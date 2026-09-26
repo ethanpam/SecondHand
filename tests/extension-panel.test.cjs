@@ -178,8 +178,9 @@ async function panel(t, initial = {}) {
   };
   const requests = [];
   const listeners = {};
-  const tabs = { current: { id: 7, url: `${adapter.PORTAL}/applicant` } };
-  const state = {
+  const tabs = { current: initial.tab || { id: 7, url: `${adapter.PORTAL}/applicant` } };
+  // A site other than Iowa: metadata only, never a checklist or autopilot.
+  const state = initial.site ? { page: { kind: 'general', pageKey: 'general' }, result: initial.result || null, autopilot: false, site: { ...initial.site } } : {
     page: { kind: initial.kind || 'fillable', pageKey: 'iowa-personal-information', reason: 'Complete this step in Iowa’s form.', checklist: [
       { key: 'firstName', label: 'First name', status: 'missing', required: true, fillable: true },
       { key: 'lastName', label: 'Last name', status: 'complete', required: true, fillable: true },
@@ -195,7 +196,10 @@ async function panel(t, initial = {}) {
     query: async () => [tabs.current],
     onActivated: { addListener: callback => { listeners.activated = callback; } },
     onUpdated: { addListener: callback => { listeners.updated = callback; } }
-  }, runtime: { sendMessage: async payload => {
+  }, permissions: { request: async permissions => {
+    requests.push({ type: 'permissions.request', ...structuredClone(permissions) });
+    return initial.grant ?? true;
+  } }, runtime: { sendMessage: async payload => {
     requests.push(structuredClone(payload));
     let data;
     if (payload.type === 'ui:pageState') data = initial.pageState ? await initial.pageState(state) : structuredClone(state);
@@ -205,16 +209,20 @@ async function panel(t, initial = {}) {
     else if (payload.type === 'ui:focusField') data = { focused: true };
     else if (payload.type === 'ui:showApp') data = { shown: true };
     else if (payload.type === 'ui:openPanel') data = { opened: true };
-    else return { ok: false, error: `Unexpected ${payload.type}` };
+    else if (payload.type === 'ui:enableSite' || payload.type === 'ui:disableSite') {
+      state.site.enabled = payload.type === 'ui:enableSite';
+      data = { enabled: state.site.enabled, origin: state.site.origin };
+    } else return { ok: false, error: `Unexpected ${payload.type}` };
     return { ok: true, data };
   } } };
   window.eval(source('panel.js'));
   await tick(); await tick();
   const get = id => window.document.getElementById(id);
-  return { window, requests, state, tabs, listeners, get,
+  const clickNow = target => clicks.get(typeof target === 'string' ? get(target) : target)({ isTrusted: true });
+  return { window, requests, state, tabs, listeners, get, clickNow,
     types: () => requests.map(request => request.type),
     row: key => window.document.querySelector(`[data-key="${key}"]`),
-    async userClick(target) { const element = typeof target === 'string' ? get(target) : target; clicks.get(element)({ isTrusted: true }); await tick(); await tick(); } };
+    async userClick(target) { clickNow(target); await tick(); await tick(); } };
 }
 
 test('side panel reads page and desktop state, has no guided or field-picker controls, and ignores untrusted clicks', async t => {
@@ -270,11 +278,15 @@ test('pages with nothing to fill disable Autofill and explain the step', async t
 
 test('tab activation clears a stale checklist without sending data to an unsupported tab', async t => {
   const view = await panel(t);
-  view.tabs.current = { id: 8, url: 'https://example.invalid/' };
-  view.listeners.activated({ tabId: 8 }); await tick(); await tick();
-  assert.equal(view.get('page-checklist').children.length, 0);
-  assert.equal(view.get('panel-autofill').disabled, true);
-  assert.match(view.get('status').textContent, /Open Iowa/);
+  // Plain http, and an https tab whose address Chrome hides until the user invokes SecondHand.
+  for (const [id, url] of [[8, 'http://example.invalid/'], [9, undefined]]) {
+    view.tabs.current = { id, url };
+    view.listeners.activated({ tabId: id }); await tick(); await tick();
+    assert.equal(view.get('page-checklist').children.length, 0);
+    assert.equal(view.get('panel-autofill').disabled, true);
+    assert.equal(view.get('site-enable').hidden, true);
+    assert.match(view.get('status').textContent, /Open Iowa/);
+  }
   assert.deepEqual(view.requests.filter(request => request.type === 'ui:pageState').map(request => request.tabId), [7]);
 });
 
@@ -282,7 +294,7 @@ test('a late old-tab response cannot restore a checklist', async t => {
   let resolve;
   const response = new Promise(done => { resolve = done; });
   const view = await panel(t, { pageState: () => response });
-  view.tabs.current = { id: 8, url: 'https://example.invalid/' };
+  view.tabs.current = { id: 8, url: 'http://example.invalid/' };
   view.listeners.activated({ tabId: 8 });
   resolve(structuredClone(view.state)); await tick(); await tick();
   assert.equal(view.get('page-checklist').children.length, 0);
@@ -377,4 +389,87 @@ test('side panel turns its button into Stop while autofill is on', async t => {
 
 test('the pill is a fixed circle that cannot stretch into an oval', () => {
   assert.match(source('panel.css'), /\.pill\{width:46px;height:46px;flex:none/);
+});
+
+// Sites other than Iowa, turned on one at a time.
+const SITE = { id: 7, url: 'https://pantry.example.org/intake?step=1' };
+const ORIGIN = 'https://pantry.example.org';
+const siteDone = { state: 'done', filled: 2, guessed: [], needYou: ['sh-4', 'sh-3'], message: 'Filled 2 · 2 need you. Check your answers before you submit.', pageKey: 'general' };
+
+test('side panel offers to turn SecondHand on for an https tab that is not Iowa, and ignores untrusted clicks', async t => {
+  const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: false } });
+  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:pageState', tabId: 7 }, { type: 'ui:desktopStatus' }]);
+  assert.equal(view.get('site-enable').hidden, false);
+  assert.equal(view.get('site-enable').textContent, 'Turn on SecondHand for this site');
+  assert.equal(view.get('panel-autofill').hidden, true);
+  assert.equal(view.get('site-disable').hidden, true);
+  assert.equal(view.get('checklist-section').hidden, true);
+  assert.match(view.get('status').textContent, /pantry\.example\.org/);
+  view.get('site-enable').click(); await tick();
+  assert.equal(view.types().includes('permissions.request'), false);
+  assert.equal(view.types().includes('ui:enableSite'), false);
+});
+
+test('a trusted click asks Chrome for the site inside the click, then asks the worker to turn it on', async t => {
+  const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: false } });
+  view.clickNow('site-enable');
+  // Chrome only prompts inside the user's gesture, so the request is made before anything is awaited.
+  assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'permissions.request', origins: [`${ORIGIN}/*`] });
+  for (let i = 0; i < 6; i++) await tick();
+  const types = view.types();
+  assert.ok(types.indexOf('permissions.request') < types.indexOf('ui:enableSite'));
+  assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:enableSite')), { type: 'ui:enableSite', confirmed: true, tabId: 7 });
+  assert.equal(view.get('site-enable').hidden, true);
+  assert.equal(view.get('panel-autofill').hidden, false);
+  assert.equal(view.get('panel-autofill').disabled, false);
+  assert.equal(view.get('site-disable').hidden, false);
+  assert.match(view.get('status').textContent, /on for pantry\.example\.org/);
+});
+
+test('declining Chrome access turns nothing on', async t => {
+  const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: false }, grant: false });
+  await view.userClick('site-enable'); await tick();
+  assert.equal(view.types().includes('permissions.request'), true);
+  assert.equal(view.types().includes('ui:enableSite'), false);
+  assert.match(view.get('status').textContent, /didn’t allow/);
+  assert.equal(view.get('site-enable').hidden, false);
+});
+
+test('on a site that is on, Autofill fills once without Stop, and Turn off asks the worker', async t => {
+  const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: siteDone });
+  assert.equal(view.get('site-enable').hidden, true);
+  assert.equal(view.get('site-disable').hidden, false);
+  await view.userClick('panel-autofill');
+  assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:autofill')), { type: 'ui:autofill', confirmed: true, tabId: 7 });
+  assert.equal(view.get('status').textContent, siteDone.message);
+  assert.equal(view.get('panel-autofill').textContent, 'Autofill this page');
+  view.get('site-disable').click(); await tick();
+  assert.equal(view.types().includes('ui:disableSite'), false);
+  await view.userClick('site-disable'); await tick(); await tick();
+  assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:disableSite')), { type: 'ui:disableSite', confirmed: true, tabId: 7 });
+  assert.equal(view.get('site-enable').hidden, false);
+  assert.equal(view.get('site-disable').hidden, true);
+  assert.match(view.get('status').textContent, /off for this site/);
+});
+
+test('widget on a site that is on autofills once, lists what needs you, and never shows Stop', async t => {
+  const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: siteDone });
+  assert.equal(view.get('widget').hidden, false);
+  assert.equal(view.get('pill').hidden, true);
+  assert.equal(view.get('widget-text').textContent, 'pantry.example.org · ready');
+  await view.userClick('autofill');
+  assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:autofill')), { type: 'ui:autofill', confirmed: true });
+  assert.equal(view.get('stop').hidden, true);
+  assert.equal(view.get('autofill').hidden, false);
+  assert.equal(view.get('widget-text').textContent, 'Filled 2');
+  assert.equal(view.get('need-you').textContent, '2 need you');
+  await view.userClick('need-you');
+  assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:focusField')), { type: 'ui:focusField', key: 'sh-4', confirmed: true });
+  view.window.document.dispatchEvent(new view.window.Event('visibilitychange'));
+  await tick(); await tick();
+  assert.equal(view.get('stop').hidden, true);
+  const locked = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: { state: 'locked', filled: 0, guessed: [], needYou: [], message: 'Unlock SecondHand to autofill.', pageKey: 'general' } });
+  await locked.userClick('autofill');
+  assert.equal(locked.get('unlock').hidden, false);
+  assert.equal(locked.get('stop').hidden, true);
 });

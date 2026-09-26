@@ -1,7 +1,14 @@
 'use strict';
-importScripts('iowa-adapter.js');
+importScripts('iowa-adapter.js', 'generic-adapter.js');
+if (typeof globalThis.SecondHandGeneric?.requestKeys !== 'function' || typeof globalThis.SecondHandGeneric.deriveValues !== 'function') {
+  throw new Error('SecondHand could not load generic-adapter.js. Reinstall the extension.');
+}
 const HOST = 'org.secondhand.bridge';
+const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
+const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
+const FIELD_ID = /^[A-Za-z][A-Za-z0-9_-]{0,59}$/; // field ids from the site engine's plan
 const results = new Map(); // tabId -> last autofill result: counts, keys, and fixed messages only. Never answers.
+const siteRuns = new Map(); // tabId -> the fill running on an approved site, so two clicks share one request.
 // tabId -> { steps, handled, running }. Memory only: a page can never turn autofill on,
 // and if Chrome restarts this worker, autofill is off and the widget shows Autofill again.
 const autopilots = new Map();
@@ -54,6 +61,11 @@ async function readPage(tabId) {
 const needYou = page => (Array.isArray(page.checklist) ? page.checklist : [])
   .filter(item => (item.required && item.status === 'missing') || item.status === 'manual').map(item => item.key);
 function remember(tabId, result) { results.set(tabId, result); return result; }
+function failed(error) {
+  if (error.code === 'offline') return { state: 'offline', message: 'Open the SecondHand app, then click Autofill again.' };
+  if (/Unlock/.test(error.message)) return { state: 'locked', message: 'Unlock SecondHand to autofill.' };
+  return { state: 'error', message: /cancelled/i.test(error.message) ? 'Cancelled. Nothing was filled.' : error.message || 'Autofill failed. Fill this page yourself.' };
+}
 
 // One desktop request for the page's saved fields, then up to four fill passes so
 // answers that reveal conditional sections get their follow-ups.
@@ -91,10 +103,7 @@ async function fillPage(tabId, state) {
       : missing.length ? `${missing.length} need you. They aren’t in your saved profile.` : 'Nothing new to fill.';
     return { state: 'done', filled, needYou: missing, message: [summary, after.page.todo].filter(Boolean).join(' '), todo: after.page.todo || '', pageKey: after.page.pageKey };
   } catch (error) {
-    if (error.code === 'offline') return { state: 'offline', filled: 0, needYou: [], message: 'Open the SecondHand app, then click Autofill again.', pageKey };
-    if (/Unlock/.test(error.message)) return { state: 'locked', filled: 0, needYou: [], message: 'Unlock SecondHand to autofill.', pageKey };
-    const message = /cancelled/i.test(error.message) ? 'Cancelled. Nothing was filled.' : error.message || 'Autofill failed. Fill this page yourself.';
-    return { state: 'error', filled: 0, needYou: [], message, pageKey };
+    return { ...failed(error), filled: 0, needYou: [], pageKey };
   } finally { values = null; }
 }
 
@@ -149,21 +158,156 @@ async function stop(tabId) {
   return stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], message: 'Autofill stopped.', pageKey });
 }
 
-async function pageState(tabId) {
+async function iowaPageState(tabId) {
   if (autopilots.has(tabId) && !autopilots.get(tabId).running) await step(tabId);
   const state = await readPage(tabId);
   const result = results.get(tabId);
   return { page: state.page, scan: state.scan, result: result && result.pageKey === state.page.pageKey ? result : null, autopilot: autopilots.has(tabId) };
 }
 
+// Other https sites the user turned on: Chrome access for the origin plus our
+// registered content script. The desktop keeps its own trusted list and has the final say.
+function siteOrigin(raw) {
+  try {
+    const url = new URL(raw);
+    return url.protocol === 'https:' && url.hostname && !url.username && !url.password && !url.port && url.origin !== IOWA_ORIGIN ? url.origin : '';
+  } catch { return ''; }
+}
+const siteScript = origin => ({ id: `site-${new URL(origin).hostname}`, matches: [`${origin}/*`],
+  js: ['generic-adapter.js', 'generic-content.js'], runAt: 'document_idle', persistAcrossSessions: true });
+async function siteEnabled(origin) {
+  const [scripts, allowed] = await Promise.all([chrome.scripting.getRegisteredContentScripts({ ids: [siteScript(origin).id] }),
+    chrome.permissions.contains({ origins: [`${origin}/*`] })]);
+  return scripts.length === 1 && allowed;
+}
+async function requireSite(origin) {
+  if (!(await siteEnabled(origin))) throw new Error('Turn on SecondHand for this site in the side panel first.');
+}
+async function activeSite(tabId) {
+  const tab = await chrome.tabs.get(tabId);
+  const origin = siteOrigin(tab.url);
+  if (tab.id !== tabId || !tab.active || !origin) throw new Error('Open the form in the active tab, then try again.');
+  return { tab, origin };
+}
+
+async function enableSite(tabId) {
+  const { tab, origin } = await activeSite(tabId);
+  const origins = [`${origin}/*`];
+  // The side panel asks Chrome inside the user's click; the worker only confirms it happened.
+  if (!(await chrome.permissions.contains({ origins }))) throw new Error('Chrome hasn’t allowed SecondHand on this site. Click Turn on again and allow it.');
+  try {
+    const trust = await nativeRequest('trustSite', { url: safeUrl(tab.url) });
+    if (trust?.trusted !== true || trust.origin !== origin) throw new Error('The SecondHand app did not approve this site.');
+  } catch (error) {
+    // Nothing stays half on: without the app's approval, Chrome access goes back too.
+    await chrome.permissions.remove({ origins });
+    throw error;
+  }
+  const script = siteScript(origin);
+  if ((await chrome.scripting.getRegisteredContentScripts({ ids: [script.id] })).length) await chrome.scripting.updateContentScripts([script]);
+  else await chrome.scripting.registerContentScripts([script]);
+  // The registration covers later loads; the page already open gets the scripts now.
+  if (siteOrigin((await chrome.tabs.get(tabId)).url) === origin) await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: script.js });
+  return { enabled: true, origin };
+}
+
+async function disableSite(tabId) {
+  const { origin } = await activeSite(tabId);
+  const script = siteScript(origin);
+  if ((await chrome.scripting.getRegisteredContentScripts({ ids: [script.id] })).length) await chrome.scripting.unregisterContentScripts({ ids: [script.id] });
+  if (!(await chrome.permissions.remove({ origins: [`${origin}/*`] }))) throw new Error('Chrome kept SecondHand’s access to this site. Remove it on Chrome’s extension page.');
+  results.delete(tabId);
+  return { enabled: false, origin };
+}
+
+const siteResult = (state, message, extra = {}) => ({ state, filled: 0, guessed: [], needYou: [], message, pageKey: 'general', ...extra });
+
+// One fill on an approved site: plan, one desktop request for the matched keys, fill.
+// Never continues, submits, or navigates.
+async function fillSiteOnce(tabId, url) {
+  let values = null;
+  try {
+    const plan = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:plan' }, { frameId: 0 });
+    if (!plan || typeof plan.token !== 'string' || !Array.isArray(plan.matched) || !Array.isArray(plan.unmatched)) throw new Error('This page couldn’t be checked safely. Fill it yourself.');
+    const keys = plan.matched.length ? [...new Set(SecondHandGeneric.requestKeys(plan.matched.map(field => field.key)))] : [];
+    if (keys.some(key => typeof key !== 'string' || !KEY.test(key))) throw new Error('SecondHand could not prepare the field request.');
+    let filled = [];
+    if (keys.length) {
+      const desktop = await nativeRequest('status');
+      if (!desktop?.unlocked) return siteResult('locked', 'Unlock SecondHand to autofill.');
+      const response = await nativeRequest('getFields', { url: safeUrl(url), fields: keys });
+      if (!response?.values || typeof response.values !== 'object' || Array.isArray(response.values)) throw new Error('The desktop did not return supported profile fields.');
+      values = SecondHandGeneric.deriveValues(response.values);
+      const current = await chrome.tabs.get(tabId);
+      if (current.url !== url || !current.active) throw new Error('The page changed. Click Autofill again.');
+      const assignments = plan.matched.filter(field => typeof values[field.key] === 'string' && values[field.key])
+        .map(field => ({ id: field.id, key: field.key, guessed: false }));
+      if (assignments.length) {
+        // Only the values being placed go to the page.
+        const placing = Object.fromEntries(assignments.map(({ key }) => [key, values[key]]));
+        values = null;
+        const result = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:fill', token: plan.token, assignments, values: placing }, { frameId: 0 });
+        if (!result?.ok || !Array.isArray(result.filled)) throw new Error('This page couldn’t be filled safely. Fill it yourself.');
+        filled = result.filled;
+      }
+    }
+    const needYou = [...plan.unmatched.map(field => field.id), ...plan.matched.map(field => field.id).filter(id => !filled.includes(id))];
+    return siteResult('done', `Filled ${filled.length}${needYou.length ? ` · ${needYou.length} need you` : ''}. Check your answers before you submit.`,
+      { filled: filled.length, needYou });
+  } catch (error) {
+    const { state, message } = failed(error);
+    return siteResult(state, message);
+  } finally { values = null; }
+}
+
+async function fillSite(tabId) {
+  const { tab, origin } = await activeSite(tabId);
+  await requireSite(origin);
+  if (!siteRuns.has(tabId)) siteRuns.set(tabId, fillSiteOnce(tabId, tab.url).then(result => remember(tabId, result)).finally(() => siteRuns.delete(tabId)));
+  return siteRuns.get(tabId);
+}
+
+// The side panel routes by the tab's current page; a widget acts only as what it was loaded on.
+async function pageState(tabId, route) {
+  const tab = await chrome.tabs.get(tabId);
+  if (route !== 'site' && SecondHandIowa.isSupportedUrl(tab.url)) return iowaPageState(tabId);
+  const origin = route === 'iowa' ? '' : siteOrigin(tab.url);
+  if (!origin) throw new Error('Open the official Iowa portal in the active tab, then try again.');
+  const enabled = await siteEnabled(origin);
+  const result = results.get(tabId);
+  return { page: { kind: 'general', pageKey: 'general' }, result: enabled && result?.pageKey === 'general' ? result : null, autopilot: false, site: { origin, enabled } };
+}
+
+async function autofill(tabId, route) {
+  const tab = await chrome.tabs.get(tabId);
+  if (route !== 'site' && SecondHandIowa.isSupportedUrl(tab.url)) return startAutopilot(tabId);
+  if (route !== 'iowa' && siteOrigin(tab.url)) return fillSite(tabId);
+  throw new Error('Open the official Iowa portal in the active tab, then try again.');
+}
+
+async function focusField(tabId, key, route) {
+  const tab = await chrome.tabs.get(tabId);
+  if (route !== 'site' && SecondHandIowa.isSupportedUrl(tab.url)) {
+    if (!KEY.test(key)) throw new Error('That field isn’t on this page.');
+    await activePortal(tabId);
+    return chrome.tabs.sendMessage(tabId, { type: 'secondhand:focusField', key }, { frameId: 0 });
+  }
+  if (route === 'iowa') throw new Error('Open the official Iowa portal in the active tab, then try again.');
+  const { origin } = await activeSite(tabId);
+  await requireSite(origin);
+  const result = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:focus', id: key }, { frameId: 0 });
+  return { focused: result?.focused === true };
+}
+
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (sender.id !== chrome.runtime.id || !message || typeof message !== 'object' || Array.isArray(message)) return;
-  // Only our own extension pages reach the vault: the side panel, and the
-  // launcher iframe inside an Iowa tab (bound to that tab). Content scripts and
-  // page postMessages never do.
+  // Only our own extension pages reach the vault: the side panel, and the launcher
+  // iframe inside an Iowa tab or a site the user turned on (bound to that tab).
+  // Content scripts and page postMessages never do.
   const panel = sender.url === chrome.runtime.getURL('panel.html') && !sender.tab;
-  const launcher = sender.url === chrome.runtime.getURL('panel.html?surface=launcher') && sender.frameId > 0 &&
-    Number.isInteger(sender.tab?.id) && SecondHandIowa.isSupportedUrl(sender.tab.url);
+  const frame = sender.url === chrome.runtime.getURL('panel.html?surface=launcher') && sender.frameId > 0 && Number.isInteger(sender.tab?.id);
+  const route = !frame ? undefined : SecondHandIowa.isSupportedUrl(sender.tab.url) ? 'iowa' : siteOrigin(sender.tab.url) ? 'site' : '';
+  const launcher = Boolean(route);
   if (!panel && !launcher) return;
   if (launcher && message.type === 'ui:openPanel' && message.confirmed === true) {
     // Keep this synchronous: Chrome requires the originating trusted user gesture.
@@ -172,18 +316,22 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     return true;
   }
   const tabId = launcher ? sender.tab.id : message.tabId;
-  let work;
-  if (message.type === 'ui:showApp' && message.confirmed === true) work = nativeRequest('showApp');
+  let run;
+  if (message.type === 'ui:showApp' && message.confirmed === true) run = () => nativeRequest('showApp');
   else if (panel && message.type === 'ui:desktopStatus') {
-    work = nativeRequest('status').then(data => ({ connected: true, unlocked: Boolean(data?.unlocked) }),
+    run = () => nativeRequest('status').then(data => ({ connected: true, unlocked: Boolean(data?.unlocked) }),
       error => { if (error.code === 'offline') return { connected: false, unlocked: false }; throw error; });
   } else if (!Number.isInteger(tabId)) return;
-  else if (message.type === 'ui:pageState') work = pageState(tabId);
-  else if (message.type === 'ui:autofill' && message.confirmed === true) work = startAutopilot(tabId);
-  else if (message.type === 'ui:stop' && message.confirmed === true) work = stop(tabId);
-  else if (message.type === 'ui:focusField' && typeof message.key === 'string' && /^[A-Za-z][A-Za-z0-9]{0,59}$/.test(message.key)) {
-    work = activePortal(tabId).then(() => chrome.tabs.sendMessage(tabId, { type: 'secondhand:focusField', key: message.key }, { frameId: 0 }));
-  } else return;
+  else if (message.type === 'ui:pageState') run = () => pageState(tabId, route);
+  else if (message.type === 'ui:autofill' && message.confirmed === true) run = () => autofill(tabId, route);
+  else if (message.type === 'ui:stop' && message.confirmed === true) run = () => stop(tabId);
+  else if (message.type === 'ui:focusField' && typeof message.key === 'string' && (route === 'iowa' ? KEY : FIELD_ID).test(message.key)) {
+    run = () => focusField(tabId, message.key, route);
+  } else if (panel && message.type === 'ui:enableSite' && message.confirmed === true) run = () => enableSite(tabId);
+  else if (panel && message.type === 'ui:disableSite' && message.confirmed === true) run = () => disableSite(tabId);
+  else return;
+  // A widget on another site is honored only while that site is turned on.
+  const work = route === 'site' ? requireSite(siteOrigin(sender.tab.url)).then(run) : run();
   work.then(data => respond({ ok: true, data }), error => respond({ ok: false, error: error.message || 'SecondHand could not complete the request.' }));
   return true;
 });
