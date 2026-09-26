@@ -142,6 +142,32 @@ test('a pending profile save cannot repopulate fields after a vault lock', async
   assert.equal(view.get('save-profile').disabled, false);
 });
 
+test('a delayed manual lock response cannot clear a passphrase entered after the lock notification', async t => {
+  const completion = deferred();
+  const attemptedPassphrases = [];
+  const view = await renderer(t, {
+    lock: () => completion.promise,
+    unlock: async passphrase => {
+      attemptedPassphrases.push(passphrase);
+      throw new Error('Unable to unlock the local vault.');
+    }
+  });
+  view.get('lock-button').click();
+  view.lock();
+  assert.equal(view.get('auth-view').hidden, false);
+  view.edit('passphrase', 'incorrect-synthetic-passphrase');
+  completion.resolve({ exists: true, unlocked: false, extensionId: '', bridgeRunning: true });
+  await tick();
+  assert.equal(view.get('passphrase').value, 'incorrect-synthetic-passphrase');
+
+  view.submit('auth-form');
+  await tick();
+  assert.deepEqual(attemptedPassphrases, ['incorrect-synthetic-passphrase']);
+  assert.equal(view.get('auth-error').hidden, false);
+  assert.match(view.get('auth-error').textContent, /Unable to unlock/);
+  assert.equal(view.get('workspace').hidden, true);
+});
+
 test('application editor freezes during save and restores editing after an error', async t => {
   const saves = [];
   const view = await renderer(t, {

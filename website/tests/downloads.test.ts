@@ -33,3 +33,17 @@ test('published filenames cannot be overwritten', async()=>{
  const req=new Request('https://example.test/api/publish/file?action=create',{method:'POST',headers:{authorization:`Bearer ${secret}`}});
  assert.equal((await publish(req,filenames[0],bucket,secret)).status,409);
 });
+test('multipart completion verifies stored metadata even when completion response omits it', async()=>{
+ let completed=false;
+ const files={
+  head:async()=>completed?{size:10,customMetadata:{size:'10',sha256:'a'.repeat(64)}}:null,
+  resumeMultipartUpload:()=>({complete:async()=>{completed=true;return{size:10};}}),
+ } as unknown as R2Bucket;
+ const req=new Request('https://example.test/api/publish/file?action=complete&uploadId=test',{
+  method:'POST',headers:{authorization:`Bearer ${secret}`,'content-type':'application/json'},
+  body:JSON.stringify({parts:[{partNumber:1,etag:'etag'}]})
+ });
+ const result=await publish(req,filenames[0],files,secret);
+ assert.equal(result.status,200);
+ assert.deepEqual(await result.json(),{size:10,sha256:'a'.repeat(64)});
+});

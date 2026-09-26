@@ -240,9 +240,12 @@
 
   async function lockVault() {
     if (profileDirty && !window.confirm('Lock your vault and discard unsaved profile changes?')) return;
+    const generation = vaultGeneration;
     try {
       const status = await api.lock();
-      showLocked(status);
+      // The lock notification can arrive before the IPC response finishes
+      // gathering status. Do not reset a form the user has already started using.
+      if (generation === vaultGeneration) showLocked(status);
     } catch (error) { toast(error.message || 'Unable to lock your vault.', true); }
   }
 

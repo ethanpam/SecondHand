@@ -92,8 +92,11 @@ export async function publish(request: Request, file: string, bucket: R2Bucket, 
       if (await bucket.head(key)) return error('Release file already exists.', 409);
       const body = await request.json() as { parts?: R2UploadedPart[] };
       if (!Array.isArray(body.parts) || body.parts.length < 1 || body.parts.length > 64 || body.parts.some((part, i) => part.partNumber !== i + 1 || typeof part.etag !== 'string' || part.etag.length > 256)) return error('Invalid parts.', 400);
-      const object = await upload.complete(body.parts);
-      if (object.size !== Number(object.customMetadata?.size)) {
+      await upload.complete(body.parts);
+      // Multipart completion responses may omit custom metadata. Read the stored
+      // object before verifying its declared size or returning its checksum.
+      const object = await bucket.head(key);
+      if (!object || object.size !== Number(object.customMetadata?.size)) {
         await bucket.delete(key);
         return error('Size mismatch.', 400);
       }
