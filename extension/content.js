@@ -29,8 +29,8 @@
       full = page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo);
     } catch { full = false; }
     panelHost.setAttribute('data-secondhand-size', full ? 'full' : 'pill');
-    panelHost.style.setProperty('width', full ? 'min(244px, calc(100vw - 24px))' : '46px', 'important');
-    panelHost.style.setProperty('height', full ? '62px' : '46px', 'important');
+    panelHost.style.setProperty('width', full ? 'min(272px, calc(100vw - 24px))' : '46px', 'important');
+    panelHost.style.setProperty('height', full ? '70px' : '46px', 'important');
   }
 
   function ensurePanel() {

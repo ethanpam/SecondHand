@@ -116,7 +116,7 @@ test('widget host is a full bar on fillable pages and a small pill elsewhere', t
   const page = content(t);
   const host = page.window.document.querySelector('[data-secondhand-assistant]');
   assert.equal(host.getAttribute('data-secondhand-size'), 'full');
-  assert.equal(host.style.height, '62px');
+  assert.equal(host.style.height, '70px');
   page.setKind('manual');
   page.window.dispatchEvent(new page.window.Event('popstate'));
   assert.equal(host.getAttribute('data-secondhand-size'), 'pill');
@@ -131,7 +131,7 @@ test('foreign extension messages cannot scan or focus, and the launcher cannot e
   const page = content(t);
   const host = page.window.document.querySelector('[data-secondhand-assistant]');
   assert.equal(page.request({ type: 'secondhand:pageState' }, { id: 'b'.repeat(32) }), undefined);
-  assert.equal(host.style.height, '62px');
+  assert.equal(host.style.height, '70px');
   assert.equal(page.request({ type: 'secondhand:focusField', key: 'firstName' }, { id: 'b'.repeat(32) }), undefined);
   assert.equal(page.request({ type: 'secondhand:focusField', key: 'firstName' }).focused, true);
   assert.equal(page.window.document.activeElement.id, 'firstName');
@@ -187,7 +187,8 @@ async function panel(t, initial = {}) {
       { key: 'unverified', label: 'Additional question', status: 'manual', required: false, fillable: false }
     ] },
     scan: { token: 'preview', recognizedPage: true, fields: [{ key: 'firstName', label: 'First name' }] },
-    result: initial.result || null
+    result: initial.result || null,
+    autopilot: Boolean(initial.autopilot)
   };
   const desktop = { connected: true, unlocked: true, ...initial.desktop };
   window.chrome = { tabs: {
@@ -198,7 +199,8 @@ async function panel(t, initial = {}) {
     requests.push(structuredClone(payload));
     let data;
     if (payload.type === 'ui:pageState') data = initial.pageState ? await initial.pageState(state) : structuredClone(state);
-    else if (payload.type === 'ui:autofill') { state.result = initial.autofill || doneResult; data = structuredClone(state.result); }
+    else if (payload.type === 'ui:autofill') { state.result = initial.autofill || doneResult; state.autopilot = Boolean(initial.autopilotAfterAutofill); data = structuredClone(state.result); }
+    else if (payload.type === 'ui:stop') { state.autopilot = false; state.result = { state: 'stopped', filled: 0, needYou: [], message: 'Autofill stopped.', pageKey: 'iowa-personal-information' }; data = structuredClone(state.result); }
     else if (payload.type === 'ui:desktopStatus') data = { ...desktop };
     else if (payload.type === 'ui:focusField') data = { focused: true };
     else if (payload.type === 'ui:showApp') data = { shown: true };
@@ -335,4 +337,44 @@ test('widget reports an unreachable desktop and restores an earlier result after
   const restored = await panel(t, { launcher: true, result: doneResult });
   assert.equal(restored.get('widget-text').textContent, 'Filled 3');
   assert.equal(restored.get('need-you').textContent, '2 need you');
+});
+
+const waitingResult = { state: 'waiting', filled: 0, needYou: [], message: 'Solve the CAPTCHA, then click Continue.', pageKey: 'iowa-personal-information' };
+
+test('while autofill is on, the widget shows Stop and the current instruction', async t => {
+  const view = await panel(t, { launcher: true, autofill: { ...doneResult, needYou: [], todo: 'Check your answers, then click Save and Continue.' }, autopilotAfterAutofill: true });
+  await view.userClick('autofill');
+  assert.equal(view.get('stop').hidden, false);
+  assert.equal(view.get('autofill').hidden, true);
+  assert.equal(view.get('widget-text').textContent, 'Filled 3 · Check your answers, then click Save and Continue.');
+  view.state.result = waitingResult;
+  view.window.document.dispatchEvent(new view.window.Event('visibilitychange'));
+  await tick(); await tick();
+  assert.equal(view.get('widget-text').textContent, 'Solve the CAPTCHA, then click Continue.', 'polls follow the worker while autofill is on');
+  view.get('stop').click(); await tick();
+  assert.equal(view.types().includes('ui:stop'), false);
+  await view.userClick('stop');
+  assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:stop')), { type: 'ui:stop', confirmed: true });
+  assert.equal(view.get('stop').hidden, true);
+  assert.equal(view.get('autofill').hidden, false);
+  assert.equal(view.get('widget-text').textContent, 'Autofill stopped.');
+});
+
+test('a widget that loads mid-run picks up the running autofill', async t => {
+  const view = await panel(t, { launcher: true, kind: 'blocked', autopilot: true, result: waitingResult });
+  assert.equal(view.get('widget').hidden, false, 'instructions stay readable on steps that need you');
+  assert.equal(view.get('stop').hidden, false);
+  assert.equal(view.get('widget-text').textContent, 'Solve the CAPTCHA, then click Continue.');
+});
+
+test('side panel turns its button into Stop while autofill is on', async t => {
+  const view = await panel(t, { autopilot: true, result: waitingResult });
+  assert.equal(view.get('panel-autofill').textContent, 'Stop autofill');
+  await view.userClick('panel-autofill');
+  assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:stop')), { type: 'ui:stop', confirmed: true, tabId: 7 });
+  assert.equal(view.get('panel-autofill').textContent, 'Autofill this page');
+});
+
+test('the pill is a fixed circle that cannot stretch into an oval', () => {
+  assert.match(source('panel.css'), /\.pill\{width:46px;height:46px;flex:none/);
 });

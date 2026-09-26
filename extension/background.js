@@ -89,7 +89,7 @@ async function fillPage(tabId, state) {
     const missing = needYou(after.page);
     const summary = filled ? `Filled ${filled}${missing.length ? ` · ${missing.length} need you` : ''}.`
       : missing.length ? `${missing.length} need you. They aren’t in your saved profile.` : 'Nothing new to fill.';
-    return { state: 'done', filled, needYou: missing, message: [summary, after.page.todo].filter(Boolean).join(' '), pageKey: after.page.pageKey };
+    return { state: 'done', filled, needYou: missing, message: [summary, after.page.todo].filter(Boolean).join(' '), todo: after.page.todo || '', pageKey: after.page.pageKey };
   } catch (error) {
     if (error.code === 'offline') return { state: 'offline', filled: 0, needYou: [], message: 'Open the SecondHand app, then click Autofill again.', pageKey };
     if (/Unlock/.test(error.message)) return { state: 'locked', filled: 0, needYou: [], message: 'Unlock SecondHand to autofill.', pageKey };

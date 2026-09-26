@@ -19,34 +19,47 @@
   function widget() {
     document.body.classList.add('launcher-surface');
     $('launcher').hidden = false;
-    let fillable = false;
+    let known = false;
+    let autopilot = false;
     let result = null;
     let note = '';
     let working = false;
     let cursor = 0;
     let pollTimer;
 
+    function statusText() {
+      if (working) return 'Working…';
+      if (note) return note;
+      if (!result) return 'Iowa SNAP · ready';
+      if (result.state === 'done') return [`Filled ${Number(result.filled) || 0}`, fixedText(result.todo, 90)].filter(Boolean).join(' · ');
+      return fixedText(result.message, 120);
+    }
     function render() {
-      $('widget').hidden = !fillable;
-      $('pill').hidden = fillable;
+      $('widget').hidden = !known && !autopilot;
+      $('pill').hidden = known || autopilot;
       const locked = result?.state === 'locked';
-      $('autofill').hidden = locked;
-      $('unlock').hidden = !locked;
+      $('stop').hidden = !autopilot;
+      $('autofill').hidden = autopilot || locked;
+      $('unlock').hidden = autopilot || !locked;
       $('autofill').disabled = working;
-      const needYou = result?.state === 'done' ? fieldKeys(result.needYou) : [];
+      const needYou = ['done', 'waiting'].includes(result?.state) ? fieldKeys(result.needYou) : [];
       $('need-you').hidden = !needYou.length;
       $('need-you').textContent = `${needYou.length} need you`;
-      $('widget-text').textContent = working ? 'Filling…' : note || (result?.state === 'done' ? `Filled ${Number(result.filled) || 0}` : result ? fixedText(result.message, 120) : 'Iowa SNAP · ready');
+      $('widget-text').textContent = statusText();
+      $('widget-text').title = fixedText(result?.message, 240);
     }
     async function poll() {
       clearTimeout(pollTimer);
       if (!document.hidden && !working) {
         try {
           const state = await send({ type: 'ui:pageState' });
-          fillable = state?.page?.kind === 'fillable';
-          // Adopt the worker's result only when this widget has none of its own,
-          // e.g. after the iframe reloads on the same page.
-          if (!result && state?.result) result = state.result;
+          const page = state?.page || {};
+          known = page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo);
+          autopilot = Boolean(state?.autopilot);
+          // While autofill runs, the worker moves ahead between polls. Otherwise keep
+          // this widget's own result and adopt the worker's only after a reload.
+          if (autopilot || !result) result = state?.result || result;
+          note = '';
         } catch (error) { note = fixedText(error.message, 120); }
         render();
       }
@@ -56,9 +69,17 @@
     $('autofill').addEventListener('click', trusted(async () => {
       if (working) return;
       working = true; note = ''; render();
-      try { result = await send({ type: 'ui:autofill', confirmed: true }); cursor = 0; }
-      catch (error) { result = { state: 'error', message: error.message }; }
+      try {
+        result = await send({ type: 'ui:autofill', confirmed: true });
+        cursor = 0;
+        autopilot = !['stopped', 'locked', 'offline', 'error'].includes(result?.state);
+      } catch (error) { result = { state: 'error', message: error.message }; autopilot = false; }
       finally { working = false; render(); }
+    }));
+    $('stop').addEventListener('click', trusted(async () => {
+      try { result = await send({ type: 'ui:stop', confirmed: true }); autopilot = false; }
+      catch (error) { note = fixedText(error.message, 120); }
+      render();
     }));
     $('need-you').addEventListener('click', trusted(async () => {
       const needYou = fieldKeys(result?.needYou);
@@ -95,6 +116,7 @@
     $('sidepanel').hidden = false;
     let target = null;
     let fillable = false;
+    let autopilot = false;
     let contextRevision = 0;
     let checklistSignature = '';
     let working = false;
@@ -115,11 +137,12 @@
       } catch { return false; }
     }
     function controls() {
-      $('panel-autofill').disabled = !target || !fillable || working;
+      $('panel-autofill').textContent = autopilot ? 'Stop autofill' : 'Autofill this page';
+      $('panel-autofill').disabled = !target || (!fillable && !autopilot) || working;
       document.querySelectorAll('.checklist-item').forEach(button => { button.disabled = working || !target; });
     }
     function clearPage() {
-      fillable = false; checklistSignature = '';
+      fillable = false; autopilot = false; checklistSignature = '';
       $('page-checklist').replaceChildren();
       $('checklist-section').hidden = true;
     }
@@ -155,11 +178,12 @@
     function render(state) {
       if (!state || typeof state !== 'object') throw new Error('The page state could not be read. Reload Iowa’s page.');
       const page = state.page || {};
-      fillable = page.kind === 'fillable';
+      fillable = page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo);
+      autopilot = Boolean(state.autopilot);
       renderChecklist(page);
       const result = state.result;
       if (result?.message) show(result.message, result.state === 'error' || result.state === 'offline');
-      else if (fillable) show('Click Autofill to fill your saved answers on this page.');
+      else if (fillable) show('Click Autofill. SecondHand fills what it can and tells you what it needs.');
       else show(fixedText(page.reason) || 'Nothing to fill on this page. Continue in Iowa’s form.');
       controls();
     }
@@ -239,9 +263,12 @@
 
     $('panel-autofill').addEventListener('click', trusted(async () => {
       if ($('panel-autofill').disabled) return;
-      const result = await act({ type: 'ui:autofill', confirmed: true }, 'Filling your saved answers…');
+      const stopping = autopilot;
+      const result = await act(stopping ? { type: 'ui:stop', confirmed: true } : { type: 'ui:autofill', confirmed: true }, stopping ? 'Stopping autofill…' : 'Filling your saved answers…');
+      if (result) autopilot = !stopping && !['stopped', 'locked', 'offline', 'error'].includes(result.state);
       if (result?.message) show(result.message, result.state === 'error' || result.state === 'offline');
-      await desktopStatus();
+      controls();
+      if (!stopping) await desktopStatus();
       await refresh();
     }));
     $('desktop-action').addEventListener('click', trusted(async () => {
