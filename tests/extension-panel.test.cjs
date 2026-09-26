@@ -30,6 +30,7 @@ function content(t, url = `${adapter.PORTAL}/applicant`) {
       return { supported: true, recognizedPage: true, fields, bindings: fields.map(field => ({ key: field.key, element })), ambiguous: [], skipped: [] };
     },
     probePage: () => ({ kind: 'fillable', pageKey: 'primary-applicant', heading: 'Enter Personal Information', reason: '', canAdvance: true, fields: [{ key: 'firstName', label: 'First name' }], requiredRemaining: 0, manualRemaining: 0 }),
+    focusField: (_document, _url, key) => { if (key !== 'firstName') return false; window.document.getElementById('firstName').focus(); return true; },
     captureNavigation: () => opaque,
     advance: (_document, _url, snapshot) => { assert.equal(snapshot, opaque); advanced++; return { advanced: true, reason: 'Continued to the next page.' }; },
     fill: (_document, _url, bindings, values) => { for (const binding of bindings) binding.element.value = values[binding.key]; return { filled: bindings.map(binding => binding.key), skipped: [] }; }
@@ -45,7 +46,7 @@ test('on-page assistant is isolated in a fixed extension iframe only on the exac
   assert.ok(host);
   assert.equal(host.shadowRoot, null);
   assert.equal(page.frames.length, 1);
-  assert.equal(page.frames[0].src, extensionURL('panel.html'));
+  assert.equal(page.frames[0].src, extensionURL('panel.html?surface=launcher'));
   assert.equal(page.frames[0].referrerPolicy, 'no-referrer');
   assert.equal(page.frames[0].getAttribute('sandbox'), 'allow-scripts allow-same-origin');
   page.window.eval(source('content.js'));
@@ -100,14 +101,18 @@ test('fill invalidates prior navigation; Next requires an authorized fresh one-u
   assert.equal(page.advanced, 1);
 });
 
-test('foreign extension messages cannot scan, navigate, or resize the assistant', t => {
+test('foreign extension messages cannot scan or focus, and the launcher cannot expand over the form', t => {
   const page = content(t);
   const host = page.window.document.querySelector('[data-secondhand-assistant]');
   assert.equal(page.request({ type: 'secondhand:pageState' }, { id: 'b'.repeat(32) }), undefined);
   assert.equal(page.request({ type: 'secondhand:panel', collapsed: true }, { id: 'b'.repeat(32) }), undefined);
-  assert.notEqual(host.style.height, '54px');
-  page.request({ type: 'secondhand:panel', collapsed: true });
-  assert.equal(host.style.height, '54px');
+  assert.equal(host.style.height, '62px');
+  page.request({ type: 'secondhand:panel', collapsed: false });
+  assert.equal(host.style.height, '62px');
+  assert.equal(page.request({ type: 'secondhand:focusField', key: 'firstName' }, { id: 'b'.repeat(32) }), undefined);
+  assert.equal(page.request({ type: 'secondhand:focusField', key: 'firstName' }).focused, true);
+  assert.equal(page.window.document.activeElement.id, 'firstName');
+  assert.equal(page.request({ type: 'secondhand:focusField', key: 'unverified' }).focused, false);
   assert.equal(page.advanced, 0);
 });
 
@@ -141,43 +146,54 @@ test('only the assistant overlay is hidden during portal checks and is restored 
 });
 
 async function panel(t, initial = {}) {
-  const dom = new JSDOM(source('panel.html'), { runScripts: 'outside-only', url: extensionURL('panel.html'), pretendToBeVisual: true });
+  const dom = new JSDOM(source('panel.html'), { runScripts: 'outside-only', url: extensionURL(`panel.html${initial.launcher ? '?surface=launcher' : ''}`), pretendToBeVisual: true });
   t.after(() => dom.window.close());
   const window = dom.window;
   const clicks = new Map();
   const originalListen = window.Element.prototype.addEventListener;
   window.Element.prototype.addEventListener = function (event, callback, options) {
-    if (event === 'click' && this.id) clicks.set(this.id, callback);
+    if (event === 'click') clicks.set(this, callback);
     return originalListen.call(this, event, callback, options);
   };
   const requests = [];
+  const listeners = {};
+  const tabs = { current: { id: 7, url: `${adapter.PORTAL}/applicant` } };
   let automatic = { enabled: false, paused: false, reason: '', ...initial.automatic };
-  window.chrome = { runtime: { sendMessage: async payload => {
+  const state = {
+    page: { kind: 'fillable', pageKey: 'primary-applicant', canAdvance: true, reason: '', checklist: [
+      { key: 'firstName', label: 'First name', status: 'missing', required: true, fillable: true },
+      { key: 'lastName', label: 'Last name', status: 'complete', required: true, fillable: true },
+      { key: 'middleName', label: 'Middle name', status: 'optional', required: false, fillable: true },
+      { key: 'unverified', label: 'Additional question', status: 'manual', required: false, fillable: false }
+    ] },
+    scan: { token: 'reviewed-preview', recognizedPage: true, fields: [{ key: 'firstName', label: 'First name' }] },
+    busy: Boolean(initial.busy), missingProfileFields: initial.missingProfileFields || [], lastResult: null
+  };
+  window.chrome = { tabs: {
+    query: async () => [tabs.current],
+    onActivated: { addListener: callback => { listeners.activated = callback; } },
+    onUpdated: { addListener: callback => { listeners.updated = callback; } }
+  }, runtime: { sendMessage: async payload => {
     requests.push(structuredClone(payload));
     let data;
-    if (payload.type === 'ui:pageState') data = {
-      page: { kind: 'fillable', pageKey: 'primary-applicant', canAdvance: true, reason: '' },
-      scan: { token: 'reviewed-preview', recognizedPage: true, fields: [{ key: 'firstName', label: 'First name' }] },
-      busy: Boolean(initial.busy), automatic, lastResult: null
-    };
+    if (payload.type === 'ui:pageState') data = initial.pageState ? await initial.pageState({ ...state, automatic }) : { ...state, automatic };
     else if (payload.type === 'ui:desktopStatus') data = { unlocked: true };
-    else if (payload.type === 'ui:auto') { automatic = { enabled: payload.enabled, paused: !payload.enabled, reason: payload.enabled ? '' : 'Paused by you.' }; data = { automatic }; }
+    else if (payload.type === 'ui:auto') { automatic = { enabled: payload.enabled, paused: false, reason: payload.enabled ? '' : 'Paused by you.' }; data = { automatic }; }
+    else if (payload.type === 'ui:focusField') data = { focused: true };
     else data = { message: 'Synthetic operation complete.' };
     return { ok: true, data };
   } } };
   window.eval(source('panel.js'));
   await tick();
-  return { window, requests, get: id => window.document.getElementById(id),
-    async userClick(id) { clicks.get(id)({ isTrusted: true }); await tick(); },
+  return { window, requests, state, tabs, listeners, get: id => window.document.getElementById(id),
+    async userClick(target) { const element = typeof target === 'string' ? window.document.getElementById(target) : target; clicks.get(element)({ isTrusted: true }); await tick(); },
     confirm() { window.document.getElementById('confirm').checked = true; window.document.getElementById('confirm').dispatchEvent(new window.Event('change')); } };
 }
 
-test('panel metadata refresh does not contact the vault, and untrusted clicks/messages cannot fill or start automatic mode', async t => {
+test('native sidebar metadata does not contact the vault and rejects untrusted actions', async t => {
   const view = await panel(t);
-  assert.deepEqual(view.requests.map(request => request.type), ['ui:pageState']);
-  view.confirm();
-  view.get('fill-page').click();
-  view.get('start-auto').click();
+  assert.deepEqual(view.requests, [{ type: 'ui:pageState', tabId: 7 }]);
+  view.confirm(); view.get('fill-page').click(); view.get('start-auto').click();
   view.window.postMessage({ type: 'ui:auto', enabled: true }, '*');
   await tick();
   assert.deepEqual(view.requests.map(request => request.type), ['ui:pageState']);
@@ -187,47 +203,79 @@ test('panel metadata refresh does not contact the vault, and untrusted clicks/me
   assert.match(view.get('desktop-status').textContent, /Vault unlocked/);
 });
 
-test('trusted panel filling requires confirmation and sends reviewed metadata only, with no caller-selected tab', async t => {
+test('trusted sidebar filling confirms reviewed metadata and derives its target from the active tab', async t => {
   const view = await panel(t);
   await view.userClick('fill-page');
   assert.equal(view.requests.some(request => request.type === 'ui:fill'), false);
-  view.confirm();
-  await view.userClick('fill-page');
-  const fill = view.requests.find(request => request.type === 'ui:fill');
-  assert.deepEqual(fill, { type: 'ui:fill', token: 'reviewed-preview', fields: ['firstName'], confirmed: true });
-  assert.equal(Object.hasOwn(fill, 'values'), false);
-  assert.equal(Object.hasOwn(fill, 'tabId'), false);
+  view.confirm(); await view.userClick('fill-page');
+  assert.deepEqual(view.requests.find(request => request.type === 'ui:fill'), { type: 'ui:fill', token: 'reviewed-preview', fields: ['firstName'], confirmed: true, tabId: 7 });
   assert.equal(view.get('confirm').checked, false);
 });
 
-test('guided mode remains explicitly pausable while background work is busy', async t => {
-  const view = await panel(t, { automatic: { enabled: true }, busy: true });
-  assert.equal(view.get('pause-auto').hidden, false);
-  assert.equal(view.get('pause-auto').disabled, false);
+test('guided mode can be stopped while busy, paused, or waiting for missing information', async t => {
+  for (const automatic of [{ enabled: true }, { enabled: true, paused: true }, { enabled: true, waitingForInfo: true, reason: 'First name is missing.' }]) {
+    const view = await panel(t, { automatic, busy: !automatic.paused && !automatic.waitingForInfo });
+    assert.equal(view.get('pause-auto').hidden, false);
+    assert.equal(view.get('pause-auto').disabled, false);
+    assert.equal(view.get('fill-page').disabled, true);
+    if (automatic.waitingForInfo) {
+      assert.equal(view.get('guided-state').textContent, 'WAITING FOR MISSING INFORMATION');
+      assert.match(view.get('automatic-reason').textContent, /check again automatically/);
+      assert.equal(view.get('start-auto').textContent, 'Check and continue →');
+    }
+    await view.userClick('pause-auto');
+    assert.deepEqual(view.requests.find(request => request.type === 'ui:auto'), { type: 'ui:auto', enabled: false, confirmed: true, tabId: 7 });
+  }
+});
+
+test('checklist distinguishes completion, required and optional blanks, manual answers, and approved profile gaps', async t => {
+  const view = await panel(t, { missingProfileFields: ['firstName'] });
+  const row = key => view.window.document.querySelector(`[data-key="${key}"]`);
+  assert.match(row('firstName').textContent, /Missing from saved profile/);
+  assert.match(row('lastName').textContent, /✓.*Complete/);
+  assert.match(row('middleName').textContent, /Optional · blank/);
+  assert.match(row('unverified').textContent, /Needs manual review/);
+  assert.equal(view.get('checklist-summary').textContent, '1/4 complete · 1 required');
+  row('firstName').click(); await tick();
+  assert.equal(view.requests.some(request => request.type === 'ui:focusField'), false);
+  await view.userClick(row('firstName'));
+  assert.deepEqual(view.requests.find(request => request.type === 'ui:focusField'), { type: 'ui:focusField', key: 'firstName', tabId: 7 });
+  view.state.page.checklist[0].status = 'complete';
+  await view.userClick('refresh');
+  assert.match(row('firstName').textContent, /✓.*Complete/);
+  assert.equal(view.get('checklist-summary').textContent, '2/4 complete');
+});
+
+test('tab activation clears stale checklist and confirmation without sending data to an unsupported tab', async t => {
+  const view = await panel(t); view.confirm();
+  view.tabs.current = { id: 8, url: 'https://example.invalid/' };
+  view.listeners.activated({ tabId: 8 }); await tick();
+  assert.equal(view.get('page-checklist').children.length, 0);
+  assert.equal(view.get('confirm').checked, false);
   assert.equal(view.get('fill-page').disabled, true);
-  await view.userClick('pause-auto');
-  assert.deepEqual(view.requests.find(request => request.type === 'ui:auto'), { type: 'ui:auto', enabled: false, confirmed: true });
+  assert.match(view.get('status').textContent, /Open Iowa/);
+  assert.deepEqual(view.requests, [{ type: 'ui:pageState', tabId: 7 }]);
 });
 
-test('a paused but authorized guided session can be stopped before filling manually', async t => {
-  const view = await panel(t, { automatic: { enabled: true, paused: true, reason: 'A required question needs your answer.' } });
-  assert.equal(view.get('pause-auto').hidden, false);
-  assert.equal(view.get('pause-auto').textContent, 'Stop guided session');
-  assert.equal(view.get('start-auto').hidden, false);
-  assert.match(view.get('start-auto').textContent, /Resume/);
-  await view.userClick('pause-auto');
-  assert.deepEqual(view.requests.find(request => request.type === 'ui:auto'), { type: 'ui:auto', enabled: false, confirmed: true });
-  view.confirm();
-  assert.equal(view.get('fill-page').disabled, false);
+test('a late old-tab response cannot restore a checklist or authorize a stale fill', async t => {
+  let resolve;
+  const response = new Promise(done => { resolve = done; });
+  const view = await panel(t, { pageState: () => response });
+  view.tabs.current = { id: 8, url: 'https://example.invalid/' };
+  view.listeners.activated({ tabId: 8 });
+  resolve({ ...view.state, automatic: { enabled: false } }); await tick(); await tick();
+  assert.equal(view.get('page-checklist').children.length, 0);
+  assert.equal(view.get('refresh').disabled, false);
+  assert.match(view.get('status').textContent, /Open Iowa/);
 });
 
-test('collapsing the helper uses extension messaging and accessible state, never page postMessage', async t => {
-  const view = await panel(t);
-  await view.userClick('collapse');
-  assert.deepEqual(view.requests.find(request => request.type === 'ui:panel'), { type: 'ui:panel', collapsed: true });
-  assert.equal(view.get('panel-body').hidden, true);
-  assert.equal(view.get('collapse').getAttribute('aria-expanded'), 'false');
-  await view.userClick('collapse');
-  assert.equal(view.get('panel-body').hidden, false);
-  assert.equal(view.get('collapse').getAttribute('aria-expanded'), 'true');
+test('launcher has no page or vault access and opens the native sidebar only after a trusted click', async t => {
+  const view = await panel(t, { launcher: true });
+  assert.deepEqual(view.requests, []);
+  assert.equal(view.get('sidepanel').hidden, true);
+  view.get('open-side-panel').click(); await tick();
+  assert.deepEqual(view.requests, []);
+  await view.userClick('open-side-panel');
+  assert.deepEqual(view.requests, [{ type: 'ui:openPanel', confirmed: true }]);
+  assert.match(view.get('launcher-status').textContent, /sidebar/);
 });

@@ -3,21 +3,42 @@
   'use strict';
   const PORTAL = 'https://hhsservices.iowa.gov/apspssp/ssp.portal';
   const normal = value => String(value || '').replace(/\s+/g, ' ').trim().replace(/\s*\*\s*$/, '').replace(/:$/, '').trim().toLowerCase();
+  const questions = Object.freeze({
+    home: 'Do you have a home address?', same: 'Is your mailing address the same as your home address?',
+    applicant: 'Are you applying for benefits?', programs: 'What benefits are you applying for?',
+    medical: 'Do you need help paying for medical bills from the last three calendar months? If you answer yes and you fall into a category that allows for retroactive approval, we will determine if you are eligible for coverage during those months.'
+  });
+  const radio = (label, id, noId, name, question, handler, container) => ({ label, id, noId, name, type: 'radio', question, handler, container });
   const definitions = Object.freeze({
     firstName: { label: 'First name', id: 'firstName', names: ['first name'] },
     middleName: { label: 'Middle name', id: 'middleName', names: ['middle name'] },
     lastName: { label: 'Last name', id: 'lastName', names: ['last name'] },
+    suffix: { label: 'Suffix', id: 'suffix', names: ['suffix'], type: 'select-one' },
+    maidenName: { label: 'Maiden name', id: 'maidenName', names: ['maiden name'] },
     homePhone: { label: 'Home phone number', id: 'phoneNumber', names: ['home phone number (999)999-9999'] },
     mobilePhone: { label: 'Mobile phone number', id: 'otherPhoneNumber', names: ['mobile phone number (999)999-9999'] },
-    addressLine1: { label: 'Home street address', id: 'addressLine1', names: ['home address line 1'], address: true },
-    addressLine2: { label: 'Home apartment / unit', id: 'addressLine2', names: ['home address line 2'], address: true },
-    city: { label: 'Home city', id: 'city', names: ['city'], address: true },
-    state: { label: 'Home state', id: 'state', names: ['state'], address: true },
-    zip: { label: 'Home ZIP code', id: 'zipcode', names: ['zip code (99999)'], address: true }
+    hasHomeAddress: radio('Do you have a home address?', 'hasHome1', 'hasHome2', 'hasHome', questions.home, 'hideShowHome'),
+    addressLine1: { label: 'Home street address', id: 'addressLine1', names: ['home address line 1'], container: 'homeAddrDiv' },
+    addressLine2: { label: 'Home apartment / unit', id: 'addressLine2', names: ['home address line 2'], container: 'homeAddrDiv' },
+    city: { label: 'Home city', id: 'city', names: ['city'], container: 'homeAddrDiv' },
+    state: { label: 'Home state', id: 'state', names: ['state'], container: 'homeAddrDiv', type: 'select-one' },
+    zip: { label: 'Home ZIP code', id: 'zipcode', names: ['zip code (99999)'], container: 'homeAddrDiv' },
+    mailingSameAsHome: radio('Is your mailing address the same as home?', 'sameAddress1', 'sameAddress2', 'sameAddress', questions.same, 'sameAddressCheck', 'homeAddrDiv'),
+    mailingAddressLine1: { label: 'Mailing street address', id: 'mailingAddressLine1', names: ['mailing address line 1'], container: 'sameAdd' },
+    mailingAddressLine2: { label: 'Mailing apartment / unit', id: 'mailingAddressLine2', names: ['mailing address line 2'], container: 'sameAdd' },
+    mailingCity: { label: 'Mailing city', id: 'mailingCity', names: ['mailing city'], container: 'sameAdd' },
+    mailingState: { label: 'Mailing state', id: 'mailingState', names: ['mailing state'], container: 'sameAdd', type: 'select-one' },
+    mailingZip: { label: 'Mailing ZIP code', id: 'mailingZipcode', names: ['mailing zip code (99999)'], container: 'sameAdd' },
+    isApplicant: radio('Are you applying for benefits?', 'applicant1', 'applicant2', 'applicant', questions.applicant, 'checkForApplicant'),
+    programMedicaid: { label: 'Health coverage (Medicaid / CHIP)', id: 'medicaid', name: 'programs', names: ["health coverage (medicaid or children's health insurance program - chip)"], type: 'checkbox', choiceValue: 'MC', onclick: 'showHideFA()', question: questions.programs, container: 'progSelection' },
+    programSnap: { label: 'SNAP', id: 'snap', name: 'programs', names: ['supplemental nutritional assistance program(snap)'], type: 'checkbox', choiceValue: 'FS', onclick: 'showHideBestTimetoCall()', question: questions.programs, container: 'progSelection' },
+    programFip: { label: 'FIP or Refugee Cash Assistance', id: 'tanf', name: 'programs', names: ['family investment program (fip) or refugee cash assistance (rca)'], type: 'checkbox', choiceValue: 'CW', onclick: 'showHideBestTimetoCall()', question: questions.programs, container: 'progSelection' },
+    helpPayMedicalBills: radio('Help with medical bills from the last three months?', 'helpPayMedBill1', 'helpPayMedBill2', 'helpPayMedBill', questions.medical, null, 'faDiv'),
+    bestContactTime: { label: 'Best time to call', id: 'bestTime', name: 'bestTimeToCall', names: ['best time to call? (30 character limit)'], container: 'bstTime', maxLength: 30 }
   });
   const pageHeadings = new Set(['enter personal information']);
-  const safeSections = new Set([...pageHeadings, "applicant's information", 'contact information', 'address information']);
-  const unsafe = /\b(signature|sign here|signing|certification|certify|attestation|attest|password|captcha|verification|security code|one time|username|user name|other people|other members|household members|family members|spouse|child|children|representative|employer|mailing address|mailing information)\b/i;
+  const safeSections = new Set([...pageHeadings, "applicant's information", 'contact information', 'address information', 'program information', ...Object.values(questions).map(normal)]);
+  const unsafe = /\b(signature|sign here|signing|certification|certify|attestation|attest|password|captcha|verification|security code|one time|username|user name|other people|other members|household members|family members|spouse|child|representative|employer)\b/i;
 
   function isSupportedUrl(raw) {
     try {
@@ -123,33 +144,52 @@
     });
   }
 
+  function matchingControls(doc, definition) {
+    const form = doc.querySelector('form#personalInformation[action="enterPersonalInfo"]');
+    if (!form) return [];
+    const ids = definition.noId ? [definition.id, definition.noId] : [definition.id];
+    const controls = ids.map(id => Array.from(doc.querySelectorAll(`[id="${id}"]`)));
+    if (controls.some(matches => matches.length !== 1 || !form.contains(matches[0]))) return [];
+    const elements = controls.map(matches => matches[0]);
+    if (elements.some((element, index) => {
+      const names = namesFor(element, doc);
+      const expected = definition.type === 'radio' ? [index === 0 ? 'yes' : 'no'] : definition.names;
+      const onclick = definition.type === 'radio' ? (definition.handler ? `${definition.handler}('${index === 0 ? 'Yes' : 'No'}');` : null) : (definition.onclick || null);
+      return element.name !== (definition.name || definition.id) || element.type !== (definition.type || 'text') ||
+        !names.length || !names.every(name => expected.includes(name)) || !sectionInfo(element).safe ||
+        (definition.container && !element.closest(`#personalInformation #${definition.container}`)) ||
+        (definition.question && normal(element.closest('fieldset')?.querySelector('legend')?.textContent) !== normal(definition.question)) ||
+        element.getAttribute('onclick') !== onclick || element.hasAttribute('onchange') ||
+        (definition.type === 'radio' && element.getAttribute('value') !== (index === 0 ? 'true' : 'false')) ||
+        (definition.type === 'checkbox' && element.getAttribute('value') !== definition.choiceValue) ||
+        (definition.maxLength && element.maxLength !== definition.maxLength);
+    })) return [];
+    // A third option with a familiar name changes the meaning of this group.
+    if (definition.type === 'radio' && form.querySelectorAll(`input[name="${definition.name}"]`).length !== 2) return [];
+    return elements;
+  }
+
+  function editable(element, doc) {
+    return rendered(element, doc) && (!inViewport(element, doc) || visible(element, doc)) && !element.matches(':disabled') && !element.readOnly;
+  }
+
+  function answered(elements, definition) {
+    return ['radio', 'checkbox'].includes(definition.type) ? elements.some(element => element.checked) : Boolean(String(elements[0]?.value || '').trim());
+  }
+
   function scan(doc, rawUrl) {
     const result = { supported: isSupportedUrl(rawUrl), recognizedPage: false, fields: [], bindings: [], ambiguous: [], skipped: 0 };
     if (!result.supported || !identifyPage(doc)) return result;
     result.recognizedPage = true;
-    const candidates = new Map();
-    for (const element of doc.querySelectorAll('form#personalInformation input, form#personalInformation select')) {
-      const names = namesFor(element, doc);
-      const identity = `${element.id} ${element.name} ${names.join(' ')}`.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]/g, ' ');
-      const type = element.type?.toLowerCase() || 'text';
-      const group = sectionInfo(element);
-      const canInspect = rendered(element, doc) && (!inViewport(element, doc) || visible(element, doc));
-      if (!canInspect || element.matches(':disabled') || element.readOnly || !group.safe || unsafe.test(identity) || !['text', 'select-one'].includes(type)) { result.skipped++; continue; }
-      const matches = Object.entries(definitions).filter(([, definition]) => names.length > 0 && names.every(name => definition.names.includes(name)));
-      if (matches.length !== 1) { result.skipped++; continue; }
-      const [key, definition] = matches[0];
-      if (element.id !== definition.id || element.name !== definition.id) { result.skipped++; continue; }
-      if (definition.address && !group.home) { result.skipped++; continue; }
-      if ((key === 'state') !== (element.tagName === 'SELECT')) { result.skipped++; continue; }
-      if (!candidates.has(key)) candidates.set(key, []);
-      candidates.get(key).push(element);
-    }
-    for (const [key, elements] of candidates) {
-      if (elements.length !== 1) { result.ambiguous.push(definitions[key].label); continue; }
-      const element = elements[0];
-      if (String(element.value || '').trim()) { result.skipped++; continue; }
-      result.fields.push({ key, label: definitions[key].label });
-      result.bindings.push({ key, element });
+    for (const [key, definition] of Object.entries(definitions)) {
+      const elements = matchingControls(doc, definition);
+      if (!elements.length) {
+        if (doc.querySelectorAll(`[id="${definition.id}"]`).length > 1) result.ambiguous.push(definition.label);
+        result.skipped++; continue;
+      }
+      if (!elements.every(element => editable(element, doc)) || answered(elements, definition)) { result.skipped++; continue; }
+      result.fields.push({ key, label: definition.label });
+      result.bindings.push({ key, element: elements[0], elements });
     }
     return result;
   }
@@ -163,22 +203,49 @@
       if (!/^\d{10}$/.test(digits)) return null;
       value = `(${digits.slice(0, 3)})${digits.slice(3, 6)}-${digits.slice(6)}`;
     }
-    if (key === 'zip' && !/^\d{5}$/.test(value)) return null;
+    if (['zip', 'mailingZip'].includes(key) && !/^\d{5}$/.test(value)) return null;
+    if (key === 'suffix' && !['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'Jr.', 'Sr.'].includes(value)) return null;
+    if (key === 'bestContactTime' && value.length > 30) return null;
     if (element.tagName === 'SELECT') {
-      const choices = Array.from(element.options).filter(option => !option.disabled && option.value && (normal(option.value) === normal(value) || normal(option.textContent) === normal(value) || (key === 'state' && ['ia', 'iowa'].includes(normal(value)) && ['ia', 'iowa'].includes(normal(option.textContent)))));
+      const choices = Array.from(element.options).filter(option => !option.disabled && option.value && (normal(option.value) === normal(value) || normal(option.textContent) === normal(value) || (['state', 'mailingState'].includes(key) && ['ia', 'iowa'].includes(normal(value)) && ['ia', 'iowa'].includes(normal(option.textContent)))));
       return choices.length === 1 ? choices[0].value : null;
     }
     if (element.maxLength >= 0 && value.length > element.maxLength) return null;
     return value;
   }
 
+  function hasDependentAnswers(key, doc) {
+    const containers = { hasHomeAddress: ['homeAddrDiv', 'sameAdd'], mailingSameAsHome: ['sameAdd'], isApplicant: ['progSelection'] }[key] || [];
+    return containers.some(id => Array.from(doc.querySelectorAll(`#personalInformation #${id} input, #personalInformation #${id} select`)).some(element =>
+      element.type !== 'hidden' && (['radio', 'checkbox'].includes(element.type) ? element.checked : Boolean(String(element.value || '').trim()))));
+  }
+
   function fill(doc, rawUrl, originalBindings, values) {
     const filled = [], skipped = [];
-    for (const binding of originalBindings) {
+    const order = Object.keys(definitions);
+    // Only bindings captured in the original rendered-field preview are eligible.
+    // Newly revealed fields need a fresh scan/release in the next guided pass.
+    for (const binding of [...originalBindings].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key))) {
       const fresh = scan(doc, rawUrl);
       const { key, element } = binding;
-      // Re-identify, re-check emptiness and element identity after desktop consent.
-      if (doc.location.href !== rawUrl || !fresh.supported || !fresh.recognizedPage || !fresh.bindings.some(item => item.key === key && item.element === element) || !Object.prototype.hasOwnProperty.call(values, key)) { skipped.push(key); continue; }
+      const definition = definitions[key];
+      const current = fresh.bindings.find(item => item.key === key && item.element === element);
+      const original = binding.elements || [element];
+      if (!definition || doc.location.href !== rawUrl || !current || !Object.prototype.hasOwnProperty.call(values, key) ||
+          current.elements.length !== original.length || current.elements.some((item, index) => item !== original[index])) { skipped.push(key); continue; }
+      if (['radio', 'checkbox'].includes(definition.type)) {
+        const value = values[key];
+        if (!['yes', 'no'].includes(value) || hasDependentAnswers(key, doc)) { skipped.push(key); continue; }
+        // An explicit No already matches an unchecked program box. Never clear
+        // a checked choice or run its potentially destructive hide/reset handler.
+        if (definition.type === 'checkbox' && value === 'no') { skipped.push(key); continue; }
+        const target = definition.type === 'radio' && value === 'no' ? current.elements[1] : element;
+        if (!scrollToField(target, doc) || doc.location.href !== rawUrl ||
+            !scan(doc, rawUrl).bindings.some(item => item.key === key && item.element === element) || hasDependentAnswers(key, doc)) { skipped.push(key); continue; }
+        target.click();
+        if (target.checked) filled.push(key); else skipped.push(key);
+        continue;
+      }
       const value = formatValue(key, values[key], element);
       if (value === null) { skipped.push(key); continue; }
       if (!scrollToField(element, doc) || doc.location.href !== rawUrl ||
@@ -186,7 +253,6 @@
       const prototype = element.tagName === 'SELECT' ? doc.defaultView.HTMLSelectElement.prototype : doc.defaultView.HTMLInputElement.prototype;
       const setter = Object.getOwnPropertyDescriptor(prototype, 'value').set;
       setter.call(element, value);
-      // Filling never clicks a button. Advancing is a separate user command.
       element.dispatchEvent(new doc.defaultView.Event('input', { bubbles: true }));
       element.dispatchEvent(new doc.defaultView.Event('change', { bubbles: true }));
       if (element.value === value) filled.push(key); else skipped.push(key);
@@ -194,20 +260,14 @@
     return { filled, skipped };
   }
   const navigationSnapshots = new WeakMap();
-  const knownPersonalControls = new Set([
-    ...Object.values(definitions).map(definition => definition.id), 'suffix', 'maidenName',
-    'hasHome1', 'hasHome2', 'sameAddress1', 'sameAddress2', 'mailingAddressLine1',
-    'mailingAddressLine2', 'mailingCity', 'mailingState', 'mailingZipcode', 'applicant1',
-    'applicant2', 'medicaid', 'snap', 'tanf', 'helpPayMedBill1', 'helpPayMedBill2', 'bestTime'
-  ]);
 
   function currentControls(form, doc) {
     return Array.from(form.querySelectorAll('input, select, textarea')).filter(element =>
-      element.type !== 'hidden' && rendered(element, doc) && !element.matches(':disabled'));
+      element.type !== 'hidden' && rendered(element, doc));
   }
 
   function mandatory(element) {
-    if (['firstName', 'lastName', 'addressLine1', 'city', 'state', 'zipcode'].includes(element.id)) return true;
+    if (['firstName', 'lastName', 'hasHome1', 'hasHome2', 'sameAddress1', 'sameAddress2', 'applicant1', 'applicant2', 'addressLine1', 'city', 'state', 'zipcode', 'mailingAddressLine1', 'mailingCity', 'mailingState', 'mailingZipcode'].includes(element.id)) return true;
     if (element.required || element.getAttribute('aria-required') === 'true') return true;
     if (Array.from(element.labels || []).some(label => /\*/.test(label.textContent))) return true;
     if (!['checkbox', 'radio'].includes(element.type)) return false;
@@ -217,34 +277,64 @@
 
   function personalIssues(form, doc) {
     const controls = currentControls(form, doc);
-    const radioGroups = new Map();
+    const covered = new Set(), checklist = [];
     let requiredRemaining = 0, manualRemaining = 0;
-    if (Array.from(form.elements).some(element => !form.contains(element))) manualRemaining++;
-    for (const id of ['firstName', 'lastName', 'hasHome1', 'hasHome2', 'applicant1', 'applicant2']) {
-      if (form.querySelectorAll(`[id="${id}"]`).length !== 1) manualRemaining++;
+    for (const [key, definition] of Object.entries(definitions)) {
+      const ids = definition.noId ? [definition.id, definition.noId] : [definition.id];
+      const present = controls.filter(element => ids.includes(element.id));
+      if (!present.length) continue;
+      present.forEach(element => covered.add(element));
+      const elements = matchingControls(doc, definition);
+      const required = definition.type === 'checkbox' ? false : present.some(mandatory);
+      const invalid = !elements.length || !elements.every(element => rendered(element, doc)) || elements.some(element => element.matches(':disabled')) ||
+        elements.some(element => element.getAttribute('aria-invalid') === 'true' || (element.willValidate && !element.validity.valid && answered(elements, definition)));
+      const clearing = !answered(present, definition) && hasDependentAnswers(key, doc);
+      let status;
+      if (invalid || clearing) { status = 'manual'; manualRemaining++; }
+      else if (answered(elements, definition)) status = 'complete';
+      else if (required) { status = 'missing'; requiredRemaining++; }
+      else status = 'optional';
+      checklist.push({ key, label: clearing ? `${definition.label} — review existing dependent answers` : definition.label, status, required,
+        fillable: !invalid && !clearing && elements.every(element => editable(element, doc)) && status !== 'complete' });
     }
-    for (const control of controls) {
-      if (!knownPersonalControls.has(control.id) || control.tagName === 'TEXTAREA') { manualRemaining++; continue; }
-      const expectedName = ({ hasHome1: 'hasHome', hasHome2: 'hasHome', sameAddress1: 'sameAddress', sameAddress2: 'sameAddress', applicant1: 'applicant', applicant2: 'applicant', medicaid: 'programs', snap: 'programs', tanf: 'programs', helpPayMedBill1: 'helpPayMedBill', helpPayMedBill2: 'helpPayMedBill', bestTime: 'bestTimeToCall' })[control.id] || control.id;
-      const expectedType = ['hasHome1', 'hasHome2', 'sameAddress1', 'sameAddress2', 'applicant1', 'applicant2', 'helpPayMedBill1', 'helpPayMedBill2'].includes(control.id) ? 'radio' : ['snap', 'medicaid', 'tanf'].includes(control.id) ? 'checkbox' : ['state', 'mailingState', 'suffix'].includes(control.id) ? 'select-one' : 'text';
-      if (control.name !== expectedName || control.type !== expectedType) { manualRemaining++; continue; }
-      if (control.type === 'radio') {
-        if (!control.name) { manualRemaining++; continue; }
-        if (!radioGroups.has(control.name)) radioGroups.set(control.name, []);
-        radioGroups.get(control.name).push(control);
-      } else if (control.type === 'checkbox') {
-        // Program choice is a manually answered group. No agreement is checked here.
-        if (!['snap', 'medicaid', 'tanf'].includes(control.id) || control.name !== 'programs') manualRemaining++;
-      } else {
-        if (mandatory(control) && !String(control.value || '').trim()) requiredRemaining++;
-        else if (control.getAttribute('aria-invalid') === 'true' || (control.willValidate && !control.validity.valid)) manualRemaining++;
-      }
+    const programs = controls.filter(element => element.name === 'programs');
+    if (programs.length) {
+      const missing = !programs.some(element => element.checked);
+      checklist.push({ key: 'programs', label: 'Choose at least one program', status: missing ? 'missing' : 'complete', required: true, fillable: false });
+      if (missing) requiredRemaining++;
     }
-    for (const group of radioGroups.values()) if (!group.some(control => control.checked)) manualRemaining++;
-    const programs = controls.filter(control => control.type === 'checkbox' && control.name === 'programs');
-    if (programs.length && !programs.some(control => control.checked)) manualRemaining++;
-    if (Array.from(form.querySelectorAll('[role="alert"], .error, .errors, .errorMessage')).some(element => rendered(element, doc) && element.textContent.trim())) manualRemaining++;
-    return { requiredRemaining, manualRemaining };
+    const unknown = controls.filter(element => !covered.has(element)).length;
+    const expected = ['firstName', 'lastName', 'hasHome1', 'hasHome2', 'applicant1', 'applicant2'];
+    const selected = id => form.querySelector(`[id="${id}"]`)?.checked === true;
+    if (selected('hasHome1')) expected.push('addressLine1', 'addressLine2', 'city', 'state', 'zipcode', 'sameAddress1', 'sameAddress2');
+    if (selected('hasHome2') || selected('sameAddress2')) expected.push('mailingAddressLine1', 'mailingAddressLine2', 'mailingCity', 'mailingState', 'mailingZipcode');
+    if (selected('applicant1')) expected.push('medicaid', 'snap', 'tanf');
+    if (selected('medicaid')) expected.push('helpPayMedBill1', 'helpPayMedBill2');
+    if (selected('snap') || selected('tanf')) expected.push('bestTime');
+    const missingCore = expected.some(id => {
+      const matches = form.querySelectorAll(`[id="${id}"]`);
+      return matches.length !== 1 || !rendered(matches[0], doc);
+    });
+    const external = Array.from(form.elements).some(element => !form.contains(element));
+    const errors = Array.from(form.querySelectorAll('[role="alert"], .error, .errors, .errorMessage')).some(element => rendered(element, doc) && element.textContent.trim());
+    if (unknown || missingCore || external || errors) {
+      // Never include a page-provided label: it may contain a household member's
+      // name or another answer. Unknown controls get one generic attention row.
+      manualRemaining += unknown + Number(missingCore) + Number(external) + Number(errors);
+      checklist.push({ key: 'manualReview', label: 'Review unrecognized controls or portal errors', status: 'manual', required: true, fillable: false });
+    }
+    return { requiredRemaining, manualRemaining, checklist };
+  }
+
+  function focusField(doc, rawUrl, key) {
+    if (!isSupportedUrl(rawUrl) || doc.location.href !== rawUrl || !identifyPage(doc)) return false;
+    const definition = definitions[key === 'programs' ? 'programMedicaid' : key];
+    if (!definition) return false;
+    const elements = matchingControls(doc, definition);
+    const element = elements.find(item => rendered(item, doc) && !item.matches(':disabled'));
+    if (!element || !scrollToField(element, doc) || doc.location.href !== rawUrl || !matchingControls(doc, definition).includes(element)) return false;
+    element.focus({ preventScroll: true });
+    return doc.activeElement === element;
   }
 
   function navigationButton(doc, rawUrl) {
@@ -265,7 +355,7 @@
   }
 
   function probePage(doc, rawUrl) {
-    const result = { kind: 'unsupported', pageKey: 'unsupported', heading: 'Unsupported website', reason: 'Open the official Iowa benefits portal.', canAdvance: false, fields: [], requiredRemaining: 0, manualRemaining: 0 };
+    const result = { kind: 'unsupported', pageKey: 'unsupported', heading: 'Unsupported website', reason: 'Open the official Iowa benefits portal.', canAdvance: false, fields: [], checklist: [], requiredRemaining: 0, manualRemaining: 0 };
     if (!isSupportedUrl(rawUrl)) return result;
     result.kind = 'manual'; result.pageKey = 'iowa-manual'; result.heading = 'Iowa benefits application';
     result.reason = 'Complete this step in Iowa’s form. SecondHand has not verified its controls.';
@@ -277,6 +367,7 @@
     if (!identifyPage(doc)) {
       if (headings.includes('household application information')) { result.pageKey = 'iowa-program-intent'; result.heading = 'Household Application Information'; result.reason = 'Choose the household’s application intent and complete verification in Iowa’s form.'; }
       else if (headings.includes('assisting organization or person')) { result.pageKey = 'iowa-assistance'; result.heading = 'Assisting Organization or Person'; result.reason = 'Answer who is helping with the application yourself. These fields do not describe the applicant.'; }
+      else if (headings.includes('select address')) { result.pageKey = 'iowa-select-address'; result.heading = 'Select Address'; result.reason = 'Review Iowa’s suggested address yourself. This address-verification step has not been live-verified for automatic actions.'; result.manualRemaining = 1; result.checklist = [{ key: 'addressReview', label: 'Review and choose the correct address in Iowa’s form', status: 'manual', required: true, fillable: false }]; }
       else if (headings.includes("let's get started")) { result.kind = 'blocked'; result.pageKey = 'iowa-consent'; result.heading = 'Let’s get started'; result.reason = 'Review and complete Iowa’s data-use consent yourself.'; }
       else {
         const informational = [
@@ -337,7 +428,7 @@
     return { advanced: true, reason: 'Next was clicked once. Check the following page for required questions or errors.' };
   }
 
-  const api = Object.freeze({ PORTAL, definitions, isSupportedUrl, rendered, visible, scan, fill, formatValue, probePage, captureNavigation, advance });
+  const api = Object.freeze({ PORTAL, definitions, isSupportedUrl, rendered, visible, scan, fill, formatValue, focusField, probePage, captureNavigation, advance });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandIowa = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

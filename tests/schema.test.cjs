@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { validateProfile, validateApplication, validateStoredApplication, isPortalUrl } = require('../shared/schema.cjs');
+const { validateProfile, validateApplication, validateStoredApplication, isPortalUrl, YES_NO_FIELDS, PROFILE_FIELDS } = require('../shared/schema.cjs');
+const fictionalProfile = require('./fixtures/applicant-profile.json');
 
 test('only the exact HTTPS Iowa application origin and path can receive fields', () => {
   assert.equal(isPortalUrl('https://hhsservices.iowa.gov/apspssp/ssp.portal/application/name'), true);
@@ -22,6 +23,34 @@ test('typed phone numbers stay distinct; legacy phone never implies home or mobi
   assert.equal(profile.mobilePhone, '5155550102');
   assert.equal(validateProfile({ phone: '515-555-0100' }).homePhone, '');
   assert.throws(() => validateProfile({ mobilePhone: 'call me' }));
+});
+test('first-page yes/no choices preserve unknown separately and never infer programs or address answers', () => {
+  const oldProfile = validateProfile({ firstName: 'Legacy', addressLine1: '123 Test Way', city: 'Demo City', state: 'IA', zip: '50309' });
+  for (const field of YES_NO_FIELDS) assert.equal(oldProfile[field], '', field);
+  assert.equal(oldProfile.mailingAddressLine1, '');
+  assert.equal(oldProfile.mailingState, '');
+  for (const field of YES_NO_FIELDS) {
+    assert.equal(validateProfile({ [field]: 'yes' })[field], 'yes');
+    assert.equal(validateProfile({ [field]: 'no' })[field], 'no');
+    for (const value of [true, false, 0, 1, 'Y', 'N', 'unknown', 'false']) assert.throws(() => validateProfile({ [field]: value }), field);
+  }
+  const explicit = validateProfile({ programSnap: 'yes', programFip: 'no', hasHomeAddress: 'no', mailingSameAsHome: 'no' });
+  assert.equal(explicit.programFip, 'no');
+  assert.equal(explicit.programMedicaid, '');
+  assert.equal(explicit.helpPayMedicalBills, '');
+});
+test('mailing contact fields stay separate, use validated formats, and the full fictional fixture is valid', () => {
+  const complete = validateProfile(fictionalProfile);
+  assert.deepEqual(Object.keys(fictionalProfile).sort(), [...PROFILE_FIELDS].sort());
+  assert.equal(complete.mailingAddressLine1, 'PO Box 123');
+  assert.equal(complete.addressLine1, '123 Test Way');
+  assert.equal(validateProfile({ mailingState: 'ia' }).mailingState, 'IA');
+  assert.throws(() => validateProfile({ mailingState: 'Iowa' }));
+  assert.throws(() => validateProfile({ mailingZip: '123' }));
+  assert.throws(() => validateProfile({ bestContactTime: 'x'.repeat(31) }));
+  assert.equal(validateProfile({ bestContactTime: 'x'.repeat(30) }).bestContactTime.length, 30);
+  for (const suffix of ['', 'I', 'III', 'X', 'Jr.', 'Sr.']) assert.equal(validateProfile({ suffix }).suffix, suffix);
+  for (const suffix of ['Jr', 'Doctor', 'XI']) assert.throws(() => validateProfile({ suffix }));
 });
 test('submission is never inferred and requires a receipt', () => {
   assert.equal(validateApplication({}).status, 'draft');

@@ -5,6 +5,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+const applicantFixture = require('../tests/fixtures/applicant-profile.json');
+const { PROFILE_FIELDS } = require('../shared/schema.cjs');
 const root = path.join(__dirname, '..');
 const passphrase = 'synthetic-test-vault-passphrase';
 
@@ -40,16 +42,18 @@ async function main() {
     await page.locator('#auth-submit').click();
     await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('.nav-item[data-view="profile"]').click();
-    await page.locator('#firstName').fill('Synthetic');
-    await page.locator('#lastName').fill('Tester');
-    await page.locator('#state').fill('IA');
-    await page.locator('#monthlyEarnedIncome').fill('0');
+    for (const field of PROFILE_FIELDS) {
+      const control = page.locator(`#${field}`);
+      if (await control.evaluate(element => element.tagName === 'SELECT')) await control.selectOption(applicantFixture[field]);
+      else await control.fill(applicantFixture[field]);
+    }
     await page.locator('#save-profile').click();
     await expect(page.locator('#profile-save-state')).toHaveText('Saved locally');
     const profile = await page.evaluate(async () => (await window.secondHand.getData()).profile);
-    assert.equal(profile.firstName, 'Synthetic');
+    assert.deepEqual(profile, applicantFixture);
     assert.equal(profile.monthlyEarnedIncome, '0');
-    assert.equal(profile.monthlyRent, '');
+    assert.equal(profile.ssn, '');
+    await captureDiagnostic(page, 'desktop-profile.png', { fullPage: true });
     await page.locator('.nav-item[data-view="applications"]').click();
     await page.locator('#new-application').click();
     await page.locator('#application-status').selectOption('submitted');
@@ -71,6 +75,8 @@ async function main() {
       overview: document.querySelector('#overview-applications').textContent
     }));
     assert.deepEqual(cleared, { firstName: '', notes: '', cards: '', overview: '' });
+    const clearedProfile = await page.locator('#profile-form').evaluate(form => Object.fromEntries(Array.from(form.querySelectorAll('[name]'), control => [control.name, control.value])));
+    assert.deepEqual(clearedProfile, Object.fromEntries(PROFILE_FIELDS.map(field => [field, ''])));
     await page.locator('#passphrase').fill('incorrect-passphrase');
     await page.locator('#auth-submit').click();
     await expect(page.locator('#auth-error')).toBeVisible();
@@ -79,7 +85,7 @@ async function main() {
     await page.locator('#auth-submit').click();
     await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('.nav-item[data-view="profile"]').click();
-    await expect(page.locator('#firstName')).toHaveValue('Synthetic');
+    await expect(page.locator('#firstName')).toHaveValue(applicantFixture.firstName);
     await page.evaluate(() => window.secondHand.lock());
     await expect(page.locator('#auth-view')).toBeVisible();
     await expect(page.locator('#firstName')).toHaveValue('');
@@ -91,12 +97,12 @@ async function main() {
     await page.locator('#auth-submit').click();
     await expect(page.locator('#workspace')).toBeVisible();
     const restored = await page.evaluate(() => window.secondHand.getData());
-    assert.equal(restored.profile.firstName, 'Synthetic');
+    assert.deepEqual(restored.profile, applicantFixture);
     assert.equal(restored.applications[0].confirmationNumber, 'SYNTHETIC-RECEIPT-ONLY');
     const bytes = await fs.readFile(path.join(userData, 'vault.secondhand'), 'utf8');
-    for (const secret of ['Synthetic', 'Tester', 'SYNTHETIC-RECEIPT-ONLY', passphrase]) assert.equal(bytes.includes(secret), false);
+    for (const secret of ['Avery', 'Example', '123 Test Way', '2025550147', 'SYNTHETIC-RECEIPT-ONLY', passphrase]) assert.equal(bytes.includes(secret), false);
     assert.deepEqual(errors, []);
-    console.log('Electron UI smoke passed: create, save profile, track application, lock/clear, wrong password, unlock, restart persistence.');
+    console.log('Electron UI smoke passed: create, save full applicant choices and mailing details, track application, lock/clear all fields, wrong password, unlock, restart persistence.');
   } finally {
     if (application) await application.close().catch(() => {});
     await fs.rm(userData, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });

@@ -9,12 +9,10 @@
   let revision = 0;
   let panelHost = null;
   let panelFrame = null;
-  let collapsed = false;
-
   function sizePanel() {
     if (!panelHost || !panelFrame) return;
-    panelHost.style.setProperty('width', collapsed ? '220px' : 'min(350px, calc(100vw - 24px))', 'important');
-    panelHost.style.setProperty('height', collapsed ? '54px' : 'min(670px, calc(100vh - 32px))', 'important');
+    panelHost.style.setProperty('width', 'min(244px, calc(100vw - 24px))', 'important');
+    panelHost.style.setProperty('height', '62px', 'important');
   }
 
   function withOwnPanelHidden(work) {
@@ -48,8 +46,8 @@
       })) panelHost.style.setProperty(property, value, 'important');
       const shadow = panelHost.attachShadow({ mode: 'closed' });
       panelFrame = document.createElement('iframe');
-      panelFrame.src = chrome.runtime.getURL('panel.html');
-      panelFrame.title = 'SecondHand Iowa SNAP assistant';
+      panelFrame.src = chrome.runtime.getURL('panel.html?surface=launcher');
+      panelFrame.title = 'Open SecondHand in Chrome’s sidebar';
       panelFrame.setAttribute('sandbox', 'allow-scripts allow-same-origin');
       panelFrame.referrerPolicy = 'no-referrer';
       for (const [property, value] of Object.entries({ width: '100%', height: '100%', display: 'block', border: '0', margin: '0', padding: '0', 'border-radius': '14px', background: 'transparent' })) panelFrame.style.setProperty(property, value, 'important');
@@ -107,10 +105,9 @@
         respond(withOwnPanelHidden(() => preview(true)));
       } else if (message.type === 'secondhand:pageState') {
         respond(withOwnPanelHidden(pageState));
-      } else if (message.type === 'secondhand:panel' && typeof message.collapsed === 'boolean') {
-        collapsed = message.collapsed;
-        sizePanel();
-        respond({ collapsed });
+      } else if (message.type === 'secondhand:focusField' && typeof message.key === 'string' && typeof adapter.focusField === 'function') {
+        const focused = withOwnPanelHidden(() => adapter.focusField(document, location.href, message.key));
+        respond({ focused: Boolean(focused) });
       } else if (message.type === 'secondhand:next') {
         const original = navigation;
         navigation = null; // One authorized worker request, one navigation attempt.

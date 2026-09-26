@@ -3,7 +3,12 @@
 (() => {
   const api = window.secondHand;
   const $ = (id) => document.getElementById(id);
-  const profileFields = ['firstName', 'middleName', 'lastName', 'birthDate', 'ssn', 'email', 'phone', 'homePhone', 'mobilePhone', 'addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county', 'householdSize', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities'];
+  const profileFields = ['firstName', 'middleName', 'lastName', 'suffix', 'maidenName', 'isApplicant',
+    'birthDate', 'ssn', 'email', 'phone', 'homePhone', 'mobilePhone', 'bestContactTime',
+    'hasHomeAddress', 'mailingSameAsHome', 'addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county',
+    'mailingAddressLine1', 'mailingAddressLine2', 'mailingCity', 'mailingState', 'mailingZip',
+    'programSnap', 'programFip', 'programMedicaid', 'helpPayMedicalBills', 'householdSize',
+    'monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities'];
   const viewNames = { overview: 'Overview', profile: 'My information', applications: 'Applications', extension: 'Chrome extension', privacy: 'Privacy & backups' };
   const statusNames = { draft: 'Draft', in_progress: 'In progress', submitted: 'Submitted', needs_action: 'Needs action', approved: 'Approved', denied: 'Denied' };
   let vaultStatus = { exists: false, unlocked: false, extensionId: '', bridgeRunning: false };

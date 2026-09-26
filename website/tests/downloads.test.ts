@@ -54,6 +54,7 @@ test('versioned downloads preserve older releases and reject mismatched or unlis
  for(const [file,query,version] of [
   ['secondHand-0.2.0-win-x64.exe','','0.2.0'],
   ['secondHand-0.3.0-mac-arm64.dmg','','0.3.0'],
+  ['secondHand-0.4.0-mac-arm64.dmg','','0.4.0'],
   ['secondHand-extension.zip','?release=0.3.0','0.3.0'],
   ['SHA256SUMS.txt','',LATEST_RELEASE],
  ]) {

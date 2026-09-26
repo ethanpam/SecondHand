@@ -1,7 +1,7 @@
 // Only application distribution artifacts are stored online. No applicant data.
-export const RELEASE = '0.3.0';
-export const LATEST_RELEASE = '0.3.0';
-const releases = ['0.2.0', '0.3.0'] as const;
+export const RELEASE = '0.4.0';
+export const LATEST_RELEASE = '0.4.0';
+const releases = ['0.2.0', '0.3.0', '0.4.0'] as const;
 export const filenames = [
   `secondHand-${RELEASE}-win-x64.exe`,
   `secondHand-${RELEASE}-mac-arm64.dmg`,

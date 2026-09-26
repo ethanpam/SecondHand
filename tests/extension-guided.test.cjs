@@ -8,12 +8,13 @@ const adapter = require('../extension/iowa-adapter.js');
 const TOKEN = 'a'.repeat(64);
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
-function worker({ holdType, blocked = false, revoked = false } = {}) {
-  const calls = { native: [], content: [], tabGets: 0 };
+function worker({ holdType, blocked = false, revoked = false, values = {firstName:'Synthetic private value'} } = {}) {
+  const calls = { native: [], content: [], panels: [], tabGets: 0 };
   const tab = { id: 7, active: true, url: `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo` };
   const page = { kind: blocked ? 'blocked' : 'fillable', pageKey: blocked ? 'consent' : 'personal', canAdvance: !blocked, reason: blocked ? 'Review consent yourself.' : '' };
   const fields = [{key:'firstName',label:'First name'}];
   let now = Date.now(), listener, release, releaseTab, holdTabWhen, complete = false, nextError = false, grants = 0;
+  let afterFill;
   const nativeFailures = new Map();
   const events = {};
   const event = key => ({addListener: value => {events[key]=value;}});
@@ -31,11 +32,12 @@ function worker({ holdType, blocked = false, revoked = false } = {}) {
         calls.content.push(message);
         if(message.type==='secondhand:pageState') return {page:{...page},scan:{token:'preview',recognizedPage:page.kind==='fillable'||page.kind==='manual',supported:true,fields:complete?[]:[...fields],ambiguous:[],skipped:0},nextToken:page.canAdvance?'next-token':null};
         if(message.type==='secondhand:scan') return {token:'preview',recognizedPage:true,supported:true,fields:[...fields],ambiguous:[],skipped:0};
-        if(message.type==='secondhand:fill'){complete=true;return{ok:true,filledCount:1,skippedCount:0};}
+        if(message.type==='secondhand:fill'){complete=afterFill?.(message) ?? true;return{ok:true,filledCount:Object.keys(message.values).length,skippedCount:message.fields.filter(key=>!message.values[key]).length};}
         if(message.type==='secondhand:next'){if(nextError)throw new Error('Navigation response unavailable.');return{advanced:true};}
         return {ok:true};
       },onActivated:event('activated'),onRemoved:event('removed'),onUpdated:event('updated')
     },
+    sidePanel:{setPanelBehavior:async()=>{},open:async options=>{calls.panels.push(options);}},
     scripting:{executeScript:async()=>{}},
     runtime:{id:'testextension',getURL:file=>`chrome-extension://testextension/${file}`,onMessage:{addListener:callback=>{listener=callback;}},connectNative:()=>{
       let messageListener,disconnectListener;
@@ -43,7 +45,7 @@ function worker({ holdType, blocked = false, revoked = false } = {}) {
         calls.native.push(request);
         const answer=()=>{
           if(nativeFailures.has(request.type)) return messageListener({id:request.id,ok:false,error:nativeFailures.get(request.type)});
-          messageListener({id:request.id,ok:true,data:request.type==='startAssistedSession'?{assistanceToken:grants++===0?TOKEN:'b'.repeat(64),expiresAt:new Date(now+900000).toISOString(),fields:Object.keys(adapter.definitions)}:request.type==='getFields'?{values:{firstName:'Synthetic private value'}}:request.type==='checkAssistedSession'?{active:!revoked}:request.type==='status'?{unlocked:true}:{recorded:true,ended:true}});
+          messageListener({id:request.id,ok:true,data:request.type==='startAssistedSession'?{assistanceToken:grants++===0?TOKEN:'b'.repeat(64),expiresAt:new Date(now+900000).toISOString(),fields:Object.keys(adapter.definitions)}:request.type==='getFields'?{values:Object.fromEntries(request.fields.filter(key=>values[key]).map(key=>[key,values[key]]))}:request.type==='checkAssistedSession'?{active:!revoked}:request.type==='status'?{unlocked:true}:{recorded:true,ended:true}});
         };
         if(request.type===holdType) release=answer;else queueMicrotask(answer);
       }};
@@ -51,9 +53,9 @@ function worker({ holdType, blocked = false, revoked = false } = {}) {
   };
   class Clock extends Date { static now(){return now;} }
   vm.runInNewContext(fs.readFileSync(require.resolve('../extension/background.js'),'utf8'),{chrome,SecondHandIowa:adapter,importScripts:()=>{},crypto:webcrypto,setTimeout,clearTimeout,URL,Map,Set,Date:Clock,console});
-  const panel=()=>({id:'testextension',url:chrome.runtime.getURL('panel.html'),frameId:3,tab:{...tab}});
-  const send=(message,sender=panel())=>new Promise(resolve=>{if(!listener(message,sender,resolve))resolve(undefined);});
-  return{calls,tab,page,fields,events,send,
+  const panel=()=>({id:'testextension',url:chrome.runtime.getURL('panel.html')});
+  const send=(message,sender=panel())=>new Promise(resolve=>{if(!listener({tabId:7,...message},sender,resolve))resolve(undefined);});
+  return{calls,tab,page,fields,events,send,onFill:callback=>{afterFill=callback;},
     release:()=>{holdType=null;const answer=release;release=null;answer?.();},
     holdNative:type=>{holdType=type;},
     holdTabGetWhen:predicate=>{holdTabWhen=predicate;},
@@ -118,7 +120,7 @@ test('switching tabs revokes guided approval and rejects cross-tab panel request
  const w=worker();await start(w);w.events.activated({tabId:12});await settle();
  assert.equal(w.calls.native.at(-1).type,'endAssistedSession');
  assert.equal((await w.send({type:'ui:status'})).data.automatic.enabled,false);
- assert.equal(await w.send({type:'ui:fill',tabId:12,confirmed:true}),undefined);
+ assert.equal((await w.send({type:'ui:fill',tabId:12,confirmed:true})).ok,false);
  const hostile={id:'testextension',url:adapter.PORTAL,frameId:0,tab:{...w.tab}};
  assert.equal(await w.send({type:'ui:auto',enabled:true,confirmed:true},hostile),undefined);
 });
@@ -259,4 +261,67 @@ test('a manual-question pause retains valid approval when the applicant resumes'
  assert.equal(w.calls.native.filter(x=>x.type==='startAssistedSession').length,1);
  assert.equal(w.calls.native.filter(x=>x.type==='checkAssistedSession').at(-1).assistanceToken,TOKEN);
  assert.equal(w.calls.content.filter(x=>x.type==='secondhand:next').length,1);
+});
+
+
+test('native side panel is trusted but a page-hosted panel can only open the browser panel', async()=>{
+ const w=worker();
+ const framed={id:'testextension',url:'chrome-extension://testextension/panel.html',frameId:3,tab:{...w.tab}};
+ assert.equal(await w.send({type:'ui:auto',enabled:true,confirmed:true},framed),undefined);
+ const launcher={...framed,url:'chrome-extension://testextension/panel.html?surface=launcher'};
+ assert.equal(await w.send({type:'ui:auto',enabled:true,confirmed:true},launcher),undefined);
+ assert.equal(await w.send({type:'ui:openPanel'},launcher),undefined);
+ assert.equal((await w.send({type:'ui:openPanel',confirmed:true},launcher)).ok,true);
+ assert.equal(w.calls.panels.length,1);
+ assert.equal(w.calls.panels[0].tabId,7);
+ assert.equal(w.calls.native.length,0);
+});
+
+test('guided passes fill newly revealed fields using one grant and fresh previews',async()=>{
+ const w=worker({values:{firstName:'Synthetic',addressLine1:'123 Test Way'}});
+ let pass=0;
+ w.onFill(()=>{if(++pass===1){w.fields.splice(0,1,{key:'addressLine1',label:'Home street address'});return false;}return true;});
+ await start(w);
+ assert.equal(w.calls.native.filter(x=>x.type==='startAssistedSession').length,1);
+ const requests=w.calls.native.filter(x=>x.type==='getFields');
+ assert.equal(requests.length,2);
+ assert.equal(requests[0].fields.join(','),'firstName');
+ assert.equal(requests[1].fields.join(','),'addressLine1');
+ assert.ok(requests.every(x=>x.assistanceToken===TOKEN));
+ assert.equal(w.calls.content.filter(x=>x.type==='secondhand:next').length,1);
+});
+
+test('missing saved information is metadata-only, does not loop, and manual completion continues',async()=>{
+ const w=worker({values:{}});
+ Object.assign(w.page,{canAdvance:false,requiredRemaining:1,manualRemaining:0,reason:'First name is missing.'});
+ w.onFill(()=>false);
+ await start(w);
+ const state=(await w.send({type:'ui:pageState'})).data;
+ assert.equal(state.automatic.waitingForInfo,true);
+ assert.equal(state.missingProfileFields.join(','),'firstName');
+ for(let n=0;n<3;n++){await w.send({type:'ui:pageState'});await settle();}
+ assert.equal(w.calls.native.filter(x=>x.type==='getFields').length,1);
+ assert.equal(w.calls.content.some(x=>x.type==='secondhand:next'),false);
+ w.setComplete(true);Object.assign(w.page,{canAdvance:true,requiredRemaining:0});
+ await w.send({type:'ui:pageState'});await settle();
+ assert.equal(w.calls.native.filter(x=>x.type==='startAssistedSession').length,1);
+ assert.equal(w.calls.content.filter(x=>x.type==='secondhand:next').length,1);
+});
+
+test('focus-field requests only carry an allowlisted key shape and cannot reach the vault',async()=>{
+ const w=worker();
+ assert.equal(await w.send({type:'ui:focusField',key:'#firstName'}),undefined);
+ assert.equal((await w.send({type:'ui:focusField',key:'firstName'})).ok,true);
+ assert.equal(w.calls.content.at(-1).type,'secondhand:focusField');
+ assert.equal(w.calls.native.length,0);
+});
+
+test('checking after profile changes replaces a revoked waiting grant in the same explicit action',async()=>{
+ const w=worker();
+ Object.assign(w.page,{canAdvance:false,requiredRemaining:1,manualRemaining:0});
+ await start(w);
+ assert.equal((await w.send({type:'ui:status'})).data.automatic.waitingForInfo,true);
+ w.setRevoked(true);
+ await start(w);
+ assert.equal(w.calls.native.filter(x=>x.type==='startAssistedSession').length,2);
 });

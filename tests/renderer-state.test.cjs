@@ -5,7 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { JSDOM } = require('jsdom');
-const { PROFILE_FIELDS } = require('../shared/schema.cjs');
+const { PROFILE_FIELDS, PROFILE_CHOICES, YES_NO_FIELDS } = require('../shared/schema.cjs');
+const fictionalProfile = require('./fixtures/applicant-profile.json');
 
 const html = fs.readFileSync(path.join(__dirname, '../renderer/index.html'), 'utf8');
 const script = fs.readFileSync(path.join(__dirname, '../renderer/app.js'), 'utf8');
@@ -118,6 +119,32 @@ test('profile saves every schema field and keeps home, mobile, and reference pho
   assert.equal(saved[1].mobilePhone, '');
   view.lock();
   for (const id of ['phone', 'homePhone', 'mobilePhone']) assert.equal(view.get(id).value, '');
+});
+
+test('new profile choices default to unknown, save explicit no, and clear with all applicant fields on lock', async t => {
+  const saved = [];
+  const view = await renderer(t, { saveProfile: async profile => { saved.push(structuredClone(profile)); return structuredClone(profile); } });
+  for (const field of Object.keys(PROFILE_CHOICES)) {
+    assert.equal(view.get(field).value, '', field);
+    assert.deepEqual(Array.from(view.get(field).options, option => option.value), PROFILE_CHOICES[field]);
+  }
+  for (const [field, value] of Object.entries(fictionalProfile)) view.edit(field, value);
+  view.submit('profile-form');await tick();
+  assert.deepEqual(saved[0], fictionalProfile);
+  assert.equal(view.get('programFip').value, 'no');
+  assert.equal(view.get('mailingSameAsHome').value, 'no');
+  assert.equal(view.get('mailingAddressLine1').value, 'PO Box 123');
+  assert.equal(view.get('addressLine1').value, '123 Test Way');
+  view.lock();
+  for (const field of PROFILE_FIELDS) assert.equal(view.get(field).value, '', field);
+});
+
+test('legacy profile loading leaves all new choice fields unknown and does not populate mailing fields', async t => {
+  const view = await renderer(t);
+  assert.equal(view.get('firstName').value, 'Initial');
+  for (const field of [...YES_NO_FIELDS, 'suffix', 'maidenName', 'bestContactTime', 'mailingAddressLine1', 'mailingAddressLine2', 'mailingCity', 'mailingState', 'mailingZip']) {
+    assert.equal(view.get(field).value, '', field);
+  }
 });
 
 test('a pending profile save cannot repopulate fields after a vault lock', async t => {

@@ -1,8 +1,8 @@
 # secondHand
 
-A desktop benefits companion and Chrome extension for Iowa SNAP. Your saved profile and application tracker live in an encrypted vault on your computer. A helper appears automatically on Iowa's Self-Service Portal and offers approved filling and guided Next actions through a local Chrome Native Messaging connection.
+A desktop benefits companion and Chrome extension for Iowa SNAP. Your saved profile and application tracker live in an encrypted vault on your computer. An Open assistant button appears on Iowa's Self-Service Portal. It opens a Chrome side panel with a field checklist and approved filling/Next actions through a local Chrome Native Messaging connection.
 
-**This is an early assisted-application release.** Only the initial applicant page has verified filling and Next controls: names, home/mobile phones, and home address. Guided mode pauses for unanswered choices, unsupported steps, consent, signatures, and final submission. You review the answers and complete those steps on Iowa's website. Only the government can confirm eligibility or approval. See [Iowa portal coverage](docs/iowa-portal.md) for the exact scope.
+**This is an early assisted-application release.** The initial applicant page has verified filling for names and suffix, phone/contact preferences, home and mailing addresses, and explicitly saved yes/no and program choices. Guided mode fills newly revealed fields, waits for missing required answers, then selects the verified Save and Continue control. Unverified later steps, consent, signatures, and final submission remain manual. You review the answers and complete those steps on Iowa's website. Only the government can confirm eligibility or approval. See [Iowa portal coverage](docs/iowa-portal.md) for the exact scope.
 
 ## iPhone app
 
@@ -15,12 +15,12 @@ Download the Windows `.exe` installer or the Mac `.dmg` for your processor from 
 1. Open SecondHand and create your local vault. Keep your passphrase safe; there is no online reset.
 2. In **Chrome extension**, choose **Prepare Chrome extension**. The app prepares a permanent folder and registers its local connection automatically.
 3. In Chrome, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select that folder. Use the app's **Copy folder path** button to locate it. No extension ID copying or command line is needed.
-4. Save your profile, keep the app unlocked, and open [Iowa's portal](https://hhsservices.iowa.gov/apspssp/ssp.portal) in Chrome. The SecondHand helper appears automatically. On the supported applicant page, choose **Fill this page**, **Fill & Next**, or **Start guided autofill**, then approve the request in the desktop app. Guided mode requires explicit approval for a session lasting up to **15 minutes**.
-5. Review the answers. When guided mode pauses, complete the required choices in Iowa's form and choose **Resume guided autofill** on a supported page. Use the helper's pause/stop control or lock the desktop vault to end assistance. Complete consent, signatures, and final submission yourself; save the official confirmation in your local tracker.
+4. Save your profile, keep the app unlocked, and open [Iowa's portal](https://hhsservices.iowa.gov/apspssp/ssp.portal) in Chrome. Use Chrome 116 or newer. Click **Open assistant** on the page or SecondHand’s toolbar icon to open the browser side panel. On the supported applicant page, choose **Fill this page**, **Fill & Next**, or **Start guided autofill**, then approve the request in the desktop app. Guided mode requires explicit approval for a session lasting up to **15 minutes**.
+5. Review the checklist: **✓ Complete**, **○ Missing required**, optional blank fields, and manual-review items. Click a row to find the field in Iowa’s form. An active guided session continues automatically when missing required answers are complete. Protected or unverified steps require your review; **Resume guided autofill** only works on a supported page. Use the helper's pause/stop control or lock the desktop vault to end assistance. Complete consent, signatures, and final submission yourself; save the official confirmation in your local tracker.
 
 Chrome installation still requires the manual Load unpacked step; the app does not silently install extensions. See [the complete setup and troubleshooting guide](docs/setup.md) for Mac folder selection, updates, and custom builds.
 
-**Upgrading to 0.3:** install the new desktop app, choose **Refresh extension files**, click **Reload** for SecondHand at `chrome://extensions`, and reload your Iowa tab. If Chrome asks, review and approve the new site access restricted to `hhsservices.iowa.gov`; automatic page detection needs that access. Avoid reloading an application containing unsaved answers—save or finish your current work first.
+**Upgrading to 0.4:** install the new desktop app, choose **Refresh extension files**, click **Reload** for SecondHand at `chrome://extensions`, and reload your Iowa tab. If Chrome asks, review the updated permissions for the browser side panel and restricted Iowa site access. Avoid reloading an application containing unsaved answers—save or finish your current work first.
 
 ## Develop
 
@@ -44,6 +44,8 @@ npm run dist:win      # Run on Windows to build the NSIS .exe installer
 npm run dist:mac      # Unsigned DMGs for Apple silicon and Intel Macs
 ```
 
+Fictional QA data is in [`tests/fixtures/applicant-profile.json`](tests/fixtures/applicant-profile.json). It is for isolated tests only and is never sent to the real Iowa portal.
+
 GitHub Actions runs syntax/security configuration checks, unit/integration tests, Electron/native smoke tests, and builds Windows installers plus Apple silicon and Intel Mac disk images. Workflow artifacts expire after 30 days and can be rebuilt with **Run workflow**; tagged builds can retain installers in a GitHub prerelease. No application server, database service, API keys, or applicant account with secondHand is required.
 
 ## Data boundaries
@@ -61,7 +63,7 @@ GitHub Actions runs syntax/security configuration checks, unit/integration tests
 | --- | --- |
 | `desktop/` | Electron main/preload, encrypted vault, native host, local IPC, registration |
 | `renderer/` | Local desktop interface |
-| `extension/` | Manifest V3 popup, worker, and conservative Iowa adapter |
+| `extension/` | Manifest V3 browser side panel, launcher, worker, and conservative Iowa adapter |
 | `shared/` | Validated profile/application schema and portal allowlist |
 | `tests/` | Crypto, protocol, schema, and portal-adapter regression tests |
 | `scripts/` | Validation, real UI smoke test, extension packaging |

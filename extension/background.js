@@ -3,6 +3,7 @@ importScripts('iowa-adapter.js');
 const HOST = 'org.secondhand.bridge';
 const scans = new Map();
 const pages = new Map();
+const missingProfile = new Map(); // Field keys only, never answers.
 let busy = false;
 let busyTab = null;
 let actionEpoch = 0;
@@ -39,11 +40,11 @@ function nativeRequest(type, payload = {}) {
 function safeUrl(raw) { const url = new URL(raw); return url.origin + url.pathname; }
 function automaticState(tabId) {
   if (!assistance || assistance.tabId !== tabId) return { enabled: false, paused: false, reason: '', expiresAt: null };
-  return { enabled: assistance.enabled, paused: assistance.paused, reason: assistance.reason, expiresAt: assistance.expiresAt };
+  return { enabled: assistance.enabled, paused: assistance.paused, waitingForInfo: Boolean(assistance.waitingForInfo), reason: assistance.reason, expiresAt: assistance.expiresAt };
 }
-function status(tabId) { return { busy, lastResult, extensionId: chrome.runtime.id, automatic: automaticState(tabId) }; }
-function pause(reason) {
-  if (assistance) { assistance.paused = true; assistance.reason = reason; }
+function status(tabId) { return { busy, lastResult, missingProfileFields: [...(missingProfile.get(tabId) || [])], extensionId: chrome.runtime.id, automatic: automaticState(tabId) }; }
+function pause(reason, waitingForInfo = false) {
+  if (assistance) { assistance.paused = true; assistance.waitingForInfo = waitingForInfo; assistance.reason = reason; }
   lastResult = { message: reason };
 }
 async function stopAutomatic(reason = 'Guided autofill stopped.') {
@@ -74,7 +75,7 @@ function requireAssistance(tabId, token) {
 }
 async function activePortal(tabId) {
   const tab = await chrome.tabs.get(tabId);
-  if (!tab.active || !SecondHandIowa.isSupportedUrl(tab.url)) throw new Error('Open the official Iowa portal in the active tab, then try again.');
+  if (tab.id !== tabId || !tab.active || !SecondHandIowa.isSupportedUrl(tab.url)) throw new Error('Open the official Iowa portal in the active tab, then try again.');
   return tab;
 }
 async function inject(tabId) {
@@ -135,6 +136,12 @@ async function performFill(tabId, token, requested, epoch, sessionToken) {
     if (current.url !== scan.url) throw new Error('The page changed during approval. Nothing was filled.');
     stillCurrent(epoch);
     if (sessionToken) requireAssistance(tabId, sessionToken);
+    const missing = missingProfile.get(tabId) || new Set();
+    for (const key of requested) {
+      if (typeof values[key] !== 'string' || !values[key].trim()) missing.add(key);
+      else missing.delete(key);
+    }
+    missingProfile.set(tabId, missing);
     const result = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:fill', token, fields: requested, values }, { frameId: 0 });
     if (!result?.ok) throw new Error(result?.error || 'The page could not be filled. Scan again.');
     let tracking = 'No application was submitted.';
@@ -153,7 +160,7 @@ async function nextPage(tabId, epoch, automatic) {
   stillCurrent(epoch);
   if (!state.page.canAdvance || !state.nextToken) {
     const reason = state.page.reason || 'Complete the remaining questions and review this page yourself before continuing.';
-    if (automatic) pause(reason);
+    if (automatic) pause(reason, state.page.kind === 'fillable' && state.scan.recognizedPage && (state.page.requiredRemaining > 0 || state.page.manualRemaining > 0));
     return { ...(lastResult || {}), advanced: false, message: reason };
   }
   let sessionToken;
@@ -217,7 +224,16 @@ async function startAutomatic(tabId) {
     stillCurrent(epoch);
     if (state.page.kind === 'blocked' || state.page.kind === 'unsupported') throw new Error(state.page.reason || 'Complete this step yourself. Guided filling can start on a supported applicant page.');
     if (assistance?.tabId === tabId && assistance.token && Date.parse(assistance.expiresAt) > Date.now()) {
-      assistance.enabled = true; assistance.paused = false; assistance.reason = '';
+      const previousToken = assistance.token;
+      try {
+        const valid = await nativeRequest('checkAssistedSession', { url: safeUrl(tab.url), assistanceToken: previousToken });
+        if (valid?.active !== true) invalidateAssistance(previousToken);
+      } catch { invalidateAssistance(previousToken); }
+      stillCurrent(epoch);
+    }
+    if (assistance?.tabId === tabId && assistance.token && Date.parse(assistance.expiresAt) > Date.now()) {
+      assistance.enabled = true; assistance.paused = false; assistance.waitingForInfo = false; assistance.reason = '';
+      assistance.attempted.clear();
       assistance.visited.delete(pageSignature(state));
     } else {
       if (assistance) {
@@ -239,7 +255,8 @@ async function startAutomatic(tabId) {
         await nativeRequest('endAssistedSession', { url: safeUrl(tab.url), assistanceToken: grant.assistanceToken }).catch(() => {});
         throw new Error('The active page changed during approval. Start again on Iowa’s page.');
       }
-      assistance = { tabId, token: grant.assistanceToken, expiresAt: grant.expiresAt, fields: grant.fields, url: safeUrl(tab.url), enabled: true, paused: false, reason: '', visited: new Set(), steps: 0 };
+      missingProfile.delete(tabId);
+      assistance = { tabId, token: grant.assistanceToken, expiresAt: grant.expiresAt, fields: grant.fields, url: safeUrl(tab.url), enabled: true, paused: false, waitingForInfo: false, reason: '', visited: new Set(), attempted: new Set(), attemptedPage: '', steps: 0 };
     }
     lastResult = { message: 'Guided autofill is ready. It pauses when a step needs your input.' };
   } finally { busy = false; busyTab = null; }
@@ -253,13 +270,25 @@ async function runAutomatic(tabId) {
   busy = true; busyTab = tabId;
   const epoch = actionEpoch;
   try {
-    const state = await readPage(tabId);
+    let state = await readPage(tabId);
     stillCurrent(epoch);
     // A recognized page can have manual questions while its safe fields are filled.
     if (!['fillable', 'manual'].includes(state.page.kind) || !state.scan.recognizedPage) { pause(state.page.reason || 'Complete this step yourself, then resume on a supported page.'); return; }
     if (assistance.visited.has(pageSignature(state))) { pause('Iowa stayed on the same step. Review its messages and choose Resume when ready.'); return; }
-    const fields = state.scan.fields.map(field => field.key).filter(field => assistance.fields.includes(field));
-    if (fields.length) await performFill(tabId, state.scan.token, fields, epoch, assistance.token);
+    const signature = pageSignature(state);
+    if (assistance.attemptedPage !== signature) { assistance.attempted.clear(); assistance.attemptedPage = signature; }
+    // Choices can reveal more verified fields. Each pass gets a fresh preview,
+    // uses the existing grant, and never retries an unanswered field in a loop.
+    for (let pass = 0; pass < 4; pass++) {
+      const fields = state.scan.fields.map(field => field.key).filter(field => assistance.fields.includes(field) && !assistance.attempted.has(field));
+      if (!fields.length) break;
+      fields.forEach(field => assistance.attempted.add(field));
+      await performFill(tabId, state.scan.token, fields, epoch, assistance.token);
+      stillCurrent(epoch);
+      state = await readPage(tabId);
+      stillCurrent(epoch);
+      if (pageSignature(state) !== signature || !state.scan.recognizedPage || state.page.kind !== 'fillable') throw new Error('The page changed while filling. Review the current step before resuming.');
+    }
     stillCurrent(epoch);
     await nextPage(tabId, epoch, true);
   } catch (error) {
@@ -271,7 +300,12 @@ async function pageState(tabId) {
     const cached = pages.get(tabId);
     return { page: cached?.page || { kind: 'manual', reason: 'Finish the current desktop approval first.', canAdvance: false }, scan: cached?.scan || { fields: [], ambiguous: [] }, ...status(tabId) };
   }
+  if (assistance?.tabId === tabId && assistance.token && Date.parse(assistance.expiresAt) <= Date.now()) await stopAutomatic('Your guided approval expired. Start again to approve a new session.');
   const state = await readPage(tabId);
+  if (assistance?.tabId === tabId && assistance.waitingForInfo && assistance.token && state.scan.recognizedPage && state.page.kind === 'fillable' && pageSignature(state) === assistance.attemptedPage &&
+      (state.page.canAdvance || state.scan.fields.some(field => assistance.fields.includes(field.key) && !assistance.attempted.has(field.key)))) {
+    assistance.paused = false; assistance.waitingForInfo = false;
+  }
   const result = { page: state.page, scan: state.scan, ...status(tabId) };
   // Polling can continue a previously approved session; it can never create one.
   if (assistance?.tabId === tabId && assistance.enabled && !assistance.paused) void runAutomatic(tabId);
@@ -281,12 +315,19 @@ async function pageState(tabId) {
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (sender.id !== chrome.runtime.id || !message || typeof message !== 'object' || Array.isArray(message)) return;
   const popup = sender.url === chrome.runtime.getURL('popup.html') && !sender.tab;
-  const panel = sender.url === chrome.runtime.getURL('panel.html') && sender.frameId > 0 && Number.isInteger(sender.tab?.id) && SecondHandIowa.isSupportedUrl(sender.tab.url);
+  const panel = sender.url === chrome.runtime.getURL('panel.html') && !sender.tab;
+  const launcher = sender.url === chrome.runtime.getURL('panel.html?surface=launcher') && sender.frameId > 0 && Number.isInteger(sender.tab?.id) && SecondHandIowa.isSupportedUrl(sender.tab.url);
+  if (launcher) {
+    if (message.type !== 'ui:openPanel' || message.confirmed !== true || (message.tabId !== undefined && message.tabId !== sender.tab.id)) return;
+    // Keep this synchronous: Chrome requires the originating trusted user gesture.
+    const opening = chrome.sidePanel.open({ tabId: sender.tab.id });
+    opening.then(() => respond({ ok: true, data: { opened: true } }), () => respond({ ok: false, error: 'Use the SecondHand toolbar icon to open the browser side panel.' }));
+    return true;
+  }
   // Only our extension-origin UI can start a session or request applicant data.
   // Content scripts and page postMessages never have a native bridge entry point.
   if (!popup && !panel) return;
-  const tabId = panel ? sender.tab.id : message.tabId;
-  if (panel && message.tabId !== undefined && message.tabId !== tabId) return;
+  const tabId = message.tabId;
   let work;
   if (message.type === 'ui:status') work = Promise.resolve(status(tabId));
   else if (message.type === 'ui:auto' && message.enabled === false) work = (!assistance || assistance.tabId === tabId || busyTab === tabId) ? stopAutomatic().then(() => status(tabId)) : Promise.reject(new Error('Open the tab running guided autofill to stop it.'));
@@ -297,6 +338,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   else if (message.type === 'ui:fillAndNext' && message.confirmed === true) work = fillTab(tabId, message.token, message.fields, true);
   else if (message.type === 'ui:auto' && message.enabled === true && message.confirmed === true) work = startAutomatic(tabId);
   else if (message.type === 'ui:desktopStatus') work = activePortal(tabId).then(() => nativeRequest('status')).then(data => ({ connected: true, unlocked: Boolean(data?.unlocked) }));
+  else if (message.type === 'ui:focusField' && typeof message.key === 'string' && /^[A-Za-z][A-Za-z0-9]{0,59}$/.test(message.key)) work = activePortal(tabId).then(() => chrome.tabs.sendMessage(tabId, { type: 'secondhand:focusField', key: message.key }, { frameId: 0 }));
   else if (message.type === 'ui:panel' && typeof message.collapsed === 'boolean') work = activePortal(tabId).then(() => inject(tabId)).then(() => chrome.tabs.sendMessage(tabId, { type: 'secondhand:panel', collapsed: message.collapsed }, { frameId: 0 }));
   else return;
   work.then(data => respond({ ok: true, data }), error => respond({ ok: false, error: error.message || 'SecondHand could not complete the request.' }));
@@ -306,9 +348,11 @@ chrome.tabs.onActivated?.addListener(info => {
   if ((assistance && info.tabId !== assistance.tabId) || (busy && info.tabId !== busyTab)) void stopAutomatic('Guided autofill stopped because the active tab changed.');
 });
 chrome.tabs.onRemoved?.addListener(tabId => {
-  scans.delete(tabId); pages.delete(tabId);
+  scans.delete(tabId); pages.delete(tabId); missingProfile.delete(tabId);
   if (assistance?.tabId === tabId || busyTab === tabId) void stopAutomatic('The application tab was closed.');
 });
+// Chrome's native panel persists alongside navigation; it never opens itself.
+chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 chrome.tabs.onUpdated?.addListener((tabId, change) => {
   if (change.status === 'loading') { scans.delete(tabId); pages.delete(tabId); }
   if (change.url && !SecondHandIowa.isSupportedUrl(change.url) && (assistance?.tabId === tabId || busyTab === tabId)) void stopAutomatic('Guided autofill stopped because this tab left Iowa’s application.');

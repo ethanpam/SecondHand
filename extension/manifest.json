@@ -1,20 +1,20 @@
 {
   "manifest_version": 3,
   "name": "SecondHand \u00b7 Iowa SNAP companion",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A local Iowa SNAP assistant: recognize supported pages, fill approved fields, and guide you through Save and Continue.",
-  "minimum_chrome_version": "110",
+  "minimum_chrome_version": "116",
   "permissions": [
     "activeTab",
     "scripting",
-    "nativeMessaging"
+    "nativeMessaging",
+    "sidePanel"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
-    "default_popup": "popup.html",
-    "default_title": "SecondHand \u00b7 Iowa SNAP"
+    "default_title": "Open SecondHand side panel"
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'none'; base-uri 'none'"
@@ -48,5 +48,8 @@
         "https://hhsservices.iowa.gov/*"
       ]
     }
-  ]
+  ],
+  "side_panel": {
+    "default_path": "panel.html"
+  }
 }

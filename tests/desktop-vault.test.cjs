@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { Vault, parseEnvelope } = require('../desktop/vault.cjs');
 const { validateApplication } = require('../shared/schema.cjs');
 
@@ -35,6 +36,38 @@ test('encrypted vault persists confirmed fields and records without plaintext; l
   assert.equal(reopened.getData().profile.firstName, 'SYNTHETIC-PRIVATE-NAME');
   assert.deepEqual(reopened.getData().applications[0], record);
   await reopened.lock();
+});
+
+test('existing encrypted v1 profiles open with new answers unknown and preserve explicit choices on later saves', async t => {
+  const { file } = await fixture(t);
+  const vault = new Vault(file);
+  await vault.create(PASSPHRASE);
+  // Build an authenticated historical payload that predates the added profile
+  // fields. Unlocking it must neither infer answers nor rewrite the user's file.
+  const originalEnvelope = JSON.parse(await fs.readFile(file, 'utf8'));
+  const nonce = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', vault.key, nonce);
+  cipher.setAAD(Buffer.from('SecondHand encrypted vault v1'));
+  const legacy = { version: 1, profile: { firstName: 'Legacy Synthetic', addressLine1: '123 Test Way', state: 'IA' }, applications: [] };
+  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(legacy)), cipher.final()]);
+  const legacyBytes = Buffer.from(JSON.stringify({ ...originalEnvelope, iv: nonce.toString('base64'), tag: cipher.getAuthTag().toString('base64'), ciphertext: ciphertext.toString('base64') }));
+  await fs.writeFile(file, legacyBytes);
+  await vault.lock();
+  await vault.unlock(PASSPHRASE);
+  const profile = vault.getData().profile;
+  assert.equal(profile.firstName, 'Legacy Synthetic');
+  assert.equal(profile.addressLine1, '123 Test Way');
+  for (const field of ['suffix', 'hasHomeAddress', 'mailingSameAsHome', 'isApplicant', 'programSnap', 'programFip', 'programMedicaid', 'helpPayMedicalBills', 'mailingAddressLine1']) assert.equal(profile[field], '', field);
+  assert.deepEqual(await fs.readFile(file), legacyBytes);
+  await vault.update(data => { data.profile.programSnap = 'yes'; data.profile.programFip = 'no'; data.profile.mailingSameAsHome = 'no'; data.profile.mailingAddressLine1 = 'PO Box 123'; });
+  await vault.lock();
+  await vault.unlock(PASSPHRASE);
+  assert.equal(vault.getData().profile.programFip, 'no');
+  assert.equal(vault.getData().profile.programMedicaid, '');
+  assert.equal(vault.getData().profile.mailingAddressLine1, 'PO Box 123');
+  assert.equal(vault.getData().profile.addressLine1, '123 Test Way');
+  assert.equal((await fs.readFile(file, 'utf8')).includes('Legacy Synthetic'), false);
+  await vault.lock();
 });
 
 test('wrong passphrase and authenticated ciphertext tampering do not unlock or change persisted bytes', async t => {

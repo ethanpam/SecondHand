@@ -118,3 +118,17 @@ test('desktop session checks reject a locked vault without granting navigation o
   await assert.rejects(app.request({ type: 'checkAssistedSession', assistanceToken: grant.assistanceToken }), /Unlock/);
   assert.deepEqual(await app.request({ type: 'endAssistedSession', assistanceToken: grant.assistanceToken }), { ended: true });
 });
+
+test('desktop releases explicit No choices but omits unknown answers from approved field scopes', async () => {
+  const app = await desktop();
+  await app.invoke('saveProfile', { programSnap: 'yes', programFip: 'no', hasHomeAddress: 'no', mailingSameAsHome: 'no', mailingAddressLine1: 'PO Box 123' });
+  const fields = ['programSnap', 'programFip', 'programMedicaid', 'hasHomeAddress', 'mailingSameAsHome', 'mailingAddressLine1'];
+  const grant = await app.request({ type: 'startAssistedSession', fields });
+  const { values } = await app.request({ type: 'getFields', fields, assistanceToken: grant.assistanceToken });
+  assert.equal(values.programSnap, 'yes');
+  assert.equal(values.programFip, 'no');
+  assert.equal(values.hasHomeAddress, 'no');
+  assert.equal(values.mailingSameAsHome, 'no');
+  assert.equal(values.mailingAddressLine1, 'PO Box 123');
+  assert.equal(Object.hasOwn(values, 'programMedicaid'), false);
+});
