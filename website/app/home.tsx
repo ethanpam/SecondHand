@@ -103,6 +103,14 @@ export function Home() {
             ))}
           </div>
         </section>
+        <section className="closing-cta" aria-labelledby="closing-heading">
+          <h2 id="closing-heading" className="section-title">Download secondHand <span className="soft">for Windows or Mac.</span></h2>
+          <div className="cta-actions">
+            <a className="pill-button" href="#downloads">Download</a>
+            <a className="pill-button outline" href="#setup">Read the setup guide</a>
+          </div>
+          <p className="mono-line"><span>Free <span aria-hidden="true">·</span> No account <span aria-hidden="true">·</span> Encrypted on your computer</span></p>
+        </section>
       </main>
       <SiteFooter />
     </>

@@ -690,6 +690,40 @@ kbd {
 
 
 
+.closing-cta {
+  padding: 120px 0 32px;
+  border-top: 1px solid var(--border);
+}
+.closing-cta .section-title {
+  max-width: 900px;
+}
+.cta-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 40px;
+}
+.pill-button {
+  display: inline-flex;
+  align-items: center;
+  padding: 14px 28px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 15px;
+  font-weight: 500;
+}
+.pill-button:hover {
+  background: #fff;
+}
+.pill-button.outline {
+  background: transparent;
+  color: var(--foreground);
+  border: 1px solid var(--border-strong);
+}
+.pill-button.outline:hover {
+  border-color: var(--foreground);
+}
 .site-footer {
   margin-top: 64px;
   padding: 64px 0 32px;
