@@ -116,7 +116,7 @@
       return { ok: false, error: 'The fill request was malformed. Nothing was filled.' };
     }
     const result = engine.fillFields(document, message.token, message.assignments, message.values);
-    return { ok: result?.ok === true, filled: strings(result?.filled), skipped: strings(result?.skipped) };
+    return { ok: result?.ok === true, filled: strings(result?.filled), skipped: strings(result?.skipped), rejected: strings(result?.rejected) };
   }
 
   ensurePanel();

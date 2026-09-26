@@ -18,21 +18,66 @@ const SCRIPT_ID = 'site-pantry.example.org';
 const SITE_SCRIPT = { id: SCRIPT_ID, matches: [`${ORIGIN}/*`], js: ['generic-adapter.js', 'generic-content.js'], runAt: 'document_idle', persistAcrossSessions: true };
 
 // Stand-in for generic-adapter.js's pure helpers; the real engine has its own tests.
+const { GENERIC_KEYS } = require('../extension/generic-adapter.js');
+const SENSITIVE = ['ssn', 'birthDate', 'totalMonthlyIncome', 'annualIncome', 'assetsOnHand'];
 const generic = {
+  GENERIC_KEYS,
   requestKeys: keys => [...new Set(keys.flatMap(key => key === 'fullName' ? ['firstName', 'lastName'] : [key]))],
   deriveValues: values => ({ ...values, ...(values.firstName && values.lastName ? { fullName: `${values.firstName} ${values.lastName}` } : {}) })
 };
-const pantryPlan = () => ({
-  token: 'plan-1',
-  matched: [{ id: 'sh-1', key: 'fullName', confidence: 'high' }, { id: 'sh-2', key: 'zip', confidence: 'high' }, { id: 'sh-3', key: 'householdSize', confidence: 'high' }],
-  unmatched: [{ id: 'sh-4', label: 'Preferred pickup day', type: 'select-one', options: ['Monday', 'Friday'], required: true }]
-});
+const PICKUP = { name: 'pickup', label: 'Preferred pickup day', type: 'select-one', options: ['Monday', 'Friday'], required: true };
+const pantryFields = () => [{ name: 'name', key: 'fullName' }, { name: 'zip', key: 'zip' }, { name: 'size', key: 'householdSize' }, { ...PICKUP }];
 
-function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, desktop = {}, plan = pantryPlan(), duringGetFields } = {}) {
+// A model of generic-content.js on the page: like the site engine, every plan lists the
+// unanswered fields on screen under fresh ids, and answering a field can reveal others.
+function sitePage(fields, { next = false } = {}) {
+  let sequence = 0, current = null;
+  const onScreen = field => !field.hidden && (!field.revealedBy || fields.some(other => other.name === field.revealedBy && other.answered));
+  const shown = field => !field.answered && onScreen(field);
+  return {
+    fields,
+    // The page as HTML, with the engine's marks on the fields it filled.
+    html: () => fields.map(field => `<div${onScreen(field) ? '' : ' style="display:none"'}><input name="${field.name}"${field.mark ? ` data-secondhand-filled="${field.mark}"` : ''}></div>`).join('') +
+      (next ? '<button type="button">Next</button>' : ''),
+    plan() {
+      sequence++;
+      const ids = new Map(), matched = [], unmatched = [];
+      fields.filter(shown).forEach((field, index) => {
+        const id = `sh-${sequence}-${index}`;
+        ids.set(id, field);
+        if (field.key) matched.push({ id, key: field.key, confidence: 'high' });
+        else unmatched.push({ id, label: field.label, type: field.type, options: field.options || [], required: field.required === true });
+      });
+      current = { token: `plan-${sequence}`, ids };
+      return { token: current.token, matched, unmatched };
+    },
+    fill({ token, assignments, values }) {
+      if (token !== current?.token) return { ok: false, filled: [], skipped: [] };
+      const filled = [], rejected = [];
+      for (const { id, key, guessed } of assignments) {
+        const field = current.ids.get(id);
+        if (!field || field.answered || field.refuses || !values[key]) continue;
+        // The page flags the answer: the engine clears a text box, but a chosen option stays chosen.
+        if (field.rejects) { rejected.push(id); if (field.choice) field.answered = values[key]; continue; }
+        field.answered = values[key]; field.mark = guessed ? 'guess' : 'rule';
+        filled.push(id);
+      }
+      return { ok: true, filled, skipped: assignments.map(item => item.id).filter(id => !filled.includes(id) && !rejected.includes(id)), rejected };
+    },
+    focus: id => Boolean(current?.ids.has(id)),
+    // The id a field has in the latest plan.
+    idOf: name => [...(current?.ids || [])].find(([, field]) => field.name === name)?.[0],
+    answered: () => fields.filter(field => field.answered).map(field => field.name)
+  };
+}
+
+function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, desktop = {}, fields = pantryFields(), next, duringGetFields } = {}) {
   const tab = { id: 7, active: true, url };
   const log = [], native = [], content = [], injected = [], opened = [];
   const permissions = new Set(granted ? [`${ORIGIN}/*`] : []);
   const registered = new Map(enabled ? [[SCRIPT_ID, structuredClone(SITE_SCRIPT)]] : []);
+  const page = sitePage(fields, { next });
+  const tallies = [];
   const vault = { reachable: true, unlocked: true, getFieldsError: null, trustError: null,
     values: { firstName: 'Synthetic private first', lastName: 'Synthetic private last', zip: '50309' }, ...desktop };
   const events = {};
@@ -43,13 +88,9 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
       get: async () => ({ ...tab }),
       sendMessage: async (tabId, message, options) => {
         content.push({ tabId, frameId: options?.frameId, ...plain(message) });
-        if (message.type === 'secondhand:generic:plan') return structuredClone(plan);
-        if (message.type === 'secondhand:generic:fill') {
-          if (message.token !== plan.token) return { ok: false, filled: [], skipped: [] };
-          const filled = message.assignments.filter(item => message.values[item.key]).map(item => item.id);
-          return { ok: true, filled, skipped: message.assignments.map(item => item.id).filter(id => !filled.includes(id)) };
-        }
-        if (message.type === 'secondhand:generic:focus') return { focused: message.id === 'sh-4' };
+        if (message.type === 'secondhand:generic:plan') return page.plan();
+        if (message.type === 'secondhand:generic:fill') return page.fill(plain(message));
+        if (message.type === 'secondhand:generic:focus') return { focused: page.focus(message.id) };
         throw new Error(`Unexpected content message ${message.type}`);
       },
       onActivated: event('activated'), onRemoved: event('removed'), onUpdated: event('updated')
@@ -60,7 +101,15 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
       request: async () => { log.push('permissions.request'); throw new Error('Only the side panel may request access, inside a click.'); }
     },
     scripting: {
-      executeScript: async details => { log.push('scripting.executeScript'); injected.push(plain(details)); },
+      executeScript: async details => {
+        // A function runs in the page and answers with its result; files are only injected.
+        if (details.func) {
+          tallies.push({ target: plain(details.target), func: details.func });
+          const dom = new JSDOM(`<!doctype html><body>${page.html()}</body>`, { runScripts: 'outside-only' });
+          try { return [{ frameId: 0, result: plain(dom.window.eval(`(${details.func})()`)) }]; } finally { dom.window.close(); }
+        }
+        log.push('scripting.executeScript'); injected.push(plain(details));
+      },
       getRegisteredContentScripts: async ({ ids }) => { log.push('scripting.getRegisteredContentScripts'); return ids.filter(id => registered.has(id)).map(id => structuredClone(registered.get(id))); },
       registerContentScripts: async scripts => {
         log.push('scripting.registerContentScripts');
@@ -110,7 +159,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
     { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console });
   const send = (message, sender) => new Promise(resolve => { if (!listener(message, sender, resolve)) resolve(undefined); });
   return {
-    tab, log, native, content, injected, opened, permissions, registered, events, send,
+    tab, page, vault, log, native, content, injected, tallies, opened, permissions, registered, events, send,
     nativeTypes: () => native.map(call => call.type),
     contentTypes: () => content.map(call => call.type),
     panel: message => send({ tabId: 7, ...message }, { id: 'testextension', url: PANEL_URL }),
@@ -187,42 +236,236 @@ test('page state tells the panel whether a site is on, with metadata only', asyn
   for (const w of [off, on]) { assert.deepEqual(w.native, []); assert.deepEqual(w.content, []); }
 });
 
-test('autofill on an approved site asks for the planned keys once and fills once without navigating', async () => {
+test('autofill on an approved site asks for the planned keys once and fills without navigating', async () => {
   const w = siteWorker({ enabled: true });
   const response = await autofill(w);
   assert.equal(response.ok, true, response.error);
   assert.deepEqual(w.nativeTypes(), ['status', 'getFields']);
   assert.deepEqual(w.native[1].fields, ['firstName', 'lastName', 'zip', 'householdSize']);
   assert.equal(w.native[1].url, `${ORIGIN}/intake`);
-  assert.deepEqual(w.contentTypes(), ['secondhand:generic:plan', 'secondhand:generic:fill']);
+  // The second plan finds nothing new it can fill, so the click ends there.
+  assert.deepEqual(w.contentTypes(), ['secondhand:generic:plan', 'secondhand:generic:fill', 'secondhand:generic:plan']);
   assert.ok(w.content.every(call => call.tabId === 7 && call.frameId === 0));
   const fill = w.content[1];
   assert.equal(fill.token, 'plan-1');
-  assert.deepEqual(fill.assignments, [{ id: 'sh-1', key: 'fullName', guessed: false }, { id: 'sh-2', key: 'zip', guessed: false }]);
+  assert.deepEqual(fill.assignments, [{ id: 'sh-1-0', key: 'fullName', guessed: false }, { id: 'sh-1-1', key: 'zip', guessed: false }]);
   assert.deepEqual(fill.values, { fullName: 'Synthetic private first Synthetic private last', zip: '50309' }, 'only the values being placed reach the page');
-  assert.deepEqual(plain(response.data), { state: 'done', filled: 2, guessed: [], needYou: ['sh-4', 'sh-3'],
+  assert.deepEqual(plain(response.data), { state: 'done', filled: 2, guessed: 0, needYou: [w.page.idOf('pickup'), w.page.idOf('size')],
     message: 'Filled 2 · 2 need you. Check your answers before you submit.', pageKey: 'general' });
+  assert.deepEqual(plain(response.data.needYou), ['sh-2-1', 'sh-2-0'], 'need-you ids come from the latest plan');
   assert.doesNotMatch(JSON.stringify(response), /Synthetic private/);
 
   const state = plain((await w.panel({ type: 'ui:pageState' })).data);
   assert.equal(state.autopilot, false);
   assert.equal(state.result.message, response.data.message);
   w.events.updated(7, { status: 'complete' }); await settle();
-  assert.deepEqual(w.contentTypes(), ['secondhand:generic:plan', 'secondhand:generic:fill'], 'nothing continues or navigates on its own');
+  assert.deepEqual(w.contentTypes(), ['secondhand:generic:plan', 'secondhand:generic:fill', 'secondhand:generic:plan'], 'nothing continues or navigates on its own');
   assert.deepEqual(w.nativeTypes(), ['status', 'getFields']);
   assert.deepEqual(w.injected, []);
   w.events.updated(7, { status: 'loading' });
   assert.equal((await w.panel({ type: 'ui:pageState' })).data.result, null);
 });
 
+test('answers that reveal more questions are filled in the same click from one desktop request', async () => {
+  const fields = [
+    { name: 'name', key: 'fullName' }, { name: 'email', key: 'email' },
+    { name: 'size', key: 'householdSize', refuses: true },               // the page rejects it every time
+    { name: 'confirmEmail', key: 'email', revealedBy: 'email' },          // same key: its value was requested
+    { name: 'phone', key: 'phone', revealedBy: 'name' },                  // its key was not requested
+    { ...PICKUP }
+  ];
+  const w = siteWorker({ enabled: true, fields, desktop: { values: { firstName: 'Synthetic private first', lastName: 'Synthetic private last',
+    email: 'synthetic@example.org', householdSize: '4', mobilePhone: '5155550100' } } });
+  const result = plain((await autofill(w)).data);
+  assert.deepEqual(w.nativeTypes(), ['status', 'getFields'], 'one desktop request for the whole click');
+  assert.deepEqual(w.native[1].fields, ['firstName', 'lastName', 'email', 'householdSize']);
+  assert.deepEqual(w.contentTypes(), ['secondhand:generic:plan', 'secondhand:generic:fill', 'secondhand:generic:plan', 'secondhand:generic:fill',
+    'secondhand:generic:plan', 'secondhand:generic:fill'], 'the third pass fills nothing, so the click stops');
+  assert.deepEqual(w.page.answered(), ['name', 'email', 'confirmEmail']);
+  assert.equal(result.filled, 3);
+  assert.deepEqual(result.needYou, [w.page.idOf('pickup'), w.page.idOf('size'), w.page.idOf('phone')]);
+  assert.ok(result.needYou.every(id => id.startsWith('sh-3-')), 'need-you ids come from the latest plan');
+  assert.match(result.message, /^Filled 3 · 3 need you\./);
+  assert.doesNotMatch(JSON.stringify(w.content), /5155550100/);
+});
+
+test('answers the page refuses are listed as need-you, not filled, and not tried again in the same click', async () => {
+  const fields = [{ name: 'name', key: 'fullName' }, { name: 'zip', key: 'zip', rejects: true }, { name: 'vet', key: 'householdVeteran', rejects: true, choice: true }, { ...PICKUP }];
+  const w = siteWorker({ enabled: true, fields, desktop: { values: { firstName: 'Synthetic private first', lastName: 'Synthetic private last', zip: '5030', householdVeteran: 'no' } } });
+  const result = plain((await autofill(w)).data);
+  const fills = w.content.filter(call => call.type === 'secondhand:generic:fill');
+  assert.equal(fills.length, 1, 'refused answers are not retried');
+  assert.equal(result.filled, 1);
+  // The cleared ZIP box is back in the latest plan; the chosen veteran option keeps its first id.
+  assert.deepEqual(result.needYou, [w.page.idOf('pickup'), w.page.idOf('zip'), 'sh-1-2']);
+  assert.equal(result.message, 'Filled 1 · 3 need you. Check your answers before you submit.');
+
+  const alone = siteWorker({ enabled: true, fields: [{ name: 'zip', key: 'zip', rejects: true }], desktop: { values: { zip: '5030' } } });
+  const refused = plain((await autofill(alone)).data);
+  assert.equal(refused.filled, 0);
+  assert.deepEqual(refused.needYou, ['sh-1-0']);
+});
+
+test('one click fills at most four passes of revealed questions', async () => {
+  const fields = Array.from({ length: 6 }, (_, i) => ({ name: `email${i}`, key: 'email', ...(i ? { revealedBy: `email${i - 1}` } : {}) }));
+  const w = siteWorker({ enabled: true, fields, desktop: { values: { email: 'synthetic@example.org' } } });
+  const result = plain((await autofill(w)).data);
+  assert.equal(w.contentTypes().filter(type => type === 'secondhand:generic:fill').length, 4);
+  assert.deepEqual(w.page.answered(), ['email0', 'email1', 'email2', 'email3']);
+  assert.equal(result.filled, 4);
+  assert.deepEqual(result.needYou, [w.page.idOf('email4')]);
+  assert.deepEqual(w.nativeTypes(), ['status', 'getFields']);
+});
+
+test('a second click on the next page of a multi-page form plans that page again', async () => {
+  const fields = [{ name: 'name', key: 'fullName' }, { name: 'zip', key: 'zip', hidden: true }];
+  const w = siteWorker({ enabled: true, fields });
+  assert.equal((await autofill(w)).data.filled, 1);
+  fields[0].hidden = true; fields[1].hidden = false;          // the form shows its second page at the same URL
+  const second = plain((await autofill(w)).data);
+  assert.deepEqual(w.page.answered(), ['name', 'zip']);
+  assert.deepEqual(w.native.filter(call => call.type === 'getFields').map(call => call.fields), [['firstName', 'lastName'], ['zip']]);
+  assert.equal(second.state, 'done');
+  assert.equal(second.filled, 1, 'only this page’s answers count');
+  assert.equal(second.message, 'Filled 1. Check your answers before you submit.');
+});
+
+test('another click on the same page reports the running total, not what that click added', async () => {
+  const w = siteWorker({ enabled: true });
+  assert.equal((await autofill(w)).data.message, 'Filled 2 · 2 need you. Check your answers before you submit.');
+  const again = plain((await autofill(w)).data);
+  assert.equal(again.filled, 2);
+  assert.equal(again.message, 'Filled 2 · 2 need you. Check your answers before you submit.');
+  assert.deepEqual(w.tallies.map(call => call.target), [{ tabId: 7, frameIds: [0] }, { tabId: 7, frameIds: [0] }]);
+  assert.deepEqual(w.injected, [], 'no files are injected');
+});
+
+test('a page where nothing matches the saved profile says so instead of Filled 0', async () => {
+  const unknown = siteWorker({ enabled: true, fields: [{ ...PICKUP }, { name: 'shoe', label: 'Shoe size', type: 'text' }] });
+  const result = plain((await autofill(unknown)).data);
+  assert.equal(result.filled, 0);
+  assert.equal(result.message, 'Nothing here matches your saved profile. 2 need you.');
+  const unsaved = siteWorker({ enabled: true, desktop: { values: {} } });
+  const empty = plain((await autofill(unsaved)).data);
+  assert.deepEqual(unsaved.nativeTypes(), ['status', 'getFields']);
+  assert.equal(empty.message, 'Nothing here matches your saved profile. 4 need you.');
+});
+
+test('a page with nothing to fill points to Next when the form has one', async () => {
+  const paged = siteWorker({ enabled: true, fields: [], next: true });
+  assert.equal(plain((await autofill(paged)).data).message, 'Nothing to fill here. Click Next, then Autofill again.');
+  const single = siteWorker({ enabled: true, fields: [] });
+  assert.equal(plain((await autofill(single)).data).message, 'Nothing to fill here.');
+  for (const w of [paged, single]) assert.deepEqual(w.native, []);
+});
+
+test('the page count takes each on-screen question SecondHand filled once and spots a Next button', async t => {
+  const w = siteWorker({ enabled: true, fields: [] });
+  await autofill(w);
+  const [{ func }] = w.tallies;
+  const run = html => {
+    const dom = new JSDOM(`<!doctype html><body>${html}</body>`, { runScripts: 'outside-only' });
+    t.after(() => dom.window.close());
+    return plain(dom.window.eval(`(${func})()`));
+  };
+  assert.deepEqual(run(`<form><input name="first" data-secondhand-filled="rule" value="Synthetic private">
+    <label><input type="radio" name="vet" value="yes" data-secondhand-filled="rule">Yes</label>
+    <label><input type="radio" name="vet" value="no" data-secondhand-filled="rule">No</label>
+    <input name="email" data-secondhand-filled="guess"><input name="untouched"></form>
+    <section style="display:none"><input name="earlier" data-secondhand-filled="rule"><button type="button">Next</button></section>
+    <div hidden><input name="tucked" data-secondhand-filled="guess"></div>
+    <button type="submit">Submit</button>`), { rule: 2, guess: 1, next: false });
+  assert.equal(run('<button type="button">Next</button>').next, true);
+  assert.equal(run('<input type="submit" value="Next page">').next, true);
+  assert.equal(run('<div role="button"><span>Next</span></div>').next, true);
+  assert.equal(run('<button type="button" style="visibility:hidden">Next</button>').next, false);
+  assert.doesNotMatch(JSON.stringify(run('<input name="first" data-secondhand-filled="rule" value="Synthetic private">')), /Synthetic/);
+});
+
+// Questions the rules leave open, for Chrome's on-device AI in the widget.
+const openQuestions = () => [{ name: 'name', key: 'fullName' }, { ...PICKUP },
+  { name: 'reach', label: 'Where can we email you?', type: 'email' }, { name: 'call', label: 'Best number to reach you', type: 'tel' }];
+const plan = async w => plain((await w.launcher({ type: 'ui:plan', confirmed: true })).data);
+
+test('the widget gets the open questions and the keys the AI may use, never sensitive ones or values', async () => {
+  const w = siteWorker({ enabled: true, fields: openQuestions() });
+  assert.equal(await w.launcher({ type: 'ui:plan' }), undefined, 'only a confirmed click plans');
+  const planned = await plan(w);
+  assert.deepEqual(planned.unmatched, [
+    { id: 'sh-1-1', label: 'Preferred pickup day', type: 'select-one', options: ['Monday', 'Friday'], required: true },
+    { id: 'sh-1-2', label: 'Where can we email you?', type: 'email', options: [], required: false },
+    { id: 'sh-1-3', label: 'Best number to reach you', type: 'tel', options: [], required: false }]);
+  assert.deepEqual(planned.allowedKeys, GENERIC_KEYS.filter(key => !SENSITIVE.includes(key)));
+  for (const key of SENSITIVE) assert.equal(planned.allowedKeys.includes(key), false, key);
+  assert.deepEqual(Object.keys(planned), ['unmatched', 'allowedKeys']);
+  assert.deepEqual(w.native, [], 'planning never reaches the vault');
+  assert.deepEqual(w.contentTypes(), ['secondhand:generic:plan']);
+
+  const off = siteWorker({ fields: openQuestions() });
+  assert.equal((await off.launcher({ type: 'ui:plan', confirmed: true })).ok, false);
+  assert.deepEqual(off.content, []);
+});
+
+test('AI guesses join the one desktop request and are filled with the guessed mark', async () => {
+  const w = siteWorker({ enabled: true, fields: openQuestions(), desktop: { values: { firstName: 'Synthetic private first', lastName: 'Synthetic private last',
+    email: 'synthetic@example.org', phone: '5155550100' } } });
+  const { unmatched } = await plan(w);
+  const [, reach, call] = unmatched.map(field => field.id);
+  const response = await w.launcher({ type: 'ui:autofill', confirmed: true, guesses: { [reach]: 'email', [call]: 'phone' } });
+  assert.equal(response.ok, true, response.error);
+  assert.deepEqual(w.nativeTypes(), ['status', 'getFields']);
+  assert.deepEqual(w.native[1].fields, ['firstName', 'lastName', 'email', 'phone']);
+  // The fill uses the plan the AI saw, then plans again for anything revealed.
+  assert.deepEqual(w.contentTypes(), ['secondhand:generic:plan', 'secondhand:generic:fill', 'secondhand:generic:plan']);
+  assert.deepEqual(w.content[1].assignments, [{ id: 'sh-1-0', key: 'fullName', guessed: false }, { id: reach, key: 'email', guessed: true }, { id: call, key: 'phone', guessed: true }]);
+  assert.deepEqual(w.page.fields.map(field => field.mark), ['rule', undefined, 'guess', 'guess']);
+  const result = plain(response.data);
+  assert.equal(result.filled, 3);
+  assert.equal(result.guessed, 2);
+  assert.equal(result.message, 'Filled 3 · 2 guessed · 1 need you. Check your answers before you submit.');
+  assert.doesNotMatch(JSON.stringify(result), /Synthetic private|5155550100/);
+});
+
+test('guesses outside the plan’s open questions or for sensitive keys are refused before the vault is asked', async () => {
+  const bad = [ids => ({ [ids.name]: 'email' }), () => ({ 'sh-9-9': 'email' }), ids => ({ [ids.reach]: 'notAKey' }), () => [], () => 'email',
+    ...SENSITIVE.map(key => ids => ({ [ids.reach]: key }))];
+  for (const guesses of bad) {
+    const w = siteWorker({ enabled: true, fields: openQuestions() });
+    await plan(w);
+    const ids = { name: w.page.idOf('name'), reach: w.page.idOf('reach') };
+    const result = plain((await w.launcher({ type: 'ui:autofill', confirmed: true, guesses: guesses(ids) })).data);
+    assert.equal(result.state, 'error', JSON.stringify(guesses(ids)));
+    assert.match(result.message, /couldn’t use the on-device AI/);
+    assert.deepEqual(w.native, [], JSON.stringify(guesses(ids)));
+    assert.equal(w.contentTypes().includes('secondhand:generic:fill'), false);
+  }
+});
+
+test('guesses without a current plan for this page are refused', async () => {
+  const unplanned = siteWorker({ enabled: true, fields: openQuestions() });
+  const refused = plain((await unplanned.launcher({ type: 'ui:autofill', confirmed: true, guesses: { 'sh-1-2': 'email' } })).data);
+  assert.match(refused.message, /page changed/);
+  const moved = siteWorker({ enabled: true, fields: openQuestions() });
+  await plan(moved);
+  moved.events.updated(7, { status: 'loading' });              // a new page reuses the same ids
+  assert.match(plain((await moved.launcher({ type: 'ui:autofill', confirmed: true, guesses: { 'sh-1-2': 'email' } })).data).message, /page changed/);
+  const used = siteWorker({ enabled: true, fields: openQuestions() });
+  await plan(used);
+  await autofill(used);                                         // a fill without guesses plans afresh
+  assert.match(plain((await used.launcher({ type: 'ui:autofill', confirmed: true, guesses: { 'sh-1-2': 'email' } })).data).message, /page changed/);
+  for (const w of [unplanned, moved]) assert.deepEqual(w.native, []);
+  assert.equal(used.nativeTypes().filter(type => type === 'getFields').length, 1);
+});
+
 test('a form with nothing SecondHand recognizes never contacts the desktop', async () => {
-  const w = siteWorker({ enabled: true, plan: { token: 'plan-1', matched: [], unmatched: pantryPlan().unmatched } });
+  const w = siteWorker({ enabled: true, fields: [{ ...PICKUP }] });
   const result = plain((await autofill(w)).data);
   assert.deepEqual(w.native, []);
   assert.deepEqual(w.contentTypes(), ['secondhand:generic:plan']);
   assert.equal(result.state, 'done');
   assert.equal(result.filled, 0);
-  assert.deepEqual(result.needYou, ['sh-4']);
+  assert.deepEqual(result.needYou, ['sh-1-0']);
+  assert.equal(result.message, 'Nothing here matches your saved profile. 1 need you.');
 });
 
 test('sites that are not turned on never reach the vault or the page', async () => {
@@ -235,7 +478,7 @@ test('sites that are not turned on never reach the vault or the page', async () 
       const response = await w.launcher({ type, confirmed: true });
       assert.equal(response.ok, false, type);
     }
-    assert.equal((await w.launcher({ type: 'ui:focusField', key: 'sh-4', confirmed: true })).ok, false);
+    assert.equal((await w.launcher({ type: 'ui:focusField', key: 'sh-1-3', confirmed: true })).ok, false);
     assert.deepEqual(w.native, [], JSON.stringify(setup));
     assert.deepEqual(w.content, [], JSON.stringify(setup));
   }
@@ -278,9 +521,11 @@ test('locked, offline, cancelled, and changed pages fill nothing on approved sit
 
 test('need-you focus on approved sites goes to the site engine by field id', async () => {
   const w = siteWorker({ enabled: true });
-  assert.deepEqual(plain((await w.launcher({ type: 'ui:focusField', key: 'sh-4', confirmed: true })).data), { focused: true });
+  const [pickup] = (await autofill(w)).data.needYou;
+  assert.deepEqual(plain((await w.launcher({ type: 'ui:focusField', key: pickup, confirmed: true })).data), { focused: true });
   assert.deepEqual(plain((await w.panel({ type: 'ui:focusField', key: 'sh-9' })).data), { focused: false });
-  assert.deepEqual(w.content.map(({ type, id }) => ({ type, id })), [{ type: 'secondhand:generic:focus', id: 'sh-4' }, { type: 'secondhand:generic:focus', id: 'sh-9' }]);
+  assert.deepEqual(w.content.filter(call => call.type === 'secondhand:generic:focus').map(({ type, id }) => ({ type, id })),
+    [{ type: 'secondhand:generic:focus', id: pickup }, { type: 'secondhand:generic:focus', id: 'sh-9' }]);
   assert.equal(await w.launcher({ type: 'ui:focusField', key: 'input[type=password]', confirmed: true }), undefined);
 });
 
@@ -321,7 +566,7 @@ function siteContent(t, { url = SITE_URL, engine = true } = {}) {
       fillFields: (doc, token, assignments, values) => {
         calls.push({ token, assignments: plain(assignments), values: plain(values) });
         doc.getElementById('name').value = values.fullName;
-        return { ok: true, filled: ['sh-1'], skipped: [], values };
+        return { ok: true, filled: ['sh-1'], skipped: [], rejected: ['sh-2'], values };
       },
       focusField: (doc, id) => { calls.push(`focus:${id}`); if (id !== 'sh-2') return false; doc.getElementById('day').focus(); return true; }
     };
@@ -341,6 +586,8 @@ test('on approved sites the widget is a closed, full-size extension iframe in th
   assert.equal(page.frames[0].src, extensionURL('panel.html?surface=launcher'));
   assert.equal(page.frames[0].referrerPolicy, 'no-referrer');
   assert.equal(page.frames[0].getAttribute('sandbox'), 'allow-scripts allow-same-origin');
+  // Chrome's on-device AI (Prompt API) is blocked in a cross-origin iframe unless the embedder delegates it.
+  assert.equal(page.frames[0].getAttribute('allow'), 'language-model');
   assert.equal(host.getAttribute('data-secondhand-size'), 'full');
   assert.equal(host.style.height, '70px');
   assert.equal(host.style.position, 'fixed');
@@ -363,7 +610,7 @@ test('site plans and fills answer with field metadata only, never values or elem
   assert.deepEqual(plain(plan), { token: 'plan-1', matched: [{ id: 'sh-1', key: 'fullName', confidence: 'high' }],
     unmatched: [{ id: 'sh-2', label: 'Pickup day', type: 'select-one', options: ['Monday'], required: true }] });
   const filled = page.request({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [{ id: 'sh-1', key: 'fullName', guessed: false }], values: { fullName: 'Synthetic private name' } });
-  assert.deepEqual(plain(filled), { ok: true, filled: ['sh-1'], skipped: [] });
+  assert.deepEqual(plain(filled), { ok: true, filled: ['sh-1'], skipped: [], rejected: ['sh-2'] }, 'answers the page refused come back');
   assert.deepEqual(page.calls[1], { token: 'plan-1', assignments: [{ id: 'sh-1', key: 'fullName', guessed: false }], values: { fullName: 'Synthetic private name' } });
   assert.equal(page.window.document.getElementById('name').value, 'Synthetic private name');
   assert.doesNotMatch(JSON.stringify([plan, filled]), /Synthetic private/);
