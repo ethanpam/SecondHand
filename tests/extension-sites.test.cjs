@@ -15,7 +15,7 @@ const PANEL_URL = 'chrome-extension://testextension/panel.html';
 const SITE_URL = 'https://pantry.example.org/intake?step=1';
 const ORIGIN = 'https://pantry.example.org';
 const SCRIPT_ID = 'site-pantry.example.org';
-const SITE_SCRIPT = { id: SCRIPT_ID, matches: [`${ORIGIN}/*`], js: ['generic-adapter.js', 'generic-content.js'], runAt: 'document_idle', persistAcrossSessions: true };
+const SITE_SCRIPT = { id: SCRIPT_ID, matches: [`${ORIGIN}/*`], js: ['generic-adapter.js', 'generic-content.js'], allFrames: true, runAt: 'document_idle', persistAcrossSessions: true };
 
 // Stand-in for generic-adapter.js's pure helpers; the real engine has its own tests.
 const generic = {
@@ -28,11 +28,15 @@ const pantryPlan = () => ({
   unmatched: [{ id: 'sh-4', label: 'Preferred pickup day', type: 'select-one', options: ['Monday', 'Friday'], required: true }]
 });
 
-function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, desktop = {}, plan = pantryPlan(), duringGetFields } = {}) {
+function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, desktop = {}, plan = pantryPlan(), frames = [], duringGetFields, keepAccess = false, discoveryError = false } = {}) {
   const tab = { id: 7, active: true, url };
   const log = [], native = [], content = [], injected = [], opened = [];
   const permissions = new Set(granted ? [`${ORIGIN}/*`] : []);
   const registered = new Map(enabled ? [[SCRIPT_ID, structuredClone(SITE_SCRIPT)]] : []);
+  for (const frame of frames) {
+    if (frame.granted || frame.enabled) permissions.add(`${frame.origin}/*`);
+    if (frame.enabled) { const id = `site-${new URL(frame.origin).hostname}`; registered.set(id, { ...SITE_SCRIPT, id, matches: [`${frame.origin}/*`] }); }
+  }
   const vault = { reachable: true, unlocked: true, getFieldsError: null, trustError: null,
     values: { firstName: 'Synthetic private first', lastName: 'Synthetic private last', zip: '50309' }, ...desktop };
   const events = {};
@@ -43,9 +47,17 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
       get: async () => ({ ...tab }),
       sendMessage: async (tabId, message, options) => {
         content.push({ tabId, frameId: options?.frameId, ...plain(message) });
-        if (message.type === 'secondhand:generic:plan') return structuredClone(plan);
+        if (message.type === 'secondhand:generic:frames') return { origins: frames.map(frame => frame.origin) };
+        const frame = frames.find(frame => frame.frameId === options?.frameId);
+        const framePlan = frame?.plan || plan;
+        if (message.type === 'secondhand:generic:plan') {
+          if (frame?.planError) throw new Error('private frame failure');
+          return structuredClone(framePlan);
+        }
         if (message.type === 'secondhand:generic:fill') {
-          if (message.token !== plan.token) return { ok: false, filled: [], skipped: [] };
+          if (frame?.fillError) throw new Error('private fill failure');
+          if (frame?.fillResult) return structuredClone(frame.fillResult);
+          if (message.token !== framePlan.token) return { ok: false, filled: [], skipped: [] };
           const filled = message.assignments.filter(item => message.values[item.key]).map(item => item.id);
           return { ok: true, filled, skipped: message.assignments.map(item => item.id).filter(id => !filled.includes(id)) };
         }
@@ -56,11 +68,11 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
     },
     permissions: {
       contains: async ({ origins }) => { log.push('permissions.contains'); return origins.every(origin => permissions.has(origin)); },
-      remove: async ({ origins }) => { log.push('permissions.remove'); origins.forEach(origin => permissions.delete(origin)); return true; },
+      remove: async ({ origins }) => { log.push('permissions.remove'); if (!keepAccess) origins.forEach(origin => permissions.delete(origin)); return true; },
       request: async () => { log.push('permissions.request'); throw new Error('Only the side panel may request access, inside a click.'); }
     },
     scripting: {
-      executeScript: async details => { log.push('scripting.executeScript'); injected.push(plain(details)); },
+      executeScript: async details => { log.push('scripting.executeScript'); injected.push(plain(details)); if (details.func && discoveryError) throw new Error('Cannot access an unapproved frame'); return details.func ? [{ frameId: 0, result: ORIGIN }, ...frames.map(frame => ({ frameId: frame.frameId, result: frame.origin }))] : []; },
       getRegisteredContentScripts: async ({ ids }) => { log.push('scripting.getRegisteredContentScripts'); return ids.filter(id => registered.has(id)).map(id => structuredClone(registered.get(id))); },
       registerContentScripts: async scripts => {
         log.push('scripting.registerContentScripts');
@@ -93,7 +105,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
               const fail = error => onMessage({ id: request.id, ok: false, error });
               if (request.type === 'status') return reply({ unlocked: vault.unlocked, applicationCount: 0 });
               if (request.type === 'showApp') return reply({ shown: true });
-              if (request.type === 'trustSite') return vault.trustError ? fail(vault.trustError) : reply({ trusted: true, origin: new URL(request.url).origin });
+              if (request.type === 'trustSite') return (vault.trustError || request.url === vault.declineOrigin) ? fail(vault.trustError || 'Declined') : reply({ trusted: true, origin: new URL(request.url).origin });
               if (request.type === 'getFields') {
                 duringGetFields?.(tab);
                 if (vault.getFieldsError) return fail(vault.getFieldsError);
@@ -180,11 +192,13 @@ test('a site is only turned on by a confirmed side-panel request with Chrome acc
 test('page state tells the panel whether a site is on, with metadata only', async () => {
   const off = siteWorker({ granted: true });
   assert.deepEqual(plain((await off.panel({ type: 'ui:pageState' })).data),
-    { page: { kind: 'general', pageKey: 'general' }, result: null, autopilot: false, site: { origin: ORIGIN, enabled: false } });
+    { page: { kind: 'general', pageKey: 'general' }, result: null, autopilot: false, site: { origin: ORIGIN, enabled: false, frames: [] } });
   const on = siteWorker({ enabled: true });
   assert.deepEqual(plain((await on.panel({ type: 'ui:pageState' })).data),
-    { page: { kind: 'general', pageKey: 'general' }, result: null, autopilot: false, site: { origin: ORIGIN, enabled: true } });
-  for (const w of [off, on]) { assert.deepEqual(w.native, []); assert.deepEqual(w.content, []); }
+    { page: { kind: 'general', pageKey: 'general' }, result: null, autopilot: false, site: { origin: ORIGIN, enabled: true, frames: [] } });
+  for (const w of [off, on]) assert.deepEqual(w.native, []);
+  assert.deepEqual(off.content, []);
+  assert.deepEqual(on.contentTypes(), ['secondhand:generic:frames']);
 });
 
 test('autofill on an approved site asks for the planned keys once and fills once without navigating', async () => {
@@ -194,13 +208,13 @@ test('autofill on an approved site asks for the planned keys once and fills once
   assert.deepEqual(w.nativeTypes(), ['status', 'getFields']);
   assert.deepEqual(w.native[1].fields, ['firstName', 'lastName', 'zip', 'householdSize']);
   assert.equal(w.native[1].url, `${ORIGIN}/intake`);
-  assert.deepEqual(w.contentTypes(), ['secondhand:generic:plan', 'secondhand:generic:fill']);
+  assert.deepEqual(w.contentTypes(), ['secondhand:generic:frames', 'secondhand:generic:plan', 'secondhand:generic:fill']);
   assert.ok(w.content.every(call => call.tabId === 7 && call.frameId === 0));
-  const fill = w.content[1];
+  const fill = w.content.find(call => call.type === 'secondhand:generic:fill');
   assert.equal(fill.token, 'plan-1');
   assert.deepEqual(fill.assignments, [{ id: 'sh-1', key: 'fullName', guessed: false }, { id: 'sh-2', key: 'zip', guessed: false }]);
   assert.deepEqual(fill.values, { fullName: 'Synthetic private first Synthetic private last', zip: '50309' }, 'only the values being placed reach the page');
-  assert.deepEqual(plain(response.data), { state: 'done', filled: 2, guessed: [], needYou: ['sh-4', 'sh-3'],
+  assert.deepEqual(plain(response.data), { state: 'done', filled: 2, guessed: [], needYou: ['f0:sh-4', 'f0:sh-3'],
     message: 'Filled 2 · 2 need you. Check your answers before you submit.', pageKey: 'general' });
   assert.doesNotMatch(JSON.stringify(response), /Synthetic private/);
 
@@ -208,9 +222,9 @@ test('autofill on an approved site asks for the planned keys once and fills once
   assert.equal(state.autopilot, false);
   assert.equal(state.result.message, response.data.message);
   w.events.updated(7, { status: 'complete' }); await settle();
-  assert.deepEqual(w.contentTypes(), ['secondhand:generic:plan', 'secondhand:generic:fill'], 'nothing continues or navigates on its own');
+  assert.deepEqual(w.contentTypes(), ['secondhand:generic:frames', 'secondhand:generic:plan', 'secondhand:generic:fill', 'secondhand:generic:frames'], 'nothing continues or navigates on its own');
   assert.deepEqual(w.nativeTypes(), ['status', 'getFields']);
-  assert.deepEqual(w.injected, []);
+  assert.deepEqual(w.injected, [{ target: { tabId: 7, allFrames: true } }]);
   w.events.updated(7, { status: 'loading' });
   assert.equal((await w.panel({ type: 'ui:pageState' })).data.result, null);
 });
@@ -219,10 +233,10 @@ test('a form with nothing SecondHand recognizes never contacts the desktop', asy
   const w = siteWorker({ enabled: true, plan: { token: 'plan-1', matched: [], unmatched: pantryPlan().unmatched } });
   const result = plain((await autofill(w)).data);
   assert.deepEqual(w.native, []);
-  assert.deepEqual(w.contentTypes(), ['secondhand:generic:plan']);
+  assert.deepEqual(w.contentTypes(), ['secondhand:generic:frames', 'secondhand:generic:plan']);
   assert.equal(result.state, 'done');
   assert.equal(result.filled, 0);
-  assert.deepEqual(result.needYou, ['sh-4']);
+  assert.deepEqual(result.needYou, ['f0:sh-4']);
 });
 
 test('sites that are not turned on never reach the vault or the page', async () => {
@@ -235,7 +249,7 @@ test('sites that are not turned on never reach the vault or the page', async () 
       const response = await w.launcher({ type, confirmed: true });
       assert.equal(response.ok, false, type);
     }
-    assert.equal((await w.launcher({ type: 'ui:focusField', key: 'sh-4', confirmed: true })).ok, false);
+    assert.equal((await w.launcher({ type: 'ui:focusField', key: 'f0:sh-4', confirmed: true })).ok, false);
     assert.deepEqual(w.native, [], JSON.stringify(setup));
     assert.deepEqual(w.content, [], JSON.stringify(setup));
   }
@@ -278,8 +292,8 @@ test('locked, offline, cancelled, and changed pages fill nothing on approved sit
 
 test('need-you focus on approved sites goes to the site engine by field id', async () => {
   const w = siteWorker({ enabled: true });
-  assert.deepEqual(plain((await w.launcher({ type: 'ui:focusField', key: 'sh-4', confirmed: true })).data), { focused: true });
-  assert.deepEqual(plain((await w.panel({ type: 'ui:focusField', key: 'sh-9' })).data), { focused: false });
+  assert.deepEqual(plain((await w.launcher({ type: 'ui:focusField', key: 'f0:sh-4', confirmed: true })).data), { focused: true });
+  assert.deepEqual(plain((await w.panel({ type: 'ui:focusField', key: 'f0:sh-9' })).data), { focused: false });
   assert.deepEqual(w.content.map(({ type, id }) => ({ type, id })), [{ type: 'secondhand:generic:focus', id: 'sh-4' }, { type: 'secondhand:generic:focus', id: 'sh-9' }]);
   assert.equal(await w.launcher({ type: 'ui:focusField', key: 'input[type=password]', confirmed: true }), undefined);
 });
@@ -363,7 +377,7 @@ test('site plans and fills answer with field metadata only, never values or elem
   assert.deepEqual(plain(plan), { token: 'plan-1', matched: [{ id: 'sh-1', key: 'fullName', confidence: 'high' }],
     unmatched: [{ id: 'sh-2', label: 'Pickup day', type: 'select-one', options: ['Monday'], required: true }] });
   const filled = page.request({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [{ id: 'sh-1', key: 'fullName', guessed: false }], values: { fullName: 'Synthetic private name' } });
-  assert.deepEqual(plain(filled), { ok: true, filled: ['sh-1'], skipped: [] });
+  assert.deepEqual(plain(filled), { ok: true, filled: ['sh-1'], skipped: [], rejected: [] });
   assert.deepEqual(page.calls[1], { token: 'plan-1', assignments: [{ id: 'sh-1', key: 'fullName', guessed: false }], values: { fullName: 'Synthetic private name' } });
   assert.equal(page.window.document.getElementById('name').value, 'Synthetic private name');
   assert.doesNotMatch(JSON.stringify([plan, filled]), /Synthetic private/);
@@ -403,4 +417,138 @@ test('the widget is hidden while the site engine checks the page and restored af
   assert.equal(failed.ok, false);
   assert.match(failed.error, /could not be checked safely/);
   assert.equal(host.style.visibility, '');
+});
+
+const FRAME_ORIGIN = 'https://form.jotform.com';
+const secondFrame = (extra = {}) => ({ origin: FRAME_ORIGIN, frameId: 4, ...extra });
+test('pageState discovers pending frames through the approved top frame only', async () => {
+  const w = siteWorker({ enabled: true, frames: [secondFrame()] });
+  assert.deepEqual(plain((await w.panel({ type: 'ui:pageState' })).data.site), {
+    origin: ORIGIN, enabled: true, frames: [{ origin: FRAME_ORIGIN, enabled: false }]
+  });
+  assert.deepEqual(w.content, [{ tabId: 7, frameId: 0, type: 'secondhand:generic:frames' }]);
+  assert.deepEqual(w.injected, []);
+});
+test('enableFrames re-derives origins, trusts each, registers allFrames and injects', async () => {
+  const other = 'https://forms.example.org';
+  const w = siteWorker({ enabled: true, frames: [secondFrame({ granted: true }), { origin: other, frameId: 5, granted: true }] });
+  const result = await w.panel({ type: 'ui:enableFrames', confirmed: true, origins: ['https://evil.example'] });
+  assert.equal(result?.ok, true);
+  assert.deepEqual(w.native.map(({ type, url }) => ({ type, url })), [{ type: 'trustSite', url: FRAME_ORIGIN }, { type: 'trustSite', url: other }]);
+  for (const origin of [FRAME_ORIGIN, other]) assert.equal(w.registered.get(`site-${new URL(origin).hostname}`).allFrames, true);
+  assert.ok(w.injected.some(call => call.target.allFrames && call.files.includes('generic-content.js')));
+});
+test('declining a frame trust returns all pending permissions and registers nothing', async () => {
+  const other = 'https://forms.example.org';
+  const w = siteWorker({ enabled: true, frames: [secondFrame({ granted: true }), { origin: other, frameId: 5, granted: true }], desktop: { declineOrigin: other } });
+  const result = await w.panel({ type: 'ui:enableFrames', confirmed: true });
+  assert.equal(result?.ok, false);
+  assert.deepEqual([...w.registered.keys()], [SCRIPT_ID]);
+  assert.deepEqual([...w.permissions], [`${ORIGIN}/*`]);
+  assert.deepEqual(w.injected, []);
+});
+test('site fill requests the union once and uses each frame token', async () => {
+  const w = siteWorker({ enabled: true, frames: [secondFrame({ enabled: true, plan: { token: 'child-token', matched: [{ id: 'sh-1', key: 'zip' }], unmatched: [] } })] });
+  const result = (await autofill(w)).data;
+  assert.equal(result.filled, 3);
+  assert.deepEqual(plain(result.needYou), ['f0:sh-4', 'f0:sh-3']);
+  assert.equal(w.native.filter(call => call.type === 'getFields').length, 1);
+  assert.deepEqual(w.content.filter(call => call.type === 'secondhand:generic:fill').map(call => [call.frameId, call.token]), [[0, 'plan-1'], [4, 'child-token']]);
+});
+for (const failure of [{ planError: true }, { fillError: true }, { plan: { token: 'bad', matched: [null], unmatched: [] } }, { fillResult: { ok: true, filled: 'bad' } }]) {
+  test(`frame failure is a fixed error: ${JSON.stringify(failure)}`, async () => {
+    const w = siteWorker({ enabled: true, frames: [secondFrame({ enabled: true, ...failure })] });
+    const result = (await autofill(w)).data;
+    assert.equal(result.state, 'error');
+    assert.equal(result.message, 'Part of this form couldn’t be filled safely. Fill it yourself.');
+  });
+}
+test('rejected ids are need-you even when also reported filled', async () => {
+  const w = siteWorker({ enabled: true, frames: [secondFrame({ enabled: true, fillResult: { ok: true, filled: ['sh-1', 'sh-2'], rejected: ['sh-2'] } })] });
+  const result = (await autofill(w)).data;
+  assert.equal(result.filled, 3);
+  assert.ok(result.needYou.includes('f4:sh-2'));
+});
+test('pending embedded forms explain the second approval step', async () => {
+  const w = siteWorker({ enabled: true, plan: { token: 'empty', matched: [], unmatched: [] }, frames: [secondFrame()] });
+  const result = (await autofill(w)).data;
+  assert.equal(result.message, 'This form is inside form.jotform.com. Click “Also turn on the embedded form” in the SecondHand side panel.');
+  assert.equal(w.content.some(call => call.frameId === 4), false);
+  assert.deepEqual(w.native, []);
+});
+test('prefixed focus routes to an enabled frame and rejects malformed ids', async () => {
+  const w = siteWorker({ enabled: true, frames: [secondFrame({ enabled: true })] });
+  assert.equal((await w.panel({ type: 'ui:focusField', key: 'f4:sh-4' }))?.data.focused, true);
+  assert.deepEqual(w.content.at(-1), { tabId: 7, frameId: 4, type: 'secondhand:generic:focus', id: 'sh-4' });
+  for (const key of ['f1234567:sh-4', 'f4:1bad', 'f4:' + 'a'.repeat(61)]) assert.equal(await w.panel({ type: 'ui:focusField', key }), undefined);
+});
+test('disableSite revokes enabled embedded origins and detects retained access', async () => {
+  const w = siteWorker({ enabled: true, frames: [secondFrame({ enabled: true })] });
+  assert.equal((await w.panel({ type: 'ui:disableSite', confirmed: true })).ok, true);
+  assert.equal(w.registered.size, 0);
+  assert.equal(w.permissions.size, 0);
+  assert.deepEqual(w.injected, []);
+  const kept = siteWorker({ enabled: true, keepAccess: true });
+  assert.equal((await kept.panel({ type: 'ui:disableSite', confirmed: true })).ok, false);
+});
+
+test('visible iframe discovery is https only, deduplicated, and excludes the page origin', t => {
+  const page = siteContent(t);
+  const doc = page.window.document;
+  for (const [src, style] of [
+    ['https://form.jotform.com/one', ''], ['https://form.jotform.com/two', ''],
+    ['https://forms.example.org/', ''], [ORIGIN + '/same', ''], ['http://insecure.example/', ''],
+    ['https://hidden.example/', 'display:none'], ['https://invisible.example/', 'visibility:hidden']
+  ]) {
+    const frame = doc.createElement('iframe'); frame.src = src; frame.style.cssText = style;
+    frame.getClientRects = () => [{ width: 300, height: 200 }];
+    doc.body.append(frame);
+  }
+  const wrapper = doc.createElement('div'); wrapper.hidden = true;
+  const hidden = doc.createElement('iframe'); hidden.src = 'https://ancestor-hidden.example/';
+  hidden.getClientRects = () => [{ width: 300, height: 200 }]; wrapper.append(hidden); doc.body.append(wrapper);
+  assert.deepEqual(plain(page.request({ type: 'secondhand:generic:frames' })), { origins: [FRAME_ORIGIN, 'https://forms.example.org'] });
+});
+test('an https subframe answers plans without creating a widget', t => {
+  const dom = new JSDOM('<!doctype html><body></body>', { url: FRAME_ORIGIN, runScripts: 'outside-only' });
+  t.after(() => dom.window.close());
+  dom.reconfigure({ windowTop: {} });
+  let listener;
+  dom.window.chrome = { runtime: { id: extensionId, onMessage: { addListener: callback => { listener = callback; } } } };
+  dom.window.SecondHandGeneric = { plan: () => pantryPlan() };
+  dom.window.eval(source('generic-content.js'));
+  assert.equal(typeof listener, 'function');
+  let result;
+  listener({ type: 'secondhand:generic:plan' }, { id: extensionId }, value => { result = value; });
+  assert.equal(result.token, 'plan-1');
+  assert.equal(dom.window.document.querySelector('[data-secondhand-assistant]'), null);
+});
+test('content fill reports rejected ids without values', t => {
+  const page = siteContent(t);
+  page.window.SecondHandGeneric.fillFields = () => ({ ok: true, filled: [], skipped: [], rejected: ['sh-1'], values: { secret: 'private' } });
+  const result = page.request({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [], values: {} });
+  assert.deepEqual(plain(result), { ok: true, filled: [], skipped: [], rejected: ['sh-1'] });
+});
+
+test('malformed engine fill arrays fail visibly instead of becoming an empty success', t => {
+  const page = siteContent(t);
+  for (const result of [
+    { ok: true, filled: 'bad', skipped: [] },
+    { ok: true, filled: [], skipped: [], rejected: null },
+    { ok: true, filled: [42], skipped: [] }
+  ]) {
+    page.window.SecondHandGeneric.fillFields = () => result;
+    assert.equal(page.request({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [], values: {} }).ok, false);
+  }
+});
+test('a malformed rejected list makes a frame fill fail', async () => {
+  const w = siteWorker({ enabled: true, frames: [secondFrame({ enabled: true, fillResult: { ok: true, filled: [], rejected: null } })] });
+  assert.equal((await autofill(w)).data.state, 'error');
+});
+
+test('a pending form explains approval before attempting all-frame script execution', async () => {
+  const w = siteWorker({ enabled: true, plan: { token: 'empty', matched: [], unmatched: [] }, frames: [secondFrame()], discoveryError: true });
+  const result = (await autofill(w)).data;
+  assert.match(result.message, /Click “Also turn on the embedded form”/);
+  assert.deepEqual(w.injected, []);
 });

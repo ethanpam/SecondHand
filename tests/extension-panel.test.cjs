@@ -302,6 +302,7 @@ async function panel(t, initial = {}) {
     else if (payload.type === 'ui:focusField') data = { focused: true };
     else if (payload.type === 'ui:showApp') data = { shown: true };
     else if (payload.type === 'ui:openPanel') data = { opened: true };
+    else if (payload.type === 'ui:enableFrames') { state.site.frames.forEach(frame => { frame.enabled = true; }); data = { enabled: true }; }
     else if (payload.type === 'ui:enableSite' || payload.type === 'ui:disableSite') {
       state.site.enabled = payload.type === 'ui:enableSite';
       data = { enabled: state.site.enabled, origin: state.site.origin };
@@ -487,7 +488,7 @@ test('the pill is a fixed circle that cannot stretch into an oval', () => {
 // Sites other than Iowa, turned on one at a time.
 const SITE = { id: 7, url: 'https://pantry.example.org/intake?step=1' };
 const ORIGIN = 'https://pantry.example.org';
-const siteDone = { state: 'done', filled: 2, guessed: [], needYou: ['sh-4', 'sh-3'], message: 'Filled 2 · 2 need you. Check your answers before you submit.', pageKey: 'general' };
+const siteDone = { state: 'done', filled: 2, guessed: [], needYou: ['f0:sh-4', 'f4:sh-3'], message: 'Filled 2 · 2 need you. Check your answers before you submit.', pageKey: 'general' };
 
 test('side panel offers to turn SecondHand on for an https tab that is not Iowa, and ignores untrusted clicks', async t => {
   const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: false } });
@@ -557,7 +558,7 @@ test('widget on a site that is on autofills once, lists what needs you, and neve
   assert.equal(view.get('widget-text').textContent, 'Filled 2');
   assert.equal(view.get('need-you').textContent, '2 need you');
   await view.userClick('need-you');
-  assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:focusField')), { type: 'ui:focusField', key: 'sh-4', confirmed: true });
+  assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:focusField')), { type: 'ui:focusField', key: 'f0:sh-4', confirmed: true });
   view.window.document.dispatchEvent(new view.window.Event('visibilitychange'));
   await tick(); await tick();
   assert.equal(view.get('stop').hidden, true);
@@ -565,4 +566,28 @@ test('widget on a site that is on autofills once, lists what needs you, and neve
   await locked.userClick('autofill');
   assert.equal(locked.get('unlock').hidden, false);
   assert.equal(locked.get('stop').hidden, true);
+});
+
+test('embedded form button asks Chrome synchronously before sending any worker message', async t => {
+  const frames = [{ origin: 'https://form.jotform.com', enabled: false }, { origin: 'https://forms.example.org', enabled: false }, { origin: 'https://approved.example.org', enabled: true }];
+  const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true, frames } });
+  assert.ok(view.get('frames-enable'));
+  assert.equal(view.get('frames-enable').hidden, false);
+  assert.equal(view.get('frames-enable').textContent, 'Also turn on the embedded form (form.jotform.com, forms.example.org)');
+  view.get('frames-enable').click(); await tick();
+  assert.equal(view.types().includes('permissions.request'), false);
+  const before = view.requests.length;
+  view.clickNow('frames-enable');
+  assert.equal(view.requests.length, before + 1);
+  assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'permissions.request', origins: ['https://form.jotform.com/*', 'https://forms.example.org/*'] });
+  for (let i = 0; i < 6; i++) await tick();
+  assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:enableFrames')), { type: 'ui:enableFrames', confirmed: true, tabId: 7 });
+  assert.equal(view.get('frames-enable').hidden, true);
+});
+test('declining frame permission sends no enableFrames request', async t => {
+  const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true, frames: [{ origin: 'https://form.jotform.com', enabled: false }] }, grant: false });
+  assert.ok(view.get('frames-enable'));
+  await view.userClick('frames-enable');
+  assert.equal(view.types().includes('ui:enableFrames'), false);
+  assert.equal(view.get('frames-enable').hidden, false);
 });

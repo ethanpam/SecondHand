@@ -4,7 +4,7 @@
   // deciding; this script plans, fills, and focuses fields, and answers with field
   // metadata only. Values arrive for one fill and are never sent back.
   const engine = globalThis.SecondHandGeneric;
-  if (window !== window.top || location.protocol !== 'https:' || !engine || globalThis.secondHandGenericInstalled) return;
+  if (location.protocol !== 'https:' || !engine || globalThis.secondHandGenericInstalled) return;
   globalThis.secondHandGenericInstalled = true;
 
   let panelHost = null;
@@ -23,7 +23,7 @@
   }
 
   function ensurePanel() {
-    if (!document.body) return;
+    if (window !== window.top || !document.body) return;
     if (!panelHost) {
       panelHost = document.createElement('div');
       panelHost.setAttribute('data-secondhand-assistant', '');
@@ -59,16 +59,33 @@
     };
   }
 
-  ensurePanel();
-  document.addEventListener('DOMContentLoaded', ensurePanel, { once: true });
-  // Pages that rebuild their body (single-page forms) get the widget back.
-  const watch = setInterval(ensurePanel, 1000);
-  window.addEventListener('pagehide', () => clearInterval(watch), { once: true });
+  if (window === window.top) {
+    ensurePanel();
+    document.addEventListener('DOMContentLoaded', ensurePanel, { once: true });
+    // Pages that rebuild their body (single-page forms) get the widget back.
+    const watch = setInterval(ensurePanel, 1000);
+    window.addEventListener('pagehide', () => clearInterval(watch), { once: true });
+  }
 
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
-    if (sender.id !== chrome.runtime.id || !message || typeof message !== 'object' || window !== window.top) return;
+    if (sender.id !== chrome.runtime.id || !message || typeof message !== 'object') return;
     try {
-      if (message.type === 'secondhand:generic:plan') {
+      if (message.type === 'secondhand:generic:frames' && window === window.top) {
+        const origins = new Set();
+        for (const frame of document.querySelectorAll('iframe[src]')) {
+          if (![...frame.getClientRects()].some(rect => rect.width > 0 && rect.height > 0)) continue;
+          let visible = true;
+          for (let node = frame; node; node = node.parentElement) {
+            const style = getComputedStyle(node);
+            if (node.hidden || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.opacity === '0') { visible = false; break; }
+          }
+          if (!visible) continue;
+          // iframe.src is resolved against the document's base URL by the browser.
+          const url = new URL(frame.src);
+          if (url.protocol === 'https:' && url.origin !== location.origin) origins.add(url.origin);
+        }
+        respond({ origins: [...origins] });
+      } else if (message.type === 'secondhand:generic:plan') {
         respond(planMetadata(withOwnPanelHidden(() => engine.plan(document))));
       } else if (message.type === 'secondhand:generic:fill') {
         if (typeof message.token !== 'string' || !Array.isArray(message.assignments) || !message.values || typeof message.values !== 'object' || Array.isArray(message.values)) {
@@ -76,7 +93,9 @@
           return;
         }
         const result = withOwnPanelHidden(() => engine.fillFields(document, message.token, message.assignments, message.values));
-        respond({ ok: result?.ok === true, filled: strings(result?.filled), skipped: strings(result?.skipped) });
+        const validIds = ids => Array.isArray(ids) && ids.every(id => typeof id === 'string');
+        if (!result || !validIds(result.filled) || !validIds(result.skipped) || (result.rejected !== undefined && !validIds(result.rejected))) throw new Error('Invalid fill result.');
+        respond({ ok: result?.ok === true, filled: strings(result?.filled), skipped: strings(result?.skipped), rejected: strings(result?.rejected) });
       } else if (message.type === 'secondhand:generic:focus' && typeof message.id === 'string') {
         respond({ focused: Boolean(withOwnPanelHidden(() => engine.focusField(document, message.id))) });
       }

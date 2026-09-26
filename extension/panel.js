@@ -9,11 +9,11 @@
     if (!response?.ok) throw new Error(fixedText(response?.error) || 'The assistant is unavailable. Reload the extension and this page.');
     return response.data;
   };
-  const fieldKeys = value => Array.isArray(value) ? value.filter(key => typeof key === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,79}$/.test(key)).slice(0, 80) : [];
+  const fieldKeys = value => Array.isArray(value) ? value.filter(key => typeof key === 'string' && (/^[A-Za-z][A-Za-z0-9_-]{0,79}$/.test(key) || /^f\d{1,6}:[A-Za-z][A-Za-z0-9_-]{0,59}$/.test(key))).slice(0, 80) : [];
   // Autofill keeps going only on Iowa; other sites get one fill per click.
   const continuing = result => result?.pageKey !== 'general' && !['stopped', 'locked', 'offline', 'error'].includes(result?.state);
   // The worker's metadata for a site other than Iowa: its origin and whether it is turned on.
-  const siteOf = state => state?.site && typeof state.site.origin === 'string' ? { origin: state.site.origin, enabled: state.site.enabled === true } : null;
+  const siteOf = state => state?.site && typeof state.site.origin === 'string' ? { origin: state.site.origin, enabled: state.site.enabled === true, frames: Array.isArray(state.site.frames) ? state.site.frames.filter(frame => frame && typeof frame.origin === 'string') : [] } : null;
   const hostOf = origin => fixedText(new URL(origin).hostname, 90);
 
   if (location.search === '?surface=launcher' && !location.hash) { widget(); return; }
@@ -153,6 +153,10 @@
     }
     function controls() {
       const off = Boolean(target && site && !site.enabled);
+      const pending = site?.enabled ? site.frames.filter(frame => !frame.enabled) : [];
+      $('frames-enable').hidden = !target || !pending.length;
+      $('frames-enable').disabled = working;
+      $('frames-enable').textContent = `Also turn on the embedded form (${pending.map(frame => hostOf(frame.origin)).join(', ')})`;
       $('site-enable').hidden = !off;
       $('site-enable').disabled = working;
       $('site-disable').hidden = !(target && site?.enabled);
@@ -305,6 +309,19 @@
       const result = await act({ type: 'ui:enableSite', confirmed: true }, 'Approve this site in the SecondHand app…');
       await refresh();
       if (result?.enabled) show(`SecondHand is on for ${hostOf(result.origin)}. Click Autofill.`);
+    }));
+    $('frames-enable').addEventListener('click', trusted(async () => {
+      if ($('frames-enable').disabled || !target || !site?.enabled) return;
+      const pending = site.frames.filter(frame => !frame.enabled);
+      if (!pending.length) return;
+      let granted;
+      // Keep the Chrome request in this trusted click, before any awaited work.
+      try { granted = await chrome.permissions.request({ origins: pending.map(frame => `${frame.origin}/*`) }); }
+      catch (error) { show(fixedText(error.message) || 'Chrome couldn’t ask for access to the embedded form.', true); return; }
+      if (!granted) { show('Chrome didn’t allow SecondHand on the embedded form. Nothing changed.', true); return; }
+      const result = await act({ type: 'ui:enableFrames', confirmed: true }, 'Approve the embedded form in the SecondHand app…');
+      await refresh();
+      if (result?.enabled) show('SecondHand is on for the embedded form. Click Autofill.');
     }));
     $('site-disable').addEventListener('click', trusted(async () => {
       if ($('site-disable').disabled) return;

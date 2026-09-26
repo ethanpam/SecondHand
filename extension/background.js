@@ -6,6 +6,8 @@ if (typeof globalThis.SecondHandGeneric?.requestKeys !== 'function' || typeof gl
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
+const SITE_FIELD_ID = /^f\d{1,6}:[A-Za-z][A-Za-z0-9_-]{0,59}$/;
+const FRAME_ERROR = "Part of this form couldn’t be filled safely. Fill it yourself.";
 const FIELD_ID = /^[A-Za-z][A-Za-z0-9_-]{0,59}$/; // field ids from the site engine's plan
 const results = new Map(); // tabId -> last autofill result: counts, keys, and fixed messages only. Never answers.
 const siteRuns = new Map(); // tabId -> the fill running on an approved site, so two clicks share one request.
@@ -191,7 +193,7 @@ function siteOrigin(raw) {
   } catch { return ''; }
 }
 const siteScript = origin => ({ id: `site-${new URL(origin).hostname}`, matches: [`${origin}/*`],
-  js: ['generic-adapter.js', 'generic-content.js'], runAt: 'document_idle', persistAcrossSessions: true });
+  js: ['generic-adapter.js', 'generic-content.js'], allFrames: true, runAt: 'document_idle', persistAcrossSessions: true });
 async function siteEnabled(origin) {
   const [scripts, allowed] = await Promise.all([chrome.scripting.getRegisteredContentScripts({ ids: [siteScript(origin).id] }),
     chrome.permissions.contains({ origins: [`${origin}/*`] })]);
@@ -228,13 +230,73 @@ async function enableSite(tabId) {
   return { enabled: true, origin };
 }
 
+// Discover embedded origins through the approved top document, without reaching
+// into an iframe before Chrome and the desktop have approved its origin.
+async function siteFrames(tabId, origin) {
+  const reply = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:frames' }, { frameId: 0 });
+  if (!reply || !Array.isArray(reply.origins) || reply.origins.some(value => typeof value !== 'string')) throw new Error(FRAME_ERROR);
+  const origins = [...new Set(reply.origins.map(siteOrigin).filter(value => value && value !== origin))];
+  return Promise.all(origins.map(async origin => ({ origin, enabled: await siteEnabled(origin) })));
+}
+
+async function removeAccess(origins) {
+  const patterns = origins.map(origin => `${origin}/*`);
+  const removed = await chrome.permissions.remove({ origins: patterns });
+  const kept = await Promise.all(patterns.map(origin => chrome.permissions.contains({ origins: [origin] })));
+  if (!removed || kept.some(Boolean)) throw new Error('Chrome kept SecondHand’s access to this site. Remove it on Chrome’s extension page.');
+}
+
+async function enableFrames(tabId) {
+  const { tab, origin } = await activeSite(tabId);
+  await requireSite(origin);
+  const pending = (await siteFrames(tabId, origin)).filter(frame => !frame.enabled).map(frame => frame.origin);
+  for (const frameOrigin of pending) {
+    if (!(await chrome.permissions.contains({ origins: [`${frameOrigin}/*`] }))) throw new Error('Chrome hasn’t allowed SecondHand on the embedded form. Click Also turn on again and allow it.');
+  }
+  // Obtain every approval before registering any of the new scripts.
+  try {
+    for (const frameOrigin of pending) {
+      const trust = await nativeRequest('trustSite', { url: frameOrigin });
+      if (trust?.trusted !== true || trust.origin !== frameOrigin) throw new Error('The SecondHand app did not approve this embedded form.');
+    }
+    const current = await chrome.tabs.get(tabId);
+    if (current.url !== tab.url || !current.active) throw new Error('The page changed. Try again.');
+  } catch (error) {
+    if (pending.length) await removeAccess(pending);
+    throw error;
+  }
+  for (const frameOrigin of pending) {
+    const script = siteScript(frameOrigin);
+    if ((await chrome.scripting.getRegisteredContentScripts({ ids: [script.id] })).length) await chrome.scripting.updateContentScripts([script]);
+    else await chrome.scripting.registerContentScripts([script]);
+  }
+  if (pending.length) await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: siteScript(origin).js });
+  return { enabled: true, origin };
+}
+
 async function disableSite(tabId) {
   const { origin } = await activeSite(tabId);
-  const script = siteScript(origin);
-  if ((await chrome.scripting.getRegisteredContentScripts({ ids: [script.id] })).length) await chrome.scripting.unregisterContentScripts({ ids: [script.id] });
-  if (!(await chrome.permissions.remove({ origins: [`${origin}/*`] }))) throw new Error('Chrome kept SecondHand’s access to this site. Remove it on Chrome’s extension page.');
+  const frames = await siteEnabled(origin) ? await siteFrames(tabId, origin) : [];
+  const origins = [origin, ...frames.filter(frame => frame.enabled).map(frame => frame.origin)];
+  const scripts = await chrome.scripting.getRegisteredContentScripts({ ids: origins.map(value => siteScript(value).id) });
+  if (scripts.length) await chrome.scripting.unregisterContentScripts({ ids: scripts.map(script => script.id) });
+  await removeAccess(origins);
   results.delete(tabId);
   return { enabled: false, origin };
+}
+
+// Chrome supplies frame ids only after access has been granted. Never message
+// an origin just because it appeared in the top document or in these results.
+async function enabledSiteFrames(tabId, origin) {
+  const frames = await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func: () => location.origin });
+  if (!Array.isArray(frames) || !frames.some(frame => frame.frameId === 0 && frame.result === origin)) throw new Error(FRAME_ERROR);
+  const enabled = [];
+  for (const frame of frames) {
+    if (!Number.isInteger(frame.frameId) || frame.frameId < 0 || frame.frameId > 999999) throw new Error(FRAME_ERROR);
+    const frameOrigin = siteOrigin(frame.result);
+    if (frameOrigin && await siteEnabled(frameOrigin)) enabled.push({ frameId: frame.frameId, origin: frameOrigin });
+  }
+  return enabled;
 }
 
 const siteResult = (state, message, extra = {}) => ({ state, filled: 0, guessed: [], needYou: [], message, pageKey: 'general', ...extra });
@@ -281,13 +343,62 @@ async function fillPlan(tabId, url, plan) {
 
 // One fill on an approved site.
 async function fillSiteOnce(tabId, url) {
+  let values = null;
   try {
-    const { filled, needYou } = await fillPlan(tabId, url, await planGeneral(tabId));
-    return siteResult('done', `${filledSummary(filled, needYou)} Check your answers before you submit.`, { filled, needYou });
+    let plans;
+    try {
+      const origin = siteOrigin(url);
+      const embedded = await siteFrames(tabId, origin);
+      const readPlan = async frameId => {
+        const plan = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:plan' }, { frameId });
+        if (!plan || typeof plan.token !== 'string' || !plan.token || !Array.isArray(plan.matched) || !Array.isArray(plan.unmatched) ||
+          [...plan.matched, ...plan.unmatched].some(field => !field || typeof field.id !== 'string' || !FIELD_ID.test(field.id)) ||
+          plan.matched.some(field => typeof field.key !== 'string' || !KEY.test(field.key))) throw new Error(FRAME_ERROR);
+        const ids = [...plan.matched, ...plan.unmatched].map(field => field.id);
+        if (new Set(ids).size !== ids.length) throw new Error(FRAME_ERROR);
+        return { frameId, plan };
+      };
+      const top = await readPlan(0);
+      const pending = embedded.filter(frame => !frame.enabled);
+      // This instruction must work before Chrome permits access to child frames.
+      if (!top.plan.matched.length && !top.plan.unmatched.length && pending.length) {
+        const hosts = pending.map(frame => new URL(frame.origin).hostname).join(', ');
+        return siteResult('waiting', `This form is inside ${hosts}. Click “Also turn on the embedded form” in the SecondHand side panel.`);
+      }
+      const frames = await enabledSiteFrames(tabId, origin);
+      plans = [top, ...await Promise.all(frames.filter(frame => frame.frameId !== 0).map(frame => readPlan(frame.frameId)))];
+    } catch { throw new Error(FRAME_ERROR); }
+    const keys = [...new Set(SecondHandGeneric.requestKeys(plans.flatMap(({ plan }) => plan.matched.map(field => field.key))))];
+    if (keys.some(key => typeof key !== 'string' || !KEY.test(key))) throw new Error(FRAME_ERROR);
+    const filled = new Set();
+    if (keys.length) {
+      const desktop = await nativeRequest('status');
+      if (!desktop?.unlocked) throw new Error('Unlock SecondHand to autofill.');
+      const response = await nativeRequest('getFields', { url: safeUrl(url), fields: keys });
+      if (!response?.values || typeof response.values !== 'object' || Array.isArray(response.values)) throw new Error('The desktop did not return supported profile fields.');
+      values = SecondHandGeneric.deriveValues(response.values);
+      const current = await chrome.tabs.get(tabId);
+      if (current.url !== url || !current.active) throw new Error('The page changed. Click Autofill again.');
+      for (const { frameId, plan } of plans) {
+        const assignments = plan.matched.filter(field => typeof values[field.key] === 'string' && values[field.key])
+          .map(field => ({ id: field.id, key: field.key, guessed: false }));
+        if (!assignments.length) continue;
+        try {
+          const placing = Object.fromEntries(assignments.map(({ key }) => [key, values[key]]));
+          const result = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:fill', token: plan.token, assignments, values: placing }, { frameId });
+          const assigned = new Set(assignments.map(field => field.id));
+          const validIds = ids => Array.isArray(ids) && ids.every(id => typeof id === 'string' && assigned.has(id)) && new Set(ids).size === ids.length;
+          if (result?.ok !== true || !validIds(result.filled) || (result.rejected !== undefined && !validIds(result.rejected)) || (result.skipped !== undefined && !validIds(result.skipped))) throw new Error(FRAME_ERROR);
+          for (const id of result.filled) if (!(result.rejected || []).includes(id)) filled.add(`f${frameId}:${id}`);
+        } catch { throw new Error(FRAME_ERROR); }
+      }
+    }
+    const needYou = plans.flatMap(({ frameId, plan }) => [...plan.unmatched, ...plan.matched].map(field => `f${frameId}:${field.id}`).filter(id => !filled.has(id)));
+    return siteResult('done', `${filledSummary(filled.size, needYou)} Check your answers before you submit.`, { filled: filled.size, needYou });
   } catch (error) {
     const { state, message } = failed(error);
     return siteResult(state, message);
-  }
+  } finally { values = null; }
 }
 
 // One fill on an Iowa page the Iowa adapter hasn't verified. Iowa's portal needs no site approval.
@@ -316,7 +427,7 @@ async function pageState(tabId, route) {
   if (!origin) throw new Error('Open the official Iowa portal in the active tab, then try again.');
   const enabled = await siteEnabled(origin);
   const result = results.get(tabId);
-  return { page: { kind: 'general', pageKey: 'general' }, result: enabled && result?.pageKey === 'general' ? result : null, autopilot: false, site: { origin, enabled } };
+  return { page: { kind: 'general', pageKey: 'general' }, result: enabled && result?.pageKey === 'general' ? result : null, autopilot: false, site: { origin, enabled, frames: enabled ? await siteFrames(tabId, origin) : [] } };
 }
 
 async function autofill(tabId, route) {
@@ -339,7 +450,11 @@ async function focusField(tabId, key, route) {
   if (route === 'iowa') throw new Error('Open the official Iowa portal in the active tab, then try again.');
   const { origin } = await activeSite(tabId);
   await requireSite(origin);
-  const result = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:focus', id: key }, { frameId: 0 });
+  if (!SITE_FIELD_ID.test(key)) throw new Error('That field isn’t on this page.');
+  const [prefix, id] = key.split(':');
+  const frameId = Number(prefix.slice(1));
+  if (!(await enabledSiteFrames(tabId, origin)).some(frame => frame.frameId === frameId)) throw new Error('Turn on SecondHand for this embedded form first.');
+  const result = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:focus', id }, { frameId });
   return { focused: result?.focused === true };
 }
 
@@ -369,9 +484,10 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   else if (message.type === 'ui:pageState') run = () => pageState(tabId, route);
   else if (message.type === 'ui:autofill' && message.confirmed === true) run = () => autofill(tabId, route);
   else if (message.type === 'ui:stop' && message.confirmed === true) run = () => stop(tabId);
-  else if (message.type === 'ui:focusField' && typeof message.key === 'string' && FIELD_ID.test(message.key)) {
+  else if (message.type === 'ui:focusField' && typeof message.key === 'string' && (FIELD_ID.test(message.key) || SITE_FIELD_ID.test(message.key))) {
     run = () => focusField(tabId, message.key, route);
   } else if (panel && message.type === 'ui:enableSite' && message.confirmed === true) run = () => enableSite(tabId);
+  else if (panel && message.type === 'ui:enableFrames' && message.confirmed === true) run = () => enableFrames(tabId);
   else if (panel && message.type === 'ui:disableSite' && message.confirmed === true) run = () => disableSite(tabId);
   else return;
   // A widget on another site is honored only while that site is turned on.
