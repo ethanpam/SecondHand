@@ -77,4 +77,27 @@ const googleChoices = `<form><div role="list">
 <div role="listbox" aria-labelledby="c6" tabindex="0"><div role="option" data-value="" aria-selected="true">Choose</div><div role="option" data-value="Polk" aria-selected="false">Polk</div><div role="option" data-value="Story" aria-selected="false">Story</div></div></div>
 </div><div role="button">Submit</div></form>`;
 
-module.exports = { plainPantry, googleStyle, jotformStyle, numberedGoogle, googleDates, googleChoices };
+// Iowa HHS "Financial Information" eligibility page, reconstructed from its question wording:
+// native count selects ("1" … "8 or More") and native Yes/No radios. No real answers.
+const iowaCount = (id, question, from) => `<label for="${id}">${question}*</label><select id="${id}" name="${id}"><option value="">Select One</option>${
+  Array.from({ length: 8 - from }, (_, index) => `<option value="${index + from}">${index + from}</option>`).join('')}<option value="8">8 or More</option></select>`;
+const iowaYesNo = (name, question) => `<fieldset><legend>${question}*</legend><input type="radio" id="${name}Yes" name="${name}" value="true"><label for="${name}Yes">Yes</label>` +
+  `<input type="radio" id="${name}No" name="${name}" value="false"><label for="${name}No">No</label></fieldset>`;
+const iowaMoney = (id, question) => `<label for="${id}">${question}*</label><input id="${id}" name="${id}" type="text">`;
+const iowaFinancial = `<main><h1>Financial Information</h1><form id="financialInformation" action="financialInfo" method="post">
+${iowaCount('adults', 'How many adults are in your household?', 1)}
+${iowaYesNo('senior', 'Is anyone age 65 or older?')}
+${iowaCount('children', 'How many children are in your household?', 0)}
+${iowaYesNo('resident', 'Is at least one member a resident of Iowa?')}
+${iowaMoney('income', 'How much total money (before taxes) did all of the people in your household get last month? Include money from jobs, benefits, and any other source.')}
+${iowaMoney('onHand', 'How much does the household have on hand? This includes cash and money in checking and savings accounts.')}
+${iowaMoney('medical', 'How much does the household pay for medical expenses monthly?')}
+${iowaYesNo('citizens', 'Are all the household members United States citizens?')}
+${iowaYesNo('legal', 'If not, do they have legal documents to stay in the US?')}
+${iowaYesNo('disability', 'Does anyone have a disability?')}
+${iowaYesNo('pregnant', 'Is anyone pregnant?')}
+${iowaYesNo('medicare', 'Is anyone in the household enrolled in Medicare?')}
+${iowaYesNo('healthHelp', 'Do you want to find out if you or your family can get help paying for health insurance?')}
+<button type="button" class="btn btn-primary saveButton">Continue</button></form></main>`;
+
+module.exports = { plainPantry, googleStyle, jotformStyle, numberedGoogle, googleDates, googleChoices, iowaFinancial };

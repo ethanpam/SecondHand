@@ -13,7 +13,9 @@ function page(html, url = 'https://pantry.example.org/intake') {
   for (const node of document.querySelectorAll('*')) { node.getBoundingClientRect = () => box; node.getClientRects = () => [box]; }
   return document;
 }
-const byElement = (doc, result) => Object.fromEntries(result.matched.map(item => [generic.elementFor(item.id)?.id || generic.elementFor(item.id)?.name || item.id, item.key]));
+// Radio groups are named by the group, other controls by their id.
+const controlName = element => (element?.type === 'radio' ? element.name : element?.id || element?.name);
+const byElement = (doc, result) => Object.fromEntries(result.matched.map(item => [controlName(generic.elementFor(item.id)) || item.id, item.key]));
 const profile = {
   firstName: 'Avery', middleName: 'Jordan', lastName: 'Example', birthDate: '1985-04-12', email: 'avery.example@example.invalid',
   mobilePhone: '2025550148', homePhone: '2025550147', addressLine1: '123 Test Way', addressLine2: 'Unit 4', city: 'Demo City', state: 'IA', zip: '50309',
@@ -151,6 +153,55 @@ test('age-band household questions map only when the band is exactly what the pr
     adults1864: 'householdAdults', adultsPeople: 'householdAdults', seniors65: 'householdSeniors', seniorsOlder: 'householdSeniors', seniorsAdults: 'householdSeniors' });
   assert.deepEqual(result.unmatched.map(field => field.label), [questions.band1859, questions.band60, questions.seniors60, questions.kids05, questions.kids618,
     questions.adults18, questions.kidsUnder5]);
+});
+
+test('Iowa\'s Financial Information page maps every question it can answer from the profile', () => {
+  const doc = page(forms.iowaFinancial, 'https://hhsservices.iowa.gov/apspssp/ssp.portal/financialInfo');
+  const result = generic.plan(doc);
+  assert.deepEqual(byElement(doc, result), {
+    adults: 'householdAdults', senior: 'anyoneSenior', children: 'householdChildren', resident: 'iowaResident', income: 'totalMonthlyIncome',
+    onHand: 'assetsOnHand', medical: 'monthlyMedicalExpenses', citizens: 'householdAllCitizens', legal: 'householdLegalStatus',
+    disability: 'householdDisability', pregnant: 'householdPregnant', medicare: 'householdMedicare', healthHelp: 'wantsHealthCoverage'
+  });
+  assert.deepEqual(result.unmatched, []);
+  assert.deepEqual(generic.requestKeys(result.matched.map(item => item.key)).sort(), ['assetsOnHand', 'householdAdults', 'householdAllCitizens', 'householdChildren',
+    'householdDisability', 'householdLegalStatus', 'householdMedicare', 'householdPregnant', 'householdSeniors', 'monthlyEarnedIncome', 'monthlyMedicalExpenses',
+    'monthlyOtherIncome', 'programMedicaid', 'state']);
+
+  const saved = { ...profile, householdAdults: '9', householdSeniors: '0', programMedicaid: 'yes', assetsOnHand: '250', monthlyMedicalExpenses: '40',
+    householdAllCitizens: 'yes', householdLegalStatus: '', householdPregnant: 'no', householdMedicare: 'no' };
+  const filled = generic.fillFields(doc, result.token, result.matched.map(({ id, key }) => ({ id, key, guessed: false })), generic.deriveValues(saved));
+  assert.equal(filled.filled.length, 12, 'everything but the blank legal-documents answer');
+  const value = id => doc.getElementById(id).value;
+  const chosen = name => doc.querySelector(`input[name="${name}"]:checked`)?.id || null;
+  assert.equal(value('adults'), '8', '9 adults picks "8 or More"');
+  assert.equal(value('children'), '1');
+  assert.equal(value('income'), '1000'); assert.equal(value('onHand'), '250'); assert.equal(value('medical'), '40');
+  assert.deepEqual(['senior', 'resident', 'citizens', 'legal', 'disability', 'pregnant', 'medicare', 'healthHelp'].map(chosen),
+    ['seniorNo', 'residentYes', 'citizensYes', null, 'disabilityYes', 'pregnantNo', 'medicareNo', 'healthHelpYes']);
+  assert.equal(doc.getElementById('residentYes').getAttribute('data-secondhand-filled'), 'guess', 'residency from the home state is always a guess to review');
+  assert.equal(doc.getElementById('seniorNo').getAttribute('data-secondhand-filled'), 'rule');
+  assert.deepEqual(generic.GUESS_KEYS, ['iowaResident']);
+});
+
+test('derived yes/no answers are only offered when the saved profile settles them', () => {
+  const derive = values => generic.deriveValues(values);
+  assert.equal(derive({ householdSeniors: '2' }).anyoneSenior, 'yes');
+  assert.equal(derive({ householdSeniors: '0' }).anyoneSenior, 'no');
+  assert.equal(derive({ householdSeniors: '' }).anyoneSenior, undefined);
+  assert.equal(derive({ householdSeniors: 'a few' }).anyoneSenior, undefined);
+  assert.equal(derive({ state: 'IA' }).iowaResident, 'yes');
+  assert.equal(derive({ state: 'MN' }).iowaResident, undefined, 'living elsewhere does not settle Iowa residency');
+  assert.equal(derive({ state: '' }).iowaResident, undefined);
+  assert.equal(derive({ programMedicaid: 'yes' }).wantsHealthCoverage, 'yes');
+  assert.equal(derive({ programMedicaid: 'no' }).wantsHealthCoverage, 'no');
+  assert.equal(derive({ programMedicaid: '' }).wantsHealthCoverage, undefined);
+  assert.equal(derive({ anyoneSenior: 'yes', iowaResident: 'yes', wantsHealthCoverage: 'yes' }).anyoneSenior, undefined, 'derived answers come only from their sources');
+  for (const key of ['assetsOnHand', 'monthlyMedicalExpenses', 'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare', 'programMedicaid'])
+    assert.ok(generic.PROFILE_KEYS.includes(key), key);
+  for (const key of ['assetsOnHand', 'monthlyMedicalExpenses', 'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare', 'anyoneSenior', 'iowaResident', 'wantsHealthCoverage'])
+    assert.ok(generic.GENERIC_KEYS.includes(key), key);
+  assert.equal(generic.GENERIC_KEYS.includes('programMedicaid'), false, 'a program choice is only placed through the health-coverage question');
 });
 
 test('only confident matches are planned; vague labels stay unmatched for the applicant', () => {

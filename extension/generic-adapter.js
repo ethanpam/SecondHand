@@ -6,15 +6,23 @@
   // Saved profile fields a general site may receive, plus answers derived from them.
   const PROFILE_KEYS = Object.freeze(['firstName', 'middleName', 'lastName', 'suffix', 'birthDate', 'ssn', 'email', 'mobilePhone', 'homePhone', 'phone',
     'addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county', 'householdSize', 'householdAdults', 'householdChildren', 'householdSeniors',
-    'householdVeteran', 'householdDisability', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities']);
+    'householdVeteran', 'householdDisability', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand',
+    'monthlyMedicalExpenses', 'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare', 'programMedicaid']);
   const SOURCES = Object.freeze({ fullName: ['firstName', 'lastName'], phone: ['mobilePhone', 'homePhone', 'phone'],
-    totalMonthlyIncome: ['monthlyEarnedIncome', 'monthlyOtherIncome'], annualIncome: ['monthlyEarnedIncome', 'monthlyOtherIncome'] });
+    totalMonthlyIncome: ['monthlyEarnedIncome', 'monthlyOtherIncome'], annualIncome: ['monthlyEarnedIncome', 'monthlyOtherIncome'],
+    anyoneSenior: ['householdSeniors'], iowaResident: ['state'], wantsHealthCoverage: ['programMedicaid'] });
   const GENERIC_KEYS = Object.freeze(['firstName', 'middleName', 'lastName', 'fullName', 'suffix', 'birthDate', 'ssn', 'email', 'phone',
     'addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county', 'householdSize', 'householdAdults', 'householdChildren', 'householdSeniors',
-    'householdVeteran', 'householdDisability', 'totalMonthlyIncome', 'annualIncome', 'monthlyRent', 'monthlyUtilities']);
+    'householdVeteran', 'householdDisability', 'totalMonthlyIncome', 'annualIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand',
+    'monthlyMedicalExpenses', 'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare', 'anyoneSenior', 'iowaResident',
+    'wantsHealthCoverage']);
+  // Answers that are only ever a guess for the applicant to review, however they were matched.
+  const GUESS_KEYS = Object.freeze(['iowaResident']);
   const KIND = Object.freeze({ birthDate: 'date', email: 'email', phone: 'tel', state: 'state', householdSize: 'count', householdAdults: 'count',
     householdChildren: 'count', householdSeniors: 'count', householdVeteran: 'yesno', householdDisability: 'yesno', totalMonthlyIncome: 'money',
-    annualIncome: 'money', monthlyRent: 'money', monthlyUtilities: 'money' });
+    annualIncome: 'money', monthlyRent: 'money', monthlyUtilities: 'money', assetsOnHand: 'money', monthlyMedicalExpenses: 'money',
+    householdAllCitizens: 'yesno', householdLegalStatus: 'yesno', householdPregnant: 'yesno', householdMedicare: 'yesno', anyoneSenior: 'yesno',
+    iowaResident: 'yesno', wantsHealthCoverage: 'yesno' });
   const AUTOCOMPLETE = Object.freeze({ 'given-name': 'firstName', 'additional-name': 'middleName', 'family-name': 'lastName', name: 'fullName',
     'honorific-suffix': 'suffix', email: 'email', tel: 'phone', 'tel-national': 'phone', 'street-address': 'addressLine1', 'address-line1': 'addressLine1',
     'address-line2': 'addressLine2', 'address-level2': 'city', 'address-level1': 'state', 'postal-code': 'zip', bday: 'birthDate' });
@@ -26,6 +34,7 @@
     householdSeniors: '65( ?\\+| (and|or) (older|over|above|up))?|(over|older than) (age )?64'
   });
   const IN_HOUSEHOLD = '( in (your |the )?(household|home))?( (who )?(are|is|live|lives|living)( in (your |the )?(household|home))?)?';
+  const ANYONE = '(is )?(anyone|any(one| household)? member|at least one (household )?member)( (in|of) (your |the )?household)?';
   const counted = (who, band) => new RegExp(`^((number of|how many|total) )?${who}${IN_HOUSEHOLD}${band ? ` (ages? |aged )?(${band})( (years?|yrs?)( old| of age)?)?${IN_HOUSEHOLD}` : ''}$`);
   // Anchored phrases only: a question must say what it asks, not merely mention a word.
   const RULES = [
@@ -51,7 +60,18 @@
     [counted('(children|kids|people|persons|individuals|members|household members)', AGE_BANDS.householdChildren), 'householdChildren'],
     [counted('(seniors|older adults|adults|people|persons|individuals|members|household members)', AGE_BANDS.householdSeniors), 'householdSeniors'],
     [/^(is )?anyone in (your |the )?household a (military )?veteran$|^veteran( status)?$/, 'householdVeteran'],
-    [/^(does )?anyone in (your |the )?household (have|has) a disability$|^disability$/, 'householdDisability'],
+    [/^(does )?anyone( in (your |the )?household)? (have|has) a disability$|^disability$/, 'householdDisability'],
+    [new RegExp(`^${ANYONE} (age |aged )?(${AGE_BANDS.householdSeniors})( years?( old)?)?$`), 'anyoneSenior'],
+    [new RegExp(`^${ANYONE} an? (resident of iowa|iowa resident)$`), 'iowaResident'],
+    [new RegExp(`^${ANYONE}( currently)? pregnant$`), 'householdPregnant'],
+    [new RegExp(`^${ANYONE}( currently)? (enrolled in|on|receiving|getting) medicare$`), 'householdMedicare'],
+    [/^(are )?all (of )?(the )?(household members|members of (your |the )?household|people in (your |the )?household)( are)? (united states|u s|us) citizens$/, 'householdAllCitizens'],
+    [/^(if not )?(do|does) (they|those members|those people) have (legal|valid) (immigration )?documents to (stay|live|be) in (the )?(united states|u s|us)$/, 'householdLegalStatus'],
+    [/^do you want to find out if (you or your family|you|your family|anyone( in (your |the )?household)?) (can|could) get help paying for health (insurance|coverage)$/, 'wantsHealthCoverage'],
+    // Iowa's long income and savings questions go on with what to include; their opening is specific enough.
+    [/^how much (total )?money did all (of )?(the )?people in (your |the )?household (get|receive|earn) last month( .*)?$/, 'totalMonthlyIncome'],
+    [/^how much (money )?does (the |your )?household have on hand( .*)?$|^(total )?money on hand$/, 'assetsOnHand'],
+    [/^how much does (the |your )?household pay (for|in) medical (expenses|bills|costs) (monthly|each month|per month|a month)$|^monthly medical (expenses|bills|costs)$|^medical (expenses|bills|costs) (per|each|a) month$/, 'monthlyMedicalExpenses'],
     [/^(total )?(gross )?monthly (household )?income$|^(total )?household income per month$/, 'totalMonthlyIncome'],
     [/^(total )?(gross )?(annual|yearly) (household )?income$|^(total )?household income per year$/, 'annualIncome'],
     [/^(monthly )?(rent|mortgage|rent or mortgage)( payment| amount)?$/, 'monthlyRent'],
@@ -313,6 +333,12 @@
     const earned = cents(values?.monthlyEarnedIncome), other = cents(values?.monthlyOtherIncome);
     // A total is only offered when both parts are known; a partial sum would understate income.
     if (earned !== null && other !== null) { result.totalMonthlyIncome = dollars(earned + other); result.annualIncome = dollars((earned + other) * 12); }
+    // Yes/no answers derived from other saved answers, offered only when those settle them.
+    delete result.anyoneSenior; delete result.iowaResident; delete result.wantsHealthCoverage;
+    if (/^\d+$/.test(String(values?.householdSeniors ?? ''))) result.anyoneSenior = Number(values.householdSeniors) > 0 ? 'yes' : 'no';
+    // A home state of Iowa suggests residency; any other state settles nothing.
+    if (String(values?.state || '').trim().toUpperCase() === 'IA' || normal(values?.state) === 'iowa') result.iowaResident = 'yes';
+    if (['yes', 'no'].includes(values?.programMedicaid)) result.wantsHealthCoverage = values.programMedicaid;
     return result;
   }
 
@@ -409,7 +435,8 @@
         skipped.push(assignment?.id); continue;
       }
       ensureStyle(doc);
-      entry.elements.forEach(element => element.setAttribute('data-secondhand-filled', assignment.guessed ? 'guess' : 'rule'));
+      const guess = assignment.guessed || GUESS_KEYS.includes(key);
+      entry.elements.forEach(element => element.setAttribute('data-secondhand-filled', guess ? 'guess' : 'rule'));
       filled.push(assignment.id);
     }
     return { ok: true, filled, skipped };
@@ -443,7 +470,7 @@
   }
   const elementFor = id => current?.map.get(id)?.elements[0] || null;
 
-  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, plan, requestKeys, deriveValues, fillFields, focusField, elementFor, canSuggest });
+  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, GUESS_KEYS, plan, requestKeys, deriveValues, fillFields, focusField, elementFor, canSuggest });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandGeneric = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
