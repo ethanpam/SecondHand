@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type KeyboardEvent } from 'react';
+import { useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import { CheckIcon, DownloadIcon, ExternalIcon } from './icons';
 import { faq } from './faq';
 import { downloads, release } from './release';
@@ -10,14 +10,19 @@ const { windows, macArm, macIntel } = downloads;
 const platforms = [{ id: 'windows', label: 'Windows' }, { id: 'mac', label: 'Mac' }] as const;
 type Platform = (typeof platforms)[number]['id'];
 
+// Open the panel on the visitor's own computer so the first button fits it.
+// The server always renders Windows; the browser swaps in the detected value.
+// iPads report a Mac platform, so a Mac also needs a mouse-style pointer.
+function detectPlatform(): Platform {
+  const name = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform || navigator.platform;
+  return /mac/i.test(name) && navigator.maxTouchPoints < 2 ? 'mac' : 'windows';
+}
+const noSubscription = () => () => {};
+
 export default function Home() {
-  const [platform, setPlatform] = useState<Platform>('windows');
-  // Open the panel on the visitor's own computer so the first button fits it.
-  // iPads report a Mac platform, so require a mouse-style pointer as well.
-  useEffect(() => {
-    const name = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform || navigator.platform;
-    if (/mac/i.test(name) && navigator.maxTouchPoints < 2) setPlatform('mac');
-  }, []);
+  const detected = useSyncExternalStore(noSubscription, detectPlatform, (): Platform => 'windows');
+  const [chosen, setPlatform] = useState<Platform | null>(null);
+  const platform = chosen ?? detected;
   // Arrow keys, Home, and End move between tabs, following the ARIA tabs pattern.
   const moveBetweenTabs = (event: KeyboardEvent<HTMLButtonElement>) => {
     const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
