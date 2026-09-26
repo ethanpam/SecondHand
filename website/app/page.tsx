@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type KeyboardEvent } from 'react';
+import { useEffect, useState, type KeyboardEvent } from 'react';
 import { CheckIcon, DownloadIcon, ExternalIcon } from './icons';
 
 const release = '0.4.0';
@@ -12,6 +12,12 @@ type Platform = (typeof platforms)[number]['id'];
 
 export default function Home() {
   const [platform, setPlatform] = useState<Platform>('windows');
+  // Open the panel on the visitor's own computer so the first button fits it.
+  // iPads report a Mac platform, so require a mouse-style pointer as well.
+  useEffect(() => {
+    const name = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform || navigator.platform;
+    if (/mac/i.test(name) && navigator.maxTouchPoints < 2) setPlatform('mac');
+  }, []);
   // Arrow keys, Home, and End move between tabs, following the ARIA tabs pattern.
   const moveBetweenTabs = (event: KeyboardEvent<HTMLButtonElement>) => {
     const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -40,6 +46,7 @@ export default function Home() {
           </div>
           <div className="download-panel">
             <div className="panel-heading"><h2>Download secondHand</h2><span className="version">v{release}</span></div>
+            <p className="phone-note">secondHand installs on Windows and Mac computers. Open this page on your computer to download it.</p>
             <div className="platform-tabs" role="tablist" aria-label="Choose your computer">
               {platforms.map(({ id, label }) => (
                 <button key={id} id={`tab-${id}`} type="button" role="tab" aria-selected={platform === id} aria-controls={`panel-${id}`}
