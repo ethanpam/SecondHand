@@ -9,6 +9,7 @@
   "scripts": {
     "postinstall": "install-electron",
     "start": "electron .",
+    "dev": "node scripts/dev.cjs",
     "test": "node --test tests/*.test.cjs",
     "check": "node scripts/check.cjs",
     "test:ui": "node scripts/smoke-ui.cjs",

@@ -9,8 +9,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { EventEmitter } = require('node:events');
 const { atomicWrite } = require('./vault.cjs');
-const { isPortalUrl } = require('../shared/schema.cjs');
-const { ASSISTANCE_TOKEN, validateFieldScope } = require('./assistance.cjs');
+const { PROFILE_FIELDS, isPortalUrl, isHttpsSiteUrl } = require('../shared/schema.cjs');
 
 const HOST_NAME = 'org.secondhand.bridge';
 const MAX_MESSAGE_BYTES = 64 * 1024;
@@ -79,22 +78,28 @@ class FrameReader extends EventEmitter {
   }
 }
 
+function validateFieldScope(fields) {
+  if (!Array.isArray(fields) || !fields.length || fields.length > PROFILE_FIELDS.length ||
+      fields.some(field => typeof field !== 'string' || !PROFILE_FIELDS.includes(field)) ||
+      new Set(fields).size !== fields.length) throw new Error('Invalid requested profile fields.');
+  return fields;
+}
+
 function validateRequest(request) {
   if (!request || typeof request !== 'object' || Array.isArray(request) ||
       typeof request.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(request.id)) throw new Error('Invalid request identifier.');
   let allowed;
-  if (request.type === 'status') allowed = ['id', 'type'];
-  else if (request.type === 'getFields') allowed = ['id', 'type', 'url', 'fields', 'assistanceToken'];
-  else if (request.type === 'startAssistedSession') allowed = ['id', 'type', 'url', 'fields'];
-  else if (request.type === 'endAssistedSession' || request.type === 'checkAssistedSession') allowed = ['id', 'type', 'url', 'assistanceToken'];
+  if (request.type === 'status' || request.type === 'showApp') allowed = ['id', 'type'];
+  else if (request.type === 'getFields') allowed = ['id', 'type', 'url', 'fields'];
+  else if (request.type === 'trustSite') allowed = ['id', 'type', 'url'];
   else if (request.type === 'recordProgress') allowed = ['id', 'type', 'url', 'filledCount'];
   else throw new Error('Unsupported bridge request.');
   if (Object.keys(request).some(key => !allowed.includes(key))) throw new Error('Unexpected request field.');
-  if (request.type !== 'status' && !isPortalUrl(request.url)) throw new Error('Only the supported Iowa portal is allowed.');
-  if (request.type === 'getFields' || request.type === 'startAssistedSession') validateFieldScope(request.fields);
-  if (request.type === 'endAssistedSession' || request.type === 'checkAssistedSession' || Object.hasOwn(request, 'assistanceToken')) {
-    if (typeof request.assistanceToken !== 'string' || !ASSISTANCE_TOKEN.test(request.assistanceToken)) throw new Error('Invalid assistance token.');
-  }
+  // Field requests and site trust may name any HTTPS site; the desktop decides whether it is trusted.
+  if (request.type === 'getFields' || request.type === 'trustSite') {
+    if (!isHttpsSiteUrl(request.url)) throw new Error('Only an https site without credentials or a custom port is allowed.');
+  } else if (request.type !== 'status' && request.type !== 'showApp' && !isPortalUrl(request.url)) throw new Error('Only the supported Iowa portal is allowed.');
+  if (request.type === 'getFields') validateFieldScope(request.fields);
   if (request.type === 'recordProgress' && (!Number.isInteger(request.filledCount) || request.filledCount < 1 || request.filledCount > 100)) {
     throw new Error('Invalid filled field count.');
   }

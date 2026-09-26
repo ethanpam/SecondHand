@@ -30,8 +30,19 @@
   "programMedicaid": "no",
   "helpPayMedicalBills": "no",
   "householdSize": "1",
+  "householdAdults": "1",
+  "householdChildren": "0",
+  "householdSeniors": "0",
+  "householdVeteran": "no",
+  "householdDisability": "no",
   "monthlyEarnedIncome": "0",
   "monthlyOtherIncome": "0",
   "monthlyRent": "800",
-  "monthlyUtilities": "150"
+  "monthlyUtilities": "150",
+  "assetsOnHand": "250",
+  "monthlyMedicalExpenses": "40",
+  "householdAllCitizens": "yes",
+  "householdLegalStatus": "yes",
+  "householdPregnant": "no",
+  "householdMedicare": "no"
 }

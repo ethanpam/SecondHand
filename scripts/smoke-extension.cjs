@@ -10,6 +10,7 @@ const path = require('node:path');
 const { chromium, expect } = require('@playwright/test');
 const syntheticProfile = require('../tests/fixtures/applicant-profile.json');
 const applicantFixture = require('../tests/fixtures/iowa-personal-information.cjs');
+const preApplicant = require('../tests/fixtures/iowa-pre-applicant.cjs');
 const root = path.join(__dirname, '..');
 const portal = 'https://hhsservices.iowa.gov/apspssp/ssp.portal';
 const applicant = `${portal}/applyForBenefits/enterPersonalInfo`;
@@ -34,24 +35,36 @@ function fixture(nextStep) {
     </script></body></html>`;
 }
 
+// Pre-applicant screens with stand-ins for Iowa's page functions. About you is not
+// recorded yet, so Instructions' Continue leads straight to the applicant page.
+function preApplicantPage(name) {
+  const targets = { letsGetStarted: '/applyForBenefits/letsGetStarted', instructions: '/applyForBenefits/instructions', aboutYou: '/applyForBenefits/enterPersonalInfo', welcome: '/applyForBenefits/welcome', importantInfo: '/applyForBenefits/importantInfo' };
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Synthetic Iowa screen · test only</title></head><body>
+    <p class="test-only">SYNTHETIC TEST FIXTURE. No government connection or real applicant data.</p>${preApplicant.screens[name].html}
+    <script>
+      const targets = ${JSON.stringify(targets)};
+      window.__continues = 0;
+      function submitUrlLink(target) { window.__continues++; location.href = '${portal}' + targets[target]; }
+      function toggleCaptcha() { document.getElementById('captchaDiv').style.display = 'block'; }
+      function validateMsg() {}
+      function onCheck() {}
+      function welcomeSubmit() { if (document.getElementById('termChkbox').checked) location.href = '${portal}/applyForBenefits/importantInfo'; }
+    </script></body></html>`;
+}
+
 async function installNativeStub(worker) {
   await worker.evaluate(profile => {
-    globalThis.__nativeSmoke = { locked: false, lockAfterFill: false, calls: [], profile };
+    globalThis.__nativeSmoke = { locked: false, calls: [], profile };
     nativeRequest = async (type, payload = {}) => {
       const state = globalThis.__nativeSmoke;
-      state.calls.push({ type, fields: payload.fields || [], session: Boolean(payload.assistanceToken) });
+      state.calls.push({ type, fields: payload.fields || [] });
       if (type === 'status') return { unlocked: !state.locked, applicationCount: 0 };
-      if (type === 'startAssistedSession') {
-        if (state.locked) throw new Error('Unlock the synthetic desktop vault first.');
-        return { assistanceToken: 'a'.repeat(64), fields: payload.fields, expiresAt: new Date(Date.now() + 900000).toISOString() };
-      }
-      if (type === 'checkAssistedSession') return { active: !state.locked };
-      if (type === 'endAssistedSession') return { ended: true };
+      if (type === 'showApp') return { shown: true };
       if (type === 'getFields') {
-        if (state.locked) throw new Error('Unlock the synthetic desktop vault first.');
-        return { values: Object.fromEntries(payload.fields.filter(field => Object.hasOwn(state.profile, field)).map(field => [field, state.profile[field]])) };
+        if (state.locked) throw new Error('Unlock your local vault first.');
+        return { values: Object.fromEntries(payload.fields.filter(field => state.profile[field]).map(field => [field, state.profile[field]])) };
       }
-      if (type === 'recordProgress') { if (state.lockAfterFill) state.locked = true; return { recorded: true }; }
+      if (type === 'recordProgress') return { recorded: true };
       throw new Error('Unexpected native test message: ' + type);
     };
   }, syntheticProfile);
@@ -132,6 +145,13 @@ async function main() {
       if (request.isNavigationRequest() && url.origin === 'https://hhsservices.iowa.gov' && url.pathname === '/apspssp/ssp.portal/applyForBenefits/enterPersonalInfo') {
         return route.fulfill({ status: 200, contentType: 'text/html', body: fixture(url.searchParams.get('next')) });
       }
+      const screen = Object.keys(preApplicant.screens).find(name => url.pathname === `/apspssp/ssp.portal${preApplicant.screens[name].path}`);
+      if (request.isNavigationRequest() && url.origin === 'https://hhsservices.iowa.gov' && screen) {
+        return route.fulfill({ status: 200, contentType: 'text/html', body: preApplicantPage(screen) });
+      }
+      if (request.isNavigationRequest() && url.origin === 'https://hhsservices.iowa.gov' && url.pathname === '/apspssp/ssp.portal/applyForBenefits/householdMembers') {
+        return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Synthetic unknown screen · test only</title><main><h1>Household Members</h1><p>SYNTHETIC TEST FIXTURE.</p></main>' });
+      }
       if (url.protocol === 'chrome-extension:') return route.continue();
       return route.abort('blockedbyclient');
     });
@@ -143,75 +163,61 @@ async function main() {
     page = context.pages()[0] || await context.newPage();
     page.on('pageerror', error => errors.push(error.message));
     await fs.mkdir(path.join(root, 'artifacts'), { recursive: true });
-
-    async function startFixture({ next = 'manual', profile = {}, lockAfterFill = false } = {}) {
-      if (panel && await panel.visible('#pause-auto')) await panel.click('#pause-auto');
-      await worker.evaluate(({ profile, lockAfterFill }) => {
-        globalThis.__nativeSmoke = { locked: false, lockAfterFill, calls: [], profile };
-      }, { profile: { ...syntheticProfile, ...profile }, lockAfterFill });
-      await page.goto(`${applicant}?next=${next}`, { waitUntil: 'domcontentloaded' });
-      await page.bringToFront();
-      await expect(page.locator('[data-secondhand-assistant]')).toHaveCount(1);
-      await expect.poll(() => page.frames().some(frame => frame.url() === `chrome-extension://${extensionId}/panel.html?surface=launcher`), { timeout: 15000 }).toBe(true);
-      const launcher = page.frames().find(frame => frame.url() === `chrome-extension://${extensionId}/panel.html?surface=launcher`);
-      if (!panel) {
-        await launcher.locator('#open-side-panel').click();
-        await expect(launcher.locator('#launcher-status')).toHaveText('Assistant opened in Chrome’s sidebar.');
-        panel = await attachNativePanel(context, page, extensionId);
-      }
-      await expect.poll(() => panel.text('#page-checklist'), { timeout: 15000 }).toContain('First name');
-      await expect.poll(() => panel.evaluate(() => document.querySelector('#start-auto').disabled)).toBe(false);
-      await expect(page.locator('#firstName')).toHaveValue('');
-      assert.equal(await page.locator('[data-secondhand-assistant]').evaluate(element => element.getBoundingClientRect().height), 62);
-      return launcher;
-    }
-    const nextOnce = async () => {
-      await expect.poll(() => page.evaluate(() => window.__nextClicks), { timeout: 20000 }).toBe(1);
-      await expect.poll(() => panel.text('#guided-state'), { timeout: 15000 }).toBe('PAUSED FOR YOUR REVIEW');
-      await page.waitForTimeout(1800);
-      assert.equal(await page.evaluate(() => window.__nextClicks), 1);
+    const launcherUrl = `chrome-extension://${extensionId}/panel.html?surface=launcher`;
+    const launcherFrame = async () => {
+      await expect.poll(() => page.frames().some(frame => frame.url() === launcherUrl), { timeout: 15000 }).toBe(true);
+      return page.frames().find(frame => frame.url() === launcherUrl);
     };
-    const stop = async () => { await panel.click('#pause-auto'); await expect.poll(() => panel.visible('#pause-auto')).toBe(false); };
+    const calls = type => worker.evaluate(type => globalThis.__nativeSmoke.calls.filter(call => call.type === type), type);
 
-    await startFixture({ profile: { firstName: '' } });
-    await page.evaluate(() => window.postMessage({ type: 'ui:auto', enabled: true, confirmed: true }, '*'));
-    await page.waitForTimeout(150);
-    assert.deepEqual(await worker.evaluate(() => globalThis.__nativeSmoke.calls), []);
-    await panel.click('#start-auto');
-    await expect.poll(() => panel.text('#guided-state'), { timeout: 20000 }).toBe('WAITING FOR MISSING INFORMATION');
-    await expect(page.locator('#lastName')).toHaveValue(syntheticProfile.lastName);
-    await expect(page.locator('#addressLine1')).toHaveValue(syntheticProfile.addressLine1);
-    await expect(page.locator('#mailingAddressLine1')).toHaveValue(syntheticProfile.mailingAddressLine1);
-    await expect.poll(() => panel.text('[data-key="lastName"]')).toContain('Complete');
-    await expect.poll(() => panel.text('[data-key="firstName"]')).toContain('Missing from saved profile');
-    assert.equal(await page.evaluate(() => window.__nextClicks), 0);
-    const sidebarText = await panel.evaluate(() => document.body.innerText);
-    const sidebarMessage = await panel.evaluate(async () => {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      return JSON.stringify(await chrome.runtime.sendMessage({ type: 'ui:pageState', tabId: tab.id }));
-    });
-    for (const value of ['Avery', 'Jordan', 'Example', '123 Test Way', '2025550147', 'PO Box 123']) {
-      assert.equal(sidebarText.includes(value), false, `Sidebar must never render a profile value: ${value}`);
-      assert.equal(sidebarMessage.includes(value), false, `Sidebar messages must never receive a profile value: ${value}`);
+    // Leaving Iowa's site turns a running autofill off, so every flow starts clean.
+    async function resetTo(url, { profile = {}, locked = false } = {}) {
+      await page.goto('about:blank');
+      await worker.evaluate(({ profile, locked }) => { globalThis.__nativeSmoke = { locked, calls: [], profile }; }, { profile: { ...syntheticProfile, ...profile }, locked });
+      await page.goto(url, { waitUntil: 'domcontentloaded' });
     }
-    assert.equal(sidebarMessage.includes('assistanceToken'), false);
-    assert.equal(sidebarMessage.includes('a'.repeat(64)), false);
-    await panel.click('[data-key="firstName"]');
-    await expect.poll(() => page.evaluate(() => document.activeElement.id)).toBe('firstName');
-    await panel.screenshot(path.join(root, 'artifacts/extension-native-sidebar.png'));
+    async function startFixture({ profile = {}, locked = false } = {}) {
+      await resetTo(applicant, { profile, locked });
+      await page.bringToFront();
+      await expect(page.locator('[data-secondhand-assistant]')).toHaveAttribute('data-secondhand-size', 'full');
+      const widget = await launcherFrame();
+      await expect(widget.locator('#autofill')).toBeVisible();
+      await expect(page.locator('#firstName')).toHaveValue('');
+      return widget;
+    }
+    const answers = () => page.evaluate(() => Object.fromEntries(Array.from(document.querySelectorAll('#personalInformation input, #personalInformation select'), element => [element.id, ['checkbox', 'radio'].includes(element.type) ? element.checked : element.value])));
+
+    // Untrusted page messages can never start autofill.
+    let widget = await startFixture();
+    await page.evaluate(() => window.postMessage({ type: 'ui:autofill', confirmed: true }, '*'));
+    await page.waitForTimeout(200);
+    assert.deepEqual(await calls('getFields'), []);
+
+    // One click fills the whole applicant page, including revealed sections.
+    await widget.locator('#autofill').click();
+    await expect(widget.locator('#widget-text')).toHaveText(/^Filled \d+ · Check your answers, then click Save and Continue\.$/, { timeout: 20000 });
+    const full = await answers();
+    assert.equal(full.firstName, syntheticProfile.firstName); assert.equal(full.lastName, syntheticProfile.lastName);
+    assert.equal(full.suffix, 'III'); assert.equal(full.phoneNumber, '(202)555-0147');
+    assert.equal(full.hasHome1, true); assert.equal(full.addressLine1, syntheticProfile.addressLine1);
+    assert.equal(full.sameAddress2, true); assert.equal(full.mailingCity, 'Demo City');
+    assert.equal(full.applicant1, true); assert.equal(full.snap, true);
+    assert.equal(full.bestTime, syntheticProfile.bestContactTime);
+    await expect(widget.locator('#need-you')).toBeHidden();
+    assert.equal((await calls('getFields')).length, 1, 'One click makes one desktop request.');
+    assert.equal((await calls('recordProgress')).length, 1);
+    assert.equal(await page.evaluate(() => window.__nextClicks), 0, 'Autofill never clicks Next.');
     await page.screenshot({ path: path.join(root, 'artifacts/extension-assistant.png') });
-    await page.waitForTimeout(1900);
-    assert.equal(await page.evaluate(() => window.__nextClicks), 0);
-    assert.equal((await worker.evaluate(() => globalThis.__nativeSmoke.calls)).filter(call => call.type === 'getFields' && call.fields.includes('firstName')).length, 1, 'Missing saved facts are not repeatedly requested while waiting.');
-    await page.locator('#firstName').fill(syntheticProfile.firstName);
-    await nextOnce();
-    const fullAnswers = await page.evaluate(() => window.__lastAnswers);
-    assert.equal(fullAnswers.firstName, syntheticProfile.firstName);
-    assert.equal(fullAnswers.suffix, 'III'); assert.equal(fullAnswers.sameAddress2, true);
-    assert.equal(fullAnswers.mailingCity, 'Demo City'); assert.equal(fullAnswers.snap, true);
-    assert.equal(fullAnswers.bestTime, syntheticProfile.bestContactTime);
-    await stop();
-    console.log('Native Chrome sidebar: complete applicant autofill, checklist metadata, missing-profile focus, wait, and manual completion → exactly one Next passed.');
+    console.log('Widget: one click fills the full applicant page with one desktop request and no Next.');
+
+    // Missing saved answers become "need you" links that jump to the field.
+    widget = await startFixture({ profile: { firstName: '' } });
+    await widget.locator('#autofill').click();
+    await expect(widget.locator('#need-you')).toHaveText('1 need you', { timeout: 20000 });
+    await expect(page.locator('#lastName')).toHaveValue(syntheticProfile.lastName);
+    await widget.locator('#need-you').click();
+    await expect.poll(() => page.evaluate(() => document.activeElement.id)).toBe('firstName');
+    console.log('Widget: a missing saved answer is flagged and one click finds it.');
 
     const branches = [
       { name: 'home address with same mailing; optional blanks', profile: { mailingSameAsHome: 'yes', middleName: '', suffix: '', maidenName: '', addressLine2: '', bestContactTime: '' }, check: answers => { assert.equal(answers.sameAddress1, true); assert.equal(answers.mailingAddressLine1, ''); } },
@@ -220,74 +226,97 @@ async function main() {
       { name: 'not applying personally hides program questions', profile: { isApplicant: 'no' }, check: answers => { assert.equal(answers.applicant2, true); assert.equal(answers.snap, false); } }
     ];
     for (const branch of branches) {
-      await startFixture({ profile: branch.profile });
-      await panel.click('#start-auto'); await nextOnce();
-      branch.check(await page.evaluate(() => window.__lastAnswers)); await stop();
-      console.log(`Native sidebar conditional branch passed: ${branch.name}.`);
+      widget = await startFixture({ profile: branch.profile });
+      await widget.locator('#autofill').click();
+      await expect(widget.locator('#widget-text')).toHaveText(/^Filled \d+ · Check your answers, then click Save and Continue\.$/, { timeout: 20000 });
+      branch.check(await answers());
+      assert.equal(await page.evaluate(() => window.__nextClicks), 0);
+      console.log(`Widget conditional branch passed: ${branch.name}.`);
     }
 
-    await startFixture({ profile: { programSnap: 'no', programFip: 'no', programMedicaid: 'no' } });
-    await panel.click('#start-auto');
-    await expect.poll(() => panel.text('#guided-state'), { timeout: 20000 }).toBe('WAITING FOR MISSING INFORMATION');
-    await expect.poll(() => panel.text('[data-key="programs"]')).toContain('Missing required');
-    assert.equal(await page.evaluate(() => window.__nextClicks), 0);
-    await panel.click('[data-key="programs"]');
-    await page.locator('#snap').check();
-    await nextOnce(); await stop();
-    console.log('Native sidebar: unanswered required program choice blocks Next, then manual selection resumes safely.');
+    widget = await startFixture({ profile: { programSnap: 'no', programFip: 'no', programMedicaid: 'no' } });
+    await widget.locator('#autofill').click();
+    await expect(widget.locator('#need-you')).toHaveText('1 need you', { timeout: 20000 });
+    console.log('Widget: an unanswered required program choice is flagged for the applicant.');
 
-    await startFixture({ profile: { isApplicant: '' } });
-    await panel.click('#start-auto');
-    await expect.poll(() => panel.text('#guided-state'), { timeout: 20000 }).toBe('WAITING FOR MISSING INFORMATION');
-    await expect.poll(() => panel.text('[data-key="isApplicant"]')).toContain('Missing from saved profile');
-    assert.equal(await page.evaluate(() => window.__nextClicks), 0);
-    await page.locator('#applicant1').check();
-    await nextOnce();
-    assert.equal((await page.evaluate(() => window.__lastAnswers)).snap, true);
-    await stop();
-    console.log('Native sidebar: completing an unanswered question reveals a new branch and safely continues approved autofill.');
+    // A locked vault fills nothing and offers to bring the desktop app forward.
+    widget = await startFixture({ locked: true });
+    await widget.locator('#autofill').click();
+    await expect(widget.locator('#unlock')).toBeVisible({ timeout: 20000 });
+    await expect(page.locator('#firstName')).toHaveValue('');
+    await widget.locator('#unlock').click();
+    await expect(widget.locator('#autofill')).toBeVisible();
+    assert.equal((await calls('showApp')).length, 1);
+    assert.equal((await calls('getFields')).length, 0);
+    console.log('Widget: a locked vault fills nothing and Unlock brings SecondHand forward.');
 
-    await startFixture({ next: 'consent' });
-    await panel.click('#start-auto'); await nextOnce();
-    await expect(page.locator('#termChkbox')).not.toBeChecked();
-    await expect.poll(() => panel.visible('#manual-note')).toBe(true); await stop();
-    console.log('Native sidebar: consent and unsupported next pages stay manual.');
+    // One click walks the pre-applicant screens: it continues info screens, waits at
+    // consent for the applicant, then continues again and fills the applicant page.
+    await resetTo(`${portal}/applyForBenefits/welcome`);
+    widget = await launcherFrame();
+    await widget.locator('#autofill').click();
+    await expect.poll(() => page.url(), { timeout: 20000 }).toBe(`${portal}/applyForBenefits/letsGetStarted`);
+    widget = await launcherFrame();
+    await expect(widget.locator('#widget-text')).toHaveText('Read and accept Iowa’s consent, then click Continue.', { timeout: 20000 });
+    await expect(widget.locator('#stop')).toBeVisible();
+    await page.locator('#termChkbox').check();
+    await page.locator('button.saveButton').click();
+    await expect.poll(() => page.url(), { timeout: 20000 }).toBe(applicant);
+    await expect(page.locator('#lastName')).toHaveValue(syntheticProfile.lastName, { timeout: 20000 });
+    widget = await launcherFrame();
+    await expect(widget.locator('#widget-text')).toHaveText(/^Filled \d+ · Check your answers, then click Save and Continue\.$/, { timeout: 20000 });
+    await expect(widget.locator('#stop')).toBeVisible();
+    assert.equal(await page.evaluate(() => window.__nextClicks), 0, 'Autofill never clicks Save and Continue.');
+    assert.equal((await calls('getFields')).length, 1);
+    console.log('Autopilot: one click continued Before You Start, waited at consent, then continued Important Information and Instructions and filled the applicant page.');
 
-    // Exercise the separate, per-page confirmation path with all relevant
-    // conditional groups revealed by real user clicks before requesting fields.
-    await startFixture();
-    await page.locator('#hasHome1').check(); await page.locator('#sameAddress2').check();
-    await page.locator('#applicant1').check(); await page.locator('#snap').check();
-    await panel.click('#refresh');
-    await expect.poll(() => panel.text('#fields'), { timeout: 15000 }).toContain('Mailing street address');
-    await panel.click('#confirm'); await panel.click('#fill-next');
-    await expect.poll(() => page.evaluate(() => window.__nextClicks), { timeout: 20000 }).toBe(1);
-    await page.waitForTimeout(1800);
-    assert.equal(await page.evaluate(() => window.__nextClicks), 1);
-    assert.equal((await page.evaluate(() => window.__lastAnswers)).firstName, syntheticProfile.firstName);
-    assert.equal((await worker.evaluate(() => globalThis.__nativeSmoke.calls)).filter(call => call.type === 'startAssistedSession').length, 0);
-    console.log('Native sidebar: trusted, explicitly confirmed Fill & Next works independently of guided mode.');
+    // The household question is answered from saved program choices; the CAPTCHA stays with the applicant.
+    await resetTo(`${portal}/applyForBenefits/guestLogin`);
+    widget = await launcherFrame();
+    await widget.locator('#autofill').click();
+    await expect(page.locator('#householdApplyProgYes')).toBeChecked({ timeout: 20000 });
+    await expect(widget.locator('#widget-text')).toHaveText('Filled 1 · Solve the CAPTCHA, then click Continue.', { timeout: 20000 });
+    assert.deepEqual((await calls('getFields'))[0].fields, ['programSnap', 'programFip', 'programMedicaid']);
+    assert.equal(await page.evaluate(() => window.__continues), 0);
+    console.log('Autopilot: the household question is answered from saved programs and the CAPTCHA is left to the applicant.');
 
-    await startFixture({ lockAfterFill: true });
-    await panel.click('#start-auto');
-    await expect.poll(() => panel.text('#guided-state'), { timeout: 20000 }).toBe('PAUSED FOR YOUR REVIEW');
-    await expect.poll(() => panel.text('#automatic-reason')).toMatch(/approval|Unlock|unlock/);
-    assert.equal(await page.evaluate(() => window.__nextClicks), 0);
-    await worker.evaluate(() => { globalThis.__nativeSmoke.locked = false; globalThis.__nativeSmoke.lockAfterFill = false; });
-    await page.waitForTimeout(1800);
-    assert.equal(await page.evaluate(() => window.__nextClicks), 0);
-    await panel.click('#start-auto'); await nextOnce();
-    assert.equal((await worker.evaluate(() => globalThis.__nativeSmoke.calls)).filter(call => call.type === 'startAssistedSession').length, 2);
-    await stop();
+    // Other portal pages show only a small pill and never contact the desktop.
+    await resetTo(`${portal}/applyForBenefits/householdMembers`);
+    await expect(page.locator('[data-secondhand-assistant]')).toHaveAttribute('data-secondhand-size', 'pill');
+    widget = await launcherFrame();
+    await expect(widget.locator('#pill')).toBeVisible();
+    await expect(widget.locator('#widget')).toBeHidden();
+    assert.deepEqual(await worker.evaluate(() => globalThis.__nativeSmoke.calls), []);
+    // The side panel shows the same page as a plain checklist and never renders values.
+    // It runs last: in headless Chromium the open panel covers the widget's corner.
+    widget = await startFixture();
+    await widget.locator('#autofill').click();
+    await expect(widget.locator('#widget-text')).toHaveText(/^Filled \d+ · Check your answers, then click Save and Continue\.$/, { timeout: 20000 });
+    await widget.locator('#details').click();
+    panel = await attachNativePanel(context, page, extensionId);
+    await expect.poll(() => panel.text('[data-key="lastName"]'), { timeout: 15000 }).toContain('Done');
+    await expect.poll(() => panel.text('#desktop-status')).toContain('unlocked');
+    const sidebarText = await panel.evaluate(() => document.body.innerText);
+    const sidebarMessage = await panel.evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      return JSON.stringify(await chrome.runtime.sendMessage({ type: 'ui:pageState', tabId: tab.id }));
+    });
+    for (const value of ['Avery', 'Jordan', '123 Test Way', '2025550147', 'PO Box 123']) {
+      assert.equal(sidebarText.includes(value), false, `Sidebar must never render a profile value: ${value}`);
+      assert.equal(sidebarMessage.includes(value), false, `Sidebar messages must never receive a profile value: ${value}`);
+    }
+    await panel.screenshot(path.join(root, 'artifacts/extension-native-sidebar.png'));
+    console.log('Side panel: checklist and desktop status without profile values.');
+
     assert.deepEqual(errors, []);
-    console.log('Native sidebar: vault lock blocks Next and Resume gets fresh consent. All browser fixtures/data were synthetic; native desktop responses were DevTools stubs.');
+    console.log('Widget: intro pages show a small pill. All browser fixtures/data were synthetic; native desktop responses were DevTools stubs.');
   } catch (error) {
     if (panel) {
       console.error('Synthetic native sidebar state:', await panel.evaluate(() => document.body.innerText).catch(() => 'unavailable'));
       await panel.screenshot(path.join(root, 'artifacts/extension-panel-failure.png')).catch(() => {});
     }
     if (page) {
-      console.error('Synthetic page state:', await page.evaluate(() => ({ url: location.href, next: window.__nextClicks, fields: Array.from(document.querySelectorAll('input,select'), e => ({ id: e.id, value: e.value, checked: e.checked, visible: Boolean(e.getClientRects().length) })) })).catch(() => 'unavailable'));
+      console.error('Synthetic page state:', await page.evaluate(() => ({ url: location.href, nextClicks: window.__nextClicks, fields: Array.from(document.querySelectorAll('input,select'), e => ({ id: e.id, value: e.value, checked: e.checked, visible: Boolean(e.getClientRects().length) })) })).catch(() => 'unavailable'));
       await page.screenshot({ path: path.join(root, 'artifacts/extension-smoke-failure.png') }).catch(() => {});
     }
     throw error;

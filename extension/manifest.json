@@ -23,6 +23,9 @@
   "host_permissions": [
     "https://hhsservices.iowa.gov/*"
   ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
   "content_scripts": [
     {
       "matches": [
@@ -31,6 +34,7 @@
       ],
       "js": [
         "iowa-adapter.js",
+        "generic-adapter.js",
         "content.js"
       ],
       "run_at": "document_idle",
@@ -45,7 +49,7 @@
         "panel.css"
       ],
       "matches": [
-        "https://hhsservices.iowa.gov/*"
+        "https://*/*"
       ]
     }
   ],

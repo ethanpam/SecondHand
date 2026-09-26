@@ -1,6 +1,6 @@
 # Iowa SNAP portal: coverage and validation
 
-SecondHand is an **experimental guided application companion**, not a complete automatic SNAP application. It can fill all verified controls on the initial **Enter Personal Information** applicant page from explicit local profile answers, show a completion checklist, and use that page’s ordinary **Save and Continue** button after completeness checks. Address verification and later pages remain manual until their controls are verified. Consent, signatures, and final submission always remain manual. A local progress entry or successful Next click does not mean an application was submitted or accepted.
+SecondHand is an **experimental application companion**, not a complete automatic SNAP application. One **Autofill** click fills all verified controls on the initial **Enter Personal Information** applicant page from explicit local profile answers, and a checklist shows what still needs you. SecondHand never clicks **Save and Continue**; you review and continue yourself. Address verification and later pages remain manual until their controls are verified. Consent, signatures, and final submission always remain manual. A local progress entry does not mean an application was submitted or accepted.
 
 ## Live inspection on September 26, 2026
 
@@ -51,7 +51,7 @@ The observed handlers reveal these branches:
 
 SecondHand refuses a parent choice if its handler could erase already-entered dependent answers. The checklist displays a static “review existing dependent answers” message and pauses. It never resolves a conflicting answer by guessing.
 
-A scan previews only currently rendered, editable fields. Guided mode uses bounded fresh scans under the existing 15-minute desktop approval so newly revealed fields can be filled on subsequent passes. Manual Fill requests only its original visible preview; newly revealed fields require another check/fill. No hidden values are requested by a scan. The adapter never fills a field unless it is rendered and safely accessible at the moment of writing. It scrolls offscreen controls into view and rechecks identity, emptiness, visibility, and occlusion immediately before each write or choice click.
+A scan previews only currently rendered, editable fields. One Autofill click requests every mapped key once, then fills in at most four fresh-preview passes, so fields revealed by an earlier answer are filled without a second desktop request. Each pass fills only fields that are rendered at that moment. The adapter never fills a field unless it is rendered and safely accessible at the moment of writing. It scrolls offscreen controls into view and rechecks identity, emptiness, visibility, and occlusion immediately before each write or choice click.
 
 `probePage(document, url)` exposes only static identifiers, labels, counts, and `checklist: [{key, label, status, required, fillable}]`. Status is `complete`, `missing`, `optional`, or `manual`. It shows only currently relevant visible fields; hidden branches do not appear. Required text and yes/no questions must be answered. Program checkboxes have individual statuses plus a required “Choose at least one program” group. Unchecked programs are optional, not inferred stored No answers. The known optional medical-bill and best-time questions may remain blank. Unknown controls and portal errors produce generic attention rows rather than copying labels that could contain a person’s name. No checklist contains answer values.
 
@@ -59,24 +59,40 @@ A scan previews only currently rendered, editable fields. Guided mode uses bound
 
 ## Next and later pages
 
-Only the applicant form is eligible for automatic Next. Live metadata verified method `post`, no `onsubmit` or target attribute, and one `button[type="button"].saveAndContinueButton` labeled **Save and Continue**, with handler exactly `submitAction('#personalInformation');`. The form action must resolve to the observed applicant endpoint, and the button must have no target/form-action override.
+SecondHand never operates Iowa's **Save and Continue**, Back, Save and Exit, or Submit controls. You click them yourself after reviewing the page. **Save and Continue shares and saves answers with Iowa. It is not final submission.**
 
-Next additionally requires expected core controls and all currently applicable conditional controls, complete required answers, at least one selected program when that question is shown, no unknown/invalid controls or duplicate mappings, and no protected step. The live form uses visible required asterisks rather than native `required` / `aria-required` flags; the adapter checks the observed mandatory fields as well as those markers.
-
-An opaque, single-use navigation snapshot records the exact document, URL, form, button, and control state in content-script memory. It is never serialized to the panel or desktop. The adapter rechecks completeness, unchanged answers, original elements, expiration, and button visibility, then clicks once. **Save and Continue shares/saves answers with Iowa. It is not final submission, and a click does not prove the next page loaded or accepted the answers.**
-
-Official [personal information help](https://hhsservices.iowa.gov/apspssp/pages/WebHelp/enter_personal_information.htm) says the next page is **Select Address**. Its [address help](https://hhsservices.iowa.gov/apspssp/pages/WebHelp/select_address.htm) describes confirming correct addresses before continuing. That help link was found through the official help table of contents, not a guessed application URL. No live address-verification controls have been reached without saving applicant facts, so SecondHand recognizes the heading and pauses with “Review and choose the correct address in Iowa’s form.” It does not select a suggested address or invent a Next selector. Other later pages similarly pause until their controls are verified. After a user completes a manual step, guided filling can resume if the following page is supported and approval remains active.
+Official [personal information help](https://hhsservices.iowa.gov/apspssp/pages/WebHelp/enter_personal_information.htm) says the next page is **Select Address**. Its [address help](https://hhsservices.iowa.gov/apspssp/pages/WebHelp/select_address.htm) describes confirming correct addresses before continuing. That help link was found through the official help table of contents, not a guessed application URL. No live address-verification controls have been reached without saving applicant facts, so SecondHand recognizes the heading and pauses with “Review and choose the correct address in Iowa’s form.” It does not select a suggested address. Other later pages show only the small widget until their controls are verified.
 
 CAPTCHA, passwords, MFA, consent, signatures, certifications, uploads, review/final-submission steps, and Save and Exit are never operated automatically.
+
+## Pre-applicant screens (autopilot)
+
+A second read-only inspection on September 26, 2026 walked Back through a guest session and recorded each earlier screen's visible heading, controls, and button handlers. No answers were read.
+
+| Screen | Recorded controls | Autofill |
+| --- | --- | --- |
+| Household Application Information | `form#householdApplicationForm[action=selectHouseholdInfo]`. Radios `#householdApplyProgYes` (`true`) and `#householdApplyProgNo` (`false`), name `householdApplyProg`, `onclick="toggleCaptcha();"`, with exact label text. Continue runs `validateMsg();`. | Picks Yes only when a saved program choice is an explicit Yes. Choosing reveals Iowa's CAPTCHA, which stays with the applicant. |
+| Before You Start... | Continue `submitUrlLink('letsGetStarted');return false;`. No named controls. | Continues |
+| Let's get started | `#termChkbox` in `form#welcomeForm[action=forceLogin]`. Continue runs `welcomeSubmit();`. | Waits for consent |
+| Important Information when applying and what to expect. | Continue `submitUrlLink('instructions');return false;` | Continues |
+| Instructions | Continue `submitUrlLink('aboutYou');return false;`. The page also shows illustration buttons (Save and Continue, Edit, Submit Application) with empty handlers, and unnamed sample controls. | Continues |
+
+An info screen is continued only when:
+- its heading is in the registry;
+- exactly one rendered `button.saveButton` reads "Continue" and has that screen's recorded `onclick`;
+- no rendered named field exists outside the language menu;
+- no CAPTCHA, consent, verification, pop-up, or signature step is visible.
+
+The adapter re-verifies all of this immediately before its single click. Illustration buttons never qualify.
 
 ## Local data flow and validation limits
 
 Content scripts run only in the top frame under the official Iowa portal path. Chrome’s host permission is restricted to `https://hhsservices.iowa.gov/*`; stricter runtime path checks guard every operation. The native Chrome side panel runs in the extension origin. There are no storage, sync, cookie, history, or externally-connectable permissions.
 
-Metadata inspection requests no profile values. A selected Fill command or explicitly approved guided session requests only the scanned keys through native host `org.secondhand.bridge`. The desktop owns the encrypted vault and controls disclosure. Values exist transiently in extension memory and Iowa’s form; JavaScript cannot guarantee immediate memory zeroization. No applicant values are written to extension storage, logs, or a SecondHand backend. Progress records only the official URL without query/fragment and a filled count; submission/approval is never inferred.
+Metadata inspection requests no profile values. An Autofill click on the recognized applicant page requests the page's mapped keys through native host `org.secondhand.bridge`, with a desktop dialog unless the user chose **Always allow on this computer**. The desktop owns the encrypted vault and controls disclosure. Values exist transiently in extension memory and Iowa’s form; JavaScript cannot guarantee immediate memory zeroization. No applicant values are written to extension storage, logs, or a SecondHand backend. Progress records only the official URL without query/fragment and a filled count; submission/approval is never inferred.
 
 Entering an answer shares it with Iowa’s website, whose scripts may save it before final submission. The local-storage promise concerns SecondHand, not Iowa’s handling, Chrome form-saving/sync, other extensions, or device backups.
 
-Tests use [the sanitized full-page fixture](../tests/fixtures/iowa-personal-information.cjs) and [fictional QA profile](../tests/fixtures/applicant-profile.json). The fixture reconstructs observed DOM metadata and conditional behavior; it is not a saved page and contains no session material. Mock answers are used only in isolated tests. `node --test tests/extension-adapter.test.cjs` tests the complete conditional flow, missing-answer checklist, exact choice metadata, no overwrite/reset, optional questions, hidden/occluded controls, focus, and one-use Next snapshots. `npm run test:extension` loads the actual extension in isolated Chromium with all Iowa requests intercepted by synthetic fixtures and native calls stubbed; no mock answers go to the government portal.
+Tests use [the sanitized full-page fixture](../tests/fixtures/iowa-personal-information.cjs) and [fictional QA profile](../tests/fixtures/applicant-profile.json). The fixture reconstructs observed DOM metadata and conditional behavior; it is not a saved page and contains no session material. Mock answers are used only in isolated tests. `node --test tests/extension-adapter.test.cjs` tests the complete conditional flow, missing-answer checklist, exact choice metadata, no overwrite/reset, optional questions, hidden/occluded controls, and focus. `tests/extension-autofill.test.cjs` covers one-click autofill in the worker. `npm run test:extension` loads the actual extension in isolated Chromium with all Iowa requests intercepted by synthetic fixtures and native calls stubbed; no mock answers go to the government portal.
 
 Before treating this as a production integration, validate actual masks/change handlers and later-page coverage with a consenting applicant or agency-provided test environment, exercise the installed Windows native bridge, and verify submission/receipt recording only through user-driven submission. Never commit applicant data, cookies, tokens, or screenshots of real answers. Portal changes must fall back to manual review.
