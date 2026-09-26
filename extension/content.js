@@ -21,14 +21,16 @@
     }
   }
 
-  // A full Autofill bar on the fillable applicant page; a small pill elsewhere.
+  // A full widget on application screens SecondHand knows; a small pill elsewhere.
   function sizePanel() {
-    let fillable = false;
-    try { fillable = withOwnPanelHidden(() => adapter.probePage(document, location.href)).kind === 'fillable'; }
-    catch { fillable = false; }
-    panelHost.setAttribute('data-secondhand-size', fillable ? 'full' : 'pill');
-    panelHost.style.setProperty('width', fillable ? 'min(244px, calc(100vw - 24px))' : '46px', 'important');
-    panelHost.style.setProperty('height', fillable ? '62px' : '46px', 'important');
+    let full = false;
+    try {
+      const page = withOwnPanelHidden(() => adapter.probePage(document, location.href));
+      full = page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo);
+    } catch { full = false; }
+    panelHost.setAttribute('data-secondhand-size', full ? 'full' : 'pill');
+    panelHost.style.setProperty('width', full ? 'min(244px, calc(100vw - 24px))' : '46px', 'important');
+    panelHost.style.setProperty('height', full ? '62px' : '46px', 'important');
   }
 
   function ensurePanel() {
@@ -100,6 +102,9 @@
     try {
       if (message.type === 'secondhand:pageState') {
         respond(withOwnPanelHidden(pageState));
+      } else if (message.type === 'secondhand:continue') {
+        pending = null;
+        respond(withOwnPanelHidden(() => adapter.continuePage(document, location.href)));
       } else if (message.type === 'secondhand:focusField' && typeof message.key === 'string' && typeof adapter.focusField === 'function') {
         const focused = withOwnPanelHidden(() => adapter.focusField(document, location.href, message.key));
         respond({ focused: Boolean(focused) });

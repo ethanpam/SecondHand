@@ -20,6 +20,8 @@ function content(t, url = `${adapter.PORTAL}/applicant`) {
   const create = window.document.createElement.bind(window.document);
   window.document.createElement = name => { const element = create(name); if (name === 'iframe') frames.push(element); return element; };
   let kind = 'fillable';
+  let todo;
+  let continued = 0;
   window.chrome = { runtime: { id: extensionId, getURL: extensionURL, onMessage: { addListener: callback => { listener = callback; } } } };
   window.SecondHandIowa = {
     isSupportedUrl: adapter.isSupportedUrl,
@@ -28,12 +30,13 @@ function content(t, url = `${adapter.PORTAL}/applicant`) {
       const fields = element.value ? [] : [{ key: 'firstName', label: 'First name' }];
       return { supported: true, recognizedPage: true, fields, bindings: fields.map(field => ({ key: field.key, element })), ambiguous: [], skipped: [] };
     },
-    probePage: () => ({ kind, pageKey: 'primary-applicant', heading: 'Enter Personal Information', reason: '', fields: [{ key: 'firstName', label: 'First name' }], requiredRemaining: 0, manualRemaining: 0 }),
+    probePage: () => ({ kind, todo, pageKey: 'primary-applicant', heading: 'Enter Personal Information', reason: '', fields: [{ key: 'firstName', label: 'First name' }], requiredRemaining: 0, manualRemaining: 0 }),
+    continuePage: () => { continued++; return { continued: true, reason: 'Continued to the next screen.' }; },
     focusField: (_document, _url, key) => { if (key !== 'firstName') return false; window.document.getElementById('firstName').focus(); return true; },
     fill: (_document, _url, bindings, values) => { for (const binding of bindings) binding.element.value = values[binding.key]; return { filled: bindings.map(binding => binding.key), skipped: [] }; }
   };
   window.eval(source('content.js'));
-  return { window, frames, setKind: value => { kind = value; },
+  return { window, frames, setKind: (value, instruction) => { kind = value; todo = instruction; }, get continued() { return continued; },
     request(message, sender = { id: extensionId }) { let response; listener?.(message, sender, value => { response = value; }); return response; } };
 }
 
@@ -89,6 +92,24 @@ test('fill uses a fresh one-use preview and pageState carries no navigation toke
   assert.equal(JSON.stringify(filled).includes('Synthetic applicant'), false);
   assert.equal(page.request({ type: 'secondhand:fill', token: first.scan.token, fields: ['firstName'], values: { firstName: 'Replay' } }).ok, false);
   assert.equal(page.request({ type: 'secondhand:next', token: 'anything', authorized: true }), undefined);
+});
+
+test('continue runs the adapter once for our extension only', t => {
+  const page = content(t);
+  assert.equal(page.request({ type: 'secondhand:continue' }, { id: 'b'.repeat(32) }), undefined);
+  assert.equal(page.continued, 0);
+  assert.deepEqual({ ...page.request({ type: 'secondhand:continue' }) }, { continued: true, reason: 'Continued to the next screen.' });
+  assert.equal(page.continued, 1);
+});
+
+test('widget stays full size on info screens and steps that need the applicant', t => {
+  const page = content(t);
+  const host = page.window.document.querySelector('[data-secondhand-assistant]');
+  for (const [kind, todo, size] of [['info', undefined, 'full'], ['blocked', 'Solve the CAPTCHA, then click Continue.', 'full'], ['manual', 'Pick the correct address, then click Continue.', 'full'], ['manual', undefined, 'pill'], ['unsupported', undefined, 'pill']]) {
+    page.setKind(kind, todo);
+    page.window.dispatchEvent(new page.window.Event('popstate'));
+    assert.equal(host.getAttribute('data-secondhand-size'), size, `${kind} ${todo}`);
+  }
 });
 
 test('widget host is a full bar on fillable pages and a small pill elsewhere', t => {
