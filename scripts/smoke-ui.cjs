@@ -9,6 +9,10 @@ const applicantFixture = require('../tests/fixtures/applicant-profile.json');
 const { PROFILE_FIELDS } = require('../shared/schema.cjs');
 const root = path.join(__dirname, '..');
 const passphrase = 'synthetic-test-vault-passphrase';
+// Creating or unlocking the vault derives its key with scrypt (N=2^15, r=8) in the
+// main process: about 65 ms on an M4 Max, but many times that on a loaded hosted
+// macOS runner. Bound the whole attempt generously instead of Playwright's 5s default.
+const AUTH_ATTEMPT_TIMEOUT_MS = 30000;
 const resetPassword = 'synthetic-reset-password';
 
 async function captureDiagnostic(page, name, options = {}) {
@@ -27,9 +31,24 @@ async function rejectedPassphrase(page, afterEntry) {
   await page.locator('#passphrase').fill('incorrect-passphrase');
   if (afterEntry) await afterEntry();
   await expect(page.locator('#passphrase')).toHaveValue('incorrect-passphrase');
-  await page.locator('#auth-submit').click();
+  await submitAuthForm(page);
   await expect(page.locator('#auth-error')).toBeVisible();
   await expect(page.locator('#workspace')).not.toBeVisible();
+}
+
+// Click the auth form's submit button and wait until that create/unlock attempt has
+// settled (the button leaves its busy state). A form that fails validation never
+// starts an attempt, so fail at once with the reason rather than waiting on a result.
+async function submitAuthForm(page) {
+  const before = await page.evaluate(() => ({ ...window.__smokeAuthForm }));
+  await page.locator('#auth-submit').click();
+  const outcome = await (await page.waitForFunction(before => {
+    const counts = window.__smokeAuthForm;
+    if (counts.invalid > before.invalid) return { submitted: false, passphraseEmpty: !document.querySelector('#passphrase').value };
+    if (counts.submit > before.submit && document.querySelector('#auth-submit').getAttribute('aria-busy') !== 'true') return { submitted: true };
+    return null;
+  }, before, { polling: 50, timeout: AUTH_ATTEMPT_TIMEOUT_MS })).jsonValue();
+  assert.ok(outcome.submitted, `The auth form was not submitted: it failed validation (passphrase empty: ${outcome.passphraseEmpty}). Something reset the form after the test filled it.`);
 }
 
 async function main() {
@@ -52,6 +71,11 @@ async function main() {
       };
       for (const type of ['submit', 'invalid', 'reset']) document.querySelector('#auth-form').addEventListener(type, () => record({ type }), true);
       window.secondHand.onLocked(event => record({ type: 'locked', revision: event?.lockRevision }));
+      const form = document.querySelector('#auth-form');
+      const counts = window.__smokeAuthForm = { submit: 0, invalid: 0 };
+      // Capture phase also sees `invalid`, which fires on the control and does not bubble.
+      form.addEventListener('submit', () => { counts.submit++; }, true);
+      form.addEventListener('invalid', () => { counts.invalid++; }, true);
     });
     return page;
   };
@@ -64,7 +88,7 @@ async function main() {
     // Keep automated runs away from the real Keychain or Windows protected storage;
     // tests/desktop-recovery-main.test.cjs covers reset on this computer.
     if (await page.locator('#device-reset-field').isVisible()) await page.locator('#allow-device-reset').uncheck();
-    await page.locator('#auth-submit').click();
+    await submitAuthForm(page);
     await expect(page.locator('#recovery-dialog')).toBeVisible();
     const recoveryKey = await page.locator('#recovery-key-value').textContent();
     assert.match(recoveryKey, /^[0-9A-Z]{4}(?:-[0-9A-Z]{4}){7}$/);
@@ -111,7 +135,7 @@ async function main() {
     assert.deepEqual(clearedProfile, Object.fromEntries(PROFILE_FIELDS.map(field => [field, ''])));
     await rejectedPassphrase(page);
     await page.locator('#passphrase').fill(passphrase);
-    await page.locator('#auth-submit').click();
+    await submitAuthForm(page);
     await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('.nav-item[data-view="profile"]').click();
     await expect(page.locator('#firstName')).toHaveValue(applicantFixture.firstName);
@@ -138,7 +162,7 @@ async function main() {
       await expect.poll(() => page.evaluate(() => window.__secondHandSmokeAuth.filter(event => event.type === 'locked').at(-1)?.revision)).toBe(revision);
     });
     await page.locator('#passphrase').fill(passphrase);
-    await page.locator('#auth-submit').click();
+    await submitAuthForm(page);
     await expect(page.locator('#workspace')).toBeVisible();
     await page.evaluate(() => window.secondHand.lock());
     await expect(page.locator('#auth-view')).toBeVisible();
@@ -148,7 +172,7 @@ async function main() {
 
     page = await launch();
     await page.locator('#passphrase').fill(passphrase);
-    await page.locator('#auth-submit').click();
+    await submitAuthForm(page);
     await expect(page.locator('#workspace')).toBeVisible();
     const restored = await page.evaluate(() => window.secondHand.getData());
     assert.deepEqual(restored.profile, applicantFixture);
@@ -163,10 +187,10 @@ async function main() {
     assert.deepEqual((await page.evaluate(() => window.secondHand.getData())).profile, applicantFixture);
     await page.locator('#lock-button').click();
     await page.locator('#passphrase').fill(passphrase);
-    await page.locator('#auth-submit').click();
+    await submitAuthForm(page);
     await expect(page.locator('#auth-error')).toBeVisible();
     await page.locator('#passphrase').fill(resetPassword);
-    await page.locator('#auth-submit').click();
+    await submitAuthForm(page);
     await expect(page.locator('#workspace')).toBeVisible();
     const bytes = await fs.readFile(path.join(userData, 'vault.secondhand'), 'utf8');
     for (const secret of ['Avery', 'Example', applicantFixture.addressLine1, '2025550147', 'SYNTHETIC-RECEIPT-ONLY', passphrase, resetPassword, recoveryKey, recoveryKey.replace(/-/g, '')]) assert.equal(bytes.includes(secret), false);

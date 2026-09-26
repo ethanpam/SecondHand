@@ -11,6 +11,13 @@ const runFile = promisify(execFile);
 
 const shellQuote = value => `'${value.replace(/'/g, `'\\''`)}'`;
 
+// Windows registers the manifest through the registry instead of a fixed folder.
+function chromeHostManifestDirectory(platform = process.platform, home = os.homedir()) {
+  if (platform === 'darwin') return path.posix.join(home, 'Library/Application Support/Google/Chrome/NativeMessagingHosts');
+  if (platform === 'linux') return path.posix.join(home, '.config/google-chrome/NativeMessagingHosts');
+  return null;
+}
+
 async function registerHost(app, extensionId) {
   if (!EXTENSION_ID.test(extensionId)) throw new Error('Use the 32-letter extension ID shown at chrome://extensions.');
   const userData = app.getPath('userData');
@@ -27,11 +34,9 @@ async function registerHost(app, extensionId) {
     executable = path.join(path.dirname(process.execPath), 'secondHand-native.exe');
     await fs.access(executable);
   }
-  let manifestDirectory;
-  if (process.platform === 'darwin') manifestDirectory = path.join(os.homedir(), 'Library/Application Support/Google/Chrome/NativeMessagingHosts');
-  else if (process.platform === 'linux') manifestDirectory = path.join(os.homedir(), '.config/google-chrome/NativeMessagingHosts');
-  else if (process.platform === 'win32') manifestDirectory = path.join(userData, 'native-messaging');
-  else throw new Error('Native messaging is supported on Windows, macOS, and Linux.');
+  let manifestDirectory = chromeHostManifestDirectory();
+  if (process.platform === 'win32') manifestDirectory = path.join(userData, 'native-messaging');
+  else if (!manifestDirectory) throw new Error('Native messaging is supported on Windows, macOS, and Linux.');
   const manifestPath = path.join(manifestDirectory, `${HOST_NAME}.json`);
   await atomicWrite(manifestPath, Buffer.from(JSON.stringify({
     name: HOST_NAME,
@@ -46,4 +51,4 @@ async function registerHost(app, extensionId) {
   return { extensionId, manifestPath };
 }
 
-module.exports = { registerHost };
+module.exports = { registerHost, chromeHostManifestDirectory };

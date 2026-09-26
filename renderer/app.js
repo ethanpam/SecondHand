@@ -8,7 +8,9 @@
     'hasHomeAddress', 'mailingSameAsHome', 'addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county',
     'mailingAddressLine1', 'mailingAddressLine2', 'mailingCity', 'mailingState', 'mailingZip',
     'programSnap', 'programFip', 'programMedicaid', 'helpPayMedicalBills', 'householdSize',
-    'monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities'];
+    'householdAdults', 'householdChildren', 'householdSeniors', 'householdVeteran', 'householdDisability',
+    'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare',
+    'monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand', 'monthlyMedicalExpenses'];
   const viewNames = { overview: 'Overview', profile: 'My information', applications: 'Applications', extension: 'Chrome extension', privacy: 'Privacy & backups' };
   const statusNames = { draft: 'Draft', in_progress: 'In progress', submitted: 'Submitted', needs_action: 'Needs action', approved: 'Approved', denied: 'Denied' };
   let vaultStatus = { exists: false, unlocked: false, recoveryKey: false, deviceReset: false, deviceResetSupported: false, extensionId: '', bridgeRunning: false };
@@ -125,7 +127,7 @@
     $('overview-applications').replaceChildren();
         $('application-count').textContent = '0';
     if ($('application-dialog').open) $('application-dialog').close();
-    for (const id of ['auth-error', 'reset-error', 'profile-error', 'application-error', 'extension-error', 'extension-prepare-error']) clearError(id);
+    for (const id of ['auth-error', 'reset-error', 'profile-error', 'application-error', 'extension-error', 'extension-prepare-error', 'autofill-trust-error']) clearError(id);
     setProfileDirty(false);
     clearTimeout(toastTimer);
     $('toast').hidden = true;
@@ -301,6 +303,8 @@
     const setup = vaultStatus.extensionSetup || {};
     const bundled = connected && vaultStatus.extensionId === setup.extensionId;
     $('extension-id').value = vaultStatus.extensionId || '';
+    $('autofill-trust').checked = Boolean(vaultStatus.autofillWithoutAsking);
+    renderTrustedSites();
     $('extension-status').textContent = bundled ? (setup.prepared ? 'Ready to load in Chrome' : 'Setup needs refresh') : connected ? 'Custom connection registered' : 'Needs setup';
     $('extension-status').classList.toggle('connected', connected);
     $('extension-prepared').hidden = !setup.prepared;
@@ -310,6 +314,29 @@
       ? 'In Chrome’s folder chooser, press Command + Shift + G, paste the copied folder path, then choose Open and Select.'
       : 'In Chrome’s folder chooser, paste the copied folder path into the address bar, then choose Select Folder.';
     $('extension-step-label').replaceChildren(document.createTextNode(connected ? 'Manage connection ' : 'Set up extension '), icon('arrow'));
+  }
+
+  function renderTrustedSites() {
+    const sites = Array.isArray(vaultStatus.trustedSites) ? vaultStatus.trustedSites : [];
+    $('trusted-sites').replaceChildren(...sites.map(origin => {
+      const row = element('li', 'trusted-site');
+      const remove = element('button', 'text-button', 'Remove');
+      remove.type = 'button';
+      remove.addEventListener('click', () => {
+        const generation = vaultGeneration;
+        pending(remove, async () => {
+          try {
+            const status = await api.removeTrustedSite(origin);
+            if (generation !== vaultGeneration) return;
+            vaultStatus = { ...vaultStatus, ...status }; renderTrustedSites();
+            toast(`SecondHand will no longer fill forms on ${origin}.`);
+          } catch (error) { if (generation === vaultGeneration) showError('autofill-trust-error', error); }
+        });
+      });
+      row.append(element('code', '', origin), remove);
+      return row;
+    }));
+    $('trusted-sites-empty').hidden = sites.length > 0;
   }
 
   function renderSummary() {
@@ -604,6 +631,22 @@
         vaultStatus.extensionId = result.extensionId; renderSetup(); toast('Extension registered. Keep SecondHand open while you use it.');
       } catch (error) { if (generation === vaultGeneration) showError('extension-error', error); }
     });
+  });
+  $('autofill-trust').addEventListener('change', () => {
+    clearError('autofill-trust-error');
+    const generation = vaultGeneration;
+    const wanted = $('autofill-trust').checked;
+    $('autofill-trust').disabled = true;
+    api.setAutofillTrust(wanted).then(status => {
+      if (generation !== vaultGeneration) return;
+      vaultStatus = { ...vaultStatus, ...status };
+      renderSetup();
+      toast(wanted ? 'Chrome can now autofill without asking while SecondHand is unlocked.' : 'Chrome will ask before each autofill.');
+    }, error => {
+      if (generation !== vaultGeneration) return;
+      $('autofill-trust').checked = !wanted;
+      showError('autofill-trust-error', error);
+    }).finally(() => { $('autofill-trust').disabled = false; });
   });
   $('extension-open-portal').addEventListener('click', () => pending($('extension-open-portal'), async () => {
     try { await api.openPortal(); } catch (error) { toast(error.message || 'Unable to open the Iowa portal.', true); }

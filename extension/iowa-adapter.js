@@ -1,8 +1,8 @@
 /* Conservative, fail-closed primary-applicant adapter. No network or storage. */
 (function (root) {
   'use strict';
-  const PORTAL = 'https://hhsservices.iowa.gov/apspssp/ssp.portal';
   const addressPolicy = typeof module === 'object' && module.exports ? require('./address-policy.js') : root.SecondHandAddressPolicy;
+  const PORTAL = 'https://hhsservices.iowa.gov/apspssp/ssp.portal';
   const normal = value => String(value || '').replace(/\s+/g, ' ').trim().replace(/\s*\*\s*$/, '').replace(/:$/, '').trim().toLowerCase();
   const questions = Object.freeze({
     home: 'Do you have a home address?', same: 'Is your mailing address the same as your home address?',
@@ -37,9 +37,32 @@
     helpPayMedicalBills: radio('Help with medical bills from the last three months?', 'helpPayMedBill1', 'helpPayMedBill2', 'helpPayMedBill', questions.medical, null, 'faDiv'),
     bestContactTime: { label: 'Best time to call', id: 'bestTime', name: 'bestTimeToCall', names: ['best time to call? (30 character limit)'], container: 'bstTime', maxLength: 30 }
   });
-  const pageHeadings = new Set(['enter personal information']);
-  const safeSections = new Set([...pageHeadings, "applicant's information", 'contact information', 'address information', 'program information', ...Object.values(questions).map(normal)]);
+  const forms = Object.freeze({
+    personal: 'form#personalInformation[action="enterPersonalInfo"]',
+    household: 'form#householdApplicationForm[action="selectHouseholdInfo"]'
+  });
+  // Household Application Information, recorded live 2026-09-26. Choosing an
+  // answer runs toggleCaptcha(), which reveals Iowa's CAPTCHA.
+  const householdDefinitions = Object.freeze({
+    householdApplyProg: { label: 'Is anyone applying for SNAP, FIP, or health coverage?', id: 'householdApplyProgYes', noId: 'householdApplyProgNo',
+      name: 'householdApplyProg', type: 'radio', form: 'household', optionHandlers: ['toggleCaptcha();', 'toggleCaptcha();'],
+      optionNames: ['yes. at least one person is applying for snap, fip/rca, or help paying for health coverage.', 'no. you will answer fewer questions but you will not get help paying for health coverage.'] }
+  });
+  const pageForms = Object.freeze({
+    personal: { form: forms.personal, headings: ['enter personal information'], definitions },
+    household: { form: forms.household, headings: ['household application information'], definitions: householdDefinitions }
+  });
+  // Information-only screens and the exact Continue handler recorded for each.
+  const infoScreens = Object.freeze({
+    'before you start...': { pageKey: 'iowa-before-start', heading: 'Before You Start', onclick: "submitUrlLink('letsGetStarted');return false;" },
+    'important information when applying and what to expect.': { pageKey: 'iowa-information', heading: 'Important application information', onclick: "submitUrlLink('instructions');return false;" },
+    instructions: { pageKey: 'iowa-instructions', heading: 'Instructions', onclick: "submitUrlLink('aboutYou');return false;" }
+  });
+  const programKeys = ['programSnap', 'programFip', 'programMedicaid'];
+  const safeSections = new Set(['enter personal information', 'household application information', "applicant's information", 'contact information', 'address information', 'program information', ...Object.values(questions).map(normal)]);
+  const definitionFor = key => definitions[key] || householdDefinitions[key];
   const unsafe = /\b(signature|sign here|signing|certification|certify|attestation|attest|password|captcha|verification|security code|one time|username|user name|other people|other members|household members|family members|spouse|child|representative|employer)\b/i;
+
   const selfQuestions = Object.freeze({
     question01: 'Gender question', question02420: 'Social Security number question', question06179: 'Citizenship question',
     question04: 'Marital status question', question01007331: 'Military service question', question02422: 'Household eating arrangement question',
@@ -137,21 +160,26 @@
 
   function identifyPage(doc) {
     const main = doc.querySelector('main, [role="main"], #MainContentContainer') || doc.body;
-    if (!main || !doc.querySelector('form#personalInformation[action="enterPersonalInfo"]')) return false;
-    // Heading visibility is checked without viewport bounds: scrolling the page
-    // may move its title out of view while a field remains visible.
-    return Array.from(main.querySelectorAll('h1, h2, h3')).some(heading => {
-      if (!pageHeadings.has(normal(heading.textContent))) return false;
-      for (let node = heading; node && node.nodeType === 1; node = node.parentElement) {
-        const style = doc.defaultView.getComputedStyle(node);
-        if (node.hidden || node.getAttribute('aria-hidden') === 'true' || style.display === 'none' || style.visibility === 'hidden') return false;
-      }
-      return true;
-    });
+    if (!main) return null;
+    for (const [id, page] of Object.entries(pageForms)) {
+      if (!doc.querySelector(page.form)) continue;
+      // Heading visibility is checked without viewport bounds: scrolling the page
+      // may move its title out of view while a field remains visible.
+      const titled = Array.from(main.querySelectorAll('h1, h2, h3')).some(heading => {
+        if (!page.headings.includes(normal(heading.textContent))) return false;
+        for (let node = heading; node && node.nodeType === 1; node = node.parentElement) {
+          const style = doc.defaultView.getComputedStyle(node);
+          if (node.hidden || node.getAttribute('aria-hidden') === 'true' || style.display === 'none' || style.visibility === 'hidden') return false;
+        }
+        return true;
+      });
+      if (titled) return id;
+    }
+    return null;
   }
 
   function matchingControls(doc, definition) {
-    const form = doc.querySelector('form#personalInformation[action="enterPersonalInfo"]');
+    const form = doc.querySelector(forms[definition.form || 'personal']);
     if (!form) return [];
     const ids = definition.noId ? [definition.id, definition.noId] : [definition.id];
     const controls = ids.map(id => Array.from(doc.querySelectorAll(`[id="${id}"]`)));
@@ -159,8 +187,8 @@
     const elements = controls.map(matches => matches[0]);
     if (elements.some((element, index) => {
       const names = namesFor(element, doc);
-      const expected = definition.type === 'radio' ? [index === 0 ? 'yes' : 'no'] : definition.names;
-      const onclick = definition.type === 'radio' ? (definition.handler ? `${definition.handler}('${index === 0 ? 'Yes' : 'No'}');` : null) : (definition.onclick || null);
+      const expected = definition.type === 'radio' ? [definition.optionNames?.[index] ?? (index === 0 ? 'yes' : 'no')] : definition.names;
+      const onclick = definition.type === 'radio' ? (definition.optionHandlers?.[index] ?? (definition.handler ? `${definition.handler}('${index === 0 ? 'Yes' : 'No'}');` : null)) : (definition.onclick || null);
       return element.name !== (definition.name || definition.id) || element.type !== (definition.type || 'text') ||
         !names.length || !names.every(name => expected.includes(name)) || !sectionInfo(element).safe ||
         (definition.container && !element.closest(`#personalInformation #${definition.container}`)) ||
@@ -196,9 +224,10 @@
       } else result.skipped++;
       return result;
     }
-    if (!identifyPage(doc)) return result;
+    const pageId = identifyPage(doc);
+    if (!pageId) return result;
     result.recognizedPage = true;
-    for (const [key, definition] of Object.entries(definitions)) {
+    for (const [key, definition] of Object.entries(pageForms[pageId].definitions)) {
       const elements = matchingControls(doc, definition);
       if (!elements.length) {
         if (doc.querySelectorAll(`[id="${definition.id}"]`).length > 1) result.ambiguous.push(definition.label);
@@ -246,13 +275,13 @@
   function fill(doc, rawUrl, originalBindings, values) {
     if (originalBindings.some(binding => binding.key === 'birthDate')) return fillSelfDetails(doc, rawUrl, originalBindings, values);
     const filled = [], skipped = [];
-    const order = Object.keys(definitions);
+    const order = [...Object.keys(definitions), ...Object.keys(householdDefinitions)];
     // Only bindings captured in the original rendered-field preview are eligible.
-    // Newly revealed fields need a fresh scan/release in the next guided pass.
+    // Newly revealed fields need a fresh scan in the next Autofill pass.
     for (const binding of [...originalBindings].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key))) {
       const fresh = scan(doc, rawUrl);
       const { key, element } = binding;
-      const definition = definitions[key];
+      const definition = definitionFor(key);
       const current = fresh.bindings.find(item => item.key === key && item.element === element);
       const original = binding.elements || [element];
       if (!definition || doc.location.href !== rawUrl || !current || !Object.prototype.hasOwnProperty.call(values, key) ||
@@ -283,6 +312,7 @@
     }
     return { filled, skipped };
   }
+
   const navigationSnapshots = new WeakMap();
 
   // The observed Start Application / Tell Us More page explicitly says these
@@ -544,7 +574,7 @@
       return doc.activeElement === address.first;
     }
     if (!identifyPage(doc)) return false;
-    const definition = definitions[key === 'programs' ? 'programMedicaid' : key];
+    const definition = definitionFor(key === 'programs' ? 'programMedicaid' : key);
     if (!definition) return false;
     const elements = matchingControls(doc, definition);
     const element = elements.find(item => rendered(item, doc) && !item.matches(':disabled'));
@@ -572,19 +602,44 @@
     return { form, button };
   }
 
+  // Steps SecondHand never operates. Each maps to a plain instruction for the applicant.
+  function protectedStep(doc, headings) {
+    const shown = selector => Array.from(doc.querySelectorAll(selector)).some(element => rendered(element, doc));
+    if (shown('#captchaDiv, [name="captchaAnswer"], #simpleCaptcha')) return { pageKey: 'iowa-captcha', heading: 'Security check', todo: 'Solve the CAPTCHA, then click Continue.' };
+    if (shown('#termChkbox')) return { pageKey: 'iowa-consent', heading: 'Let’s get started', todo: 'Read and accept Iowa’s consent, then click Continue.' };
+    if (shown('input[type="password"], #securityCode')) return { pageKey: 'iowa-verification', heading: 'Sign in or verify', todo: 'Sign in or verify in Iowa’s form, then continue.' };
+    if (shown('[aria-modal="true"], [role="dialog"]')) return { pageKey: 'iowa-popup', heading: 'Iowa pop-up', todo: 'Answer Iowa’s pop-up, then continue.' };
+    if (headings.some(heading => /\b(signature|certification|attestation|review and submit|submit application|confirmation|terms and conditions)\b/.test(heading))) {
+      return { pageKey: 'iowa-protected-step', heading: 'Finish this step yourself', todo: 'Sign or submit in Iowa’s form yourself.' };
+    }
+    return null;
+  }
+
+  function continueButton(doc, onclick) {
+    // An information-only screen has no named fields to submit.
+    const named = Array.from(doc.querySelectorAll('input, select, textarea')).filter(element =>
+      element.type !== 'hidden' && (element.id || element.name) && !element.closest('#languageFormMenu') && rendered(element, doc));
+    if (named.length) return null;
+    const buttons = Array.from(doc.querySelectorAll('button.saveButton')).filter(button => rendered(button, doc) && normal(button.textContent) === 'continue');
+    if (buttons.length !== 1) return null;
+    const [button] = buttons;
+    if (button.getAttribute('onclick') !== onclick || button.type !== 'button' || button.matches(':disabled') || button.getAttribute('aria-disabled') === 'true' ||
+        button.hasAttribute('formaction') || button.hasAttribute('formtarget')) return null;
+    return button;
+  }
+
   function probePage(doc, rawUrl) {
     const result = { kind: 'unsupported', pageKey: 'unsupported', heading: 'Unsupported website', reason: 'Open the official Iowa benefits portal.', canAdvance: false, fields: [], checklist: [], requiredRemaining: 0, manualRemaining: 0 };
     if (!isSupportedUrl(rawUrl)) return result;
     result.kind = 'manual'; result.pageKey = 'iowa-manual'; result.heading = 'Iowa benefits application';
     result.reason = 'Complete this step in Iowa’s form. SecondHand has not verified its controls.';
     const headings = Array.from(doc.querySelectorAll('h1,h2,h3')).filter(element => rendered(element, doc)).map(element => normal(element.textContent));
-    if (Array.from(doc.querySelectorAll('input[type="password"], [name="captchaAnswer"], #securityCode, #termChkbox, [aria-modal="true"], [role="dialog"]')).some(element => rendered(element, doc)) ||
-        headings.some(heading => /\b(signature|certification|attestation|review and submit|submit application|confirmation|terms and conditions)\b/.test(heading))) {
-      return { ...result, kind: 'blocked', pageKey: 'iowa-protected-step', heading: 'Finish this step yourself', reason: 'Account access, verification, consent, signatures, and final submission must be completed directly in Iowa’s portal.' };
-    }
-    if (headings.includes('select address')) {
+    const blocked = protectedStep(doc, headings);
+    if (blocked) return { ...result, ...blocked, kind: 'blocked', reason: blocked.todo };
+    if (headings.includes('select address') || rawUrl === `${PORTAL}/applyForBenefits/addressValidation`) {
       const address = addressContext(doc, rawUrl);
       return { ...result, kind: address ? 'fillable' : 'manual', pageKey: 'iowa-select-address', heading: 'Select Address',
+        todo: address ? 'SecondHand selects the first suggested home address and saves this step. Review it before final submission.' : 'Review this address step and continue in Iowa’s form yourself.',
         canAdvance: Boolean(address), manualRemaining: address ? 0 : 1,
         checklist: [{ key: 'addressReview', label: 'First suggested home address', status: address ? (address.first.checked ? 'complete' : 'missing') : 'manual', required: true, fillable: false }],
         reason: address ? 'Next selects Iowa’s first suggested home address and saves this step. Review the selected address before final submission.' : 'Review this address step in Iowa’s form. The expected home suggestions could not be verified, or another address question or error needs attention.' };
@@ -600,31 +655,78 @@
       checklist.push({ key: 'selfDetailsReview', label: 'Review the remaining questions and continue in Iowa’s form', status: 'manual', required: false, fillable: false });
       return { ...result, kind: 'fillable', pageKey: 'iowa-self-details', heading: 'Tell Us More', fields, checklist,
         manualRemaining: checklist.filter(item => item.status === 'manual').length, canAdvance: false,
+        todo: 'Review the other questions, then click Save and Continue in Iowa’s form yourself.',
         reason: 'SecondHand can fill your saved date of birth on this verified self-information page. Review and answer the other questions, then choose Save and Continue directly in Iowa’s form.' };
     }
-    if (!identifyPage(doc)) {
-      if (headings.includes('household application information')) { result.pageKey = 'iowa-program-intent'; result.heading = 'Household Application Information'; result.reason = 'Choose the household’s application intent and complete verification in Iowa’s form.'; }
-      else if (headings.includes('assisting organization or person')) { result.pageKey = 'iowa-assistance'; result.heading = 'Assisting Organization or Person'; result.reason = 'Answer who is helping with the application yourself. These fields do not describe the applicant.'; }
-      else if (headings.includes("let's get started")) { result.kind = 'blocked'; result.pageKey = 'iowa-consent'; result.heading = 'Let’s get started'; result.reason = 'Review and complete Iowa’s data-use consent yourself.'; }
-      else {
-        const informational = [
-          ['welcome', 'iowa-home', 'Welcome', 'Choose Apply for Assistance in Iowa’s portal to begin.'],
-          ['before you start...', 'iowa-before-start', 'Before You Start', 'Read Iowa’s preparation information, then continue in the portal.'],
-          ['important information when applying and what to expect.', 'iowa-information', 'Important application information', 'Read Iowa’s application instructions, then continue in the portal.'],
-          ['instructions', 'iowa-instructions', 'Instructions', 'Read how Iowa’s form works, then continue in the portal.'],
-          ['about you', 'iowa-about-you', 'About you', 'Continue in Iowa’s portal to the applicant questions.']
-        ].find(([heading]) => headings.includes(heading));
-        if (informational) [, result.pageKey, result.heading, result.reason] = informational;
-      }
+    if (headings.includes('tell us more') || rawUrl === `${PORTAL}/applyForBenefits/dynamicQuestions`) return { ...result, pageKey: 'iowa-self-details-unverified', heading: 'Applicant questions', todo: 'Review and complete these questions directly in Iowa’s form.', reason: 'This person or question context is not verified for saved applicant facts.' };
+    const pageId = identifyPage(doc);
+    if (pageId === 'household') {
+      const definition = householdDefinitions.householdApplyProg;
+      const elements = matchingControls(doc, definition);
+      const status = !elements.length || !elements.every(element => rendered(element, doc)) ? 'manual' : answered(elements, definition) ? 'complete' : 'missing';
+      return { ...result, kind: 'fillable', pageKey: 'iowa-program-intent', heading: 'Household Application Information', fields: scan(doc, rawUrl).fields,
+        checklist: [{ key: 'householdApplyProg', label: definition.label, status, required: true, fillable: status === 'missing' }],
+        requiredRemaining: Number(status === 'missing'), manualRemaining: Number(status === 'manual'),
+        reason: status === 'complete' ? 'Click Continue in Iowa’s form.' : 'Answer whether anyone is applying, then solve the CAPTCHA.',
+        ...(status === 'complete' ? { todo: 'Click Continue in Iowa’s form.' } : {}) };
+    }
+    if (pageId === 'personal') {
+      const scanResult = scan(doc, rawUrl);
+      const issues = personalIssues(doc.querySelector(forms.personal), doc);
+      const next = navigationButton(doc, rawUrl);
+      return { ...result, ...issues, kind: 'fillable', pageKey: 'iowa-personal-information', heading: 'Enter Personal Information', fields: scanResult.fields,
+        canAdvance: Boolean(next && issues.requiredRemaining === 0 && issues.manualRemaining === 0 && scanResult.ambiguous.length === 0),
+        todo: issues.requiredRemaining || issues.manualRemaining ? 'Complete the missing answers in Iowa’s form. SecondHand will check again before continuing.' : 'SecondHand can save this verified page and continue. Review every answer before final submission.',
+        reason: issues.manualRemaining ? 'Answer the remaining questions and correct any errors in Iowa’s form.' : issues.requiredRemaining ? 'Complete the required applicant fields in Iowa’s form.' : 'Review your answers, then click Save and Continue in Iowa’s form.' };
+    }
+    if (rawUrl === `${PORTAL}/applyForBenefits/enterPersonalInfo` || headings.includes('enter personal information')) return { ...result, pageKey: 'iowa-personal-unverified', todo: 'Review the applicant fields and continue directly in Iowa’s form.', reason: 'The expected primary-applicant form could not be verified.' };
+    const info = headings.map(heading => infoScreens[heading]).find(Boolean);
+    if (info) {
+      const ready = Boolean(continueButton(doc, info.onclick));
+      return { ...result, kind: ready ? 'info' : 'manual', pageKey: info.pageKey, heading: info.heading,
+        reason: ready ? 'Information only. SecondHand can continue for you.' : 'Read this page, then click Continue in Iowa’s form.',
+        ...(ready ? {} : { todo: 'Read this page, then click Continue in Iowa’s form.' }) };
+    }
+    const known = [
+      ['household application information', 'iowa-program-intent', 'Household Application Information', 'Answer whether anyone is applying, solve the CAPTCHA, then click Continue.'],
+      ['assisting organization or person', 'iowa-assistance', 'Assisting Organization or Person', 'If nobody is helping you, leave this blank and click Continue.'],
+      ['select address', 'iowa-select-address', 'Select Address', 'Pick the correct address, then click Continue.'],
+      ['about you', 'iowa-about-you', 'About you', 'Click Continue in Iowa’s form.']
+    ].find(([heading]) => headings.includes(heading));
+    if (known) {
+      [, result.pageKey, result.heading, result.todo] = known;
+      result.reason = result.todo;
+      if (result.pageKey === 'iowa-select-address') { result.manualRemaining = 1; result.checklist = [{ key: 'addressReview', label: 'Review and choose the correct address in Iowa’s form', status: 'manual', required: true, fillable: false }]; }
       return result;
     }
-    const scanResult = scan(doc, rawUrl);
-    const form = doc.querySelector('form#personalInformation[action="enterPersonalInfo"]');
-    const issues = personalIssues(form, doc);
-    const next = navigationButton(doc, rawUrl);
-    return { ...result, ...issues, kind: 'fillable', pageKey: 'iowa-personal-information', heading: 'Enter Personal Information', fields: scanResult.fields,
-      canAdvance: Boolean(next && issues.requiredRemaining === 0 && issues.manualRemaining === 0 && scanResult.ambiguous.length === 0),
-      reason: issues.manualRemaining ? 'Answer the remaining questions and correct any errors in Iowa’s form, then check again.' : issues.requiredRemaining ? 'Complete the required applicant fields before continuing.' : next ? 'Review all answers. Next saves this page to Iowa and opens the following step; it does not submit the application.' : 'The expected Next button was not found safely. Continue directly in Iowa’s form.' };
+    if (headings.includes('welcome')) { result.pageKey = 'iowa-home'; result.heading = 'Welcome'; result.reason = 'Choose Apply for Assistance in Iowa’s portal to begin.'; }
+    return result;
+  }
+
+  // Clicks the recorded Continue on an information-only screen, once, after re-verifying it.
+  function continuePage(doc, rawUrl) {
+    const fail = reason => ({ continued: false, reason });
+    if (!isSupportedUrl(rawUrl) || doc.location.href !== rawUrl) return fail('The page changed. Check it before continuing.');
+    const page = probePage(doc, rawUrl);
+    const info = Object.values(infoScreens).find(screen => screen.pageKey === page.pageKey);
+    if (page.kind !== 'info' || !info) return fail('This page needs you. Continue in Iowa’s form.');
+    const button = continueButton(doc, info.onclick);
+    if (!button || !scrollToField(button, doc) || doc.location.href !== rawUrl || continueButton(doc, info.onclick) !== button) return fail('Continue isn’t safely available. Click it in Iowa’s form.');
+    try { button.click(); } catch { return fail('Iowa’s Continue button didn’t respond. Click it yourself.'); }
+    return { continued: true, reason: 'Continued to the next screen.' };
+  }
+
+  // Saved profile fields a page needs, and how they become that page's answers.
+  function profileRequest(pageKey) {
+    if (pageKey === 'iowa-self-details') return ['birthDate'];
+    if (pageKey === 'iowa-personal-information') return Object.keys(definitions);
+    if (pageKey === 'iowa-program-intent') return [...programKeys];
+    return [];
+  }
+  function pageValues(pageKey, values) {
+    if (pageKey === 'iowa-self-details') return typeof values?.birthDate === 'string' ? { birthDate: values.birthDate } : {};
+    if (pageKey === 'iowa-program-intent') return programKeys.some(key => values?.[key] === 'yes') ? { householdApplyProg: 'yes' } : {};
+    return pageKey === 'iowa-personal-information' ? values : {};
   }
 
   function controlState(form) {
@@ -687,7 +789,7 @@
   // The worker uses only this union's keys for its explicit desktop grant. Each
   // page still uses its own exact selectors and recipient checks internally.
   const supportedDefinitions = Object.freeze({ ...definitions, birthDate: Object.freeze({ label: 'Date of birth' }) });
-  const api = Object.freeze({ PORTAL, definitions: supportedDefinitions, isSupportedUrl, rendered, visible, scan, fill, formatValue, focusField, probePage, captureNavigation, advance });
+  const api = Object.freeze({ PORTAL, definitions: supportedDefinitions, isSupportedUrl, rendered, visible, scan, fill, formatValue, focusField, probePage, continuePage, profileRequest, pageValues, captureNavigation, advance });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandIowa = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

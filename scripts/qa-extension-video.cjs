@@ -57,10 +57,10 @@ async function main() {
     });
     await expect.poll(() => page.frames().some(frame => frame.url() === `chrome-extension://${extensionId}/panel.html?surface=launcher`), { timeout: 15000 }).toBe(true);
     const launcher = page.frames().find(frame => frame.url() === `chrome-extension://${extensionId}/panel.html?surface=launcher`);
-    await launcher.locator('#open-side-panel').click();
+    await launcher.locator('#details').click();
     panel = await attachNativePanel(context, page, extensionId);
     await expect.poll(() => panel.text('#page-checklist'), { timeout: 15000 }).toContain('First name');
-    await expect.poll(() => panel.evaluate(() => document.querySelector('#start-auto').disabled)).toBe(false);
+    await expect.poll(() => panel.evaluate(() => document.querySelector('#panel-autofill').disabled)).toBe(false);
     await expect(page.locator('#firstName')).toHaveValue('');
 
     // Opening Chrome's native sidebar resizes its compositor surface. Discard
@@ -83,9 +83,9 @@ async function main() {
     }
     async function noNext() { assert.equal(await page.evaluate(() => window.__nextClicks), 0); }
 
-    await chapter('1. Start guided autofill with an intentionally incomplete fictional profile.', 3200);
-    await panel.click('#start-auto');
-    await expect.poll(() => panel.text('#guided-state'), { timeout: 20000 }).toBe('WAITING FOR MISSING INFORMATION');
+    await chapter('1. Start Autofill with an intentionally incomplete fictional profile.', 3200);
+    await panel.click('#panel-autofill');
+    await expect.poll(() => panel.text('[data-key="firstName"]'), { timeout: 20000 }).toContain('Needs you');
     await expect(page.locator('#lastName')).toHaveValue(syntheticProfile.lastName);
     await expect(page.locator('#addressLine1')).toHaveValue(syntheticProfile.addressLine1);
     await expect(page.locator('#mailingAddressLine1')).toHaveValue(syntheticProfile.mailingAddressLine1);
@@ -99,10 +99,10 @@ async function main() {
     await chapter('Separate mailing address filled automatically too.', 3000);
     await panel.click('[data-key="firstName"]');
     await expect.poll(() => page.evaluate(() => document.activeElement.id)).toBe('firstName');
-    await expect.poll(() => panel.text('[data-key="firstName"]')).toContain('Missing from saved profile');
+    await expect.poll(() => panel.text('[data-key="firstName"]')).toContain('Needs you');
     await chapter('2. Click a missing checklist item to focus its field in the form.', 3000);
     await page.locator('#firstName').pressSequentially(syntheticProfile.firstName, { delay: 160 });
-    await expect.poll(() => panel.text('[data-key="firstName"]')).toContain('Complete');
+    await expect.poll(() => panel.text('[data-key="firstName"]')).toContain('Done');
     await noNext();
     await chapter('First name is complete. Other required questions still need an answer.', 2200);
 
@@ -110,7 +110,7 @@ async function main() {
     await chapter('3. Acting as the fictional applicant: answer Yes to applying for benefits.', 2600);
     await page.locator('#applicant1').check();
     await expect(page.locator('#progSelection')).toBeVisible();
-    await expect.poll(() => panel.text('[data-key="programs"]'), { timeout: 15000 }).toContain('Missing required');
+    await expect.poll(() => panel.text('[data-key="programs"]'), { timeout: 15000 }).toContain('Needs you');
     await noNext();
     await panel.click('[data-key="programs"]');
     await chapter('The new program question is detected. Select SNAP for this QA applicant.', 3000);
@@ -121,16 +121,14 @@ async function main() {
     assert.equal(submitted.applicant1, true);
     assert.equal(submitted.snap, true);
     assert.equal(submitted.bestTime, syntheticProfile.bestContactTime);
-    await expect.poll(() => panel.text('#guided-state'), { timeout: 15000 }).toBe('PAUSED FOR YOUR REVIEW');
+    await expect.poll(() => panel.text('#status'), { timeout: 15000 }).toMatch(/address|review/i);
     await page.evaluate(() => window.scrollTo(0, 0));
     await panelTop();
     await chapter('4. All required answers complete: the extension clicked Next exactly once.', 3400);
     await expect(page.locator('[data-qa-only]')).toContainText('HYPOTHETICAL QA CONTROLS');
-    await expect.poll(() => panel.text('[data-key="addressReview"]')).toContain('Needs manual review');
+    await expect.poll(() => panel.text('[data-key="addressReview"]')).toContain('Do it yourself');
     await expect(page.locator('#qa-original-address')).not.toBeChecked();
     await expect(page.locator('#qa-suggested-address')).not.toBeChecked();
-    assert.equal(await panel.evaluate(() => document.querySelector('#start-auto').disabled), true);
-    assert.equal(await panel.evaluate(() => document.querySelector('#fill-next').disabled), true);
     const requestsAtPause = (await worker.evaluate(() => globalThis.__nativeSmoke.calls)).filter(call => call.type === 'getFields').length;
     await chapter('Select Address pauses for review. These example choices are hypothetical.', 3800);
     assert.deepEqual(await page.evaluate(() => ({ next: window.__nextClicks, addressNext: window.__addressNextClicks, changes: window.__addressChoiceEvents })), { next: 1, addressNext: 0, changes: 0 });
@@ -140,7 +138,7 @@ async function main() {
     await expect(page.locator('#qa-original-address')).toBeChecked();
     assert.equal(await page.evaluate(() => window.__addressChoiceEvents), 1);
     assert.equal(await page.evaluate(() => window.__addressNextClicks), 0);
-    await expect.poll(() => panel.text('#guided-state')).toBe('PAUSED FOR YOUR REVIEW');
+    await expect.poll(() => panel.text('#status')).toMatch(/address|review/i);
     await chapter('PASS: autofill, missing-answer guidance, manual choices, one Next, and review pause.', 3800);
     await panel.screenshot(path.join(outputDirectory, 'final-sidebar.png'));
     await page.screenshot({ path: path.join(outputDirectory, 'final-form.png') });

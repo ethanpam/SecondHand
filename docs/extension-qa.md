@@ -25,7 +25,7 @@ synthetic messages.
 
 The video shows these actions:
 
-1. Start guided autofill with missing first-name, applicant, and program answers.
+1. Click **Autofill** with missing first-name, applicant, and program answers.
 2. Check that home and separate mailing addresses fill from the fictional profile.
 3. Use the sidebar checklist to focus and complete the missing first name.
 4. Manually answer Yes to applying and select SNAP, acting as the fictional applicant.
@@ -40,19 +40,17 @@ includes timed chapters, assertions, and the recording's scope.
 
 The broader browser smoke additionally exercises the observed home-address
 confirmation structure using `tests/fixtures/iowa-select-address.cjs`: it chooses
-the first possible home match, advances exactly once, makes no additional profile
-request at that step, and pauses at an unsupported later page. Generated variants
+the first possible home match, advances exactly once, makes only an empty-field desktop authorization request at that step (no profile values), and pauses at an unsupported later page. Generated variants
 cover prior selections, multiple suggestions, errors, visible dialogs/county
 questions, and unsupported mailing controls. The video flow above retains the
 separate hypothetical address page to demonstrate the unverified-layout pause.
 
-The browser smoke also exercises the sanitized primary-applicant **Tell Us More** fixture: it requests only `birthDate`, formats it as `MM/DD/YYYY`, preserves manual and hidden controls, and makes zero Next clicks. Changed person phase, form, or heading prevents profile release. The sidebar exposes static checklist labels without the applicant name, birth date, or approval token.
+The browser smoke also exercises the sanitized primary-applicant **Tell Us More** fixture: it requests only `birthDate`, formats it as `MM/DD/YYYY`, preserves manual and hidden controls, and makes zero Next clicks. Changed person phase, form, or heading prevents profile release. The sidebar exposes static checklist labels without the applicant name, birth date, private navigation snapshot, or access receipt.
 
 The browser smoke also checks conditional address/program branches,
 preservation of existing answers, potentially destructive parent choices,
 full-document navigation and extension reinjection, consent pauses, per-page
-Fill & Next, lock handling, and that sidebar messages omit profile values and
-approval tokens.
+verified applicant/address Save and Continue, lock/access-revision changes, and that sidebar messages omit profile values and private navigation tokens.
 
 The applicant fixture uses sanitized metadata from the observed blank Iowa
 form. The new home-address fixture reconstructs observed controls with a public
@@ -61,6 +59,8 @@ end-to-end filing, and passing them does not mean the extension can complete an
 entire SNAP application.
 
 The separately authorized [live journey](iowa-live-journey.md) was operated manually through E-Signature and stopped with all signature controls untouched. It is not part of the isolated extension smoke or the earlier video, and it does not establish automated end-to-end filing.
+
+Earlier published isolated walkthroughs show the former **Start guided autofill** controls and session protocol. Those videos are historical evidence of that build; current scripts use **Autofill** / **Stop**, per-request native authorization, and `accessRevision` checks. They do not retroactively establish live portal behavior.
 
 ## Recording the real desktop connection
 

@@ -525,6 +525,94 @@ test('an outdated bundled extension is labelled for refresh rather than a custom
   assert.equal(view.get('extension-prepared').hidden, true);
 });
 
+test('Chrome extension view toggles autofill trust through the desktop API', async t => {
+  const calls = [];
+  const view = await renderer(t, { setAutofillTrust: async enabled => { calls.push(enabled); return { exists: true, unlocked: true, extensionId: '', bridgeRunning: true, autofillWithoutAsking: enabled }; } });
+  assert.equal(view.get('autofill-trust').checked, false);
+  view.get('autofill-trust').checked = true;
+  view.get('autofill-trust').dispatchEvent(new view.window.Event('change'));
+  await tick(); await tick();
+  assert.deepEqual(calls, [true]);
+  assert.equal(view.get('autofill-trust').checked, true);
+  assert.equal(view.get('autofill-trust').disabled, false);
+  assert.doesNotMatch(view.get('view-extension').textContent, /guided/i);
+});
+
+test('a failed trust change restores the checkbox and shows the error', async t => {
+  const view = await renderer(t, { setAutofillTrust: async () => { throw new Error('Unlock SecondHand first.'); } });
+  view.get('autofill-trust').checked = true;
+  view.get('autofill-trust').dispatchEvent(new view.window.Event('change'));
+  await tick(); await tick();
+  assert.equal(view.get('autofill-trust').checked, false);
+  assert.match(view.get('autofill-trust-error').textContent, /Unlock/);
+});
+
+test('the profile form saves household counts and household flags', async t => {
+  const view = await renderer(t);
+  view.window.document.querySelector('.nav-item[data-view="profile"]').click();
+  await tick();
+  view.edit('householdAdults', '2');
+  view.edit('householdChildren', '3');
+  view.edit('householdSeniors', '0');
+  view.get('householdVeteran').value = 'no';
+  view.get('householdVeteran').dispatchEvent(new view.window.Event('change', { bubbles: true }));
+  view.get('householdDisability').value = 'yes';
+  view.get('householdDisability').dispatchEvent(new view.window.Event('change', { bubbles: true }));
+  view.submit('profile-form');
+  await tick(); await tick();
+  assert.equal(view.database.profile.householdAdults, '2');
+  assert.equal(view.database.profile.householdChildren, '3');
+  assert.equal(view.database.profile.householdSeniors, '0');
+  assert.equal(view.database.profile.householdVeteran, 'no');
+  assert.equal(view.database.profile.householdDisability, 'yes');
+});
+
+test('the Household section saves money on hand, medical costs, and the citizenship, pregnancy, and Medicare answers', async t => {
+  const view = await renderer(t);
+  view.window.document.querySelector('.nav-item[data-view="profile"]').click();
+  await tick();
+  const household = view.get('householdSize').closest('.form-card');
+  for (const id of ['assetsOnHand', 'monthlyMedicalExpenses', 'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare']) {
+    assert.ok(household.contains(view.get(id)), `${id} is in the Household section`);
+    assert.ok(view.window.document.querySelector(`label[for="${id}"]`)?.textContent.trim(), `${id} has a label`);
+  }
+  for (const id of ['assetsOnHand', 'monthlyMedicalExpenses']) {
+    assert.equal(view.get(id).type, 'number');
+    assert.equal(view.get(id).min, '0');
+    assert.ok(view.get(id).closest('.currency-input'), `${id} is a dollar amount`);
+  }
+  view.edit('assetsOnHand', '250.75');
+  view.edit('monthlyMedicalExpenses', '0');
+  for (const [id, value] of [['householdAllCitizens', 'no'], ['householdLegalStatus', 'yes'], ['householdPregnant', 'no'], ['householdMedicare', 'yes']]) {
+    view.get(id).value = value;
+    view.get(id).dispatchEvent(new view.window.Event('change', { bubbles: true }));
+  }
+  view.submit('profile-form');
+  await tick(); await tick();
+  const { profile } = view.database;
+  assert.deepEqual([profile.assetsOnHand, profile.monthlyMedicalExpenses, profile.householdAllCitizens, profile.householdLegalStatus, profile.householdPregnant, profile.householdMedicare],
+    ['250.75', '0', 'no', 'yes', 'no', 'yes']);
+});
+
+test('trusted sites are listed with a Remove button that calls the desktop', async t => {
+  const removed = [];
+  let status = { exists: true, unlocked: true, extensionId: '', bridgeRunning: true, trustedSites: ['https://pantry.example.org', 'https://wic.example.gov'] };
+  const view = await renderer(t, {
+    status: async () => status,
+    removeTrustedSite: async origin => { removed.push(origin); status = { ...status, trustedSites: status.trustedSites.filter(site => site !== origin) }; return status; }
+  });
+  const rows = () => Array.from(view.get('trusted-sites').querySelectorAll('li'), row => row.textContent);
+  assert.deepEqual(rows().map(text => text.replace('Remove', '').trim()), ['https://pantry.example.org', 'https://wic.example.gov']);
+  view.get('trusted-sites').querySelector('button').click();
+  await tick(); await tick();
+  assert.deepEqual(removed, ['https://pantry.example.org']);
+  assert.deepEqual(rows().map(text => text.replace('Remove', '').trim()), ['https://wic.example.gov']);
+  status = { ...status, trustedSites: [] };
+  view.get('trusted-sites').querySelector('button').click();
+  await tick(); await tick();
+  assert.equal(view.get('trusted-sites-empty').hidden, false);
+});
+
 test('creating a password shows the recovery key once and requires acknowledgement before continuing', async t => {
   const created = [];
   const recoveryKey = 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789';

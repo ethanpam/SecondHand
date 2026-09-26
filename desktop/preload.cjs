@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld('secondHand', Object.freeze({
   copyExtensionFolderPath: () => invoke('copyExtensionFolderPath'),
   copyChromeExtensionsUrl: () => invoke('copyChromeExtensionsUrl'),
   connectExtension: extensionId => invoke('connectExtension', extensionId),
+  setAutofillTrust: enabled => invoke('setAutofillTrust', enabled),
+  removeTrustedSite: origin => invoke('removeTrustedSite', origin),
   exportBackup: () => invoke('exportBackup'),
   importBackup: () => invoke('importBackup'),
   onLocked: callback => {

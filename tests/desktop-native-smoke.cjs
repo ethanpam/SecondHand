@@ -19,14 +19,10 @@ const { PORTAL_URL } = require('../shared/schema.cjs');
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-native-smoke-'));
   const userData = packaged && process.platform === 'win32' ? path.join(temporary, 'SecondHand') : path.join(temporary, 'dev-data');
   const extensionId = 'a'.repeat(32);
-  const assistanceToken = 'b'.repeat(64);
   const fixtures = [
     { request: { id: 'native-smoke', type: 'status' }, data: { unlocked: false, applicationCount: 0 } },
-    { request: { id: 'start-assistance', type: 'startAssistedSession', url: PORTAL_URL, fields: ['firstName'] },
-      data: { assistanceToken, expiresAt: '2026-09-26T12:15:00.000Z', fields: ['firstName'] } },
-    { request: { id: 'assisted-fields', type: 'getFields', url: PORTAL_URL, fields: ['firstName'], assistanceToken }, data: { values: { firstName: 'Synthetic' } } },
-    { request: { id: 'check-assistance', type: 'checkAssistedSession', url: PORTAL_URL, assistanceToken }, data: { active: true } },
-    { request: { id: 'end-assistance', type: 'endAssistedSession', url: PORTAL_URL, assistanceToken }, data: { ended: true } }
+    { request: { id: 'show-app', type: 'showApp' }, data: { shown: true } },
+    { request: { id: 'fields', type: 'getFields', url: PORTAL_URL, fields: ['firstName'] }, data: { values: { firstName: 'Synthetic' } } }
   ];
   let bridge;
   let child;
