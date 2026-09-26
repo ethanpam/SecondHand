@@ -8,6 +8,10 @@ A desktop benefits companion and Chrome extension for Iowa SNAP. Your saved prof
 
 A native SwiftUI iOS companion and Safari extension are in [`ios/`](ios/README.md). Open [`ios/SecondHand.xcodeproj`](ios/SecondHand.xcodeproj) in Xcode. It provides encrypted on-device storage, renewal reminders, and a guided application assistant with saved-answer filling, explicit page continuation, separately approved submission, and user-reported confirmation capture. This is a prototype; live Iowa filing and authenticated renewal remain unverified. The iPhone and desktop vaults are independent; there is no cross-device synchronization. See the [iOS setup guide](ios/README.md) and [application pipeline](ios/docs/Application-assistant.md).
 
+## Android app
+
+A matching Kotlin/Jetpack Compose app is in [`android/`](android/README.md). Open that folder in Android Studio. It includes encrypted offline profiles and documents, notice-based reminders, and an in-app Iowa assistant with explicit page and submission approval. It reuses the laptop and iOS form engines; supported WebViews run them in an isolated JavaScript world, with manual browsing on older providers. Live Iowa filing and authenticated renewal remain unverified. See the [Android setup guide](android/README.md) and [validation record](android/docs/Validation.md).
+
 ## Install on Windows or Mac
 
 Download the Windows `.exe` installer or the Mac `.dmg` for your processor from the [secondHand download website](https://secondhand-download.khoidoan00.chatgpt.site). On Mac, drag SecondHand into Applications and launch it there before setting up Chrome. These pilot builds are unsigned and Mac builds are not notarized, so your operating system may warn or block them.
