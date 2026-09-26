@@ -59,7 +59,7 @@ GitHub Actions checks every pull request and every push to `main`:
 | Workflow | Runs when | What it checks |
 | --- | --- | --- |
 | **Verify and build** (`build.yml`) | Every pull request, `main`, and `v*` tags | Static checks and unit tests on Node 22 and 24; website lint, tests, typecheck, and build; the Chromium extension smoke test; the Electron UI and native-host tests, then Windows and Mac installers. **CI result** passes only when all of these pass. |
-| **iOS** (`ios.yml`) | Changes under `ios/` | Safari extension JavaScript tests, then native and UI tests on the newest iPhone simulator with Xcode 26. |
+| **iOS** (`ios.yml`) | Changes under `ios/` | The Safari extension and application-assistant JavaScript tests, then native and UI tests on the newest iPhone simulator with Xcode 26. |
 | **Dependency audit** (`audit.yml`) | Lockfile changes and every Monday | `npm audit` for the desktop app and website. Critical advisories fail; high ones are reported as warnings. |
 | **Workflow lint** (`workflow-lint.yml`) | Changes to workflow files | actionlint and shellcheck. |
 
