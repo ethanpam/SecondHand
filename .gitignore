@@ -1,0 +1,13 @@
+node_modules/
+release/
+artifacts/
+test-results/
+playwright-report/
+.DS_Store
+*.log
+*.vault
+*.secondhand*
+*.backup
+*.pem
+.env*
+!.env.example

@@ -1,0 +1,85 @@
+'use strict';
+const { randomUUID } = require('node:crypto');
+
+const PORTAL_URL = 'https://hhsservices.iowa.gov/apspssp/ssp.portal';
+const FIELD_LABELS = Object.freeze({
+  firstName: 'First name', middleName: 'Middle name', lastName: 'Last name',
+  birthDate: 'Date of birth', ssn: 'Social Security number', email: 'Email', phone: 'Phone',
+  addressLine1: 'Street address', addressLine2: 'Apartment or unit', city: 'City',
+  state: 'State', zip: 'ZIP code', county: 'County', householdSize: 'Household size',
+  monthlyEarnedIncome: 'Monthly earned income', monthlyOtherIncome: 'Monthly other income',
+  monthlyRent: 'Monthly rent or mortgage', monthlyUtilities: 'Monthly utilities'
+});
+const PROFILE_FIELDS = Object.freeze(Object.keys(FIELD_LABELS));
+const APPLICATION_STATUSES = Object.freeze(['draft', 'in_progress', 'submitted', 'needs_action', 'approved', 'denied']);
+
+function isPortalUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.origin === 'https://hhsservices.iowa.gov' && !url.username && !url.password &&
+      (url.pathname === '/apspssp/ssp.portal' || url.pathname.startsWith('/apspssp/ssp.portal/'));
+  } catch { return false; }
+}
+
+function object(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      ![Object.prototype, null].includes(Object.getPrototypeOf(value))) throw new Error('Expected an object.');
+}
+function text(value, name, max = 200) {
+  if (value === undefined) return '';
+  if (typeof value !== 'string' || value.length > max || /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(value)) throw new Error(`${name} is invalid.`);
+  return value.trim();
+}
+function validDate(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
+}
+function validateProfile(input) {
+  object(input);
+  if (Object.keys(input).some(key => !PROFILE_FIELDS.includes(key))) throw new Error('Unknown profile field.');
+  const result = Object.fromEntries(PROFILE_FIELDS.map(key => [key, text(input[key], FIELD_LABELS[key])]));
+  if (result.birthDate && (!validDate(result.birthDate) || result.birthDate > new Date().toISOString().slice(0, 10))) throw new Error('Enter a valid date of birth.');
+  if (result.ssn && !/^\d{3}-?\d{2}-?\d{4}$/.test(result.ssn)) throw new Error('Enter a nine-digit Social Security number or leave it blank.');
+  if (result.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(result.email)) throw new Error('Enter a valid email address.');
+  if (result.phone && !/^[+\d\s().-]{7,30}$/.test(result.phone)) throw new Error('Enter a valid phone number.');
+  if (result.zip && !/^\d{5}(-\d{4})?$/.test(result.zip)) throw new Error('Enter a five- or nine-digit ZIP code.');
+  if (result.state && !/^[A-Za-z]{2}$/.test(result.state)) throw new Error('Use a two-letter state abbreviation.');
+  result.state = result.state.toUpperCase();
+  if (result.householdSize && !/^[1-9]\d?$/.test(result.householdSize)) throw new Error('Household size must be a whole number from 1 to 99.');
+  for (const field of ['monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities']) {
+    if (result[field] && !/^\d{1,8}(\.\d{1,2})?$/.test(result[field])) throw new Error(`${FIELD_LABELS[field]} must be a nonnegative dollar amount, or blank if unknown.`);
+  }
+  return result;
+}
+
+function validateApplication(input, existing) {
+  object(input);
+  const allowed = ['id', 'program', 'status', 'createdAt', 'updatedAt', 'confirmationNumber', 'notes', 'nextAction', 'dueDate'];
+  if (Object.keys(input).some(key => !allowed.includes(key))) throw new Error('Unknown application field.');
+  if (input.id && (typeof input.id !== 'string' || !/^[a-f\d-]{36}$/i.test(input.id))) throw new Error('Invalid application ID.');
+  if (input.program && input.program !== 'Iowa SNAP') throw new Error('Only Iowa SNAP is supported.');
+  const status = input.status || 'draft';
+  if (!APPLICATION_STATUSES.includes(status)) throw new Error('Invalid application status.');
+  const confirmationNumber = text(input.confirmationNumber, 'Confirmation number', 150);
+  if (status === 'submitted' && !confirmationNumber) throw new Error('Add the portal confirmation number before marking an application submitted.');
+  const dueDate = text(input.dueDate, 'Due date', 10);
+  if (dueDate && !validDate(dueDate)) throw new Error('Enter a valid due date.');
+  const now = new Date().toISOString();
+  return {
+    id: existing?.id || input.id || randomUUID(), program: 'Iowa SNAP', status,
+    createdAt: existing?.createdAt || now, updatedAt: now, confirmationNumber,
+    notes: text(input.notes, 'Notes', 5000), nextAction: text(input.nextAction, 'Next action', 500), dueDate
+  };
+}
+
+function validateStoredApplication(input) {
+  object(input);
+  if (!input.id || !input.createdAt || !input.updatedAt) throw new Error('Incomplete stored application.');
+  for (const field of ['createdAt', 'updatedAt']) {
+    const value = input[field];
+    if (typeof value !== 'string' || value.length !== 24 || Number.isNaN(Date.parse(value)) || new Date(value).toISOString() !== value) throw new Error('Invalid application timestamp.');
+  }
+  if (input.updatedAt < input.createdAt) throw new Error('Invalid application chronology.');
+  return { ...validateApplication(input), createdAt: input.createdAt, updatedAt: input.updatedAt };
+}
+
+module.exports = { PORTAL_URL, FIELD_LABELS, PROFILE_FIELDS, APPLICATION_STATUSES, isPortalUrl, validateProfile, validateApplication, validateStoredApplication };

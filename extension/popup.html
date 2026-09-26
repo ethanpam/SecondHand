@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SecondHand companion</title><link rel="stylesheet" href="popup.css"></head>
+<body>
+  <header><span class="brand-mark" aria-hidden="true">s.</span><div><strong>SecondHand</strong><span class="eyebrow">IOWA SNAP COMPANION</span></div><span class="local">On device</span></header>
+  <main>
+    <h1>A little help<br>with the paperwork.</h1>
+    <p>Use your local profile to fill supported fields on Iowa’s benefits portal. You stay in control.</p>
+    <div class="notice">Early preview: primary applicant fields only. Iowa’s complete application flow still needs live validation.</div>
+    <div id="status" class="status" role="status" aria-live="polite">Open an Iowa application to get started.</div>
+    <button id="scan" class="primary">Scan this page <span aria-hidden="true">↗</span></button>
+    <section id="preview" hidden aria-labelledby="preview-heading">
+      <h2 id="preview-heading">Fields ready for your review</h2>
+      <p class="small">Only empty, visible, uniquely matched fields appear. Scroll in Iowa’s form and scan again to see more.</p>
+      <div id="fields"></div>
+      <label class="confirm"><input id="confirm" type="checkbox"><span>I checked these fields belong to the primary applicant and want to share the selected information with Iowa HHS.</span></label>
+      <button id="fill" class="primary" disabled>Approve in desktop &amp; fill</button>
+      <p class="small">The desktop app will ask for permission. This popup may close; reopen it to see the result.</p>
+    </section>
+    <p class="small privacy">Iowa may save answers as they are entered. Check every answer, finish the remaining questions, sign, and submit yourself.</p>
+    <a href="https://hhsservices.iowa.gov/apspssp/ssp.portal" target="_blank" rel="noopener noreferrer">Open Iowa’s official portal ↗</a>
+  </main>
+  <footer><details><summary>Connect to your desktop app</summary><p>Load this folder as an unpacked Chrome extension, then paste this ID in SecondHand → Connect Chrome.</p><code id="extension-id"></code><p>Keep your vault unlocked while filling. SecondHand stores no applicant information in this extension or Chrome Sync.</p></details></footer>
+  <script src="iowa-adapter.js"></script><script src="popup.js"></script>
+</body>
+</html>
