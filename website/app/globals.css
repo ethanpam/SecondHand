@@ -9,6 +9,8 @@
   --border: #d7e1d6;
   --ring: #337d5b;
   --radius: 0.75rem;
+  --font-sans: "Instrument Sans Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 * {
   box-sizing: border-box;
@@ -21,7 +23,7 @@ body {
   margin: 0;
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
   font-size: 16px;
   line-height: 1.65;
 }
@@ -76,7 +78,7 @@ summary:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-family: Georgia, serif;
+  font-family: var(--font-sans);
   font-weight: bold;
   font-size: 24px;
   letter-spacing: -2px;
@@ -100,7 +102,7 @@ nav a:hover,
   align-items: center;
 }
 h1 {
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--font-sans);
   font-size: clamp(38px, 4.5vw, 57px);
   line-height: 1.1;
   font-weight: 400;
@@ -328,7 +330,7 @@ h2 {
   padding-top: 24px;
 }
 .step-number {
-  font-family: Georgia, serif;
+  font-family: var(--font-sans);
   color: #668b61;
   font-size: 24px;
   display: block;
@@ -383,6 +385,7 @@ summary {
 }
 code,
 kbd {
+  font-family: var(--font-mono);
   font-size: 12px;
   background: #e8eee5;
   padding: 2px 4px;
@@ -428,7 +431,7 @@ kbd {
   border-top: 1px solid var(--border);
 }
 .privacy-section h2 {
-  font-family: Georgia, serif;
+  font-family: var(--font-sans);
   font-size: 35px;
   font-weight: 400;
   line-height: 1.25;

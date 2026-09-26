@@ -1,4 +1,7 @@
 import type { Metadata } from 'next';
+// Self-hosted fonts: no requests to outside font services.
+import '@fontsource-variable/instrument-sans';
+import '@fontsource-variable/jetbrains-mono';
 import './globals.css';
 import { siteUrl } from './site';
 export const metadata: Metadata = {
