@@ -76,7 +76,7 @@
           return;
         }
         const result = withOwnPanelHidden(() => engine.fillFields(document, message.token, message.assignments, message.values));
-        respond({ ok: result?.ok === true, filled: strings(result?.filled), skipped: strings(result?.skipped) });
+        respond({ ok: result?.ok === true, filled: strings(result?.filled), skipped: strings(result?.skipped), rejected: strings(result?.rejected) });
       } else if (message.type === 'secondhand:generic:focus' && typeof message.id === 'string') {
         respond({ focused: Boolean(withOwnPanelHidden(() => engine.focusField(document, message.id))) });
       }

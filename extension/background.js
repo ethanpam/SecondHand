@@ -325,6 +325,7 @@ async function fillPlan(tabId, url, plan, planned = ruleAssignments(plan)) {
     const keys = planned.length ? [...new Set(SecondHandGeneric.requestKeys(planned.map(item => item.key)))] : [];
     if (keys.some(key => typeof key !== 'string' || !KEY.test(key))) throw new Error('SecondHand could not prepare the field request.');
     let filled = 0;
+    const refused = new Map(); // key -> id of the question whose page refused that saved answer
     if (keys.length) {
       const desktop = await nativeRequest('status');
       if (!desktop?.unlocked) throw new Error('Unlock SecondHand to autofill.');
@@ -333,14 +334,16 @@ async function fillPlan(tabId, url, plan, planned = ruleAssignments(plan)) {
       values = SecondHandGeneric.deriveValues(response.values);
       for (let pass = 1; ; pass++) {
         // A revealed question whose key wasn't requested stays with the applicant.
-        const assignments = planned.filter(({ key }) => typeof values[key] === 'string' && values[key]);
+        const assignments = planned.filter(({ key }) => !refused.has(key) && typeof values[key] === 'string' && values[key]);
         if (!assignments.length) break;
         const current = await chrome.tabs.get(tabId);
         if (current.url !== url || !current.active) throw new Error('The page changed. Click Autofill again.');
         // Only the values being placed go to the page.
         const placing = Object.fromEntries(assignments.map(({ key }) => [key, values[key]]));
         const result = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:fill', token: plan.token, assignments, values: placing }, { frameId: 0 });
-        if (!result?.ok || !Array.isArray(result.filled)) throw new Error('This page couldn’t be filled safely. Fill it yourself.');
+        if (!result?.ok || !Array.isArray(result.filled) || !Array.isArray(result.rejected)) throw new Error('This page couldn’t be filled safely. Fill it yourself.');
+        // The page flagged these answers: they need the applicant and aren't tried again this click.
+        for (const { id, key } of assignments) if (result.rejected.includes(id)) refused.set(key, id);
         const placed = assignments.filter(({ id }) => result.filled.includes(id)).length;
         if (!placed) break;
         filled += placed;
@@ -351,8 +354,11 @@ async function fillPlan(tabId, url, plan, planned = ruleAssignments(plan)) {
       }
       values = null;
     }
-    // Whatever the latest plan still lists needs the applicant, under that plan's ids.
-    return { filled, needYou: [...plan.unmatched, ...plan.matched].map(field => field.id) };
+    // Whatever the latest plan still lists needs the applicant, under that plan's ids. A refused
+    // choice stays chosen, so a later plan leaves it out: it keeps the id it was refused under.
+    const needYou = [...plan.unmatched, ...plan.matched].map(field => field.id);
+    for (const [key, id] of refused) if (!needYou.includes(id) && !plan.matched.some(field => field.key === key)) needYou.push(id);
+    return { filled, needYou };
   } finally { values = null; }
 }
 

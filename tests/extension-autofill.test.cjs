@@ -35,9 +35,11 @@ function generalPage(message, plan) {
   }
   if (message.type === 'secondhand:generic:fill') {
     if (message.token !== plan.token) return { ok: false, filled: [], skipped: [] };
-    const filled = message.assignments.filter(item => message.values[item.key]).map(item => item.id);
+    const refuses = new Set([...(plan.matched || []), ...(plan.unmatched || [])].filter(field => field.rejects).map(field => field.id));
+    const rejected = message.assignments.filter(item => message.values[item.key] && refuses.has(item.id)).map(item => item.id);
+    const filled = message.assignments.filter(item => message.values[item.key] && !refuses.has(item.id)).map(item => item.id);
     filled.forEach(id => answered.add(id));
-    return { ok: true, filled, skipped: message.assignments.map(item => item.id).filter(id => !filled.includes(id)) };
+    return { ok: true, filled, skipped: message.assignments.map(item => item.id).filter(id => !filled.includes(id) && !rejected.includes(id)), rejected };
   }
   if (message.type === 'secondhand:generic:focus') return { focused: message.id === 'sh-1-3' };
   return undefined;
@@ -244,6 +246,17 @@ test('an unknown Iowa page fills questions its answers reveal in the same click,
   assert.equal(result.message, 'Filled 3 · 3 need you. Check your answers, then click Continue.');
   assert.equal(w.calls.content.some(message => message.type === 'secondhand:continue'), false);
   assert.doesNotMatch(JSON.stringify(w.calls.content), /700/);
+});
+
+test('an answer an unknown Iowa page refuses needs the applicant and is not counted as filled', async () => {
+  const plan = financialPlan();
+  plan.matched[0].rejects = true;
+  const w = worker({ kind: 'manual', engine: generalEngine, general: plan, desktop: { values: financialValues } });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.filled, 1);
+  assert.deepEqual(result.needYou, ['sh-1-3', 'sh-1-0', 'sh-1-2']);
+  assert.equal(result.message, 'Filled 1 · 3 need you. Check your answers, then click Continue.');
+  assert.equal(w.calls.content.filter(message => message.type === 'secondhand:generic:fill').length, 1, 'a refused answer is not tried again');
 });
 
 test('need-you on a general-filled Iowa page focuses the general engine’s field; Iowa keys still go to the Iowa adapter', async () => {

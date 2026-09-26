@@ -53,14 +53,16 @@ function sitePage(fields, { next = false } = {}) {
     },
     fill({ token, assignments, values }) {
       if (token !== current?.token) return { ok: false, filled: [], skipped: [] };
-      const filled = [];
+      const filled = [], rejected = [];
       for (const { id, key, guessed } of assignments) {
         const field = current.ids.get(id);
         if (!field || field.answered || field.refuses || !values[key]) continue;
+        // The page flags the answer: the engine clears a text box, but a chosen option stays chosen.
+        if (field.rejects) { rejected.push(id); if (field.choice) field.answered = values[key]; continue; }
         field.answered = values[key]; field.mark = guessed ? 'guess' : 'rule';
         filled.push(id);
       }
-      return { ok: true, filled, skipped: assignments.map(item => item.id).filter(id => !filled.includes(id)) };
+      return { ok: true, filled, skipped: assignments.map(item => item.id).filter(id => !filled.includes(id) && !rejected.includes(id)), rejected };
     },
     focus: id => Boolean(current?.ids.has(id)),
     // The id a field has in the latest plan.
@@ -285,6 +287,23 @@ test('answers that reveal more questions are filled in the same click from one d
   assert.ok(result.needYou.every(id => id.startsWith('sh-3-')), 'need-you ids come from the latest plan');
   assert.match(result.message, /^Filled 3 · 3 need you\./);
   assert.doesNotMatch(JSON.stringify(w.content), /5155550100/);
+});
+
+test('answers the page refuses are listed as need-you, not filled, and not tried again in the same click', async () => {
+  const fields = [{ name: 'name', key: 'fullName' }, { name: 'zip', key: 'zip', rejects: true }, { name: 'vet', key: 'householdVeteran', rejects: true, choice: true }, { ...PICKUP }];
+  const w = siteWorker({ enabled: true, fields, desktop: { values: { firstName: 'Synthetic private first', lastName: 'Synthetic private last', zip: '5030', householdVeteran: 'no' } } });
+  const result = plain((await autofill(w)).data);
+  const fills = w.content.filter(call => call.type === 'secondhand:generic:fill');
+  assert.equal(fills.length, 1, 'refused answers are not retried');
+  assert.equal(result.filled, 1);
+  // The cleared ZIP box is back in the latest plan; the chosen veteran option keeps its first id.
+  assert.deepEqual(result.needYou, [w.page.idOf('pickup'), w.page.idOf('zip'), 'sh-1-2']);
+  assert.equal(result.message, 'Filled 1 · 3 need you. Check your answers before you submit.');
+
+  const alone = siteWorker({ enabled: true, fields: [{ name: 'zip', key: 'zip', rejects: true }], desktop: { values: { zip: '5030' } } });
+  const refused = plain((await autofill(alone)).data);
+  assert.equal(refused.filled, 0);
+  assert.deepEqual(refused.needYou, ['sh-1-0']);
 });
 
 test('one click fills at most four passes of revealed questions', async () => {
@@ -547,7 +566,7 @@ function siteContent(t, { url = SITE_URL, engine = true } = {}) {
       fillFields: (doc, token, assignments, values) => {
         calls.push({ token, assignments: plain(assignments), values: plain(values) });
         doc.getElementById('name').value = values.fullName;
-        return { ok: true, filled: ['sh-1'], skipped: [], values };
+        return { ok: true, filled: ['sh-1'], skipped: [], rejected: ['sh-2'], values };
       },
       focusField: (doc, id) => { calls.push(`focus:${id}`); if (id !== 'sh-2') return false; doc.getElementById('day').focus(); return true; }
     };
@@ -589,7 +608,7 @@ test('site plans and fills answer with field metadata only, never values or elem
   assert.deepEqual(plain(plan), { token: 'plan-1', matched: [{ id: 'sh-1', key: 'fullName', confidence: 'high' }],
     unmatched: [{ id: 'sh-2', label: 'Pickup day', type: 'select-one', options: ['Monday'], required: true }] });
   const filled = page.request({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [{ id: 'sh-1', key: 'fullName', guessed: false }], values: { fullName: 'Synthetic private name' } });
-  assert.deepEqual(plain(filled), { ok: true, filled: ['sh-1'], skipped: [] });
+  assert.deepEqual(plain(filled), { ok: true, filled: ['sh-1'], skipped: [], rejected: ['sh-2'] }, 'answers the page refused come back');
   assert.deepEqual(page.calls[1], { token: 'plan-1', assignments: [{ id: 'sh-1', key: 'fullName', guessed: false }], values: { fullName: 'Synthetic private name' } });
   assert.equal(page.window.document.getElementById('name').value, 'Synthetic private name');
   assert.doesNotMatch(JSON.stringify([plan, filled]), /Synthetic private/);
