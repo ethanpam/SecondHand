@@ -1,10 +1,19 @@
 name: Verify and build
+# Pushes to feature branches are covered by their pull request, so only main
+# and release tags run on push. This avoids running every job twice.
 on:
   push:
+    branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 permissions:
   contents: read
+# A newer commit on the same pull request cancels the older run. Runs on main
+# and tags always finish so every merged commit and release is verified.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   website:
     name: Download website
