@@ -6,8 +6,13 @@ Runtime: Electron desktop, plain HTML/CSS/JavaScript renderer, Manifest V3 Chrom
 
 `window.secondHand` exposes async methods returning plain values or throwing sanitized errors:
 
-- `status()` -> `{ exists, unlocked, lockRevision, extensionId, bridgeRunning, platform, extensionSetup }`; setup contains `{ directory, extensionId, version, prepared }`, or `{ prepared: false, available: false }` if bundled assets are unavailable
-- `createVault(passphrase)` / `unlock(passphrase)` -> status
+- `status()` -> `{ exists, unlocked, lockRevision, recoveryKey, deviceReset, deviceResetSupported, extensionId, bridgeRunning, platform, extensionSetup }`; setup contains `{ directory, extensionId, version, prepared }`, or `{ prepared: false, available: false }` if bundled assets are unavailable
+- `createVault({ password, allowDeviceReset })` -> `{ status, recoveryKey, deviceResetFailed }`; the recovery key is returned once and never stored
+- `unlock(password)` -> status
+- `resetPassword({ recoveryKey, password } | { method: 'device', password })` -> status (unlocked with the new password)
+- `replaceRecoveryKey()` -> `{ recoveryKey }` (unlocked only; retires the previous key)
+- `setDeviceReset(enabled)` -> status (unlocked only)
+- `saveRecoveryKey(recoveryKey)` -> `{ cancelled }` / `copyRecoveryKey(recoveryKey)` -> true
 - `lock()` -> status
 - `getData()` -> `{ profile, applications }`
 - `saveProfile(profile)` -> saved profile

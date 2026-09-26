@@ -404,6 +404,38 @@ test('a profile load completed after a lock cannot show an unlocked workspace', 
   assert.equal(view.get('auth-view').hidden, false);
 });
 
+test('slow buttons show a ring loader only while their work is in progress', async t => {
+  const unlocking = deferred();
+  const saving = deferred();
+  let status = { exists: true, unlocked: false, recoveryKey: true, extensionId: '', bridgeRunning: true };
+  const view = await renderer(t, {
+    status: async () => status,
+    unlock: async () => { await unlocking.promise; status = { ...status, unlocked: true }; return status; },
+    saveProfile: () => saving.promise
+  });
+  const button = view.get('auth-submit');
+  assert.equal(button.querySelector('.loader'), null);
+  view.edit('passphrase', 'synthetic long password');
+  view.submit('auth-form');
+  await tick();
+  assert.equal(button.getAttribute('aria-busy'), 'true');
+  assert.equal(button.querySelectorAll('.loader').length, 1);
+  assert.equal(button.querySelector('.loader').getAttribute('aria-hidden'), 'true');
+  unlocking.resolve();
+  await tick(); await tick();
+  assert.equal(view.get('workspace').hidden, false);
+  assert.equal(button.querySelector('.loader'), null);
+  assert.equal(button.hasAttribute('aria-busy'), false);
+
+  // Quick actions without data-loader keep their plain busy state.
+  view.submit('profile-form');
+  await tick();
+  assert.equal(view.get('save-profile').getAttribute('aria-busy'), 'true');
+  assert.equal(view.get('save-profile').querySelector('.loader'), null);
+  saving.resolve({});
+  await tick();
+});
+
 test('extension preparation shows manual Chrome steps and uses fixed path-copy API without an ID paste', async t => {
   let prepared = 0;
   let copied = 0;
@@ -437,4 +469,124 @@ test('an outdated bundled extension is labelled for refresh rather than a custom
   assert.equal(view.get('extension-status').textContent, 'Setup needs refresh');
   assert.match(view.get('prepare-extension').textContent, /Refresh extension files/);
   assert.equal(view.get('extension-prepared').hidden, true);
+});
+
+test('creating a password shows the recovery key once and requires acknowledgement before continuing', async t => {
+  const created = [];
+  const recoveryKey = 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789';
+  const view = await renderer(t, {
+    status: async () => ({ exists: false, unlocked: false, recoveryKey: false, deviceResetSupported: true, extensionId: '', bridgeRunning: true }),
+    createVault: async request => {
+      created.push({ ...request });
+      return { status: { exists: true, unlocked: true, recoveryKey: true, extensionId: '', bridgeRunning: true }, recoveryKey };
+    }
+  });
+  assert.equal(view.get('forgot-password').hidden, true);
+  assert.equal(view.get('device-reset-field').hidden, false);
+  assert.equal(view.get('allow-device-reset').checked, true);
+  view.edit('passphrase', 'synthetic long password');
+  view.edit('confirm-passphrase', 'synthetic long password');
+  view.submit('auth-form');
+  await tick(); await tick();
+  assert.deepEqual(created, [{ password: 'synthetic long password', allowDeviceReset: true }]);
+  assert.equal(view.get('workspace').hidden, false);
+  assert.equal(view.get('recovery-dialog').open, true);
+  assert.equal(view.get('recovery-key-value').textContent, recoveryKey);
+  assert.equal(view.get('recovery-reminder').hidden, true);
+
+  const cancel = new view.window.Event('cancel', { cancelable: true });
+  view.get('recovery-dialog').dispatchEvent(cancel);
+  assert.equal(cancel.defaultPrevented, true);
+  assert.equal(view.get('recovery-done').disabled, true);
+  view.get('recovery-saved').checked = true;
+  view.get('recovery-saved').dispatchEvent(new view.window.Event('change'));
+  assert.equal(view.get('recovery-done').disabled, false);
+  view.get('recovery-done').click();
+  assert.equal(view.get('recovery-dialog').open, false);
+});
+
+test('forgot password resets with a recovery key, and older saved information explains why it cannot', async t => {
+  const resets = [];
+  let status = { exists: true, unlocked: false, recoveryKey: true, extensionId: '', bridgeRunning: true };
+  const view = await renderer(t, {
+    status: async () => status,
+    resetPassword: async request => {
+      resets.push({ ...request });
+      if (request.recoveryKey !== 'good key') throw new Error('That recovery key didn’t work. Check it and try again.');
+      status = { ...status, unlocked: true };
+      return status;
+    }
+  });
+  assert.equal(view.get('forgot-password').hidden, false);
+  view.get('forgot-password').click();
+  assert.equal(view.get('auth-form').hidden, true);
+  assert.equal(view.get('reset-form').hidden, false);
+  assert.equal(view.get('reset-fields').hidden, false);
+  assert.equal(view.get('auth-title').textContent, 'Reset your password');
+
+  view.edit('recovery-key-input', 'bad key');
+  view.edit('reset-password', 'new synthetic password');
+  view.edit('reset-confirm', 'different synthetic password');
+  view.submit('reset-form');
+  await tick();
+  assert.match(view.get('reset-error').textContent, /don’t match/);
+  assert.equal(resets.length, 0);
+
+  view.edit('reset-confirm', 'new synthetic password');
+  view.submit('reset-form');
+  await tick();
+  assert.match(view.get('reset-error').textContent, /didn’t work/);
+  assert.equal(view.get('reset-password').value, '');
+
+  view.edit('recovery-key-input', 'good key');
+  view.edit('reset-password', 'new synthetic password');
+  view.edit('reset-confirm', 'new synthetic password');
+  view.submit('reset-form');
+  await tick(); await tick();
+  assert.deepEqual(resets.at(-1), { recoveryKey: 'good key', password: 'new synthetic password' });
+  assert.equal(view.get('workspace').hidden, false);
+  assert.equal(view.get('recovery-key-input').value, '');
+
+  view.lock();
+  assert.equal(view.get('reset-form').hidden, true);
+  assert.equal(view.get('auth-form').hidden, false);
+
+  const older = await renderer(t, { status: async () => ({ exists: true, unlocked: false, recoveryKey: false, extensionId: '', bridgeRunning: true }) });
+  older.get('forgot-password').click();
+  assert.equal(older.get('reset-fields').hidden, true);
+  assert.equal(older.get('reset-submit').hidden, true);
+  assert.equal(older.get('reset-unavailable').hidden, false);
+  older.get('reset-cancel').click();
+  assert.equal(older.get('auth-form').hidden, false);
+  assert.equal(older.get('auth-title').textContent, 'Welcome back');
+});
+
+test('reset on this computer skips the recovery key, and either method can be chosen when both exist', async t => {
+  const resets = [];
+  const view = await renderer(t, {
+    status: async () => ({ exists: true, unlocked: false, recoveryKey: true, deviceReset: true, deviceResetSupported: true, extensionId: '', bridgeRunning: true }),
+    resetPassword: async request => { resets.push({ ...request }); throw new Error('This computer can’t reset this password. Use your recovery key instead.'); }
+  });
+  view.get('forgot-password').click();
+  assert.equal(view.get('reset-method').hidden, false);
+  assert.equal(view.get('reset-method-device').checked, true);
+  assert.equal(view.get('recovery-key-field').hidden, true);
+  assert.equal(view.get('recovery-key-input').required, false);
+  view.edit('reset-password', 'new synthetic password');
+  view.edit('reset-confirm', 'new synthetic password');
+  view.submit('reset-form');
+  await tick();
+  assert.deepEqual(resets, [{ method: 'device', password: 'new synthetic password' }]);
+  assert.match(view.get('reset-error').textContent, /Use your recovery key/);
+
+  view.get('reset-method-recovery').checked = true;
+  view.get('reset-method-recovery').dispatchEvent(new view.window.Event('change'));
+  assert.equal(view.get('recovery-key-field').hidden, false);
+  assert.equal(view.get('recovery-key-input').required, true);
+  view.edit('recovery-key-input', 'typed key');
+  view.edit('reset-password', 'new synthetic password');
+  view.edit('reset-confirm', 'new synthetic password');
+  view.submit('reset-form');
+  await tick();
+  assert.deepEqual(resets.at(-1), { recoveryKey: 'typed key', password: 'new synthetic password' });
 });

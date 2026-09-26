@@ -226,7 +226,7 @@
       if (serial !== actionSerial || revision !== contextRevision) return;
       if (kind === 'desktop') {
         const connected = result?.connected !== false;
-        $('desktop-status').textContent = !connected ? 'Open SecondHand and prepare its Chrome extension.' : result?.unlocked ? 'Vault unlocked. Ready for your approval.' : 'Open SecondHand and unlock your vault.';
+        $('desktop-status').textContent = !connected ? 'Open SecondHand and prepare its Chrome extension.' : result?.unlocked ? 'SecondHand is unlocked. Ready for your approval.' : 'Open SecondHand and unlock it.';
         $('desktop-status').parentElement.classList.toggle('error', !connected || !result?.unlocked);
       }
       if (result?.message) show(result.message, Boolean(result.error));
@@ -236,7 +236,7 @@
     } catch (error) {
       if (serial === actionSerial && revision === contextRevision) {
         show(error.message, true);
-        if (kind === 'desktop') { $('desktop-status').textContent = 'Open SecondHand, prepare the extension, and unlock your vault.'; $('desktop-status').parentElement.classList.add('error'); }
+        if (kind === 'desktop') { $('desktop-status').textContent = 'Open SecondHand, prepare the extension, and unlock it.'; $('desktop-status').parentElement.classList.add('error'); }
       }
     } finally {
       if (serial === actionSerial) { working = false; activeAction = ''; controls(); schedulePoll(); }

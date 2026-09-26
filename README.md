@@ -8,11 +8,15 @@ A desktop benefits companion and Chrome extension for Iowa SNAP. Your saved prof
 
 A native SwiftUI iOS companion and Safari extension are in [`ios/`](ios/README.md). Open [`ios/SecondHand.xcodeproj`](ios/SecondHand.xcodeproj) in Xcode. It provides encrypted on-device storage, renewal reminders, and a guided application assistant with saved-answer filling, explicit page continuation, separately approved submission, and user-reported confirmation capture. This is a prototype; live Iowa filing and authenticated renewal remain unverified. The iPhone and desktop vaults are independent; there is no cross-device synchronization. See the [iOS setup guide](ios/README.md) and [application pipeline](ios/docs/Application-assistant.md).
 
+## Android app
+
+A matching Kotlin/Jetpack Compose app is in [`android/`](android/README.md). Open that folder in Android Studio. It includes encrypted offline profiles and documents, notice-based reminders, and an in-app Iowa assistant with explicit page and submission approval. It reuses the laptop and iOS form engines; supported WebViews run them in an isolated JavaScript world, with manual browsing on older providers. Live Iowa filing and authenticated renewal remain unverified. See the [Android setup guide](android/README.md) and [validation record](android/docs/Validation.md).
+
 ## Install on Windows or Mac
 
 Download the Windows `.exe` installer or the Mac `.dmg` for your processor from the [secondHand download website](https://secondhand-download.khoidoan00.chatgpt.site). On Mac, drag SecondHand into Applications and launch it there before setting up Chrome. These pilot builds are unsigned and Mac builds are not notarized, so your operating system may warn or block them.
 
-1. Open SecondHand and create your local vault. Keep your passphrase safe; there is no online reset.
+1. Open SecondHand and create a password. Save the recovery key it shows you somewhere safe, away from the computer. If you forget your password, choose **Forgot password?** and use that key, or reset it on the same computer if you left **Let this computer reset my password** on.
 2. In **Chrome extension**, choose **Prepare Chrome extension**. The app prepares a permanent folder and registers its local connection automatically.
 3. In Chrome, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select that folder. Use the app's **Copy folder path** button to locate it. No extension ID copying or command line is needed.
 4. Save your profile, keep the app unlocked, and open [Iowa's portal](https://hhsservices.iowa.gov/apspssp/ssp.portal) in Chrome. Use Chrome 116 or newer. Click **Open assistant** on the page or SecondHand’s toolbar icon to open the browser side panel. On the supported applicant page, choose **Fill this page**, **Fill & Next**, or **Start guided autofill**, then approve the request in the desktop app. Guided mode requires explicit approval for a session lasting up to **15 minutes**.
@@ -58,7 +62,7 @@ GitHub Actions runs syntax/security configuration checks, unit/integration tests
 - The desktop app is the sole persistent owner of applicant data. Chrome extension storage and Chrome Sync are not used for applicant information.
 - Filling a field shares it with Iowa's website. The website can read or autosave values before you click Submit, and ordinary **Save and Continue** saves page answers. Desktop approval occurs **before filling**; a guided approval covers only the listed profile fields and verified Next actions for up to 15 minutes. It does not authorize consent, signatures, or final submission.
 - The extension is restricted to Iowa's supported HTTPS portal, requests only recognized fields on the current page, and never fills passwords, verification codes, signatures, or unknown household members.
-- An encrypted backup is the portable recovery mechanism. Backups still require the original passphrase. Keep them off cloud-synced folders if you want all copies offline.
+- An encrypted backup is the portable copy of your information. A backup opens with the password or recovery key it was saved with. Keep backups off cloud-synced folders if you want all copies offline.
 - This does not protect an unlocked computer from malware, malicious same-user processes, browser extensions reading Iowa's page, OS backups/crash dumps, or government-side storage. Read [the security design](docs/security.md).
 
 ## Project layout

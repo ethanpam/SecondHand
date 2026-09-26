@@ -31,7 +31,7 @@ function nativeRequest(type, payload = {}) {
       });
       port.onDisconnect.addListener(() => {
         void chrome.runtime.lastError;
-        finish('Cannot reach SecondHand. Prepare or refresh the Chrome extension in the desktop app, and keep your vault unlocked.');
+        finish('Cannot reach SecondHand. Prepare or refresh the Chrome extension in the desktop app, and keep SecondHand unlocked.');
       });
       port.postMessage({ id, type, ...payload });
     } catch { finish('Cannot reach SecondHand. Check the desktop app and extension connection.'); }
