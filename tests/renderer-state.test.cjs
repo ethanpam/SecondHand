@@ -48,7 +48,10 @@ async function renderer(t, overrides = {}) {
       get(id).dispatchEvent(new window.Event('input', { bubbles: true }));
     },
     submit(id) { get(id).dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); },
-    lock() { status = { ...status, unlocked: false }; onLocked(); }
+    lock(lockRevision) {
+      status = { ...status, unlocked: false, lockRevision };
+      onLocked(lockRevision === undefined ? undefined : { lockRevision });
+    }
   };
 }
 
@@ -134,7 +137,7 @@ test('new profile choices default to unknown, save explicit no, and clear with a
   assert.equal(view.get('programFip').value, 'no');
   assert.equal(view.get('mailingSameAsHome').value, 'no');
   assert.equal(view.get('mailingAddressLine1').value, 'PO Box 123');
-  assert.equal(view.get('addressLine1').value, '123 Test Way');
+  assert.equal(view.get('addressLine1').value, fictionalProfile.addressLine1);
   view.lock();
   for (const field of PROFILE_FIELDS) assert.equal(view.get(field).value, '', field);
 });
@@ -193,6 +196,187 @@ test('a delayed manual lock response cannot clear a passphrase entered after the
   assert.equal(view.get('auth-error').hidden, false);
   assert.match(view.get('auth-error').textContent, /Unable to unlock/);
   assert.equal(view.get('workspace').hidden, true);
+});
+
+test('a delayed lock notification cannot clear a passphrase entered after the manual lock response', async t => {
+  const completion = deferred();
+  const attemptedPassphrases = [];
+  const view = await renderer(t, {
+    lock: () => completion.promise,
+    unlock: async passphrase => {
+      attemptedPassphrases.push(passphrase);
+      throw new Error('Unable to unlock the local vault.');
+    }
+  });
+  view.get('lock-button').click();
+  completion.resolve({ exists: true, unlocked: false, lockRevision: 1, extensionId: '', bridgeRunning: true });
+  await tick();
+  assert.equal(view.get('auth-view').hidden, false);
+  view.edit('passphrase', 'incorrect-synthetic-passphrase');
+  view.lock(1);
+  assert.equal(view.get('passphrase').value, 'incorrect-synthetic-passphrase');
+  view.submit('auth-form');
+  await tick();
+  assert.deepEqual(attemptedPassphrases, ['incorrect-synthetic-passphrase']);
+  assert.equal(view.get('auth-error').hidden, false);
+  assert.equal(view.get('workspace').hidden, true);
+});
+
+test('a fresh lock revision cancels a pending unlock and preserves subsequent input from its late completion', async t => {
+  const completion = deferred();
+  let dataRequests = 0;
+  const view = await renderer(t, {
+    unlock: () => completion.promise,
+    getData: async () => { dataRequests++; return { profile: { firstName: 'Private synthetic name' }, applications: [] }; }
+  });
+  view.lock(1);
+  view.edit('passphrase', 'synthetic-current-attempt');
+  view.submit('auth-form');
+  assert.equal(view.get('auth-submit').disabled, true);
+  view.lock(2);
+  view.edit('passphrase', 'synthetic-next-attempt');
+  completion.resolve({ exists: true, unlocked: true, lockRevision: 1 });
+  await tick();
+  assert.equal(dataRequests, 1, 'A stale unlock must not request profile data');
+  assert.equal(view.get('workspace').hidden, true);
+  assert.equal(view.get('firstName').value, '');
+  assert.equal(view.get('passphrase').value, 'synthetic-next-attempt');
+  assert.equal(view.get('auth-error').hidden, true);
+});
+
+test('a fresh lock revision cancels a pending unlock data load', async t => {
+  const completion = deferred();
+  let dataRequests = 0;
+  const view = await renderer(t, {
+    unlock: async () => ({ exists: true, unlocked: true, lockRevision: 1 }),
+    getData: async () => ++dataRequests === 1 ? { profile: {}, applications: [] } : completion.promise
+  });
+  view.lock(1);
+  view.edit('passphrase', 'synthetic-current-attempt');
+  view.submit('auth-form');
+  await tick();
+  assert.equal(dataRequests, 2);
+  view.lock(2);
+  completion.resolve({ profile: { firstName: 'Late private synthetic name' }, applications: [] });
+  await tick();
+  assert.equal(view.get('workspace').hidden, true);
+  assert.equal(view.get('firstName').value, '');
+  assert.equal(view.get('passphrase').value, '');
+});
+
+test('invalid or legacy lock revisions fail closed instead of being treated as duplicates', async t => {
+  const view = await renderer(t);
+  view.lock(1);
+  for (const revision of [undefined, -1, 1.5, '1', Number.MAX_SAFE_INTEGER + 1]) {
+    view.edit('passphrase', 'synthetic-input-to-clear');
+    view.lock(revision);
+    assert.equal(view.get('passphrase').value, '');
+    assert.equal(view.get('workspace').hidden, true);
+  }
+});
+
+test('a successful unlock ignores its earlier lock notification but a fresh lock still clears it', async t => {
+  const view = await renderer(t, {
+    unlock: async () => ({ exists: true, unlocked: true, lockRevision: 2 })
+  });
+  view.lock(1);
+  view.edit('passphrase', 'synthetic-current-attempt');
+  view.submit('auth-form');
+  await tick();
+  assert.equal(view.get('workspace').hidden, false);
+  assert.equal(view.get('firstName').value, 'Initial');
+  view.lock(2);
+  assert.equal(view.get('workspace').hidden, false);
+  view.lock(3);
+  assert.equal(view.get('workspace').hidden, true);
+  assert.equal(view.get('firstName').value, '');
+});
+
+test('restoring a backup while locked refreshes create-vault UI despite an unchanged lock revision', async t => {
+  let restored = false;
+  const view = await renderer(t, {
+    status: async () => ({ exists: restored, unlocked: false, lockRevision: 0 }),
+    importBackup: async () => { restored = true; return { cancelled: false }; }
+  });
+  assert.equal(view.get('confirm-passphrase').required, true);
+  assert.match(view.get('auth-submit').textContent, /Create password/);
+  view.get('auth-import').click();
+  await tick();
+  assert.equal(view.get('confirm-passphrase').required, false);
+  assert.equal(view.get('confirm-passphrase-field').hidden, true);
+  assert.match(view.get('auth-submit').textContent, /Unlock/);
+  assert.equal(view.get('workspace').hidden, true);
+});
+
+test('opening Applications or Overview refreshes progress recorded while another view was active', async t => {
+  for (const destination of ['applications', 'overview']) await t.test(destination, async t => {
+    const view = await renderer(t);
+    view.window.document.querySelector('.nav-item[data-view="extension"]').click();
+    view.database.applications = [{ id: 'synthetic-native-progress', status: 'in_progress', nextAction: 'Synthetic newly recorded progress' }];
+    view.database.profile.firstName = 'Changed only in stored profile';
+    view.window.dispatchEvent(new view.window.Event('focus'));
+    await tick();
+    assert.equal(view.get('application-count').textContent, '0');
+    view.window.document.querySelector(`.nav-item[data-view="${destination}"]`).click();
+    await tick();
+    assert.equal(view.get(`view-${destination}`).hidden, false);
+    assert.equal(view.get('application-count').textContent, '1');
+    assert.match(view.get('application-list').textContent, /Synthetic newly recorded progress/);
+    assert.match(view.get('overview-applications').textContent, /Synthetic newly recorded progress/);
+    assert.equal(view.get('firstName').value, 'Initial', 'Refreshing progress must not replace profile inputs');
+  });
+});
+
+test('declining to leave unsaved profile edits does not refresh the tracker', async t => {
+  let reads = 0;
+  const view = await renderer(t, { getData: async () => { reads++; return { profile: {}, applications: [] }; } });
+  view.window.document.querySelector('.nav-item[data-view="profile"]').click();
+  view.edit('firstName', 'Unsaved fictional name');
+  view.window.confirm = () => false;
+  view.window.document.querySelector('.nav-item[data-view="applications"]').click();
+  await tick();
+  assert.equal(reads, 1);
+  assert.equal(view.get('view-profile').hidden, false);
+  assert.equal(view.get('firstName').value, 'Unsaved fictional name');
+});
+
+test('late tracker navigation responses cannot repopulate a locked screen or show stale errors', async t => {
+  for (const outcome of ['success', 'failure']) await t.test(outcome, async t => {
+    const completion = deferred();
+    let reads = 0;
+    const view = await renderer(t, { getData: () => ++reads === 1 ? Promise.resolve({ profile: {}, applications: [] }) : completion.promise });
+    view.window.document.querySelector('.nav-item[data-view="applications"]').click();
+    assert.equal(reads, 2);
+    view.lock(1);
+    view.edit('passphrase', 'new synthetic unlock input');
+    if (outcome === 'success') completion.resolve({ profile: {}, applications: [{ status: 'in_progress', nextAction: 'Late private progress' }] });
+    else completion.reject(new Error('Old refresh failure'));
+    await tick();
+    assert.equal(view.get('workspace').hidden, true);
+    assert.equal(view.get('application-count').textContent, '0');
+    assert.equal(view.get('application-list').textContent, '');
+    assert.equal(view.get('overview-applications').textContent, '');
+    assert.equal(view.get('toast').hidden, true);
+    assert.equal(view.get('passphrase').value, 'new synthetic unlock input');
+  });
+});
+
+test('an older tracker refresh cannot replace progress from a newer navigation', async t => {
+  const completions = [];
+  let reads = 0;
+  const view = await renderer(t, { getData: () => {
+    if (++reads === 1) return Promise.resolve({ profile: {}, applications: [] });
+    const completion = deferred(); completions.push(completion); return completion.promise;
+  } });
+  view.window.document.querySelector('.nav-item[data-view="applications"]').click();
+  view.window.document.querySelector('.nav-item[data-view="overview"]').click();
+  assert.equal(completions.length, 2);
+  completions[1].resolve({ profile: {}, applications: [{ status: 'in_progress', nextAction: 'Newest synthetic progress' }] });
+  await tick();
+  completions[0].resolve({ profile: {}, applications: [] });
+  await tick();
+  assert.equal(view.get('application-count').textContent, '1');
+  assert.match(view.get('overview-applications').textContent, /Newest synthetic progress/);
 });
 
 test('application editor freezes during save and restores editing after an error', async t => {
@@ -463,9 +647,98 @@ test('creating a password shows the recovery key once and requires acknowledgeme
   assert.equal(view.get('recovery-dialog').open, false);
 });
 
+test('locking during initial profile loading cannot redisplay the newly created recovery key', async t => {
+  const completion = deferred();
+  let dataRequests = 0;
+  const view = await renderer(t, {
+    status: async () => ({ exists: false, unlocked: false, lockRevision: 0 }),
+    createVault: async () => ({
+      status: { exists: true, unlocked: true, recoveryKey: true, lockRevision: 0 },
+      recoveryKey: 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789', deviceResetFailed: true
+    }),
+    getData: () => { dataRequests++; return completion.promise; }
+  });
+  view.edit('passphrase', 'synthetic long password');
+  view.edit('confirm-passphrase', 'synthetic long password');
+  view.submit('auth-form');
+  await tick();
+  assert.equal(dataRequests, 1);
+  view.lock(1);
+  completion.resolve({ profile: { firstName: 'Late private name' }, applications: [] });
+  await tick();
+  assert.equal(view.get('workspace').hidden, true);
+  assert.equal(view.get('firstName').value, '');
+  assert.equal(view.get('recovery-dialog').open, false);
+  assert.equal(view.get('recovery-key-value').textContent, '');
+  assert.equal(view.get('recovery-feedback').textContent, '');
+});
+
+test('late password reset responses after lock or cancel cannot reload data, show errors, or clear newer input', async t => {
+  for (const interruption of ['lock', 'cancel']) for (const result of ['success', 'failure']) {
+    await t.test(`${interruption} before ${result}`, async t => {
+      const completion = deferred();
+      let dataRequests = 0;
+      const view = await renderer(t, {
+        status: async () => ({ exists: true, unlocked: false, recoveryKey: true, lockRevision: 0 }),
+        resetPassword: () => completion.promise,
+        getData: async () => { dataRequests++; return { profile: { firstName: 'Stale private name' }, applications: [] }; }
+      });
+      view.get('forgot-password').click();
+      view.edit('recovery-key-input', 'synthetic recovery key');
+      view.edit('reset-password', 'synthetic reset password');
+      view.edit('reset-confirm', 'synthetic reset password');
+      view.submit('reset-form');
+      assert.equal(view.get('reset-submit').disabled, true);
+      if (interruption === 'lock') view.lock(1); else view.get('reset-cancel').click();
+      assert.equal(view.get('auth-form').hidden, false);
+      assert.equal(view.get('reset-form').hidden, true);
+      view.get('forgot-password').click();
+      view.edit('reset-password', 'newer synthetic input');
+      view.edit('reset-confirm', 'newer synthetic input');
+      if (result === 'success') completion.resolve({ exists: true, unlocked: true, recoveryKey: true, lockRevision: 0 });
+      else completion.reject(new Error('Old synthetic reset failure'));
+      await tick();
+      assert.equal(dataRequests, 0);
+      assert.equal(view.get('workspace').hidden, true);
+      assert.equal(view.get('firstName').value, '');
+      assert.equal(view.get('reset-error').hidden, true);
+      assert.equal(view.get('toast').hidden, true);
+      assert.equal(view.get('reset-password').value, 'newer synthetic input');
+      assert.equal(view.get('reset-confirm').value, 'newer synthetic input');
+    });
+  }
+});
+
+test('locking during a reset profile load keeps data and success feedback hidden', async t => {
+  const completion = deferred();
+  let dataRequests = 0;
+  const view = await renderer(t, {
+    status: async () => ({ exists: true, unlocked: false, recoveryKey: true, lockRevision: 0 }),
+    resetPassword: async () => ({ exists: true, unlocked: true, recoveryKey: true, lockRevision: 0 }),
+    getData: () => { dataRequests++; return completion.promise; }
+  });
+  view.get('forgot-password').click();
+  view.edit('recovery-key-input', 'synthetic recovery key');
+  view.edit('reset-password', 'synthetic reset password');
+  view.edit('reset-confirm', 'synthetic reset password');
+  view.submit('reset-form');
+  await tick();
+  assert.equal(dataRequests, 1);
+  view.lock(1);
+  view.get('forgot-password').click();
+  view.edit('reset-password', 'newer synthetic input');
+  completion.resolve({ profile: { firstName: 'Late private name' }, applications: [] });
+  await tick();
+  assert.equal(view.get('workspace').hidden, true);
+  assert.equal(view.get('firstName').value, '');
+  assert.equal(view.get('toast').hidden, true);
+  assert.equal(view.get('reset-error').hidden, true);
+  assert.equal(view.get('reset-password').value, 'newer synthetic input');
+});
+
 test('forgot password resets with a recovery key, and older saved information explains why it cannot', async t => {
   const resets = [];
-  let status = { exists: true, unlocked: false, recoveryKey: true, extensionId: '', bridgeRunning: true };
+  let status = { exists: true, unlocked: false, recoveryKey: true, lockRevision: 0, extensionId: '', bridgeRunning: true };
   const view = await renderer(t, {
     status: async () => status,
     resetPassword: async request => {
@@ -509,7 +782,7 @@ test('forgot password resets with a recovery key, and older saved information ex
   assert.equal(view.get('reset-form').hidden, true);
   assert.equal(view.get('auth-form').hidden, false);
 
-  const older = await renderer(t, { status: async () => ({ exists: true, unlocked: false, recoveryKey: false, extensionId: '', bridgeRunning: true }) });
+  const older = await renderer(t, { status: async () => ({ exists: true, unlocked: false, recoveryKey: false, lockRevision: 0, extensionId: '', bridgeRunning: true }) });
   older.get('forgot-password').click();
   assert.equal(older.get('reset-fields').hidden, true);
   assert.equal(older.get('reset-submit').hidden, true);
@@ -551,7 +824,7 @@ test('reset on this computer skips the recovery key, and either method can be ch
 
 test('a lock notification arriving after the lock response cannot clear an unlock attempt already under way', async t => {
   const view = await renderer(t, {
-    lock: async () => ({ exists: true, unlocked: false, recoveryKey: true, extensionId: '', bridgeRunning: true }),
+    lock: async () => ({ exists: true, unlocked: false, lockRevision: 1, recoveryKey: true, extensionId: '', bridgeRunning: true }),
     unlock: async () => { throw new Error('Unable to unlock. Check your password or restore an intact backup.'); }
   });
   // The lock response shows the unlock screen before the separate notification arrives.
@@ -563,7 +836,8 @@ test('a lock notification arriving after the lock response cannot clear an unloc
   await tick();
   assert.equal(view.get('auth-error').hidden, false);
 
-  view.lock();
+  // The late notice carries the same lock revision as the response already shown.
+  view.lock(1);
   assert.equal(view.get('auth-error').hidden, false, 'A late lock notice must not hide the unlock error');
   assert.match(view.get('auth-error').textContent, /Unable to unlock/);
   assert.equal(view.get('workspace').hidden, true);

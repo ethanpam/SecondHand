@@ -60,6 +60,23 @@ test('showApp carries no data; assisted-session requests and tokens are no longe
   for (const extra of [{ tabId: 1 }, { profile: {} }]) assert.throws(() => validateRequest({ id: 'x', type: 'getFields', url: PORTAL_URL, fields: ['firstName'], ...extra }), /Unexpected/);
 });
 
+test('empty field authorization is limited to the two exact verified Iowa navigation endpoints', () => {
+  for (const page of ['enterPersonalInfo', 'addressValidation']) {
+    const url = `${PORTAL_URL}/applyForBenefits/${page}`;
+    const request = { id: 'navigation', type: 'getFields', url, fields: [] };
+    assert.deepEqual(validateRequest(request), request);
+    for (const altered of [`${url}/`, `${url}?step=1`, `${url}#review`, url.replace(page, page.toUpperCase())]) {
+      assert.throws(() => validateRequest({ ...request, url: altered }), /profile fields/);
+    }
+  }
+  for (const url of [PORTAL_URL, `${PORTAL_URL}/applyForBenefits/dynamicQuestions`,
+    `${PORTAL_URL}/applyForBenefits/addressValidationDQfuncPage`, 'https://pantry.example.org/intake',
+    'https://hhsservices.iowa.gov/other/applyForBenefits/addressValidation']) {
+    assert.throws(() => validateRequest({ id: 'navigation', type: 'getFields', url, fields: [] }), /profile fields/);
+  }
+  assert.throws(() => validateRequest({ id: 'navigation', type: 'getFields', url: `${PORTAL_URL}/applyForBenefits/addressValidation`, fields: [], assistanceToken: 'a'.repeat(64) }), /Unexpected/);
+});
+
 test('local bridge requires ephemeral token and registered extension; native host emits framed responses', async t => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-bridge-test-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

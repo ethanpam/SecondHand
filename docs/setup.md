@@ -38,8 +38,10 @@ Start the application and click **Autofill** in the widget (or **Autofill this p
 | Before You Start, Important Information, Instructions | Clicks Continue for you (these screens send no answers) |
 | Let's get started | Waits for you to read and accept Iowa's consent |
 | About you, Assisting Organization or Person | Waits for you to click Continue (leave the assisting fields blank if nobody is helping you) |
-| Enter Personal Information | Fills your saved answers, then waits for you to check them and click Save and Continue |
-| Any other screen | Stops: SecondHand doesn't know it yet |
+| Enter Personal Information | Fills explicit saved answers, waits for missing required answers, then uses verified Save and Continue when complete |
+| Select Address (verified home-only layout) | Selects the first suggested home address, then continues; review the chosen address before submission. Mailing, county, errors, and changed layouts stay manual |
+| Tell Us More (verified primary-applicant context) | Fills only saved date of birth; every other answer and Continue stays manual |
+| Other Iowa pages | May fill generic rule matches after desktop approval; review them and continue yourself. Unmatched or protected steps remain manual |
 
 After you finish a step and continue, Autofill picks up on the next screen. Click **Stop** in the widget, or **Stop autofill** in the side panel, to end it. Locking SecondHand, leaving Iowa's site, or closing the tab also ends it, and it stops after 15 automatic steps so you can check where you are.
 
@@ -47,17 +49,22 @@ On **Enter Personal Information**, one click fills every empty supported field f
 
 The first time, the desktop app asks before sharing your saved answers. Choose **Allow once** to be asked again next time, or **Always allow on this computer** to skip the pop-up whenever the app is unlocked. Turn that off under **Chrome extension → Let Chrome autofill without asking**. Locking the vault, manually, after 10 idle minutes, or when your computer sleeps or locks, stops autofill until you unlock again. The widget then shows **Unlock SecondHand**, which brings the app to the front.
 
+
 After filling, the widget shows **Filled N** and, when something is missing, **N need you**. Click it to jump to each missing field in turn. **Details** opens the side panel, which lists each relevant question as **Done**, **Needs you**, **Optional**, or **Do it yourself**. Click a row to bring that field into view. Checkmarks describe the form's completeness, not agency approval.
 
-SecondHand never clicks **Save and Continue**, Submit, or anything on consent, CAPTCHA, or sign-in screens. Review every answer, then continue yourself.
+Autofill can use **Save and Continue** on the verified complete applicant page and home-address confirmation. It never operates consent, CAPTCHA, sign-in, signature, or final Submit controls. Iowa may save answers as they are entered or a page is continued. Review every answer and the selected address before final submission.
 
-**Current scope is the initial applicant page:** names, suffix, maiden name, explicit home/mobile phones, home/mailing addresses and address questions, applying-for-benefits choice, saved SNAP/FIP/Medicaid choices, optional medical-bill help choice, and and best time to call. Later application pages remain manual. The helper can scroll rendered fields into view; it skips hidden, covered, ambiguous, and already-entered fields. Review every filled answer. Iowa can receive or save information as it is entered, and Save and Continue sends the page's current answers to Iowa.
+**Current scope is the initial applicant page:** names, suffix, maiden name, explicit home/mobile phones, home/mailing addresses and address questions, applying-for-benefits choice, saved SNAP/FIP/Medicaid choices, optional medical-bill help choice, and best time to call. This development branch also covers the verified home-address selection and primary-applicant birth date described above. Other Tell Us More answers and its Next button remain manual. Generic rule matching may help fill other unverified Iowa pages, but it does not give those pages verified mappings or automatic Next. Public 0.4 installers predate these changes. The helper can scroll rendered fields into view; it skips hidden, covered, ambiguous, and already-entered fields. Review every filled answer. Iowa can receive or save information as it is entered, and Save and Continue sends the page's current answers to Iowa.
 
 Complete all unsupported steps, uploads, signatures, interviews, and final submission yourself. Save the official confirmation number in SecondHand's tracker. Saving a page is not a submitted application. The tracker is your own record, not a live agency status feed. See [verified field coverage](iowa-portal.md).
 
+## Other food-assistance forms
+
+On another HTTPS site, open the SecondHand toolbar sidebar and choose **Turn on SecondHand for this site**. Chrome asks for that origin, then the desktop asks whether to trust it. Embedded forms need their own origin approval. Autofill fills once per click and never navigates or submits on these sites. Sensitive answers still require confirmation each time. The optional on-device AI matches question labels without receiving saved profile values; when unavailable, rule matching remains available. Turn off a site in the sidebar or remove its desktop trust in the app.
+
 ## Updates and troubleshooting
 
-- **Upgrade to 0.4 or a new desktop version:** install it, open **Chrome extension**, choose **Refresh extension files**, then click **Reload** for SecondHand on `chrome://extensions`. Reload your Iowa tab so it uses the new helper. If Chrome asks, review and approve the updated browser-side-panel permission and site access restricted to `hhsservices.iowa.gov`. The extension ID and local folder stay the same. There is no automatic updater. Save or finish any unsaved application work before reloading; Iowa's guest flow can lose unsaved answers.
+- **Upgrade to 0.4 or a new desktop version:** install it, open **Chrome extension**, choose **Refresh extension files**, then click **Reload** for SecondHand on `chrome://extensions`. Reload your Iowa tab so it uses the new helper. If Chrome asks, review and approve the updated browser-side-panel permission and required Iowa site access; additional sites require separate optional permission. The extension ID and local folder stay the same. There is no automatic updater. Save or finish any unsaved application work before reloading; Iowa's guest flow can lose unsaved answers.
 - **Helper does not appear:** confirm SecondHand is enabled at `chrome://extensions`, its Iowa site access is allowed, and you are on the official portal in Chrome. Reload the Iowa tab after installing or reloading the extension. Click the widget or the toolbar icon to open the side panel. No saved profile values are requested merely by opening it.
 - **Moved the app:** prepare/refresh the extension again to update Chrome's native-host registration. On Mac, keep the app in Applications rather than running it from the mounted disk image.
 - **Cannot reach the vault:** open/unlock SecondHand, refresh the extension files, reload the extension in Chrome, and try again. Only Chrome is configured by this setup; Edge and other browsers are not automatically configured.

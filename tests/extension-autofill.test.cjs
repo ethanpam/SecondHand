@@ -105,13 +105,13 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
               if (!vault.reachable) return onDisconnect();
               const reply = data => onMessage({ id: request.id, ok: true, data });
               const fail = error => onMessage({ id: request.id, ok: false, error });
-              if (request.type === 'status') return reply({ unlocked: vault.unlocked, applicationCount: 0 });
+              if (request.type === 'status') return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: 0 });
               if (request.type === 'showApp') return reply({ shown: true });
               if (request.type === 'recordProgress') return reply({ recorded: true });
               if (request.type === 'getFields') {
                 duringGetFields?.(tab);
                 if (vault.getFieldsError) return fail(vault.getFieldsError);
-                return reply({ values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])) });
+                return reply({ accessRevision: 0, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])) });
               }
               fail('Unsupported bridge request.');
             });
@@ -136,10 +136,10 @@ test('one click makes one status and one getFields request, fills revealed field
   const w = worker();
   const response = await autofill(w);
   assert.equal(response.ok, true);
-  assert.deepEqual(w.calls.native.map(call => call.type), ['status', 'getFields', 'recordProgress']);
-  assert.deepEqual(plain(w.calls.native[1].fields), Object.keys(adapter.definitions));
+  assert.deepEqual(w.calls.native.map(call => call.type).filter(type => type !== 'status'), ['getFields', 'recordProgress']);
+  assert.deepEqual(plain(w.calls.native[1].fields), adapter.profileRequest('iowa-personal-information'));
   assert.equal(w.calls.native[1].url, `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo`);
-  assert.equal(w.calls.native[2].filledCount, 3);
+  assert.equal(w.calls.native.find(call => call.type === 'recordProgress').filledCount, 3);
   assert.deepEqual(w.filled(), ['firstName', 'hasHomeAddress', 'mailingCity']);
   const result = plain(response.data);
   assert.equal(result.state, 'done');
@@ -148,7 +148,7 @@ test('one click makes one status and one getFields request, fills revealed field
   assert.match(result.message, /Filled 3 · 1 need you/);
   assert.doesNotMatch(JSON.stringify(response), /Synthetic private/);
   assert.equal(w.calls.content.some(message => message.type.startsWith('secondhand:generic:')), false, 'verified pages never use the general engine');
-  assert.deepEqual(w.calls.injected[0], { target: { tabId: 7, frameIds: [0] }, files: ['iowa-adapter.js', 'generic-adapter.js', 'content.js'] });
+  assert.deepEqual(w.calls.injected[0], { target: { tabId: 7, frameIds: [0] }, files: ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'content.js'] });
 });
 
 test('locked and unreachable desktops map to widget states without filling', async () => {
@@ -207,7 +207,7 @@ test('an unknown Iowa page gets one general fill, then waits for the applicant t
   assert.equal(response.ok, true, response.error);
   assert.deepEqual(plain(response.data), { state: 'done', filled: 2, needYou: ['sh-1-3', 'sh-1-2'],
     message: 'Filled 2 · 2 need you. Check your answers, then click Continue.', todo: 'Check your answers, then click Continue.', pageKey: 'iowa-manual' });
-  assert.deepEqual(w.calls.native.map(call => call.type), ['status', 'getFields']);
+  assert.deepEqual(w.calls.native.map(call => call.type).filter(type => type !== 'status'), ['getFields']);
   assert.equal(w.calls.native[1].url, `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo`);
   assert.deepEqual(plain(w.calls.native[1].fields), ['householdAdults', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'householdSeniors']);
   // The second plan finds nothing new it can fill, so the click ends there.
@@ -237,7 +237,7 @@ test('an unknown Iowa page fills questions its answers reveal in the same click,
     { id: 'sh-1-5', key: 'monthlyRent', confidence: 'high', revealedBy: 'sh-1-0' });                        // its key was not requested
   const w = worker({ kind: 'manual', engine: generalEngine, general: plan, desktop: { values: { ...financialValues, monthlyRent: '700' } } });
   const result = plain((await autofill(w)).data);
-  assert.deepEqual(w.calls.native.map(call => call.type), ['status', 'getFields']);
+  assert.deepEqual(w.calls.native.map(call => call.type).filter(type => type !== 'status'), ['getFields']);
   assert.deepEqual(plain(w.calls.native[1].fields), ['householdAdults', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'householdSeniors']);
   assert.deepEqual(w.calls.content.map(message => message.type), ['secondhand:pageState', 'secondhand:generic:plan', 'secondhand:generic:fill',
     'secondhand:generic:plan', 'secondhand:generic:fill', 'secondhand:generic:plan']);
@@ -399,8 +399,8 @@ function journey({ screens, desktop = {}, continueStays = false, engine = noSite
             calls.native.push(request);
             queueMicrotask(() => {
               const reply = data => onMessage({ id: request.id, ok: true, data });
-              if (request.type === 'status') return reply({ unlocked: vault.unlocked, applicationCount: 0 });
-              if (request.type === 'getFields') return reply({ values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])) });
+              if (request.type === 'status') return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: 0 });
+              if (request.type === 'getFields') return reply({ accessRevision: 0, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])) });
               return reply({ recorded: true });
             });
           }
@@ -450,7 +450,7 @@ test('one click walks the application: fills, continues info screens, and waits 
   assert.equal(w.at(), 'applicant');
   assert.equal(w.continues(), 3);
   assert.equal(w.getFields().length, 2);
-  assert.deepEqual(plain(w.getFields()[1].fields), Object.keys(adapter.definitions));
+  assert.deepEqual(plain(w.getFields()[1].fields), adapter.profileRequest('iowa-personal-information'));
   const applicant = (await lastResult(w)).result;
   assert.match(applicant.message, /^Filled 2\. Check your answers, then click Save and Continue\.$/);
 

@@ -19,8 +19,10 @@
   let profileDirty = false;
   let profileRevision = 0;
   let applicationBusy = false;
+  let applicationRefreshRevision = 0;
   let toastTimer;
   let vaultGeneration = 0;
+  let handledLockRevision = -1;
 
   function icon(name) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -132,7 +134,12 @@
     $('toast').textContent = '';
   }
 
-  function showLocked(status = vaultStatus) {
+  function showLocked(status = vaultStatus, { refresh = false } = {}) {
+    const revision = Number.isSafeInteger(status.lockRevision) && status.lockRevision >= 0 ? status.lockRevision : null;
+    // The status reply and event can arrive in either order. Clear once for
+    // that transition; a later revision must still cancel pending auth/data.
+    if (!refresh && revision !== null && revision <= handledLockRevision) return;
+    if (revision !== null) handledLockRevision = Math.max(handledLockRevision, revision);
     clearSensitiveUI();
     vaultStatus = { ...status, unlocked: false };
     $('workspace').hidden = true;
@@ -222,6 +229,7 @@
     });
     $('breadcrumb-current').textContent = viewNames[view];
     if (focus) { $('main-content').focus(); window.scrollTo(0, 0); }
+    return true;
   }
 
   function fillProfile() {
@@ -341,6 +349,11 @@
     const generation = vaultGeneration;
     const loaded = await api.getData();
     if (generation !== vaultGeneration) return;
+    // A successful unlock can supersede a delayed event for a lock that the
+    // desktop already completed before this authenticated status was returned.
+    if (Number.isSafeInteger(status.lockRevision) && status.lockRevision >= 0) {
+      handledLockRevision = Math.max(handledLockRevision, status.lockRevision);
+    }
     vaultStatus = status;
     data = { profile: loaded.profile || {}, applications: Array.isArray(loaded.applications) ? loaded.applications : [] };
     $('auth-form').reset();
@@ -379,8 +392,12 @@
 
   async function refreshApplications(generation) {
     if (!vaultStatus.unlocked || generation !== vaultGeneration) return false;
+    const revision = ++applicationRefreshRevision;
     const latest = await api.getData();
     if (!vaultStatus.unlocked || generation !== vaultGeneration) return false;
+    // A newer refresh owns the list. Still report a valid unlocked generation
+    // to save/delete callers so their completed operation can close its editor.
+    if (revision !== applicationRefreshRevision) return true;
     data.applications = Array.isArray(latest.applications) ? latest.applications : [];
     renderApplications();
     return true;
@@ -392,36 +409,50 @@
     if (!vaultStatus.exists && $('passphrase').value !== $('confirm-passphrase').value) {
       showError('auth-error', 'The passwords don’t match. Please try again.'); $('confirm-passphrase').focus(); return;
     }
+    const generation = vaultGeneration;
     pending($('auth-submit'), async () => {
       try {
-        if (vaultStatus.exists) await loadUnlocked(await api.unlock($('passphrase').value));
-        else {
+        if (vaultStatus.exists) {
+          const status = await api.unlock($('passphrase').value);
+          if (generation !== vaultGeneration) return;
+          await loadUnlocked(status);
+        } else {
           const allowDeviceReset = !$('device-reset-field').hidden && $('allow-device-reset').checked;
           const created = await api.createVault({ password: $('passphrase').value, allowDeviceReset });
+          if (generation !== vaultGeneration) return;
           await loadUnlocked(created.status);
+          if (generation !== vaultGeneration) return;
           showRecoveryKey(created.recoveryKey);
           if (created.deviceResetFailed) $('recovery-feedback').textContent = 'This computer couldn’t save a reset option, so keep this key safe.';
         }
-      } catch (error) { showError('auth-error', error); }
-      finally { $('passphrase').value = ''; $('confirm-passphrase').value = ''; }
+      } catch (error) { if (generation === vaultGeneration) showError('auth-error', error); }
+      finally {
+        if (generation === vaultGeneration) { $('passphrase').value = ''; $('confirm-passphrase').value = ''; }
+      }
     });
   });
 
   $('forgot-password').addEventListener('click', () => setResetMode(true));
-  $('reset-cancel').addEventListener('click', () => showLocked(vaultStatus));
+  $('reset-cancel').addEventListener('click', () => showLocked(vaultStatus, { refresh: true }));
   $('reset-form').addEventListener('submit', (event) => {
     event.preventDefault(); clearError('reset-error');
     if (!api) return;
     if ($('reset-password').value !== $('reset-confirm').value) {
       showError('reset-error', 'The passwords don’t match. Please try again.'); $('reset-confirm').focus(); return;
     }
+    const generation = vaultGeneration;
     pending($('reset-submit'), async () => {
       try {
         const password = $('reset-password').value;
-        await loadUnlocked(await api.resetPassword(resetWithDevice() ? { method: 'device', password } : { recoveryKey: $('recovery-key-input').value, password }));
+        const status = await api.resetPassword(resetWithDevice() ? { method: 'device', password } : { recoveryKey: $('recovery-key-input').value, password });
+        if (generation !== vaultGeneration) return;
+        await loadUnlocked(status);
+        if (generation !== vaultGeneration) return;
         toast('Your password was reset. Use your new password next time.');
-      } catch (error) { showError('reset-error', error); }
-      finally { $('reset-password').value = ''; $('reset-confirm').value = ''; }
+      } catch (error) { if (generation === vaultGeneration) showError('reset-error', error); }
+      finally {
+        if (generation === vaultGeneration) { $('reset-password').value = ''; $('reset-confirm').value = ''; }
+      }
     });
   });
 
@@ -476,13 +507,22 @@
       try {
         const result = await api.importBackup();
         if (result.cancelled) return;
-        showLocked(await api.status());
+        // Restoring changes whether a vault exists without a lock transition.
+        showLocked(await api.status(), { refresh: true });
         toast('Backup restored. Unlock it with the password it was created with.');
       } catch (error) { showError('auth-error', error); }
     });
   });
 
-  document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', (event) => { event.preventDefault(); showView(button.dataset.view); }));
+  document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', (event) => {
+    event.preventDefault();
+    const view = button.dataset.view;
+    if (showView(view) && (view === 'overview' || view === 'applications')) {
+      // Native progress may arrive while another desktop view is active. Read
+      // fresh application records on navigation without replacing profile edits.
+      refreshApplications(vaultGeneration).catch(() => { /* Keep the current list until the next refresh or lock. */ });
+    }
+  }));
   document.querySelector('.auth-brand').addEventListener('click', (event) => event.preventDefault());
   $('overview-start').addEventListener('click', () => showView('profile'));
   $('lock-button').addEventListener('click', lockVault);
@@ -638,14 +678,11 @@
       $('confirm-passphrase').disabled = true;
       return;
     }
-    // The lock response and this notification can arrive in either order. Once the
-    // unlock screen is showing, saved details are already cleared, so a repeat must
-    // not reset an unlock attempt the person has started. A load still in progress
-    // while the unlock screen is hidden is always cancelled.
-    api.onLocked(() => {
-      if (!vaultStatus.unlocked && !$('auth-view').hidden) return;
-      showLocked({ ...vaultStatus, exists: true, unlocked: false });
-    });
+    // The lock response and this notification can arrive in either order. The lock
+    // revision lets showLocked skip a repeat of a lock already shown, so a late notice
+    // cannot reset an unlock attempt the person has started, while a newer lock still
+    // cancels any pending unlock or profile load.
+    api.onLocked(notification => showLocked({ ...vaultStatus, exists: true, unlocked: false, lockRevision: notification?.lockRevision }));
     try {
       const status = await api.status();
       if (status.unlocked) await loadUnlocked(status); else showLocked(status);

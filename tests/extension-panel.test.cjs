@@ -32,7 +32,7 @@ function generalEngine(window, calls, { matched = true } = {}) {
   };
 }
 
-function content(t, url = `${adapter.PORTAL}/applicant`, { engine = true, matched = true } = {}) {
+function content(t, url = `${adapter.PORTAL}/applicant`, { engine = true, matched = true, navigation = false } = {}) {
   const dom = new JSDOM('<!doctype html><body><form><input id="firstName"><button type="button">Save and Continue</button></form></body>', { url, runScripts: 'outside-only' });
   t.after(() => dom.window.close());
   const window = dom.window;
@@ -43,6 +43,8 @@ function content(t, url = `${adapter.PORTAL}/applicant`, { engine = true, matche
   let kind = 'fillable';
   let todo;
   let continued = 0;
+  let advanced = 0;
+  const privateNavigation = { answer: 'Synthetic private address' };
   const calls = [];
   window.chrome = { runtime: { id: extensionId, getURL: extensionURL, onMessage: { addListener: callback => { listener = callback; } } } };
   if (engine) window.SecondHandGeneric = generalEngine(window, calls, { matched });
@@ -53,13 +55,15 @@ function content(t, url = `${adapter.PORTAL}/applicant`, { engine = true, matche
       const fields = element.value ? [] : [{ key: 'firstName', label: 'First name' }];
       return { supported: true, recognizedPage: true, fields, bindings: fields.map(field => ({ key: field.key, element })), ambiguous: [], skipped: [] };
     },
-    probePage: () => ({ kind, todo, pageKey: 'primary-applicant', heading: 'Enter Personal Information', reason: '', fields: [{ key: 'firstName', label: 'First name' }], requiredRemaining: 0, manualRemaining: 0 }),
+    probePage: () => ({ kind, todo, pageKey: navigation ? 'iowa-personal-information' : 'primary-applicant', canAdvance: navigation, heading: 'Enter Personal Information', reason: '', fields: [{ key: 'firstName', label: 'First name' }], requiredRemaining: 0, manualRemaining: 0 }),
+    captureNavigation: () => privateNavigation,
+    advance: (_doc, _url, snapshot) => { assert.equal(snapshot, privateNavigation); advanced++; return { advanced: true }; },
     continuePage: () => { continued++; return { continued: true, reason: 'Continued to the next screen.' }; },
     focusField: (_document, _url, key) => { if (key !== 'firstName') return false; window.document.getElementById('firstName').focus(); return true; },
     fill: (_document, _url, bindings, values) => { for (const binding of bindings) binding.element.value = values[binding.key]; return { filled: bindings.map(binding => binding.key), skipped: [] }; }
   };
   window.eval(source('content.js'));
-  return { window, frames, calls, setKind: (value, instruction) => { kind = value; todo = instruction; }, get continued() { return continued; },
+  return { window, frames, calls, setKind: (value, instruction) => { kind = value; todo = instruction; }, get continued() { return continued; }, get advanced() { return advanced; },
     host: () => window.document.querySelector('[data-secondhand-assistant]'),
     request(message, sender = { id: extensionId }) { let response; listener?.(message, sender, value => { response = value; }); return response; },
     // For answers the content script sends after awaiting (fills settle their choices first).
@@ -111,15 +115,15 @@ test('page-state polls reuse unchanged preview tokens and never serialize field 
   assert.equal(populated.scan.fields.length, 0);
 });
 
-test('fill uses a fresh one-use preview and pageState carries no navigation token', t => {
+test('fill uses a fresh one-use preview; an unrecognized page gets no usable navigation token', t => {
   const page = content(t);
   const first = page.request({ type: 'secondhand:pageState' });
-  assert.equal('nextToken' in first, false);
+  assert.equal(first.nextToken, null);
   const filled = page.request({ type: 'secondhand:fill', token: first.scan.token, fields: ['firstName'], values: { firstName: 'Synthetic applicant' } });
   assert.equal(filled.filledCount, 1);
   assert.equal(JSON.stringify(filled).includes('Synthetic applicant'), false);
   assert.equal(page.request({ type: 'secondhand:fill', token: first.scan.token, fields: ['firstName'], values: { firstName: 'Replay' } }).ok, false);
-  assert.equal(page.request({ type: 'secondhand:next', token: 'anything', authorized: true }), undefined);
+  assert.equal(page.request({ type: 'secondhand:next', token: 'anything', authorized: true }).advanced, false);
 });
 
 test('continue runs the adapter once for our extension only', t => {
@@ -156,7 +160,7 @@ test('widget host is a full bar on fillable pages and a small pill elsewhere', t
 });
 
 test('the Iowa content script loads the general engine before content.js', () => {
-  assert.deepEqual(JSON.parse(source('manifest.json')).content_scripts[0].js, ['iowa-adapter.js', 'generic-adapter.js', 'content.js']);
+  assert.deepEqual(JSON.parse(source('manifest.json')).content_scripts[0].js, ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'content.js']);
 });
 
 test('on Iowa pages the adapter has not verified, the general engine plans, fills, and focuses with metadata only', async t => {
@@ -509,7 +513,7 @@ test('a worker that never answers gets exact reload steps in the widget and the 
 
   // A worker that answers page state but not a newer message is outdated too.
   const partial = await panel(t, { launcher: true, silent: ['ui:autofill'], build: BUILD });
-  assert.equal(partial.get('widget-text').textContent, 'Iowa SNAP · ready');
+  assert.equal(partial.get('widget-text').textContent, 'Iowa · uses first home address suggestion');
   await partial.userClick('autofill');
   assert.equal(partial.get('widget-text').textContent, OUTDATED);
   const before = partial.requests.length;
@@ -751,3 +755,43 @@ for (const loading of [false, true]) {
     assert.equal(view.get('frames-enable').hidden, true);
   });
 }
+
+
+test('Iowa widget and sidebar disclose first-address selection before Autofill; other sites do not', async t => {
+  const widget = await panel(t, { launcher: true });
+  assert.match(widget.get('widget-text').textContent, /first home address suggestion/);
+  assert.match(widget.get('autofill').title, /and continues/);
+  const sidebar = await panel(t);
+  assert.equal(sidebar.get('iowa-policy').hidden, false);
+  assert.match(sidebar.get('iowa-policy').textContent, /Review that address before submitting/);
+  const other = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true } });
+  assert.equal(other.get('iowa-policy').hidden, true);
+});
+
+test('manual-only Tell Us More instruction is preserved without invented required-answer or automatic-Next text', async t => {
+  const result = { state: 'done', pageKey: 'iowa-self-details', filled: 1, needYou: [], message: 'Date of birth filled. Review the remaining questions and continue in Iowa’s form.', todo: 'Review the remaining questions and continue in Iowa’s form.' };
+  const widget = await panel(t, { launcher: true, result, autopilot: true });
+  assert.match(widget.get('widget-text').textContent, /continue in Iowa’s form/);
+  assert.doesNotMatch(widget.get('widget-text').textContent, /missing required|automatically/);
+  const sidebar = await panel(t, { result, autopilot: true });
+  assert.equal(sidebar.get('status').textContent, result.message);
+});
+
+
+test('verified navigation keeps its private snapshot local and consumes one authorized content token', t => {
+  const page = content(t, `${adapter.PORTAL}/applicant`, { navigation: true });
+  const first = page.request({ type: 'secondhand:pageState' });
+  assert.equal(typeof first.nextToken, 'string');
+  assert.equal(JSON.stringify(first).includes('Synthetic private address'), false);
+  const metadataPoll = page.request({ type: 'secondhand:pageState', navigationPreview: false });
+  assert.equal(metadataPoll.nextToken, null, 'UI polling receives no navigation token and must not invalidate the action preview.');
+  assert.equal(page.request({ type: 'secondhand:next', token: first.nextToken, authorized: true }, { id: 'wrong-extension' }), undefined);
+  assert.equal(page.advanced, 0);
+  assert.equal(page.request({ type: 'secondhand:next', token: first.nextToken, authorized: true }).advanced, true);
+  assert.equal(page.advanced, 1);
+  assert.equal(page.request({ type: 'secondhand:next', token: first.nextToken, authorized: true }).advanced, false);
+  const fresh = page.request({ type: 'secondhand:pageState' });
+  assert.equal(page.request({ type: 'secondhand:next', token: fresh.nextToken }).advanced, false);
+  assert.equal(page.request({ type: 'secondhand:next', token: fresh.nextToken, authorized: true }).advanced, false);
+  assert.equal(page.advanced, 1);
+});

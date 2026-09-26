@@ -9,11 +9,16 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { EventEmitter } = require('node:events');
 const { atomicWrite } = require('./vault.cjs');
-const { PROFILE_FIELDS, isPortalUrl, isHttpsSiteUrl } = require('../shared/schema.cjs');
+const { PROFILE_FIELDS, PORTAL_URL, isPortalUrl, isHttpsSiteUrl } = require('../shared/schema.cjs');
 
 const HOST_NAME = 'org.secondhand.bridge';
 const MAX_MESSAGE_BYTES = 64 * 1024;
 const EXTENSION_ID = /^[a-p]{32}$/;
+const IOWA_NAVIGATION_URLS = new Set(['enterPersonalInfo', 'addressValidation'].map(page => `${PORTAL_URL}/applyForBenefits/${page}`));
+
+function isIowaNavigationAuthorization(request) {
+  return request?.type === 'getFields' && Array.isArray(request.fields) && request.fields.length === 0 && IOWA_NAVIGATION_URLS.has(request.url);
+}
 
 function extensionFromOrigin(origin) {
   if (typeof origin !== 'string') return null;
@@ -99,7 +104,7 @@ function validateRequest(request) {
   if (request.type === 'getFields' || request.type === 'trustSite') {
     if (!isHttpsSiteUrl(request.url)) throw new Error('Only an https site without credentials or a custom port is allowed.');
   } else if (request.type !== 'status' && request.type !== 'showApp' && !isPortalUrl(request.url)) throw new Error('Only the supported Iowa portal is allowed.');
-  if (request.type === 'getFields') validateFieldScope(request.fields);
+  if (request.type === 'getFields' && !isIowaNavigationAuthorization(request)) validateFieldScope(request.fields);
   if (request.type === 'recordProgress' && (!Number.isInteger(request.filledCount) || request.filledCount < 1 || request.filledCount > 100)) {
     throw new Error('Invalid filled field count.');
   }
@@ -222,5 +227,5 @@ function runNativeHost(userData, extensionId, input = process.stdin, output = pr
   });
 }
 
-module.exports = { HOST_NAME, EXTENSION_ID, MAX_MESSAGE_BYTES, extensionFromOrigin, frame, FrameReader, nativeStreams,
+module.exports = { HOST_NAME, EXTENSION_ID, MAX_MESSAGE_BYTES, extensionFromOrigin, frame, FrameReader, nativeStreams, isIowaNavigationAuthorization,
   validateRequest, startBridge, relayRequest, runNativeHost };

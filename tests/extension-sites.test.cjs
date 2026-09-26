@@ -78,7 +78,7 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan' } = {}) {
   };
 }
 
-function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, desktop = {}, fields = pantryFields(), next, duringGetFields, frames = [], plan, keepAccess = false, discoveryError = false, topError, framesReply } = {}) {
+function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, desktop = {}, fields = pantryFields(), next, duringGetFields, duringStatus, frames = [], plan, keepAccess = false, discoveryError = false, topError, framesReply } = {}) {
   const tab = { id: 7, active: true, url };
   const log = [], native = [], content = [], injected = [], opened = [];
   const permissions = new Set(granted ? [`${ORIGIN}/*`] : []);
@@ -90,7 +90,8 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
   const page = sitePage(fields, { next });
   for (const frame of frames) frame.page = sitePage(frame.fields || pantryFields(), { next: frame.next, tokenPrefix: `frame${frame.frameId}` });
   const tallies = [];
-  const vault = { reachable: true, unlocked: true, getFieldsError: null, trustError: null,
+  let statusChecks = 0;
+  const vault = { reachable: true, unlocked: true, accessRevision: 0, getFieldsError: null, trustError: null,
     values: { firstName: 'Synthetic private first', lastName: 'Synthetic private last', zip: '50309' }, ...desktop };
   const events = {};
   const event = key => ({ addListener: value => { events[key] = value; } });
@@ -168,13 +169,16 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
               if (!vault.reachable) return onDisconnect();
               const reply = data => onMessage({ id: request.id, ok: true, data });
               const fail = error => onMessage({ id: request.id, ok: false, error });
-              if (request.type === 'status') return reply({ unlocked: vault.unlocked, applicationCount: 0 });
+              if (request.type === 'status') {
+                duringStatus?.(vault, ++statusChecks);
+                return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: vault.accessRevision });
+              }
               if (request.type === 'showApp') return reply({ shown: true });
               if (request.type === 'trustSite') return (vault.trustError || request.url === vault.declineOrigin) ? fail(vault.trustError || 'Declined') : reply({ trusted: true, origin: new URL(request.url).origin });
               if (request.type === 'getFields') {
                 duringGetFields?.(tab);
                 if (vault.getFieldsError) return fail(vault.getFieldsError);
-                return reply({ values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])) });
+                return reply({ accessRevision: vault.accessRevision, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])) });
               }
               fail('Unsupported bridge request.');
             });
@@ -201,7 +205,7 @@ test('the worker loads the site engine next to the Iowa adapter and refuses to s
   const imported = [];
   const chrome = { runtime: { onMessage: { addListener: () => {} } }, tabs: {}, sidePanel: { setPanelBehavior: async () => {} } };
   assert.throws(() => vm.runInNewContext(source('background.js'), { chrome, SecondHandIowa: adapter, importScripts: (...files) => imported.push(...files), crypto: webcrypto, URL, Map, Set }), /generic-adapter\.js/);
-  assert.deepEqual(imported, ['iowa-adapter.js', 'generic-adapter.js']);
+  assert.deepEqual(imported, ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js']);
 });
 
 test('turning a site on checks Chrome access, asks the desktop, then registers and injects the site scripts', async () => {
@@ -270,7 +274,7 @@ test('autofill on an approved site asks for the planned keys once and fills with
   const w = siteWorker({ enabled: true });
   const response = await autofill(w);
   assert.equal(response.ok, true, response.error);
-  assert.deepEqual(w.nativeTypes(), ['status', 'getFields']);
+  assert.deepEqual(w.nativeTypes(), ['status', 'getFields', 'status']);
   assert.deepEqual(w.native[1].fields, ['firstName', 'lastName', 'zip', 'householdSize']);
   assert.equal(w.native[1].url, `${ORIGIN}/intake`);
   // The second plan finds nothing new it can fill, so the click ends there.
@@ -290,7 +294,7 @@ test('autofill on an approved site asks for the planned keys once and fills with
   assert.equal(state.result.message, response.data.message);
   w.events.updated(7, { status: 'complete' }); await settle();
   assert.deepEqual(w.contentTypes(), ['secondhand:generic:frames', 'secondhand:generic:plan', 'secondhand:generic:fill', 'secondhand:generic:plan', 'secondhand:generic:frames'], 'nothing continues or navigates on its own');
-  assert.deepEqual(w.nativeTypes(), ['status', 'getFields']);
+  assert.deepEqual(w.nativeTypes(), ['status', 'getFields', 'status']);
   assert.deepEqual(w.injected, []);
   w.events.updated(7, { status: 'loading' });
   assert.equal((await w.panel({ type: 'ui:pageState' })).data.result, null);
@@ -307,7 +311,7 @@ test('answers that reveal more questions are filled in the same click from one d
   const w = siteWorker({ enabled: true, fields, desktop: { values: { firstName: 'Synthetic private first', lastName: 'Synthetic private last',
     email: 'synthetic@example.org', householdSize: '4', mobilePhone: '5155550100' } } });
   const result = plain((await autofill(w)).data);
-  assert.deepEqual(w.nativeTypes(), ['status', 'getFields'], 'one desktop request for the whole click');
+  assert.deepEqual(w.nativeTypes(), ['status', 'getFields', 'status', 'status', 'status'], 'one profile request, with authorization checked before each fill pass');
   assert.deepEqual(w.native[1].fields, ['firstName', 'lastName', 'email', 'householdSize']);
   assert.deepEqual(w.contentTypes(), ['secondhand:generic:frames', 'secondhand:generic:plan', 'secondhand:generic:fill', 'secondhand:generic:plan', 'secondhand:generic:fill',
     'secondhand:generic:plan', 'secondhand:generic:fill'], 'the third pass fills nothing, so the click stops');
@@ -344,7 +348,7 @@ test('one click fills at most four passes of revealed questions', async () => {
   assert.deepEqual(w.page.answered(), ['email0', 'email1', 'email2', 'email3']);
   assert.equal(result.filled, 4);
   assert.deepEqual(result.needYou, [`f0:${w.page.idOf('email4')}`]);
-  assert.deepEqual(w.nativeTypes(), ['status', 'getFields']);
+  assert.deepEqual(w.nativeTypes(), ['status', 'getFields', 'status', 'status', 'status', 'status']);
 });
 
 test('a second click on the next page of a multi-page form plans that page again', async () => {
@@ -446,7 +450,7 @@ test('AI guesses join the one desktop request and are filled with the guessed ma
   const [, reach, call] = unmatched.map(field => field.id);
   const response = await w.launcher({ type: 'ui:autofill', confirmed: true, guesses: { [reach]: 'email', [call]: 'phone' } });
   assert.equal(response.ok, true, response.error);
-  assert.deepEqual(w.nativeTypes(), ['status', 'getFields']);
+  assert.deepEqual(w.nativeTypes(), ['status', 'getFields', 'status']);
   assert.deepEqual(w.native[1].fields, ['firstName', 'lastName', 'email', 'phone']);
   // The fill uses the plan the AI saw, then plans again for anything revealed.
   assert.deepEqual(w.contentTypes(), ['secondhand:generic:frames', 'secondhand:generic:plan', 'secondhand:generic:frames', 'secondhand:generic:fill', 'secondhand:generic:plan']);
@@ -550,6 +554,36 @@ test('locked, offline, cancelled, and changed pages fill nothing on approved sit
     assert.equal(w.contentTypes().includes('secondhand:generic:fill'), false);
     assert.equal(w.nativeTypes().filter(type => type === 'getFields').length <= 1, true);
   }
+});
+
+for (const change of ['locked', 'profile or trust changed', 'desktop restarted']) {
+  test(`approved-site fill stops when access is ${change} after the profile request`, async () => {
+    const w = siteWorker({ enabled: true, duringStatus: (vault, count) => {
+      if (count !== 2) return;
+      if (change === 'locked') vault.unlocked = false;
+      else vault.accessRevision = change === 'desktop restarted' ? 812347891 : 1;
+    } });
+    const result = (await autofill(w)).data;
+    assert.equal(result.state, change === 'locked' ? 'locked' : 'error');
+    assert.deepEqual(w.page.answered(), []);
+    assert.equal(w.contentTypes().includes('secondhand:generic:fill'), false);
+    assert.equal(w.nativeTypes().filter(type => type === 'getFields').length, 1);
+  });
+}
+
+test('an authorization change between revealed-field passes stops remaining values', async () => {
+  const fields = [
+    { name: 'email', key: 'email' },
+    { name: 'confirmation', key: 'email', revealedBy: 'email' }
+  ];
+  const w = siteWorker({ enabled: true, fields, desktop: { values: { email: 'synthetic@example.invalid' } },
+    duringStatus: (vault, count) => { if (count === 3) vault.accessRevision++; } });
+  const result = (await autofill(w)).data;
+  assert.equal(result.state, 'error');
+  assert.match(result.message, /access changed/);
+  assert.deepEqual(w.page.answered(), ['email']);
+  assert.equal(w.contentTypes().filter(type => type === 'secondhand:generic:fill').length, 1);
+  assert.equal(w.nativeTypes().filter(type => type === 'getFields').length, 1);
 });
 
 test('need-you focus on approved sites goes to the site engine by field id', async () => {

@@ -33,6 +33,7 @@
         "https://hhsservices.iowa.gov/apspssp/ssp.portal/*"
       ],
       "js": [
+        "address-policy.js",
         "iowa-adapter.js",
         "generic-adapter.js",
         "content.js"

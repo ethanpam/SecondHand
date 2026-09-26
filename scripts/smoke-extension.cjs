@@ -11,13 +11,78 @@ const { chromium, expect } = require('@playwright/test');
 const syntheticProfile = require('../tests/fixtures/applicant-profile.json');
 const applicantFixture = require('../tests/fixtures/iowa-personal-information.cjs');
 const preApplicant = require('../tests/fixtures/iowa-pre-applicant.cjs');
+const addressFixture = require('../tests/fixtures/iowa-select-address.cjs');
+const selfFixture = require('../tests/fixtures/iowa-self-details.cjs');
 const root = path.join(__dirname, '..');
 const portal = 'https://hhsservices.iowa.gov/apspssp/ssp.portal';
 const applicant = `${portal}/applyForBenefits/enterPersonalInfo`;
 const extensionDirectory = path.join(root, 'extension');
 
+const documentManualUrl = `${portal}/qa-only/document-manual`;
+const documentNextMarker = 'SECONDHAND_SYNTHETIC_FULL_DOCUMENT_NEXT';
+const addressUrl = addressFixture.URL;
+const selfDetailsUrl = selfFixture.URL;
+const verifiedApplicantMarker = 'SECONDHAND_VERIFIED_ADDRESS_APPLICANT_NEXT';
+const verifiedAddressMarker = 'SECONDHAND_VERIFIED_ADDRESS_NEXT:';
+const addressVariants = {
+  original: { selected: 'original' },
+  second: { selected: 'second', candidateCount: 2 },
+  error: { selected: 'original', error: true },
+  modal: { selected: 'original', modal: true },
+  mailing: { selected: 'original', mailing: true },
+  county: { selected: 'original', renderedCounty: true }
+};
+
+function verifiedAddressFixture(variant) {
+  const options = addressVariants[variant];
+  if (!options) throw new Error('Unknown isolated address QA variant.');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Verified address structure · isolated QA</title>
+    <style>body{font:16px system-ui;background:#f7f8f2;color:#294035;margin:0;padding:30px}main{max-width:900px}label{display:block;margin:12px 0}button{padding:12px 18px;margin:12px}table{border-collapse:collapse}td,th{padding:10px;text-align:left}</style></head>
+    <body><main><p data-verified-address-qa>ISOLATED QA · FICTIONAL APPLICANT · PUBLIC CAMPUS ADDRESS. No government connection.</p>${addressFixture.makeHtml(options)}</main>
+    <script>(${addressFixture.attachHandlers.toString()})(document);
+      document.querySelector(${JSON.stringify(addressFixture.NEXT_SELECTOR)}).addEventListener('click', () => {
+        console.info(${JSON.stringify(verifiedAddressMarker)} + JSON.stringify(document.__addressQa));
+        location.assign(${JSON.stringify(documentManualUrl)});
+      });
+    </script></body></html>`;
+}
+
+function selfDetailsFixture(variant = 'verified') {
+  let html = selfFixture.html;
+  if (variant === 'people') html = html.replace('People | Unvisited', 'People | Active');
+  else if (variant === 'form') html = html.replace('action="simple"', 'action="otherPerson"');
+  else if (variant === 'heading') html = html.replace('<h2>Tell Us More</h2>', '<h2>Tell Us About Another Person</h2>');
+  else if (variant !== 'verified') throw new Error('Unknown self-details QA variant.');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Self-information DOB · isolated QA</title>
+    <style>body{font:16px system-ui;background:#f7f8f2;color:#294035;margin:0;padding:30px}main{max-width:900px}label{display:block;margin:8px 0}input[type=text]{padding:8px}button{padding:12px;margin:10px}.questionAnswer{margin:16px 0}</style></head>
+    <body><main><p>ISOLATED QA · FICTIONAL APPLICANT. Only date-of-birth metadata is verified; the additional test controls below are synthetic guards.</p>${html}</main>
+    <script>
+      // These controls are deliberately QA-only, not purported Iowa mappings.
+      document.getElementById('question01').insertAdjacentHTML('beforeend', '<label><input data-qa-manual name="qaGender" type="radio" value="qa-option-one">QA gender option one</label><label><input data-qa-manual name="qaGender" type="radio" value="qa-option-two">QA gender option two</label>');
+      document.getElementById('question06179').insertAdjacentHTML('beforeend', '<label><input data-qa-manual name="qaCitizenship" type="radio" value="qa-option-one">QA citizenship option one</label><label><input data-qa-manual name="qaCitizenship" type="radio" value="qa-option-two">QA citizenship option two</label>');
+      document.getElementById('question02420').insertAdjacentHTML('beforeend', '<label>QA SSN placeholder<input data-qa-manual name="qaSsn" type="text"></label><label><input data-qa-manual name="qaSsnChoice" type="checkbox">QA SSN choice</label>');
+      window.__selfQa = { nextClicks: 0, manualChanges: 0 };
+      document.querySelectorAll('[data-qa-manual]').forEach(element => element.addEventListener('change', () => { window.__selfQa.manualChanges++; }));
+      document.getElementById('dqButtonId309').onclick = () => { window.__selfQa.nextClicks++; };
+    </script></body></html>`;
+}
+
 function fixture(nextStep) {
-  const nextMarkup = nextStep === 'consent'
+  if (nextStep === 'document-manual-destination') {
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Synthetic manual step · test only</title></head>
+      <body><main><p data-qa-document>SYNTHETIC FULL-DOCUMENT QA FIXTURE. No government connection or real applicant data.</p>
+      <h1>Household Members</h1><label>Fictional household member<input id="qa-household-member" name="qaHouseholdMember"></label>
+      <button id="qa-manual-continue" type="button">Continue (QA only)</button></main>
+      <script>window.__manualNextClicks=0;document.getElementById('qa-manual-continue').addEventListener('click',()=>{window.__manualNextClicks++;});</script></body></html>`;
+  }
+  // Address controls below are hypothetical QA controls, not an observed Iowa
+  // schema. They verify the shipping adapter's refusal to operate this step.
+  const addressReview = nextStep === 'address-review';
+  const verifiedAddressVariant = typeof nextStep === 'string' && nextStep.startsWith('verified-address-') ? nextStep.slice('verified-address-'.length) : null;
+  if (verifiedAddressVariant && !Object.hasOwn(addressVariants, verifiedAddressVariant)) throw new Error('Unknown address fixture transition.');
+  const nextMarkup = addressReview
+    ? '<h1>Select Address</h1><p data-qa-only>HYPOTHETICAL QA CONTROLS. These are not verified Iowa selectors or address-selection behavior.</p><fieldset><legend>Public-campus address choices for the fictional applicant isolation test</legend><label><input id="qa-original-address" name="qa-address-choice" type="radio" value="original">411 Morrill Rd, Ames, IA 50011</label><label><input id="qa-suggested-address" name="qa-address-choice" type="radio" value="suggested">411 MORRILL RD, AMES, IA 50011</label></fieldset><button id="qa-address-continue" type="button">Continue (QA only)</button>'
+    : nextStep === 'consent'
     ? '<h1>Terms and Consent</h1><label><input id="termChkbox" type="checkbox">I agree to the terms</label><button type="button">Continue</button>'
     : '<h1>Household Members</h1><label>Household member<input name="householdMember"></label><button type="button">Continue</button>';
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Synthetic Iowa flow · test only</title>
@@ -26,11 +91,27 @@ function fixture(nextStep) {
     ${applicantFixture.html}</main><script>
       (${applicantFixture.attachConditionalHandlers.toString()})(document);
       window.__nextClicks = 0; window.__lastAnswers = null;
+      window.__addressNextClicks = 0; window.__addressChoiceEvents = 0;
       document.querySelector('.saveAndContinueButton').addEventListener('click', () => {
         window.__nextClicks++;
         window.__lastAnswers = Object.fromEntries(Array.from(document.querySelectorAll('#personalInformation input, #personalInformation select'), element => [element.id, ['checkbox','radio'].includes(element.type) ? element.checked : element.value]));
+        if (${JSON.stringify(nextStep === 'stay')}) return;
+        if (${JSON.stringify(Boolean(verifiedAddressVariant))}) {
+          console.info(${JSON.stringify(verifiedApplicantMarker)});
+          location.assign(${JSON.stringify(addressUrl)});
+          return;
+        }
+        if (${JSON.stringify(nextStep === 'document-manual')}) {
+          // Static QA marker survives unloading through the browser console
+          // listener. It carries no answers, tokens, or other applicant data.
+          console.info(${JSON.stringify(documentNextMarker)});
+          location.assign(${JSON.stringify(documentManualUrl)});
+          return;
+        }
         document.getElementById('synthetic-content').innerHTML = ${JSON.stringify(nextMarkup)};
-        history.pushState({}, '', ${JSON.stringify(`${portal}/applyForBenefits/${nextStep === 'consent' ? 'consent' : 'household'}`)});
+        history.pushState({}, '', ${JSON.stringify(addressReview ? `${portal}/qa-only/select-address` : `${portal}/applyForBenefits/${nextStep === 'consent' ? 'consent' : 'household'}`)});
+        document.getElementById('qa-address-continue')?.addEventListener('click', () => { window.__addressNextClicks++; });
+        document.querySelectorAll('[name="qa-address-choice"]').forEach(input => input.addEventListener('change', () => { window.__addressChoiceEvents++; }));
       });
     </script></body></html>`;
 }
@@ -38,7 +119,7 @@ function fixture(nextStep) {
 // Pre-applicant screens with stand-ins for Iowa's page functions. About you is not
 // recorded yet, so Instructions' Continue leads straight to the applicant page.
 function preApplicantPage(name) {
-  const targets = { letsGetStarted: '/applyForBenefits/letsGetStarted', instructions: '/applyForBenefits/instructions', aboutYou: '/applyForBenefits/enterPersonalInfo', welcome: '/applyForBenefits/welcome', importantInfo: '/applyForBenefits/importantInfo' };
+  const targets = { letsGetStarted: '/applyForBenefits/letsGetStarted', instructions: '/applyForBenefits/instructions', aboutYou: '/applyForBenefits/enterPersonalInfo?next=stay', welcome: '/applyForBenefits/welcome', importantInfo: '/applyForBenefits/importantInfo' };
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Synthetic Iowa screen · test only</title></head><body>
     <p class="test-only">SYNTHETIC TEST FIXTURE. No government connection or real applicant data.</p>${preApplicant.screens[name].html}
     <script>
@@ -53,21 +134,28 @@ function preApplicantPage(name) {
 }
 
 async function installNativeStub(worker) {
-  await worker.evaluate(profile => {
-    globalThis.__nativeSmoke = { locked: false, calls: [], profile };
+  await worker.evaluate(({ profile, addressUrl }) => {
+    globalThis.__nativeSmoke = { locked: false, accessRevision: 0, calls: [], profile };
     nativeRequest = async (type, payload = {}) => {
       const state = globalThis.__nativeSmoke;
-      state.calls.push({ type, fields: payload.fields || [] });
-      if (type === 'status') return { unlocked: !state.locked, applicationCount: 0 };
+      state.calls.push({ type, fields: payload.fields || [], url: payload.url || '' });
+      if (type === 'status') return { unlocked: !state.locked, applicationCount: 0, accessRevision: state.accessRevision };
       if (type === 'showApp') return { shown: true };
       if (type === 'getFields') {
+        if (payload.url === addressUrl && state.holdAddressNavigation) {
+          state.addressAuthorizationWaiting = true;
+          await new Promise(resolve => { state.releaseAddressNavigation = resolve; });
+        }
         if (state.locked) throw new Error('Unlock your local vault first.');
-        return { values: Object.fromEntries(payload.fields.filter(field => state.profile[field]).map(field => [field, state.profile[field]])) };
+        const receipt = state.accessRevision;
+        const values = Object.fromEntries(payload.fields.filter(field => state.profile[field]).map(field => [field, state.profile[field]]));
+        if (state.lockAfterFields) { state.locked = true; state.accessRevision++; }
+        return { values, accessRevision: receipt };
       }
       if (type === 'recordProgress') return { recorded: true };
       throw new Error('Unexpected native test message: ' + type);
     };
-  }, syntheticProfile);
+  }, { profile: syntheticProfile, addressUrl });
 }
 
 // Chrome native side-panel targets are real extension pages but are not exposed
@@ -135,6 +223,9 @@ async function main() {
   const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-chromium-smoke-'));
   let context, panel, page, worker;
   const errors = [];
+  let currentAddressVariant = 'original', currentSelfVariant = 'verified';
+  let verifiedApplicantClicks = 0, verifiedAddressLoads = 0, documentManualLoads = 0;
+  const verifiedAddressNext = [];
   try {
     context = await chromium.launchPersistentContext(userData, {
       channel: 'chromium', headless: true, viewport: { width: 1200, height: 900 },
@@ -144,6 +235,15 @@ async function main() {
       const request = route.request(); const url = new URL(request.url());
       if (request.isNavigationRequest() && url.origin === 'https://hhsservices.iowa.gov' && url.pathname === '/apspssp/ssp.portal/applyForBenefits/enterPersonalInfo') {
         return route.fulfill({ status: 200, contentType: 'text/html', body: fixture(url.searchParams.get('next')) });
+      }
+      if (request.isNavigationRequest() && request.url() === addressUrl) {
+        verifiedAddressLoads++;
+        return route.fulfill({ status: 200, contentType: 'text/html', body: verifiedAddressFixture(currentAddressVariant) });
+      }
+      if (request.isNavigationRequest() && request.url() === selfDetailsUrl) return route.fulfill({ status: 200, contentType: 'text/html', body: selfDetailsFixture(currentSelfVariant) });
+      if (request.isNavigationRequest() && request.url() === documentManualUrl) {
+        documentManualLoads++;
+        return route.fulfill({ status: 200, contentType: 'text/html', body: fixture('document-manual-destination') });
       }
       const screen = Object.keys(preApplicant.screens).find(name => url.pathname === `/apspssp/ssp.portal${preApplicant.screens[name].path}`);
       if (request.isNavigationRequest() && url.origin === 'https://hhsservices.iowa.gov' && screen) {
@@ -162,6 +262,10 @@ async function main() {
     await installNativeStub(worker);
     page = context.pages()[0] || await context.newPage();
     page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (message.text() === verifiedApplicantMarker) verifiedApplicantClicks++;
+      if (message.text().startsWith(verifiedAddressMarker)) verifiedAddressNext.push(JSON.parse(message.text().slice(verifiedAddressMarker.length)));
+    });
     await fs.mkdir(path.join(root, 'artifacts'), { recursive: true });
     const launcherUrl = `chrome-extension://${extensionId}/panel.html?surface=launcher`;
     const launcherFrame = async () => {
@@ -173,11 +277,11 @@ async function main() {
     // Leaving Iowa's site turns a running autofill off, so every flow starts clean.
     async function resetTo(url, { profile = {}, locked = false } = {}) {
       await page.goto('about:blank');
-      await worker.evaluate(({ profile, locked }) => { globalThis.__nativeSmoke = { locked, calls: [], profile }; }, { profile: { ...syntheticProfile, ...profile }, locked });
+      await worker.evaluate(({ profile, locked }) => { globalThis.__nativeSmoke = { locked, accessRevision: 0, calls: [], profile }; }, { profile: { ...syntheticProfile, ...profile }, locked });
       await page.goto(url, { waitUntil: 'domcontentloaded' });
     }
     async function startFixture({ profile = {}, locked = false } = {}) {
-      await resetTo(applicant, { profile, locked });
+      await resetTo(`${applicant}?next=stay`, { profile, locked });
       await page.bringToFront();
       await expect(page.locator('[data-secondhand-assistant]')).toHaveAttribute('data-secondhand-size', 'full');
       const widget = await launcherFrame();
@@ -195,20 +299,20 @@ async function main() {
 
     // One click fills the whole applicant page, including revealed sections.
     await widget.locator('#autofill').click();
-    await expect(widget.locator('#widget-text')).toHaveText(/^Filled \d+ · Check your answers, then click Save and Continue\.$/, { timeout: 20000 });
+    await expect.poll(() => page.evaluate(() => window.__nextClicks), { timeout: 20000 }).toBe(1);
     const full = await answers();
     assert.equal(full.firstName, syntheticProfile.firstName); assert.equal(full.lastName, syntheticProfile.lastName);
     assert.equal(full.suffix, 'III'); assert.equal(full.phoneNumber, '(202)555-0147');
     assert.equal(full.hasHome1, true); assert.equal(full.addressLine1, syntheticProfile.addressLine1);
-    assert.equal(full.sameAddress2, true); assert.equal(full.mailingCity, 'Demo City');
+    assert.equal(full.sameAddress2, true); assert.equal(full.mailingCity, syntheticProfile.mailingCity);
     assert.equal(full.applicant1, true); assert.equal(full.snap, true);
     assert.equal(full.bestTime, syntheticProfile.bestContactTime);
     await expect(widget.locator('#need-you')).toBeHidden();
     assert.equal((await calls('getFields')).length, 1, 'One click makes one desktop request.');
     assert.equal((await calls('recordProgress')).length, 1);
-    assert.equal(await page.evaluate(() => window.__nextClicks), 0, 'Autofill never clicks Next.');
+    assert.equal(await page.evaluate(() => window.__nextClicks), 1, 'Verified complete applicant continues once.');
     await page.screenshot({ path: path.join(root, 'artifacts/extension-assistant.png') });
-    console.log('Widget: one click fills the full applicant page with one desktop request and no Next.');
+    console.log('Widget: one click fills the full applicant page with one desktop request and one verified Next.');
 
     // Missing saved answers become "need you" links that jump to the field.
     widget = await startFixture({ profile: { firstName: '' } });
@@ -217,7 +321,13 @@ async function main() {
     await expect(page.locator('#lastName')).toHaveValue(syntheticProfile.lastName);
     await widget.locator('#need-you').click();
     await expect.poll(() => page.evaluate(() => document.activeElement.id)).toBe('firstName');
-    console.log('Widget: a missing saved answer is flagged and one click finds it.');
+    assert.equal(await page.evaluate(() => window.__nextClicks), 0, 'Missing required profile data cannot trigger Next.');
+    const beforeManual = (await calls('getFields')).length;
+    await page.locator('#firstName').fill(syntheticProfile.firstName);
+    await expect.poll(() => page.evaluate(() => window.__nextClicks), { timeout: 20000 }).toBe(1);
+    assert.equal((await calls('getFields')).filter(call => call.fields.length).length, beforeManual, 'Manual completion requests no additional saved profile values.');
+    assert.deepEqual((await calls('getFields')).at(-1).fields, [], 'Manual completion obtains fresh no-data navigation authorization.');
+    console.log('Widget: missing profile data blocks Next; field focus and manual completion allow one later Next.');
 
     const branches = [
       { name: 'home address with same mailing; optional blanks', profile: { mailingSameAsHome: 'yes', middleName: '', suffix: '', maidenName: '', addressLine2: '', bestContactTime: '' }, check: answers => { assert.equal(answers.sameAddress1, true); assert.equal(answers.mailingAddressLine1, ''); } },
@@ -228,9 +338,9 @@ async function main() {
     for (const branch of branches) {
       widget = await startFixture({ profile: branch.profile });
       await widget.locator('#autofill').click();
-      await expect(widget.locator('#widget-text')).toHaveText(/^Filled \d+ · Check your answers, then click Save and Continue\.$/, { timeout: 20000 });
+      await expect.poll(() => page.evaluate(() => window.__nextClicks), { timeout: 20000 }).toBe(1);
       branch.check(await answers());
-      assert.equal(await page.evaluate(() => window.__nextClicks), 0);
+      assert.equal(await page.evaluate(() => window.__nextClicks), 1);
       console.log(`Widget conditional branch passed: ${branch.name}.`);
     }
 
@@ -238,6 +348,18 @@ async function main() {
     await widget.locator('#autofill').click();
     await expect(widget.locator('#need-you')).toHaveText('1 need you', { timeout: 20000 });
     console.log('Widget: an unanswered required program choice is flagged for the applicant.');
+
+    // Manual completion can reveal a saved optional field. Fill that new field
+    // before deciding that required answers are complete and clicking Next.
+    widget = await startFixture({ profile: { isApplicant: '', programSnap: '', programFip: '', programMedicaid: '' } });
+    await widget.locator('#autofill').click();
+    await expect(page.locator('#lastName')).toHaveValue(syntheticProfile.lastName, { timeout: 20000 });
+    assert.equal(await page.evaluate(() => window.__nextClicks), 0);
+    await page.locator('#applicant1').check();
+    await page.locator('#snap').check();
+    await expect.poll(() => page.evaluate(() => window.__nextClicks), { timeout: 20000 }).toBe(1);
+    assert.equal(await page.evaluate(() => window.__lastAnswers.bestTime), syntheticProfile.bestContactTime);
+    console.log('Manual program choice: newly revealed saved best-time answer fills before Next.');
 
     // A locked vault fills nothing and offers to bring the desktop app forward.
     widget = await startFixture({ locked: true });
@@ -261,12 +383,12 @@ async function main() {
     await expect(widget.locator('#stop')).toBeVisible();
     await page.locator('#termChkbox').check();
     await page.locator('button.saveButton').click();
-    await expect.poll(() => page.url(), { timeout: 20000 }).toBe(applicant);
+    await expect.poll(() => page.url(), { timeout: 20000 }).toBe(`${applicant}?next=stay`);
     await expect(page.locator('#lastName')).toHaveValue(syntheticProfile.lastName, { timeout: 20000 });
     widget = await launcherFrame();
-    await expect(widget.locator('#widget-text')).toHaveText(/^Filled \d+ · Check your answers, then click Save and Continue\.$/, { timeout: 20000 });
+    await expect.poll(() => page.evaluate(() => window.__nextClicks), { timeout: 20000 }).toBe(1);
     await expect(widget.locator('#stop')).toBeVisible();
-    assert.equal(await page.evaluate(() => window.__nextClicks), 0, 'Autofill never clicks Save and Continue.');
+    assert.equal(await page.evaluate(() => window.__nextClicks), 1, 'Verified complete applicant continues once.');
     assert.equal((await calls('getFields')).length, 1);
     console.log('Autopilot: one click continued Before You Start, waited at consent, then continued Important Information and Instructions and filled the applicant page.');
 
@@ -291,7 +413,7 @@ async function main() {
     // It runs last: in headless Chromium the open panel covers the widget's corner.
     widget = await startFixture();
     await widget.locator('#autofill').click();
-    await expect(widget.locator('#widget-text')).toHaveText(/^Filled \d+ · Check your answers, then click Save and Continue\.$/, { timeout: 20000 });
+    await expect.poll(() => page.evaluate(() => window.__nextClicks), { timeout: 20000 }).toBe(1);
     await widget.locator('#details').click();
     panel = await attachNativePanel(context, page, extensionId);
     await expect.poll(() => panel.text('[data-key="lastName"]'), { timeout: 15000 }).toContain('Done');
@@ -301,12 +423,140 @@ async function main() {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       return JSON.stringify(await chrome.runtime.sendMessage({ type: 'ui:pageState', tabId: tab.id }));
     });
-    for (const value of ['Avery', 'Jordan', '123 Test Way', '2025550147', 'PO Box 123']) {
+    for (const value of [syntheticProfile.firstName, syntheticProfile.middleName, syntheticProfile.addressLine1, syntheticProfile.homePhone, syntheticProfile.mailingAddressLine1]) {
       assert.equal(sidebarText.includes(value), false, `Sidebar must never render a profile value: ${value}`);
       assert.equal(sidebarMessage.includes(value), false, `Sidebar messages must never receive a profile value: ${value}`);
     }
     await panel.screenshot(path.join(root, 'artifacts/extension-native-sidebar.png'));
     console.log('Side panel: checklist and desktop status without profile values.');
+
+    // Existing answers are not overwritten, including answers a saved parent
+    // choice would clear through a portal conditional handler.
+    await resetTo(`${applicant}?next=stay`, { profile: { mailingSameAsHome: 'yes' } });
+    await page.locator('#firstName').fill('Preserved fictional name');
+    await page.locator('#hasHome1').check();
+    await page.locator('#sameAddress2').check();
+    await page.locator('#mailingAddressLine1').fill('Preserved fictional mailing');
+    await page.locator('#sameAddress2').evaluate(element => { element.checked = false; });
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await panel.click('#panel-autofill');
+    await expect(page.locator('#lastName')).toHaveValue(syntheticProfile.lastName, { timeout: 20000 });
+    await expect(page.locator('#firstName')).toHaveValue('Preserved fictional name');
+    await expect(page.locator('#mailingAddressLine1')).toHaveValue('Preserved fictional mailing');
+    await expect(page.locator('#sameAddress1')).not.toBeChecked();
+    assert.equal(await page.evaluate(() => window.__nextClicks), 0);
+    console.log('Applicant: prefilled answers and dependent mailing details remain unchanged.');
+
+    // A genuine document unload exercises native sidebar/tab identity and private
+    // address snapshots. The address authorization returns no saved fields.
+    for (const variant of ['original', 'second']) {
+      currentAddressVariant = variant;
+      verifiedApplicantClicks = 0; verifiedAddressLoads = 0; documentManualLoads = 0; verifiedAddressNext.length = 0;
+      await resetTo(`${applicant}?next=verified-address-${variant}`, { profile: { mailingSameAsHome: 'yes' } });
+      await worker.evaluate(() => { globalThis.__nativeSmoke.holdAddressNavigation = true; });
+      await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+      await panel.click('#panel-autofill');
+      await expect.poll(() => page.url(), { timeout: 20000 }).toBe(addressUrl);
+      await expect.poll(() => worker.evaluate(() => globalThis.__nativeSmoke.addressAuthorizationWaiting), { timeout: 20000 }).toBe(true);
+      await expect(page.locator('#homeAddressIndex0')).not.toBeChecked();
+      await expect(page.locator('#homeAddressIndex1')).toBeChecked();
+      await expect.poll(() => panel.text('[data-key="addressReview"]')).toContain('First suggested home address');
+      const metadata = await panel.evaluate(async () => {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        return JSON.stringify(await chrome.runtime.sendMessage({ type: 'ui:pageState', tabId: tab.id }));
+      });
+      const text = await panel.evaluate(() => document.body.innerText);
+      for (const value of ['411 Morrill', '411 MORRILL', '415 MORRILL', 'Ames', 'AMES', '50011']) {
+        assert.equal(text.includes(value), false); assert.equal(metadata.includes(value), false);
+      }
+      await worker.evaluate(() => { const state = globalThis.__nativeSmoke; state.holdAddressNavigation = false; state.releaseAddressNavigation(); });
+      await expect.poll(() => page.url(), { timeout: 20000 }).toBe(documentManualUrl);
+      await expect.poll(() => verifiedAddressNext.length).toBe(1);
+      assert.equal(verifiedApplicantClicks, 1); assert.equal(verifiedAddressLoads, 1); assert.equal(documentManualLoads, 1);
+      assert.deepEqual(verifiedAddressNext, [{ selectionClicks: ['0'], selectedIndexes: [['0']], nextClicks: 1 }]);
+      const requests = await calls('getFields');
+      assert.equal(requests.length, 2);
+      assert.deepEqual(requests.filter(call => call.url === addressUrl).map(call => call.fields), [[]]);
+      await page.waitForTimeout(1800);
+      assert.equal((await calls('getFields')).length, 2);
+      assert.equal(await page.evaluate(() => window.__manualNextClicks), 0);
+      console.log(`Address ${variant}: one applicant Next, first suggestion selected, one address Next, no address profile values.`);
+    }
+
+    for (const variant of ['error', 'modal', 'mailing', 'county']) {
+      currentAddressVariant = variant; verifiedAddressNext.length = 0;
+      await resetTo(addressUrl);
+      await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+      await panel.click('#panel-autofill');
+      const before = await page.evaluate(() => JSON.stringify(document.__addressQa));
+      const requests = (await calls('getFields')).length;
+      await page.waitForTimeout(1800);
+      await expect(page.locator('#homeAddressIndex0')).not.toBeChecked();
+      await expect(page.locator('#homeAddressIndex1')).toBeChecked();
+      assert.equal(await page.evaluate(() => JSON.stringify(document.__addressQa)), before);
+      assert.equal((await calls('getFields')).length, requests);
+      assert.deepEqual(verifiedAddressNext, []);
+      console.log(`Address ${variant}: unsupported variation stays manual and unchanged.`);
+    }
+
+    await resetTo(`${applicant}?next=address-review`, { profile: { mailingSameAsHome: 'yes' } });
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await panel.click('#panel-autofill');
+    await expect(page.locator('[data-qa-only]')).toBeVisible({ timeout: 20000 });
+    await expect.poll(() => panel.text('[data-key="addressReview"]')).toContain('address');
+    const hypotheticalRequests = (await calls('getFields')).length;
+    await page.waitForTimeout(1800);
+    assert.equal(await page.evaluate(() => window.__addressNextClicks), 0);
+    assert.equal(await page.evaluate(() => window.__addressChoiceEvents), 0);
+    assert.equal((await calls('getFields')).length, hypotheticalRequests);
+    console.log('Hypothetical Select Address controls remain manual; no fabricated schema is activated.');
+
+    // Authorization receipt becomes stale if the desktop locks before navigation.
+    currentAddressVariant = 'original'; verifiedAddressNext.length = 0;
+    await resetTo(addressUrl);
+    await worker.evaluate(() => { globalThis.__nativeSmoke.lockAfterFields = true; });
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await panel.click('#panel-autofill');
+    await expect.poll(() => panel.text('#status')).toMatch(/lock|unlock|changed/i);
+    await expect(page.locator('#homeAddressIndex1')).toBeChecked();
+    assert.deepEqual(verifiedAddressNext, []);
+    assert.equal(await page.evaluate(() => document.__addressQa.nextClicks), 0);
+    console.log('A desktop lock after authorization prevents address selection and Next.');
+
+    const selfControls = () => page.evaluate(dobId => Array.from(document.querySelectorAll('input')).filter(element => element.id !== dobId)
+      .map(element => ({ id: element.id, name: element.name, value: element.value, checked: element.checked })), selfFixture.DOB_ID);
+    currentSelfVariant = 'verified';
+    await resetTo(selfDetailsUrl);
+    const untouched = await selfControls();
+    await expect.poll(() => panel.text('[data-key="birthDate"]')).toContain('Date of birth');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await panel.click('#panel-autofill');
+    await expect(page.locator(`[id="${selfFixture.DOB_ID}"]`)).toHaveValue('04/12/1985', { timeout: 20000 });
+    await expect.poll(() => panel.text('[data-key="birthDate"]')).toContain('Done');
+    await page.waitForTimeout(1800);
+    assert.deepEqual(await selfControls(), untouched);
+    assert.deepEqual(await page.evaluate(() => window.__selfQa), { nextClicks: 0, manualChanges: 0 });
+    assert.deepEqual((await calls('getFields')).map(call => ({ url: call.url, fields: call.fields })), [{ url: selfDetailsUrl, fields: ['birthDate'] }]);
+    const dobMetadata = await panel.evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      return JSON.stringify(await chrome.runtime.sendMessage({ type: 'ui:pageState', tabId: tab.id }));
+    });
+    const dobText = await panel.evaluate(() => document.body.innerText);
+    for (const value of ['Avery', 'Example', '1985-04-12', '04/12/1985']) {
+      assert.equal(dobMetadata.includes(value), false); assert.equal(dobText.includes(value), false);
+    }
+    console.log('Tell Us More: only self DOB filled/formatted; manual questions and Next untouched; no answers in sidebar.');
+    for (const variant of ['people', 'form', 'heading']) {
+      currentSelfVariant = variant;
+      await resetTo(selfDetailsUrl);
+      await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+      await panel.click('#panel-autofill');
+      await page.waitForTimeout(1800);
+      await expect(page.locator(`[id="${selfFixture.DOB_ID}"]`)).toHaveValue('');
+      assert.deepEqual(await calls('getFields'), []);
+      assert.deepEqual(await page.evaluate(() => window.__selfQa), { nextClicks: 0, manualChanges: 0 });
+      console.log(`Tell Us More ${variant}: mismatched context stays manual.`);
+    }
 
     assert.deepEqual(errors, []);
     console.log('Widget: intro pages show a small pill. All browser fixtures/data were synthetic; native desktop responses were DevTools stubs.');
@@ -326,4 +576,5 @@ async function main() {
     await fs.rm(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
-main().catch(error => { console.error(error); process.exitCode = 1; });
+if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; });
+module.exports = { fixture, verifiedAddressFixture, selfDetailsFixture, installNativeStub, attachNativePanel, portal, applicant, addressUrl, selfDetailsUrl, documentManualUrl, extensionDirectory, syntheticProfile };

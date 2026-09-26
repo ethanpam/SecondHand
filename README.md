@@ -1,8 +1,8 @@
 # secondHand
 
-A desktop benefits companion and Chrome extension for Iowa SNAP. Your saved profile and application tracker live in an encrypted vault on your computer. On Iowa's Self-Service Portal, one **Autofill** click works through the application for you, through a local Chrome Native Messaging connection. It fills the questions it knows and continues past information-only screens. It stops with a plain instruction wherever you're needed: CAPTCHA, consent, missing answers, and checking each page before Save and Continue. A Chrome side panel shows what still needs you.
+A desktop benefits companion and Chrome extension for Iowa SNAP. Your saved profile and application tracker live in an encrypted vault on your computer. On Iowa's Self-Service Portal, one **Autofill** click works through the application for you, through a local Chrome Native Messaging connection. It fills the questions it knows and continues past information-only screens. It stops with a plain instruction wherever you're needed: CAPTCHA, consent, missing answers, and unsupported steps. A Chrome side panel shows what still needs you.
 
-**This is an early assisted-application release.** The initial applicant page has verified filling for names and suffix, phone/contact preferences, home and mailing addresses, and explicitly saved yes/no and program choices. One click also fills fields that your saved answers reveal, such as a mailing address. SecondHand never clicks Save and Continue. You review the answers, click Continue yourself, and complete unverified later steps, consent, signatures, and final submission on Iowa's website. Only the government can confirm eligibility or approval. See [Iowa portal coverage](docs/iowa-portal.md) for the exact scope.
+**This is an early assisted-application release.** The initial applicant page has verified filling for names and suffix, phone/contact preferences, home and mailing addresses, and explicitly saved yes/no and program choices. One click also fills fields that your saved answers reveal, such as a mailing address. On the verified initial applicant page it chooses Save and Continue once required answers are complete. It also selects the first suggested home address on the verified home-only address screen and continues. Review the chosen address and every answer before submitting. On other pages, the general form engine may fill recognizable saved fields, but later navigation, unsupported questions, consent, signatures, and final submission stay manual. Only the government can confirm eligibility or approval. See [Iowa portal coverage](docs/iowa-portal.md) for the exact scope.
 
 ![SecondHand desktop app and Chrome extension autofilling an Iowa SNAP test page, a Jotform, an embedded Jotform, and a Google Form](docs/media/secondhand-demo.gif)
 
@@ -24,7 +24,7 @@ Download the Windows `.exe` installer or the Mac `.dmg` for your processor from 
 2. In **Chrome extension**, choose **Prepare Chrome extension**. The app prepares a permanent folder and registers its local connection automatically.
 3. In Chrome, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select that folder. Use the app's **Copy folder path** button to locate it. No extension ID copying or command line is needed.
 4. Save your profile, keep the app unlocked, and open [Iowa's portal](https://hhsservices.iowa.gov/apspssp/ssp.portal) in Chrome. Use Chrome 116 or newer. Start a guest application and click **Autofill** in the bottom-right corner. It stays on for that tab until you click **Stop**, lock SecondHand, leave Iowa's site, or reach a screen it doesn't know yet. The first time, the desktop app asks: choose **Allow once**, or **Always allow on this computer** to skip the pop-up whenever the app is unlocked. You can turn that off in the app's **Chrome extension** page.
-5. The widget shows how many fields it filled and how many **need you**. Click that link to jump to each missing field. **Details** opens the side panel checklist (**Done**, **Needs you**, **Optional**, **Do it yourself**). Review every answer, then click Iowa's Save and Continue yourself. Complete consent, signatures, and final submission yourself, and save the official confirmation in your local tracker. Locking the vault stops autofill.
+5. The widget shows how many fields it filled and how many **need you**. Click that link to jump to each missing field. **Details** opens the side panel checklist (**Done**, **Needs you**, **Optional**, **Do it yourself**). The verified applicant and home-address screens can continue automatically; other Next buttons stay manual. Review every answer and the selected home address before submitting. Complete consent, signatures, and final submission yourself, and save the official confirmation in your local tracker. Locking the vault stops autofill.
 
 Chrome installation still requires the manual Load unpacked step; the app does not silently install extensions. See [the complete setup and troubleshooting guide](docs/setup.md) for Mac folder selection, updates, and custom builds.
 
@@ -48,30 +48,27 @@ On macOS/Linux, use the desktop's Prepare Chrome extension button; it registers 
 ```sh
 npm run test:ui       # Real Electron UI smoke test; needs a desktop session
 npm run test:extension # Isolated Chromium with synthetic Iowa fixtures; install via npx playwright install chromium
+npm run test:extension:video # Record a fictional-applicant walkthrough of the extension and native sidebar
 npm run test:native   # Native protocol test (on Windows set SECONDHAND_PACKAGED_EXE to the built native host)
 npm run extension:zip
 npm run dist:win      # Run on Windows to build the NSIS .exe installer
 npm run dist:mac      # Unsigned DMGs for Apple silicon and Intel Macs
 ```
 
-Fictional QA data is in [`tests/fixtures/applicant-profile.json`](tests/fixtures/applicant-profile.json). It is for isolated tests only and is never sent to the real Iowa portal.
+Fictional QA data is in [`tests/fixtures/applicant-profile.json`](tests/fixtures/applicant-profile.json). Automated tests use it only in isolated browsers with all Iowa requests intercepted. The separately authorized manual live inspection is documented in [the journey record](docs/iowa-live-journey.md); it stopped at E-Signature without signing or submitting.
+See [extension QA and recording](docs/extension-qa.md) for the walkthrough, test coverage, and simulated components.
+
+This development branch also supports the observed home-only **Select Address** step: autofill chooses Iowa's first possible home-address match, then Save and Continue. Review that choice before submitting. Separate mailing confirmation, county questions, and later navigation remain manual. The general form engine can fill recognizable fields on other pages; this does not establish verified coverage of those pages. See [address confirmation coverage](docs/address-automation.md). The branch also fills the primary applicant’s saved birth date on the verified **Tell Us More** page; its other answers and Next stay manual. Public 0.4 downloads do not yet include these changes.
 
 No application server, database service, API keys, or applicant account with secondHand is required.
 
-## Continuous integration
+## Local validation and releases
 
-GitHub Actions checks every pull request and every push to `main`:
+GitHub Actions CI workflows have been removed to avoid hosted-runner usage. Pull requests, pushes, and tags do not automatically run project checks, build installers, or create releases.
 
-| Workflow | Runs when | What it checks |
-| --- | --- | --- |
-| **Verify and build** (`build.yml`) | Every pull request, `main`, and `v*` tags | Static checks and unit tests on Node 22 and 24; website lint, tests, typecheck, and build; the Chromium extension smoke test; the Electron UI and native-host tests, then Windows and Mac installers. **CI result** passes only when all of these pass. |
-| **iOS** (`ios.yml`) | Changes under `ios/` | The Safari extension and application-assistant JavaScript tests, then native and UI tests on the newest iPhone simulator with Xcode 26. |
-| **Dependency audit** (`audit.yml`) | Lockfile changes and every Monday | `npm audit` for the desktop app and website. Critical advisories fail; high ones are reported as warnings. |
-| **Workflow lint** (`workflow-lint.yml`) | Changes to workflow files | actionlint and shellcheck. |
+Run the local test and build commands in [Develop](#develop) before sharing changes. The [website](website/README.md), [iOS](ios/README.md), and [Android](android/README.md) guides retain their platform-specific validation instructions. Dependency audits can also be run locally with `npm audit` in the repository root and in `website/`.
 
-Dependabot opens weekly update pull requests for npm packages and actions. A newer commit on a pull request cancels the older run. If a UI test fails, its screenshots (or the Xcode result bundle) are attached to the run as an artifact.
-
-**Releases.** Installers from each run are kept as artifacts for 30 days and can be rebuilt with **Run workflow**. Pushing a tag that matches `package.json` (for example `v0.4.0`) builds all installers and attaches them, with checksums, to a draft prerelease. Publishing to the public download website stays a manual step with a temporary upload token; see [`website/README.md`](website/README.md).
+Build installers locally with `npm run dist:win` on Windows or `npm run dist:mac` on macOS. Releases and installer uploads are manual. Publishing to the public download website uses a temporary upload token; see [`website/README.md`](website/README.md).
 
 ## Data boundaries
 

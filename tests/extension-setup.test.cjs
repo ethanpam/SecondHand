@@ -50,7 +50,7 @@ test('missing copied files report setup incomplete and preparation repairs the s
   const { app } = await fixture(t);
   const initial = await prepareBundledExtension(app);
   assert.equal(EXTENSION_FILES.some(file => file.startsWith('popup.')), false);
-  for (const file of ['content.js', 'generic-content.js', 'panel.html', 'panel.js', 'panel.css']) {
+  for (const file of ['address-policy.js', 'content.js', 'generic-adapter.js', 'generic-content.js', 'ai-mapper.js', 'panel.html', 'panel.js', 'panel.css']) {
     await fs.unlink(path.join(initial.directory, file));
     assert.equal((await getExtensionSetup(app)).prepared, false);
     assert.equal((await prepareBundledExtension(app)).directory, initial.directory);

@@ -4,7 +4,7 @@
   const $ = id => document.getElementById(id);
   // Must match BUILD in background.js: change both together. Chrome loads these pages
   // from disk right away but keeps running the old worker until SecondHand is reloaded.
-  const BUILD = '2026-09-26.2';
+  const BUILD = '2026-09-26.3';
   const OUTDATED = 'SecondHand was updated. Open chrome://extensions and click the reload arrow on SecondHand, then reload this page.';
   const fixedText = (value, length = 360) => typeof value === 'string' ? value.slice(0, length) : '';
   const trusted = callback => event => { if (event.isTrusted) return callback(event); };
@@ -52,7 +52,7 @@
       if (outdated) return OUTDATED;
       if (working) return 'Working…';
       if (note) return note;
-      if (!result) return site ? `${hostOf(site.origin)} · ready` : 'Iowa SNAP · ready';
+      if (!result) return site ? `${hostOf(site.origin)} · ready` : 'Iowa · uses first home address suggestion';
       // Other sites: the need-you link carries the count, so it isn't repeated here.
       if (result.state === 'done' && result.pageKey === 'general') {
         const guessed = Number(result.guessed) > 0 ? ` · ${Number(result.guessed)} guessed` : '';
@@ -76,6 +76,7 @@
       $('need-you').hidden = outdated || !needYou.length;
       $('need-you').textContent = `${needYou.length} need you`;
       $('widget-text').textContent = statusText();
+      $('autofill').title = site ? 'Fill supported fields on this site once. Review every answer.' : 'Autofill continues verified information screens and complete applicant pages, then selects the first suggested home address and continues. Review the selected address before submitting.';
       $('widget-text').title = outdated ? OUTDATED : fixedText([result?.message, ai.note, ai.reason].filter(Boolean).join(' '), 240);
     }
     async function poll() {
@@ -196,6 +197,7 @@
     }
     function controls() {
       const off = Boolean(target && site && !site.enabled);
+      $('iowa-policy').hidden = !target || Boolean(site);
       const pending = site?.enabled && site.ready ? site.frames.filter(frame => !frame.enabled) : [];
       $('frames-enable').hidden = !target || !pending.length;
       $('frames-enable').disabled = working;

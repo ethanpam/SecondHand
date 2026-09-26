@@ -7,6 +7,7 @@
   globalThis.secondHandContentInstalled = true;
 
   let pending = null;
+  let navigation = null;
   let revision = 0;
   let panelHost = null;
   let panelFrame = null;
@@ -40,6 +41,7 @@
   function ensurePanel() {
     if (!adapter.isSupportedUrl(location.href)) {
       pending = null;
+      navigation = null;
       panelHost?.remove();
       return;
     }
@@ -84,8 +86,13 @@
     return scanMetadata(scan, pending.token);
   }
 
-  function pageState() {
-    return { page: adapter.probePage(document, location.href), scan: preview() };
+  function pageState(navigationPreview = true) {
+    const page = adapter.probePage(document, location.href), scan = preview();
+    if (navigationPreview) {
+      const snapshot = ['iowa-personal-information', 'iowa-select-address'].includes(page.pageKey) && page.canAdvance ? adapter.captureNavigation(document, location.href) : null;
+      navigation = snapshot ? { token: crypto.randomUUID(), snapshot, url: location.href, expires: Date.now() + 15000 } : null;
+    }
+    return { page, scan, nextToken: navigationPreview ? navigation?.token || null : null };
   }
 
   // The general engine only runs where the Iowa adapter has neither a verified form nor an instruction.
@@ -132,22 +139,29 @@
   document.addEventListener('change', () => { revision++; }, true);
   window.addEventListener('popstate', ensurePanel);
   const watch = setInterval(ensurePanel, 1000);
-  window.addEventListener('pagehide', () => { clearInterval(watch); observer.disconnect(); pending = null; }, { once: true });
+  window.addEventListener('pagehide', () => { clearInterval(watch); observer.disconnect(); pending = null; navigation = null; }, { once: true });
 
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (sender.id !== chrome.runtime.id || !message || window !== window.top || !adapter.isSupportedUrl(location.href)) return;
     try {
       if (message.type === 'secondhand:pageState') {
-        respond(withOwnPanelHidden(pageState));
+        respond(withOwnPanelHidden(() => pageState(message.navigationPreview !== false)));
       } else if (message.type === 'secondhand:continue') {
-        pending = null;
+        pending = null; navigation = null;
         respond(withOwnPanelHidden(() => adapter.continuePage(document, location.href)));
+      } else if (message.type === 'secondhand:next') {
+        const original = navigation; navigation = null; pending = null;
+        if (message.authorized !== true || !original || original.token !== message.token || original.url !== location.href || original.expires < Date.now()) {
+          respond({ advanced: false, reason: 'The page changed or its navigation preview expired. Check it again.' }); return;
+        }
+        respond(withOwnPanelHidden(() => adapter.advance(document, location.href, original.snapshot)));
       } else if (message.type === 'secondhand:focusField' && typeof message.key === 'string' && typeof adapter.focusField === 'function') {
         const focused = withOwnPanelHidden(() => adapter.focusField(document, location.href, message.key));
         respond({ focused: Boolean(focused) });
       } else if (message.type === 'secondhand:fill') {
         const original = pending;
         pending = null; // One approval, one attempt. No automatic retry.
+        navigation = null;
         if (!original || original.token !== message.token || original.url !== location.href || original.expires < Date.now() || !Array.isArray(message.fields) || !message.values || typeof message.values !== 'object' || Array.isArray(message.values)) {
           respond({ ok: false, error: 'The page changed or the preview expired. Scan again.' });
           return;
@@ -166,6 +180,7 @@
       }
     } catch {
       pending = null;
+      navigation = null;
       respond({ ok: false, error: 'This page could not be checked safely. Review it manually, then rescan.' });
     }
   });

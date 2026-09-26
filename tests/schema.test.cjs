@@ -43,7 +43,7 @@ test('mailing contact fields stay separate, use validated formats, and the full 
   const complete = validateProfile(fictionalProfile);
   assert.deepEqual(Object.keys(fictionalProfile).sort(), [...PROFILE_FIELDS].sort());
   assert.equal(complete.mailingAddressLine1, 'PO Box 123');
-  assert.equal(complete.addressLine1, '123 Test Way');
+  assert.equal(complete.addressLine1, fictionalProfile.addressLine1);
   assert.equal(validateProfile({ mailingState: 'ia' }).mailingState, 'IA');
   assert.throws(() => validateProfile({ mailingState: 'Iowa' }));
   assert.throws(() => validateProfile({ mailingZip: '123' }));

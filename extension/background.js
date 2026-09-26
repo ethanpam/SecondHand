@@ -1,11 +1,11 @@
 'use strict';
-importScripts('iowa-adapter.js', 'generic-adapter.js');
+importScripts('address-policy.js', 'iowa-adapter.js', 'generic-adapter.js');
 if (typeof globalThis.SecondHandGeneric?.requestKeys !== 'function' || typeof globalThis.SecondHandGeneric.deriveValues !== 'function' || !Array.isArray(globalThis.SecondHandGeneric.GENERIC_KEYS)) {
   throw new Error('SecondHand could not load generic-adapter.js. Reinstall the extension.');
 }
 // Must match BUILD in panel.js: change both together. The panel compares them to tell
 // when Chrome is still running an older worker than the pages it loaded from disk.
-const BUILD = '2026-09-26.2';
+const BUILD = '2026-09-26.3';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
@@ -63,12 +63,12 @@ async function activePortal(tabId) {
   return tab;
 }
 async function inject(tabId) {
-  await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ['iowa-adapter.js', 'generic-adapter.js', 'content.js'] });
+  await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'content.js'] });
 }
-async function readPage(tabId) {
+async function readPage(tabId, navigationPreview = true) {
   const tab = await activePortal(tabId);
   await inject(tabId);
-  const state = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:pageState' }, { frameId: 0 });
+  const state = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:pageState', navigationPreview }, { frameId: 0 });
   const current = await activePortal(tabId);
   if (current.url !== tab.url || !state?.page || !state.scan) throw new Error('The page changed. Wait for it to finish loading.');
   return { ...state, url: tab.url };
@@ -77,118 +77,194 @@ const needYou = page => (Array.isArray(page.checklist) ? page.checklist : [])
   .filter(item => (item.required && item.status === 'missing') || item.status === 'manual').map(item => item.key);
 function remember(tabId, result) { results.set(tabId, result); return result; }
 function failed(error) {
+  const text = typeof error?.message === 'string' ? error.message.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 240) : '';
+  error = { ...error, message: text };
   if (error.code === 'offline') return { state: 'offline', message: 'Open the SecondHand app, then click Autofill again.' };
   if (/Unlock/.test(error.message)) return { state: 'locked', message: 'Unlock SecondHand to autofill.' };
   return { state: 'error', message: /cancelled/i.test(error.message) ? 'Cancelled. Nothing was filled.' : error.message || 'Autofill failed. Fill this page yourself.' };
 }
 
-// One desktop request for the page's saved fields, then up to four fill passes so
-// answers that reveal conditional sections get their follow-ups.
-async function fillPage(tabId, state) {
+// Desktop receipt revisions are authorization metadata, never profile values.
+function receiptRevision(response) {
+  if (!Number.isSafeInteger(response?.accessRevision) || response.accessRevision < 0) throw new Error('Update and reopen SecondHand, then reload this extension. Its authorization response is outdated.');
+  return response.accessRevision;
+}
+async function checkAccess(revision) {
+  const desktop = await nativeRequest('status');
+  if (!desktop?.unlocked) throw new Error('Unlock SecondHand to autofill.');
+  if (receiptRevision(desktop) !== revision) throw new Error('Desktop access changed. Review the page, then click Autofill again.');
+}
+function currentPilot(tabId, pilot) {
+  if (autopilots.get(tabId) !== pilot) throw new Error('Autofill stopped. Nothing further will be filled or advanced.');
+}
+function stopAutopilot(tabId, result, pilot) {
+  if (pilot && autopilots.get(tabId) !== pilot) return results.get(tabId) || result;
+  autopilots.delete(tabId);
+  return remember(tabId, result);
+}
+async function fillPage(tabId, state, pilot) {
   const { url } = state;
   const pageKey = state.page.pageKey;
   let values = null;
   try {
     const desktop = await nativeRequest('status');
+    currentPilot(tabId, pilot);
     if (!desktop?.unlocked) return { state: 'locked', filled: 0, needYou: [], message: 'Unlock SecondHand to autofill.', pageKey };
     const response = await nativeRequest('getFields', { url: safeUrl(url), fields: SecondHandIowa.profileRequest(pageKey) });
+    currentPilot(tabId, pilot);
+    const revision = receiptRevision(response);
     if (!response?.values || typeof response.values !== 'object' || Array.isArray(response.values)) throw new Error('The desktop did not return supported profile fields.');
     values = SecondHandIowa.pageValues(pageKey, response.values);
     let filled = 0;
-    const attempted = new Set();
+    const attempted = pilot.attempted;
     for (let pass = 0; pass < 4; pass++) {
+      currentPilot(tabId, pilot);
       if ((await activePortal(tabId)).url !== url) throw new Error('The page changed. Click Autofill again.');
+      currentPilot(tabId, pilot);
       const fresh = pass === 0 ? state : await readPage(tabId);
+      currentPilot(tabId, pilot);
+      if (fresh.page.kind === 'blocked') break; // A household answer can reveal CAPTCHA.
+      if (fresh.page.pageKey !== pageKey || !fresh.scan.recognizedPage) throw new Error('The page changed. Click Autofill again.');
       const keys = fresh.scan.fields.map(field => field.key).filter(key => !attempted.has(key) && typeof values[key] === 'string' && values[key]);
+      fresh.scan.fields.forEach(field => attempted.add(field.key));
       if (!keys.length) break;
-      keys.forEach(key => attempted.add(key));
+      await checkAccess(revision);
+      currentPilot(tabId, pilot);
+      if ((await activePortal(tabId)).url !== url) throw new Error('The page changed. Click Autofill again.');
+      currentPilot(tabId, pilot);
       const result = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:fill', token: fresh.scan.token, fields: keys,
         values: Object.fromEntries(keys.map(key => [key, values[key]])) }, { frameId: 0 });
+      currentPilot(tabId, pilot);
       if (!result?.ok) throw new Error('This page couldn’t be filled safely. Fill it yourself.');
       filled += result.filledCount;
       if (!result.filledCount) break;
     }
     values = null;
     const after = await readPage(tabId);
-    // The tracker is secondary: the page is already filled, so a failed update
-    // must not turn a successful fill into an error.
+    currentPilot(tabId, pilot);
+    if (after.url !== url || (after.page.pageKey !== pageKey && after.page.kind !== 'blocked')) throw new Error('The page changed. Check it before continuing.');
     if (filled > 0) await nativeRequest('recordProgress', { url: safeUrl(url), filledCount: Math.min(filled, 100) }).catch(() => {});
+    currentPilot(tabId, pilot);
     const missing = needYou(after.page);
     const summary = filled ? `Filled ${filled}${missing.length ? ` · ${missing.length} need you` : ''}.`
       : missing.length ? `${missing.length} need you. They aren’t in your saved profile.` : 'Nothing new to fill.';
+    // This receipt stays only in the worker. It never reaches a panel result.
+    pilot.accessRevision = revision;
     return { state: 'done', filled, needYou: missing, message: [summary, after.page.todo].filter(Boolean).join(' '), todo: after.page.todo || '', pageKey: after.page.pageKey };
   } catch (error) {
     return { ...failed(error), filled: 0, needYou: [], pageKey };
   } finally { values = null; }
 }
 
-function stopAutopilot(tabId, result) {
-  autopilots.delete(tabId);
-  return remember(tabId, result);
+async function advanceVerified(tabId, state, pilot, filledResult, authorize = false) {
+  const pageKey = state.page.pageKey;
+  if (!['iowa-personal-information', 'iowa-select-address'].includes(pageKey) || !state.page.canAdvance || !state.nextToken) return filledResult;
+  if (authorize || !Number.isSafeInteger(pilot.accessRevision)) {
+    const response = await nativeRequest('getFields', { url: safeUrl(state.url), fields: [] });
+    currentPilot(tabId, pilot);
+    pilot.accessRevision = receiptRevision(response);
+    if (!response?.values || Object.keys(response.values).length) throw new Error('The desktop returned an invalid navigation authorization.');
+  }
+  // Bind the snapshot before the final desktop/tab checks: an edit during those
+  // checks invalidates the existing token instead of silently approving new data.
+  const fresh = await readPage(tabId);
+  currentPilot(tabId, pilot);
+  if (fresh.url !== state.url || fresh.page.pageKey !== pageKey || !fresh.page.canAdvance || !fresh.nextToken) throw new Error('The page changed. Review it before continuing.');
+  await checkAccess(pilot.accessRevision);
+  currentPilot(tabId, pilot);
+  if ((await activePortal(tabId)).url !== state.url) throw new Error('The page changed before navigation. Review it.');
+  currentPilot(tabId, pilot);
+  pilot.waiting = null; // one attempt, including uncertain navigation responses
+  const result = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:next', token: fresh.nextToken, authorized: true }, { frameId: 0 });
+  currentPilot(tabId, pilot);
+  if (!result?.advanced) return { ...filledResult, state: 'waiting', message: result?.reason || 'Review this page and continue in Iowa’s form.', pageKey };
+  return { ...filledResult, state: 'continuing', message: 'Selected Save and Continue once. Waiting for Iowa’s next step.', pageKey };
 }
 
-// One autopilot step per page: continue an info screen, fill a known form, or
-// wait with the page's instruction. An unknown page gets one general-engine fill
-// and waits for the applicant; with nothing the engine recognizes, autofill ends.
 function step(tabId) {
   const pilot = autopilots.get(tabId);
   if (!pilot) return Promise.resolve(results.get(tabId) || null);
   if (pilot.running) return pilot.running;
   pilot.running = (async () => {
     let state;
-    // A page that is still loading or not in front is retried on the next load or poll.
     try { state = await readPage(tabId); } catch { return results.get(tabId) || null; }
+    if (autopilots.get(tabId) !== pilot) return results.get(tabId) || null;
     const { page } = state;
+    pilot.pageKey = page.pageKey;
     const signature = `${safeUrl(state.url)}|${page.pageKey}`;
-    if (pilot.handled.has(signature)) return results.get(tabId) || null;
+    if (pilot.handled.has(signature) && !(pilot.waiting === signature && (page.canAdvance || state.scan.fields.some(field => !pilot.attempted.has(field.key))))) return results.get(tabId) || null;
+    const resuming = pilot.handled.has(signature);
+    if (!resuming) pilot.attempted = new Set();
     pilot.handled.add(signature);
-    if (++pilot.steps > MAX_STEPS) return stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], message: `Stopped after ${MAX_STEPS} steps. Check this page, then click Autofill to keep going.`, pageKey: page.pageKey });
+    if (!resuming && ++pilot.steps > MAX_STEPS) return stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], message: `Stopped after ${MAX_STEPS} steps. Check this page, then click Autofill to keep going.`, pageKey: page.pageKey }, pilot);
     try {
+      if (resuming && page.canAdvance && !state.scan.fields.some(field => !pilot.attempted.has(field.key))) {
+        const result = await advanceVerified(tabId, state, pilot, results.get(tabId) || { filled: 0, needYou: [] }, true);
+        currentPilot(tabId, pilot);
+        return remember(tabId, result);
+      }
       if (page.kind === 'info') {
         remember(tabId, { state: 'continuing', filled: 0, needYou: [], message: 'Continuing…', pageKey: page.pageKey });
+        currentPilot(tabId, pilot);
         const result = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:continue' }, { frameId: 0 });
+        currentPilot(tabId, pilot);
         if (!result?.continued) return remember(tabId, { state: 'waiting', filled: 0, needYou: [], message: result?.reason || 'Click Continue in Iowa’s form.', pageKey: page.pageKey });
         return results.get(tabId);
       }
       if (page.kind === 'fillable' && state.scan.recognizedPage) {
-        const result = await fillPage(tabId, state);
-        return result.state === 'done' ? remember(tabId, result) : stopAutopilot(tabId, result);
+        let result;
+        if (page.pageKey === 'iowa-select-address') {
+          result = await advanceVerified(tabId, state, pilot, { filled: 0, needYou: [], pageKey: page.pageKey }, true);
+        } else {
+          result = await fillPage(tabId, state, pilot);
+          currentPilot(tabId, pilot);
+          if (result.state === 'done' && page.pageKey === 'iowa-personal-information') {
+            const fresh = await readPage(tabId); currentPilot(tabId, pilot);
+            if (fresh.page.canAdvance) result = await advanceVerified(tabId, fresh, pilot, result);
+            else pilot.waiting = signature;
+          }
+        }
+        currentPilot(tabId, pilot);
+        return ['done', 'waiting', 'continuing'].includes(result.state) ? remember(tabId, result) : stopAutopilot(tabId, result, pilot);
       }
       if (page.todo) return remember(tabId, { state: 'waiting', filled: 0, needYou: needYou(page), message: page.todo, pageKey: page.pageKey });
       if (page.kind === 'manual') {
-        // Never clicks Continue here: the applicant checks the general engine's answers first.
-        const plan = await planGeneral(tabId);
+        const plan = await planGeneral(tabId); currentPilot(tabId, pilot);
         const url = safeUrl(state.url);
         if (plan.matched.length || generalPages.get(tabId) === url) {
           generalPages.set(tabId, url);
-          const result = await fillIowaGeneral(tabId, state, plan);
-          return result.state === 'done' ? remember(tabId, result) : stopAutopilot(tabId, result);
+          const result = await fillIowaGeneral(tabId, state, plan, () => currentPilot(tabId, pilot));
+          currentPilot(tabId, pilot);
+          return result.state === 'done' ? remember(tabId, result) : stopAutopilot(tabId, result, pilot);
         }
       }
-      return stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], message: 'SecondHand doesn’t know this page yet. Fill it in, then continue.', pageKey: page.pageKey });
+      return stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], message: 'SecondHand doesn’t know this page yet. Fill it in, then continue.', pageKey: page.pageKey }, pilot);
     } catch (error) {
-      return stopAutopilot(tabId, { state: 'error', filled: 0, needYou: [], message: error.message || 'Autofill stopped. Continue in Iowa’s form.', pageKey: page.pageKey });
+      return stopAutopilot(tabId, { ...failed(error), filled: 0, needYou: [], pageKey: page.pageKey }, pilot);
     }
   })().finally(() => { pilot.running = null; });
   return pilot.running;
 }
-
 async function startAutopilot(tabId) {
-  await activePortal(tabId);
-  autopilots.set(tabId, { steps: 0, handled: new Set(), running: null });
-  return step(tabId);
+  if (autopilots.get(tabId)?.running) return autopilots.get(tabId).running;
+  const pilot = { steps: 0, handled: new Set(), running: null, waiting: null, accessRevision: null, attempted: new Set() };
+  autopilots.set(tabId, pilot);
+  try { await activePortal(tabId); currentPilot(tabId, pilot); return step(tabId); }
+  catch (error) { return stopAutopilot(tabId, { ...failed(error), filled: 0, needYou: [], pageKey: results.get(tabId)?.pageKey || '' }, pilot); }
 }
-
 async function stop(tabId) {
-  const pageKey = await readPage(tabId).then(state => state.page.pageKey, () => results.get(tabId)?.pageKey || '');
-  return stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], message: 'Autofill stopped.', pageKey });
+  // Revoke first, before any asynchronous inspection, so a pending native reply
+  // cannot fill or click while Stop is waiting for a page response.
+  return stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], message: 'Autofill stopped.', pageKey: autopilots.get(tabId)?.pageKey || results.get(tabId)?.pageKey || '' });
 }
-
 async function iowaPageState(tabId) {
-  if (autopilots.has(tabId) && !autopilots.get(tabId).running) await step(tabId);
-  const state = await readPage(tabId);
+  // Metadata must remain responsive while the desktop is awaiting approval.
+  // step owns its serialized run and stores its eventual sanitized result.
+  if (autopilots.has(tabId) && !autopilots.get(tabId).running) void step(tabId);
+  // Polls must never replace the private navigation snapshot held by an
+  // in-flight authorization. Only a worker action captures a Next preview.
+  const state = await readPage(tabId, false);
   const result = results.get(tabId);
-  // Once the general engine found fields on an unknown page, it waits for the applicant like any other step.
   const general = state.page.kind === 'manual' && !state.page.todo && generalPages.get(tabId) === safeUrl(state.url);
   const page = general ? { ...state.page, todo: GENERAL_TODO } : state.page;
   return { page, scan: state.scan, result: result && result.pageKey === state.page.pageKey ? result : null, autopilot: autopilots.has(tabId) };
@@ -447,7 +523,8 @@ function guessAssignments(stored, url, guesses) {
 // Fills from a general-engine plan: one desktop request for the keys planned first (the
 // rules' matches and any AI guesses), then up to four fill passes so questions revealed by
 // an answer are filled too. Each pass plans the page again. Never continues, submits, or navigates.
-async function fillPlan(tabId, url, frames, prefix = false) {
+async function fillPlan(tabId, url, frames, prefix = false, guard = () => {}) {
+  let revision;
   let values = null;
   try {
     const initial = frames.map(frame => ({ ...frame, planned: frame.planned || ruleAssignments(frame.plan) }));
@@ -458,6 +535,8 @@ async function fillPlan(tabId, url, frames, prefix = false) {
       if (!desktop?.unlocked) throw new Error('Unlock SecondHand to autofill.');
       const response = await nativeRequest('getFields', { url: safeUrl(url), fields: keys });
       if (!response?.values || typeof response.values !== 'object' || Array.isArray(response.values)) throw new Error('The desktop did not return supported profile fields.');
+      guard();
+      revision = receiptRevision(response);
       values = SecondHandGeneric.deriveValues(response.values);
     }
     let filled = 0;
@@ -469,7 +548,11 @@ async function fillPlan(tabId, url, frames, prefix = false) {
       if (values) for (let pass = 1; ; pass++) {
         const assignments = planned.filter(({ key }) => !refused.has(key) && typeof values[key] === 'string' && values[key]);
         if (!assignments.length) break;
+        guard();
+        await checkAccess(revision);
+        guard();
         const current = await chrome.tabs.get(tabId);
+        guard();
         if (current.url !== url || !current.active) throw new Error('The page changed. Click Autofill again.');
         const placing = Object.fromEntries(assignments.map(({ key }) => [key, values[key]]));
         let result;
@@ -533,10 +616,10 @@ async function fillSiteOnce(tabId, url, guesses) {
 }
 
 // One fill on an Iowa page the Iowa adapter hasn't verified. Iowa's portal needs no site approval.
-async function fillIowaGeneral(tabId, state, plan) {
+async function fillIowaGeneral(tabId, state, plan, guard) {
   const { pageKey } = state.page;
   try {
-    const { filled, needYou } = await fillPlan(tabId, state.url, [{ frameId: 0, plan }]);
+    const { filled, needYou } = await fillPlan(tabId, state.url, [{ frameId: 0, plan }], false, guard);
     return { state: 'done', filled, needYou, message: `${filledSummary(filled, needYou)} ${GENERAL_TODO}`, todo: GENERAL_TODO, pageKey };
   } catch (error) {
     return { ...failed(error), filled: 0, needYou: [], pageKey };
@@ -630,6 +713,9 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   const work = route === 'site' ? requireSite(siteOrigin(sender.tab.url)).then(run) : run();
   work.then(data => respond({ ok: true, data }), error => respond({ ok: false, error: error.message || 'SecondHand could not complete the request.' }));
   return true;
+});
+chrome.tabs.onActivated?.addListener(info => {
+  for (const tabId of autopilots.keys()) if (tabId !== info.tabId) stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], message: 'Autofill stopped because the active tab changed.', pageKey: results.get(tabId)?.pageKey || '' });
 });
 chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); generalPages.delete(tabId); sitePlans.delete(tabId); });
 chrome.tabs.onUpdated?.addListener((tabId, change) => {

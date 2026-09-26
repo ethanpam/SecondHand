@@ -19,26 +19,28 @@ const plain = value => JSON.parse(JSON.stringify(value));
 async function desktop(options = {}) {
   let bridge;
   let shows = 0;
+  let dataReads = 0;
   const writes = [];
   let invoke;
   let window;
   let answer = async () => ({ response: 1 });
   const prompts = [];
+  const notifications = [];
   const powerEvents = new Map();
   class Vault {
     constructor() { this.unlocked = true; this.data = { profile: { firstName: 'Synthetic', lastName: '' }, applications: [] }; }
     async exists() { return true; }
     async inspect() { return { recoveryKey: true }; }
-    async lock() { this.unlocked = false; }
+    async lock() { if (options.beforeLock) await options.beforeLock(); this.unlocked = false; }
     async unlock() { this.unlocked = true; }
-    getData() { return this.data; }
+    getData() { dataReads++; return this.data; }
     async update(change) { change(this.data); }
   }
   class BrowserWindow {
     constructor() {
       window = this;
       this.webContents = { mainFrame: { url: pathToFileURL(path.join(root, 'renderer/index.html')).href },
-        setWindowOpenHandler() {}, on() {}, send() {} };
+        setWindowOpenHandler() {}, on() {}, send(...args) { notifications.push(args); } };
     }
     show() { shows++; } focus() {} setMenuBarVisibility() {} once() {} on() {} loadFile() {}
     isDestroyed() { return false; }
@@ -66,14 +68,29 @@ async function desktop(options = {}) {
   await tick();
   assert.equal(typeof bridge, 'function');
   return {
-    prompts, writes,
+    prompts, notifications, writes,
     get shows() { return shows; },
+    get dataReads() { return dataReads; },
     answer: callback => { answer = callback; },
     request: request => bridge({ id: 'synthetic', url: PORTAL_URL, ...request }, context),
     invoke: (method, argument) => invoke({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, method, ...(argument === undefined ? [] : [argument])),
     async sleep() { powerEvents.get('suspend')(); await tick(); }
   };
 }
+
+test('renderer lock status and notifications identify each completed lock monotonically', async () => {
+  const app = await desktop();
+  assert.equal((await app.invoke('status')).lockRevision, 0);
+  const first = await app.invoke('lock');
+  assert.equal(first.lockRevision, 1);
+  assert.equal(first.unlocked, false);
+  assert.equal(app.notifications[0][0], 'secondhand:locked');
+  assert.deepEqual(JSON.parse(JSON.stringify(app.notifications[0][1])), { lockRevision: 1 });
+  assert.equal((await app.invoke('unlock', 'synthetic-passphrase')).lockRevision, 1);
+  await app.sleep();
+  assert.equal((await app.invoke('status')).lockRevision, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(app.notifications[1][1])), { lockRevision: 2 });
+});
 
 test('trusted autofill returns saved values with no dialog; lock still blocks it', async () => {
   const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true } });
@@ -91,6 +108,10 @@ test('untrusted autofill asks once per click with Allow once, Always allow, and 
   app.answer(async () => ({ response: 1 }));
   assert.equal((await app.request({ type: 'getFields', fields: ['firstName'] })).values.firstName, 'Synthetic');
   assert.deepEqual(plain(app.prompts[0].buttons), ['Cancel', 'Allow once', 'Always allow on this computer']);
+  assert.match(app.prompts[0].detail, /initial applicant page/);
+  assert.match(app.prompts[0].detail, /first possible home-address suggestion and choose Save and Continue/);
+  assert.match(app.prompts[0].detail, /home-address suggestions only/);
+  assert.match(app.prompts[0].detail, /does not authorize consent, signatures, or submitting/);
   assert.equal((await app.invoke('status')).autofillWithoutAsking, false);
   app.answer(async () => ({ response: 0 }));
   await assert.rejects(app.request({ type: 'getFields', fields: ['firstName'] }), /cancelled/);
@@ -100,6 +121,91 @@ test('untrusted autofill asks once per click with Allow once, Always allow, and 
   assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: true, trustedSites: [] });
   await app.request({ type: 'getFields', fields: ['firstName'] });
   assert.equal(app.prompts.length, 3, 'no dialog after Always allow');
+});
+
+test('exact Iowa navigation authorization reads no saved profile values and follows existing trust or consent', async t => {
+  for (const page of ['enterPersonalInfo', 'addressValidation']) for (const trusted of [false, true]) {
+    await t.test(`${page}, trusted=${trusted}`, async () => {
+      const app = await desktop({ settings: { extensionId, autofillWithoutAsking: trusted } });
+      const response = await app.request({ type: 'getFields', url: `${PORTAL_URL}/applyForBenefits/${page}`, fields: [] });
+      assert.deepEqual(plain(response.values), {});
+      assert.deepEqual(Object.keys(response).sort(), ['accessRevision', 'values']);
+      assert.equal(Number.isSafeInteger(response.accessRevision), true);
+      assert.equal(app.dataReads, 0, 'Navigation authorization must not read the profile');
+      assert.equal(app.prompts.length, trusted ? 0 : 1);
+      if (!trusted) {
+        assert.match(app.prompts[0].detail, /No saved profile fields will be read/);
+        assert.match(app.prompts[0].detail, /first possible home-address suggestion and choose Save and Continue/);
+      }
+      await app.invoke('lock');
+      await assert.rejects(app.request({ type: 'getFields', url: `${PORTAL_URL}/applyForBenefits/${page}`, fields: [] }), /Unlock/);
+      assert.equal(app.dataReads, 0);
+    });
+  }
+  const app = await desktop();
+  app.answer(async () => ({ response: 0 }));
+  await assert.rejects(app.request({ type: 'getFields', url: `${PORTAL_URL}/applyForBenefits/addressValidation`, fields: [] }), /cancelled/);
+  assert.equal(app.dataReads, 0);
+});
+
+test('access receipts advance for lock, profile, trust, and extension changes independently of renderer lock revisions', async () => {
+  const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true } });
+  let revision = (await app.request({ type: 'status' })).accessRevision;
+  assert.equal(Number.isSafeInteger(revision), true);
+  const restarted = await desktop({ settings: { extensionId, autofillWithoutAsking: true } });
+  assert.notEqual((await restarted.request({ type: 'status' })).accessRevision, revision, 'A new desktop process cannot reuse a prior access receipt');
+  assert.equal((await app.request({ type: 'getFields', fields: ['firstName'] })).accessRevision, revision);
+  const mutations = [
+    () => app.invoke('lock'),
+    async () => { await app.invoke('unlock', 'synthetic password'); await app.invoke('saveProfile', { firstName: 'Updated synthetic name' }); },
+    () => app.invoke('setAutofillTrust', false),
+    () => app.request({ type: 'trustSite', url: 'https://pantry.example.org/intake' }),
+    () => app.invoke('removeTrustedSite', 'https://pantry.example.org'),
+    async () => { await app.invoke('connectExtension', 'b'.repeat(32)); await app.invoke('connectExtension', extensionId); }
+  ];
+  for (const mutate of mutations) {
+    await mutate();
+    const next = (await app.request({ type: 'status' })).accessRevision;
+    assert.equal(Number.isSafeInteger(next), true);
+    assert.ok(next > revision);
+    revision = next;
+  }
+  assert.equal((await app.invoke('status')).lockRevision, 1);
+  const receipt = await app.request({ type: 'getFields', url: `${PORTAL_URL}/applyForBenefits/addressValidation`, fields: [] });
+  assert.equal(receipt.accessRevision, revision);
+  app.answer(async () => ({ response: 2 }));
+  const trustedReceipt = await app.request({ type: 'getFields', url: `${PORTAL_URL}/applyForBenefits/addressValidation`, fields: [] });
+  assert.ok(trustedReceipt.accessRevision > revision, 'Always allow returns the post-approval revision');
+  assert.equal(trustedReceipt.accessRevision, (await app.request({ type: 'status' })).accessRevision);
+});
+
+test('pending consent cannot authorize after a profile edit, trust change, or extension identity round trip', async t => {
+  for (const mutation of ['profile', 'trust', 'registration']) await t.test(mutation, async () => {
+    const app = await desktop();
+    let resolve;
+    app.answer(() => new Promise(done => { resolve = done; }));
+    const pending = app.request({ type: 'getFields', url: `${PORTAL_URL}/applyForBenefits/addressValidation`, fields: [] });
+    if (mutation === 'profile') await app.invoke('saveProfile', { firstName: 'Updated synthetic name' });
+    if (mutation === 'trust') await app.invoke('setAutofillTrust', false);
+    if (mutation === 'registration') { await app.invoke('connectExtension', 'b'.repeat(32)); await app.invoke('connectExtension', extensionId); }
+    resolve({ response: 2 });
+    await assert.rejects(pending, /changed/);
+    assert.equal((await app.invoke('status')).autofillWithoutAsking, false);
+    assert.equal(app.dataReads, 0);
+  });
+});
+
+test('an access receipt issued while a queued lock settles cannot survive the next unlock', async () => {
+  let finishLock;
+  const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true }, beforeLock: () => new Promise(resolve => { finishLock = resolve; }) });
+  const locking = app.invoke('lock');
+  const receipt = await app.request({ type: 'getFields', url: `${PORTAL_URL}/applyForBenefits/addressValidation`, fields: [] });
+  finishLock();
+  await locking;
+  await app.invoke('unlock', 'synthetic-password');
+  const status = await app.request({ type: 'status' });
+  assert.equal(status.unlocked, true);
+  assert.ok(status.accessRevision > receipt.accessRevision);
 });
 
 test('a late approval after lock and unlock is rejected', async () => {
