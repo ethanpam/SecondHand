@@ -4,6 +4,7 @@ import { SiteFooter, SiteHeader } from './site-chrome';
 
 export const metadata: Metadata = {
   title: 'Page not found',
+  description: 'This secondHand page doesn’t exist or has moved. Find downloads, the setup guide, common questions, and the privacy policy.',
   robots: { index: false, follow: true },
 };
 

@@ -4,6 +4,7 @@ import { SiteFooter, SiteHeader } from '../site-chrome';
 export const metadata: Metadata = {
   title: 'Privacy policy',
   description: 'How the secondHand website, desktop app, and Chrome extension handle your information: stored encrypted on your computer, with no accounts, analytics, or ads.',
+  alternates: { canonical: '/privacy' },
 };
 
 export default function PrivacyPolicy() {

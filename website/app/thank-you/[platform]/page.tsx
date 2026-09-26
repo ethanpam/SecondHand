@@ -18,11 +18,15 @@ export function generateStaticParams() {
   return Object.keys(platforms).map(platform => ({ platform }));
 }
 
-export const metadata: Metadata = {
-  title: 'Thanks for downloading',
-  description: 'Your secondHand download is starting. Here is how to install it, create your password, and connect Chrome.',
-  robots: { index: false, follow: true },
-};
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { platform } = await params;
+  const name = Object.hasOwn(platforms, platform) ? platforms[platform as PlatformId].name : 'your computer';
+  return {
+    title: `Thanks for downloading for ${name}`,
+    description: `Your secondHand download for ${name} is starting. Here is how to install it, create your password, and connect Chrome.`,
+    robots: { index: false, follow: true },
+  };
+}
 
 export default async function ThankYou({ params }: Props) {
   const { platform } = await params;
