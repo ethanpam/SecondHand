@@ -18,6 +18,7 @@ export default function PrivacyPolicy() {
 
         <h2>This website</h2>
         <p>This website offers the secondHand installers and setup instructions. It has no forms or accounts, and its code does not set cookies or run analytics, advertising, or tracking scripts.</p>
+        <p>The network that serves this site (Cloudflare) sets one security cookie, <code>__cf_bm</code>, to help tell people apart from automated traffic. It expires after 30 minutes. It is needed to keep the site available, it is not used for advertising or tracking, and secondHand does not read it.</p>
         <p>Like any website, the hosting provider processes basic connection information, such as your IP address, browser type, the page or file requested, and the time. This is used to deliver pages and downloads and to keep the service running. secondHand does not use it to identify you.</p>
 
         <h2>The desktop app</h2>
