@@ -40,6 +40,7 @@
       frame.src = chrome.runtime.getURL('panel.html?surface=launcher');
       frame.title = 'SecondHand autofill';
       frame.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+      frame.setAttribute('allow', 'language-model'); // lets the widget use Chrome's on-device AI
       frame.referrerPolicy = 'no-referrer';
       for (const [property, value] of Object.entries({ width: '100%', height: '100%', display: 'block', border: '0', margin: '0', padding: '0', 'border-radius': '14px', background: 'transparent' })) frame.style.setProperty(property, value, 'important');
       shadow.append(frame);

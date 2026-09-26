@@ -586,6 +586,8 @@ test('on approved sites the widget is a closed, full-size extension iframe in th
   assert.equal(page.frames[0].src, extensionURL('panel.html?surface=launcher'));
   assert.equal(page.frames[0].referrerPolicy, 'no-referrer');
   assert.equal(page.frames[0].getAttribute('sandbox'), 'allow-scripts allow-same-origin');
+  // Chrome's on-device AI (Prompt API) is blocked in a cross-origin iframe unless the embedder delegates it.
+  assert.equal(page.frames[0].getAttribute('allow'), 'language-model');
   assert.equal(host.getAttribute('data-secondhand-size'), 'full');
   assert.equal(host.style.height, '70px');
   assert.equal(host.style.position, 'fixed');
