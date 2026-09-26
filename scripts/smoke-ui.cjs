@@ -9,6 +9,10 @@ const applicantFixture = require('../tests/fixtures/applicant-profile.json');
 const { PROFILE_FIELDS } = require('../shared/schema.cjs');
 const root = path.join(__dirname, '..');
 const passphrase = 'synthetic-test-vault-passphrase';
+// Creating or unlocking the vault derives its key with scrypt (N=2^15, r=8) in the
+// main process: about 65 ms on an M4 Max, but many times that on a loaded hosted
+// macOS runner. Bound the whole attempt generously instead of Playwright's 5s default.
+const AUTH_ATTEMPT_TIMEOUT_MS = 30000;
 
 async function captureDiagnostic(page, name, options = {}) {
   try {
@@ -22,6 +26,21 @@ async function captureDiagnostic(page, name, options = {}) {
   }
 }
 
+// Click the auth form's submit button and wait until that create/unlock attempt has
+// settled (the button leaves its busy state). A form that fails validation never
+// starts an attempt, so fail at once with the reason rather than waiting on a result.
+async function submitAuthForm(page) {
+  const before = await page.evaluate(() => ({ ...window.__smokeAuthForm }));
+  await page.locator('#auth-submit').click();
+  const outcome = await (await page.waitForFunction(before => {
+    const counts = window.__smokeAuthForm;
+    if (counts.invalid > before.invalid) return { submitted: false, passphraseEmpty: !document.querySelector('#passphrase').value };
+    if (counts.submit > before.submit && document.querySelector('#auth-submit').getAttribute('aria-busy') !== 'true') return { submitted: true };
+    return null;
+  }, before, { polling: 50, timeout: AUTH_ATTEMPT_TIMEOUT_MS })).jsonValue();
+  assert.ok(outcome.submitted, `The auth form was not submitted: it failed validation (passphrase empty: ${outcome.passphraseEmpty}). Something reset the form after the test filled it.`);
+}
+
 async function main() {
   const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-ui-'));
   const errors = [];
@@ -31,6 +50,13 @@ async function main() {
     const page = await application.firstWindow();
     page.on('pageerror', error => errors.push(error.message));
     await page.locator('#auth-view').waitFor({ state: 'visible' });
+    await page.evaluate(() => {
+      const form = document.querySelector('#auth-form');
+      const counts = window.__smokeAuthForm = { submit: 0, invalid: 0 };
+      // Capture phase also sees `invalid`, which fires on the control and does not bubble.
+      form.addEventListener('submit', () => { counts.submit++; }, true);
+      form.addEventListener('invalid', () => { counts.invalid++; }, true);
+    });
     return page;
   };
   try {
@@ -39,7 +65,7 @@ async function main() {
     await captureDiagnostic(page, 'vault-setup.png');
     await page.locator('#passphrase').fill(passphrase);
     await page.locator('#confirm-passphrase').fill(passphrase);
-    await page.locator('#auth-submit').click();
+    await submitAuthForm(page);
     await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('.nav-item[data-view="profile"]').click();
     for (const field of PROFILE_FIELDS) {
@@ -78,11 +104,11 @@ async function main() {
     const clearedProfile = await page.locator('#profile-form').evaluate(form => Object.fromEntries(Array.from(form.querySelectorAll('[name]'), control => [control.name, control.value])));
     assert.deepEqual(clearedProfile, Object.fromEntries(PROFILE_FIELDS.map(field => [field, ''])));
     await page.locator('#passphrase').fill('incorrect-passphrase');
-    await page.locator('#auth-submit').click();
+    await submitAuthForm(page);
     await expect(page.locator('#auth-error')).toBeVisible();
     await expect(page.locator('#workspace')).not.toBeVisible();
     await page.locator('#passphrase').fill(passphrase);
-    await page.locator('#auth-submit').click();
+    await submitAuthForm(page);
     await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('.nav-item[data-view="profile"]').click();
     await expect(page.locator('#firstName')).toHaveValue(applicantFixture.firstName);
@@ -94,7 +120,7 @@ async function main() {
 
     page = await launch();
     await page.locator('#passphrase').fill(passphrase);
-    await page.locator('#auth-submit').click();
+    await submitAuthForm(page);
     await expect(page.locator('#workspace')).toBeVisible();
     const restored = await page.evaluate(() => window.secondHand.getData());
     assert.deepEqual(restored.profile, applicantFixture);
