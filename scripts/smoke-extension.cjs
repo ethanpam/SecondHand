@@ -10,6 +10,7 @@ const path = require('node:path');
 const { chromium, expect } = require('@playwright/test');
 const syntheticProfile = require('../tests/fixtures/applicant-profile.json');
 const applicantFixture = require('../tests/fixtures/iowa-personal-information.cjs');
+const preApplicant = require('../tests/fixtures/iowa-pre-applicant.cjs');
 const root = path.join(__dirname, '..');
 const portal = 'https://hhsservices.iowa.gov/apspssp/ssp.portal';
 const applicant = `${portal}/applyForBenefits/enterPersonalInfo`;
@@ -31,6 +32,23 @@ function fixture(nextStep) {
         document.getElementById('synthetic-content').innerHTML = ${JSON.stringify(nextMarkup)};
         history.pushState({}, '', ${JSON.stringify(`${portal}/applyForBenefits/${nextStep === 'consent' ? 'consent' : 'household'}`)});
       });
+    </script></body></html>`;
+}
+
+// Pre-applicant screens with stand-ins for Iowa's page functions. About you is not
+// recorded yet, so Instructions' Continue leads straight to the applicant page.
+function preApplicantPage(name) {
+  const targets = { letsGetStarted: '/applyForBenefits/letsGetStarted', instructions: '/applyForBenefits/instructions', aboutYou: '/applyForBenefits/enterPersonalInfo', welcome: '/applyForBenefits/welcome', importantInfo: '/applyForBenefits/importantInfo' };
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Synthetic Iowa screen · test only</title></head><body>
+    <p class="test-only">SYNTHETIC TEST FIXTURE. No government connection or real applicant data.</p>${preApplicant.screens[name].html}
+    <script>
+      const targets = ${JSON.stringify(targets)};
+      window.__continues = 0;
+      function submitUrlLink(target) { window.__continues++; location.href = '${portal}' + targets[target]; }
+      function toggleCaptcha() { document.getElementById('captchaDiv').style.display = 'block'; }
+      function validateMsg() {}
+      function onCheck() {}
+      function welcomeSubmit() { if (document.getElementById('termChkbox').checked) location.href = '${portal}/applyForBenefits/importantInfo'; }
     </script></body></html>`;
 }
 
@@ -127,8 +145,12 @@ async function main() {
       if (request.isNavigationRequest() && url.origin === 'https://hhsservices.iowa.gov' && url.pathname === '/apspssp/ssp.portal/applyForBenefits/enterPersonalInfo') {
         return route.fulfill({ status: 200, contentType: 'text/html', body: fixture(url.searchParams.get('next')) });
       }
-      if (request.isNavigationRequest() && url.origin === 'https://hhsservices.iowa.gov' && url.pathname === '/apspssp/ssp.portal/applyForBenefits/aboutYou') {
-        return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Synthetic Iowa intro · test only</title><main><h1>About you</h1><p>SYNTHETIC TEST FIXTURE.</p></main>' });
+      const screen = Object.keys(preApplicant.screens).find(name => url.pathname === `/apspssp/ssp.portal${preApplicant.screens[name].path}`);
+      if (request.isNavigationRequest() && url.origin === 'https://hhsservices.iowa.gov' && screen) {
+        return route.fulfill({ status: 200, contentType: 'text/html', body: preApplicantPage(screen) });
+      }
+      if (request.isNavigationRequest() && url.origin === 'https://hhsservices.iowa.gov' && url.pathname === '/apspssp/ssp.portal/applyForBenefits/householdMembers') {
+        return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Synthetic unknown screen · test only</title><main><h1>Household Members</h1><p>SYNTHETIC TEST FIXTURE.</p></main>' });
       }
       if (url.protocol === 'chrome-extension:') return route.continue();
       return route.abort('blockedbyclient');
@@ -148,9 +170,14 @@ async function main() {
     };
     const calls = type => worker.evaluate(type => globalThis.__nativeSmoke.calls.filter(call => call.type === type), type);
 
-    async function startFixture({ profile = {}, locked = false } = {}) {
+    // Leaving Iowa's site turns a running autofill off, so every flow starts clean.
+    async function resetTo(url, { profile = {}, locked = false } = {}) {
+      await page.goto('about:blank');
       await worker.evaluate(({ profile, locked }) => { globalThis.__nativeSmoke = { locked, calls: [], profile }; }, { profile: { ...syntheticProfile, ...profile }, locked });
-      await page.goto(applicant, { waitUntil: 'domcontentloaded' });
+      await page.goto(url, { waitUntil: 'domcontentloaded' });
+    }
+    async function startFixture({ profile = {}, locked = false } = {}) {
+      await resetTo(applicant, { profile, locked });
       await page.bringToFront();
       await expect(page.locator('[data-secondhand-assistant]')).toHaveAttribute('data-secondhand-size', 'full');
       const widget = await launcherFrame();
@@ -168,7 +195,7 @@ async function main() {
 
     // One click fills the whole applicant page, including revealed sections.
     await widget.locator('#autofill').click();
-    await expect(widget.locator('#widget-text')).toHaveText(/^Filled \d+$/, { timeout: 20000 });
+    await expect(widget.locator('#widget-text')).toHaveText(/^Filled \d+ · Check your answers, then click Save and Continue\.$/, { timeout: 20000 });
     const full = await answers();
     assert.equal(full.firstName, syntheticProfile.firstName); assert.equal(full.lastName, syntheticProfile.lastName);
     assert.equal(full.suffix, 'III'); assert.equal(full.phoneNumber, '(202)555-0147');
@@ -201,7 +228,7 @@ async function main() {
     for (const branch of branches) {
       widget = await startFixture({ profile: branch.profile });
       await widget.locator('#autofill').click();
-      await expect(widget.locator('#widget-text')).toHaveText(/^Filled \d+$/, { timeout: 20000 });
+      await expect(widget.locator('#widget-text')).toHaveText(/^Filled \d+ · Check your answers, then click Save and Continue\.$/, { timeout: 20000 });
       branch.check(await answers());
       assert.equal(await page.evaluate(() => window.__nextClicks), 0);
       console.log(`Widget conditional branch passed: ${branch.name}.`);
@@ -223,9 +250,38 @@ async function main() {
     assert.equal((await calls('getFields')).length, 0);
     console.log('Widget: a locked vault fills nothing and Unlock brings SecondHand forward.');
 
+    // One click walks the pre-applicant screens: it continues info screens, waits at
+    // consent for the applicant, then continues again and fills the applicant page.
+    await resetTo(`${portal}/applyForBenefits/welcome`);
+    widget = await launcherFrame();
+    await widget.locator('#autofill').click();
+    await expect.poll(() => page.url(), { timeout: 20000 }).toBe(`${portal}/applyForBenefits/letsGetStarted`);
+    widget = await launcherFrame();
+    await expect(widget.locator('#widget-text')).toHaveText('Read and accept Iowa’s consent, then click Continue.', { timeout: 20000 });
+    await expect(widget.locator('#stop')).toBeVisible();
+    await page.locator('#termChkbox').check();
+    await page.locator('button.saveButton').click();
+    await expect.poll(() => page.url(), { timeout: 20000 }).toBe(applicant);
+    await expect(page.locator('#lastName')).toHaveValue(syntheticProfile.lastName, { timeout: 20000 });
+    widget = await launcherFrame();
+    await expect(widget.locator('#widget-text')).toHaveText(/^Filled \d+ · Check your answers, then click Save and Continue\.$/, { timeout: 20000 });
+    await expect(widget.locator('#stop')).toBeVisible();
+    assert.equal(await page.evaluate(() => window.__nextClicks), 0, 'Autofill never clicks Save and Continue.');
+    assert.equal((await calls('getFields')).length, 1);
+    console.log('Autopilot: one click continued Before You Start, waited at consent, then continued Important Information and Instructions and filled the applicant page.');
+
+    // The household question is answered from saved program choices; the CAPTCHA stays with the applicant.
+    await resetTo(`${portal}/applyForBenefits/guestLogin`);
+    widget = await launcherFrame();
+    await widget.locator('#autofill').click();
+    await expect(page.locator('#householdApplyProgYes')).toBeChecked({ timeout: 20000 });
+    await expect(widget.locator('#widget-text')).toHaveText('Filled 1 · Solve the CAPTCHA, then click Continue.', { timeout: 20000 });
+    assert.deepEqual((await calls('getFields'))[0].fields, ['programSnap', 'programFip', 'programMedicaid']);
+    assert.equal(await page.evaluate(() => window.__continues), 0);
+    console.log('Autopilot: the household question is answered from saved programs and the CAPTCHA is left to the applicant.');
+
     // Other portal pages show only a small pill and never contact the desktop.
-    await worker.evaluate(() => { globalThis.__nativeSmoke.calls = []; });
-    await page.goto(`${portal}/applyForBenefits/aboutYou`, { waitUntil: 'domcontentloaded' });
+    await resetTo(`${portal}/applyForBenefits/householdMembers`);
     await expect(page.locator('[data-secondhand-assistant]')).toHaveAttribute('data-secondhand-size', 'pill');
     widget = await launcherFrame();
     await expect(widget.locator('#pill')).toBeVisible();
@@ -235,7 +291,7 @@ async function main() {
     // It runs last: in headless Chromium the open panel covers the widget's corner.
     widget = await startFixture();
     await widget.locator('#autofill').click();
-    await expect(widget.locator('#widget-text')).toHaveText(/^Filled \d+$/, { timeout: 20000 });
+    await expect(widget.locator('#widget-text')).toHaveText(/^Filled \d+ · Check your answers, then click Save and Continue\.$/, { timeout: 20000 });
     await widget.locator('#details').click();
     panel = await attachNativePanel(context, page, extensionId);
     await expect.poll(() => panel.text('[data-key="lastName"]'), { timeout: 15000 }).toContain('Done');

@@ -189,8 +189,14 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
 });
 chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); });
 chrome.tabs.onUpdated?.addListener((tabId, change) => {
-  if (change.status === 'loading') results.delete(tabId);
-  if (change.url && !SecondHandIowa.isSupportedUrl(change.url)) autopilots.delete(tabId);
+  if (change.status === 'loading') {
+    results.delete(tabId);
+    // Chrome omits other sites' URLs without the tabs permission, so re-read the
+    // tab: anything that is not Iowa's portal (or unreadable) ends autofill.
+    if (autopilots.has(tabId)) {
+      chrome.tabs.get(tabId).then(tab => { if (!SecondHandIowa.isSupportedUrl(tab.url)) autopilots.delete(tabId); }, () => autopilots.delete(tabId));
+    }
+  }
   if (change.status === 'complete' && autopilots.has(tabId)) void step(tabId);
 });
 // Chrome's native panel persists alongside navigation; it never opens itself.

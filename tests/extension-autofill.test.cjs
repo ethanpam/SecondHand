@@ -256,6 +256,8 @@ function journey({ screens, desktop = {}, continueStays = false } = {}) {
   const send = (message, sender = { id: 'testextension', url: PANEL_URL }) => new Promise(resolve => { if (!listener({ tabId: 7, ...message }, sender, resolve)) resolve(undefined); });
   return { calls, vault, events, send, filled: () => [...filled], at: () => current().name,
     userContinues: () => navigate(),
+    leave: url => { tab.url = url; events.updated?.(7, { status: 'loading' }); setImmediate(() => events.updated?.(7, { status: 'complete' })); },
+    returnTo: path => { tab.url = `${adapter.PORTAL}${path}`; index = Math.min(index + 1, screens.length - 1); events.updated?.(7, { status: 'loading' }); setImmediate(() => events.updated?.(7, { status: 'complete' })); },
     continues: () => calls.content.filter(type => type === 'secondhand:continue').length,
     getFields: () => calls.native.filter(call => call.type === 'getFields') };
 }
@@ -352,5 +354,16 @@ test('the widget can stop its own tab only, and pages cannot start autofill', as
   await w.send({ type: 'ui:autofill', confirmed: true }, launcher);
   assert.equal(await w.send({ type: 'ui:stop' }, launcher), undefined);
   assert.equal((await w.send({ type: 'ui:stop', confirmed: true, tabId: 99 }, launcher)).data.state, 'stopped');
+  assert.equal((await lastResult(w)).autopilot, false);
+});
+
+test('leaving Iowa turns autofill off even when Chrome hides the new URL', async () => {
+  const w = journey({ screens: [info('a', '/applyForBenefits/welcome', 'iowa-before-start'), info('b', '/applyForBenefits/importantInfo', 'iowa-information')], continueStays: true });
+  await w.send({ type: 'ui:autofill', confirmed: true });
+  w.leave('https://example.com/');                 // no changeInfo.url without the tabs permission
+  await settle();
+  w.returnTo('/applyForBenefits/importantInfo');
+  await settle();
+  assert.equal(w.continues(), 1, 'coming back later does not resume');
   assert.equal((await lastResult(w)).autopilot, false);
 });
