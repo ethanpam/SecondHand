@@ -1,13 +1,17 @@
-<!-- Source for app/opengraph-image.png. Open in a browser at 1200x630 (or screenshot it headless) and save the result over that file. -->
+<!-- Source for app/opengraph-image.png. Open this file in a browser from the website folder (after npm ci) at 1200x630, or screenshot it headless, and save the result over that file. -->
 <!doctype html><html><head><meta charset="utf-8"><style>
+@font-face{font-family:"Instrument Sans";src:url("../node_modules/@fontsource-variable/instrument-sans/files/instrument-sans-latin-wght-normal.woff2") format("woff2");font-weight:400 700}
+@font-face{font-family:"JetBrains Mono";src:url("../node_modules/@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2") format("woff2");font-weight:100 800}
 *{box-sizing:border-box;margin:0}
-body{width:1200px;height:630px;background:#f8faf7;color:#163a2c;font-family:Arial,Helvetica,sans-serif;padding:72px 80px;display:flex;flex-direction:column;justify-content:space-between;border-bottom:16px solid #164c38}
-.brand{display:flex;align-items:center;gap:16px;font-size:40px;letter-spacing:-1.5px}.brand b{font-weight:700}
-.mark{width:64px;height:64px;border-radius:16px 16px 16px 4px;background:#164c38;color:#fff;display:flex;align-items:center;justify-content:center;font:bold 38px Georgia,serif;letter-spacing:-3px;padding-right:3px}
-h1{font:400 76px/1.08 Georgia,'Times New Roman',serif;letter-spacing:-2.4px;max-width:1000px}
-p{font-size:30px;color:#415d4c}
+body{width:1200px;height:630px;background:#050505;color:#ededed;font-family:"Instrument Sans",system-ui,sans-serif;padding:64px 80px;display:flex;flex-direction:column;justify-content:space-between;background-image:repeating-linear-gradient(to right,#ffffff09 0 1px,transparent 1px 120px)}
+.brand{display:flex;align-items:flex-start;gap:10px;font-size:34px;letter-spacing:-.5px;line-height:1}
+.brand span{font-family:"JetBrains Mono",monospace;font-size:13px;letter-spacing:1px;color:#8c8c8c}
+h1{font-weight:400;font-size:84px;line-height:.98;letter-spacing:-2.6px;max-width:1040px}
+h1 span{color:#8f8a82}
+p{display:flex;align-items:center;gap:16px;font-family:"JetBrains Mono",monospace;font-size:20px;color:#a8a8a8}
+p::before{content:"";width:48px;height:1px;background:#3d3d3d}
 </style></head><body>
-<div class="brand"><span class="mark">sh</span><span>second<b>Hand</b></span></div>
-<h1>Fill out Iowa’s SNAP application with less typing.</h1>
+<div class="brand">secondHand<span>IOWA</span></div>
+<h1>Fill out Iowa’s SNAP application <span>with less typing.</span></h1>
 <p>Free for Windows and Mac · Encrypted on your computer · No account</p>
 </body></html>
