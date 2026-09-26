@@ -274,6 +274,38 @@ test('a profile load completed after a lock cannot show an unlocked workspace', 
   assert.equal(view.get('auth-view').hidden, false);
 });
 
+test('slow buttons show a ring loader only while their work is in progress', async t => {
+  const unlocking = deferred();
+  const saving = deferred();
+  let status = { exists: true, unlocked: false, recoveryKey: true, extensionId: '', bridgeRunning: true };
+  const view = await renderer(t, {
+    status: async () => status,
+    unlock: async () => { await unlocking.promise; status = { ...status, unlocked: true }; return status; },
+    saveProfile: () => saving.promise
+  });
+  const button = view.get('auth-submit');
+  assert.equal(button.querySelector('.loader'), null);
+  view.edit('passphrase', 'synthetic long password');
+  view.submit('auth-form');
+  await tick();
+  assert.equal(button.getAttribute('aria-busy'), 'true');
+  assert.equal(button.querySelectorAll('.loader').length, 1);
+  assert.equal(button.querySelector('.loader').getAttribute('aria-hidden'), 'true');
+  unlocking.resolve();
+  await tick(); await tick();
+  assert.equal(view.get('workspace').hidden, false);
+  assert.equal(button.querySelector('.loader'), null);
+  assert.equal(button.hasAttribute('aria-busy'), false);
+
+  // Quick actions without data-loader keep their plain busy state.
+  view.submit('profile-form');
+  await tick();
+  assert.equal(view.get('save-profile').getAttribute('aria-busy'), 'true');
+  assert.equal(view.get('save-profile').querySelector('.loader'), null);
+  saving.resolve({});
+  await tick();
+});
+
 test('extension preparation shows manual Chrome steps and uses fixed path-copy API without an ID paste', async t => {
   let prepared = 0;
   let copied = 0;

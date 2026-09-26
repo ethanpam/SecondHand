@@ -30,6 +30,24 @@
     return svg;
   }
 
+  // Ring loader for buttons marked data-loader: a faint track plus an arc
+  // that grows, shrinks, and turns. Styles live in styles.css (the CSP allows
+  // no inline styles), and it is hidden from screen readers since the button
+  // already reports aria-busy.
+  function loader() {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.classList.add('loader');
+    svg.setAttribute('viewBox', '0 0 40 40');
+    svg.setAttribute('aria-hidden', 'true');
+    for (const part of ['loader-track', 'loader-arc']) {
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.classList.add(part);
+      for (const [name, value] of [['cx', '20'], ['cy', '20'], ['r', '17.5'], ['pathLength', '100']]) circle.setAttribute(name, value);
+      svg.append(circle);
+    }
+    return svg;
+  }
+
   function element(tag, className, text) {
     const result = document.createElement(tag);
     if (className) result.className = className;
@@ -61,11 +79,13 @@
     const generation = vaultGeneration;
     button.disabled = true;
     button.setAttribute('aria-busy', 'true');
+    if (button.hasAttribute('data-loader')) button.append(loader());
     try { return await action(); }
     finally {
       if (generation === vaultGeneration) {
         button.disabled = !api;
         button.removeAttribute('aria-busy');
+        button.querySelector(':scope > .loader')?.remove();
       }
     }
   }
@@ -88,6 +108,7 @@
     document.querySelectorAll('button[aria-busy="true"]').forEach((button) => {
       button.disabled = !api;
       button.removeAttribute('aria-busy');
+      button.querySelector(':scope > .loader')?.remove();
     });
     setApplicationBusy(false);
     data = { profile: {}, applications: [] };
