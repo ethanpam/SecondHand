@@ -7,6 +7,8 @@ body.launcher-surface{background:transparent}#launcher{width:100%;height:100%;di
 .widget-primary{background:#f5f8eb;color:#1f4432;border:0;border-radius:7px;padding:4px 13px;font-size:12px;font-weight:700;white-space:nowrap}.widget-primary:hover:enabled{background:#fff}
 .widget-link{background:none;border:0;padding:0;color:#d6e5c8;font-size:10px;text-decoration:underline;white-space:nowrap}#need-you{color:#f2d58d;font-weight:600}
 #widget-text{font-size:10px;line-height:12px;color:#c7d8ba;min-width:0;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+/* An outdated worker: only the reload steps, with room for all of them. */
+.widget.outdated .widget-row:first-child{display:none}.widget.outdated #widget-text{-webkit-line-clamp:4}
 .pill{width:46px;height:46px;flex:none;padding:0;border:1px solid #cddcc1;border-radius:50%;background:#28543f;display:flex;align-items:center;justify-content:center}.pill .brand{width:30px;height:30px;font-size:22px;line-height:27px}
 /* Chrome's native side panel. */
 #sidepanel{height:100%;display:flex;flex-direction:column;overflow:hidden}

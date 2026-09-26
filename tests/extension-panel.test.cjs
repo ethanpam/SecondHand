@@ -10,6 +10,8 @@ const extensionId = 'a'.repeat(32);
 const extensionURL = file => `chrome-extension://${extensionId}/${file}`;
 const source = file => fs.readFileSync(path.join(__dirname, '../extension', file), 'utf8');
 const tick = () => new Promise(resolve => setImmediate(resolve));
+const BUILD = source('panel.js').match(/const BUILD = '([^']+)'/)[1];
+const OUTDATED = 'SecondHand was updated. Open chrome://extensions and click the reload arrow on SecondHand, then reload this page.';
 
 const plain = value => JSON.parse(JSON.stringify(value));
 
@@ -294,8 +296,11 @@ async function panel(t, initial = {}) {
     return initial.grant ?? true;
   } }, runtime: { sendMessage: async payload => {
     requests.push(structuredClone(payload));
+    // An outdated worker ignores messages it doesn't know: Chrome resolves with no response.
+    if (initial.silent === true || initial.silent?.includes(payload.type)) return undefined;
     let data;
-    if (payload.type === 'ui:pageState') data = initial.pageState ? await initial.pageState(state) : structuredClone(state);
+    if (payload.type === 'ui:ping') data = { build: initial.build ?? BUILD };
+    else if (payload.type === 'ui:pageState') data = initial.pageState ? await initial.pageState(state) : structuredClone(state);
     else if (payload.type === 'ui:autofill') { state.result = initial.autofill || doneResult; state.autopilot = Boolean(initial.autopilotAfterAutofill); data = structuredClone(state.result); }
     else if (payload.type === 'ui:stop') { state.autopilot = false; state.result = { state: 'stopped', filled: 0, needYou: [], message: 'Autofill stopped.', pageKey: 'iowa-personal-information' }; data = structuredClone(state.result); }
     else if (payload.type === 'ui:desktopStatus') data = { ...desktop };
@@ -320,7 +325,7 @@ async function panel(t, initial = {}) {
 
 test('side panel reads page and desktop state, has no guided or field-picker controls, and ignores untrusted clicks', async t => {
   const view = await panel(t);
-  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:pageState', tabId: 7 }, { type: 'ui:desktopStatus' }]);
+  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:ping' }, { type: 'ui:pageState', tabId: 7 }, { type: 'ui:desktopStatus' }]);
   for (const id of ['start-auto', 'pause-auto', 'fill-page', 'fill-next', 'confirm', 'fields']) assert.equal(view.get(id), null, id);
   assert.equal(view.get('panel-autofill').disabled, false);
   view.get('panel-autofill').click();
@@ -397,7 +402,7 @@ test('a late old-tab response cannot restore a checklist', async t => {
 test('widget on a fillable page offers one-click Autofill and cycles through what needs you', async t => {
   const view = await panel(t, { launcher: true });
   assert.equal(view.get('sidepanel').hidden, true);
-  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:pageState' }]);
+  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:ping' }, { type: 'ui:pageState' }]);
   assert.equal(view.get('widget').hidden, false);
   assert.equal(view.get('pill').hidden, true);
   assert.equal(view.get('need-you').hidden, true);
@@ -480,6 +485,44 @@ test('side panel turns its button into Stop while autofill is on', async t => {
   assert.equal(view.get('panel-autofill').textContent, 'Autofill this page');
 });
 
+test('a worker that never answers gets exact reload steps in the widget and the side panel', async t => {
+  const widget = await panel(t, { launcher: true, silent: true });
+  assert.equal(widget.get('widget').hidden, false, 'the steps stay readable instead of a pill');
+  assert.equal(widget.get('pill').hidden, true);
+  assert.equal(widget.get('widget-text').textContent, OUTDATED);
+  assert.equal(widget.get('widget').classList.contains('outdated'), true);
+  const side = await panel(t, { silent: true });
+  assert.equal(side.get('status').textContent, OUTDATED);
+  assert.equal(side.get('panel-autofill').disabled, true);
+
+  // A worker that answers page state but not a newer message is outdated too.
+  const partial = await panel(t, { launcher: true, silent: ['ui:autofill'], build: BUILD });
+  assert.equal(partial.get('widget-text').textContent, 'Iowa SNAP · ready');
+  await partial.userClick('autofill');
+  assert.equal(partial.get('widget-text').textContent, OUTDATED);
+  const before = partial.requests.length;
+  partial.window.document.dispatchEvent(new partial.window.Event('visibilitychange'));
+  await tick(); await tick();
+  assert.equal(partial.requests.length, before, 'an outdated worker is not polled again');
+});
+
+test('a worker from another build gets the same reload steps even though it answers', async t => {
+  const widget = await panel(t, { launcher: true, build: 'older-build' });
+  assert.deepEqual(plainRequests(widget.requests), [{ type: 'ui:ping' }]);
+  assert.equal(widget.get('widget-text').textContent, OUTDATED);
+  assert.equal(widget.get('widget-text').title, OUTDATED);
+  await widget.userClick('autofill');
+  assert.equal(widget.types().includes('ui:autofill'), false);
+  const side = await panel(t, { build: 'older-build' });
+  assert.deepEqual(plainRequests(side.requests), [{ type: 'ui:ping' }]);
+  assert.equal(side.get('status').textContent, OUTDATED);
+  assert.equal(side.get('status').classList.contains('error'), true);
+  assert.equal(side.get('panel-autofill').disabled, true);
+  side.listeners.activated({ tabId: 7 }); await tick(); await tick();
+  assert.equal(side.get('status').textContent, OUTDATED, 'switching tabs keeps the reload steps');
+  assert.equal(side.types().includes('ui:pageState'), false);
+});
+
 test('the pill is a fixed circle that cannot stretch into an oval', () => {
   assert.match(source('panel.css'), /\.pill\{width:46px;height:46px;flex:none/);
 });
@@ -491,7 +534,7 @@ const siteDone = { state: 'done', filled: 2, guessed: [], needYou: ['sh-4', 'sh-
 
 test('side panel offers to turn SecondHand on for an https tab that is not Iowa, and ignores untrusted clicks', async t => {
   const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: false } });
-  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:pageState', tabId: 7 }, { type: 'ui:desktopStatus' }]);
+  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:ping' }, { type: 'ui:pageState', tabId: 7 }, { type: 'ui:desktopStatus' }]);
   assert.equal(view.get('site-enable').hidden, false);
   assert.equal(view.get('site-enable').textContent, 'Turn on SecondHand for this site');
   assert.equal(view.get('panel-autofill').hidden, true);

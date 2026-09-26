@@ -3,6 +3,9 @@ importScripts('iowa-adapter.js', 'generic-adapter.js');
 if (typeof globalThis.SecondHandGeneric?.requestKeys !== 'function' || typeof globalThis.SecondHandGeneric.deriveValues !== 'function') {
   throw new Error('SecondHand could not load generic-adapter.js. Reinstall the extension.');
 }
+// Must match BUILD in panel.js: change both together. The panel compares them to tell
+// when Chrome is still running an older worker than the pages it loaded from disk.
+const BUILD = '2026-09-26.1';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
@@ -353,6 +356,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   const route = !frame ? undefined : SecondHandIowa.isSupportedUrl(sender.tab.url) ? 'iowa' : siteOrigin(sender.tab.url) ? 'site' : '';
   const launcher = Boolean(route);
   if (!panel && !launcher) return;
+  if (message.type === 'ui:ping') { respond({ ok: true, data: { build: BUILD } }); return; }
   if (launcher && message.type === 'ui:openPanel' && message.confirmed === true) {
     // Keep this synchronous: Chrome requires the originating trusted user gesture.
     chrome.sidePanel.open({ tabId: sender.tab.id }).then(() => respond({ ok: true, data: { opened: true } }),

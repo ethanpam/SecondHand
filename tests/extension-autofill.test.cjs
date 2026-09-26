@@ -263,6 +263,19 @@ test('pageState returns the last result for the same page and forgets it after n
   assert.equal((await w.panel({ type: 'ui:pageState' })).data.result, null);
 });
 
+test('the worker answers a build ping from its own pages with the build the panel expects', async () => {
+  const build = file => fs.readFileSync(require.resolve(`../extension/${file}`), 'utf8').match(/const BUILD = '([^']+)'/)?.[1];
+  assert.ok(build('background.js'));
+  assert.equal(build('background.js'), build('panel.js'), 'background.js and panel.js must change BUILD together');
+  const w = worker();
+  assert.deepEqual(plain((await w.panel({ type: 'ui:ping' })).data), { build: build('background.js') });
+  assert.deepEqual(plain((await w.launcher({ type: 'ui:ping' })).data), { build: build('background.js') });
+  assert.equal(await w.send({ type: 'ui:ping' }, { id: 'otherextension', url: PANEL_URL }), undefined);
+  assert.equal(await w.send({ type: 'ui:ping' }, { id: 'testextension', url: `${adapter.PORTAL}/applicant`, tab: { id: 7 } }), undefined);
+  assert.deepEqual(w.calls.native, []);
+  assert.deepEqual(w.calls.content, []);
+});
+
 test('desktop status, showApp, and focusField pass through; guided and manual-fill messages are gone', async () => {
   const w = worker();
   assert.deepEqual(plain((await w.panel({ type: 'ui:desktopStatus' })).data), { connected: true, unlocked: true });

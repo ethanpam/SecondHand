@@ -2,13 +2,22 @@
 
 (() => {
   const $ = id => document.getElementById(id);
+  // Must match BUILD in background.js: change both together. Chrome loads these pages
+  // from disk right away but keeps running the old worker until SecondHand is reloaded.
+  const BUILD = '2026-09-26.1';
+  const OUTDATED = 'SecondHand was updated. Open chrome://extensions and click the reload arrow on SecondHand, then reload this page.';
   const fixedText = (value, length = 360) => typeof value === 'string' ? value.slice(0, length) : '';
   const trusted = callback => event => { if (event.isTrusted) return callback(event); };
+  const outdatedError = () => Object.assign(new Error(OUTDATED), { outdated: true });
   const send = async payload => {
     const response = await chrome.runtime.sendMessage(payload);
+    // An outdated worker ignores messages it doesn't know, so Chrome resolves with no response.
+    if (response === undefined) throw outdatedError();
     if (!response?.ok) throw new Error(fixedText(response?.error) || 'The assistant is unavailable. Reload the extension and this page.');
     return response.data;
   };
+  // An older worker that still answers is caught by its build.
+  const checkBuild = async () => { if ((await send({ type: 'ui:ping' }))?.build !== BUILD) throw outdatedError(); };
   const fieldKeys = value => Array.isArray(value) ? value.filter(key => typeof key === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,79}$/.test(key)).slice(0, 80) : [];
   // Autofill keeps going only on Iowa; other sites get one fill per click.
   const continuing = result => result?.pageKey !== 'general' && !['stopped', 'locked', 'offline', 'error'].includes(result?.state);
@@ -30,10 +39,14 @@
     let result = null;
     let note = '';
     let working = false;
+    let outdated = false;
     let cursor = 0;
     let pollTimer;
+    // An outdated worker keeps its reload steps on screen and is not polled again.
+    const trouble = error => { if (error.outdated) outdated = true; return fixedText(error.message, 120); };
 
     function statusText() {
+      if (outdated) return OUTDATED;
       if (working) return 'Working…';
       if (note) return note;
       if (!result) return site ? `${hostOf(site.origin)} · ready` : 'Iowa SNAP · ready';
@@ -41,21 +54,23 @@
       return fixedText(result.message, 120);
     }
     function render() {
-      $('widget').hidden = !known && !autopilot;
-      $('pill').hidden = known || autopilot;
+      $('widget').hidden = !known && !autopilot && !outdated;
+      $('widget').classList.toggle('outdated', outdated);
+      $('pill').hidden = known || autopilot || outdated;
       const locked = result?.state === 'locked';
       $('stop').hidden = !autopilot;
       $('autofill').hidden = autopilot || locked;
       $('unlock').hidden = autopilot || !locked;
       $('autofill').disabled = working;
       const needYou = ['done', 'waiting'].includes(result?.state) ? fieldKeys(result.needYou) : [];
-      $('need-you').hidden = !needYou.length;
+      $('need-you').hidden = outdated || !needYou.length;
       $('need-you').textContent = `${needYou.length} need you`;
       $('widget-text').textContent = statusText();
-      $('widget-text').title = fixedText(result?.message, 240);
+      $('widget-text').title = outdated ? OUTDATED : fixedText(result?.message, 240);
     }
     async function poll() {
       clearTimeout(pollTimer);
+      if (outdated) return;
       if (!document.hidden && !working) {
         try {
           const state = await send({ type: 'ui:pageState' });
@@ -67,25 +82,25 @@
           // this widget's own result and adopt the worker's only after a reload.
           if (autopilot || !result) result = state?.result || result;
           note = '';
-        } catch (error) { note = fixedText(error.message, 120); }
+        } catch (error) { note = trouble(error); }
         render();
       }
-      pollTimer = setTimeout(poll, 1500);
+      if (!outdated) pollTimer = setTimeout(poll, 1500);
     }
 
     $('autofill').addEventListener('click', trusted(async () => {
-      if (working) return;
+      if (working || outdated) return;
       working = true; note = ''; render();
       try {
         result = await send({ type: 'ui:autofill', confirmed: true });
         cursor = 0;
         autopilot = continuing(result);
-      } catch (error) { result = { state: 'error', message: error.message }; autopilot = false; }
+      } catch (error) { result = { state: 'error', message: trouble(error) }; autopilot = false; }
       finally { working = false; render(); }
     }));
     $('stop').addEventListener('click', trusted(async () => {
       try { result = await send({ type: 'ui:stop', confirmed: true }); autopilot = false; }
-      catch (error) { note = fixedText(error.message, 120); }
+      catch (error) { note = trouble(error); }
       render();
     }));
     $('need-you').addEventListener('click', trusted(async () => {
@@ -96,26 +111,26 @@
       try {
         const focused = await send({ type: 'ui:focusField', key, confirmed: true });
         note = focused?.focused ? '' : site ? 'Find it in the form.' : 'Find it in Iowa’s form.';
-      } catch (error) { note = fixedText(error.message, 120); }
+      } catch (error) { note = trouble(error); }
       render();
     }));
     $('unlock').addEventListener('click', trusted(async () => {
       try {
         await send({ type: 'ui:showApp', confirmed: true });
         result = { state: 'waiting', message: 'Unlock SecondHand, then click Autofill.' };
-      } catch (error) { note = fixedText(error.message, 120); }
+      } catch (error) { note = trouble(error); }
       render();
     }));
     // Send immediately inside the trusted click: Chrome needs the user gesture to open the panel.
     for (const id of ['details', 'pill']) {
       $(id).addEventListener('click', trusted(() => {
-        send({ type: 'ui:openPanel', confirmed: true }).catch(error => { note = fixedText(error.message, 120); render(); });
+        send({ type: 'ui:openPanel', confirmed: true }).catch(error => { note = trouble(error); render(); });
       }));
     }
     document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
     window.addEventListener('pagehide', () => clearTimeout(pollTimer), { once: true });
     render();
-    poll();
+    checkBuild().catch(error => { note = trouble(error); render(); }).then(poll);
   }
 
   // Chrome's side panel: desktop status, one Autofill button, and the checklist.
@@ -168,6 +183,7 @@
       $('checklist-section').hidden = true;
     }
     function invalidateTarget() {
+      if (stopped) return;
       contextRevision++; working = false; target = null;
       clearPage(); controls();
       show('Checking the application in your active tab…');
@@ -316,13 +332,25 @@
       try { await send({ type: 'ui:showApp', confirmed: true }); $('desktop-status').textContent = 'Unlock SecondHand, then click Autofill.'; }
       catch (error) { $('desktop-status').textContent = error.message; }
     }));
+    // An outdated worker stops the panel with its reload steps on screen.
+    async function start() {
+      try { await checkBuild(); } catch (error) {
+        if (error.outdated) {
+          stopped = true; target = null; clearPage(); controls(); show(OUTDATED, true);
+          $('desktop-status').parentElement.hidden = true;
+          return;
+        }
+        show(error.message, true);
+      }
+      refresh().then(desktopStatus);
+      schedulePoll();
+    }
     chrome.tabs.onActivated?.addListener(() => { invalidateTarget(); refresh(); });
     chrome.tabs.onUpdated?.addListener((tabId, change) => {
       if (target?.id === tabId && (change.url || change.status === 'loading')) { invalidateTarget(); refresh(); }
     });
-    document.addEventListener('visibilitychange', () => { if (!document.hidden && !working) { refresh(); desktopStatus(); } });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && !working && !stopped) { refresh(); desktopStatus(); } });
     window.addEventListener('pagehide', () => { stopped = true; clearTimeout(pollTimer); }, { once: true });
-    refresh().then(desktopStatus);
-    schedulePoll();
+    start();
   }
 })();
