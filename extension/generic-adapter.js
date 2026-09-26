@@ -24,7 +24,7 @@
     [/^middle (name|initial)$/, 'middleName'],
     [/^(last|family|sur) ?name$|^last$/, 'lastName'],
     [/^(full |legal |applicant )?name$|^((parents?|guardians?)( (or )?(parents?|guardians?))? )?(first (and )?last|full) name$|^name of (the )?head of household$|^head of household name$/, 'fullName'],
-    [/^(date of birth|birth ?date|dob|birthday)( mm dd yyyy)?$/, 'birthDate'],
+    [/^(date of birth|birth ?date|dob|birthday)( mm dd yyyy| date)?$/, 'birthDate'],
     [/^(social security( number)?|ssn)$/, 'ssn'],
     [/^e ?mail( address)?$/, 'email'],
     [/^((cell|mobile|home|best|primary) )?(phone|telephone)( number)?$|^(mobile|cell) number$/, 'phone'],
@@ -64,7 +64,7 @@
   const QUESTION_NUMBER = /^\s*(\d{1,3}\s*[.)]|[a-z][.)](?=\s))\s*/i;
   // An aside in parentheses ("(First and Last Name)") is dropped, unless it holds numbers
   // (age bands like "(0-5)") or points at someone other than the applicant ("(spouse)").
-  const OTHER_PERSON = /\b(child|children|kids?|spouse|partner|husband|wife|emergency|contact|pet|landlord|employer|other|previous|former|maiden|alternate|second|secondary|work|business)\b/i;
+  const OTHER_PERSON = /\b(child|children|kid|spouse|partner|husband|wife|emergency|contact|pet|landlord|employer|other|previous|former|maiden|alternate|second|secondary|work|business)s?\b/i;
   const aside = (text, inner) => /\d/.test(inner) || OTHER_PERSON.test(inner) ? text : ' ';
   function question(value) {
     const words = String(value || '').replace(/([a-z])([A-Z][a-z])/g, '$1 $2').replace(QUESTION_NUMBER, '').replace(/\(([^()]*)\)/g, aside);
@@ -73,6 +73,14 @@
     return text;
   }
   const ruleFor = text => RULES.find(([pattern]) => pattern.test(question(text)))?.[1] || null;
+  // Whether a guess (the AI step) may offer a key for a question. A birth date only goes to a
+  // whole-date question about birth, never to "Date ordered", a month box, or a child's birthday.
+  function canSuggest(key, field) {
+    if (!GENERIC_KEYS.includes(key)) return false;
+    if (key !== 'birthDate') return true;
+    const text = question(field?.label);
+    return /\b(birth|born|dob)/.test(text) && !/\b(month|day|year|time|hours?|minutes?)\b/.test(text) && !OTHER_PERSON.test(text);
+  }
 
   function rendered(element) {
     const win = element.ownerDocument.defaultView;
@@ -101,11 +109,32 @@
     }
     return '';
   }
+  // The question a control sits in: the nearest labelled group or form-builder question item.
+  const QUESTION_BOX = '[role="listitem"], [role="radiogroup"], [role="group"], fieldset';
+  function boxHeading(box, doc) {
+    const legend = box.tagName === 'FIELDSET' ? box.querySelector('legend') : null;
+    return idsText(doc, box.getAttribute('aria-labelledby')) || clean(box.getAttribute('aria-label')) || (legend ? textWithoutControls(legend) : '') ||
+      clean(box.querySelector('[role="heading"]')?.textContent);
+  }
+  function enclosingQuestion(node, doc) {
+    for (let box = node.parentElement?.closest(QUESTION_BOX); box; box = box.parentElement?.closest(QUESTION_BOX)) {
+      const text = boxHeading(box, doc);
+      if (text) return text;
+    }
+    return '';
+  }
+  // "Date", "Month", "Hour"… name a part of a question, not the question itself.
+  const DATE_PART = /^(date|month|day|year|time|hours?|minutes?)$/;
   function labelsFor(element, doc) {
     const candidates = [idsText(doc, element.getAttribute('aria-labelledby')), clean(element.getAttribute('aria-label')),
       ...Array.from(element.labels || [], textWithoutControls), clean(element.getAttribute('placeholder'))];
     const present = candidates.filter(Boolean);
-    return present.length ? present : [precedingText(element)].filter(Boolean);
+    const labels = present.length ? present : [precedingText(element)].filter(Boolean);
+    return labels.map(text => {
+      if (!DATE_PART.test(normal(text))) return text;
+      const asked = enclosingQuestion(element, doc);
+      return asked && normal(asked) !== normal(text) ? `${asked}: ${text}` : text;
+    });
   }
   function groupQuestion(elements, doc) {
     const first = elements[0];
@@ -301,7 +330,9 @@
       const entry = current.map.get(assignment?.id);
       const key = assignment?.key;
       const value = values?.[key];
-      if (!entry || !GENERIC_KEYS.includes(key) || typeof value !== 'string' || !value || answered(entry) || !entry.elements.every(element => element.isConnected && eligible(element)) || !compatible(key, entry) || !fillEntry(entry, key, value)) {
+      // A key the rules did not choose for this question is a guess and must be one a guess may offer.
+      const allowed = entry && (match(entry).key === key || canSuggest(key, { label: entry.labels[0] || '' }));
+      if (!entry || !GENERIC_KEYS.includes(key) || !allowed || typeof value !== 'string' || !value || answered(entry) || !entry.elements.every(element => element.isConnected && eligible(element)) || !compatible(key, entry) || !fillEntry(entry, key, value)) {
         skipped.push(assignment?.id); continue;
       }
       ensureStyle(doc);
@@ -320,7 +351,7 @@
   }
   const elementFor = id => current?.map.get(id)?.elements[0] || null;
 
-  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, plan, requestKeys, deriveValues, fillFields, focusField, elementFor });
+  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, plan, requestKeys, deriveValues, fillFields, focusField, elementFor, canSuggest });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandGeneric = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

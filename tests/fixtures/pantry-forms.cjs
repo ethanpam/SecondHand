@@ -49,4 +49,12 @@ const numberedGoogle = `<form><div role="list">
 <div role="listitem"><div id="n6" role="heading">6. U.S. citizen?</div><input id="citizen" type="text" aria-labelledby="n6"></div>
 </div></form>`;
 
-module.exports = { plainPantry, googleStyle, jotformStyle, numberedGoogle };
+// Google Form date and time questions: each input is labelled by its own sub-label, not the question.
+const googleDates = `<form><div role="list">
+<div role="listitem"><div id="d5" role="heading"><span>5.Date ordered:</span><span aria-label="Required question"> *</span></div><div><div id="d5s">Date</div><input id="ordered" type="date" aria-labelledby="d5s" required></div></div>
+<div role="listitem"><div id="d6" role="heading">Date of birth</div><div><div id="d6s">Date</div><input id="dob" type="date" aria-labelledby="d6s"></div></div>
+<div role="listitem"><div id="t7" role="heading">Pickup time</div><div><div id="t7h">Hour</div><input id="hour" aria-labelledby="t7h"><div id="t7m">Minute</div><input id="minute" aria-labelledby="t7m"></div></div>
+<div role="listitem"><div id="b8" role="heading">Birthday</div><div><span id="b8m">Month</span><input id="month" aria-labelledby="b8m"><span id="b8d">Day</span><input id="day" aria-labelledby="b8d"><span id="b8y">Year</span><input id="year" aria-labelledby="b8y"></div></div>
+</div></form>`;
+
+module.exports = { plainPantry, googleStyle, jotformStyle, numberedGoogle, googleDates };

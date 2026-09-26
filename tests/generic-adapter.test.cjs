@@ -63,6 +63,29 @@ test('"first and last name" and guardian names are full names; asides in parenth
   assert.deepEqual(result.unmatched.map(field => field.label), ['Last name (spouse)', 'Name (of your pet)', 'Phone (work)', 'Guardian phone']);
 });
 
+test('a generic date or time sub-label is read together with its question, and birth dates go only to birth questions', () => {
+  const doc = page(forms.googleDates);
+  const result = generic.plan(doc);
+  assert.deepEqual(byElement(doc, result), { dob: 'birthDate' });
+  assert.deepEqual(result.unmatched.map(field => field.label),
+    ['5.Date ordered: Date', 'Pickup time: Hour', 'Pickup time: Minute', 'Birthday: Month', 'Birthday: Day', 'Birthday: Year']);
+  for (const label of ['5.Date ordered: Date', 'Birthday: Month', 'Month of birth', 'Child’s date of birth', 'Date'])
+    assert.equal(generic.canSuggest('birthDate', { label }), false, label);
+  for (const label of ['Your birthday', 'Date of birth (MM/DD/YYYY)']) assert.equal(generic.canSuggest('birthDate', { label }), true, label);
+  assert.equal(generic.canSuggest('email', { label: 'Date' }), true);
+  assert.equal(generic.canSuggest('password', { label: 'Password' }), false);
+  // A guessed birth date is never placed in a question that is not about birth.
+  const ordered = result.unmatched.find(field => field.label.startsWith('5.'));
+  const month = result.unmatched.find(field => field.label === 'Birthday: Month');
+  const dob = result.matched.find(item => item.key === 'birthDate');
+  const filled = generic.fillFields(doc, result.token, [{ id: ordered.id, key: 'birthDate', guessed: true }, { id: month.id, key: 'birthDate', guessed: false },
+    { id: dob.id, key: 'birthDate', guessed: false }], generic.deriveValues(profile));
+  assert.deepEqual(filled.filled, [dob.id]);
+  assert.equal(doc.getElementById('ordered').value, '');
+  assert.equal(doc.getElementById('month').value, '');
+  assert.equal(doc.getElementById('dob').value, '1985-04-12');
+});
+
 test('only confident matches are planned; vague labels stay unmatched for the applicant', () => {
   const doc = page('<label for="a">Name of your pet</label><input id="a"><label for="b">Emergency contact phone</label><input id="b" type="tel"><label for="c">Income last year from your side business</label><input id="c">');
   const result = generic.plan(doc);
