@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import { CheckIcon, DownloadIcon, ExternalIcon } from './icons';
 import { faq } from './faq';
+import { HeroScene } from './hero-scene';
 import { release } from './release';
 import { SiteFooter, SiteHeader } from './site-chrome';
 
@@ -38,12 +39,28 @@ export function Home() {
     <>
       <SiteHeader />
       <main id="main" className="wrap">
-        <section className="intro" id="downloads">
-          <h1 className="hero-title">Fill out Iowa’s SNAP application<br className="hero-break" /> <span className="soft">with less typing.</span></h1>
-          <div className="intro-copy">
+        <section className="hero" aria-labelledby="hero-title">
+          <HeroScene />
+          <div className="hero-content">
+            <h1 id="hero-title" className="hero-title">Fill out Iowa’s SNAP application <span className="soft">with less typing.</span></h1>
             <p className="lead">Save your details once in an encrypted app on your computer. After you approve, its Chrome extension fills the supported fields in Iowa’s SNAP application.</p>
             <p className="mono-line"><span>Encrypted on your device <span aria-hidden="true">·</span> No account needed</span></p>
-            <a className="text-link" href="#setup">How to get set up</a>
+            <div className="cta-actions">
+              <a className="pill-button" href="#downloads">Download</a>
+              <a className="pill-button outline" href="#setup">How to get set up</a>
+            </div>
+          </div>
+          <dl className="stats hero-stats" aria-label="At a glance">
+            <div><dt>$0</dt><dd>to download and use</dd></div>
+            <div><dt>0</dt><dd>accounts to create</dd></div>
+            <div><dt>15 min</dt><dd>longest assisted session, only after you approve</dd></div>
+          </dl>
+        </section>
+
+        <section className="download-section" id="downloads" aria-labelledby="download-heading">
+          <div>
+            <h2 id="download-heading" className="section-title">Get secondHand <span className="soft">for your computer.</span></h2>
+            <p className="section-intro">Windows 10 or later, or macOS 13 or later, with Google Chrome 116 or newer. The Chrome extension is included, so there is nothing else to download.</p>
           </div>
           <div className="download-panel">
             <div className="panel-heading"><h2>Download secondHand</h2><span className="version">v{release}</span></div>
@@ -71,11 +88,6 @@ export function Home() {
           </div>
         </section>
 
-        <dl className="stats" aria-label="At a glance">
-          <div><dt>$0</dt><dd>to download and use</dd></div>
-          <div><dt>0</dt><dd>accounts to create</dd></div>
-          <div><dt>15 min</dt><dd>longest assisted session, only after you approve</dd></div>
-        </dl>
         <section className="section-split" aria-labelledby="today-heading">
           <h2 id="today-heading" className="section-title">What it does <span className="soft">today.</span></h2>
           <p className="section-intro">A browser side panel tracks the applicant page with completion checkmarks and missing-field reminders. With your approval, it fills saved applicant details, address and mailing information, and your explicit program choices. It selects Save and Continue when required answers are complete, then checks the next step. Unverified later pages stay manual.</p>

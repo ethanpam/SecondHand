@@ -28,6 +28,7 @@ html {
 }
 body {
   margin: 0;
+  overflow-x: clip;
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
@@ -119,15 +120,7 @@ nav a:hover,
 .header-cta:hover {
   background: #fff;
 }
-.intro {
-  position: relative;
-  display: grid;
-  grid-template-columns: 1.3fr 1fr;
-  gap: 64px;
-  padding: 96px 0 64px;
-  align-items: start;
-  row-gap: 32px;
-}
+
 h1 {
   font-family: var(--font-sans);
   font-size: clamp(44px, 6vw, 80px);
@@ -146,24 +139,69 @@ p {
   max-width: 465px;
 }
 
-.intro::before {
-  /* Faint full-width column grid behind the hero, drawn as 1px hard-edged lines. */
+
+.hero {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 64px;
+  min-height: calc(100svh - 88px);
+  padding: 120px 0 40px;
+}
+.hero-scene {
+  position: absolute;
+  top: -88px;
+  bottom: 0;
+  left: 50%;
+  z-index: -2;
+  display: block;
+  width: 100vw;
+  height: calc(100% + 88px);
+  transform: translateX(-50%);
+}
+.hero::after {
+  /* Keeps the text readable over the scene, as the template darkens its video,
+     and adds the faint column grid. */
   content: "";
   position: absolute;
-  inset: 0 auto 0 50%;
+  top: -88px;
+  bottom: 0;
+  left: 50%;
+  z-index: -1;
   width: 100vw;
   transform: translateX(-50%);
-  background-image: repeating-linear-gradient(to right, #ffffff09 0 1px, transparent 1px 120px);
+  background:
+    repeating-linear-gradient(to right, #ffffff08 0 1px, transparent 1px 120px),
+    linear-gradient(to right, rgba(5, 5, 5, 0.88) 0%, rgba(5, 5, 5, 0.55) 40%, rgba(5, 5, 5, 0) 68%),
+    linear-gradient(to bottom, rgba(5, 5, 5, 0) 55%, rgba(5, 5, 5, 0.9) 100%);
   pointer-events: none;
-  z-index: -1;
+}
+.hero-content {
+  max-width: 720px;
+}
+.hero-title {
+  margin-bottom: 32px;
+}
+.hero-stats {
+  margin: 0;
+}
+.download-section {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 64px;
+  align-items: start;
+  padding: 96px 0;
+  border-top: 1px solid var(--border);
+}
+.download-section .section-intro {
+  margin-top: 24px;
 }
 .soft {
   color: var(--heading-soft);
 }
-.hero-title {
-  grid-column: 1 / -1;
-  margin-bottom: 8px;
-}
+
 .mono-line {
   display: flex;
   align-items: baseline;
@@ -843,16 +881,23 @@ kbd {
   .brand {
     font-size: 18px;
   }
-  .intro {
+  .hero {
+    min-height: 0;
+    padding: 64px 0 32px;
+    gap: 48px;
+  }
+  .hero::after {
+    background:
+      linear-gradient(to right, rgba(5, 5, 5, 0.85), rgba(5, 5, 5, 0.6)),
+      linear-gradient(to bottom, rgba(5, 5, 5, 0) 55%, rgba(5, 5, 5, 0.9) 100%);
+  }
+  .download-section {
     grid-template-columns: 1fr;
-    padding: 48px 0;
     gap: 32px;
+    padding: 64px 0;
   }
   h1 {
     font-size: 40px;
-  }
-  .hero-break {
-    display: none;
   }
   .section-split {
     grid-template-columns: 1fr;
