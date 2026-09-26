@@ -34,7 +34,7 @@
     "oxlint": "1.76.0",
     "oxlint-tsgolint": "7.0.2001",
     "tailwindcss": "4.2.1",
-    "typescript": "5.9.3",
+    "typescript": "7.0.2",
     "vite": "8.0.13",
     "wrangler": "4.92.0"
   },
