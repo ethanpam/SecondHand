@@ -26,7 +26,8 @@ function generalEngine(window, calls, { matched = true } = {}) {
         matched: matched ? [{ id: 'sh-1-0', key: 'householdAdults', confidence: 'high', element: element(), value: 'Synthetic private value' }] : [],
         unmatched: [{ id: 'sh-1-1', label: 'Is anyone blind?', type: 'radio', options: ['Yes', 'No'], required: true, element: element(), value: 'Synthetic private value' }] };
     },
-    fillFields: (_doc, token, assignments, values) => { calls.push({ token, assignments: plain(assignments), values: plain(values) }); return { ok: true, filled: ['sh-1-0'], skipped: [], rejected: ['sh-1-9'], values }; },
+    fillFields: (_doc, token, assignments, values) => { calls.push({ token, assignments: plain(assignments), values: plain(values) }); return { ok: true, filled: ['sh-1-0'], skipped: [], rejected: ['sh-1-9'], pending: [], values }; },
+    settle: async (_doc, token, result) => { calls.push(`settle:${token}`); return result; },
     focusField: (_doc, id) => { calls.push(`focus:${id}`); if (id !== 'sh-1-1') return false; element().focus(); return true; }
   };
 }
@@ -60,7 +61,11 @@ function content(t, url = `${adapter.PORTAL}/applicant`, { engine = true, matche
   window.eval(source('content.js'));
   return { window, frames, calls, setKind: (value, instruction) => { kind = value; todo = instruction; }, get continued() { return continued; },
     host: () => window.document.querySelector('[data-secondhand-assistant]'),
-    request(message, sender = { id: extensionId }) { let response; listener?.(message, sender, value => { response = value; }); return response; } };
+    request(message, sender = { id: extensionId }) { let response; listener?.(message, sender, value => { response = value; }); return response; },
+    // For answers the content script sends after awaiting (fills settle their choices first).
+    requestAsync(message, sender = { id: extensionId }) {
+      return new Promise(resolve => { if (listener?.(message, sender, resolve) !== true) resolve(undefined); });
+    } };
 }
 
 test('on-page assistant is isolated in a fixed extension iframe only on the exact Iowa top-level portal', t => {
@@ -154,15 +159,16 @@ test('the Iowa content script loads the general engine before content.js', () =>
   assert.deepEqual(JSON.parse(source('manifest.json')).content_scripts[0].js, ['iowa-adapter.js', 'generic-adapter.js', 'content.js']);
 });
 
-test('on Iowa pages the adapter has not verified, the general engine plans, fills, and focuses with metadata only', t => {
+test('on Iowa pages the adapter has not verified, the general engine plans, fills, and focuses with metadata only', async t => {
   const page = content(t);
   page.setKind('manual');
   const plan = page.request({ type: 'secondhand:generic:plan' });
   assert.deepEqual(plain(plan), { token: 'plan-1', matched: [{ id: 'sh-1-0', key: 'householdAdults', confidence: 'high' }],
     unmatched: [{ id: 'sh-1-1', label: 'Is anyone blind?', type: 'radio', options: ['Yes', 'No'], required: true }] });
-  const filled = page.request({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [{ id: 'sh-1-0', key: 'householdAdults', guessed: false }], values: { householdAdults: '2' } });
+  const filled = await page.requestAsync({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [{ id: 'sh-1-0', key: 'householdAdults', guessed: false }], values: { householdAdults: '2' } });
   assert.deepEqual(plain(filled), { ok: true, filled: ['sh-1-0'], skipped: [], rejected: ['sh-1-9'] }, 'answers the page refused come back');
   assert.deepEqual(page.calls[1], { token: 'plan-1', assignments: [{ id: 'sh-1-0', key: 'householdAdults', guessed: false }], values: { householdAdults: '2' } });
+  assert.equal(page.calls[2], 'settle:plan-1', 'choices the page confirms a moment later are settled before answering');
   assert.doesNotMatch(JSON.stringify([plan, filled]), /Synthetic private/);
   assert.deepEqual(plain(page.request({ type: 'secondhand:generic:focus', id: 'sh-1-1' })), { focused: true });
   assert.equal(page.window.document.activeElement.id, 'firstName');

@@ -115,3 +115,51 @@ test('#24 an aria-hidden group of choices stays out of the plan', () => {
     <label><input type="radio" name="vet" value="y"> Yes</label><label><input type="radio" name="vet" value="n"> No</label></fieldset>`);
   assert.deepEqual(generic.plan(doc).matched, []);
 });
+
+// Google Forms marks a div radio checked a few milliseconds after the click, in its own task.
+function googleCount(doc, { selects = true } = {}) {
+  const group = doc.querySelector('[role=radiogroup]');
+  for (const option of group.querySelectorAll('[role=radio]')) {
+    option.addEventListener('click', () => { if (selects) setTimeout(() => {
+      group.querySelectorAll('[role=radio]').forEach(other => other.setAttribute('aria-checked', String(other === option)));
+    }, 5); });
+  }
+}
+const googleHousehold = `<div role="listitem"><div role="heading" id="q">Number of Family / Household Members</div>
+  <div role="radiogroup" aria-labelledby="q">${['One (Myself)', 'Two', 'Three', 'Four', 'Five or more'].map(label =>
+    `<div role="radio" aria-checked="false" aria-label="${label}" data-value="${label}" tabindex="0"><span>${label}</span></div>`).join('')}</div></div>`;
+
+test('a Google Forms choice that the page checks a moment after the click is settled and counted', async () => {
+  const doc = page(googleHousehold);
+  googleCount(doc);
+  const result = generic.plan(doc);
+  assert.deepEqual(keysOf(result), ['householdSize']);
+  const id = result.matched[0].id;
+  const filled = fillAll(doc, result, { householdSize: '3' });
+  assert.deepEqual(filled.filled, [], 'not counted before the page confirms it');
+  assert.deepEqual(filled.pending, [id]);
+  const settled = await generic.settle(doc, result.token, filled);
+  assert.deepEqual(settled.filled, [id]);
+  assert.deepEqual(settled.pending, []);
+  assert.equal(doc.querySelector('[aria-label="Three"]').getAttribute('aria-checked'), 'true');
+  assert.equal(doc.querySelector('[aria-label="Three"]').getAttribute('data-secondhand-filled'), 'rule');
+});
+
+test('a Google Forms choice the page never checks is reported as skipped after settling, not filled', async () => {
+  const doc = page(googleHousehold);
+  googleCount(doc, { selects: false });
+  const result = generic.plan(doc);
+  const id = result.matched[0].id;
+  const settled = await generic.settle(doc, result.token, fillAll(doc, result, { householdSize: '3' }), { timeoutMs: 60 });
+  assert.deepEqual(settled.filled, []);
+  assert.deepEqual(settled.skipped, [id]);
+  assert.equal(doc.querySelector('[data-secondhand-filled]'), null);
+});
+
+test('settling a fill with nothing pending returns it unchanged', async () => {
+  const doc = page('<label for="z">ZIP Code</label><input id="z">');
+  const result = generic.plan(doc);
+  const filled = fillAll(doc, result, { zip: '50309' });
+  assert.deepEqual(filled.pending, []);
+  assert.deepEqual(await generic.settle(doc, result.token, filled), filled);
+});

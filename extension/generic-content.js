@@ -95,8 +95,19 @@
         }
         const result = withOwnPanelHidden(() => engine.fillFields(document, message.token, message.assignments, message.values));
         const validIds = ids => Array.isArray(ids) && ids.every(id => typeof id === 'string');
-        if (!result || !validIds(result.filled) || !validIds(result.skipped) || !validIds(result.rejected)) throw new Error('Invalid fill result.');
-        respond({ ok: result?.ok === true, filled: strings(result?.filled), skipped: strings(result?.skipped), rejected: strings(result?.rejected) });
+        const settledResult = result => {
+          if (!result || !validIds(result.filled) || !validIds(result.skipped) || !validIds(result.rejected)) return null;
+          return { ok: result.ok === true, filled: strings(result.filled), skipped: strings(result.skipped), rejected: strings(result.rejected) };
+        };
+        // Some pages (Google Forms) confirm a chosen option a moment after the click: answer once it settles.
+        engine.settle(document, message.token, result).then(
+          settled => {
+            const formatted = settledResult(settled);
+            if (formatted) respond(formatted);
+            else respond({ ok: false, error: 'Invalid fill result.' });
+          },
+          () => respond({ ok: false, error: 'This page could not be checked safely. Review it manually.' }));
+        return true;
       } else if (message.type === 'secondhand:generic:focus' && typeof message.id === 'string') {
         respond({ focused: Boolean(withOwnPanelHidden(() => engine.focusField(document, message.id))) });
       }

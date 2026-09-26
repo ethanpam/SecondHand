@@ -116,7 +116,9 @@
       return { ok: false, error: 'The fill request was malformed. Nothing was filled.' };
     }
     const result = engine.fillFields(document, message.token, message.assignments, message.values);
-    return { ok: result?.ok === true, filled: strings(result?.filled), skipped: strings(result?.skipped), rejected: strings(result?.rejected) };
+    // A choice the page confirms a moment after the click is settled before answering.
+    return engine.settle(document, message.token, result)
+      .then(settled => ({ ok: settled?.ok === true, filled: strings(settled?.filled), skipped: strings(settled?.skipped), rejected: strings(settled?.rejected) }));
   }
 
   ensurePanel();
@@ -154,8 +156,11 @@
         const result = withOwnPanelHidden(() => adapter.fill(document, location.href, bindings, message.values));
         respond({ ok: true, filledCount: result.filled.length, skippedCount: result.skipped.length });
       } else if (message.type === 'secondhand:generic:plan' || message.type === 'secondhand:generic:fill') {
-        respond(withOwnPanelHidden(() => general(message)));
+        const answer = withOwnPanelHidden(() => general(message));
         ensurePanel();
+        if (typeof answer?.then !== 'function') { respond(answer); return; }
+        answer.then(respond, () => respond({ ok: false, error: 'This page could not be checked safely. Review it manually, then rescan.' }));
+        return true;
       } else if (message.type === 'secondhand:generic:focus' && typeof message.id === 'string' && engine) {
         respond({ focused: Boolean(withOwnPanelHidden(() => engine.focusField(document, message.id))) });
       }

@@ -405,6 +405,9 @@ test('the page count takes each on-screen question SecondHand filled once and sp
     <section style="display:none"><input name="earlier" data-secondhand-filled="rule"><button type="button">Next</button></section>
     <div hidden><input name="tucked" data-secondhand-filled="guess"></div>
     <button type="submit">Submit</button>`), { rule: 2, guess: 1, next: false });
+  // Google Forms' div choices: every option is marked, but the question counts once.
+  assert.deepEqual(run(`<div role="radiogroup">${['One', 'Two', 'Three'].map(label => `<div role="radio" aria-label="${label}" data-secondhand-filled="rule"></div>`).join('')}</div>
+    <div role="radiogroup"><div role="radio" data-secondhand-filled="guess"></div><div role="radio" data-secondhand-filled="guess"></div></div>`), { rule: 1, guess: 1, next: false });
   assert.equal(run('<button type="button">Next</button>').next, true);
   assert.equal(run('<input type="submit" value="Next page">').next, true);
   assert.equal(run('<div role="button"><span>Next</span></div>').next, true);
@@ -575,7 +578,7 @@ test('turning a site off removes its script registration and Chrome access', asy
 // The content script that hosts the widget and runs the site engine on approved pages.
 const extensionId = 'a'.repeat(32);
 const extensionURL = file => `chrome-extension://${extensionId}/${file}`;
-function siteContent(t, { url = SITE_URL, engine = true } = {}) {
+function siteContent(t, { url = SITE_URL, engine = true, settled = null } = {}) {
   const dom = new JSDOM('<!doctype html><body><form><label>Your name <input id="name"></label><label>Pickup day <select id="day"><option></option><option>Monday</option></select></label></form></body>', { url, runScripts: 'outside-only' });
   t.after(() => dom.window.close());
   const window = dom.window;
@@ -596,15 +599,21 @@ function siteContent(t, { url = SITE_URL, engine = true } = {}) {
       fillFields: (doc, token, assignments, values) => {
         calls.push({ token, assignments: plain(assignments), values: plain(values) });
         doc.getElementById('name').value = values.fullName;
-        return { ok: true, filled: ['sh-1'], skipped: [], rejected: ['sh-2'], values };
+        return { ok: true, filled: ['sh-1'], skipped: [], rejected: ['sh-2'], pending: [], values };
       },
+      // Stands in for the engine confirming choices the page marks a moment after the click.
+      settle: async (doc, token, result) => { calls.push(`settle:${token}`); return settled ? settled(result) : result; },
       focusField: (doc, id) => { calls.push(`focus:${id}`); if (id !== 'sh-2') return false; doc.getElementById('day').focus(); return true; }
     };
   }
   window.eval(source('generic-content.js'));
   return { window, frames, calls,
     host: () => window.document.querySelector('[data-secondhand-assistant]'),
-    request(message, sender = { id: extensionId }) { let response; listener?.(message, sender, value => { response = value; }); return response; } };
+    request(message, sender = { id: extensionId }) { let response; listener?.(message, sender, value => { response = value; }); return response; },
+    // For answers the content script sends after awaiting (fills settle their choices first).
+    requestAsync(message, sender = { id: extensionId }) {
+      return new Promise(resolve => { if (listener?.(message, sender, resolve) !== true) resolve(undefined); });
+    } };
 }
 
 test('on approved sites the widget is a closed, full-size extension iframe in the top frame only', t => {
@@ -634,12 +643,12 @@ test('on approved sites the widget is a closed, full-size extension iframe in th
   assert.equal(siteContent(t, { url: 'http://pantry.example.org/intake' }).host(), null);
 });
 
-test('site plans and fills answer with field metadata only, never values or elements', t => {
+test('site plans and fills answer with field metadata only, never values or elements', async t => {
   const page = siteContent(t);
   const plan = page.request({ type: 'secondhand:generic:plan' });
   assert.deepEqual(plain(plan), { token: 'plan-1', matched: [{ id: 'sh-1', key: 'fullName', confidence: 'high' }],
     unmatched: [{ id: 'sh-2', label: 'Pickup day', type: 'select-one', options: ['Monday'], required: true }] });
-  const filled = page.request({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [{ id: 'sh-1', key: 'fullName', guessed: false }], values: { fullName: 'Synthetic private name' } });
+  const filled = await page.requestAsync({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [{ id: 'sh-1', key: 'fullName', guessed: false }], values: { fullName: 'Synthetic private name' } });
   assert.deepEqual(plain(filled), { ok: true, filled: ['sh-1'], skipped: [], rejected: ['sh-2'] }, 'answers the page refused come back');
   assert.deepEqual(page.calls[1], { token: 'plan-1', assignments: [{ id: 'sh-1', key: 'fullName', guessed: false }], values: { fullName: 'Synthetic private name' } });
   assert.equal(page.window.document.getElementById('name').value, 'Synthetic private name');
@@ -647,6 +656,14 @@ test('site plans and fills answer with field metadata only, never values or elem
   assert.deepEqual(plain(page.request({ type: 'secondhand:generic:focus', id: 'sh-2' })), { focused: true });
   assert.equal(page.window.document.activeElement.id, 'day');
   assert.deepEqual(plain(page.request({ type: 'secondhand:generic:focus', id: 'sh-9' })), { focused: false });
+});
+
+test('a fill answers only after the engine settles choices the page confirms a moment later', async t => {
+  const page = siteContent(t, { settled: result => ({ ...result, filled: [...result.filled, 'sh-3'], pending: [] }) });
+  page.request({ type: 'secondhand:generic:plan' });
+  const filled = await page.requestAsync({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [{ id: 'sh-1', key: 'fullName', guessed: false }], values: { fullName: 'Synthetic' } });
+  assert.deepEqual(plain(filled), { ok: true, filled: ['sh-1', 'sh-3'], skipped: [], rejected: ['sh-2'] });
+  assert.equal(page.calls.at(-1), 'settle:plan-1');
 });
 
 test('other extensions, malformed fills, and Iowa messages reach nothing on approved sites', t => {
