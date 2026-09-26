@@ -206,13 +206,13 @@
   function renderSetup() {
     const connected = Boolean(vaultStatus.extensionId);
     const setup = vaultStatus.extensionSetup || {};
-    const bundled = setup.prepared && vaultStatus.extensionId === setup.extensionId;
+    const bundled = connected && vaultStatus.extensionId === setup.extensionId;
     $('extension-id').value = vaultStatus.extensionId || '';
-    $('extension-status').textContent = bundled ? 'Ready to load in Chrome' : connected ? 'Custom connection registered' : 'Needs setup';
+    $('extension-status').textContent = bundled ? (setup.prepared ? 'Ready to load in Chrome' : 'Setup needs refresh') : connected ? 'Custom connection registered' : 'Needs setup';
     $('extension-status').classList.toggle('connected', connected);
     $('extension-prepared').hidden = !setup.prepared;
     $('extension-folder-path').textContent = setup.prepared ? setup.directory : '';
-    $('prepare-extension').replaceChildren(document.createTextNode(setup.prepared ? 'Refresh extension files ' : 'Prepare Chrome extension '), icon('plug'));
+    $('prepare-extension').replaceChildren(document.createTextNode(setup.prepared || bundled ? 'Refresh extension files ' : 'Prepare Chrome extension '), icon('plug'));
     $('extension-folder-help').textContent = vaultStatus.platform === 'darwin'
       ? 'In Chrome’s folder chooser, press Command + Shift + G, paste the copied folder path, then choose Open and Select.'
       : 'In Chrome’s folder chooser, paste the copied folder path into the address bar, then choose Select Folder.';
