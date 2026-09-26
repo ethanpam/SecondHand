@@ -4,6 +4,10 @@ A desktop benefits companion and Chrome extension for Iowa SNAP. Your saved prof
 
 **This is an early assisted-application release.** The initial applicant page has verified filling for names and suffix, phone/contact preferences, home and mailing addresses, and explicitly saved yes/no and program choices. One click also fills fields that your saved answers reveal, such as a mailing address. SecondHand never clicks Save and Continue. You review the answers, click Continue yourself, and complete unverified later steps, consent, signatures, and final submission on Iowa's website. Only the government can confirm eligibility or approval. See [Iowa portal coverage](docs/iowa-portal.md) for the exact scope.
 
+![SecondHand desktop app and Chrome extension autofilling an Iowa SNAP test page, a Jotform, an embedded Jotform, and a Google Form](docs/media/secondhand-demo.gif)
+
+The demo uses the fictional test profile and a synthetic copy of Iowa's applicant page; nothing is submitted.
+
 ## iPhone app
 
 A native SwiftUI iOS companion and Safari extension are in [`ios/`](ios/README.md). Open [`ios/SecondHand.xcodeproj`](ios/SecondHand.xcodeproj) in Xcode. It provides encrypted on-device storage, renewal reminders, and a guided application assistant with saved-answer filling, explicit page continuation, separately approved submission, and user-reported confirmation capture. This is a prototype; live Iowa filing and authenticated renewal remain unverified. The iPhone and desktop vaults are independent; there is no cross-device synchronization. See the [iOS setup guide](ios/README.md) and [application pipeline](ios/docs/Application-assistant.md).
