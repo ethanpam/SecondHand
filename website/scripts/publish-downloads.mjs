@@ -23,7 +23,7 @@ for (const file of filenames) {
   const hash = createHash('sha256');
   for await (const chunk of createReadStream(path)) hash.update(chunk);
   const sha256 = hash.digest('hex');
-  const existing = await fetch(new URL(`/download/${file}`, site), { method: 'HEAD', redirect: 'error', headers: accessHeaders });
+  const existing = await fetch(new URL(`/download/${file}`, site), { method: 'HEAD', redirect: 'error', headers: { ...accessHeaders, 'accept-encoding': 'identity' } });
   if (existing.ok) {
     if (existing.headers.get('x-checksum-sha256') !== sha256 || Number(existing.headers.get('content-length')) !== size) throw new Error(`Existing file differs: ${file}. Publish a new version.`);
     console.log(`Already uploaded: ${file}`); continue;
