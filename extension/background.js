@@ -2,7 +2,10 @@
 importScripts('iowa-adapter.js');
 const HOST = 'org.secondhand.bridge';
 const results = new Map(); // tabId -> last autofill result: counts, keys, and fixed messages only. Never answers.
-let busyTab = null;
+// tabId -> { steps, handled, running }. Memory only: a page can never turn autofill on,
+// and if Chrome restarts this worker, autofill is off and the widget shows Autofill again.
+const autopilots = new Map();
+const MAX_STEPS = 15;
 
 function nativeRequest(type, payload = {}) {
   return new Promise((resolve, reject) => {
@@ -52,22 +55,18 @@ const needYou = page => (Array.isArray(page.checklist) ? page.checklist : [])
   .filter(item => (item.required && item.status === 'missing') || item.status === 'manual').map(item => item.key);
 function remember(tabId, result) { results.set(tabId, result); return result; }
 
-// One click: one desktop request for every mapped field, then up to four fill
-// passes so answers that reveal conditional sections get their follow-ups.
-async function autofill(tabId) {
-  if (busyTab !== null) throw new Error('Autofill is already running.');
-  busyTab = tabId;
+// One desktop request for the page's saved fields, then up to four fill passes so
+// answers that reveal conditional sections get their follow-ups.
+async function fillPage(tabId, state) {
+  const { url } = state;
+  const pageKey = state.page.pageKey;
   let values = null;
-  let state = null;
   try {
-    state = await readPage(tabId);
-    if (state.page.kind !== 'fillable' || !state.scan.recognizedPage) throw Object.assign(new Error('Nothing to fill on this page.'), { code: 'idle' });
-    const url = state.url;
     const desktop = await nativeRequest('status');
-    if (!desktop?.unlocked) return remember(tabId, { state: 'locked', filled: 0, needYou: [], message: 'Unlock SecondHand to autofill.', pageKey: state.page.pageKey });
-    const response = await nativeRequest('getFields', { url: safeUrl(url), fields: Object.keys(SecondHandIowa.definitions) });
-    values = response?.values;
-    if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('The desktop did not return supported profile fields.');
+    if (!desktop?.unlocked) return { state: 'locked', filled: 0, needYou: [], message: 'Unlock SecondHand to autofill.', pageKey };
+    const response = await nativeRequest('getFields', { url: safeUrl(url), fields: SecondHandIowa.profileRequest(pageKey) });
+    if (!response?.values || typeof response.values !== 'object' || Array.isArray(response.values)) throw new Error('The desktop did not return supported profile fields.');
+    values = SecondHandIowa.pageValues(pageKey, response.values);
     let filled = 0;
     const attempted = new Set();
     for (let pass = 0; pass < 4; pass++) {
@@ -88,22 +87,73 @@ async function autofill(tabId) {
     // must not turn a successful fill into an error.
     if (filled > 0) await nativeRequest('recordProgress', { url: safeUrl(url), filledCount: Math.min(filled, 100) }).catch(() => {});
     const missing = needYou(after.page);
-    const message = filled ? `Filled ${filled}${missing.length ? ` · ${missing.length} need you` : ''}. Review, then click Continue in Iowa’s form.`
-      : missing.length ? `${missing.length} need you. They aren’t in your saved profile.` : 'Everything on this page is already filled.';
-    return remember(tabId, { state: 'done', filled, needYou: missing, message, pageKey: after.page.pageKey });
+    const summary = filled ? `Filled ${filled}${missing.length ? ` · ${missing.length} need you` : ''}.`
+      : missing.length ? `${missing.length} need you. They aren’t in your saved profile.` : 'Nothing new to fill.';
+    return { state: 'done', filled, needYou: missing, message: [summary, after.page.todo].filter(Boolean).join(' '), pageKey: after.page.pageKey };
   } catch (error) {
-    if (error.code === 'idle') throw error;
-    const pageKey = state?.page?.pageKey || '';
-    if (error.code === 'offline') return remember(tabId, { state: 'offline', filled: 0, needYou: [], message: 'Open the SecondHand app, then click Autofill again.', pageKey });
-    if (/Unlock/.test(error.message)) return remember(tabId, { state: 'locked', filled: 0, needYou: [], message: 'Unlock SecondHand to autofill.', pageKey });
+    if (error.code === 'offline') return { state: 'offline', filled: 0, needYou: [], message: 'Open the SecondHand app, then click Autofill again.', pageKey };
+    if (/Unlock/.test(error.message)) return { state: 'locked', filled: 0, needYou: [], message: 'Unlock SecondHand to autofill.', pageKey };
     const message = /cancelled/i.test(error.message) ? 'Cancelled. Nothing was filled.' : error.message || 'Autofill failed. Fill this page yourself.';
-    return remember(tabId, { state: 'error', filled: 0, needYou: [], message, pageKey });
-  } finally { values = null; busyTab = null; }
+    return { state: 'error', filled: 0, needYou: [], message, pageKey };
+  } finally { values = null; }
 }
+
+function stopAutopilot(tabId, result) {
+  autopilots.delete(tabId);
+  return remember(tabId, result);
+}
+
+// One autopilot step per page: continue an info screen, fill a known form, or
+// wait with the page's instruction. Unknown pages end autofill.
+function step(tabId) {
+  const pilot = autopilots.get(tabId);
+  if (!pilot) return Promise.resolve(results.get(tabId) || null);
+  if (pilot.running) return pilot.running;
+  pilot.running = (async () => {
+    let state;
+    // A page that is still loading or not in front is retried on the next load or poll.
+    try { state = await readPage(tabId); } catch { return results.get(tabId) || null; }
+    const { page } = state;
+    const signature = `${safeUrl(state.url)}|${page.pageKey}`;
+    if (pilot.handled.has(signature)) return results.get(tabId) || null;
+    pilot.handled.add(signature);
+    if (++pilot.steps > MAX_STEPS) return stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], message: `Stopped after ${MAX_STEPS} steps. Check this page, then click Autofill to keep going.`, pageKey: page.pageKey });
+    try {
+      if (page.kind === 'info') {
+        remember(tabId, { state: 'continuing', filled: 0, needYou: [], message: 'Continuing…', pageKey: page.pageKey });
+        const result = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:continue' }, { frameId: 0 });
+        if (!result?.continued) return remember(tabId, { state: 'waiting', filled: 0, needYou: [], message: result?.reason || 'Click Continue in Iowa’s form.', pageKey: page.pageKey });
+        return results.get(tabId);
+      }
+      if (page.kind === 'fillable' && state.scan.recognizedPage) {
+        const result = await fillPage(tabId, state);
+        return result.state === 'done' ? remember(tabId, result) : stopAutopilot(tabId, result);
+      }
+      if (page.todo) return remember(tabId, { state: 'waiting', filled: 0, needYou: needYou(page), message: page.todo, pageKey: page.pageKey });
+      return stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], message: 'SecondHand doesn’t know this page yet. Fill it in, then continue.', pageKey: page.pageKey });
+    } catch (error) {
+      return stopAutopilot(tabId, { state: 'error', filled: 0, needYou: [], message: error.message || 'Autofill stopped. Continue in Iowa’s form.', pageKey: page.pageKey });
+    }
+  })().finally(() => { pilot.running = null; });
+  return pilot.running;
+}
+
+async function startAutopilot(tabId) {
+  await activePortal(tabId);
+  autopilots.set(tabId, { steps: 0, handled: new Set(), running: null });
+  return step(tabId);
+}
+
+async function stop(tabId) {
+  const pageKey = await readPage(tabId).then(state => state.page.pageKey, () => results.get(tabId)?.pageKey || '');
+  return stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], message: 'Autofill stopped.', pageKey });
+}
+
 async function pageState(tabId) {
+  if (autopilots.has(tabId) && !autopilots.get(tabId).running) await step(tabId);
   const state = await readPage(tabId);
   const result = results.get(tabId);
-  return { page: state.page, scan: state.scan, result: result && result.pageKey === state.page.pageKey ? result : null };
+  return { page: state.page, scan: state.scan, result: result && result.pageKey === state.page.pageKey ? result : null, autopilot: autopilots.has(tabId) };
 }
 
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
@@ -129,14 +179,19 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       error => { if (error.code === 'offline') return { connected: false, unlocked: false }; throw error; });
   } else if (!Number.isInteger(tabId)) return;
   else if (message.type === 'ui:pageState') work = pageState(tabId);
-  else if (message.type === 'ui:autofill' && message.confirmed === true) work = autofill(tabId);
+  else if (message.type === 'ui:autofill' && message.confirmed === true) work = startAutopilot(tabId);
+  else if (message.type === 'ui:stop' && message.confirmed === true) work = stop(tabId);
   else if (message.type === 'ui:focusField' && typeof message.key === 'string' && /^[A-Za-z][A-Za-z0-9]{0,59}$/.test(message.key)) {
     work = activePortal(tabId).then(() => chrome.tabs.sendMessage(tabId, { type: 'secondhand:focusField', key: message.key }, { frameId: 0 }));
   } else return;
   work.then(data => respond({ ok: true, data }), error => respond({ ok: false, error: error.message || 'SecondHand could not complete the request.' }));
   return true;
 });
-chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); });
-chrome.tabs.onUpdated?.addListener((tabId, change) => { if (change.status === 'loading') results.delete(tabId); });
+chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); });
+chrome.tabs.onUpdated?.addListener((tabId, change) => {
+  if (change.status === 'loading') results.delete(tabId);
+  if (change.url && !SecondHandIowa.isSupportedUrl(change.url)) autopilots.delete(tabId);
+  if (change.status === 'complete' && autopilots.has(tabId)) void step(tabId);
+});
 // Chrome's native panel persists alongside navigation; it never opens itself.
 chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});

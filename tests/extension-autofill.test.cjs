@@ -138,12 +138,14 @@ test('a vault that locks during the request, a cancelled approval, or a page cha
   }
 });
 
-test('non-fillable pages never contact the desktop', async () => {
+test('an unknown page stops autofill without contacting the desktop', async () => {
   const w = worker({ kind: 'manual' });
   const response = await autofill(w);
-  assert.equal(response.ok, false);
-  assert.match(response.error, /Nothing to fill/);
+  assert.equal(response.ok, true);
+  assert.equal(response.data.state, 'stopped');
+  assert.match(response.data.message, /doesn’t know this page yet/);
   assert.equal(w.calls.native.length, 0);
+  assert.equal((await w.panel({ type: 'ui:pageState' })).data.autopilot, false);
 });
 
 test('launcher is bound to its own tab, needs confirmed clicks, and cannot use panel-only or unknown types', async () => {
@@ -184,4 +186,171 @@ test('desktop status, showApp, and focusField pass through; guided and manual-fi
   assert.deepEqual(plain((await w.send({ type: 'ui:desktopStatus' }, noTab)).data), { connected: true, unlocked: true });
   assert.deepEqual(plain((await w.send({ type: 'ui:showApp', confirmed: true }, noTab)).data), { shown: true });
   assert.equal(await w.send({ type: 'ui:pageState' }, noTab), undefined);
+});
+
+// A multi-screen walk: each Continue moves the tab to the next screen and fires
+// Chrome's loading/complete updates, the way a real navigation does.
+const settle = async () => { for (let i = 0; i < 30; i++) await new Promise(resolve => setImmediate(resolve)); };
+function journey({ screens, desktop = {}, continueStays = false } = {}) {
+  const vault = { unlocked: true, values: { programSnap: 'yes', firstName: 'Synthetic private first', lastName: 'Synthetic private last' }, ...desktop };
+  const calls = { native: [], content: [] };
+  let index = 0;
+  const filled = new Set();
+  const tab = { id: 7, active: true, url: `${adapter.PORTAL}${screens[0].path}` };
+  const events = {};
+  const event = key => ({ addListener: value => { events[key] = value; } });
+  const current = () => screens[index];
+  function state() {
+    const screen = current();
+    const page = typeof screen.page === 'function' ? screen.page(filled) : screen.page;
+    const fields = (screen.fields || []).filter(key => !filled.has(key));
+    return { page, scan: { token: `t-${index}-${filled.size}`, recognizedPage: page.kind === 'fillable', fields: fields.map(key => ({ key, label: key })) } };
+  }
+  function navigate() {
+    index = Math.min(index + 1, screens.length - 1);
+    tab.url = `${adapter.PORTAL}${current().path}`;
+    events.updated?.(7, { status: 'loading', url: tab.url });
+    setImmediate(() => events.updated?.(7, { status: 'complete' }));
+  }
+  let listener;
+  const chrome = {
+    tabs: {
+      get: async () => ({ ...tab }),
+      sendMessage: async (_id, message) => {
+        calls.content.push(message.type);
+        if (message.type === 'secondhand:pageState') return state();
+        if (message.type === 'secondhand:continue') { if (!continueStays) navigate(); return { continued: true, reason: 'Continued to the next screen.' }; }
+        if (message.type === 'secondhand:fill') {
+          const keys = message.fields.filter(key => message.values[key]);
+          keys.forEach(key => filled.add(key));
+          return { ok: true, filledCount: keys.length, skippedCount: message.fields.length - keys.length };
+        }
+        return { focused: true };
+      },
+      onActivated: event('activated'), onRemoved: event('removed'), onUpdated: event('updated')
+    },
+    sidePanel: { setPanelBehavior: async () => {}, open: async () => {} },
+    scripting: { executeScript: async () => {} },
+    runtime: {
+      id: 'testextension', getURL: file => `chrome-extension://testextension/${file}`,
+      onMessage: { addListener: callback => { listener = callback; } },
+      connectNative: () => {
+        let onMessage;
+        return {
+          onMessage: { addListener: callback => { onMessage = callback; } }, onDisconnect: { addListener: () => {} }, disconnect: () => {},
+          postMessage: request => {
+            calls.native.push(request);
+            queueMicrotask(() => {
+              const reply = data => onMessage({ id: request.id, ok: true, data });
+              if (request.type === 'status') return reply({ unlocked: vault.unlocked, applicationCount: 0 });
+              if (request.type === 'getFields') return reply({ values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])) });
+              return reply({ recorded: true });
+            });
+          }
+        };
+      }
+    }
+  };
+  vm.runInNewContext(fs.readFileSync(require.resolve('../extension/background.js'), 'utf8'),
+    { chrome, SecondHandIowa: adapter, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, setImmediate, URL, Map, Set, console });
+  const send = (message, sender = { id: 'testextension', url: PANEL_URL }) => new Promise(resolve => { if (!listener({ tabId: 7, ...message }, sender, resolve)) resolve(undefined); });
+  return { calls, vault, events, send, filled: () => [...filled], at: () => current().name,
+    userContinues: () => navigate(),
+    continues: () => calls.content.filter(type => type === 'secondhand:continue').length,
+    getFields: () => calls.native.filter(call => call.type === 'getFields') };
+}
+const info = (name, path, pageKey) => ({ name, path, page: { kind: 'info', pageKey } });
+const walk = () => [
+  { name: 'household', path: '/applyForBenefits/guestLogin', fields: ['householdApplyProg'],
+    page: filled => filled.has('householdApplyProg') ? { kind: 'blocked', pageKey: 'iowa-captcha', todo: 'Solve the CAPTCHA, then click Continue.', checklist: [] }
+      : { kind: 'fillable', pageKey: 'iowa-program-intent', checklist: [{ key: 'householdApplyProg', label: 'q', required: true, status: 'missing' }] } },
+  info('beforeYouStart', '/applyForBenefits/welcome', 'iowa-before-start'),
+  { name: 'consent', path: '/applyForBenefits/letsGetStarted', page: { kind: 'blocked', pageKey: 'iowa-consent', todo: 'Read and accept Iowa’s consent, then click Continue.', checklist: [] } },
+  info('importantInfo', '/applyForBenefits/importantInfo', 'iowa-information'),
+  info('instructions', '/applyForBenefits/instructions', 'iowa-instructions'),
+  { name: 'applicant', path: '/applyForBenefits/enterPersonalInfo', fields: ['firstName', 'lastName'],
+    page: filled => ({ kind: 'fillable', pageKey: 'iowa-personal-information', todo: 'Check your answers, then click Save and Continue.',
+      checklist: ['firstName', 'lastName'].map(key => ({ key, label: key, required: true, status: filled.has(key) ? 'complete' : 'missing' })) }) },
+  { name: 'members', path: '/applyForBenefits/householdMembers', page: { kind: 'manual', pageKey: 'iowa-manual', checklist: [] } }
+];
+const lastResult = async w => (await w.send({ type: 'ui:pageState' })).data;
+
+test('one click walks the application: fills, continues info screens, and waits wherever the applicant is needed', async () => {
+  const w = journey({ screens: walk() });
+  const first = (await w.send({ type: 'ui:autofill', confirmed: true })).data;
+  assert.deepEqual(plain(w.getFields()[0].fields), ['programSnap', 'programFip', 'programMedicaid']);
+  assert.deepEqual(w.filled(), ['householdApplyProg']);
+  assert.match(first.message, /Filled 1\. Solve the CAPTCHA, then click Continue\./);
+  assert.equal((await lastResult(w)).autopilot, true);
+
+  w.userContinues(); await settle();            // applicant solved the CAPTCHA
+  assert.equal(w.at(), 'consent', 'Before You Start was continued automatically');
+  assert.equal((await lastResult(w)).result.message, 'Read and accept Iowa’s consent, then click Continue.');
+
+  w.userContinues(); await settle();            // applicant accepted consent
+  assert.equal(w.at(), 'applicant');
+  assert.equal(w.continues(), 3);
+  assert.equal(w.getFields().length, 2);
+  assert.deepEqual(plain(w.getFields()[1].fields), Object.keys(adapter.definitions));
+  const applicant = (await lastResult(w)).result;
+  assert.match(applicant.message, /^Filled 2\. Check your answers, then click Save and Continue\.$/);
+
+  w.userContinues(); await settle();            // applicant saved the page
+  const unknown = await lastResult(w);
+  assert.equal(unknown.autopilot, false);
+  assert.match(unknown.result.message, /doesn’t know this page yet/);
+  assert.equal(w.getFields().length, 2, 'values are only requested on pages that need them');
+  assert.doesNotMatch(JSON.stringify(w.calls.native.filter(call => call.type !== 'getFields')), /Synthetic private/);
+});
+
+test('Stop ends autofill; later page loads do nothing', async () => {
+  const w = journey({ screens: [info('a', '/applyForBenefits/welcome', 'iowa-before-start'), info('b', '/applyForBenefits/importantInfo', 'iowa-information')], continueStays: true });
+  await w.send({ type: 'ui:autofill', confirmed: true });
+  assert.equal(w.continues(), 1);
+  const stopped = (await w.send({ type: 'ui:stop', confirmed: true })).data;
+  assert.equal(stopped.state, 'stopped');
+  w.userContinues(); await settle();
+  assert.equal(w.continues(), 1);
+  assert.equal((await lastResult(w)).autopilot, false);
+});
+
+test('an info screen that does not navigate is never continued twice', async () => {
+  const w = journey({ screens: [info('a', '/applyForBenefits/welcome', 'iowa-before-start')], continueStays: true });
+  await w.send({ type: 'ui:autofill', confirmed: true });
+  for (let i = 0; i < 3; i++) { await lastResult(w); w.events.updated(7, { status: 'complete' }); await settle(); }
+  assert.equal(w.continues(), 1);
+});
+
+test('a locked vault stops autofill at the first page that needs values', async () => {
+  const w = journey({ screens: walk().slice(1), desktop: { unlocked: false } });
+  await w.send({ type: 'ui:autofill', confirmed: true });
+  await settle();
+  assert.equal(w.at(), 'consent');
+  w.userContinues(); await settle();            // applicant accepted consent
+  const state = await lastResult(w);
+  assert.equal(w.at(), 'applicant');
+  assert.equal(state.result.state, 'locked');
+  assert.equal(state.autopilot, false);
+  assert.equal(w.getFields().length, 0);
+});
+
+test('autofill stops after 15 automatic steps', async () => {
+  const screens = Array.from({ length: 20 }, (_, i) => info(`info${i}`, `/applyForBenefits/step${i}`, 'iowa-information'));
+  const w = journey({ screens });
+  await w.send({ type: 'ui:autofill', confirmed: true });
+  await settle(); await settle();
+  assert.equal(w.continues(), 15);
+  const state = await lastResult(w);
+  assert.equal(state.autopilot, false);
+  assert.match(state.result.message, /15 steps/);
+});
+
+test('the widget can stop its own tab only, and pages cannot start autofill', async () => {
+  const w = journey({ screens: walk().slice(1, 3), continueStays: true });
+  const launcher = { id: 'testextension', url: `${PANEL_URL}?surface=launcher`, frameId: 3, tab: { id: 7, url: `${adapter.PORTAL}/applyForBenefits/welcome` } };
+  assert.equal(await w.send({ type: 'ui:autofill' }, launcher), undefined);
+  await w.send({ type: 'ui:autofill', confirmed: true }, launcher);
+  assert.equal(await w.send({ type: 'ui:stop' }, launcher), undefined);
+  assert.equal((await w.send({ type: 'ui:stop', confirmed: true, tabId: 99 }, launcher)).data.state, 'stopped');
+  assert.equal((await lastResult(w)).autopilot, false);
 });
