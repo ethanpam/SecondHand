@@ -28,6 +28,13 @@ export default function PrivacyPolicy() {
           analytics, advertising, or tracking scripts.
         </p>
         <p>
+          The network that serves this site (Cloudflare) sets one security
+          cookie, <code>__cf_bm</code>, to help tell people apart from automated
+          traffic. It expires after 30 minutes. It is needed to keep the site
+          available, it is not used for advertising or tracking, and SecondHand
+          does not read it.
+        </p>
+        <p>
           Like any website, the hosting provider processes basic connection
           information, such as your IP address, browser type, the page or file
           requested, and the time. This is used to deliver pages and downloads
@@ -88,10 +95,21 @@ export default function PrivacyPolicy() {
 
         <h2>Removing your information</h2>
         <p>
+          SecondHand never receives your profile or application records, so
+          there is nothing on our side to delete and no deletion request to
+          send. Everything the app saved is on your own computer, and you can
+          remove it yourself.
+        </p>
+        <p>
           To delete what the desktop app saved, uninstall SecondHand and delete
           its data folder: <code>%LOCALAPPDATA%\SecondHand</code> on Windows or{' '}
-          <code>~/Library/Application Support/SecondHand</code> on a Mac. Delete
-          any encrypted backups you exported as well.
+          <code>~/Library/Application Support/SecondHand</code> on a Mac. This
+          also removes the password reset secret for this computer. Delete any
+          encrypted backups you exported as well.
+        </p>
+        <p>
+          Information you already gave Iowa’s website is kept by Iowa HHS. Ask
+          Iowa HHS about changing or removing it.
         </p>
 
         <h2>Changes to this policy</h2>

@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { ExternalIcon } from '../../icons';
 import { downloads } from '../../release';
 import { SiteFooter, SiteHeader } from '../../site-chrome';
+import { StartDownload } from '../start-download';
 
 const platforms = {
   windows: {
@@ -50,8 +51,7 @@ export default async function ThankYou({ params }: Props) {
   const { name, file, install } = platforms[platform as PlatformId];
   return (
     <>
-      {/* Starts the download without JavaScript; the installer is sent as an attachment, so this page stays open. */}
-      <meta httpEquiv="refresh" content={`1;url=${file}`} />
+      <StartDownload href={file} />
       <SiteHeader />
       <main id="main" className="wrap doc-page">
         <h1>Thanks for downloading SecondHand</h1>

@@ -9,7 +9,7 @@ Use Node24+, `npm ci`, then `npm run dev`. Validate using `npm test`, `npm run t
 ## Pages
 
 - `/`: downloads (opening on the visitor's platform), setup steps, privacy summary, and common questions, with `SoftwareApplication` and `FAQPage` structured data.
-- `/thank-you/windows`, `/thank-you/mac-apple-silicon`, `/thank-you/mac-intel`: start the installer download with a meta refresh and list next steps. Not indexed.
+- `/thank-you/windows`, `/thank-you/mac-apple-silicon`, `/thank-you/mac-intel`: start the installer download once the page loads (with a direct link as a fallback) and list next steps. Not indexed.
 - `/privacy`: the privacy policy. Update its date when the wording changes.
 - A custom 404 page, `robots.txt`, `sitemap.xml`, and a share image (`app/opengraph-image.png`, generated from `scripts/og-image.html`).
 
