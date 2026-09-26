@@ -10,52 +10,37 @@
 </head>
 <body>
   <section id="launcher" hidden>
-    <button id="open-side-panel" class="launcher-button" type="button"><span class="brand" aria-hidden="true">s.</span><span><strong>Open assistant</strong><small id="launcher-caption">Iowa SNAP · in Chrome’s sidebar</small></span><span class="launcher-arrow" aria-hidden="true">↗</span></button>
-    <span id="launcher-status" class="sr-only" role="status" aria-live="polite"></span>
+    <div id="widget" class="widget">
+      <span class="brand" aria-hidden="true">s.</span>
+      <div class="widget-body">
+        <div class="widget-row">
+          <button id="autofill" class="widget-primary" type="button">Autofill</button>
+          <button id="unlock" class="widget-primary" type="button" hidden>Unlock SecondHand</button>
+          <button id="details" class="widget-link" type="button" title="Open details in Chrome’s side panel">Details</button>
+        </div>
+        <div class="widget-row">
+          <span id="widget-text" role="status" aria-live="polite">Iowa SNAP · ready</span>
+          <button id="need-you" class="widget-link" type="button" hidden></button>
+        </div>
+      </div>
+    </div>
+    <button id="pill" class="pill" type="button" title="Nothing to fill on this page. Open SecondHand’s side panel." hidden><span class="brand" aria-hidden="true">s.</span></button>
   </section>
   <div id="sidepanel" hidden>
-  <header class="panel-header">
-    <span class="brand" aria-hidden="true">s.</span>
-    <div class="header-copy"><strong>SecondHand</strong><span id="header-state">IOWA SNAP ASSISTANT</span></div>
-    <span class="local-badge">LOCAL</span>
-  </header>
-  <main id="panel-body">
-    <div class="heading-row"><span class="eyebrow"><span class="dot"></span><span id="site-label">IOWA SNAP</span></span><button id="refresh" class="text-button" type="button">Rescan</button></div>
-    <h1>Your application checklist</h1>
-    <p class="intro">See what’s complete and what still needs you.</p>
-
-    <div class="desktop-row"><span id="desktop-status">Keep SecondHand open and unlocked.</span><button id="check-desktop" class="text-button" type="button">Check</button></div>
-
-    <div id="status" class="status" role="status" aria-live="polite">Checking this page for supported fields…</div>
-    <div id="manual-note" class="manual-note" hidden><strong>Your turn</strong><p id="manual-reason"></p><p>Use the checklist to find missing answers in Iowa’s form. It updates as you go.</p></div>
-
-    <section class="guided-section" aria-labelledby="guided-title">
-      <div class="guided-heading"><span class="guided-icon" aria-hidden="true">↗</span><div><h2 id="guided-title">A hand with the next steps</h2><span id="guided-state">YOU CHOOSE WHEN TO START</span></div></div>
-      <p>After desktop approval, guided autofill uses your saved details on supported pages and chooses verified <strong>Save &amp; Continue</strong> buttons. It pauses when a step needs you.</p>
-      <button id="start-auto" class="button primary full" type="button">Start guided autofill <span aria-hidden="true">→</span></button>
-      <button id="pause-auto" class="button pause full" type="button" hidden>Pause automatic mode</button>
-      <p id="automatic-reason" class="automatic-reason" hidden></p>
-    </section>
-
-    <section id="checklist-section" class="checklist-section" hidden aria-labelledby="checklist-title">
-      <div class="fields-heading"><h2 id="checklist-title">On this page</h2><span id="checklist-summary" aria-live="polite"></span></div>
-      <p class="checklist-help">Choose a detail to find it in Iowa’s form. Answers stay on the form.</p>
-      <div id="page-checklist" class="page-checklist"></div>
-      <p class="field-note">Optional blanks do not block the next step. A checkmark means an answer is present, not that the agency has verified it.</p>
-    </section>
-
-    <section id="field-preview" hidden aria-labelledby="fields-title">
-      <div class="fields-heading"><h2 id="fields-title">Choose fields to share</h2><span id="field-count"></span></div>
-      <div id="fields" class="fields"></div>
-      <label class="confirm"><input id="confirm" type="checkbox"><span>These fields belong to the primary applicant. Share my selected details with Iowa.</span></label>
-      <div class="fill-actions"><button id="fill-page" class="button secondary" type="button" disabled>Fill this page</button><button id="fill-next" class="button primary" type="button" disabled>Fill &amp; Next <span aria-hidden="true">→</span></button></div>
-      <p class="field-note">Supported fields may be brought into view. Anything that cannot be verified stays manual.</p>
-    </section>
-
-
-
-    <footer><span class="privacy-mark" aria-hidden="true">✓</span><p>No signatures or final submission. Review every answer. Iowa may save details as they are entered.</p></footer>
-  </main>
+    <header class="panel-header">
+      <span class="brand" aria-hidden="true">s.</span>
+      <div class="header-copy"><strong>SecondHand</strong><span>IOWA SNAP</span></div>
+    </header>
+    <main id="panel-body">
+      <div class="desktop-row"><span id="desktop-status">Checking SecondHand…</span><button id="desktop-action" class="text-button" type="button" hidden>Unlock</button></div>
+      <button id="panel-autofill" class="button primary full" type="button" disabled>Autofill this page</button>
+      <div id="status" class="status" role="status" aria-live="polite">Checking the application in your active tab…</div>
+      <section id="checklist-section" class="checklist-section" hidden aria-labelledby="checklist-title">
+        <div class="fields-heading"><h2 id="checklist-title">On this page</h2><span id="checklist-summary"></span></div>
+        <div id="page-checklist" class="page-checklist"></div>
+      </section>
+      <footer><p>You review and click Continue. SecondHand never submits.</p></footer>
+    </main>
   </div>
 </body>
 </html>

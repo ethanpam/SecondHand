@@ -122,16 +122,16 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     return true;
   }
   const tabId = launcher ? sender.tab.id : message.tabId;
-  if (!Number.isInteger(tabId)) return;
   let work;
-  if (message.type === 'ui:pageState') work = pageState(tabId);
-  else if (message.type === 'ui:autofill' && message.confirmed === true) work = autofill(tabId);
-  else if (message.type === 'ui:focusField' && typeof message.key === 'string' && /^[A-Za-z][A-Za-z0-9]{0,59}$/.test(message.key)) {
-    work = activePortal(tabId).then(() => chrome.tabs.sendMessage(tabId, { type: 'secondhand:focusField', key: message.key }, { frameId: 0 }));
-  } else if (message.type === 'ui:showApp' && message.confirmed === true) work = nativeRequest('showApp');
+  if (message.type === 'ui:showApp' && message.confirmed === true) work = nativeRequest('showApp');
   else if (panel && message.type === 'ui:desktopStatus') {
     work = nativeRequest('status').then(data => ({ connected: true, unlocked: Boolean(data?.unlocked) }),
       error => { if (error.code === 'offline') return { connected: false, unlocked: false }; throw error; });
+  } else if (!Number.isInteger(tabId)) return;
+  else if (message.type === 'ui:pageState') work = pageState(tabId);
+  else if (message.type === 'ui:autofill' && message.confirmed === true) work = autofill(tabId);
+  else if (message.type === 'ui:focusField' && typeof message.key === 'string' && /^[A-Za-z][A-Za-z0-9]{0,59}$/.test(message.key)) {
+    work = activePortal(tabId).then(() => chrome.tabs.sendMessage(tabId, { type: 'secondhand:focusField', key: message.key }, { frameId: 0 }));
   } else return;
   work.then(data => respond({ ok: true, data }), error => respond({ ok: false, error: error.message || 'SecondHand could not complete the request.' }));
   return true;

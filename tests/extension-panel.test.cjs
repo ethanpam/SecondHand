@@ -142,6 +142,9 @@ test('only the assistant overlay is hidden during portal checks and is restored 
   assert.equal(host.style.visibility, '');
 });
 
+const plainRequests = requests => JSON.parse(JSON.stringify(requests));
+const doneResult = { state: 'done', filled: 3, needYou: ['firstName', 'lastName'], message: 'Filled 3 · 2 need you. Review, then click Continue in Iowa’s form.', pageKey: 'iowa-personal-information' };
+
 async function panel(t, initial = {}) {
   const dom = new JSDOM(source('panel.html'), { runScripts: 'outside-only', url: extensionURL(`panel.html${initial.launcher ? '?surface=launcher' : ''}`), pretendToBeVisual: true });
   t.after(() => dom.window.close());
@@ -155,17 +158,17 @@ async function panel(t, initial = {}) {
   const requests = [];
   const listeners = {};
   const tabs = { current: { id: 7, url: `${adapter.PORTAL}/applicant` } };
-  let automatic = { enabled: false, paused: false, reason: '', ...initial.automatic };
   const state = {
-    page: { kind: 'fillable', pageKey: 'primary-applicant', canAdvance: true, reason: '', checklist: [
+    page: { kind: initial.kind || 'fillable', pageKey: 'iowa-personal-information', reason: 'Complete this step in Iowa’s form.', checklist: [
       { key: 'firstName', label: 'First name', status: 'missing', required: true, fillable: true },
       { key: 'lastName', label: 'Last name', status: 'complete', required: true, fillable: true },
       { key: 'middleName', label: 'Middle name', status: 'optional', required: false, fillable: true },
       { key: 'unverified', label: 'Additional question', status: 'manual', required: false, fillable: false }
     ] },
-    scan: { token: 'reviewed-preview', recognizedPage: true, fields: [{ key: 'firstName', label: 'First name' }] },
-    busy: Boolean(initial.busy), missingProfileFields: initial.missingProfileFields || [], lastResult: null
+    scan: { token: 'preview', recognizedPage: true, fields: [{ key: 'firstName', label: 'First name' }] },
+    result: initial.result || null
   };
+  const desktop = { connected: true, unlocked: true, ...initial.desktop };
   window.chrome = { tabs: {
     query: async () => [tabs.current],
     onActivated: { addListener: callback => { listeners.activated = callback; } },
@@ -173,106 +176,142 @@ async function panel(t, initial = {}) {
   }, runtime: { sendMessage: async payload => {
     requests.push(structuredClone(payload));
     let data;
-    if (payload.type === 'ui:pageState') data = initial.pageState ? await initial.pageState({ ...state, automatic }) : { ...state, automatic };
-    else if (payload.type === 'ui:desktopStatus') data = { unlocked: true };
-    else if (payload.type === 'ui:auto') { automatic = { enabled: payload.enabled, paused: false, reason: payload.enabled ? '' : 'Paused by you.' }; data = { automatic }; }
+    if (payload.type === 'ui:pageState') data = initial.pageState ? await initial.pageState(state) : structuredClone(state);
+    else if (payload.type === 'ui:autofill') { state.result = initial.autofill || doneResult; data = structuredClone(state.result); }
+    else if (payload.type === 'ui:desktopStatus') data = { ...desktop };
     else if (payload.type === 'ui:focusField') data = { focused: true };
-    else data = { message: 'Synthetic operation complete.' };
+    else if (payload.type === 'ui:showApp') data = { shown: true };
+    else if (payload.type === 'ui:openPanel') data = { opened: true };
+    else return { ok: false, error: `Unexpected ${payload.type}` };
     return { ok: true, data };
   } } };
   window.eval(source('panel.js'));
-  await tick();
-  return { window, requests, state, tabs, listeners, get: id => window.document.getElementById(id),
-    async userClick(target) { const element = typeof target === 'string' ? window.document.getElementById(target) : target; clicks.get(element)({ isTrusted: true }); await tick(); },
-    confirm() { window.document.getElementById('confirm').checked = true; window.document.getElementById('confirm').dispatchEvent(new window.Event('change')); } };
+  await tick(); await tick();
+  const get = id => window.document.getElementById(id);
+  return { window, requests, state, tabs, listeners, get,
+    types: () => requests.map(request => request.type),
+    row: key => window.document.querySelector(`[data-key="${key}"]`),
+    async userClick(target) { const element = typeof target === 'string' ? get(target) : target; clicks.get(element)({ isTrusted: true }); await tick(); await tick(); } };
 }
 
-test('native sidebar metadata does not contact the vault and rejects untrusted actions', async t => {
+test('side panel reads page and desktop state, has no guided or field-picker controls, and ignores untrusted clicks', async t => {
   const view = await panel(t);
-  assert.deepEqual(view.requests, [{ type: 'ui:pageState', tabId: 7 }]);
-  view.confirm(); view.get('fill-page').click(); view.get('start-auto').click();
-  view.window.postMessage({ type: 'ui:auto', enabled: true }, '*');
+  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:pageState', tabId: 7 }, { type: 'ui:desktopStatus' }]);
+  for (const id of ['start-auto', 'pause-auto', 'fill-page', 'fill-next', 'confirm', 'fields']) assert.equal(view.get(id), null, id);
+  assert.equal(view.get('panel-autofill').disabled, false);
+  view.get('panel-autofill').click();
+  view.window.postMessage({ type: 'ui:autofill', confirmed: true }, '*');
   await tick();
-  assert.deepEqual(view.requests.map(request => request.type), ['ui:pageState']);
-  assert.equal(view.get('fields').textContent, 'First name');
-  await view.userClick('check-desktop');
-  assert.equal(view.requests.filter(request => request.type === 'ui:desktopStatus').length, 1);
-  assert.match(view.get('desktop-status').textContent, /Vault unlocked/);
+  assert.equal(view.types().includes('ui:autofill'), false);
+  assert.match(view.get('desktop-status').textContent, /unlocked/);
+  assert.equal(view.get('desktop-action').hidden, true);
 });
 
-test('trusted sidebar filling confirms reviewed metadata and derives its target from the active tab', async t => {
+test('trusted side-panel Autofill targets the active tab, shows the result, and rechecks the desktop', async t => {
   const view = await panel(t);
-  await view.userClick('fill-page');
-  assert.equal(view.requests.some(request => request.type === 'ui:fill'), false);
-  view.confirm(); await view.userClick('fill-page');
-  assert.deepEqual(view.requests.find(request => request.type === 'ui:fill'), { type: 'ui:fill', token: 'reviewed-preview', fields: ['firstName'], confirmed: true, tabId: 7 });
-  assert.equal(view.get('confirm').checked, false);
+  await view.userClick('panel-autofill');
+  assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:autofill')), { type: 'ui:autofill', confirmed: true, tabId: 7 });
+  assert.match(view.get('status').textContent, /Filled 3 · 2 need you/);
+  assert.equal(view.types().filter(type => type === 'ui:desktopStatus').length, 2);
 });
 
-test('guided mode can be stopped while busy, paused, or waiting for missing information', async t => {
-  for (const automatic of [{ enabled: true }, { enabled: true, paused: true }, { enabled: true, waitingForInfo: true, reason: 'First name is missing.' }]) {
-    const view = await panel(t, { automatic, busy: !automatic.paused && !automatic.waitingForInfo });
-    assert.equal(view.get('pause-auto').hidden, false);
-    assert.equal(view.get('pause-auto').disabled, false);
-    assert.equal(view.get('fill-page').disabled, true);
-    if (automatic.waitingForInfo) {
-      assert.equal(view.get('guided-state').textContent, 'WAITING FOR MISSING INFORMATION');
-      assert.match(view.get('automatic-reason').textContent, /check again automatically/);
-      assert.equal(view.get('start-auto').textContent, 'Check and continue →');
-    }
-    await view.userClick('pause-auto');
-    assert.deepEqual(view.requests.find(request => request.type === 'ui:auto'), { type: 'ui:auto', enabled: false, confirmed: true, tabId: 7 });
-  }
+test('checklist uses plain labels and a trusted row click finds the field', async t => {
+  const view = await panel(t);
+  assert.match(view.row('firstName').textContent, /First name.*Needs you/);
+  assert.match(view.row('lastName').textContent, /✓.*Done/);
+  assert.match(view.row('middleName').textContent, /Optional/);
+  assert.match(view.row('unverified').textContent, /Do it yourself/);
+  assert.equal(view.get('checklist-summary').textContent, '1 of 4 done');
+  view.row('firstName').click(); await tick();
+  assert.equal(view.types().includes('ui:focusField'), false);
+  await view.userClick(view.row('firstName'));
+  assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:focusField')), { type: 'ui:focusField', key: 'firstName', tabId: 7 });
 });
 
-test('checklist distinguishes completion, required and optional blanks, manual answers, and approved profile gaps', async t => {
-  const view = await panel(t, { missingProfileFields: ['firstName'] });
-  const row = key => view.window.document.querySelector(`[data-key="${key}"]`);
-  assert.match(row('firstName').textContent, /Missing from saved profile/);
-  assert.match(row('lastName').textContent, /✓.*Complete/);
-  assert.match(row('middleName').textContent, /Optional · blank/);
-  assert.match(row('unverified').textContent, /Needs manual review/);
-  assert.equal(view.get('checklist-summary').textContent, '1/4 complete · 1 required');
-  row('firstName').click(); await tick();
-  assert.equal(view.requests.some(request => request.type === 'ui:focusField'), false);
-  await view.userClick(row('firstName'));
-  assert.deepEqual(view.requests.find(request => request.type === 'ui:focusField'), { type: 'ui:focusField', key: 'firstName', tabId: 7 });
-  view.state.page.checklist[0].status = 'complete';
-  await view.userClick('refresh');
-  assert.match(row('firstName').textContent, /✓.*Complete/);
-  assert.equal(view.get('checklist-summary').textContent, '2/4 complete');
+test('desktop line shows locked with Unlock, and not running without an action', async t => {
+  const locked = await panel(t, { desktop: { unlocked: false } });
+  assert.match(locked.get('desktop-status').textContent, /locked/);
+  assert.equal(locked.get('desktop-action').hidden, false);
+  await locked.userClick('desktop-action');
+  assert.deepEqual(plainRequests(locked.requests.find(request => request.type === 'ui:showApp')), { type: 'ui:showApp', confirmed: true });
+  const offline = await panel(t, { desktop: { connected: false, unlocked: false } });
+  assert.match(offline.get('desktop-status').textContent, /isn’t running/);
+  assert.equal(offline.get('desktop-action').hidden, true);
 });
 
-test('tab activation clears stale checklist and confirmation without sending data to an unsupported tab', async t => {
-  const view = await panel(t); view.confirm();
+test('pages with nothing to fill disable Autofill and explain the step', async t => {
+  const view = await panel(t, { kind: 'manual' });
+  assert.equal(view.get('panel-autofill').disabled, true);
+  assert.match(view.get('status').textContent, /Complete this step/);
+});
+
+test('tab activation clears a stale checklist without sending data to an unsupported tab', async t => {
+  const view = await panel(t);
   view.tabs.current = { id: 8, url: 'https://example.invalid/' };
-  view.listeners.activated({ tabId: 8 }); await tick();
+  view.listeners.activated({ tabId: 8 }); await tick(); await tick();
   assert.equal(view.get('page-checklist').children.length, 0);
-  assert.equal(view.get('confirm').checked, false);
-  assert.equal(view.get('fill-page').disabled, true);
+  assert.equal(view.get('panel-autofill').disabled, true);
   assert.match(view.get('status').textContent, /Open Iowa/);
-  assert.deepEqual(view.requests, [{ type: 'ui:pageState', tabId: 7 }]);
+  assert.deepEqual(view.requests.filter(request => request.type === 'ui:pageState').map(request => request.tabId), [7]);
 });
 
-test('a late old-tab response cannot restore a checklist or authorize a stale fill', async t => {
+test('a late old-tab response cannot restore a checklist', async t => {
   let resolve;
   const response = new Promise(done => { resolve = done; });
   const view = await panel(t, { pageState: () => response });
   view.tabs.current = { id: 8, url: 'https://example.invalid/' };
   view.listeners.activated({ tabId: 8 });
-  resolve({ ...view.state, automatic: { enabled: false } }); await tick(); await tick();
+  resolve(structuredClone(view.state)); await tick(); await tick();
   assert.equal(view.get('page-checklist').children.length, 0);
-  assert.equal(view.get('refresh').disabled, false);
   assert.match(view.get('status').textContent, /Open Iowa/);
 });
 
-test('launcher has no page or vault access and opens the native sidebar only after a trusted click', async t => {
+test('widget on a fillable page offers one-click Autofill and cycles through what needs you', async t => {
   const view = await panel(t, { launcher: true });
-  assert.deepEqual(view.requests, []);
   assert.equal(view.get('sidepanel').hidden, true);
-  view.get('open-side-panel').click(); await tick();
-  assert.deepEqual(view.requests, []);
-  await view.userClick('open-side-panel');
-  assert.deepEqual(view.requests, [{ type: 'ui:openPanel', confirmed: true }]);
-  assert.match(view.get('launcher-status').textContent, /sidebar/);
+  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:pageState' }]);
+  assert.equal(view.get('widget').hidden, false);
+  assert.equal(view.get('pill').hidden, true);
+  assert.equal(view.get('need-you').hidden, true);
+  view.get('autofill').click(); await tick();
+  assert.equal(view.types().includes('ui:autofill'), false);
+  await view.userClick('autofill');
+  assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:autofill')), { type: 'ui:autofill', confirmed: true });
+  assert.equal(view.get('widget-text').textContent, 'Filled 3');
+  assert.equal(view.get('need-you').hidden, false);
+  assert.equal(view.get('need-you').textContent, '2 need you');
+  for (let i = 0; i < 3; i++) await view.userClick('need-you');
+  assert.deepEqual(view.requests.filter(request => request.type === 'ui:focusField').map(request => request.key), ['firstName', 'lastName', 'firstName']);
+  assert.ok(view.requests.filter(request => request.type === 'ui:focusField').every(request => request.confirmed === true && !('tabId' in request)));
+  await view.userClick('details');
+  assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'ui:openPanel', confirmed: true });
+});
+
+test('widget is a pill off the applicant page and opens the side panel from it', async t => {
+  const view = await panel(t, { launcher: true, kind: 'manual' });
+  assert.equal(view.get('widget').hidden, true);
+  assert.equal(view.get('pill').hidden, false);
+  await view.userClick('pill');
+  assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'ui:openPanel', confirmed: true });
+});
+
+test('widget shows Unlock when the vault is locked and returns to Autofill after bringing the app forward', async t => {
+  const view = await panel(t, { launcher: true, autofill: { state: 'locked', filled: 0, needYou: [], message: 'Unlock SecondHand to autofill.', pageKey: 'iowa-personal-information' } });
+  await view.userClick('autofill');
+  assert.equal(view.get('unlock').hidden, false);
+  assert.equal(view.get('autofill').hidden, true);
+  await view.userClick('unlock');
+  assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'ui:showApp', confirmed: true });
+  assert.equal(view.get('autofill').hidden, false);
+  assert.match(view.get('widget-text').textContent, /Unlock SecondHand, then click Autofill/);
+});
+
+test('widget reports an unreachable desktop and restores an earlier result after reloading', async t => {
+  const offline = await panel(t, { launcher: true, autofill: { state: 'offline', filled: 0, needYou: [], message: 'Open the SecondHand app, then click Autofill again.', pageKey: 'iowa-personal-information' } });
+  await offline.userClick('autofill');
+  assert.match(offline.get('widget-text').textContent, /Open the SecondHand app/);
+  assert.equal(offline.get('autofill').hidden, false);
+  const restored = await panel(t, { launcher: true, result: doneResult });
+  assert.equal(restored.get('widget-text').textContent, 'Filled 3');
+  assert.equal(restored.get('need-you').textContent, '2 need you');
 });

@@ -179,4 +179,9 @@ test('desktop status, showApp, and focusField pass through; guided and manual-fi
   }
   const offline = worker({ desktop: { reachable: false } });
   assert.deepEqual(plain((await offline.panel({ type: 'ui:desktopStatus' })).data), { connected: false, unlocked: false });
+  // The side panel shows desktop state and can bring the app forward on any tab.
+  const noTab = { id: 'testextension', url: PANEL_URL };
+  assert.deepEqual(plain((await w.send({ type: 'ui:desktopStatus' }, noTab)).data), { connected: true, unlocked: true });
+  assert.deepEqual(plain((await w.send({ type: 'ui:showApp', confirmed: true }, noTab)).data), { shown: true });
+  assert.equal(await w.send({ type: 'ui:pageState' }, noTab), undefined);
 });
