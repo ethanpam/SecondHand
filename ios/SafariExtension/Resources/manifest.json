@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "SecondHand for Iowa",
+  "version": "1.0.0",
+  "description": "Preview and fill your saved contact details on Iowa's benefits portal. You review and submit.",
+  "permissions": ["activeTab", "scripting", "nativeMessaging"],
+  "action": {
+    "default_title": "SecondHand contact autofill",
+    "default_popup": "popup.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'none'"
+  }
+}

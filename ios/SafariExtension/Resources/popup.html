@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SecondHand contact autofill</title>
+  <link rel="stylesheet" href="popup.css">
+  <script src="field-mapper.js" defer></script>
+  <script src="popup.js" defer></script>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">SECONDHAND · IOWA</p>
+    <h1>A little less paperwork.</h1>
+    <p>Open Iowa's “Enter Personal Information” application page in Safari. Preview your name and home-address fields, then choose to fill them.</p>
+    <p class="notice">First, unlock SecondHand and enable a 10-minute autofill session. Your review and submission happen on Iowa's website.</p>
+    <button id="preview" type="button">Preview fields</button>
+    <section id="result" hidden aria-labelledby="preview-heading">
+      <h2 id="preview-heading">Contact fields found</h2>
+      <ul id="fields"></ul>
+      <p id="skipped"></p>
+      <button id="fill" type="button" disabled>Fill saved contact details</button>
+    </section>
+    <p id="status" role="status" aria-live="polite"></p>
+    <p class="footnote">Prototype based on inspected public form labels; Safari filling and renewal remain unvalidated. Only visible, empty applicant fields are considered. Phone, email, income, household answers, signatures, and submission stay manual.</p>
+  </main>
+</body>
+</html>

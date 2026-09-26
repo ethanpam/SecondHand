@@ -4,6 +4,10 @@ A desktop benefits companion and Chrome extension for Iowa SNAP. Your saved prof
 
 **This is an early assisted-application release.** It does not determine eligibility or submit applications unattended. You review the page, answer unsupported questions, navigate, sign, and submit on Iowa's website. Only the government can confirm eligibility or approval. See [Iowa portal coverage](docs/iowa-portal.md) for observed mappings and remaining manual steps.
 
+## iPhone app
+
+A native SwiftUI iOS companion and Safari extension are in [`ios/`](ios/README.md). Open [`ios/SecondHand.xcodeproj`](ios/SecondHand.xcodeproj) in Xcode. It provides encrypted on-device profile and document storage, notice-based renewal reminders, and user-reviewed contact autofill. The iPhone and desktop vaults are independent; there is no cross-device synchronization. See the [iOS setup and validation guide](ios/README.md) for signing, Simulator tests, and current portal limitations.
+
 ## Install on Windows
 
 1. Open the repository's **Actions → Verify and build** page. Download the `secondHand-windows` artifact from a successful run and extract it.
@@ -58,6 +62,7 @@ GitHub Actions runs syntax/security configuration checks, unit/integration tests
 | `shared/` | Validated profile/application schema and portal allowlist |
 | `tests/` | Crypto, protocol, schema, and portal-adapter regression tests |
 | `scripts/` | Validation, real UI smoke test, extension packaging |
+| `ios/` | Native iPhone app, Safari extension, Xcode project, and iOS tests |
 
 ## Before broader distribution
 
