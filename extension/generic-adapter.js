@@ -288,10 +288,15 @@
     style.textContent = '[data-secondhand-filled="rule"]{outline:2px solid #5f9b62!important;outline-offset:1px!important}[data-secondhand-filled="guess"]{outline:2px dashed #d99a2b!important;outline-offset:1px!important}';
     (doc.head || doc.documentElement).append(style);
   }
+  function rejectedByPage(entry) {
+    const container = entry.elements[0].closest('.form-line');
+    return entry.elements.some(element => element.getAttribute('aria-invalid') === 'true') || container?.classList.contains('form-line-error') ||
+      Boolean(container && Array.from(container.querySelectorAll('[role="alert"]')).some(rendered));
+  }
   function fillFields(doc, token, assignments, values) {
     const ids = (Array.isArray(assignments) ? assignments : []).map(item => item?.id);
-    if (!current || current.token !== token || current.doc !== doc) return { ok: false, filled: [], skipped: ids };
-    const filled = [], skipped = [];
+    if (!current || current.token !== token || current.doc !== doc) return { ok: false, filled: [], skipped: ids, rejected: [] };
+    const filled = [], skipped = [], rejected = [];
     for (const assignment of assignments) {
       const entry = current.map.get(assignment?.id);
       const key = assignment?.key;
@@ -299,11 +304,16 @@
       if (!entry || !GENERIC_KEYS.includes(key) || typeof value !== 'string' || !value || answered(entry) || !entry.elements.every(element => element.isConnected && eligible(element)) || !compatible(key, entry) || !fillEntry(entry, key, value)) {
         skipped.push(assignment?.id); continue;
       }
+      entry.elements[0].dispatchEvent(new entry.elements[0].ownerDocument.defaultView.Event('blur'));
+      if (rejectedByPage(entry)) {
+        if (entry.kind === 'input' || entry.kind === 'textarea' || entry.kind === 'select') setValue(entry.elements[0], '');
+        rejected.push(assignment.id); continue;
+      }
       ensureStyle(doc);
       entry.elements.forEach(element => element.setAttribute('data-secondhand-filled', assignment.guessed ? 'guess' : 'rule'));
       filled.push(assignment.id);
     }
-    return { ok: true, filled, skipped };
+    return { ok: true, filled, skipped, rejected };
   }
   function focusField(doc, id) {
     const entry = current && current.doc === doc ? current.map.get(id) : null;
