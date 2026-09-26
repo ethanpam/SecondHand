@@ -4,7 +4,7 @@ import { SiteFooter, SiteHeader } from '../site-chrome';
 export const metadata: Metadata = {
   title: 'Privacy policy',
   description:
-    'How the secondHand website, desktop app, and Chrome extension handle your information: stored encrypted on your computer, with no accounts, analytics, or ads.',
+    'How the SecondHand website, desktop app, and Chrome extension handle your information: stored encrypted on your computer, with no accounts, analytics, or ads.',
   alternates: { canonical: '/privacy' },
 };
 
@@ -16,14 +16,14 @@ export default function PrivacyPolicy() {
         <h1>Privacy policy</h1>
         <p className="doc-date">Last updated September 26, 2026</p>
         <p className="doc-lead">
-          secondHand helps you prepare an Iowa SNAP application on your own
+          SecondHand helps you prepare an Iowa SNAP application on your own
           computer. We do not collect your benefits information. There are no
-          secondHand accounts, analytics, or ads.
+          SecondHand accounts, analytics, or ads.
         </p>
 
         <h2>This website</h2>
         <p>
-          This website offers the secondHand installers and setup instructions.
+          This website offers the SecondHand installers and setup instructions.
           It has no forms or accounts, and its code does not set cookies or run
           analytics, advertising, or tracking scripts.
         </p>
@@ -31,20 +31,20 @@ export default function PrivacyPolicy() {
           Like any website, the hosting provider processes basic connection
           information, such as your IP address, browser type, the page or file
           requested, and the time. This is used to deliver pages and downloads
-          and to keep the service running. secondHand does not use it to
+          and to keep the service running. SecondHand does not use it to
           identify you.
         </p>
 
         <h2>The desktop app</h2>
         <p>
           Your profile and application records are saved in an encrypted file on
-          your computer. They are not sent to secondHand, and the app has no
+          your computer. They are not sent to SecondHand, and the app has no
           cloud sync, analytics, telemetry, or AI service.
         </p>
         <ul>
           <li>
-            Your password and recovery key are never stored by secondHand.
-            Anyone with your recovery key and your secondHand files can open
+            Your password and recovery key are never stored by SecondHand.
+            Anyone with your recovery key and your SecondHand files can open
             your information, so keep the key somewhere safe.
           </li>
           <li>
@@ -88,7 +88,7 @@ export default function PrivacyPolicy() {
 
         <h2>Removing your information</h2>
         <p>
-          To delete what the desktop app saved, uninstall secondHand and delete
+          To delete what the desktop app saved, uninstall SecondHand and delete
           its data folder: <code>%LOCALAPPDATA%\SecondHand</code> on Windows or{' '}
           <code>~/Library/Application Support/SecondHand</code> on a Mac. Delete
           any encrypted backups you exported as well.

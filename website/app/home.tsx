@@ -12,7 +12,6 @@ import { GradientBackground } from './gradient-background';
 import { faq } from './faq';
 import { release } from './release';
 import { SiteFooter, SiteHeader } from './site-chrome';
-import { PaperStack } from './paper-stack';
 import { MotionProvider, MotionToggle } from './site-motion';
 
 const platforms = [
@@ -67,17 +66,16 @@ export function Home() {
               <div className="hero-copy">
                 <h1 id="hero-heading">
                   <span>A little help.</span>
-                  <span>A lot less</span>
-                  <span>typing.</span>
+                  <span>A lot less typing.</span>
                 </h1>
                 <p className="hero-lead">
                   Applying for Iowa SNAP? Keep your details on your computer.
-                  Let secondHand fill the supported fields, with your
+                  Let SecondHand fill the supported fields, with your
                   permission.
                 </p>
                 <div className="hero-actions">
                   <a className="primary-link" href="#downloads">
-                    Get secondHand <ArrowIcon size={20} />
+                    Get SecondHand <ArrowIcon size={20} />
                   </a>
                   <a className="secondary-link" href="#setup">
                     Setup guide <span aria-hidden="true">↗</span>
@@ -87,7 +85,6 @@ export function Home() {
                   Free for Windows &amp; Mac. No account needed.
                 </p>
               </div>
-              <PaperStack />
             </div>
             <div className="hero-caption wrap">
               <span>Built for Iowa SNAP. Built around you.</span>
@@ -128,11 +125,11 @@ export function Home() {
               </div>
               <div className="download-panel">
                 <div className="panel-heading">
-                  <h3>Download secondHand</h3>
+                  <h3>Download SecondHand</h3>
                   <span className="version">v{release}</span>
                 </div>
                 <p className="phone-note">
-                  secondHand installs on Windows and Mac computers. Open this
+                  SecondHand installs on Windows and Mac computers. Open this
                   page on your computer to download it.
                 </p>
                 <div
@@ -248,7 +245,7 @@ export function Home() {
                       follow the installer.
                     </p>
                     <p>
-                      <strong>Mac:</strong> open the .dmg, drag secondHand into
+                      <strong>Mac:</strong> open the .dmg, drag SecondHand into
                       Applications, then open it from Applications.
                     </p>
                     <details>
@@ -321,7 +318,7 @@ export function Home() {
                       <summary>Finding the folder on Windows or Mac</summary>
                       <div className="details-body">
                         <p>
-                          Click <strong>Copy folder path</strong> in secondHand.
+                          Click <strong>Copy folder path</strong> in SecondHand.
                           On Windows, paste the path into the folder chooser’s
                           address bar. On Mac, press <kbd>⌘</kbd> +{' '}
                           <kbd>Shift</kbd> + <kbd>G</kbd> in the chooser, paste
@@ -339,7 +336,7 @@ export function Home() {
                         <p>
                           Install the new app, choose{' '}
                           <strong>Refresh extension files</strong>, then click
-                          Reload for secondHand on{' '}
+                          Reload for SecondHand on{' '}
                           <code>chrome://extensions</code>. Reload your Iowa tab
                           too. Use Chrome 116 or newer. Chrome may ask you to
                           approve the extension’s updated permissions. Click
@@ -355,7 +352,7 @@ export function Home() {
                 <div>
                   <h3>Ready to apply?</h3>
                   <p>
-                    Keep secondHand unlocked and open Iowa’s portal in Chrome.
+                    Keep SecondHand unlocked and open Iowa’s portal in Chrome.
                     Click the Open assistant button or the extension’s toolbar
                     icon to open the side panel. Choose Start guided autofill
                     and approve in the desktop app. Missing answers are listed
@@ -389,7 +386,7 @@ export function Home() {
               <div className="privacy-copy">
                 <p>
                   Your profile and application history are encrypted on your
-                  device. secondHand has no account system, cloud sync or
+                  device. SecondHand has no account system, cloud sync or
                   analytics. This website hosts the installers; it does not
                   collect your benefits information.
                 </p>
@@ -450,7 +447,7 @@ export function Home() {
                 less typing?
               </h2>
               <a className="primary-link" href="#downloads">
-                Download secondHand <ArrowIcon />
+                Download SecondHand <ArrowIcon />
               </a>
               <p className="micro">Free to use. Made to help.</p>
             </section>

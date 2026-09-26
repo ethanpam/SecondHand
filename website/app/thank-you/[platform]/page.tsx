@@ -15,13 +15,13 @@ const platforms = {
     name: 'Mac with Apple silicon',
     file: downloads.macArm,
     install:
-      'Open the downloaded .dmg file, drag secondHand into Applications, and open it from Applications. If your Mac blocks it, follow Apple’s guidance below.',
+      'Open the downloaded .dmg file, drag SecondHand into Applications, and open it from Applications. If your Mac blocks it, follow Apple’s guidance below.',
   },
   'mac-intel': {
     name: 'Intel Mac',
     file: downloads.macIntel,
     install:
-      'Open the downloaded .dmg file, drag secondHand into Applications, and open it from Applications. If your Mac blocks it, follow Apple’s guidance below.',
+      'Open the downloaded .dmg file, drag SecondHand into Applications, and open it from Applications. If your Mac blocks it, follow Apple’s guidance below.',
   },
 } as const;
 type PlatformId = keyof typeof platforms;
@@ -39,7 +39,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     : 'your computer';
   return {
     title: `Thanks for downloading for ${name}`,
-    description: `Your secondHand download for ${name} is starting. Here is how to install it, create your password, and connect Chrome.`,
+    description: `Your SecondHand download for ${name} is starting. Here is how to install it, create your password, and connect Chrome.`,
     robots: { index: false, follow: true },
   };
 }
@@ -54,7 +54,7 @@ export default async function ThankYou({ params }: Props) {
       <meta httpEquiv="refresh" content={`1;url=${file}`} />
       <SiteHeader />
       <main id="main" className="wrap doc-page">
-        <h1>Thanks for downloading secondHand</h1>
+        <h1>Thanks for downloading SecondHand</h1>
         <p className="doc-lead">
           Your download for {name} should start in a moment. If it doesn’t,{' '}
           <a href={file}>download it directly</a>.
@@ -65,7 +65,7 @@ export default async function ThankYou({ params }: Props) {
             <strong>Install the app.</strong> {install}
           </li>
           <li>
-            <strong>Create a password.</strong> Open secondHand and choose a
+            <strong>Create a password.</strong> Open SecondHand and choose a
             password of at least 12 characters. Save the recovery key it shows
             you somewhere safe, away from your computer.
           </li>

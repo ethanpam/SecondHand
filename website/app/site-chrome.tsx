@@ -1,11 +1,20 @@
+import Image from 'next/image';
 import { ArrowIcon, ExternalIcon } from './icons';
 import { downloads } from './release';
 import { VariableWordmark } from './variable-wordmark';
 
 function Brand({ className = 'brand' }: { className?: string }) {
   return (
-    <a href="/" className={className} aria-label="secondHand home">
-      <span className="brand-mark">sh</span>second<span>Hand</span>
+    <a href="/" className={className} aria-label="SecondHand home">
+      <Image
+        className="brand-mark"
+        src="/brand/secondhand-mascot.png"
+        alt=""
+        width={40}
+        height={40}
+        unoptimized
+      />
+      Second<span>Hand</span>
     </a>
   );
 }
@@ -24,7 +33,7 @@ export function SiteHeader() {
           <a href="/privacy">Privacy</a>
         </nav>
         <a className="header-download" href="/#downloads">
-          Get secondHand <ArrowIcon size={15} />
+          Get SecondHand <ArrowIcon size={15} />
         </a>
       </header>
     </>
@@ -40,7 +49,7 @@ export function SiteFooter() {
           <p>
             Independent software. Not affiliated with Iowa HHS.
             <br />
-            Using secondHand does not determine benefit eligibility.
+            Using SecondHand does not determine benefit eligibility.
           </p>
         </div>
         <nav aria-label="Footer" className="footer-links">

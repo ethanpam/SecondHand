@@ -4,7 +4,7 @@ import { SiteFooter, SiteHeader } from './site-chrome';
 export const metadata: Metadata = {
   title: 'Page not found',
   description:
-    'This secondHand page doesn’t exist or has moved. Find downloads, the setup guide, common questions, and the privacy policy.',
+    'This SecondHand page doesn’t exist or has moved. Find downloads, the setup guide, common questions, and the privacy policy.',
   robots: { index: false, follow: true },
 };
 
@@ -20,7 +20,7 @@ export default function NotFound() {
         </p>
         <ul className="not-found-links">
           <li>
-            <a href="/">Download secondHand for Windows or Mac</a>
+            <a href="/">Download SecondHand for Windows or Mac</a>
           </li>
           <li>
             <a href="/#setup">Setup guide</a>

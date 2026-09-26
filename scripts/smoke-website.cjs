@@ -12,10 +12,21 @@ const externalRequests = new Set();
 
 async function inspectLayout(page) {
   assert.equal(await page.locator('h1').count(), 1);
+  assert.doesNotMatch(await page.locator('body').innerText(), /secondHand/, 'Visible branding must use SecondHand');
+  assert.doesNotMatch(await page.title(), /secondHand/, 'Page titles must use SecondHand');
+  for (const description of await page.locator('meta[name="description"], meta[property="og:site_name"], meta[property="og:title"]').evaluateAll(elements => elements.map(element => element.getAttribute('content')))) {
+    assert.doesNotMatch(description, /secondHand/, 'Metadata must use SecondHand');
+  }
+  await expect(page.locator('.brand').first()).toHaveAccessibleName('SecondHand home');
+  await expect(page.locator('.brand').first()).toHaveText('SecondHand');
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', '/brand/secondhand-mascot.png');
+  assert.equal(await page.locator('.brand-mark').first().evaluate(image => image.complete && image.naturalWidth > 0), true, 'The mascot must load');
   assert.equal(await page.evaluate(width => document.documentElement.scrollWidth > width + 1, page.viewportSize().width), false, 'Page must not overflow horizontally');
 }
 
 async function inspectHeroLayout(page) {
+  await expect(page.locator('.workflow-preview, .paper-stack, .stack-controls')).toHaveCount(0);
+  await expect(page.locator('.hero')).not.toContainText(/A place for your details|Your say, every time|Filled in. Still your call/);
   const background = await page.locator('.gradient-background').boundingBox();
   const header = await page.locator('.site-header').boundingBox();
   const content = await page.locator('.hero h1').boundingBox();
@@ -33,25 +44,10 @@ async function inspectHeroLayout(page) {
   }
 }
 
-async function inspectReactBits(page) {
+async function inspectWordmark(page) {
   await page.goto(site, { waitUntil: 'networkidle' });
-  const preview = page.getByRole('region', { name: 'How secondHand works' });
-  const count = page.locator('.stack-count');
-  await expect(preview).toHaveAttribute('data-autoplay', 'true');
-  const initialStep = await count.textContent();
-  await expect.poll(() => count.textContent(), { timeout: 7000 }).not.toBe(initialStep);
+  await expect(page.locator('.variable-wordmark')).toHaveText('SecondHand');
   await page.getByRole('button', { name: 'Pause animations' }).click();
-  await expect(preview).toHaveAttribute('data-autoplay', 'false');
-  const pausedStep = await count.textContent();
-  await page.waitForTimeout(5100);
-  assert.equal(await count.textContent(), pausedStep, 'Pause must stop automatic card cycling');
-  const next = page.getByRole('button', { name: 'Next preview step' });
-  await next.focus();
-  await next.press('Enter');
-  await expect(count).not.toHaveText(pausedStep);
-  await expect(page.locator('.stack-layer[aria-hidden="false"]')).toHaveCount(1);
-  await page.getByRole('button', { name: 'Previous preview step' }).press('Enter');
-  await expect(count).toHaveText(pausedStep);
   const letter = page.locator('.variable-wordmark [data-letter]').nth(4);
   await letter.hover();
   const weight = () => letter.evaluate(element => getComputedStyle(element).fontVariationSettings);
@@ -61,32 +57,13 @@ async function inspectReactBits(page) {
   await expect.poll(weight).not.toBe('"wght" 450');
   await page.mouse.move(0, 0);
   await expect.poll(weight).toBe('"wght" 450');
-  await expect(preview).toHaveAttribute('data-autoplay', 'false');
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await letter.hover();
   assert.equal(await weight(), '"wght" 450', 'Reduced motion must disable proximity animation');
-  await next.focus();
-  const reducedStep = await count.textContent();
-  await next.press('Enter');
-  await expect(count).not.toHaveText(reducedStep);
-  await expect(preview).toHaveAttribute('data-autoplay', 'false');
   await expect(page.locator('.motion-toggle')).toHaveCount(0);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await expect(preview).toHaveAttribute('data-autoplay', 'false');
-  await page.getByRole('heading', { level: 1 }).click();
-  await expect(preview).toHaveAttribute('data-autoplay', 'true');
-  await page.locator('.paper-stack').hover();
-  await expect(preview).toHaveAttribute('data-autoplay', 'false');
-  const front = page.locator('.stack-layer[data-front="true"] .paper-card');
-  const bounds = await front.boundingBox();
-  const beforeDrag = await count.textContent();
-  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 90);
-  await page.mouse.down();
-  await page.mouse.move(bounds.x + bounds.width / 2 + 130, bounds.y + 90, { steps: 12 });
-  await page.mouse.up();
-  await expect(count).not.toHaveText(beforeDrag);
   await page.mouse.move(0, 0);
-  console.log('React Bits deck autoplay, keyboard controls, drag, shared pause, reduced motion, offscreen suspension, and proximity wordmark passed.');
+  console.log('React Bits wordmark, shared pause, reduced motion, and branding passed.');
 }
 
 async function main() {
@@ -112,6 +89,8 @@ async function main() {
     await expect(page.locator('.gradient-background canvas')).toBeVisible();
     await inspectLayout(page);
     await inspectHeroLayout(page);
+    const structuredData = JSON.parse(await page.locator('script[type="application/ld+json"]').textContent());
+    assert.equal(structuredData.find(entry => entry['@type'] === 'SoftwareApplication').name, 'SecondHand');
     const shaderFrame = () => page.locator('.gradient-canvas[data-paper-shader]').evaluate(element => element.paperShaderMount.getCurrentFrame());
     const initialFrame = await shaderFrame();
     await expect.poll(shaderFrame).toBeGreaterThan(initialFrame);
@@ -134,7 +113,7 @@ async function main() {
     await page.locator('#setup').evaluate(element => element.scrollIntoView({ behavior: 'instant', block: 'start' }));
     await expect.poll(() => page.locator('.gradient-canvas[data-paper-shader]').evaluate(element => element.paperShaderMount.currentSpeed)).toBe(0);
     console.log('Shader rendering, pause/play, reduced motion, and offscreen suspension passed.');
-    await inspectReactBits(page);
+    await inspectWordmark(page);
 
     await page.getByRole('tab', { name: 'Windows', exact: true }).click();
     await page.getByRole('tab', { name: 'Windows', exact: true }).press('ArrowRight');
@@ -163,7 +142,7 @@ async function main() {
         page.getByRole('link', { name: label }).click(),
       ]);
       await expect(page).toHaveURL(`${site}/thank-you/${platform}`);
-      await expect(page.getByRole('heading', { level: 1 })).toHaveText('Thanks for downloading secondHand');
+      await expect(page.getByRole('heading', { level: 1 })).toHaveText('Thanks for downloading SecondHand');
       assert.match(downloaded.url(), filename);
       await inspectLayout(page);
       await page.screenshot({ path: path.join(artifacts, `${platform}.png`), fullPage: true });
@@ -171,7 +150,7 @@ async function main() {
     console.log('Keyboard tabs and all three installer routes passed.');
 
     await page.goto(site, { waitUntil: 'networkidle' });
-    const question = page.getByText('Does secondHand cost anything?', { exact: true });
+    const question = page.getByText('Does SecondHand cost anything?', { exact: true });
     await question.click();
     await expect(page.getByText('No. The download is free, and there is no account or subscription.', { exact: true })).toBeVisible();
     await question.press('Enter');
@@ -196,11 +175,6 @@ async function main() {
       await mobile.setViewportSize({ width, height: 844 });
       await inspectLayout(mobile);
       await inspectHeroLayout(mobile);
-      for (let step = 0; step < 3; step++) {
-        const card = mobile.locator('.stack-layer[data-front="true"] .paper-card');
-        assert.equal(await card.evaluate(element => element.scrollHeight <= element.clientHeight + 1), true, 'Every preview step must fit its paper at every viewport width');
-        await mobile.getByRole('button', { name: 'Next preview step' }).click();
-      }
     }
     await mobile.setViewportSize({ width: 390, height: 844 });
     await mobile.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Privacy', exact: true }).click();
@@ -234,8 +208,7 @@ async function main() {
     await staticPage.goto(site);
     await expect(staticPage.getByRole('heading', { level: 1 })).toBeVisible();
     await inspectHeroLayout(staticPage);
-    await expect(staticPage.locator('.stack-buttons')).toBeHidden();
-    await expect(staticPage.locator('.stack-layer[data-front="true"] h2')).toBeVisible();
+    await inspectLayout(staticPage);
     await expect(staticPage.getByRole('link', { name: 'Download for Windows' })).toBeAttached();
     assert.deepEqual(errors, [], 'No browser runtime errors');
     assert.deepEqual([...externalRequests], [], 'Fonts and shaders must stay self-hosted');

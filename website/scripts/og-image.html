@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>secondHand social preview</title>
+    <title>SecondHand social preview</title>
     <style>
       @font-face {
         font-family: 'Bricolage';
@@ -45,18 +45,12 @@
         letter-spacing: -1px;
       }
       .mark {
-        background: #164c38;
-        color: #fff;
-        border-radius: 10px 10px 10px 3px;
-        padding: 4px 7px 6px;
-        letter-spacing: -2px;
+        width: 48px;
+        height: 48px;
       }
       main {
-        display: grid;
-        grid-template-columns: 1.2fr 1fr;
-        gap: 72px;
-        align-items: center;
-        margin-top: 48px;
+        text-align: center;
+        margin-top: 100px;
       }
       h1 {
         font:
@@ -64,61 +58,21 @@
           sans-serif;
         letter-spacing: -4px;
       }
-      .paper {
-        background: #fff;
-        border-radius: 8px;
-        padding: 28px;
-        transform: rotate(4deg);
-        box-shadow:
-          -12px 12px 0 #f1f4ef,
-          -24px 24px 0 #e9eee8,
-          0 12px 28px #163a2c20;
-      }
-      .paper-top {
-        display: flex;
-        justify-content: space-between;
-        font-size: 12px;
-        border-bottom: 1px solid #deded8;
-        padding-bottom: 20px;
-      }
-      h2 {
-        font:
-          600 39px/1.04 'Bricolage',
-          sans-serif;
-        letter-spacing: -1px;
-        margin: 22px 0;
-      }
-      .field {
-        display: flex;
-        justify-content: space-between;
-        padding: 12px 0;
-        border-bottom: 1px solid #deded8;
-        font-size: 12px;
-      }
-      .note {
-        font-size: 11px;
-        margin-top: 22px;
-      }
       .caption {
         font-size: 17px;
-        margin-top: 48px;
+        margin-top: 64px;
+        text-align: center;
         color: #415d4c;
       }
     </style>
   </head>
   <body>
-    <div class="brand"><span class="mark">sh</span>secondHand</div>
+    <div class="brand">
+      <img class="mark" src="../public/brand/secondhand-mascot.png" alt="" />
+      SecondHand
+    </div>
     <main>
-      <h1>A little help.<br />A lot less<br />typing.</h1>
-      <div class="paper">
-        <div class="paper-top"><span>secondHand</span><span>01 / 03</span></div>
-        <h2>A place for<br />your details.</h2>
-        <div class="field"><span>Full name</span><span>Your name</span></div>
-        <div class="field">
-          <span>Home address</span><span>Your address</span>
-        </div>
-        <p class="note">Stored on your computer. Shared with your approval.</p>
-      </div>
+      <h1>A little help.<br />A lot less typing.</h1>
     </main>
     <p class="caption">
       Made for Iowa SNAP. Free for Windows &amp; Mac. No account.

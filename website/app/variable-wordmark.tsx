@@ -3,7 +3,7 @@
 import { useEffect, useRef, type PointerEvent } from 'react';
 import { useSiteMotion } from './site-motion';
 
-const label = 'secondHand';
+const label = 'SecondHand';
 const restingSettings = '"wght" 450';
 
 export function VariableWordmark() {

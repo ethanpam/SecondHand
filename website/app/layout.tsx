@@ -8,18 +8,21 @@ import { siteUrl } from './site';
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: 'secondHand | Iowa SNAP helper for Windows and Mac',
-    template: '%s | secondHand',
+    default: 'SecondHand | Iowa SNAP helper for Windows and Mac',
+    template: '%s | SecondHand',
   },
   description:
-    'secondHand keeps your details encrypted on your computer and fills supported fields in Iowa’s SNAP application after you approve.',
-  icons: { icon: '/icon.svg' },
+    'SecondHand keeps your details encrypted on your computer and fills supported fields in Iowa’s SNAP application after you approve.',
+  icons: {
+    icon: { url: '/brand/secondhand-mascot.png', type: 'image/png' },
+    apple: '/brand/secondhand-mascot.png',
+  },
   openGraph: {
     type: 'website',
-    siteName: 'secondHand',
+    siteName: 'SecondHand',
     locale: 'en_US',
     url: '/',
-    title: 'secondHand | Iowa SNAP helper for Windows and Mac',
+    title: 'SecondHand | Iowa SNAP helper for Windows and Mac',
     description:
       'Save your details once, encrypted on your computer, and fill supported fields in Iowa’s SNAP application after you approve.',
   },

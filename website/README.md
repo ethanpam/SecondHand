@@ -1,6 +1,6 @@
-# secondHand download website
+# SecondHand download website
 
-Public download site for the local-only secondHand desktop application. This site stores installers and a checksum list in R2. It has no applicant forms, account system, analytics, or applicant-data storage. Hosting infrastructure can process ordinary connection logs.
+Public download site for the local-only SecondHand desktop application. This site stores installers and a checksum list in R2. It has no applicant forms, account system, analytics, or applicant-data storage. Hosting infrastructure can process ordinary connection logs.
 
 ## Develop
 
@@ -17,7 +17,7 @@ The site URL used for canonical links, the sitemap, and share previews is in `ap
 
 ## Visual design
 
-The website keeps secondHand’s original forest green (`#164c38`), soft white (`#f8faf7`), and sage accents in a paper-and-ink design. Bricolage Grotesque variable headings and Geist body text are self-hosted through Fontsource. The homepage adapts [React Bits Stack](https://reactbits.dev/components/stack) into an interactive workflow illustration, and [Variable Proximity](https://reactbits.dev/text-animations/variable-proximity) into a responsive footer wordmark. Source references, accessibility adaptations, and design decisions are in [the research note](../docs/react-bits-design-research.md); the upstream license is preserved in [the third-party notice](public/react-bits-license.txt). The browser does not request third-party fonts or scripts.
+The website keeps SecondHand’s original forest green (`#164c38`), soft white (`#f8faf7`), and sage accents in an open, type-led design. Bricolage Grotesque variable headings and Geist body text are self-hosted through Fontsource. The hero is card-free, with a full-width animated green background. The homepage adapts [React Bits Variable Proximity](https://reactbits.dev/text-animations/variable-proximity) into a responsive footer wordmark. A green bear mascot appears in the shared branding and favicon; its generation brief is in [the mascot note](../docs/secondhand-mascot.md). Source references, accessibility adaptations, and design decisions are in [the research note](../docs/react-bits-design-research.md); the upstream license is preserved in [the third-party notice](public/react-bits-license.txt). The browser does not request third-party fonts or scripts.
 
 The decorative hero retains the `GrainGradient` adapted from mxthxn’s [Shader Gradient Component](https://v0.app/templates/shader-gradient-component-cAawT1AJaki), using the pinned `@paper-design/shaders-react` package. It reaches behind the header and fades into the page. The shader loads after hydration, with a CSS fallback for unavailable or lost WebGL. One homepage motion control pauses the shader, deck, and wordmark; all respect reduced motion. The deck additionally stops autoplay on hover, focus, offscreen visibility, or document hiding, while native buttons keep it usable without dragging. Paper Shaders suspends rendering offscreen or while hidden, capped at 1.5 million pixels. The same tokens style downloads, numbered setup rows, privacy, FAQ, confirmations, and the 404 page.
 
