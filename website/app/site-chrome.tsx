@@ -3,16 +3,19 @@ import { ExternalIcon } from './icons';
 import { downloads } from './release';
 
 function Brand({ className = 'brand' }: { className?: string }) {
-  return <Link href="/" className={className} aria-label="secondHand home"><span className="brand-mark">sh</span>second<span>Hand</span></Link>;
+  return <Link href="/" className={className} aria-label="secondHand home">secondHand<span className="brand-tag" aria-hidden="true">IOWA</span></Link>;
 }
 
 export function SiteHeader() {
   return (
     <>
       <a href="#main" className="skip">Skip to content</a>
-      <header className="site-header wrap">
-        <Brand />
-        <nav aria-label="Main navigation"><Link href="/#setup">Setup guide</Link><Link href="/#faq">Questions</Link><Link href="/privacy">Privacy policy</Link></nav>
+      <header className="site-header">
+        <div className="header-bar">
+          <Brand />
+          <nav aria-label="Main navigation"><Link href="/#setup">Setup guide</Link><Link href="/#faq">Questions</Link><Link href="/privacy">Privacy policy</Link></nav>
+          <Link href="/#downloads" className="header-cta">Download</Link>
+        </div>
       </header>
     </>
   );
