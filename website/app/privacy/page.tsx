@@ -43,7 +43,9 @@ export default function PrivacyPolicy() {
         </ul>
 
         <h2>Removing your information</h2>
-        <p>To delete what the desktop app saved, uninstall secondHand and delete its data folder: <code>%LOCALAPPDATA%\SecondHand</code> on Windows or <code>~/Library/Application Support/SecondHand</code> on a Mac. Delete any encrypted backups you exported as well.</p>
+        <p>secondHand never receives your profile or application records, so there is nothing on our side to delete and no deletion request to send. Everything the app saved is on your own computer, and you can remove it yourself.</p>
+        <p>To delete what the desktop app saved, uninstall secondHand and delete its data folder: <code>%LOCALAPPDATA%\SecondHand</code> on Windows or <code>~/Library/Application Support/SecondHand</code> on a Mac. This also removes the password reset secret for this computer. Delete any encrypted backups you exported as well.</p>
+        <p>Information you already gave Iowa’s website is kept by Iowa HHS. Ask Iowa HHS about changing or removing it.</p>
 
         <h2>Changes to this policy</h2>
         <p>If this policy changes, the new version will be posted on this page with a new date.</p>
