@@ -8,7 +8,6 @@ const net = require('node:net');
 const { PassThrough } = require('node:stream');
 const { FrameReader, frame, extensionFromOrigin, validateRequest, startBridge, relayRequest, runNativeHost, MAX_MESSAGE_BYTES } = require('../desktop/bridge.cjs');
 const { PORTAL_URL } = require('../shared/schema.cjs');
-const { AssistedSession } = require('../desktop/assistance.cjs');
 const EXTENSION = 'a'.repeat(32);
 
 test('native frames handle split headers, split UTF-8, and multiple messages', () => {
@@ -43,8 +42,9 @@ test('Chrome native origins and Iowa portal requests use strict allowlists', () 
   assert.equal(extensionFromOrigin(`chrome-extension://${EXTENSION}/`), EXTENSION);
   for (const origin of [`chrome-extension://${EXTENSION}/page`, `https://${EXTENSION}/`, `chrome-extension://${'z'.repeat(32)}/`, `chrome-extension://${EXTENSION}.evil/`]) assert.equal(extensionFromOrigin(origin), null);
   assert.deepEqual(validateRequest({ id: 'request-1', type: 'getFields', url: PORTAL_URL, fields: ['firstName'] }).fields, ['firstName']);
+  // Progress records stay Iowa-only; field requests are gated by desktop site trust instead.
   for (const url of ['http://hhsservices.iowa.gov/apspssp/ssp.portal', `${PORTAL_URL}.evil`, 'https://hhsservices.iowa.gov.evil.test/apspssp/ssp.portal', 'https://person@hhsservices.iowa.gov/apspssp/ssp.portal', 'https://hhsservices.iowa.gov:444/apspssp/ssp.portal', 'https://hhsservices.iowa.gov/other']) {
-    assert.throws(() => validateRequest({ id: 'x', type: 'getFields', url, fields: ['firstName'] }), /Iowa portal/);
+    assert.throws(() => validateRequest({ id: 'x', type: 'recordProgress', url, filledCount: 1 }), /Iowa portal/);
   }
   for (const fields of [[], ['password'], ['firstName', 'firstName'], [null]]) assert.throws(() => validateRequest({ id: 'x', type: 'getFields', url: PORTAL_URL, fields }), /profile fields/);
   assert.throws(() => validateRequest({ id: 'x', type: 'status', profile: {} }), /Unexpected/);
@@ -52,24 +52,29 @@ test('Chrome native origins and Iowa portal requests use strict allowlists', () 
   for (const filledCount of [-1, 0, 1.5, 101, '2']) assert.throws(() => validateRequest({ id: 'x', type: 'recordProgress', url: PORTAL_URL, filledCount }), /count/);
 });
 
-test('assisted native requests have strict field scopes and token syntax without accepting tab IDs or extra data', () => {
-  const start = { id: 'start', type: 'startAssistedSession', url: PORTAL_URL, fields: ['firstName'] };
-  assert.deepEqual(validateRequest(start), start);
-  const end = { id: 'end', type: 'endAssistedSession', url: PORTAL_URL, assistanceToken: 'a'.repeat(64) };
-  assert.deepEqual(validateRequest(end), end);
-  assert.deepEqual(validateRequest({ ...end, type: 'checkAssistedSession' }).assistanceToken, end.assistanceToken);
-  assert.deepEqual(validateRequest({ ...start, type: 'getFields', assistanceToken: end.assistanceToken }).fields, ['firstName']);
-  for (const fields of [[], ['submit'], ['firstName', 'firstName']]) assert.throws(() => validateRequest({ ...start, fields }), /profile fields/);
-  for (const assistanceToken of [undefined, null, '', 'a'.repeat(63), 'A'.repeat(64), 12]) {
-    assert.throws(() => validateRequest({ ...end, assistanceToken }), /assistance token/);
-    assert.throws(() => validateRequest({ ...end, type: 'checkAssistedSession', assistanceToken }), /assistance token/);
-    assert.throws(() => validateRequest({ ...start, type: 'getFields', assistanceToken }), /assistance token/);
+test('showApp carries no data; assisted-session requests and tokens are no longer accepted', () => {
+  assert.deepEqual(validateRequest({ id: 'show', type: 'showApp' }), { id: 'show', type: 'showApp' });
+  assert.throws(() => validateRequest({ id: 'show', type: 'showApp', url: PORTAL_URL }), /Unexpected/);
+  assert.throws(() => validateRequest({ id: 'x', type: 'getFields', url: PORTAL_URL, fields: ['firstName'], assistanceToken: 'a'.repeat(64) }), /Unexpected/);
+  for (const type of ['startAssistedSession', 'checkAssistedSession', 'endAssistedSession']) assert.throws(() => validateRequest({ id: 'x', type, url: PORTAL_URL }), /Unsupported/);
+  for (const extra of [{ tabId: 1 }, { profile: {} }]) assert.throws(() => validateRequest({ id: 'x', type: 'getFields', url: PORTAL_URL, fields: ['firstName'], ...extra }), /Unexpected/);
+});
+
+test('empty field authorization is limited to the two exact verified Iowa navigation endpoints', () => {
+  for (const page of ['enterPersonalInfo', 'addressValidation']) {
+    const url = `${PORTAL_URL}/applyForBenefits/${page}`;
+    const request = { id: 'navigation', type: 'getFields', url, fields: [] };
+    assert.deepEqual(validateRequest(request), request);
+    for (const altered of [`${url}/`, `${url}?step=1`, `${url}#review`, url.replace(page, page.toUpperCase())]) {
+      assert.throws(() => validateRequest({ ...request, url: altered }), /profile fields/);
+    }
   }
-  for (const extra of [{ tabId: 1 }, { profile: {} }, { assistanceToken: end.assistanceToken }]) {
-    assert.throws(() => validateRequest({ ...start, ...extra }), /Unexpected/);
+  for (const url of [PORTAL_URL, `${PORTAL_URL}/applyForBenefits/dynamicQuestions`,
+    `${PORTAL_URL}/applyForBenefits/addressValidationDQfuncPage`, 'https://pantry.example.org/intake',
+    'https://hhsservices.iowa.gov/other/applyForBenefits/addressValidation']) {
+    assert.throws(() => validateRequest({ id: 'navigation', type: 'getFields', url, fields: [] }), /profile fields/);
   }
-  assert.throws(() => validateRequest({ ...end, url: 'https://example.test' }), /Iowa portal/);
-  assert.throws(() => validateRequest({ ...end, type: 'checkAssistedSession', fields: ['firstName'] }), /Unexpected/);
+  assert.throws(() => validateRequest({ id: 'navigation', type: 'getFields', url: `${PORTAL_URL}/applyForBenefits/addressValidation`, fields: [], assistanceToken: 'a'.repeat(64) }), /Unexpected/);
 });
 
 test('local bridge requires ephemeral token and registered extension; native host emits framed responses', async t => {
@@ -109,28 +114,14 @@ test('local bridge requires ephemeral token and registered extension; native hos
   output.destroy();
 });
 
-test('assisted tokens survive independent native relay requests but cannot cross extension identities', async t => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-assisted-bridge-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
-  const assistance = new AssistedSession();
-  let approvedExtension = EXTENSION;
-  const bridge = await startBridge(directory, () => approvedExtension, async (request, context) => {
-    if (request.type === 'startAssistedSession') return assistance.issue({ ...request, ...context });
-    if (request.type === 'endAssistedSession') return assistance.end({ ...request, ...context });
-    if (request.type === 'checkAssistedSession') return assistance.check({ ...request, ...context });
-    assistance.authorize({ ...request, ...context });
-    return { values: { firstName: 'Synthetic' } };
-  });
-  t.after(() => bridge.close());
-  const started = await relayRequest(directory, EXTENSION, { id: 'start', type: 'startAssistedSession', url: PORTAL_URL, fields: ['firstName'] });
-  const request = { id: 'fill', type: 'getFields', url: PORTAL_URL, fields: ['firstName'], assistanceToken: started.data.assistanceToken };
-  assert.deepEqual((await relayRequest(directory, EXTENSION, request)).data, { values: { firstName: 'Synthetic' } });
-  const check = { id: 'check', type: 'checkAssistedSession', url: PORTAL_URL, assistanceToken: request.assistanceToken };
-  assert.deepEqual((await relayRequest(directory, EXTENSION, check)).data, { active: true });
-  approvedExtension = 'b'.repeat(32);
-  assert.equal((await relayRequest(directory, approvedExtension, request)).ok, false);
-  approvedExtension = EXTENSION;
-  assert.deepEqual((await relayRequest(directory, EXTENSION, { id: 'end', type: 'endAssistedSession', url: PORTAL_URL, assistanceToken: request.assistanceToken })).data, { ended: true });
-  assert.equal((await relayRequest(directory, EXTENSION, request)).ok, false);
-  assert.equal((await relayRequest(directory, EXTENSION, check)).ok, false);
+test('site trust requests carry only an https site URL; the desktop decides which sites are trusted', () => {
+  const site = 'https://pantry.example.org/intake?x=1';
+  assert.deepEqual(validateRequest({ id: 'trust', type: 'trustSite', url: site }), { id: 'trust', type: 'trustSite', url: site });
+  for (const url of ['http://pantry.example.org/', 'https://a:b@pantry.example.org/', 'https://pantry.example.org:8443/', 'javascript:alert(1)', 'not a url']) {
+    assert.throws(() => validateRequest({ id: 'trust', type: 'trustSite', url }), /https site/, url);
+    assert.throws(() => validateRequest({ id: 'x', type: 'getFields', url, fields: ['firstName'] }), /https site/, url);
+  }
+  assert.throws(() => validateRequest({ id: 'trust', type: 'trustSite', url: site, fields: ['ssn'] }), /Unexpected/);
+  assert.deepEqual(validateRequest({ id: 'x', type: 'getFields', url: site, fields: ['firstName'] }).fields, ['firstName']);
+  assert.throws(() => validateRequest({ id: 'x', type: 'recordProgress', url: site, filledCount: 1 }), /Iowa portal/);
 });

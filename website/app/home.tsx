@@ -216,7 +216,8 @@ export function Home() {
                 fills saved applicant details, address and mailing information,
                 and your explicit program choices. It selects Save and Continue
                 when required answers are complete, then checks the next step.
-                Unverified later pages stay manual.
+                Later navigation and questions the helper cannot recognize stay
+                manual.
               </p>
             </div>
 
@@ -339,9 +340,8 @@ export function Home() {
                           Reload for SecondHand on{' '}
                           <code>chrome://extensions</code>. Reload your Iowa tab
                           too. Use Chrome 116 or newer. Chrome may ask you to
-                          approve the extension’s updated permissions. Click
-                          Open assistant on Iowa’s page to open the browser side
-                          panel.
+                          approve the extension’s updated permissions. Then
+                          click Autofill on Iowa’s applicant page.
                         </p>
                       </div>
                     </details>
@@ -353,12 +353,14 @@ export function Home() {
                   <h3>Ready to apply?</h3>
                   <p>
                     Keep SecondHand unlocked and open Iowa’s portal in Chrome.
-                    Click the Open assistant button or the extension’s toolbar
-                    icon to open the side panel. Choose Start guided autofill
-                    and approve in the desktop app. Missing answers are listed
-                    with a Show field button; completed answers get a checkmark.
-                    An active session continues once required answers are
-                    complete.
+                    Click Autofill in the corner and approve once in the desktop
+                    app, or choose Always allow. SecondHand moves past
+                    information-only screens and fills the pages it knows.
+                    Anything missing is flagged so you can jump straight to it.
+                    On verified applicant and home-address screens, it can
+                    choose Save and Continue automatically. Review all answers
+                    and the first suggested home address before submitting;
+                    other Next buttons stay manual.
                   </p>
                 </div>
                 <a
@@ -392,8 +394,9 @@ export function Home() {
                 </p>
                 <ul>
                   <li>
-                    <CheckIcon /> The desktop asks you to approve filling and
-                    guided navigation.
+                    <CheckIcon /> The desktop asks before filling, unless you
+                    choose Always allow. SecondHand never submits your
+                    application.
                   </li>
                   <li>
                     <CheckIcon /> Information you put into Iowa’s portal goes to

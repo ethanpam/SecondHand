@@ -23,11 +23,18 @@ contextBridge.exposeInMainWorld('secondHand', Object.freeze({
   copyExtensionFolderPath: () => invoke('copyExtensionFolderPath'),
   copyChromeExtensionsUrl: () => invoke('copyChromeExtensionsUrl'),
   connectExtension: extensionId => invoke('connectExtension', extensionId),
+  setAutofillTrust: enabled => invoke('setAutofillTrust', enabled),
+  removeTrustedSite: origin => invoke('removeTrustedSite', origin),
   exportBackup: () => invoke('exportBackup'),
   importBackup: () => invoke('importBackup'),
   onLocked: callback => {
     if (typeof callback !== 'function') throw new TypeError('A callback is required.');
-    const listener = () => callback();
+    const listener = (_event, notification) => {
+      // Expose only the transition identifier, never Electron's event or
+      // arbitrary payloads. Invalid/legacy notifications still lock the UI.
+      callback(Number.isSafeInteger(notification?.lockRevision) && notification.lockRevision > 0
+        ? { lockRevision: notification.lockRevision } : undefined);
+    };
     ipcRenderer.on('secondhand:locked', listener);
     return () => ipcRenderer.removeListener('secondhand:locked', listener);
   }

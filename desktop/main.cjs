@@ -4,15 +4,15 @@ const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, powerMonitor, ses
 const crypto = require('node:crypto');
 const path = require('node:path');
 const fs = require('node:fs/promises');
+const { watch } = require('node:fs');
 const os = require('node:os');
 const { pathToFileURL } = require('node:url');
 const { Vault, atomicWrite, normalizeRecoveryKey, MAX_VAULT_BYTES } = require('./vault.cjs');
-const { startBridge, runNativeHost, nativeStreams, extensionFromOrigin, EXTENSION_ID } = require('./bridge.cjs');
+const { startBridge, runNativeHost, nativeStreams, extensionFromOrigin, EXTENSION_ID, isIowaNavigationAuthorization } = require('./bridge.cjs');
 const { registerHost } = require('./registration.cjs');
 const { getExtensionSetup, prepareBundledExtension } = require('./extension-setup.cjs');
 const { testStoragePath } = require('./test-storage-path.cjs');
-const { AssistedSession } = require('./assistance.cjs');
-const { validateProfile, validateApplication, FIELD_LABELS, PORTAL_URL } = require('../shared/schema.cjs');
+const { validateProfile, validateApplication, FIELD_LABELS, PORTAL_URL, isPortalUrl, siteOrigin } = require('../shared/schema.cjs');
 
 app.setName('SecondHand');
 const localAppData = process.platform === 'win32' ?
@@ -38,12 +38,20 @@ if (nativeOrigin) {
   let bridge;
   let extensionId = null;
   let lockTimer;
+  let lockRevision = 0;
   let quitting = false;
   let fieldRequestPending = false;
   let extensionSetupPending = false;
+  let autofillWithoutAsking = false;
+  let trustedSites = [];
+  // Released only after a named confirmation on sites other than Iowa's portal.
+  const SENSITIVE_FIELDS = ['ssn', 'birthDate', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'assetsOnHand', 'monthlyMedicalExpenses'];
+  const MAX_TRUSTED_SITES = 50;
+  // A worker may survive a desktop restart. A per-process seed prevents its old
+  // access receipt matching a new process; six bytes leave ample safe-integer headroom.
+  let accessRevision = crypto.randomBytes(6).readUIntBE(0, 6);
   const userData = app.getPath('userData');
   const vault = new Vault(path.join(userData, 'vault.secondhand'));
-  const assistance = new AssistedSession();
   const configPath = path.join(userData, 'settings.json');
   const deviceSecretPath = path.join(userData, 'device-reset.bin');
   const deviceResetSupported = ['darwin', 'win32'].includes(process.platform);
@@ -75,8 +83,8 @@ if (nativeOrigin) {
   }
   async function status() {
     const details = await vault.inspect().catch(() => null);
-    return { exists: await vault.exists(), unlocked: vault.unlocked, recoveryKey: Boolean(details?.recoveryKey),
-      deviceReset: Boolean(details?.deviceReset) && await hasDeviceSecret(), deviceResetSupported, extensionId,
+    return { exists: await vault.exists(), unlocked: vault.unlocked, lockRevision, recoveryKey: Boolean(details?.recoveryKey),
+      deviceReset: Boolean(details?.deviceReset) && await hasDeviceSecret(), deviceResetSupported, extensionId, autofillWithoutAsking, trustedSites: [...trustedSites],
       bridgeRunning: Boolean(bridge), platform: process.platform,
       extensionSetup: await getExtensionSetup(app).catch(() => ({ prepared: false, available: false })) };
   }
@@ -86,83 +94,109 @@ if (nativeOrigin) {
   }
   async function lockVault() {
     clearTimeout(lockTimer);
-    assistance.revoke();
+    accessRevision++;
     await vault.lock();
-    assistance.revoke();
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('secondhand:locked');
+    accessRevision++;
+    lockRevision++;
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('secondhand:locked', { lockRevision });
     return status();
   }
   function requireUnlocked() {
     if (!vault.unlocked) throw publicError('Unlock SecondHand first.');
   }
+  async function saveSettings() {
+    await atomicWrite(configPath, Buffer.from(JSON.stringify({ extensionId, autofillWithoutAsking, trustedSites })));
+  }
   async function saveExtensionRegistration(id) {
-    assistance.revoke();
+    accessRevision++;
     let registration;
     try { registration = await registerHost(app, id); }
     catch (error) { throw publicError(error.message.startsWith('On Windows') ? error.message : 'Could not prepare the Chrome connection. Try again or see the setup instructions.'); }
-    await atomicWrite(configPath, Buffer.from(JSON.stringify({ extensionId: id })));
+    // Trust belongs to one extension identity; a different ID must be approved again.
+    if (id !== extensionId) autofillWithoutAsking = false;
     extensionId = id;
-    assistance.revoke();
+    accessRevision++;
+    await saveSettings();
     return registration;
   }
   async function bridgeRequest(request, context) {
-    if (request.type === 'status') return { unlocked: vault.unlocked, applicationCount: vault.unlocked ? vault.getData().applications.length : 0 };
-    if (request.type === 'endAssistedSession') return assistance.end({ ...request, extensionId: context.extensionId });
-    requireUnlocked();
-    if (request.type === 'checkAssistedSession') {
-      const active = validated(assistance.check.bind(assistance), { ...request, extensionId: context.extensionId });
-      touch();
-      return active;
+    if (request.type === 'status') return { unlocked: vault.unlocked, applicationCount: vault.unlocked ? vault.getData().applications.length : 0, accessRevision };
+    if (request.type === 'showApp') {
+      if (mainWindow) { if (mainWindow.isMinimized?.()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); }
+      return { shown: true };
     }
-    if (request.type === 'startAssistedSession') {
+    requireUnlocked();
+    if (request.type === 'trustSite') {
+      const origin = siteOrigin(request.url);
       if (fieldRequestPending) throw publicError('Another request is waiting for your approval.');
       fieldRequestPending = true;
-      const generation = assistance.generation;
+      const generation = accessRevision;
       try {
         mainWindow.show(); mainWindow.focus();
         const answer = await dialog.showMessageBox(mainWindow, {
-          type: 'question', title: 'Start guided Iowa SNAP assistance?',
-          message: 'Allow guided filling for the next 15 minutes?',
-          detail: `Website: ${PORTAL_URL}\n\nApproved profile fields: ${request.fields.map(field => FIELD_LABELS[field]).join(', ')}\n\nSecondHand may fill these saved fields and click ordinary Next or Save and Continue on supported Iowa SNAP pages. These actions send entered answers to Iowa, which may save them immediately.\n\nIt must pause for unsupported or unanswered questions, CAPTCHA, consent, signatures, review, and final submission. This approval does not authorize consent, signatures, or submitting your application.\n\nStop from the extension or lock SecondHand at any time.`,
-          buttons: ['Cancel', 'Allow guided assistance'], defaultId: 0, cancelId: 0, noLink: true
+          type: 'question', title: 'Trust this site?', message: `Let SecondHand fill forms on ${origin}?`,
+          detail: 'When you click Autofill on this site, SecondHand fills the saved answers it can match. It never clicks Next or Submit. Social Security number, date of birth, income, money on hand, and medical expenses still ask every time. You can remove this site on the Chrome extension page.',
+          buttons: ['Cancel', 'Trust this site'], defaultId: 1, cancelId: 0, noLink: true
         });
-        if (answer.response !== 1) throw publicError('You cancelled guided assistance.');
+        if (answer.response !== 1) throw publicError('You cancelled trusting this site.');
         requireUnlocked();
-        if (generation !== assistance.generation || extensionId !== context.extensionId) throw publicError('SecondHand was locked or the Chrome connection changed. Start guided assistance again.');
-        const grant = assistance.issue({ ...request, extensionId: context.extensionId });
+        if (generation !== accessRevision || extensionId !== context.extensionId) throw publicError('SecondHand access changed. Try again.');
+        if (!trustedSites.includes(origin)) {
+          if (trustedSites.length >= MAX_TRUSTED_SITES) throw publicError('Remove a trusted site before adding another.');
+          trustedSites = [...trustedSites, origin];
+          const approvedRevision = ++accessRevision;
+          await saveSettings();
+          requireUnlocked();
+          if (approvedRevision !== accessRevision || extensionId !== context.extensionId) throw publicError('SecondHand access changed. Try again.');
+        }
         touch();
-        return grant;
+        return { trusted: true, origin };
       } finally { fieldRequestPending = false; }
     }
     if (request.type === 'getFields') {
-      if (request.assistanceToken) {
-        validated(assistance.authorize.bind(assistance), { ...request, extensionId: context.extensionId });
-        const profile = vault.getData().profile;
-        const values = {};
-        for (const field of request.fields) if (typeof profile[field] === 'string' && profile[field].trim()) values[field] = profile[field];
-        touch();
-        return { values };
+      const iowa = isPortalUrl(request.url);
+      const navigationOnly = isIowaNavigationAuthorization(request);
+      if (!request.fields.length && !navigationOnly) throw publicError('This page does not support navigation authorization.');
+      const origin = siteOrigin(request.url);
+      if (!iowa && !trustedSites.includes(origin)) throw publicError('This site isn’t trusted. Turn on SecondHand for it first.');
+      const sensitive = iowa ? [] : request.fields.filter(field => SENSITIVE_FIELDS.includes(field));
+      const trusted = autofillWithoutAsking && extensionId === context.extensionId && !sensitive.length;
+      if (!trusted) {
+        if (fieldRequestPending) throw publicError('Another field request is waiting for your approval.');
+        fieldRequestPending = true;
+        const generation = accessRevision;
+        try {
+          mainWindow.show(); mainWindow.focus();
+          const site = iowa ? 'Iowa’s application' : origin;
+          const answer = await dialog.showMessageBox(mainWindow, sensitive.length ? {
+            type: 'warning', title: 'Share sensitive details?',
+            message: `Fill sensitive details on ${origin}?`,
+            detail: `${sensitive.map(field => FIELD_LABELS[field]).join(', ')}\n\nOnly allow this if you meant to give these details to ${origin}. Other fields: ${request.fields.filter(field => !sensitive.includes(field)).map(field => FIELD_LABELS[field]).join(', ') || 'none'}.`,
+            buttons: ['Cancel', 'Allow once'], defaultId: 0, cancelId: 0, noLink: true
+          } : {
+            type: 'question', title: 'Let Chrome fill this form?',
+            message: navigationOnly ? 'Continue this verified Iowa step?' : `Fill these saved answers into ${site}?`,
+            detail: `Website: ${iowa ? PORTAL_URL : origin}\n\n${navigationOnly ? 'No saved profile fields will be read for this step.' : request.fields.map(field => FIELD_LABELS[field]).join(', ')}\n\nChoose “Always allow” to let the SecondHand extension fill without asking whenever this app is unlocked. You can turn it off on the Chrome extension page. The website may save entered information. Review every answer before continuing.${iowa ? "\n\nOn the verified initial applicant page, SecondHand may click ordinary Save and Continue after checking completeness. On the supported home-address confirmation page, it will automatically select Iowa's first possible home-address suggestion and choose Save and Continue. This applies to home-address suggestions only. These actions send entered answers to Iowa, which may save them immediately. Review the chosen home address before final submission. Other question pages require manual Next. This approval does not authorize consent, signatures, or submitting your application." : ''}`,
+            buttons: ['Cancel', 'Allow once', 'Always allow on this computer'], defaultId: 1, cancelId: 0, noLink: true
+          });
+          if (answer.response !== 1 && answer.response !== 2) throw publicError('You cancelled this field request.');
+          requireUnlocked();
+          if (generation !== accessRevision || extensionId !== context.extensionId) throw publicError('SecondHand access changed. Click Autofill again.');
+          if (answer.response === 2 && !sensitive.length) {
+            autofillWithoutAsking = true;
+            const approvedRevision = ++accessRevision;
+            await saveSettings();
+            requireUnlocked();
+            if (approvedRevision !== accessRevision || extensionId !== context.extensionId) throw publicError('SecondHand access changed. Click Autofill again.');
+          }
+        } finally { fieldRequestPending = false; }
       }
-      if (fieldRequestPending) throw publicError('Another field request is waiting for your approval.');
-      fieldRequestPending = true;
-      const generation = assistance.generation;
-      try {
-        mainWindow.show(); mainWindow.focus();
-        const answer = await dialog.showMessageBox(mainWindow, {
-          type: 'question', title: 'Share fields with Iowa HHS?',
-          message: 'Allow this page to fill these fields once?',
-          detail: `Website: ${PORTAL_URL}\n\n${request.fields.map(field => FIELD_LABELS[field]).join(', ')}\n\nThe Iowa website may save entered information. Review every answer before submitting.`,
-          buttons: ['Cancel', 'Allow once'], defaultId: 0, cancelId: 0, noLink: true
-        });
-        if (answer.response !== 1) throw publicError('You cancelled this field request.');
-        requireUnlocked();
-        if (generation !== assistance.generation || extensionId !== context.extensionId) throw publicError('SecondHand was locked or the Chrome connection changed. Review this request again.');
-        const profile = vault.getData().profile;
-        const values = {};
-        for (const field of request.fields) if (typeof profile[field] === 'string' && profile[field].trim()) values[field] = profile[field];
-        touch();
-        return { values };
-      } finally { fieldRequestPending = false; }
+      if (navigationOnly) { touch(); return { values: {}, accessRevision }; }
+      const profile = vault.getData().profile;
+      const values = {};
+      for (const field of request.fields) if (typeof profile[field] === 'string' && profile[field].trim()) values[field] = profile[field];
+      touch();
+      return { values, accessRevision };
     }
     if (request.type === 'recordProgress') {
       await vault.update(data => {
@@ -259,9 +293,9 @@ if (nativeOrigin) {
     async saveProfile(profile) {
       requireUnlocked();
       const clean = validated(validateProfile, profile);
-      assistance.revoke();
+      accessRevision++;
       await vault.update(data => { data.profile = clean; });
-      assistance.revoke();
+      accessRevision++;
       touch(); return clean;
     },
     async saveApplication(application) {
@@ -280,6 +314,22 @@ if (nativeOrigin) {
       if (typeof id !== 'string' || id.length > 64) throw publicError('Invalid application record.');
       await vault.update(data => { data.applications = data.applications.filter(item => item.id !== id); });
       touch(); return true;
+    },
+    async setAutofillTrust(enabled) {
+      requireUnlocked();
+      if (typeof enabled !== 'boolean') throw publicError('Invalid setting.');
+      accessRevision++;
+      autofillWithoutAsking = enabled;
+      await saveSettings();
+      touch(); return status();
+    },
+    async removeTrustedSite(origin) {
+      requireUnlocked();
+      if (typeof origin !== 'string' || !trustedSites.includes(origin)) throw publicError('That site isn’t in your trusted list.');
+      accessRevision++;
+      trustedSites = trustedSites.filter(site => site !== origin);
+      await saveSettings();
+      touch(); return status();
     },
     async openPortal() { await shell.openExternal(PORTAL_URL); return true; },
     async prepareExtension() {
@@ -355,12 +405,23 @@ if (nativeOrigin) {
     mainWindow.loadFile(rendererPath);
   }
 
+  // `npm run dev` sets this so renderer edits reload the window without locking the vault.
+  function watchRendererForDev() {
+    if (app.isPackaged || process.env.SECONDHAND_DEV_RELOAD !== '1') return;
+    let timer;
+    watch(path.dirname(rendererPath), () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => mainWindow?.webContents.reloadIgnoringCache(), 100);
+    });
+  }
+
   app.on('second-instance', () => { if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); } });
   app.whenReady().then(async () => {
     await fs.mkdir(userData, { recursive: true, mode: 0o700 });
     try {
       const stat = await fs.stat(configPath);
-      if (stat.size <= 4096) { const config = JSON.parse(await fs.readFile(configPath, 'utf8')); if (EXTENSION_ID.test(config.extensionId || '')) extensionId = config.extensionId; }
+      if (stat.size <= 4096) { const config = JSON.parse(await fs.readFile(configPath, 'utf8')); if (EXTENSION_ID.test(config.extensionId || '')) { extensionId = config.extensionId; autofillWithoutAsking = config.autofillWithoutAsking === true; }
+      if (Array.isArray(config.trustedSites)) trustedSites = [...new Set(config.trustedSites.filter(origin => typeof origin === 'string' && siteOrigin(origin) === origin))].slice(0, MAX_TRUSTED_SITES); }
     } catch { /* Missing or invalid non-sensitive setup settings are reset. */ }
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     session.defaultSession.setPermissionCheckHandler(() => false);
@@ -372,6 +433,7 @@ if (nativeOrigin) {
       catch (error) { throw new Error(error.publicMessage || 'The local operation could not be completed. Please try again.'); }
     });
     createWindow();
+    watchRendererForDev();
     try { bridge = await startBridge(userData, () => extensionId, bridgeRequest); }
     catch { dialog.showErrorBox('Local bridge unavailable', 'Your saved information is available. Restart SecondHand to connect the Chrome extension.'); }
     powerMonitor.on('suspend', () => lockVault().catch(() => {}));
@@ -382,7 +444,6 @@ if (nativeOrigin) {
     if (quitting) return;
     event.preventDefault(); quitting = true;
     clearTimeout(lockTimer);
-    assistance.revoke();
     Promise.allSettled([vault.lock(), bridge?.close()]).then(() => app.quit());
   });
 }

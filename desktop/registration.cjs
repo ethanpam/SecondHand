@@ -11,6 +11,13 @@ const runFile = promisify(execFile);
 
 const shellQuote = value => `'${value.replace(/'/g, `'\\''`)}'`;
 
+// Windows registers the manifest through the registry instead of a fixed folder.
+function chromeHostManifestDirectory(platform = process.platform, home = os.homedir()) {
+  if (platform === 'darwin') return path.posix.join(home, 'Library/Application Support/Google/Chrome/NativeMessagingHosts');
+  if (platform === 'linux') return path.posix.join(home, '.config/google-chrome/NativeMessagingHosts');
+  return null;
+}
+
 async function registerHost(app, extensionId) {
   if (!EXTENSION_ID.test(extensionId)) throw new Error('Use the 32-letter extension ID shown at chrome://extensions.');
   const userData = app.getPath('userData');
@@ -18,18 +25,18 @@ async function registerHost(app, extensionId) {
   if (!app.isPackaged) {
     if (process.platform === 'win32') throw new Error('On Windows, install the packaged SecondHand app before connecting the extension.');
     executable = path.join(userData, 'secondhand-native-host');
-    await atomicWrite(executable, Buffer.from(`#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(app.getAppPath())} "$@"\n`));
+    // Chrome launches this process with its own environment. Keep it bound to
+    // the desktop that registered it, including an isolated development vault.
+    await atomicWrite(executable, Buffer.from(`#!/bin/sh\nexport SECONDHAND_USER_DATA=${shellQuote(userData)}\nunset SECONDHAND_TEST_MODE SECONDHAND_TEST_USER_DATA\nexec ${shellQuote(process.execPath)} ${shellQuote(app.getAppPath())} "$@"\n`));
     await fs.chmod(executable, 0o700);
   }
   if (process.platform === 'win32') {
     executable = path.join(path.dirname(process.execPath), 'secondHand-native.exe');
     await fs.access(executable);
   }
-  let manifestDirectory;
-  if (process.platform === 'darwin') manifestDirectory = path.join(os.homedir(), 'Library/Application Support/Google/Chrome/NativeMessagingHosts');
-  else if (process.platform === 'linux') manifestDirectory = path.join(os.homedir(), '.config/google-chrome/NativeMessagingHosts');
-  else if (process.platform === 'win32') manifestDirectory = path.join(userData, 'native-messaging');
-  else throw new Error('Native messaging is supported on Windows, macOS, and Linux.');
+  let manifestDirectory = chromeHostManifestDirectory();
+  if (process.platform === 'win32') manifestDirectory = path.join(userData, 'native-messaging');
+  else if (!manifestDirectory) throw new Error('Native messaging is supported on Windows, macOS, and Linux.');
   const manifestPath = path.join(manifestDirectory, `${HOST_NAME}.json`);
   await atomicWrite(manifestPath, Buffer.from(JSON.stringify({
     name: HOST_NAME,
@@ -44,4 +51,4 @@ async function registerHost(app, extensionId) {
   return { extensionId, manifestPath };
 }
 
-module.exports = { registerHost };
+module.exports = { registerHost, chromeHostManifestDirectory };
