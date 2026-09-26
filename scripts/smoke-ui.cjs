@@ -39,7 +39,8 @@ async function main() {
   let page;
   const launch = async () => {
     application = await electron.launch({ args: [root], env: { ...process.env, SECONDHAND_USER_DATA: userData }, timeout: 30000 });
-    const page = await application.firstWindow();
+    // Track the open window here so a failure during launch can still be diagnosed.
+    page = await application.firstWindow();
     page.on('pageerror', error => errors.push(error.message));
     await page.locator('#auth-view').waitFor({ state: 'visible' });
     await page.evaluate(() => {
@@ -183,6 +184,9 @@ async function main() {
         workspaceHidden: document.querySelector('#workspace').hidden
       })).catch(() => ({ unavailable: true }));
       console.error('Sanitized auth failure diagnostics:', JSON.stringify(auth));
+      // Record what the window showed when a step failed; CI uploads artifacts/.
+      await captureDiagnostic(page, 'ui-smoke-failure.png')
+        .catch(screenshotError => console.error('Failure screenshot unavailable:', screenshotError.message));
     }
     throw error;
   } finally {

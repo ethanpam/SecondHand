@@ -222,23 +222,6 @@ test('a delayed lock notification cannot clear a passphrase entered after the ma
   assert.equal(view.get('workspace').hidden, true);
 });
 
-test('a delayed lock notification cannot erase a completed wrong-password error', async t => {
-  const view = await renderer(t, {
-    lock: async () => ({ exists: true, unlocked: false, lockRevision: 1, extensionId: '', bridgeRunning: true }),
-    unlock: async () => { throw new Error('Unable to unlock the local vault.'); }
-  });
-  view.get('lock-button').click();
-  await tick();
-  view.edit('passphrase', 'incorrect-synthetic-passphrase');
-  view.submit('auth-form');
-  await tick();
-  assert.equal(view.get('auth-error').hidden, false);
-  view.lock(1);
-  assert.equal(view.get('auth-error').hidden, false);
-  assert.match(view.get('auth-error').textContent, /Unable to unlock/);
-  assert.equal(view.get('workspace').hidden, true);
-});
-
 test('a fresh lock revision cancels a pending unlock and preserves subsequent input from its late completion', async t => {
   const completion = deferred();
   let dataRequests = 0;
@@ -678,4 +661,25 @@ test('reset on this computer skips the recovery key, and either method can be ch
   view.submit('reset-form');
   await tick();
   assert.deepEqual(resets.at(-1), { recoveryKey: 'typed key', password: 'new synthetic password' });
+});
+
+test('a lock notification arriving after the lock response cannot clear an unlock attempt already under way', async t => {
+  const view = await renderer(t, {
+    lock: async () => ({ exists: true, unlocked: false, lockRevision: 1, recoveryKey: true, extensionId: '', bridgeRunning: true }),
+    unlock: async () => { throw new Error('Unable to unlock. Check your password or restore an intact backup.'); }
+  });
+  // The lock response shows the unlock screen before the separate notification arrives.
+  view.get('lock-button').click();
+  await tick();
+  assert.equal(view.get('auth-view').hidden, false);
+  view.edit('passphrase', 'incorrect-synthetic-password');
+  view.submit('auth-form');
+  await tick();
+  assert.equal(view.get('auth-error').hidden, false);
+
+  // The late notice carries the same lock revision as the response already shown.
+  view.lock(1);
+  assert.equal(view.get('auth-error').hidden, false, 'A late lock notice must not hide the unlock error');
+  assert.match(view.get('auth-error').textContent, /Unable to unlock/);
+  assert.equal(view.get('workspace').hidden, true);
 });

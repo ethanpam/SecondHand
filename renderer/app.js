@@ -621,6 +621,10 @@
       $('confirm-passphrase').disabled = true;
       return;
     }
+    // The lock response and this notification can arrive in either order. The lock
+    // revision lets showLocked skip a repeat of a lock already shown, so a late notice
+    // cannot reset an unlock attempt the person has started, while a newer lock still
+    // cancels any pending unlock or profile load.
     api.onLocked(notification => showLocked({ ...vaultStatus, exists: true, unlocked: false, lockRevision: notification?.lockRevision }));
     try {
       const status = await api.status();
