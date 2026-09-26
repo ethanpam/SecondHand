@@ -12,9 +12,9 @@ const KDF = Object.freeze({ name: 'scrypt', N: 32768, r: 8, p: 1 });
 const AAD = Buffer.from('SecondHand encrypted vault v1');
 const AAD_V2 = Buffer.from('SecondHand encrypted vault v2');
 // Version 2 encrypts contents with a random data key. Each slot stores that key
-// wrapped by one secret, so a recovery key can set a new password without
-// re-encrypting or exposing the password.
-const SLOT_NAMES = Object.freeze(['password', 'recovery']);
+// wrapped by one secret, so a recovery key or this computer's protected secret
+// can set a new password without re-encrypting or exposing the password.
+const SLOT_NAMES = Object.freeze(['password', 'recovery', 'device']);
 const slotAad = name => Buffer.from(`SecondHand vault key slot v2:${name}`);
 // Crockford base32: no I, L, O, or U, so handwritten keys are hard to misread.
 const RECOVERY_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -88,6 +88,12 @@ async function deriveSecretKey(bytes, salt) {
 
 const deriveKey = (passphrase, salt) => deriveSecretKey(passphraseBytes(passphrase), salt);
 const deriveRecoveryKey = (recoveryKey, salt) => deriveSecretKey(Buffer.from(normalizeRecoveryKey(recoveryKey), 'utf8'), salt);
+// The device secret is 32 random bytes kept by the operating system, so a fast
+// HKDF is enough; scrypt only needs to slow down guessing of human secrets.
+function deriveDeviceKey(deviceSecret, salt) {
+  if (!Buffer.isBuffer(deviceSecret) || deviceSecret.length !== 32) throw new Error('This computer’s reset secret is unavailable.');
+  return Buffer.from(crypto.hkdfSync('sha256', deviceSecret, salt, 'SecondHand device reset', 32));
+}
 
 function wrapKey(dataKey, wrappingKey, name, salt) {
   const iv = crypto.randomBytes(12);
@@ -175,8 +181,10 @@ class Vault {
   }
   async inspect() {
     if (!await this.exists()) return null;
-    try { return { recoveryKey: Boolean(parseEnvelope(await this.readEncrypted()).slots?.recovery) }; }
-    catch { return { recoveryKey: false }; }
+    try {
+      const { slots } = parseEnvelope(await this.readEncrypted());
+      return { recoveryKey: Boolean(slots?.recovery), deviceReset: Boolean(slots?.device) };
+    } catch { return { recoveryKey: false, deviceReset: false }; }
   }
   enqueue(operation) {
     const result = this.pending.then(operation);
@@ -189,7 +197,7 @@ class Vault {
     if (this.key && this.key !== state.key) this.key.fill(0);
     Object.assign(this, { key: state.key, salt: state.salt || null, slots: state.slots || null, version: state.version, data });
   }
-  create(passphrase) {
+  create(passphrase, { deviceSecret } = {}) {
     return this.enqueue(async () => {
       if (await this.exists()) throw new Error('SecondHand already has a password on this computer. Unlock it instead.');
       const recoveryKey = createRecoveryKey();
@@ -201,6 +209,7 @@ class Vault {
         passwordKey = await deriveKey(passphrase, passwordSalt);
         recoveryWrappingKey = await deriveRecoveryKey(recoveryKey, recoverySalt);
         const slots = { password: wrapKey(key, passwordKey, 'password', passwordSalt), recovery: wrapKey(key, recoveryWrappingKey, 'recovery', recoverySalt) };
+        if (deviceSecret) slots.device = this.deviceSlot(key, deviceSecret);
         await this.commit({ version: 1, profile: {}, applications: [] }, { version: 2, key, slots });
       } catch (error) { key.fill(0); throw error; }
       finally { passwordKey?.fill(0); recoveryWrappingKey?.fill(0); }
@@ -224,18 +233,35 @@ class Vault {
       } finally { if (key !== passwordKey) passwordKey.fill(0); }
     });
   }
-  resetWithRecoveryKey(recoveryKey, passphrase) {
+  deviceSlot(key, deviceSecret) {
+    const salt = crypto.randomBytes(32);
+    const wrappingKey = deriveDeviceKey(deviceSecret, salt);
+    try { return wrapKey(key, wrappingKey, 'device', salt); }
+    finally { wrappingKey.fill(0); }
+  }
+  async resetWithRecoveryKey(recoveryKey, passphrase) {
+    normalizeRecoveryKey(recoveryKey);
+    return this.resetFromSlot('recovery', salt => deriveRecoveryKey(recoveryKey, salt), passphrase, {
+      missing: 'This information was saved before recovery keys were added, so it has no recovery key.',
+      failed: 'That recovery key didn’t work. Check it and try again.' });
+  }
+  resetWithDeviceSecret(deviceSecret, passphrase) {
+    return this.resetFromSlot('device', async salt => deriveDeviceKey(deviceSecret, salt), passphrase, {
+      missing: 'This computer isn’t set up to reset your password. Use your recovery key instead.',
+      failed: 'This computer can’t reset this password. Use your recovery key instead.' });
+  }
+  resetFromSlot(name, deriveWrappingKey, passphrase, messages) {
     return this.enqueue(async () => {
       if (this.unlocked) throw new Error('SecondHand is already unlocked.');
-      normalizeRecoveryKey(recoveryKey);
       passphraseBytes(passphrase).fill(0);
       const envelope = parseEnvelope(await this.readEncrypted());
-      if (!envelope.slots?.recovery) throw new Error('This information was saved before recovery keys were added, so it has no recovery key.');
-      const wrappingKey = await deriveRecoveryKey(recoveryKey, envelope.slots.recovery.salt);
-      let key, data;
-      try { key = unwrapKey(envelope.slots.recovery, wrappingKey, 'recovery'); data = decryptContents(envelope, key); }
-      catch { key?.fill(0); throw new Error('That recovery key didn’t work. Check it and try again.'); }
-      finally { wrappingKey.fill(0); }
+      if (!envelope.slots?.[name]) throw new Error(messages.missing);
+      let wrappingKey, key, data;
+      try {
+        wrappingKey = await deriveWrappingKey(envelope.slots[name].salt);
+        key = unwrapKey(envelope.slots[name], wrappingKey, name); data = decryptContents(envelope, key);
+      } catch { key?.fill(0); throw new Error(messages.failed); }
+      finally { wrappingKey?.fill(0); }
       const salt = crypto.randomBytes(32);
       let passwordKey;
       try {
@@ -245,24 +271,34 @@ class Vault {
       finally { passwordKey?.fill(0); }
     });
   }
-  // Also upgrades a version 1 file, reusing its password-derived key as the
-  // password slot so the current password keeps working.
+  // Changes key slots on an unlocked file. A version 1 file is upgraded first,
+  // reusing its password-derived key as the password slot so the current
+  // password keeps working.
+  async changeSlots(change) {
+    const data = this.getData();
+    const upgrade = this.version === 1;
+    const key = upgrade ? crypto.randomBytes(32) : this.key;
+    try {
+      const slots = upgrade ? { password: wrapKey(key, this.key, 'password', this.salt) } : { ...this.slots };
+      change(slots, key);
+      await this.commit(data, { version: 2, key, slots });
+    } catch (error) { if (upgrade) key.fill(0); throw error; }
+  }
   replaceRecoveryKey() {
     return this.enqueue(async () => {
-      const data = this.getData();
+      this.getData();
       const recoveryKey = createRecoveryKey();
       const salt = crypto.randomBytes(32);
       const wrappingKey = await deriveRecoveryKey(recoveryKey, salt);
-      const upgrade = this.version === 1;
-      const key = upgrade ? crypto.randomBytes(32) : this.key;
-      try {
-        const slots = upgrade ? { password: wrapKey(key, this.key, 'password', this.salt) } : { ...this.slots };
-        slots.recovery = wrapKey(key, wrappingKey, 'recovery', salt);
-        await this.commit(data, { version: 2, key, slots });
-      } catch (error) { if (upgrade) key.fill(0); throw error; }
+      try { await this.changeSlots((slots, key) => { slots.recovery = wrapKey(key, wrappingKey, 'recovery', salt); }); }
       finally { wrappingKey.fill(0); }
       return recoveryKey;
     });
+  }
+  setDeviceSecret(deviceSecret) {
+    return this.enqueue(() => this.changeSlots((slots, key) => {
+      if (deviceSecret) slots.device = this.deviceSlot(key, deviceSecret); else delete slots.device;
+    }));
   }
   lock() {
     return this.enqueue(async () => {

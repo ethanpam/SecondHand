@@ -11,7 +11,7 @@
     'monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities'];
   const viewNames = { overview: 'Overview', profile: 'My information', applications: 'Applications', extension: 'Chrome extension', privacy: 'Privacy & backups' };
   const statusNames = { draft: 'Draft', in_progress: 'In progress', submitted: 'Submitted', needs_action: 'Needs action', approved: 'Approved', denied: 'Denied' };
-  let vaultStatus = { exists: false, unlocked: false, recoveryKey: false, extensionId: '', bridgeRunning: false };
+  let vaultStatus = { exists: false, unlocked: false, recoveryKey: false, deviceReset: false, deviceResetSupported: false, extensionId: '', bridgeRunning: false };
   let data = { profile: {}, applications: [] };
   let currentView = 'overview';
   let profileDirty = false;
@@ -126,12 +126,25 @@
     $('auth-submit').replaceChildren(document.createTextNode(exists ? 'Unlock ' : 'Create password '), icon(exists ? 'lock' : 'arrow'));
     $('recovery-note').textContent = exists ? 'Your password never leaves this computer.' : 'Keep your password somewhere safe. You’ll also get a recovery key in case you forget it.';
     $('forgot-password').hidden = !exists;
+    $('device-reset-field').hidden = exists || !vaultStatus.deviceResetSupported;
+    $('allow-device-reset').checked = true;
     setResetMode(false);
     if (api) $('passphrase').focus();
   }
 
+  function resetWithDevice() {
+    return Boolean(vaultStatus.deviceReset) && (!vaultStatus.recoveryKey || $('reset-method-device').checked);
+  }
+
+  function renderResetMethod() {
+    const device = resetWithDevice();
+    $('recovery-key-field').hidden = device;
+    $('recovery-key-input').required = !device;
+    $('auth-description').textContent = device ? 'Choose a new password. Your saved information stays as it is.' : 'Enter your recovery key and choose a new password. Your saved information stays as it is.';
+  }
+
   function setResetMode(active) {
-    const available = Boolean(vaultStatus.recoveryKey);
+    const available = Boolean(vaultStatus.recoveryKey || vaultStatus.deviceReset);
     $('reset-form').reset();
     clearError('reset-error'); clearError('auth-error');
     $('auth-form').hidden = active;
@@ -142,8 +155,10 @@
     $('reset-submit').hidden = !available;
     if (!active) return;
     $('auth-title').textContent = 'Reset your password';
-    $('auth-description').textContent = available ? 'Enter your recovery key and choose a new password. Your saved information stays as it is.' : 'Without your password or a recovery key, SecondHand can’t open your saved information.';
-    if (available) $('recovery-key-input').focus();
+    $('reset-method').hidden = !(vaultStatus.recoveryKey && vaultStatus.deviceReset);
+    if (!available) { $('auth-description').textContent = 'Without your password or a recovery key, SecondHand can’t open your saved information.'; return; }
+    renderResetMethod();
+    (resetWithDevice() ? $('reset-password') : $('recovery-key-input')).focus();
   }
 
   function clearRecoveryKey() {
@@ -166,6 +181,8 @@
       ? 'You have a recovery key. Creating a new one stops the old key from working. Backups saved earlier still open with the key and password they were saved with.'
       : 'You don’t have a recovery key yet. Create one so you can get back in if you forget your password.';
     $('replace-recovery-key').textContent = hasKey ? 'Create a new recovery key' : 'Create recovery key';
+    $('device-reset-setting').hidden = !vaultStatus.deviceResetSupported;
+    $('device-reset-toggle').checked = Boolean(vaultStatus.deviceReset);
   }
 
   function showView(view, { skipConfirmation = false, focus = true } = {}) {
@@ -332,9 +349,11 @@
       try {
         if (vaultStatus.exists) await loadUnlocked(await api.unlock($('passphrase').value));
         else {
-          const created = await api.createVault({ password: $('passphrase').value });
+          const allowDeviceReset = !$('device-reset-field').hidden && $('allow-device-reset').checked;
+          const created = await api.createVault({ password: $('passphrase').value, allowDeviceReset });
           await loadUnlocked(created.status);
           showRecoveryKey(created.recoveryKey);
+          if (created.deviceResetFailed) $('recovery-feedback').textContent = 'This computer couldn’t save a reset option, so keep this key safe.';
         }
       } catch (error) { showError('auth-error', error); }
       finally { $('passphrase').value = ''; $('confirm-passphrase').value = ''; }
@@ -351,13 +370,29 @@
     }
     pending($('reset-submit'), async () => {
       try {
-        await loadUnlocked(await api.resetPassword({ recoveryKey: $('recovery-key-input').value, password: $('reset-password').value }));
+        const password = $('reset-password').value;
+        await loadUnlocked(await api.resetPassword(resetWithDevice() ? { method: 'device', password } : { recoveryKey: $('recovery-key-input').value, password }));
         toast('Your password was reset. Use your new password next time.');
       } catch (error) { showError('reset-error', error); }
       finally { $('reset-password').value = ''; $('reset-confirm').value = ''; }
     });
   });
 
+  document.querySelectorAll('input[name="reset-method"]').forEach((input) => input.addEventListener('change', () => { clearError('reset-error'); renderResetMethod(); }));
+  $('device-reset-toggle').addEventListener('change', () => {
+    const enabled = $('device-reset-toggle').checked;
+    const generation = vaultGeneration;
+    $('device-reset-toggle').disabled = true;
+    api.setDeviceReset(enabled).then((status) => {
+      if (generation !== vaultGeneration) return;
+      vaultStatus = status; renderRecovery();
+      toast(enabled ? 'This computer can now reset your password.' : 'Reset on this computer is turned off.');
+    }).catch((error) => {
+      if (generation !== vaultGeneration) return;
+      $('device-reset-toggle').checked = !enabled;
+      toast(error.message || 'Unable to change this setting.', true);
+    }).finally(() => { if (generation === vaultGeneration) $('device-reset-toggle').disabled = false; });
+  });
   $('recovery-saved').addEventListener('change', () => { $('recovery-done').disabled = !$('recovery-saved').checked; });
   $('recovery-done').addEventListener('click', () => $('recovery-dialog').close());
   $('recovery-dialog').addEventListener('cancel', (event) => { if (!$('recovery-saved').checked) event.preventDefault(); });

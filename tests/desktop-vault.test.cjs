@@ -154,7 +154,7 @@ test('a new password comes with a recovery key that can set a new password and k
   await vault.update(data => { data.profile = { firstName: 'Recovered Synthetic' }; });
   await vault.lock();
   assert.equal((await fs.readFile(file, 'utf8')).includes(recoveryKey.replace(/-/g, '')), false);
-  assert.deepEqual(await new Vault(file).inspect(), { recoveryKey: true });
+  assert.deepEqual(await new Vault(file).inspect(), { recoveryKey: true, deviceReset: false });
 
   const before = await fs.readFile(file);
   await assert.rejects(vault.resetWithRecoveryKey('0000-0000-0000-0000-0000-0000-0000-0000', 'a brand new password'), /didn’t work/);
@@ -180,7 +180,7 @@ test('a version 1 file gains a recovery key without changing its password, and r
   const { file } = await fixture(t);
   await writeLegacyVault(file, PASSPHRASE, { version: 1, profile: { firstName: 'Legacy Synthetic' }, applications: [] });
   const vault = new Vault(file);
-  assert.deepEqual(await vault.inspect(), { recoveryKey: false });
+  assert.deepEqual(await vault.inspect(), { recoveryKey: false, deviceReset: false });
   await assert.rejects(vault.resetWithRecoveryKey('0000-0000-0000-0000-0000-0000-0000-0000', 'a brand new password'), /no recovery key/);
   await vault.unlock(PASSPHRASE);
   const legacyKey = vault.key;
@@ -213,4 +213,46 @@ test('version 2 envelopes require a password slot and reject unknown or malforme
   const swapped = variant({ password: envelope.slots.recovery, recovery: envelope.slots.password });
   await fs.writeFile(file, swapped);
   await assert.rejects(vault.unlock(PASSPHRASE), /Unable to unlock/);
+});
+
+test('this computer’s secret can reset the password only while its slot is enabled and matching', async t => {
+  const { file } = await fixture(t);
+  const deviceSecret = crypto.randomBytes(32);
+  const vault = new Vault(file);
+  await vault.create(PASSPHRASE, { deviceSecret });
+  await vault.update(data => { data.profile = { firstName: 'Device Synthetic' }; });
+  await vault.lock();
+  assert.deepEqual(await vault.inspect(), { recoveryKey: true, deviceReset: true });
+  assert.equal((await fs.readFile(file, 'utf8')).includes(deviceSecret.toString('base64')), false);
+
+  const before = await fs.readFile(file);
+  await assert.rejects(vault.resetWithDeviceSecret(crypto.randomBytes(32), 'a brand new password'), /can’t reset/);
+  await assert.rejects(vault.resetWithDeviceSecret(Buffer.alloc(8), 'a brand new password'), /can’t reset/);
+  await assert.rejects(vault.resetWithDeviceSecret(deviceSecret, 'short'), /at least 12/);
+  assert.deepEqual(await fs.readFile(file), before);
+
+  await vault.resetWithDeviceSecret(deviceSecret, 'a brand new password');
+  assert.equal(vault.getData().profile.firstName, 'Device Synthetic');
+  await vault.setDeviceSecret(null);
+  await vault.lock();
+  assert.deepEqual(await vault.inspect(), { recoveryKey: true, deviceReset: false });
+  await assert.rejects(vault.resetWithDeviceSecret(deviceSecret, 'another new password'), /isn’t set up/);
+  await vault.unlock('a brand new password');
+  await vault.lock();
+});
+
+test('turning on reset for this computer upgrades a version 1 file and keeps its password', async t => {
+  const { file } = await fixture(t);
+  await writeLegacyVault(file, PASSPHRASE, { version: 1, profile: { firstName: 'Legacy Synthetic' }, applications: [] });
+  const deviceSecret = crypto.randomBytes(32);
+  const vault = new Vault(file);
+  await vault.unlock(PASSPHRASE);
+  await vault.setDeviceSecret(deviceSecret);
+  await vault.lock();
+  assert.deepEqual(await vault.inspect(), { recoveryKey: false, deviceReset: true });
+  await vault.unlock(PASSPHRASE);
+  await vault.lock();
+  await vault.resetWithDeviceSecret(deviceSecret, 'a brand new password');
+  assert.equal(vault.getData().profile.firstName, 'Legacy Synthetic');
+  await vault.lock();
 });

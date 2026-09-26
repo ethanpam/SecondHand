@@ -313,18 +313,20 @@ test('creating a password shows the recovery key once and requires acknowledgeme
   const created = [];
   const recoveryKey = 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789';
   const view = await renderer(t, {
-    status: async () => ({ exists: false, unlocked: false, recoveryKey: false, extensionId: '', bridgeRunning: true }),
+    status: async () => ({ exists: false, unlocked: false, recoveryKey: false, deviceResetSupported: true, extensionId: '', bridgeRunning: true }),
     createVault: async request => {
       created.push({ ...request });
       return { status: { exists: true, unlocked: true, recoveryKey: true, extensionId: '', bridgeRunning: true }, recoveryKey };
     }
   });
   assert.equal(view.get('forgot-password').hidden, true);
+  assert.equal(view.get('device-reset-field').hidden, false);
+  assert.equal(view.get('allow-device-reset').checked, true);
   view.edit('passphrase', 'synthetic long password');
   view.edit('confirm-passphrase', 'synthetic long password');
   view.submit('auth-form');
   await tick(); await tick();
-  assert.deepEqual(created, [{ password: 'synthetic long password' }]);
+  assert.deepEqual(created, [{ password: 'synthetic long password', allowDeviceReset: true }]);
   assert.equal(view.get('workspace').hidden, false);
   assert.equal(view.get('recovery-dialog').open, true);
   assert.equal(view.get('recovery-key-value').textContent, recoveryKey);
@@ -395,4 +397,34 @@ test('forgot password resets with a recovery key, and older saved information ex
   older.get('reset-cancel').click();
   assert.equal(older.get('auth-form').hidden, false);
   assert.equal(older.get('auth-title').textContent, 'Welcome back');
+});
+
+test('reset on this computer skips the recovery key, and either method can be chosen when both exist', async t => {
+  const resets = [];
+  const view = await renderer(t, {
+    status: async () => ({ exists: true, unlocked: false, recoveryKey: true, deviceReset: true, deviceResetSupported: true, extensionId: '', bridgeRunning: true }),
+    resetPassword: async request => { resets.push({ ...request }); throw new Error('This computer can’t reset this password. Use your recovery key instead.'); }
+  });
+  view.get('forgot-password').click();
+  assert.equal(view.get('reset-method').hidden, false);
+  assert.equal(view.get('reset-method-device').checked, true);
+  assert.equal(view.get('recovery-key-field').hidden, true);
+  assert.equal(view.get('recovery-key-input').required, false);
+  view.edit('reset-password', 'new synthetic password');
+  view.edit('reset-confirm', 'new synthetic password');
+  view.submit('reset-form');
+  await tick();
+  assert.deepEqual(resets, [{ method: 'device', password: 'new synthetic password' }]);
+  assert.match(view.get('reset-error').textContent, /Use your recovery key/);
+
+  view.get('reset-method-recovery').checked = true;
+  view.get('reset-method-recovery').dispatchEvent(new view.window.Event('change'));
+  assert.equal(view.get('recovery-key-field').hidden, false);
+  assert.equal(view.get('recovery-key-input').required, true);
+  view.edit('recovery-key-input', 'typed key');
+  view.edit('reset-password', 'new synthetic password');
+  view.edit('reset-confirm', 'new synthetic password');
+  view.submit('reset-form');
+  await tick();
+  assert.deepEqual(resets.at(-1), { recoveryKey: 'typed key', password: 'new synthetic password' });
 });

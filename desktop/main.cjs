@@ -1,6 +1,7 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, powerMonitor, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, powerMonitor, session, safeStorage } = require('electron');
+const crypto = require('node:crypto');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -44,6 +45,8 @@ if (nativeOrigin) {
   const vault = new Vault(path.join(userData, 'vault.secondhand'));
   const assistance = new AssistedSession();
   const configPath = path.join(userData, 'settings.json');
+  const deviceSecretPath = path.join(userData, 'device-reset.bin');
+  const deviceResetSupported = ['darwin', 'win32'].includes(process.platform);
   const rendererPath = path.join(__dirname, '../renderer/index.html');
   const rendererUrl = pathToFileURL(rendererPath).href;
   const AUTO_LOCK_MS = 10 * 60 * 1000;
@@ -53,9 +56,27 @@ if (nativeOrigin) {
   };
   const formattedRecoveryKey = value => validated(normalizeRecoveryKey, value).match(/.{4}/g).join('-');
 
+  // The operating system protects this secret (macOS Keychain or Windows data
+  // protection), so only this computer account can use it to reset the password.
+  function sealDeviceSecret() {
+    if (!deviceResetSupported || !safeStorage.isEncryptionAvailable()) throw new Error('Device reset is unavailable.');
+    const secret = crypto.randomBytes(32);
+    return { secret, sealed: safeStorage.encryptString(secret.toString('base64')) };
+  }
+  async function readDeviceSecret() {
+    try {
+      if ((await fs.stat(deviceSecretPath)).size > 4096) return null;
+      const secret = Buffer.from(safeStorage.decryptString(await fs.readFile(deviceSecretPath)), 'base64');
+      return secret.length === 32 ? secret : null;
+    } catch { return null; }
+  }
+  async function hasDeviceSecret() {
+    try { await fs.access(deviceSecretPath); return true; } catch { return false; }
+  }
   async function status() {
     const details = await vault.inspect().catch(() => null);
-    return { exists: await vault.exists(), unlocked: vault.unlocked, recoveryKey: Boolean(details?.recoveryKey), extensionId,
+    return { exists: await vault.exists(), unlocked: vault.unlocked, recoveryKey: Boolean(details?.recoveryKey),
+      deviceReset: Boolean(details?.deviceReset) && await hasDeviceSecret(), deviceResetSupported, extensionId,
       bridgeRunning: Boolean(bridge), platform: process.platform,
       extensionSetup: await getExtensionSetup(app).catch(() => ({ prepared: false, available: false })) };
   }
@@ -159,10 +180,22 @@ if (nativeOrigin) {
   const methods = {
     status,
     async createVault(request) {
+      let device = null;
+      let deviceResetFailed = false;
+      if (request?.allowDeviceReset === true && deviceResetSupported) {
+        try { device = sealDeviceSecret(); } catch { deviceResetFailed = true; }
+      }
       let created;
-      try { created = await vault.create(request?.password); }
+      try { created = await vault.create(request?.password, { deviceSecret: device?.secret }); }
       catch (error) { throw publicError(/password/.test(error.message) ? error.message : 'Could not set up SecondHand. Please try again.'); }
-      touch(); return { status: await status(), recoveryKey: created.recoveryKey };
+      finally { device?.secret.fill(0); }
+      // Store the sealed secret only after creation succeeds, so a failed attempt
+      // never replaces the secret that belongs to an existing file.
+      if (device) {
+        try { await atomicWrite(deviceSecretPath, device.sealed); }
+        catch { deviceResetFailed = true; await vault.setDeviceSecret(null).catch(() => {}); }
+      }
+      touch(); return { status: await status(), recoveryKey: created.recoveryKey, deviceResetFailed };
     },
     async unlock(passphrase) {
       try { await vault.unlock(passphrase); }
@@ -170,7 +203,12 @@ if (nativeOrigin) {
       touch(); return status();
     },
     async resetPassword(request) {
-      try { await vault.resetWithRecoveryKey(request?.recoveryKey, request?.password); }
+      try {
+        if (request?.method === 'device') {
+          const secret = await readDeviceSecret();
+          try { await vault.resetWithDeviceSecret(secret, request?.password); } finally { secret?.fill(0); }
+        } else await vault.resetWithRecoveryKey(request?.recoveryKey, request?.password);
+      }
       catch (error) { throw publicError(/password|recovery key|already unlocked/.test(error.message) ? error.message : 'Could not reset your password. Please try again.'); }
       touch(); return status();
     },
@@ -180,6 +218,25 @@ if (nativeOrigin) {
       try { recoveryKey = await vault.replaceRecoveryKey(); }
       catch { throw publicError('Could not create a recovery key. Please try again.'); }
       touch(); return { recoveryKey };
+    },
+    async setDeviceReset(enabled) {
+      requireUnlocked();
+      if (typeof enabled !== 'boolean') throw publicError('Invalid setting.');
+      try {
+        if (enabled) {
+          let secret = await readDeviceSecret();
+          if (!secret) {
+            const device = sealDeviceSecret();
+            await atomicWrite(deviceSecretPath, device.sealed);
+            secret = device.secret;
+          }
+          try { await vault.setDeviceSecret(secret); } finally { secret.fill(0); }
+        } else {
+          await vault.setDeviceSecret(null);
+          await fs.rm(deviceSecretPath, { force: true });
+        }
+      } catch { throw publicError(enabled ? 'This computer couldn’t save a reset option. Your recovery key still works.' : 'Could not turn off reset on this computer. Please try again.'); }
+      touch(); return status();
     },
     async saveRecoveryKey(value) {
       const recoveryKey = formattedRecoveryKey(value);

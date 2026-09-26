@@ -40,6 +40,9 @@ async function main() {
     await captureDiagnostic(page, 'vault-setup.png');
     await page.locator('#passphrase').fill(passphrase);
     await page.locator('#confirm-passphrase').fill(passphrase);
+    // Keep automated runs away from the real Keychain or Windows protected storage;
+    // tests/desktop-recovery-main.test.cjs covers reset on this computer.
+    if (await page.locator('#device-reset-field').isVisible()) await page.locator('#allow-device-reset').uncheck();
     await page.locator('#auth-submit').click();
     await expect(page.locator('#recovery-dialog')).toBeVisible();
     const recoveryKey = await page.locator('#recovery-key-value').textContent();
