@@ -2,6 +2,8 @@
 
 const net = require('node:net');
 const fs = require('node:fs/promises');
+const { createReadStream, writeSync } = require('node:fs');
+const { Writable } = require('node:stream');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -24,6 +26,27 @@ function frame(value) {
   const header = Buffer.alloc(4);
   header.writeUInt32LE(payload.length);
   return Buffer.concat([header, payload]);
+}
+
+function nativeStreams() {
+  // Electron intentionally replaces process.stdin with an EOF-only stream on
+  // Windows (lib/common/init.ts). Use the inherited OS descriptors directly.
+  // Raw Buffer writes also avoid console/text encoding of the binary header.
+  const input = createReadStream(null, { fd: 0, autoClose: false, highWaterMark: 16384 });
+  const output = new Writable({
+    write(bytes, _encoding, callback) {
+      try {
+        let offset = 0;
+        while (offset < bytes.length) {
+          const written = writeSync(1, bytes, offset, bytes.length - offset);
+          if (!written) throw new Error('Native output pipe closed.');
+          offset += written;
+        }
+        callback();
+      } catch (error) { callback(error); }
+    }
+  });
+  return { input, output };
 }
 
 class FrameReader extends EventEmitter {
@@ -192,5 +215,5 @@ function runNativeHost(userData, extensionId, input = process.stdin, output = pr
   });
 }
 
-module.exports = { HOST_NAME, EXTENSION_ID, MAX_MESSAGE_BYTES, extensionFromOrigin, frame, FrameReader,
+module.exports = { HOST_NAME, EXTENSION_ID, MAX_MESSAGE_BYTES, extensionFromOrigin, frame, FrameReader, nativeStreams,
   validateRequest, startBridge, relayRequest, runNativeHost };

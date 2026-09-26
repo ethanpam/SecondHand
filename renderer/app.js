@@ -10,6 +10,8 @@
   let data = { profile: {}, applications: [] };
   let currentView = 'overview';
   let profileDirty = false;
+  let profileRevision = 0;
+  let applicationBusy = false;
   let toastTimer;
   let vaultGeneration = 0;
 
@@ -51,10 +53,22 @@
 
   async function pending(button, action) {
     if (button.disabled) return;
+    const generation = vaultGeneration;
     button.disabled = true;
     button.setAttribute('aria-busy', 'true');
     try { return await action(); }
-    finally { button.disabled = !api; button.removeAttribute('aria-busy'); }
+    finally {
+      if (generation === vaultGeneration) {
+        button.disabled = !api;
+        button.removeAttribute('aria-busy');
+      }
+    }
+  }
+
+  function setApplicationBusy(value) {
+    applicationBusy = value;
+    $('application-form').querySelectorAll('input, select, textarea, button').forEach((control) => { control.disabled = value; });
+    $('application-form').setAttribute('aria-busy', String(value));
   }
 
   function setProfileDirty(value) {
@@ -66,6 +80,11 @@
 
   function clearSensitiveUI() {
     vaultGeneration++;
+    document.querySelectorAll('button[aria-busy="true"]').forEach((button) => {
+      button.disabled = !api;
+      button.removeAttribute('aria-busy');
+    });
+    setApplicationBusy(false);
     data = { profile: {}, applications: [] };
     $('profile-form').reset();
     $('application-form').reset();
@@ -119,6 +138,7 @@
   }
 
   function fillProfile() {
+    profileRevision++;
     for (const key of profileFields) $(key).value = typeof data.profile[key] === 'string' ? data.profile[key] : '';
     setProfileDirty(false);
   }
@@ -234,6 +254,7 @@
   }
 
   async function refreshApplications(generation) {
+    if (!vaultStatus.unlocked || generation !== vaultGeneration) return false;
     const latest = await api.getData();
     if (!vaultStatus.unlocked || generation !== vaultGeneration) return false;
     data.applications = Array.isArray(latest.applications) ? latest.applications : [];
@@ -274,17 +295,21 @@
   $('overview-start').addEventListener('click', () => showView('profile'));
   $('lock-button').addEventListener('click', lockVault);
   $('privacy-lock').addEventListener('click', lockVault);
-  $('profile-form').addEventListener('input', () => setProfileDirty(true));
+  $('profile-form').addEventListener('input', () => { profileRevision++; setProfileDirty(true); });
   $('profile-form').addEventListener('submit', (event) => {
     event.preventDefault(); clearError('profile-error');
     const generation = vaultGeneration;
+    const revision = profileRevision;
     const profile = Object.fromEntries(profileFields.map((field) => [field, $(field).value.trim()]));
     pending($('save-profile'), async () => {
       try {
         const saved = await api.saveProfile(profile);
         if (!vaultStatus.unlocked || generation !== vaultGeneration) return;
         data.profile = saved;
-        setProfileDirty(false); renderSummary(); toast('Your information is saved in your local vault.');
+        const newerEdits = profileDirty && profileRevision !== revision;
+        if (!newerEdits) fillProfile();
+        renderSummary();
+        toast(newerEdits ? 'Earlier changes saved. Your newer edits still need to be saved.' : 'Your information is saved in your local vault.');
       } catch (error) { if (generation === vaultGeneration) showError('profile-error', error); }
     });
   });
@@ -293,7 +318,10 @@
   const closeApplication = () => { $('application-dialog').close(); $('application-form').reset(); $('application-id').value = ''; clearError('application-error'); };
   $('close-application').addEventListener('click', closeApplication);
   $('cancel-application').addEventListener('click', closeApplication);
-  $('application-dialog').addEventListener('cancel', closeApplication);
+  $('application-dialog').addEventListener('cancel', (event) => {
+    if (applicationBusy) event.preventDefault();
+    else closeApplication();
+  });
   $('application-status').addEventListener('change', () => { $('application-confirmation').required = $('application-status').value === 'submitted'; });
   $('application-form').addEventListener('submit', (event) => {
     event.preventDefault(); clearError('application-error');
@@ -309,10 +337,12 @@
     if (application.status === 'submitted' && !application.confirmationNumber) { showError('application-error', 'Add the confirmation or receipt number from the portal before marking this submitted.'); return; }
     const generation = vaultGeneration;
     pending($('save-application'), async () => {
+      setApplicationBusy(true);
       try {
         await api.saveApplication(application);
         if (await refreshApplications(generation)) { closeApplication(); toast('Application record saved locally.'); }
       } catch (error) { if (generation === vaultGeneration) showError('application-error', error); }
+      finally { if (generation === vaultGeneration) setApplicationBusy(false); }
     });
   });
   $('delete-application').addEventListener('click', () => {
@@ -320,10 +350,12 @@
     const generation = vaultGeneration;
     const id = $('application-id').value;
     pending($('delete-application'), async () => {
+      setApplicationBusy(true);
       try {
         await api.deleteApplication(id);
         if (await refreshApplications(generation)) { closeApplication(); toast('Local application record deleted.'); }
       } catch (error) { if (generation === vaultGeneration) showError('application-error', error); }
+      finally { if (generation === vaultGeneration) setApplicationBusy(false); }
     });
   });
 

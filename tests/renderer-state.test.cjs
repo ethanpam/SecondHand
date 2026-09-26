@@ -1,0 +1,193 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const { JSDOM } = require('jsdom');
+
+const html = fs.readFileSync(path.join(__dirname, '../renderer/index.html'), 'utf8');
+const script = fs.readFileSync(path.join(__dirname, '../renderer/app.js'), 'utf8');
+const tick = () => new Promise(resolve => setImmediate(resolve));
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+async function renderer(t, overrides = {}) {
+  const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'https://secondhand.invalid/' });
+  t.after(() => dom.window.close());
+  const window = dom.window;
+  let onLocked;
+  let status = { exists: true, unlocked: true, extensionId: '', bridgeRunning: true };
+  const database = { profile: { firstName: 'Initial', lastName: 'Test' }, applications: [] };
+  window.scrollTo = () => {};
+  window.confirm = () => true;
+  window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  window.HTMLDialogElement.prototype.close = function () { this.open = false; };
+  window.secondHand = {
+    status: async () => status,
+    getData: async () => structuredClone(database),
+    onLocked: callback => { onLocked = callback; return () => {}; },
+    unlock: async () => { status = { ...status, unlocked: true }; return status; },
+    saveProfile: async profile => { database.profile = structuredClone(profile); return structuredClone(profile); },
+    ...overrides
+  };
+  window.eval(script);
+  await tick();
+  const get = id => window.document.getElementById(id);
+  return {
+    window, get, database,
+    edit(id, value) {
+      get(id).value = value;
+      get(id).dispatchEvent(new window.Event('input', { bubbles: true }));
+    },
+    submit(id) { get(id).dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); },
+    lock() { status = { ...status, unlocked: false }; onLocked(); }
+  };
+}
+
+test('profile edits made during a pending save remain visible and unsaved until a second save', async t => {
+  const saves = [];
+  const view = await renderer(t, {
+    saveProfile: profile => {
+      const completion = deferred();
+      saves.push({ profile: structuredClone(profile), completion });
+      return completion.promise;
+    }
+  });
+  view.window.document.querySelector('.nav-item[data-view="profile"]').click();
+  view.edit('firstName', 'First edit');
+  view.submit('profile-form');
+  assert.equal(saves.length, 1);
+  assert.equal(saves[0].profile.firstName, 'First edit');
+  assert.equal(view.get('save-profile').disabled, true);
+
+  view.edit('firstName', 'Newer unsaved edit');
+  saves[0].completion.resolve(saves[0].profile);
+  await tick();
+  assert.equal(view.get('firstName').value, 'Newer unsaved edit');
+  assert.equal(view.get('profile-save-state').textContent, 'Unsaved changes');
+  assert.equal(view.get('profile-nav-dot').hidden, false);
+  assert.match(view.get('toast').textContent, /newer edits still need to be saved/);
+
+  let askedToDiscard = false;
+  view.window.confirm = () => { askedToDiscard = true; return false; };
+  view.window.document.querySelector('.nav-item[data-view="overview"]').click();
+  assert.equal(askedToDiscard, true);
+  assert.equal(view.get('view-profile').hidden, false);
+  assert.equal(view.get('firstName').value, 'Newer unsaved edit');
+
+  view.submit('profile-form');
+  assert.equal(saves.length, 2);
+  assert.equal(saves[1].profile.firstName, 'Newer unsaved edit');
+  saves[1].completion.resolve(saves[1].profile);
+  await tick();
+  assert.equal(view.get('profile-save-state').textContent, 'Saved locally');
+  assert.equal(view.get('profile-nav-dot').hidden, true);
+  assert.equal(view.get('firstName').value, 'Newer unsaved edit');
+});
+
+test('a pending profile save cannot repopulate fields after a vault lock', async t => {
+  const completion = deferred();
+  let submitted;
+  const view = await renderer(t, {
+    saveProfile: profile => { submitted = structuredClone(profile); return completion.promise; }
+  });
+  view.edit('firstName', 'Private test name');
+  view.edit('ssn', '999-88-7777');
+  view.submit('profile-form');
+  view.lock();
+  completion.resolve(submitted);
+  await tick();
+
+  assert.equal(view.get('firstName').value, '');
+  assert.equal(view.get('ssn').value, '');
+  assert.equal(view.get('workspace').hidden, true);
+  assert.equal(view.get('auth-view').hidden, false);
+  assert.equal(view.get('toast').hidden, true);
+  assert.equal(view.get('application-list').children.length, 0);
+  assert.equal(view.get('save-profile').disabled, false);
+});
+
+test('application editor freezes during save and restores editing after an error', async t => {
+  const saves = [];
+  const view = await renderer(t, {
+    saveApplication: application => {
+      const completion = deferred();
+      saves.push({ application: structuredClone(application), completion });
+      return completion.promise;
+    }
+  });
+  view.get('new-application').click();
+  view.edit('application-next-action', 'Bring requested documents');
+  view.submit('application-form');
+  assert.equal(saves.length, 1);
+  for (const id of ['application-status', 'application-confirmation', 'application-next-action', 'application-due-date', 'application-notes', 'close-application', 'cancel-application', 'delete-application', 'save-application']) {
+    assert.equal(view.get(id).disabled, true, `${id} remains editable during save`);
+  }
+  const cancel = new view.window.Event('cancel', { cancelable: true });
+  view.get('application-dialog').dispatchEvent(cancel);
+  assert.equal(cancel.defaultPrevented, true);
+  assert.equal(view.get('application-dialog').open, true);
+  view.get('cancel-application').click();
+  assert.equal(view.get('application-dialog').open, true);
+
+  saves[0].completion.reject(new Error('Save failed for this test'));
+  await tick();
+  assert.equal(view.get('application-dialog').open, true);
+  assert.equal(view.get('application-next-action').disabled, false);
+  assert.equal(view.get('save-application').disabled, false);
+  assert.equal(view.get('cancel-application').disabled, false);
+  assert.equal(view.get('application-next-action').value, 'Bring requested documents');
+  assert.equal(view.get('application-error').hidden, false);
+
+  view.submit('application-form');
+  assert.equal(saves.length, 2);
+  const saved = { ...saves[1].application, id: 'application-test-id', createdAt: '2026-09-26T12:00:00.000Z', updatedAt: '2026-09-26T12:00:00.000Z' };
+  view.database.applications = [saved];
+  saves[1].completion.resolve(saved);
+  await tick();
+  assert.equal(view.get('application-dialog').open, false);
+  assert.equal(view.get('application-next-action').value, '');
+  assert.equal(view.get('application-next-action').disabled, false);
+  assert.equal(view.get('application-count').textContent, '1');
+});
+
+test('locking during an application save clears the editor and ignores the late result', async t => {
+  const completion = deferred();
+  let submitted;
+  const view = await renderer(t, {
+    saveApplication: application => { submitted = structuredClone(application); return completion.promise; }
+  });
+  view.get('new-application').click();
+  view.edit('application-notes', 'Private synthetic application notes');
+  view.submit('application-form');
+  assert.equal(view.get('application-notes').disabled, true);
+  view.lock();
+  assert.equal(view.get('application-dialog').open, false);
+  assert.equal(view.get('application-notes').value, '');
+  assert.equal(view.get('application-notes').disabled, false);
+  completion.resolve(submitted);
+  await tick();
+  assert.equal(view.get('application-notes').value, '');
+  assert.equal(view.get('application-list').children.length, 0);
+  assert.equal(view.get('overview-applications').children.length, 0);
+  assert.equal(view.get('workspace').hidden, true);
+  assert.equal(view.get('toast').hidden, true);
+  assert.equal(view.get('application-error').hidden, true);
+});
+
+test('a profile load completed after a lock cannot show an unlocked workspace', async t => {
+  const completion = deferred();
+  const view = await renderer(t, { getData: () => completion.promise });
+  view.lock();
+  completion.resolve({ profile: { firstName: 'Stale private profile' }, applications: [] });
+  await tick();
+  assert.equal(view.get('firstName').value, '');
+  assert.equal(view.get('workspace').hidden, true);
+  assert.equal(view.get('auth-view').hidden, false);
+});

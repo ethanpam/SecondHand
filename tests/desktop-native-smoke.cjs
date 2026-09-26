@@ -30,12 +30,20 @@ const { startBridge, frame, FrameReader } = require('../desktop/bridge.cjs');
     delete env.ELECTRON_RUN_AS_NODE;
     child = spawn(executable, args, { env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     let stderr = '';
+    let stdoutPrefix = Buffer.alloc(0);
+    let stdoutBytes = 0;
     const messages = [];
     let framingInvalid = false;
     const reader = new FrameReader();
     reader.on('message', value => messages.push(value));
     reader.on('invalid', () => { framingInvalid = true; });
-    child.stdout.on('data', bytes => reader.push(bytes));
+    child.stdout.on('data', bytes => {
+      stdoutBytes += bytes.length;
+      // This isolated smoke fixture only sends synthetic status messages. Never
+      // capture native stdout in the real application or tests with user data.
+      if (stdoutPrefix.length < 256) stdoutPrefix = Buffer.concat([stdoutPrefix, bytes.subarray(0, 256 - stdoutPrefix.length)]);
+      reader.push(bytes);
+    });
     child.stdout.on('end', () => reader.end());
     child.stderr.on('data', bytes => { if (stderr.length < 16000) stderr += bytes.toString(); });
     const ended = new Promise((resolve, reject) => {
@@ -47,7 +55,7 @@ const { startBridge, frame, FrameReader } = require('../desktop/bridge.cjs');
     child.stdin.end(frame({ id: 'native-smoke', type: 'status' }));
     const result = await ended;
     assert.equal(result.code, 0, `Native host failed (${result.signal || result.code}). ${stderr}`);
-    assert.equal(framingInvalid, false, `Native host emitted non-protocol stdout. ${stderr}`);
+    assert.equal(framingInvalid, false, `Native host emitted non-protocol stdout (${stdoutBytes} bytes; bounded synthetic hex: ${stdoutPrefix.toString('hex')}). ${stderr}`);
     assert.deepEqual(messages, [{ id: 'native-smoke', ok: true, data: { unlocked: false, applicationCount: 0 } }]);
     process.stdout.write(`Native messaging subprocess smoke passed (${packaged ? 'packaged Windows exe' : 'development Electron'}).\n`);
   } finally {

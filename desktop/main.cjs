@@ -6,7 +6,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const { pathToFileURL } = require('node:url');
 const { Vault, atomicWrite, MAX_VAULT_BYTES } = require('./vault.cjs');
-const { startBridge, runNativeHost, extensionFromOrigin, EXTENSION_ID } = require('./bridge.cjs');
+const { startBridge, runNativeHost, nativeStreams, extensionFromOrigin, EXTENSION_ID } = require('./bridge.cjs');
 const { registerHost } = require('./registration.cjs');
 const { validateProfile, validateApplication, FIELD_LABELS, PORTAL_URL } = require('../shared/schema.cjs');
 
@@ -24,7 +24,8 @@ if (nativeOrigin) {
   if (!extensionId) app.exit(1);
   else {
     app.whenReady().then(() => { if (process.platform === 'darwin') app.dock?.hide(); });
-    runNativeHost(app.getPath('userData'), extensionId).then(() => app.exit(0), () => app.exit(1));
+    const { input, output } = nativeStreams();
+    runNativeHost(app.getPath('userData'), extensionId, input, output).then(() => app.exit(0), () => app.exit(1));
   }
 } else if (!app.requestSingleInstanceLock()) {
   app.quit();
