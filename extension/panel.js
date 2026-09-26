@@ -6,10 +6,15 @@
   const trusted = callback => event => { if (event.isTrusted) return callback(event); };
   const send = async payload => {
     const response = await chrome.runtime.sendMessage(payload);
-    if (!response?.ok) throw new Error(fixedText(response?.error) || 'The assistant is unavailable. Reload the extension and this Iowa page.');
+    if (!response?.ok) throw new Error(fixedText(response?.error) || 'The assistant is unavailable. Reload the extension and this page.');
     return response.data;
   };
   const fieldKeys = value => Array.isArray(value) ? value.filter(key => typeof key === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,79}$/.test(key)).slice(0, 80) : [];
+  // Autofill keeps going only on Iowa; other sites get one fill per click.
+  const continuing = result => result?.pageKey !== 'general' && !['stopped', 'locked', 'offline', 'error'].includes(result?.state);
+  // The worker's metadata for a site other than Iowa: its origin and whether it is turned on.
+  const siteOf = state => state?.site && typeof state.site.origin === 'string' ? { origin: state.site.origin, enabled: state.site.enabled === true } : null;
+  const hostOf = origin => fixedText(new URL(origin).hostname, 90);
 
   if (location.search === '?surface=launcher' && !location.hash) { widget(); return; }
   if (location.search || location.hash) return;
@@ -21,6 +26,7 @@
     $('launcher').hidden = false;
     let known = false;
     let autopilot = false;
+    let site = null;
     let result = null;
     let note = '';
     let working = false;
@@ -30,7 +36,7 @@
     function statusText() {
       if (working) return 'Working…';
       if (note) return note;
-      if (!result) return 'Iowa SNAP · ready';
+      if (!result) return site ? `${hostOf(site.origin)} · ready` : 'Iowa SNAP · ready';
       if (result.state === 'done') return [`Filled ${Number(result.filled) || 0}`, fixedText(result.todo, 90)].filter(Boolean).join(' · ');
       return fixedText(result.message, 120);
     }
@@ -54,7 +60,8 @@
         try {
           const state = await send({ type: 'ui:pageState' });
           const page = state?.page || {};
-          known = page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo);
+          site = siteOf(state);
+          known = page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo) || Boolean(site?.enabled);
           autopilot = Boolean(state?.autopilot);
           // While autofill runs, the worker moves ahead between polls. Otherwise keep
           // this widget's own result and adopt the worker's only after a reload.
@@ -72,7 +79,7 @@
       try {
         result = await send({ type: 'ui:autofill', confirmed: true });
         cursor = 0;
-        autopilot = !['stopped', 'locked', 'offline', 'error'].includes(result?.state);
+        autopilot = continuing(result);
       } catch (error) { result = { state: 'error', message: error.message }; autopilot = false; }
       finally { working = false; render(); }
     }));
@@ -88,7 +95,7 @@
       cursor++;
       try {
         const focused = await send({ type: 'ui:focusField', key, confirmed: true });
-        note = focused?.focused ? '' : 'Find it in Iowa’s form.';
+        note = focused?.focused ? '' : site ? 'Find it in the form.' : 'Find it in Iowa’s form.';
       } catch (error) { note = fixedText(error.message, 120); }
       render();
     }));
@@ -117,6 +124,7 @@
     let target = null;
     let fillable = false;
     let autopilot = false;
+    let site = null;
     let contextRevision = 0;
     let checklistSignature = '';
     let working = false;
@@ -136,13 +144,26 @@
           (url.pathname === '/apspssp/ssp.portal' || url.pathname.startsWith('/apspssp/ssp.portal/')) && !/%|\\/.test(url.pathname);
       } catch { return false; }
     }
+    // Any other https page can be turned on; the worker and the desktop check it again.
+    function siteUrl(raw) {
+      try {
+        const url = new URL(raw);
+        return url.protocol === 'https:' && Boolean(url.hostname) && url.origin !== 'https://hhsservices.iowa.gov' && !url.username && !url.password && !url.port;
+      } catch { return false; }
+    }
     function controls() {
+      const off = Boolean(target && site && !site.enabled);
+      $('site-enable').hidden = !off;
+      $('site-enable').disabled = working;
+      $('site-disable').hidden = !(target && site?.enabled);
+      $('site-disable').disabled = working;
+      $('panel-autofill').hidden = off;
       $('panel-autofill').textContent = autopilot ? 'Stop autofill' : 'Autofill this page';
       $('panel-autofill').disabled = !target || (!fillable && !autopilot) || working;
       document.querySelectorAll('.checklist-item').forEach(button => { button.disabled = working || !target; });
     }
     function clearPage() {
-      fillable = false; autopilot = false; checklistSignature = '';
+      fillable = false; autopilot = false; site = null; checklistSignature = '';
       $('page-checklist').replaceChildren();
       $('checklist-section').hidden = true;
     }
@@ -178,11 +199,14 @@
     function render(state) {
       if (!state || typeof state !== 'object') throw new Error('The page state could not be read. Reload Iowa’s page.');
       const page = state.page || {};
-      fillable = page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo);
+      site = siteOf(state);
+      fillable = site ? site.enabled : page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo);
       autopilot = Boolean(state.autopilot);
       renderChecklist(page);
       const result = state.result;
       if (result?.message) show(result.message, result.state === 'error' || result.state === 'offline');
+      else if (site && !site.enabled) show(`SecondHand can fill forms on ${hostOf(site.origin)} after you turn it on here and approve it in the SecondHand app.`);
+      else if (site) show('Click Autofill. SecondHand fills what it recognizes and lists what needs you. It never submits.');
       else if (fillable) show('Click Autofill. SecondHand fills what it can and tells you what it needs.');
       else show(fixedText(page.reason) || 'Nothing to fill on this page. Continue in Iowa’s form.');
       controls();
@@ -195,9 +219,9 @@
         try {
           const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
           if (revision !== contextRevision || stopped) return;
-          if (!tab || !Number.isInteger(tab.id) || !supportedUrl(tab.url)) {
+          if (!tab || !Number.isInteger(tab.id) || (!supportedUrl(tab.url) && !siteUrl(tab.url))) {
             target = null; clearPage(); controls();
-            show('Open Iowa’s SNAP application in this tab. Your checklist appears here automatically.');
+            show('Open Iowa’s SNAP application in this tab. Your checklist appears here automatically. On another food-assistance form, click the SecondHand toolbar icon.');
             return;
           }
           if (!target || target.id !== tab.id || target.url !== tab.url) {
@@ -265,11 +289,28 @@
       if ($('panel-autofill').disabled) return;
       const stopping = autopilot;
       const result = await act(stopping ? { type: 'ui:stop', confirmed: true } : { type: 'ui:autofill', confirmed: true }, stopping ? 'Stopping autofill…' : 'Filling your saved answers…');
-      if (result) autopilot = !stopping && !['stopped', 'locked', 'offline', 'error'].includes(result.state);
+      if (result) autopilot = !stopping && continuing(result);
       if (result?.message) show(result.message, result.state === 'error' || result.state === 'offline');
       controls();
       if (!stopping) await desktopStatus();
       await refresh();
+    }));
+    $('site-enable').addEventListener('click', trusted(async () => {
+      if ($('site-enable').disabled || !target || !site) return;
+      let granted;
+      // Ask before anything is awaited: Chrome only shows its prompt inside the user's click.
+      try { granted = await chrome.permissions.request({ origins: [`${site.origin}/*`] }); }
+      catch (error) { show(fixedText(error.message) || 'Chrome couldn’t ask for access to this site.', true); return; }
+      if (!granted) { show('Chrome didn’t allow SecondHand on this site. Nothing changed.', true); return; }
+      const result = await act({ type: 'ui:enableSite', confirmed: true }, 'Approve this site in the SecondHand app…');
+      await refresh();
+      if (result?.enabled) show(`SecondHand is on for ${hostOf(result.origin)}. Click Autofill.`);
+    }));
+    $('site-disable').addEventListener('click', trusted(async () => {
+      if ($('site-disable').disabled) return;
+      const result = await act({ type: 'ui:disableSite', confirmed: true }, 'Turning SecondHand off for this site…');
+      await refresh();
+      if (result && !result.enabled) show('SecondHand is off for this site. Reload the page to remove its button.');
     }));
     $('desktop-action').addEventListener('click', trusted(async () => {
       try { await send({ type: 'ui:showApp', confirmed: true }); $('desktop-status').textContent = 'Unlock SecondHand, then click Autofill.'; }

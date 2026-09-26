@@ -9,6 +9,8 @@ const adapter = require('../extension/iowa-adapter.js');
 // Values created inside the worker's vm context have foreign prototypes.
 const plain = value => JSON.parse(JSON.stringify(value));
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
+// Iowa never uses the site engine; any call is a bug.
+const noSiteEngine = { requestKeys: () => { throw new Error('Iowa used the site engine.'); }, deriveValues: () => { throw new Error('Iowa used the site engine.'); } };
 
 // A small page model: answering "has home address" reveals a mailing field,
 // the way Iowa's form reveals conditional sections.
@@ -51,7 +53,8 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields } = {}) {
       onActivated: event('activated'), onRemoved: event('removed'), onUpdated: event('updated')
     },
     sidePanel: { setPanelBehavior: async () => {}, open: async () => {} },
-    scripting: { executeScript: async () => {} },
+    scripting: { executeScript: async () => {}, getRegisteredContentScripts: async () => [] },
+    permissions: { contains: async () => false },
     runtime: {
       id: 'testextension', getURL: file => `chrome-extension://testextension/${file}`,
       onMessage: { addListener: callback => { listener = callback; } },
@@ -83,7 +86,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields } = {}) {
     }
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../extension/background.js'), 'utf8'),
-    { chrome, SecondHandIowa: adapter, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console });
+    { chrome, SecondHandIowa: adapter, SecondHandGeneric: noSiteEngine, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console });
   const send = (message, sender) => new Promise(resolve => { if (!listener(message, sender, resolve)) resolve(undefined); });
   return {
     calls, tab, events, filled: () => [...model.filled],
@@ -157,8 +160,13 @@ test('launcher is bound to its own tab, needs confirmed clicks, and cannot use p
   const page = { id: 'testextension', url: `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo`, tab: { id: 7 } };
   assert.equal(await w.send({ type: 'ui:autofill', confirmed: true, tabId: 7 }, page), undefined);
   assert.equal(await w.send({ type: 'ui:autofill', confirmed: true, tabId: 7 }, { id: 'otherextension', url: PANEL_URL }), undefined);
+  // A widget on a site the user has not turned on is refused before anything is read.
+  const calls = w.calls.native.length + w.calls.content.length;
   const elsewhere = { id: 'testextension', url: `${PANEL_URL}?surface=launcher`, frameId: 3, tab: { id: 7, url: 'https://example.com/' } };
-  assert.equal(await w.send({ type: 'ui:autofill', confirmed: true }, elsewhere), undefined);
+  assert.equal((await w.send({ type: 'ui:autofill', confirmed: true }, elsewhere)).ok, false);
+  const plainPage = { ...elsewhere, tab: { id: 7, url: 'http://example.com/' } };
+  assert.equal(await w.send({ type: 'ui:autofill', confirmed: true }, plainPage), undefined);
+  assert.equal(w.calls.native.length + w.calls.content.length, calls);
 });
 
 test('pageState returns the last result for the same page and forgets it after navigation', async () => {
@@ -252,7 +260,7 @@ function journey({ screens, desktop = {}, continueStays = false } = {}) {
     }
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../extension/background.js'), 'utf8'),
-    { chrome, SecondHandIowa: adapter, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, setImmediate, URL, Map, Set, console });
+    { chrome, SecondHandIowa: adapter, SecondHandGeneric: noSiteEngine, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, setImmediate, URL, Map, Set, console });
   const send = (message, sender = { id: 'testextension', url: PANEL_URL }) => new Promise(resolve => { if (!listener({ tabId: 7, ...message }, sender, resolve)) resolve(undefined); });
   return { calls, vault, events, send, filled: () => [...filled], at: () => current().name,
     userContinues: () => navigate(),

@@ -1,0 +1,87 @@
+(function () {
+  'use strict';
+  // Runs only on https sites the user turned on. The widget and the worker do the
+  // deciding; this script plans, fills, and focuses fields, and answers with field
+  // metadata only. Values arrive for one fill and are never sent back.
+  const engine = globalThis.SecondHandGeneric;
+  if (window !== window.top || location.protocol !== 'https:' || !engine || globalThis.secondHandGenericInstalled) return;
+  globalThis.secondHandGenericInstalled = true;
+
+  let panelHost = null;
+  const strings = value => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
+
+  function withOwnPanelHidden(work) {
+    if (!panelHost) return work();
+    const visibility = panelHost.style.getPropertyValue('visibility');
+    const priority = panelHost.style.getPropertyPriority('visibility');
+    panelHost.style.setProperty('visibility', 'hidden', 'important');
+    try { return work(); }
+    finally {
+      if (visibility) panelHost.style.setProperty('visibility', visibility, priority);
+      else panelHost.style.removeProperty('visibility');
+    }
+  }
+
+  function ensurePanel() {
+    if (!document.body) return;
+    if (!panelHost) {
+      panelHost = document.createElement('div');
+      panelHost.setAttribute('data-secondhand-assistant', '');
+      panelHost.setAttribute('data-secondhand-size', 'full');
+      for (const [property, value] of Object.entries({
+        all: 'initial', position: 'fixed', right: '12px', bottom: '16px', display: 'block',
+        width: 'min(272px, calc(100vw - 24px))', height: '70px',
+        'z-index': '2147483647', margin: '0', padding: '0', border: '0',
+        'border-radius': '14px', 'box-shadow': '0 12px 42px #17342235',
+        'color-scheme': 'light', isolation: 'isolate'
+      })) panelHost.style.setProperty(property, value, 'important');
+      const shadow = panelHost.attachShadow({ mode: 'closed' });
+      const frame = document.createElement('iframe');
+      frame.src = chrome.runtime.getURL('panel.html?surface=launcher');
+      frame.title = 'SecondHand autofill';
+      frame.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+      frame.referrerPolicy = 'no-referrer';
+      for (const [property, value] of Object.entries({ width: '100%', height: '100%', display: 'block', border: '0', margin: '0', padding: '0', 'border-radius': '14px', background: 'transparent' })) frame.style.setProperty(property, value, 'important');
+      shadow.append(frame);
+    }
+    if (!panelHost.isConnected) document.body.append(panelHost);
+  }
+
+  // Rebuilt field by field so nothing but labels and ids ever leaves the page.
+  const text = value => { if (typeof value !== 'string') throw new Error('Invalid plan.'); return value; };
+  function planMetadata(plan) {
+    if (!plan || !Array.isArray(plan.matched) || !Array.isArray(plan.unmatched)) throw new Error('Invalid plan.');
+    return {
+      token: text(plan.token),
+      matched: plan.matched.map(field => ({ id: text(field.id), key: text(field.key), confidence: text(field.confidence) })),
+      unmatched: plan.unmatched.map(field => ({ id: text(field.id), label: typeof field.label === 'string' ? field.label : '',
+        type: typeof field.type === 'string' ? field.type : '', options: strings(field.options), required: field.required === true }))
+    };
+  }
+
+  ensurePanel();
+  document.addEventListener('DOMContentLoaded', ensurePanel, { once: true });
+  // Pages that rebuild their body (single-page forms) get the widget back.
+  const watch = setInterval(ensurePanel, 1000);
+  window.addEventListener('pagehide', () => clearInterval(watch), { once: true });
+
+  chrome.runtime.onMessage.addListener((message, sender, respond) => {
+    if (sender.id !== chrome.runtime.id || !message || typeof message !== 'object' || window !== window.top) return;
+    try {
+      if (message.type === 'secondhand:generic:plan') {
+        respond(planMetadata(withOwnPanelHidden(() => engine.plan(document))));
+      } else if (message.type === 'secondhand:generic:fill') {
+        if (typeof message.token !== 'string' || !Array.isArray(message.assignments) || !message.values || typeof message.values !== 'object' || Array.isArray(message.values)) {
+          respond({ ok: false, error: 'The fill request was malformed. Nothing was filled.' });
+          return;
+        }
+        const result = withOwnPanelHidden(() => engine.fillFields(document, message.token, message.assignments, message.values));
+        respond({ ok: result?.ok === true, filled: strings(result?.filled), skipped: strings(result?.skipped) });
+      } else if (message.type === 'secondhand:generic:focus' && typeof message.id === 'string') {
+        respond({ focused: Boolean(withOwnPanelHidden(() => engine.focusField(document, message.id))) });
+      }
+    } catch {
+      respond({ ok: false, error: 'This page could not be checked safely. Review it manually.' });
+    }
+  });
+})();
