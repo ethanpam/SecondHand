@@ -4,7 +4,7 @@ SecondHand runs on your computer. You do not need a developer account, command l
 
 ## Install the desktop app
 
-Download a Windows installer or Mac disk image from the [official GitHub release](https://github.com/ethanpam/secondHand/releases/latest).
+Download a Windows installer or Mac disk image from the [secondHand download website](https://secondhand-download.khoidoan00.chatgpt.site). No GitHub account or repository access is needed.
 
 - **Windows:** run the `.exe` installer and open SecondHand.
 - **MacBook:** choose the Apple silicon download for an M-series Mac, or Intel for an Intel Mac. Open the `.dmg`, drag SecondHand to Applications, eject the disk image, and open the app from Applications. Move it into Applications before preparing the extension so Chrome's local connection points to a permanent app location.
@@ -20,7 +20,7 @@ Create a local vault with a passphrase of at least 12 characters. Keep that pass
 3. Turn on **Developer mode**, choose **Load unpacked**, and select the prepared folder. Use **Copy folder path** in SecondHand to find it:
    - On Mac, press **Command + Shift + G** inside Chrome's folder chooser, paste the path, and open/select that folder.
    - On Windows, paste the path into the folder chooser's address bar, then choose **Select Folder**.
-4. Use Chrome's puzzle-piece menu to pin SecondHand. Keep the desktop app running and unlocked while using the extension.
+4. Keep the desktop app running and unlocked while using the extension. The helper appears automatically on Iowa's supported portal. You can also pin SecondHand from Chrome's puzzle-piece menu to reopen its controls.
 
 There is no extension ID to copy for the bundled extension. Preparing files does **not** install the extension in Chrome: you still complete steps 2–3 yourself. The setup screen cannot verify that you have completed Chrome's installation. Managed school or work browsers may prohibit unpacked extensions; follow that device's policy.
 
@@ -28,15 +28,26 @@ The prepared extension folder stays in the local SecondHand app-data directory. 
 
 ## Apply on Iowa's portal
 
-Open [Iowa's Self-Service Portal](https://hhsservices.iowa.gov/apspssp/ssp.portal) in **Chrome**. The desktop's portal button uses your default browser, which may be different. Choose the guest flow or create/sign into your own Iowa account. Complete program selection and verification yourself.
+Open [Iowa's Self-Service Portal](https://hhsservices.iowa.gov/apspssp/ssp.portal) in **Chrome**. The desktop's portal button uses your default browser, which may be different. The SecondHand helper appears automatically and identifies the current step without retrieving your saved profile. Choose the guest flow or create/sign into your own Iowa account. Complete program choices, verification, and data-use consent yourself.
 
-On the supported primary applicant information page, open SecondHand in Chrome, scan the page, select the matched fields, and request filling. The desktop asks you to approve those specific fields before sharing them. Review the filled answers on the portal.
+On **Enter Personal Information**, the helper lists recognized fields. Select the fields you want to share and review the confirmation checkbox before using either page action:
 
-Continue the application yourself, including all unsupported questions, uploads, signatures, interviews, and final submission. Save the official confirmation number in SecondHand's tracker. The tracker is your own record, not a live agency status feed. See [verified field coverage](iowa-portal.md).
+- **Fill this page:** requests desktop approval for the selected fields and fills the empty supported controls. It stays on the current page.
+- **Fill & Next:** requests the same field approval, fills the page, and activates its verified **Save and Continue** button only when required fields and manual questions are complete. Otherwise it pauses and explains what needs attention.
+- **Start guided autofill:** opens a separate desktop approval listing the profile fields and the scope of a guided session. Approving permits supported filling and verified ordinary Next actions for up to **15 minutes**. It does not approve consent, signatures, or final submission.
+
+Guided mode fills supported saved details and pauses when it encounters unanswered choices, missing required information, validation errors, an unsupported step, verification, consent, signatures, review, or final submission. Answer manual questions directly in Iowa's form; SecondHand never guesses these answers or chooses programs for you. On a supported page, choose **Resume guided autofill** after reviewing your changes. An unexpired paused session can resume within its original scope; an expired or stopped session needs a new desktop approval.
+
+Use **Pause automatic mode** while it is running, or **Stop guided session** when it has paused, to stop the workflow and end its approval. Locking the desktop vault also revokes approval. Stopping does not undo fields already filled or answers already saved by Iowa.
+
+**Current scope is the initial applicant page only:** names, explicit home and mobile phone numbers, and home address, plus that page's verified Save and Continue control. Later application pages remain manual. The helper can scroll rendered fields into view; it skips hidden, covered, ambiguous, and already-entered fields. Review every filled answer. Iowa can receive or save information as it is entered, and Save and Continue sends the page's current answers to Iowa.
+
+Complete all unsupported steps, uploads, signatures, interviews, and final submission yourself. Save the official confirmation number in SecondHand's tracker. A successful Next click is not a submitted application. The tracker is your own record, not a live agency status feed. See [verified field coverage](iowa-portal.md).
 
 ## Updates and troubleshooting
 
-- **New desktop version:** install it, open **Chrome extension**, choose **Refresh extension files**, then click the extension's reload icon on `chrome://extensions`. Close and reopen its popup. Its ID and local folder stay the same. There is no automatic updater.
+- **Upgrade to 0.3 or a new desktop version:** install it, open **Chrome extension**, choose **Refresh extension files**, then click **Reload** for SecondHand on `chrome://extensions`. Reload your Iowa tab so it uses the new helper. If Chrome asks, review and approve the new site permission restricted to `hhsservices.iowa.gov`, which enables automatic portal detection. The extension ID and local folder stay the same. There is no automatic updater. Save or finish any unsaved application work before reloading; Iowa's guest flow can lose unsaved answers.
+- **Helper does not appear:** confirm SecondHand is enabled at `chrome://extensions`, its Iowa site access is allowed, and you are on the official portal in Chrome. Reload the Iowa tab after installing or reloading the extension. No saved profile values are requested merely by opening the helper.
 - **Moved the app:** prepare/refresh the extension again to update Chrome's native-host registration. On Mac, keep the app in Applications rather than running it from the mounted disk image.
 - **Cannot reach the vault:** open/unlock SecondHand, refresh the extension files, reload the extension in Chrome, and try again. Only Chrome is configured by this setup; Edge and other browsers are not automatically configured.
 - **Old manually unpacked copy:** remove the old copy from Chrome, then load the folder prepared by this version. The app preserves vault data when refreshing extension assets.

@@ -10,6 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { startBridge, frame, FrameReader } = require('../desktop/bridge.cjs');
+const { PORTAL_URL } = require('../shared/schema.cjs');
 
 (async () => {
   const packaged = process.env.SECONDHAND_PACKAGED_EXE;
@@ -18,12 +19,24 @@ const { startBridge, frame, FrameReader } = require('../desktop/bridge.cjs');
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-native-smoke-'));
   const userData = packaged && process.platform === 'win32' ? path.join(temporary, 'SecondHand') : path.join(temporary, 'dev-data');
   const extensionId = 'a'.repeat(32);
+  const assistanceToken = 'b'.repeat(64);
+  const fixtures = [
+    { request: { id: 'native-smoke', type: 'status' }, data: { unlocked: false, applicationCount: 0 } },
+    { request: { id: 'start-assistance', type: 'startAssistedSession', url: PORTAL_URL, fields: ['firstName'] },
+      data: { assistanceToken, expiresAt: '2026-09-26T12:15:00.000Z', fields: ['firstName'] } },
+    { request: { id: 'assisted-fields', type: 'getFields', url: PORTAL_URL, fields: ['firstName'], assistanceToken }, data: { values: { firstName: 'Synthetic' } } },
+    { request: { id: 'check-assistance', type: 'checkAssistedSession', url: PORTAL_URL, assistanceToken }, data: { active: true } },
+    { request: { id: 'end-assistance', type: 'endAssistedSession', url: PORTAL_URL, assistanceToken }, data: { ended: true } }
+  ];
   let bridge;
   let child;
   try {
-    bridge = await startBridge(userData, () => extensionId, async request => {
-      assert.equal(request.type, 'status');
-      return { unlocked: false, applicationCount: 0 };
+    bridge = await startBridge(userData, () => extensionId, async (request, context) => {
+      assert.equal(context.extensionId, extensionId);
+      const fixture = fixtures.find(item => item.request.id === request.id);
+      assert.ok(fixture, 'Unexpected native smoke request');
+      assert.deepEqual(request, fixture.request);
+      return fixture.data;
     });
     const executable = packaged ? (process.platform === 'win32' ?
       path.join(path.dirname(path.resolve(packaged)), 'secondHand-native.exe') : path.resolve(packaged)) : require('electron');
@@ -47,7 +60,7 @@ const { startBridge, frame, FrameReader } = require('../desktop/bridge.cjs');
     reader.on('invalid', () => { framingInvalid = true; });
     child.stdout.on('data', bytes => {
       stdoutBytes += bytes.length;
-      // This isolated smoke fixture only sends synthetic status messages. Never
+      // This isolated smoke fixture only sends synthetic messages. Never
       // capture native stdout in the real application or tests with user data.
       if (stdoutPrefix.length < 256) stdoutPrefix = Buffer.concat([stdoutPrefix, bytes.subarray(0, 256 - stdoutPrefix.length)]);
       reader.push(bytes);
@@ -60,12 +73,11 @@ const { startBridge, frame, FrameReader } = require('../desktop/bridge.cjs');
       child.once('close', (code, signal) => { clearTimeout(timeout); resolve({ code, signal }); });
     });
     child.stdin.on('error', () => {});
-    const identifiers = ['native-smoke', 'native-smoke-again'];
-    child.stdin.end(Buffer.concat(identifiers.map(id => frame({ id, type: 'status' }))));
+    child.stdin.end(Buffer.concat(fixtures.map(item => frame(item.request))));
     const result = await ended;
     assert.equal(result.code, 0, `Native host failed (${result.signal || result.code}). ${stderr}`);
     assert.equal(framingInvalid, false, `Native host emitted non-protocol stdout (${stdoutBytes} bytes; bounded synthetic hex: ${stdoutPrefix.toString('hex')}). ${stderr}`);
-    assert.deepEqual(messages, identifiers.map(id => ({ id, ok: true, data: { unlocked: false, applicationCount: 0 } })));
+    assert.deepEqual(messages, fixtures.map(item => ({ id: item.request.id, ok: true, data: item.data })));
     process.stdout.write(`Native messaging subprocess smoke passed (${packaged ? `packaged ${process.platform} native host` : 'development Electron'}).\n`);
   } finally {
     if (child && child.exitCode === null) child.kill();

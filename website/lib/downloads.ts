@@ -1,5 +1,7 @@
 // Only application distribution artifacts are stored online. No applicant data.
-export const RELEASE = '0.2.0';
+export const RELEASE = '0.3.0';
+export const LATEST_RELEASE = '0.3.0';
+const releases = ['0.2.0', '0.3.0'] as const;
 export const filenames = [
   `secondHand-${RELEASE}-win-x64.exe`,
   `secondHand-${RELEASE}-mac-arm64.dmg`,
@@ -8,7 +10,18 @@ export const filenames = [
   'SHA256SUMS.txt',
 ] as const;
 export function allowedFile(file: string) { return (filenames as readonly string[]).includes(file); }
-export function objectKey(file: string) { return `releases/${RELEASE}/${file}`; }
+export function objectKey(file: string, release: string = RELEASE) { return `releases/${release}/${file}`; }
+function downloadRelease(request: Request, file: string) {
+  const explicit = new URL(request.url).searchParams.get('release');
+  if (explicit !== null && !(releases as readonly string[]).includes(explicit)) return null;
+  if (file === 'secondHand-extension.zip' || file === 'SHA256SUMS.txt') return explicit ?? LATEST_RELEASE;
+  for (const version of releases) {
+    if ([`secondHand-${version}-win-x64.exe`, `secondHand-${version}-mac-arm64.dmg`, `secondHand-${version}-mac-x64.dmg`].includes(file)) {
+      return !explicit || explicit === version ? version : null;
+    }
+  }
+  return null;
+}
 export const PART_BYTES = 8 * 1024 * 1024;
 export const MAX_BYTES = 512 * 1024 * 1024;
 export function contentType(file: string) {
@@ -29,8 +42,9 @@ export async function authorized(request: Request, secret?: string) {
 }
 
 export async function download(request: Request, file: string, bucket: R2Bucket) {
-  if (!allowedFile(file)) return error('Download not found.', 404);
-  const key = objectKey(file);
+  const release = downloadRelease(request, file);
+  if (!release) return error('Download not found.', 404);
+  const key = objectKey(file, release);
   const info = await bucket.head(key);
   if (!info) return error('This download is not available yet. Please try again shortly.', 503);
   const headers = new Headers({

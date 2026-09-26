@@ -9,7 +9,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { EventEmitter } = require('node:events');
 const { atomicWrite } = require('./vault.cjs');
-const { PROFILE_FIELDS, isPortalUrl } = require('../shared/schema.cjs');
+const { isPortalUrl } = require('../shared/schema.cjs');
+const { ASSISTANCE_TOKEN, validateFieldScope } = require('./assistance.cjs');
 
 const HOST_NAME = 'org.secondhand.bridge';
 const MAX_MESSAGE_BYTES = 64 * 1024;
@@ -83,15 +84,16 @@ function validateRequest(request) {
       typeof request.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(request.id)) throw new Error('Invalid request identifier.');
   let allowed;
   if (request.type === 'status') allowed = ['id', 'type'];
-  else if (request.type === 'getFields') allowed = ['id', 'type', 'url', 'fields'];
+  else if (request.type === 'getFields') allowed = ['id', 'type', 'url', 'fields', 'assistanceToken'];
+  else if (request.type === 'startAssistedSession') allowed = ['id', 'type', 'url', 'fields'];
+  else if (request.type === 'endAssistedSession' || request.type === 'checkAssistedSession') allowed = ['id', 'type', 'url', 'assistanceToken'];
   else if (request.type === 'recordProgress') allowed = ['id', 'type', 'url', 'filledCount'];
   else throw new Error('Unsupported bridge request.');
   if (Object.keys(request).some(key => !allowed.includes(key))) throw new Error('Unexpected request field.');
   if (request.type !== 'status' && !isPortalUrl(request.url)) throw new Error('Only the supported Iowa portal is allowed.');
-  if (request.type === 'getFields') {
-    if (!Array.isArray(request.fields) || !request.fields.length || request.fields.length > PROFILE_FIELDS.length ||
-        request.fields.some(field => typeof field !== 'string' || !PROFILE_FIELDS.includes(field)) ||
-        new Set(request.fields).size !== request.fields.length) throw new Error('Invalid requested profile fields.');
+  if (request.type === 'getFields' || request.type === 'startAssistedSession') validateFieldScope(request.fields);
+  if (request.type === 'endAssistedSession' || request.type === 'checkAssistedSession' || Object.hasOwn(request, 'assistanceToken')) {
+    if (typeof request.assistanceToken !== 'string' || !ASSISTANCE_TOKEN.test(request.assistanceToken)) throw new Error('Invalid assistance token.');
   }
   if (request.type === 'recordProgress' && (!Number.isInteger(request.filledCount) || request.filledCount < 1 || request.filledCount > 100)) {
     throw new Error('Invalid filled field count.');
@@ -130,7 +132,7 @@ async function startBridge(userData, getExtensionId, handleRequest) {
           socket.end(frame(failure(envelope?.request?.id, 'The extension is not connected to this desktop app.'))); return;
         }
         const request = validateRequest(envelope.request);
-        const data = await handleRequest(request);
+        const data = await handleRequest(request, Object.freeze({ extensionId: envelope.extensionId }));
         if (!socket.destroyed) socket.end(frame({ id: request.id, ok: true, data }));
       } catch (error) {
         if (!socket.destroyed) socket.end(frame(failure(envelope?.request?.id, error.publicMessage || 'The request could not be completed. Check the desktop app.')));

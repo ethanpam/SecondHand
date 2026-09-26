@@ -8,7 +8,8 @@ const { atomicWrite } = require('./vault.cjs');
 // Copy application assets only. Never copy the vault, settings, or user documents.
 const EXTENSION_FILES = Object.freeze([
   'background.js', 'content.js', 'iowa-adapter.js',
-  'popup.html', 'popup.css', 'popup.js', 'manifest.json'
+  'popup.html', 'popup.css', 'popup.js',
+  'panel.html', 'panel.css', 'panel.js', 'manifest.json'
 ]);
 
 function extensionIdFromKey(key) {

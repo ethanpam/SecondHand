@@ -8,6 +8,7 @@ const net = require('node:net');
 const { PassThrough } = require('node:stream');
 const { FrameReader, frame, extensionFromOrigin, validateRequest, startBridge, relayRequest, runNativeHost, MAX_MESSAGE_BYTES } = require('../desktop/bridge.cjs');
 const { PORTAL_URL } = require('../shared/schema.cjs');
+const { AssistedSession } = require('../desktop/assistance.cjs');
 const EXTENSION = 'a'.repeat(32);
 
 test('native frames handle split headers, split UTF-8, and multiple messages', () => {
@@ -51,11 +52,34 @@ test('Chrome native origins and Iowa portal requests use strict allowlists', () 
   for (const filledCount of [-1, 0, 1.5, 101, '2']) assert.throws(() => validateRequest({ id: 'x', type: 'recordProgress', url: PORTAL_URL, filledCount }), /count/);
 });
 
+test('assisted native requests have strict field scopes and token syntax without accepting tab IDs or extra data', () => {
+  const start = { id: 'start', type: 'startAssistedSession', url: PORTAL_URL, fields: ['firstName'] };
+  assert.deepEqual(validateRequest(start), start);
+  const end = { id: 'end', type: 'endAssistedSession', url: PORTAL_URL, assistanceToken: 'a'.repeat(64) };
+  assert.deepEqual(validateRequest(end), end);
+  assert.deepEqual(validateRequest({ ...end, type: 'checkAssistedSession' }).assistanceToken, end.assistanceToken);
+  assert.deepEqual(validateRequest({ ...start, type: 'getFields', assistanceToken: end.assistanceToken }).fields, ['firstName']);
+  for (const fields of [[], ['submit'], ['firstName', 'firstName']]) assert.throws(() => validateRequest({ ...start, fields }), /profile fields/);
+  for (const assistanceToken of [undefined, null, '', 'a'.repeat(63), 'A'.repeat(64), 12]) {
+    assert.throws(() => validateRequest({ ...end, assistanceToken }), /assistance token/);
+    assert.throws(() => validateRequest({ ...end, type: 'checkAssistedSession', assistanceToken }), /assistance token/);
+    assert.throws(() => validateRequest({ ...start, type: 'getFields', assistanceToken }), /assistance token/);
+  }
+  for (const extra of [{ tabId: 1 }, { profile: {} }, { assistanceToken: end.assistanceToken }]) {
+    assert.throws(() => validateRequest({ ...start, ...extra }), /Unexpected/);
+  }
+  assert.throws(() => validateRequest({ ...end, url: 'https://example.test' }), /Iowa portal/);
+  assert.throws(() => validateRequest({ ...end, type: 'checkAssistedSession', fields: ['firstName'] }), /Unexpected/);
+});
+
 test('local bridge requires ephemeral token and registered extension; native host emits framed responses', async t => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-bridge-test-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   let handled = 0;
-  const bridge = await startBridge(directory, () => EXTENSION, async () => { handled++; return { unlocked: false, applicationCount: 0 }; });
+  const bridge = await startBridge(directory, () => EXTENSION, async (_request, context) => {
+    assert.deepEqual(context, { extensionId: EXTENSION });
+    handled++; return { unlocked: false, applicationCount: 0 };
+  });
   t.after(() => bridge.close());
   const request = { id: 'status-1', type: 'status' };
   const response = await relayRequest(directory, EXTENSION, request);
@@ -83,4 +107,30 @@ test('local bridge requires ephemeral token and registered extension; native hos
   await native;
   assert.deepEqual(nativeResponses, [response]);
   output.destroy();
+});
+
+test('assisted tokens survive independent native relay requests but cannot cross extension identities', async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-assisted-bridge-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const assistance = new AssistedSession();
+  let approvedExtension = EXTENSION;
+  const bridge = await startBridge(directory, () => approvedExtension, async (request, context) => {
+    if (request.type === 'startAssistedSession') return assistance.issue({ ...request, ...context });
+    if (request.type === 'endAssistedSession') return assistance.end({ ...request, ...context });
+    if (request.type === 'checkAssistedSession') return assistance.check({ ...request, ...context });
+    assistance.authorize({ ...request, ...context });
+    return { values: { firstName: 'Synthetic' } };
+  });
+  t.after(() => bridge.close());
+  const started = await relayRequest(directory, EXTENSION, { id: 'start', type: 'startAssistedSession', url: PORTAL_URL, fields: ['firstName'] });
+  const request = { id: 'fill', type: 'getFields', url: PORTAL_URL, fields: ['firstName'], assistanceToken: started.data.assistanceToken };
+  assert.deepEqual((await relayRequest(directory, EXTENSION, request)).data, { values: { firstName: 'Synthetic' } });
+  const check = { id: 'check', type: 'checkAssistedSession', url: PORTAL_URL, assistanceToken: request.assistanceToken };
+  assert.deepEqual((await relayRequest(directory, EXTENSION, check)).data, { active: true });
+  approvedExtension = 'b'.repeat(32);
+  assert.equal((await relayRequest(directory, approvedExtension, request)).ok, false);
+  approvedExtension = EXTENSION;
+  assert.deepEqual((await relayRequest(directory, EXTENSION, { id: 'end', type: 'endAssistedSession', url: PORTAL_URL, assistanceToken: request.assistanceToken })).data, { ended: true });
+  assert.equal((await relayRequest(directory, EXTENSION, request)).ok, false);
+  assert.equal((await relayRequest(directory, EXTENSION, check)).ok, false);
 });

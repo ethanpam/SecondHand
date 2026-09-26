@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "SecondHand · Iowa SNAP companion",
-  "version": "0.2.0",
-  "description": "Fill supported Iowa applicant fields with your permission from your local SecondHand vault.",
+  "name": "SecondHand \u00b7 Iowa SNAP companion",
+  "version": "0.3.0",
+  "description": "A local Iowa SNAP assistant: recognize supported pages, fill approved fields, and guide you through Save and Continue.",
   "minimum_chrome_version": "110",
   "permissions": [
     "activeTab",
@@ -14,10 +14,39 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "SecondHand · Iowa SNAP"
+    "default_title": "SecondHand \u00b7 Iowa SNAP"
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'none'; base-uri 'none'"
   },
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3tZoCADD5tvytGdvKOKBqccHFoWBqIH3KNvb/QZjGUzLsS39egRWF9TsXS2zA15yb2/nqvwmpM3IpR68WG8pIqXHPWD0q6C/shDx6H840Iy/qUVOnikCdnmbFq4bpRtTACF7ui/Oc078R4k+cdQv3Gw9Bt+Yfj9vpao0rsxck25Lsa/noR/Uoqz6cCJsdS76IcOBqoB5PAvHXmOUn+AS0VfggDs5CMBGFoI+r87PKR1rdigvciMs5XyCHJoEkVdJAA85hGrOwuPQSm1pOqoe48436fvi/IXVL2y94Wiphy2cmWmTgPh9hLCyDax8V3pLEkREQCu3iz/uTISzaQ2dIwIDAQAB"
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3tZoCADD5tvytGdvKOKBqccHFoWBqIH3KNvb/QZjGUzLsS39egRWF9TsXS2zA15yb2/nqvwmpM3IpR68WG8pIqXHPWD0q6C/shDx6H840Iy/qUVOnikCdnmbFq4bpRtTACF7ui/Oc078R4k+cdQv3Gw9Bt+Yfj9vpao0rsxck25Lsa/noR/Uoqz6cCJsdS76IcOBqoB5PAvHXmOUn+AS0VfggDs5CMBGFoI+r87PKR1rdigvciMs5XyCHJoEkVdJAA85hGrOwuPQSm1pOqoe48436fvi/IXVL2y94Wiphy2cmWmTgPh9hLCyDax8V3pLEkREQCu3iz/uTISzaQ2dIwIDAQAB",
+  "host_permissions": [
+    "https://hhsservices.iowa.gov/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://hhsservices.iowa.gov/apspssp/ssp.portal",
+        "https://hhsservices.iowa.gov/apspssp/ssp.portal/*"
+      ],
+      "js": [
+        "iowa-adapter.js",
+        "content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "panel.html",
+        "panel.js",
+        "panel.css"
+      ],
+      "matches": [
+        "https://hhsservices.iowa.gov/*"
+      ]
+    }
+  ]
 }

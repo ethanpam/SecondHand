@@ -27,7 +27,7 @@
     } catch { return false; }
   }
 
-  function visible(element, doc) {
+  function rendered(element, doc) {
     const win = doc.defaultView;
     if (!win || !element.isConnected) return false;
     for (let node = element; node && node.nodeType === 1; node = node.parentElement) {
@@ -35,7 +35,18 @@
       if (node.hidden || node.hasAttribute('inert') || node.getAttribute('aria-hidden') === 'true' || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.opacity === '0') return false;
     }
     const rect = element.getBoundingClientRect();
-    if (!element.getClientRects().length || rect.width <= 0 || rect.height <= 0 || rect.left < 0 || rect.top < 0 || rect.right > win.innerWidth || rect.bottom > win.innerHeight) return false;
+    return Boolean(element.getClientRects().length && rect.width > 0 && rect.height > 0);
+  }
+
+  function inViewport(element, doc) {
+    const rect = element.getBoundingClientRect();
+    return rect.left >= 0 && rect.top >= 0 && rect.right <= doc.defaultView.innerWidth && rect.bottom <= doc.defaultView.innerHeight;
+  }
+
+  function visible(element, doc) {
+    if (!rendered(element, doc) || !inViewport(element, doc)) return false;
+    const win = doc.defaultView;
+    const rect = element.getBoundingClientRect();
     for (let node = element.parentElement; node && node !== doc.body; node = node.parentElement) {
       const style = win.getComputedStyle(node);
       const box = node.getBoundingClientRect();
@@ -47,6 +58,14 @@
       if (!top || (top !== element && !element.contains(top))) return false;
     }
     return true;
+  }
+
+  function scrollToField(element, doc) {
+    if (!rendered(element, doc)) return false;
+    if (!visible(element, doc) && typeof element.scrollIntoView === 'function') {
+      element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+    }
+    return visible(element, doc);
   }
 
   function namesFor(element, doc) {
@@ -114,7 +133,8 @@
       const identity = `${element.id} ${element.name} ${names.join(' ')}`.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]/g, ' ');
       const type = element.type?.toLowerCase() || 'text';
       const group = sectionInfo(element);
-      if (!visible(element, doc) || element.matches(':disabled') || element.readOnly || !group.safe || unsafe.test(identity) || !['text', 'select-one'].includes(type)) { result.skipped++; continue; }
+      const canInspect = rendered(element, doc) && (!inViewport(element, doc) || visible(element, doc));
+      if (!canInspect || element.matches(':disabled') || element.readOnly || !group.safe || unsafe.test(identity) || !['text', 'select-one'].includes(type)) { result.skipped++; continue; }
       const matches = Object.entries(definitions).filter(([, definition]) => names.length > 0 && names.every(name => definition.names.includes(name)));
       if (matches.length !== 1) { result.skipped++; continue; }
       const [key, definition] = matches[0];
@@ -161,17 +181,163 @@
       if (doc.location.href !== rawUrl || !fresh.supported || !fresh.recognizedPage || !fresh.bindings.some(item => item.key === key && item.element === element) || !Object.prototype.hasOwnProperty.call(values, key)) { skipped.push(key); continue; }
       const value = formatValue(key, values[key], element);
       if (value === null) { skipped.push(key); continue; }
+      if (!scrollToField(element, doc) || doc.location.href !== rawUrl ||
+          !scan(doc, rawUrl).bindings.some(item => item.key === key && item.element === element)) { skipped.push(key); continue; }
       const prototype = element.tagName === 'SELECT' ? doc.defaultView.HTMLSelectElement.prototype : doc.defaultView.HTMLInputElement.prototype;
       const setter = Object.getOwnPropertyDescriptor(prototype, 'value').set;
       setter.call(element, value);
-      // Let the portal validate as if a user had typed; never click, navigate, or submit.
+      // Filling never clicks a button. Advancing is a separate user command.
       element.dispatchEvent(new doc.defaultView.Event('input', { bubbles: true }));
       element.dispatchEvent(new doc.defaultView.Event('change', { bubbles: true }));
       if (element.value === value) filled.push(key); else skipped.push(key);
     }
     return { filled, skipped };
   }
-  const api = Object.freeze({ PORTAL, definitions, isSupportedUrl, visible, scan, fill, formatValue });
+  const navigationSnapshots = new WeakMap();
+  const knownPersonalControls = new Set([
+    ...Object.values(definitions).map(definition => definition.id), 'suffix', 'maidenName',
+    'hasHome1', 'hasHome2', 'sameAddress1', 'sameAddress2', 'mailingAddressLine1',
+    'mailingAddressLine2', 'mailingCity', 'mailingState', 'mailingZipcode', 'applicant1',
+    'applicant2', 'medicaid', 'snap', 'tanf', 'helpPayMedBill1', 'helpPayMedBill2', 'bestTime'
+  ]);
+
+  function currentControls(form, doc) {
+    return Array.from(form.querySelectorAll('input, select, textarea')).filter(element =>
+      element.type !== 'hidden' && rendered(element, doc) && !element.matches(':disabled'));
+  }
+
+  function mandatory(element) {
+    if (['firstName', 'lastName', 'addressLine1', 'city', 'state', 'zipcode'].includes(element.id)) return true;
+    if (element.required || element.getAttribute('aria-required') === 'true') return true;
+    if (Array.from(element.labels || []).some(label => /\*/.test(label.textContent))) return true;
+    if (!['checkbox', 'radio'].includes(element.type)) return false;
+    const legend = element.closest('fieldset')?.querySelector('legend');
+    return Boolean(legend && /\*/.test(legend.textContent));
+  }
+
+  function personalIssues(form, doc) {
+    const controls = currentControls(form, doc);
+    const radioGroups = new Map();
+    let requiredRemaining = 0, manualRemaining = 0;
+    if (Array.from(form.elements).some(element => !form.contains(element))) manualRemaining++;
+    for (const id of ['firstName', 'lastName', 'hasHome1', 'hasHome2', 'applicant1', 'applicant2']) {
+      if (form.querySelectorAll(`[id="${id}"]`).length !== 1) manualRemaining++;
+    }
+    for (const control of controls) {
+      if (!knownPersonalControls.has(control.id) || control.tagName === 'TEXTAREA') { manualRemaining++; continue; }
+      const expectedName = ({ hasHome1: 'hasHome', hasHome2: 'hasHome', sameAddress1: 'sameAddress', sameAddress2: 'sameAddress', applicant1: 'applicant', applicant2: 'applicant', medicaid: 'programs', snap: 'programs', tanf: 'programs', helpPayMedBill1: 'helpPayMedBill', helpPayMedBill2: 'helpPayMedBill', bestTime: 'bestTimeToCall' })[control.id] || control.id;
+      const expectedType = ['hasHome1', 'hasHome2', 'sameAddress1', 'sameAddress2', 'applicant1', 'applicant2', 'helpPayMedBill1', 'helpPayMedBill2'].includes(control.id) ? 'radio' : ['snap', 'medicaid', 'tanf'].includes(control.id) ? 'checkbox' : ['state', 'mailingState', 'suffix'].includes(control.id) ? 'select-one' : 'text';
+      if (control.name !== expectedName || control.type !== expectedType) { manualRemaining++; continue; }
+      if (control.type === 'radio') {
+        if (!control.name) { manualRemaining++; continue; }
+        if (!radioGroups.has(control.name)) radioGroups.set(control.name, []);
+        radioGroups.get(control.name).push(control);
+      } else if (control.type === 'checkbox') {
+        // Program choice is a manually answered group. No agreement is checked here.
+        if (!['snap', 'medicaid', 'tanf'].includes(control.id) || control.name !== 'programs') manualRemaining++;
+      } else {
+        if (mandatory(control) && !String(control.value || '').trim()) requiredRemaining++;
+        else if (control.getAttribute('aria-invalid') === 'true' || (control.willValidate && !control.validity.valid)) manualRemaining++;
+      }
+    }
+    for (const group of radioGroups.values()) if (!group.some(control => control.checked)) manualRemaining++;
+    const programs = controls.filter(control => control.type === 'checkbox' && control.name === 'programs');
+    if (programs.length && !programs.some(control => control.checked)) manualRemaining++;
+    if (Array.from(form.querySelectorAll('[role="alert"], .error, .errors, .errorMessage')).some(element => rendered(element, doc) && element.textContent.trim())) manualRemaining++;
+    return { requiredRemaining, manualRemaining };
+  }
+
+  function navigationButton(doc, rawUrl) {
+    if (!isSupportedUrl(rawUrl) || !identifyPage(doc)) return null;
+    const forms = doc.querySelectorAll('form#personalInformation[action="enterPersonalInfo"]');
+    if (forms.length !== 1) return null;
+    const form = forms[0];
+    // Even a familiar relative action must resolve to the observed Iowa endpoint.
+    if (form.action !== `${PORTAL}/applyForBenefits/enterPersonalInfo` || form.method.toLowerCase() !== 'post' || form.hasAttribute('onsubmit') || form.hasAttribute('target')) return null;
+    const buttons = Array.from(form.querySelectorAll('button')).filter(button => normal(button.textContent) === 'save and continue');
+    if (buttons.length !== 1) return null;
+    const button = buttons[0];
+    if (button.type !== 'button' || !button.classList.contains('saveAndContinueButton') || button.getAttribute('onclick')?.trim() !== "submitAction('#personalInformation');" ||
+        !rendered(button, doc) || button.matches(':disabled') || button.getAttribute('aria-disabled') === 'true' ||
+        button.hasAttribute('formaction') || button.hasAttribute('formtarget') || button.hasAttribute('formnovalidate') ||
+        (button.getAttribute('form') && button.getAttribute('form') !== form.id)) return null;
+    return { form, button };
+  }
+
+  function probePage(doc, rawUrl) {
+    const result = { kind: 'unsupported', pageKey: 'unsupported', heading: 'Unsupported website', reason: 'Open the official Iowa benefits portal.', canAdvance: false, fields: [], requiredRemaining: 0, manualRemaining: 0 };
+    if (!isSupportedUrl(rawUrl)) return result;
+    result.kind = 'manual'; result.pageKey = 'iowa-manual'; result.heading = 'Iowa benefits application';
+    result.reason = 'Complete this step in Iowa’s form. SecondHand has not verified its controls.';
+    const headings = Array.from(doc.querySelectorAll('h1,h2,h3')).filter(element => rendered(element, doc)).map(element => normal(element.textContent));
+    if (Array.from(doc.querySelectorAll('input[type="password"], [name="captchaAnswer"], #securityCode, #termChkbox, [aria-modal="true"]')).some(element => rendered(element, doc)) ||
+        headings.some(heading => /\b(signature|certification|attestation|review and submit|submit application|confirmation|terms and conditions)\b/.test(heading))) {
+      return { ...result, kind: 'blocked', pageKey: 'iowa-protected-step', heading: 'Finish this step yourself', reason: 'Account access, verification, consent, signatures, and final submission must be completed directly in Iowa’s portal.' };
+    }
+    if (!identifyPage(doc)) {
+      if (headings.includes('household application information')) { result.pageKey = 'iowa-program-intent'; result.heading = 'Household Application Information'; result.reason = 'Choose the household’s application intent and complete verification in Iowa’s form.'; }
+      else if (headings.includes('assisting organization or person')) { result.pageKey = 'iowa-assistance'; result.heading = 'Assisting Organization or Person'; result.reason = 'Answer who is helping with the application yourself. These fields do not describe the applicant.'; }
+      else if (headings.includes("let's get started")) { result.kind = 'blocked'; result.pageKey = 'iowa-consent'; result.heading = 'Let’s get started'; result.reason = 'Review and complete Iowa’s data-use consent yourself.'; }
+      else {
+        const informational = [
+          ['welcome', 'iowa-home', 'Welcome', 'Choose Apply for Assistance in Iowa’s portal to begin.'],
+          ['before you start...', 'iowa-before-start', 'Before You Start', 'Read Iowa’s preparation information, then continue in the portal.'],
+          ['important information when applying and what to expect.', 'iowa-information', 'Important application information', 'Read Iowa’s application instructions, then continue in the portal.'],
+          ['instructions', 'iowa-instructions', 'Instructions', 'Read how Iowa’s form works, then continue in the portal.'],
+          ['about you', 'iowa-about-you', 'About you', 'Continue in Iowa’s portal to the applicant questions.']
+        ].find(([heading]) => headings.includes(heading));
+        if (informational) [, result.pageKey, result.heading, result.reason] = informational;
+      }
+      return result;
+    }
+    const scanResult = scan(doc, rawUrl);
+    const form = doc.querySelector('form#personalInformation[action="enterPersonalInfo"]');
+    const issues = personalIssues(form, doc);
+    const next = navigationButton(doc, rawUrl);
+    return { ...result, ...issues, kind: 'fillable', pageKey: 'iowa-personal-information', heading: 'Enter Personal Information', fields: scanResult.fields,
+      canAdvance: Boolean(next && issues.requiredRemaining === 0 && issues.manualRemaining === 0 && scanResult.ambiguous.length === 0),
+      reason: issues.manualRemaining ? 'Answer the remaining questions and correct any errors in Iowa’s form, then check again.' : issues.requiredRemaining ? 'Complete the required applicant fields before continuing.' : next ? 'Review all answers. Next saves this page to Iowa and opens the following step; it does not submit the application.' : 'The expected Next button was not found safely. Continue directly in Iowa’s form.' };
+  }
+
+  function controlState(form) {
+    return Array.from(form.querySelectorAll('input, select, textarea')).filter(element => element.type !== 'hidden').map(element => ({ element,
+      value: element.value, checked: element.checked, disabled: element.disabled, readOnly: element.readOnly, required: element.required,
+      id: element.id, name: element.name, type: element.type, ariaInvalid: element.getAttribute('aria-invalid'), ariaRequired: element.getAttribute('aria-required'),
+      rendered: rendered(element, form.ownerDocument), labels: namesFor(element, form.ownerDocument).join('|') }));
+  }
+
+  function sameControlState(before, form) {
+    const after = controlState(form);
+    return before.length === after.length && before.every((state, index) => Object.keys(state).every(key => state[key] === after[index][key]));
+  }
+
+  function captureNavigation(doc, rawUrl) {
+    if (doc.location.href !== rawUrl || !probePage(doc, rawUrl).canAdvance) return null;
+    const next = navigationButton(doc, rawUrl);
+    if (!next) return null;
+    // The public token has no enumerable data. DOM refs and answers stay private
+    // in this isolated world's memory and are never included in a page probe.
+    const token = Object.freeze({});
+    navigationSnapshots.set(token, { doc, url: rawUrl, ...next, controls: controlState(next.form), expires: Date.now() + 120000,
+      buttonType: next.button.type, onclick: next.button.getAttribute('onclick') });
+    return token;
+  }
+
+  function advance(doc, rawUrl, token) {
+    const original = token && navigationSnapshots.get(token);
+    if (token) navigationSnapshots.delete(token);
+    const fail = reason => ({ advanced: false, reason });
+    if (!original || original.doc !== doc || original.url !== rawUrl || doc.location.href !== rawUrl || original.expires < Date.now()) return fail('The page changed or the Next preview expired. Check this page again.');
+    const page = probePage(doc, rawUrl), next = navigationButton(doc, rawUrl);
+    if (!page.canAdvance || !next || next.form !== original.form || next.button !== original.button ||
+        next.button.type !== original.buttonType || next.button.getAttribute('onclick') !== original.onclick || !sameControlState(original.controls, next.form)) return fail('The page or an answer changed. Review it and check again before Next.');
+    if (!scrollToField(next.button, doc) || doc.location.href !== rawUrl || !probePage(doc, rawUrl).canAdvance || !sameControlState(original.controls, next.form)) return fail('The Next button is not safely accessible. Continue in Iowa’s form.');
+    try { next.button.click(); }
+    catch { return fail('Iowa’s Next control could not be activated. Check the page before trying again.'); }
+    return { advanced: true, reason: 'Next was clicked once. Check the following page for required questions or errors.' };
+  }
+
+  const api = Object.freeze({ PORTAL, definitions, isSupportedUrl, rendered, visible, scan, fill, formatValue, probePage, captureNavigation, advance });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandIowa = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

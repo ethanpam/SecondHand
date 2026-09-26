@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>SecondHand · Iowa SNAP assistant</title>
+  <link rel="stylesheet" href="panel.css">
+  <script src="panel.js" defer></script>
+</head>
+<body>
+  <header class="panel-header">
+    <span class="brand" aria-hidden="true">s.</span>
+    <div class="header-copy"><strong>SecondHand</strong><span id="header-state">IOWA SNAP ASSISTANT</span></div>
+    <button id="collapse" class="icon-button" type="button" aria-label="Collapse assistant" aria-expanded="true" title="Collapse to see more of the form">−</button>
+  </header>
+  <main id="panel-body">
+    <div class="heading-row"><span class="eyebrow"><span class="dot"></span> OFFICIAL IOWA PORTAL</span><button id="refresh" class="text-button" type="button">Rescan</button></div>
+    <h1>Assist on this page</h1>
+    <p class="intro">Your saved details. Your next step.<br>Always in your control.</p>
+
+    <div class="desktop-row"><span id="desktop-status">Keep SecondHand open and unlocked.</span><button id="check-desktop" class="text-button" type="button">Check</button></div>
+
+    <div id="status" class="status" role="status" aria-live="polite">Checking this page for supported fields…</div>
+    <div id="manual-note" class="manual-note" hidden><strong>Your turn</strong><p id="manual-reason"></p><p>Finish the required step in Iowa’s form, then rescan or resume guided autofill.</p></div>
+
+    <section id="field-preview" hidden aria-labelledby="fields-title">
+      <div class="fields-heading"><h2 id="fields-title">Details ready to fill</h2><span id="field-count"></span></div>
+      <div id="fields" class="fields"></div>
+      <label class="confirm"><input id="confirm" type="checkbox"><span>These fields belong to the primary applicant. Share my selected details with Iowa.</span></label>
+      <div class="fill-actions"><button id="fill-page" class="button secondary" type="button" disabled>Fill this page</button><button id="fill-next" class="button primary" type="button" disabled>Fill &amp; Next <span aria-hidden="true">→</span></button></div>
+      <p class="field-note">Supported fields may be brought into view. Anything that cannot be verified stays manual.</p>
+    </section>
+
+    <section class="guided-section" aria-labelledby="guided-title">
+      <div class="guided-heading"><span class="guided-icon" aria-hidden="true">↗</span><div><h2 id="guided-title">A hand with the next steps</h2><span id="guided-state">YOU CHOOSE WHEN TO START</span></div></div>
+      <p>After desktop approval, guided autofill uses your saved details on supported pages and chooses verified <strong>Save &amp; Continue</strong> buttons. It pauses when a step needs you.</p>
+      <button id="start-auto" class="button primary full" type="button">Start guided autofill <span aria-hidden="true">→</span></button>
+      <button id="pause-auto" class="button pause full" type="button" hidden>Pause automatic mode</button>
+      <p id="automatic-reason" class="automatic-reason" hidden></p>
+    </section>
+
+    <footer><span class="privacy-mark" aria-hidden="true">✓</span><p>No signatures or final submission. Review every answer. Iowa may save details as they are entered.</p></footer>
+  </main>
+</body>
+</html>

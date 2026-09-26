@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { open, stat } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
-import { filenames, PART_BYTES } from '../lib/downloads.ts';
+import { filenames, PART_BYTES, RELEASE } from '../lib/downloads.ts';
 const [origin, directory] = process.argv.slice(2);
 const token = process.env.RELEASE_UPLOAD_TOKEN;
 if (!origin?.startsWith('https://') || !directory || !token || token.length < 32) throw new Error('Usage: RELEASE_UPLOAD_TOKEN=... node scripts/publish-downloads.mjs https://site.example release-directory');
@@ -23,7 +23,7 @@ for (const file of filenames) {
   const hash = createHash('sha256');
   for await (const chunk of createReadStream(path)) hash.update(chunk);
   const sha256 = hash.digest('hex');
-  const existing = await fetch(new URL(`/download/${file}`, site), { method: 'HEAD', redirect: 'error', headers: { ...accessHeaders, 'accept-encoding': 'identity' } });
+  const existing = await fetch(new URL(`/download/${file}?release=${RELEASE}`, site), { method: 'HEAD', redirect: 'error', headers: { ...accessHeaders, 'accept-encoding': 'identity' } });
   if (existing.ok) {
     if (existing.headers.get('x-checksum-sha256') !== sha256 || Number(existing.headers.get('content-length')) !== size) throw new Error(`Existing file differs: ${file}. Publish a new version.`);
     console.log(`Already uploaded: ${file}`); continue;
@@ -44,7 +44,7 @@ for (const file of filenames) {
     throw error;
   } finally { await handle.close(); }
   // Read the actual published bytes back, not just the metadata, before declaring success.
-  const response = await fetch(new URL(`/download/${file}`, site), { redirect:'error', headers: accessHeaders });
+  const response = await fetch(new URL(`/download/${file}?release=${RELEASE}`, site), { redirect:'error', headers: accessHeaders });
   if (!response.ok || !response.body) throw new Error(`Cannot verify ${file}`);
   const check = createHash('sha256');
   let count = 0;

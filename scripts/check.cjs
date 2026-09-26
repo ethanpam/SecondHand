@@ -21,5 +21,10 @@ if (manifest.manifest_version !== 3 || !manifest.permissions.includes('nativeMes
 for (const permission of [...(manifest.host_permissions || []), ...(manifest.optional_host_permissions || [])]) {
   if (permission !== 'https://hhsservices.iowa.gov/*' && permission !== 'https://hhsservices.iowa.gov/apspssp/*') throw new Error(`Unexpected host permission: ${permission}`);
 }
+const expectedMatches = ['https://hhsservices.iowa.gov/apspssp/ssp.portal', 'https://hhsservices.iowa.gov/apspssp/ssp.portal/*'];
+if (manifest.content_scripts?.length !== 1 || JSON.stringify(manifest.content_scripts[0].matches) !== JSON.stringify(expectedMatches) || manifest.content_scripts[0].all_frames !== false) throw new Error('Automatic detection must stay on exact Iowa portal top frames.');
+const resources = manifest.web_accessible_resources;
+if (resources?.length !== 1 || JSON.stringify(resources[0].matches) !== JSON.stringify(['https://hhsservices.iowa.gov/*']) || resources[0].resources.some(file => !['panel.html', 'panel.js', 'panel.css'].includes(file))) throw new Error('Only the Iowa assistant panel can be web accessible.');
+if (manifest.externally_connectable) throw new Error('Websites cannot send extension commands.');
 if (manifest.permissions.includes('storage')) throw new Error('Applicant information must not be stored in Chrome extension storage.');
 console.log(`Checked ${count} JavaScript files and extension permissions.`);

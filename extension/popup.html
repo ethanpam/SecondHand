@@ -6,18 +6,20 @@
   <main>
     <h1>A little help<br>with the paperwork.</h1>
     <p>Use your local profile to fill supported fields on Iowa’s benefits portal. You stay in control.</p>
-    <div class="notice">Early preview: names, home/mobile phones, and home address on the first applicant page. Full application flow still needs live validation.</div>
+    <div class="notice">The on-page assistant appears automatically on Iowa’s portal. Guided mode fills supported fields and selects Save and Continue on verified pages, pausing for anything that needs your input.</div>
     <div id="status" class="status" role="status" aria-live="polite">Open an Iowa application to get started.</div>
+    <button id="show-assistant" class="primary">Show on-page assistant <span aria-hidden="true">↗</span></button>
     <button id="scan" class="primary">Scan this page <span aria-hidden="true">↗</span></button>
     <section id="preview" hidden aria-labelledby="preview-heading">
       <h2 id="preview-heading">Fields ready for your review</h2>
-      <p class="small">Only empty, visible, uniquely matched fields appear. Scroll in Iowa’s form and scan again to see more.</p>
+      <p class="small">Only empty, rendered, uniquely matched fields appear. SecondHand scrolls to check each field before filling.</p>
       <div id="fields"></div>
       <label class="confirm"><input id="confirm" type="checkbox"><span>I checked these fields belong to the primary applicant and want to share the selected information with Iowa HHS.</span></label>
       <button id="fill" class="primary" disabled>Approve in desktop &amp; fill</button>
+      <button id="fill-next" class="primary" disabled>Fill &amp; Save and Continue</button>
       <p class="small">The desktop app will ask for permission. This popup may close; reopen it to see the result.</p>
     </section>
-    <p class="small privacy">Iowa may save answers as they are entered. Check every answer, finish the remaining questions, sign, and submit yourself.</p>
+    <p class="small privacy">Iowa may save answers as they are entered or when Save and Continue is selected. Unknown questions, CAPTCHA, consent, signatures, and final submission stay with you.</p>
     <a href="https://hhsservices.iowa.gov/apspssp/ssp.portal" target="_blank" rel="noopener noreferrer">Open Iowa’s official portal ↗</a>
   </main>
   <footer><details><summary>Connect to your desktop app</summary><p>In SecondHand, open Chrome extension and choose Prepare Chrome extension (or Refresh extension files). Follow its steps to load the prepared folder in Chrome, then keep the desktop app open and your vault unlocked.</p><p>For custom builds only, use this ID in the desktop app’s advanced setup:</p><code id="extension-id"></code><p>SecondHand stores no applicant information in this extension or Chrome Sync.</p></details></footer>

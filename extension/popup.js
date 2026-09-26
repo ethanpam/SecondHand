@@ -9,7 +9,7 @@ const message = async payload => {
   return response.data;
 };
 const chosen = () => Array.from(document.querySelectorAll('#fields input:checked'), input => input.value);
-const enableFill = () => { $('fill').disabled = !preview || !$('confirm').checked || !chosen().length; };
+const enableFill = () => { $('fill').disabled = !preview || !$('confirm').checked || !chosen().length; $('fill-next').disabled = $('fill').disabled; };
 $('confirm').addEventListener('change', enableFill);
 $('scan').addEventListener('click', async () => {
   $('scan').disabled = true;
@@ -24,7 +24,7 @@ $('scan').addEventListener('click', async () => {
     preview = await message({ type: 'ui:scan', tabId: tab.id });
     $('fields').replaceChildren();
     if (!preview.recognizedPage) { show('This page is not supported for filling. Navigate yourself to Enter Personal Information, then scan again. Program choices, CAPTCHA, login, other household members, signatures, and submission stay manual.'); return; }
-    if (!preview.fields.length) { show('No empty, visible fields matched safely. Scroll to the applicant fields and scan again, or complete this page manually.'); return; }
+    if (!preview.fields.length) { show('No empty supported fields matched safely. Review the form or use the on-page assistant to continue.'); return; }
     for (const field of preview.fields) {
       const label = document.createElement('label'); label.className = 'field';
       const input = document.createElement('input'); input.type = 'checkbox'; input.value = field.key; input.checked = true; input.addEventListener('change', enableFill);
@@ -38,15 +38,25 @@ $('scan').addEventListener('click', async () => {
   } catch (error) { show(error.message, true); }
   finally { $('scan').disabled = false; }
 });
-$('fill').addEventListener('click', async () => {
+async function fillSelected(advance = false) {
   if (!preview || !$('confirm').checked || !chosen().length) return;
-  $('fill').disabled = true; $('scan').disabled = true;
+  $('fill').disabled = true; $('fill-next').disabled = true; $('scan').disabled = true;
   show('Approve the selected fields in the SecondHand desktop app. You can reopen this popup afterward to see the result.');
   try {
-    const result = await message({ type: 'ui:fill', tabId: selectedTab, token: preview.token, fields: chosen(), confirmed: true });
+    const result = await message({ type: advance ? 'ui:fillAndNext' : 'ui:fill', tabId: selectedTab, token: preview.token, fields: chosen(), confirmed: true });
     show(result.message, Boolean(result.error));
   } catch (error) { show(error.message, true); }
   finally { preview = null; $('preview').hidden = true; $('scan').disabled = false; }
+}
+$('fill').addEventListener('click', () => fillSelected(false));
+$('fill-next').addEventListener('click', () => fillSelected(true));
+$('show-assistant').addEventListener('click', async () => {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !SecondHandIowa.isSupportedUrl(tab.url)) throw new Error('Open Iowa’s official application first.');
+    await message({ type: 'ui:panel', tabId: tab.id, collapsed: false });
+    window.close();
+  } catch (error) { show(error.message, true); }
 });
 (async () => {
   $('extension-id').textContent = chrome.runtime.id;

@@ -11,7 +11,7 @@ const URL = `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo`;
 // This is not a page dump: no values, tokens, cookies, or scripts are retained.
 const basic = '<h1>Enter Personal Information</h1><form><label for="firstName">First Name *</label><input id="firstName" name="firstName"><label for="lastName">Last Name</label><input id="lastName" name="lastName"></form>';
 function page(html = basic, url = URL) {
-  const attrs = 'id="personalInformation" action="enterPersonalInfo"';
+  const attrs = 'id="personalInformation" action="enterPersonalInfo" method="post"';
   html = html.includes('<form>') ? html.replace('<form>', `<form ${attrs}>`) : `<form ${attrs}>${html}</form>`;
   const dom = new JSDOM(`<!doctype html><main>${html}</main>`, { url, pretendToBeVisual: true });
   const { document } = dom.window;
@@ -53,7 +53,7 @@ test('wrong pages, other people, and unknown groups are not mapped', () => {
   assert.deepEqual(keys(page('<h1 hidden>Enter Personal Information</h1><label>First name<input id="firstName" name="firstName"></label>')), []);
 });
 
-test('hidden, offscreen, occluded, disabled, readonly, or prefilled fields are skipped', () => {
+test('hidden, occluded, disabled, readonly, or prefilled fields are skipped', () => {
   for (const attributes of ['type="hidden"', 'disabled', 'readonly', 'style="display:none"', 'style="visibility:hidden"', 'style="opacity:0"', 'aria-hidden="true"', 'inert', 'value="Existing"']) {
     assert.deepEqual(keys(page(`<h1>Enter Personal Information</h1><label>First name<input id="firstName" name="firstName" ${attributes}></label>`)), [], attributes);
   }
@@ -62,7 +62,8 @@ test('hidden, offscreen, occluded, disabled, readonly, or prefilled fields are s
   }
   const offscreen = page();
   offscreen.querySelector('#firstName').getBoundingClientRect = () => ({ left: -300, top: 20, right: -100, bottom: 40, width: 200, height: 20 });
-  assert.deepEqual(keys(offscreen), ['lastName']);
+  assert.deepEqual(keys(offscreen), ['firstName', 'lastName']);
+  assert.deepEqual(adapter.fill(offscreen, URL, adapter.scan(offscreen, URL).bindings, { firstName: 'Example' }).filled, [], 'offscreen field cannot be written until a successful scroll and visibility check');
   const occluded = page();
   occluded.elementFromPoint = () => occluded.querySelector('h1');
   assert.deepEqual(keys(occluded), []);
@@ -144,11 +145,128 @@ test('public Iowa guest screen metadata fixture is deliberately unsupported', ()
   assert.deepEqual(keys(doc), []);
 });
 
-test('manifest grants only user activated injection and native messaging; applicant storage unavailable', () => {
+test('automatic detection is confined to Iowa portal top frames and applicant storage is unavailable', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../extension/manifest.json'), 'utf8'));
   assert.deepEqual(manifest.permissions.sort(), ['activeTab', 'nativeMessaging', 'scripting']);
-  assert.equal(manifest.host_permissions, undefined);
-  assert.equal(manifest.content_scripts, undefined);
+  assert.deepEqual(manifest.host_permissions, ['https://hhsservices.iowa.gov/*']);
+  assert.deepEqual(manifest.content_scripts, [{ matches: [adapter.PORTAL, `${adapter.PORTAL}/*`], js: ['iowa-adapter.js', 'content.js'], run_at: 'document_idle', all_frames: false }]);
   assert.equal(manifest.externally_connectable, undefined);
   assert.match(manifest.content_security_policy.extension_pages, /connect-src 'none'/);
+});
+
+test('rendered offscreen fields are scrolled into view and rechecked before filling', () => {
+  const doc = page();
+  const target = doc.querySelector('#firstName');
+  let scrolled = 0;
+  target.getBoundingClientRect = () => ({ left: 20, top: 1400, right: 220, bottom: 1430, width: 200, height: 30 });
+  target.scrollIntoView = () => {
+    scrolled++;
+    target.getBoundingClientRect = () => ({ left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 });
+  };
+  const result = adapter.fill(doc, URL, adapter.scan(doc, URL).bindings, { firstName: 'Example' });
+  assert.deepEqual(result.filled, ['firstName']);
+  assert.equal(scrolled, 1);
+  const blocked = page();
+  const control = blocked.querySelector('#firstName');
+  control.getBoundingClientRect = () => ({ left: 20, top: 1400, right: 220, bottom: 1430, width: 200, height: 30 });
+  control.scrollIntoView = () => {
+    control.getBoundingClientRect = () => ({ left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 });
+    control.hidden = true;
+  };
+  assert.deepEqual(adapter.fill(blocked, URL, adapter.scan(blocked, URL).bindings, { firstName: 'Example' }).filled, []);
+  assert.equal(control.value, '');
+});
+
+// Synthetic values remain in jsdom. Question identities are the observed public
+// applicant DOM; this helper never contacts or submits to the government portal.
+function navigationPage() {
+  const doc = page(`<h1>Enter Personal Information</h1><form>
+    <h3>Applicant's Information</h3>
+    <label>First Name*<input id="firstName" name="firstName" value="Example"></label>
+    <label>Last Name*<input id="lastName" name="lastName" value="Applicant"></label>
+    <h3>Address Information</h3><fieldset><legend>Do you have a home address?*</legend>
+      <label>Yes<input id="hasHome1" name="hasHome" type="radio"></label><label>No<input id="hasHome2" name="hasHome" type="radio" checked></label>
+    </fieldset><h3>Program Information</h3><fieldset><legend>Are you applying for benefits?*</legend>
+      <label>Yes<input id="applicant1" name="applicant" type="radio" checked></label><label>No<input id="applicant2" name="applicant" type="radio"></label>
+    </fieldset><fieldset><legend>What benefits are you applying for?*</legend>
+      <label>Supplemental Nutritional Assistance Program(SNAP)<input id="snap" name="programs" type="checkbox" checked></label>
+      <label>Best Time to Call? (30 character limit)<input id="bestTime" name="bestTimeToCall" maxlength="30"></label>
+    </fieldset><button type="button" class="btn btn-primary saveAndContinueButton" onclick="submitAction('#personalInformation');">Save and Continue</button></form>`);
+  return doc;
+}
+
+test('probe returns sanitized page facts and stops at verification, consent, and unknown pages', () => {
+  const ready = navigationPage();
+  const result = adapter.probePage(ready, URL);
+  assert.equal(result.kind, 'fillable');
+  assert.equal(result.canAdvance, true);
+  assert.doesNotMatch(JSON.stringify(result), /Example|Applicant"|50309/);
+  assert.equal(adapter.probePage(ready, 'https://example.com/').kind, 'unsupported');
+  assert.equal(adapter.probePage(page('<h1>Household Members</h1>'), URL).kind, 'manual');
+  for (const html of ['<h1>Confirmation</h1>', '<h1>Review and submit</h1>', '<h1>Enter Personal Information</h1><input id="termChkbox" type="checkbox">', '<input name="captchaAnswer">', '<input type="password">']) {
+    const doc = page(html);
+    assert.equal(adapter.probePage(doc, URL).kind, 'blocked', html);
+    assert.equal(adapter.captureNavigation(doc, URL), null);
+  }
+});
+
+test('required blank fields, unanswered choices, unknown controls, and errors disable Next', () => {
+  for (const change of [
+    doc => { doc.querySelector('#firstName').value = ''; },
+    doc => { doc.querySelector('#hasHome2').checked = false; },
+    doc => { doc.querySelector('#snap').checked = false; },
+    doc => { doc.querySelector('#lastName').setAttribute('aria-invalid', 'true'); },
+    doc => { doc.querySelector('#firstName').name = 'otherPerson'; },
+    doc => { doc.querySelector('#applicant1').remove(); },
+    doc => { const field = doc.querySelector('#firstName'); field.id = 'unknownRequired'; field.required = true; },
+    doc => { doc.querySelector('button').setAttribute('formaction', 'https://example.com/submit'); }
+  ]) {
+    const doc = navigationPage(); change(doc);
+    assert.equal(adapter.probePage(doc, URL).canAdvance, false);
+    assert.equal(adapter.captureNavigation(doc, URL), null);
+  }
+});
+
+test('Next requires a single-use private snapshot and clicks the exact observed button once', () => {
+  const doc = navigationPage();
+  let clicks = 0;
+  doc.querySelector('button').addEventListener('click', event => { event.preventDefault(); clicks++; });
+  assert.equal(adapter.advance(doc, URL).advanced, false);
+  const snapshot = adapter.captureNavigation(doc, URL);
+  assert.ok(snapshot);
+  assert.equal(JSON.stringify(snapshot), '{}');
+  assert.equal(adapter.advance(doc, URL, snapshot).advanced, true);
+  assert.equal(clicks, 1);
+  assert.equal(adapter.advance(doc, URL, snapshot).advanced, false);
+  assert.equal(clicks, 1);
+});
+
+test('Next stops on answer, page, form, handler, or button changes after preview', () => {
+  for (const change of [
+    doc => { doc.querySelector('#firstName').value = 'User changed'; },
+    doc => { doc.querySelector('form').setAttribute('action', 'submitApplication'); },
+    doc => { doc.querySelector('button').textContent = 'Submit Application'; },
+    doc => { doc.querySelector('button').setAttribute('onclick', 'changedHandler()'); },
+    doc => { doc.querySelector('button').replaceWith(doc.querySelector('button').cloneNode(true)); },
+    doc => { doc.defaultView.history.replaceState({}, '', `${adapter.PORTAL}/different`); }
+  ]) {
+    const doc = navigationPage();
+    const snapshot = adapter.captureNavigation(doc, URL);
+    let clicks = 0;
+    doc.addEventListener('click', () => clicks++);
+    change(doc);
+    assert.equal(adapter.advance(doc, URL, snapshot).advanced, false);
+    assert.equal(clicks, 0);
+  }
+});
+
+test('save-and-exit, final submission, and duplicate Next buttons never advance', () => {
+  for (const label of ['Save and Exit', 'Submit Application', 'Sign and Continue', 'Finish']) {
+    const doc = navigationPage(); doc.querySelector('button').textContent = label;
+    assert.equal(adapter.probePage(doc, URL).canAdvance, false, label);
+  }
+  const duplicate = navigationPage();
+  const button = duplicate.querySelector('button').cloneNode(true);
+  duplicate.querySelector('form').append(button);
+  assert.equal(adapter.probePage(duplicate, URL).canAdvance, false);
 });

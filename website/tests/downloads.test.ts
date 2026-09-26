@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { authorized, download, publish, filenames } from '../lib/downloads.ts';
+import { authorized, download, publish, filenames, LATEST_RELEASE } from '../lib/downloads.ts';
 const secret = 'test-secret-that-is-at-least-32-characters';
 const request = (path: string = filenames[0], headers = {}, method='GET') => new Request(`https://example.test/download/${path}`, {method, headers});
 const object = {size:10,httpEtag:'"etag"',customMetadata:{sha256:'a'.repeat(64)}};
@@ -46,4 +46,26 @@ test('multipart completion verifies stored metadata even when completion respons
  const result=await publish(req,filenames[0],files,secret);
  assert.equal(result.status,200);
  assert.deepEqual(await result.json(),{size:10,sha256:'a'.repeat(64)});
+});
+
+test('versioned downloads preserve older releases and reject mismatched or unlisted versions', async()=>{
+ const keys: string[]=[];
+ const files={head:async(key: string)=>{keys.push(key);return object;},get:async()=>({body:'data'})} as unknown as R2Bucket;
+ for(const [file,query,version] of [
+  ['secondHand-0.2.0-win-x64.exe','','0.2.0'],
+  ['secondHand-0.3.0-mac-arm64.dmg','','0.3.0'],
+  ['secondHand-extension.zip','?release=0.3.0','0.3.0'],
+  ['SHA256SUMS.txt','',LATEST_RELEASE],
+ ]) {
+  assert.equal((await download(request(file+query),file,files)).status,200);
+  assert.equal(keys.at(-1),`releases/${version}/${file}`);
+ }
+ for(const [file,query] of [
+  ['secondHand-0.2.0-win-x64.exe','?release=0.3.0'],
+  ['secondHand-extension.zip','?release=../../vault'],
+  ['secondHand-9.9.9-win-x64.exe',''],
+  ['SHA256SUMS.txt','?release=9.9.9'],
+ ]) assert.equal((await download(request(file+query),file,files)).status,404);
+ const req=new Request('https://example.test/api/publish/file?action=create',{method:'POST',headers:{authorization:`Bearer ${secret}`}});
+ assert.equal((await publish(req,'secondHand-0.2.0-win-x64.exe',files,secret)).status,400);
 });

@@ -49,10 +49,12 @@ test('preparation copies bundled extension assets to a permanent local folder wi
 test('missing copied files report setup incomplete and preparation repairs the same directory', async t => {
   const { app } = await fixture(t);
   const initial = await prepareBundledExtension(app);
-  await fs.unlink(path.join(initial.directory, 'popup.js'));
-  assert.equal((await getExtensionSetup(app)).prepared, false);
-  assert.equal((await prepareBundledExtension(app)).directory, initial.directory);
-  assert.equal((await getExtensionSetup(app)).prepared, true);
+  for (const file of ['popup.js', 'panel.html', 'panel.js', 'panel.css']) {
+    await fs.unlink(path.join(initial.directory, file));
+    assert.equal((await getExtensionSetup(app)).prepared, false);
+    assert.equal((await prepareBundledExtension(app)).directory, initial.directory);
+    assert.equal((await getExtensionSetup(app)).prepared, true);
+  }
 });
 
 test('a broken package fails before replacing an existing extension', async t => {

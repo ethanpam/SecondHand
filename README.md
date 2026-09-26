@@ -1,8 +1,8 @@
 # secondHand
 
-A desktop benefits companion and Chrome extension for Iowa SNAP. Your saved profile and application tracker live in an encrypted vault on your computer. The extension requests individual fields through Chrome Native Messaging, with approval in the desktop app, and fills supported fields on Iowa's Self-Service Portal.
+A desktop benefits companion and Chrome extension for Iowa SNAP. Your saved profile and application tracker live in an encrypted vault on your computer. A helper appears automatically on Iowa's Self-Service Portal and offers approved filling and guided Next actions through a local Chrome Native Messaging connection.
 
-**This is an early assisted-application release.** It does not determine eligibility or submit applications unattended. You review the page, answer unsupported questions, navigate, sign, and submit on Iowa's website. Only the government can confirm eligibility or approval. See [Iowa portal coverage](docs/iowa-portal.md) for observed mappings and remaining manual steps.
+**This is an early assisted-application release.** Only the initial applicant page has verified filling and Next controls: names, home/mobile phones, and home address. Guided mode pauses for unanswered choices, unsupported steps, consent, signatures, and final submission. You review the answers and complete those steps on Iowa's website. Only the government can confirm eligibility or approval. See [Iowa portal coverage](docs/iowa-portal.md) for the exact scope.
 
 ## iPhone app
 
@@ -15,10 +15,12 @@ Download the Windows `.exe` installer or the Mac `.dmg` for your processor from 
 1. Open SecondHand and create your local vault. Keep your passphrase safe; there is no online reset.
 2. In **Chrome extension**, choose **Prepare Chrome extension**. The app prepares a permanent folder and registers its local connection automatically.
 3. In Chrome, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select that folder. Use the app's **Copy folder path** button to locate it. No extension ID copying or command line is needed.
-4. Save your profile, keep the app unlocked, and open [Iowa's portal](https://hhsservices.iowa.gov/apspssp/ssp.portal) in Chrome. Use the extension on the supported applicant page and approve the requested fields in SecondHand.
-5. Review all answers and complete unsupported questions, signatures, and final submission yourself. Save the official confirmation in your local tracker.
+4. Save your profile, keep the app unlocked, and open [Iowa's portal](https://hhsservices.iowa.gov/apspssp/ssp.portal) in Chrome. The SecondHand helper appears automatically. On the supported applicant page, choose **Fill this page**, **Fill & Next**, or **Start guided autofill**, then approve the request in the desktop app. Guided mode requires explicit approval for a session lasting up to **15 minutes**.
+5. Review the answers. When guided mode pauses, complete the required choices in Iowa's form and choose **Resume guided autofill** on a supported page. Use the helper's pause/stop control or lock the desktop vault to end assistance. Complete consent, signatures, and final submission yourself; save the official confirmation in your local tracker.
 
 Chrome installation still requires the manual Load unpacked step; the app does not silently install extensions. See [the complete setup and troubleshooting guide](docs/setup.md) for Mac folder selection, updates, and custom builds.
+
+**Upgrading to 0.3:** install the new desktop app, choose **Refresh extension files**, click **Reload** for SecondHand at `chrome://extensions`, and reload your Iowa tab. If Chrome asks, review and approve the new site access restricted to `hhsservices.iowa.gov`; automatic page detection needs that access. Avoid reloading an application containing unsaved answers—save or finish your current work first.
 
 ## Develop
 
@@ -35,6 +37,7 @@ On macOS/Linux, use the desktop's Prepare Chrome extension button; it registers 
 
 ```sh
 npm run test:ui       # Real Electron UI smoke test; needs a desktop session
+npm run test:extension # Isolated Chromium with synthetic Iowa fixtures; install via npx playwright install chromium
 npm run test:native   # Native protocol test (on Windows set SECONDHAND_PACKAGED_EXE to the built native host)
 npm run extension:zip
 npm run dist:win      # Run on Windows to build the NSIS .exe installer
@@ -47,7 +50,7 @@ GitHub Actions runs syntax/security configuration checks, unit/integration tests
 
 - The encrypted vault holds the profile, application notes, receipts entered as text, and deadlines. No cloud account, analytics, telemetry, remote fonts, or AI service is used by this code.
 - The desktop app is the sole persistent owner of applicant data. Chrome extension storage and Chrome Sync are not used for applicant information.
-- Filling a field shares it with Iowa's website. The website can read or autosave values before you click Submit; this is why desktop approval occurs **before filling**.
+- Filling a field shares it with Iowa's website. The website can read or autosave values before you click Submit, and ordinary **Save and Continue** saves page answers. Desktop approval occurs **before filling**; a guided approval covers only the listed profile fields and verified Next actions for up to 15 minutes. It does not authorize consent, signatures, or final submission.
 - The extension is restricted to Iowa's supported HTTPS portal, requests only recognized fields on the current page, and never fills passwords, verification codes, signatures, or unknown household members.
 - An encrypted backup is the portable recovery mechanism. Backups still require the original passphrase. Keep them off cloud-synced folders if you want all copies offline.
 - This does not protect an unlocked computer from malware, malicious same-user processes, browser extensions reading Iowa's page, OS backups/crash dumps, or government-side storage. Read [the security design](docs/security.md).
