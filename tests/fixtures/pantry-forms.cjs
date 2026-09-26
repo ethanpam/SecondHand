@@ -57,4 +57,24 @@ const googleDates = `<form><div role="list">
 <div role="listitem"><div id="b8" role="heading">Birthday</div><div><span id="b8m">Month</span><input id="month" aria-labelledby="b8m"><span id="b8d">Day</span><input id="day" aria-labelledby="b8d"><span id="b8y">Year</span><input id="year" aria-labelledby="b8y"></div></div>
 </div></form>`;
 
-module.exports = { plainPantry, googleStyle, jotformStyle, numberedGoogle, googleDates };
+// Google Form choice questions: div[role=radio] / div[role=checkbox] / div[role=listbox], not native controls.
+const radio = value => `<label><div role="radio" data-value="${value}" aria-label="${value}" aria-checked="false" tabindex="0"></div><span>${value}</span></label>`;
+const checked = value => `<label><div role="radio" data-value="${value}" aria-label="${value}" aria-checked="true" tabindex="0"></div><span>${value}</span></label>`;
+const required = '<span aria-label="Required question"> *</span>';
+const googleChoices = `<form><div role="list">
+<div role="listitem"><div id="c1" role="heading"><span>Number of Family / Household Members</span>${required}</div>
+<div role="radiogroup" aria-labelledby="c1">${['One (Myself)', 'Two', 'Three', 'Four', 'Five or more'].map(radio).join('')}</div><input type="hidden" name="entry.101" value=""></div>
+<div role="listitem"><div id="c2" role="heading">Is anyone in your household a veteran?</div>
+<div role="radiogroup" aria-labelledby="c2">${radio('Yes')}${radio('No')}</div><input type="hidden" name="entry.102" value=""></div>
+<div role="listitem"><div id="c3" role="heading"><span>Which pantry location?</span>${required}</div>
+<div role="radiogroup" aria-labelledby="c3">${radio('North')}${radio('South')}</div></div>
+<div role="listitem"><div id="c4" role="heading">Does anyone in your household have a disability?</div>
+<div role="radiogroup" aria-labelledby="c4">${checked('Yes')}${radio('No')}</div></div>
+<div role="listitem"><div id="c5" role="heading"><span>Which items do you need?</span>${required}</div>
+<div role="list"><div role="listitem"><div role="checkbox" aria-label="Produce" data-answer-value="Produce" aria-checked="false" tabindex="0"></div></div>
+<div role="listitem"><div role="checkbox" aria-label="Dairy" data-answer-value="Dairy" aria-checked="false" tabindex="0"></div></div></div></div>
+<div role="listitem"><div id="c6" role="heading"><span>County</span>${required}</div>
+<div role="listbox" aria-labelledby="c6" tabindex="0"><div role="option" data-value="" aria-selected="true">Choose</div><div role="option" data-value="Polk" aria-selected="false">Polk</div><div role="option" data-value="Story" aria-selected="false">Story</div></div></div>
+</div><div role="button">Submit</div></form>`;
+
+module.exports = { plainPantry, googleStyle, jotformStyle, numberedGoogle, googleDates, googleChoices };

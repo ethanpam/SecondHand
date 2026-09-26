@@ -39,8 +39,8 @@ test('a plain pantry intake form maps every common question to the saved profile
 test('Google Forms and Jotform layouts map through aria-labelledby, autocomplete, sub-labels, and questions', () => {
   const google = page(forms.googleStyle);
   const googleResult = generic.plan(google);
-  assert.deepEqual(googleResult.matched.map(item => item.key), ['fullName', 'email', 'zip']);
-  assert.equal(googleResult.unmatched.length, 0, 'div-based radio groups are not native controls and are left alone');
+  assert.deepEqual(googleResult.matched.map(item => item.key), ['fullName', 'email', 'zip', 'householdSize']);
+  assert.equal(googleResult.unmatched.length, 0);
   const jot = page(forms.jotformStyle);
   const jotResult = generic.plan(jot);
   assert.deepEqual(byElement(jot, jotResult), { first_3: 'firstName', last_3: 'lastName', input_4: 'state', input_5: 'monthlyRent' });
@@ -84,6 +84,57 @@ test('a generic date or time sub-label is read together with its question, and b
   assert.equal(doc.getElementById('ordered').value, '');
   assert.equal(doc.getElementById('month').value, '');
   assert.equal(doc.getElementById('dob').value, '1985-04-12');
+});
+
+// Google registers a choice when its div[role=radio] is clicked; this stands in for its script.
+function googleClicks(doc) {
+  const clicks = [];
+  for (const option of doc.querySelectorAll('[role="radiogroup"] [role="radio"]')) {
+    option.addEventListener('click', () => {
+      clicks.push(option.getAttribute('data-value'));
+      for (const other of option.closest('[role="radiogroup"]').querySelectorAll('[role="radio"]')) other.setAttribute('aria-checked', String(other === option));
+    });
+  }
+  return clicks;
+}
+
+test('Google Forms choice questions are planned, counted as need-you, and filled by clicking the matching option', () => {
+  const doc = page(forms.googleChoices);
+  const clicks = googleClicks(doc);
+  const result = generic.plan(doc);
+  assert.deepEqual(result.matched.map(item => item.key), ['householdSize', 'householdVeteran']);
+  assert.deepEqual(result.unmatched.map(({ label, type, options, required }) => ({ label, type, options, required })), [
+    { label: 'Which pantry location?', type: 'radio', options: ['North', 'South'], required: true },
+    { label: 'Which items do you need?', type: 'checkbox', options: ['Produce', 'Dairy'], required: true },
+    { label: 'County', type: 'listbox', options: ['Polk', 'Story'], required: true }
+  ], 'an answered question is not planned; the rest wait for the applicant');
+  const filled = generic.fillFields(doc, result.token, [...result.matched.map(({ id, key }) => ({ id, key, guessed: false })),
+    ...result.unmatched.map(({ id }) => ({ id, key: 'county', guessed: true }))], generic.deriveValues({ ...profile, county: 'Polk' }));
+  assert.deepEqual(filled.filled, result.matched.map(item => item.id));
+  assert.deepEqual(clicks, ['Three', 'No'], 'only the matching options are clicked; the answered question is never touched');
+  const checkedIn = heading => [...doc.getElementById(heading).parentElement.querySelectorAll('[aria-checked="true"]')].map(option => option.getAttribute('data-value'));
+  assert.deepEqual(checkedIn('c1'), ['Three']);
+  assert.deepEqual(checkedIn('c4'), ['Yes']);
+  assert.equal(doc.querySelector('[role="listbox"] [aria-selected="true"]').getAttribute('data-value'), '');
+});
+
+test('number words and "or more" choices pick the right count; a click Google ignores is not reported as filled', () => {
+  const pick = size => {
+    const doc = page(forms.googleChoices);
+    googleClicks(doc);
+    const result = generic.plan(doc);
+    const size_ = result.matched.find(item => item.key === 'householdSize');
+    generic.fillFields(doc, result.token, [{ id: size_.id, key: 'householdSize', guessed: false }], { householdSize: size });
+    return [...doc.querySelectorAll('#c1 ~ [role="radiogroup"] [aria-checked="true"]')].map(option => option.getAttribute('data-value'));
+  };
+  assert.deepEqual(pick('1'), ['One (Myself)']);
+  assert.deepEqual(pick('5'), ['Five or more']);
+  assert.deepEqual(pick('8'), ['Five or more']);
+  assert.deepEqual(pick('0'), [], 'no option means zero people');
+  const doc = page(forms.googleChoices);
+  const result = generic.plan(doc);
+  const filled = generic.fillFields(doc, result.token, result.matched.map(({ id, key }) => ({ id, key, guessed: false })), generic.deriveValues(profile));
+  assert.deepEqual(filled.filled, [], 'without Google registering the click, nothing counts as filled');
 });
 
 test('only confident matches are planned; vague labels stay unmatched for the applicant', () => {
