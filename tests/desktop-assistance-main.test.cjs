@@ -173,6 +173,25 @@ test('sensitive fields on a non-Iowa site always ask, even with Always allow on'
   assert.equal(app.prompts.length, 1, 'Iowa keeps its own trust rules');
 });
 
+test('money on hand and medical expenses always ask on other sites but follow Iowa’s trust rules on Iowa', async () => {
+  const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'] } });
+  await app.invoke('saveProfile', { assetsOnHand: '250', monthlyMedicalExpenses: '40', householdPregnant: 'no' });
+  app.answer(async () => ({ response: 1 }));
+  for (const field of ['assetsOnHand', 'monthlyMedicalExpenses']) {
+    const before = app.prompts.length;
+    await app.request({ type: 'getFields', url: PANTRY, fields: ['householdPregnant', field] });
+    assert.equal(app.prompts.length, before + 1, field);
+    assert.deepEqual(plain(app.prompts.at(-1).buttons), ['Cancel', 'Allow once']);
+    assert.match(app.prompts.at(-1).detail, field === 'assetsOnHand' ? /Money on hand/ : /Monthly medical expenses/);
+  }
+  const prompts = app.prompts.length;
+  assert.deepEqual(plain((await app.request({ type: 'getFields', fields: ['assetsOnHand', 'monthlyMedicalExpenses'] })).values), { assetsOnHand: '250', monthlyMedicalExpenses: '40' });
+  assert.equal(app.prompts.length, prompts, 'Iowa keeps its own trust rules');
+  app.answer(async () => ({ response: 1 }));
+  await app.request({ type: 'trustSite', url: 'https://wic.example.gov/apply' });
+  assert.match(app.prompts.at(-1).detail, /money on hand, and medical expenses still ask every time/);
+});
+
 test('removing a trusted site stops field release; a locked vault cannot trust sites', async () => {
   const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org', 'https://wic.example.gov'] } });
   assert.deepEqual(plain((await app.invoke('removeTrustedSite', 'https://pantry.example.org')).trustedSites), ['https://wic.example.gov']);

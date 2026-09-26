@@ -43,7 +43,7 @@ if (nativeOrigin) {
   let autofillWithoutAsking = false;
   let trustedSites = [];
   // Released only after a named confirmation on sites other than Iowa's portal.
-  const SENSITIVE_FIELDS = ['ssn', 'birthDate', 'monthlyEarnedIncome', 'monthlyOtherIncome'];
+  const SENSITIVE_FIELDS = ['ssn', 'birthDate', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'assetsOnHand', 'monthlyMedicalExpenses'];
   const MAX_TRUSTED_SITES = 50;
   let lockGeneration = 0;
   const userData = app.getPath('userData');
@@ -105,7 +105,7 @@ if (nativeOrigin) {
         mainWindow.show(); mainWindow.focus();
         const answer = await dialog.showMessageBox(mainWindow, {
           type: 'question', title: 'Trust this site?', message: `Let SecondHand fill forms on ${origin}?`,
-          detail: 'When you click Autofill on this site, SecondHand fills the saved answers it can match. It never clicks Next or Submit. Social Security number, date of birth, and income still ask every time. You can remove this site on the Chrome extension page.',
+          detail: 'When you click Autofill on this site, SecondHand fills the saved answers it can match. It never clicks Next or Submit. Social Security number, date of birth, income, money on hand, and medical expenses still ask every time. You can remove this site on the Chrome extension page.',
           buttons: ['Cancel', 'Trust this site'], defaultId: 1, cancelId: 0, noLink: true
         });
         if (answer.response !== 1) throw publicError('You cancelled trusting this site.');

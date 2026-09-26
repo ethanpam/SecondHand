@@ -351,6 +351,33 @@ test('the profile form saves household counts and household flags', async t => {
   assert.equal(view.database.profile.householdDisability, 'yes');
 });
 
+test('the Household section saves money on hand, medical costs, and the citizenship, pregnancy, and Medicare answers', async t => {
+  const view = await renderer(t);
+  view.window.document.querySelector('.nav-item[data-view="profile"]').click();
+  await tick();
+  const household = view.get('householdSize').closest('.form-card');
+  for (const id of ['assetsOnHand', 'monthlyMedicalExpenses', 'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare']) {
+    assert.ok(household.contains(view.get(id)), `${id} is in the Household section`);
+    assert.ok(view.window.document.querySelector(`label[for="${id}"]`)?.textContent.trim(), `${id} has a label`);
+  }
+  for (const id of ['assetsOnHand', 'monthlyMedicalExpenses']) {
+    assert.equal(view.get(id).type, 'number');
+    assert.equal(view.get(id).min, '0');
+    assert.ok(view.get(id).closest('.currency-input'), `${id} is a dollar amount`);
+  }
+  view.edit('assetsOnHand', '250.75');
+  view.edit('monthlyMedicalExpenses', '0');
+  for (const [id, value] of [['householdAllCitizens', 'no'], ['householdLegalStatus', 'yes'], ['householdPregnant', 'no'], ['householdMedicare', 'yes']]) {
+    view.get(id).value = value;
+    view.get(id).dispatchEvent(new view.window.Event('change', { bubbles: true }));
+  }
+  view.submit('profile-form');
+  await tick(); await tick();
+  const { profile } = view.database;
+  assert.deepEqual([profile.assetsOnHand, profile.monthlyMedicalExpenses, profile.householdAllCitizens, profile.householdLegalStatus, profile.householdPregnant, profile.householdMedicare],
+    ['250.75', '0', 'no', 'yes', 'no', 'yes']);
+});
+
 test('trusted sites are listed with a Remove button that calls the desktop', async t => {
   const removed = [];
   let status = { exists: true, unlocked: true, extensionId: '', bridgeRunning: true, trustedSites: ['https://pantry.example.org', 'https://wic.example.gov'] };

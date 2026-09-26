@@ -34,6 +34,7 @@
       ],
       "js": [
         "iowa-adapter.js",
+        "generic-adapter.js",
         "content.js"
       ],
       "run_at": "document_idle",

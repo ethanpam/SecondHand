@@ -13,6 +13,9 @@ const siteRuns = new Map(); // tabId -> the fill running on an approved site, so
 // and if Chrome restarts this worker, autofill is off and the widget shows Autofill again.
 const autopilots = new Map();
 const MAX_STEPS = 15;
+// tabId -> the Iowa page (origin + path) where the general engine found fields, until the tab navigates.
+const generalPages = new Map();
+const GENERAL_TODO = 'Check your answers, then click Continue.';
 
 function nativeRequest(type, payload = {}) {
   return new Promise((resolve, reject) => {
@@ -48,7 +51,7 @@ async function activePortal(tabId) {
   return tab;
 }
 async function inject(tabId) {
-  await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ['iowa-adapter.js', 'content.js'] });
+  await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ['iowa-adapter.js', 'generic-adapter.js', 'content.js'] });
 }
 async function readPage(tabId) {
   const tab = await activePortal(tabId);
@@ -113,7 +116,8 @@ function stopAutopilot(tabId, result) {
 }
 
 // One autopilot step per page: continue an info screen, fill a known form, or
-// wait with the page's instruction. Unknown pages end autofill.
+// wait with the page's instruction. An unknown page gets one general-engine fill
+// and waits for the applicant; with nothing the engine recognizes, autofill ends.
 function step(tabId) {
   const pilot = autopilots.get(tabId);
   if (!pilot) return Promise.resolve(results.get(tabId) || null);
@@ -139,6 +143,16 @@ function step(tabId) {
         return result.state === 'done' ? remember(tabId, result) : stopAutopilot(tabId, result);
       }
       if (page.todo) return remember(tabId, { state: 'waiting', filled: 0, needYou: needYou(page), message: page.todo, pageKey: page.pageKey });
+      if (page.kind === 'manual') {
+        // Never clicks Continue here: the applicant checks the general engine's answers first.
+        const plan = await planGeneral(tabId);
+        const url = safeUrl(state.url);
+        if (plan.matched.length || generalPages.get(tabId) === url) {
+          generalPages.set(tabId, url);
+          const result = await fillIowaGeneral(tabId, state, plan);
+          return result.state === 'done' ? remember(tabId, result) : stopAutopilot(tabId, result);
+        }
+      }
       return stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], message: 'SecondHand doesn’t know this page yet. Fill it in, then continue.', pageKey: page.pageKey });
     } catch (error) {
       return stopAutopilot(tabId, { state: 'error', filled: 0, needYou: [], message: error.message || 'Autofill stopped. Continue in Iowa’s form.', pageKey: page.pageKey });
@@ -162,7 +176,10 @@ async function iowaPageState(tabId) {
   if (autopilots.has(tabId) && !autopilots.get(tabId).running) await step(tabId);
   const state = await readPage(tabId);
   const result = results.get(tabId);
-  return { page: state.page, scan: state.scan, result: result && result.pageKey === state.page.pageKey ? result : null, autopilot: autopilots.has(tabId) };
+  // Once the general engine found fields on an unknown page, it waits for the applicant like any other step.
+  const general = state.page.kind === 'manual' && !state.page.todo && generalPages.get(tabId) === safeUrl(state.url);
+  const page = general ? { ...state.page, todo: GENERAL_TODO } : state.page;
+  return { page, scan: state.scan, result: result && result.pageKey === state.page.pageKey ? result : null, autopilot: autopilots.has(tabId) };
 }
 
 // Other https sites the user turned on: Chrome access for the origin plus our
@@ -221,20 +238,26 @@ async function disableSite(tabId) {
 }
 
 const siteResult = (state, message, extra = {}) => ({ state, filled: 0, guessed: [], needYou: [], message, pageKey: 'general', ...extra });
+const filledSummary = (filled, needYou) => `Filled ${filled}${needYou.length ? ` · ${needYou.length} need you` : ''}.`;
 
-// One fill on an approved site: plan, one desktop request for the matched keys, fill.
+// The general engine's plan for the page: field ids, keys, and labels only.
+async function planGeneral(tabId) {
+  const plan = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:plan' }, { frameId: 0 });
+  if (!plan || typeof plan.token !== 'string' || !Array.isArray(plan.matched) || !Array.isArray(plan.unmatched)) throw new Error('This page couldn’t be checked safely. Fill it yourself.');
+  return plan;
+}
+
+// One fill from a general-engine plan: one desktop request for the matched keys, then fill.
 // Never continues, submits, or navigates.
-async function fillSiteOnce(tabId, url) {
+async function fillPlan(tabId, url, plan) {
   let values = null;
   try {
-    const plan = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:plan' }, { frameId: 0 });
-    if (!plan || typeof plan.token !== 'string' || !Array.isArray(plan.matched) || !Array.isArray(plan.unmatched)) throw new Error('This page couldn’t be checked safely. Fill it yourself.');
     const keys = plan.matched.length ? [...new Set(SecondHandGeneric.requestKeys(plan.matched.map(field => field.key)))] : [];
     if (keys.some(key => typeof key !== 'string' || !KEY.test(key))) throw new Error('SecondHand could not prepare the field request.');
     let filled = [];
     if (keys.length) {
       const desktop = await nativeRequest('status');
-      if (!desktop?.unlocked) return siteResult('locked', 'Unlock SecondHand to autofill.');
+      if (!desktop?.unlocked) throw new Error('Unlock SecondHand to autofill.');
       const response = await nativeRequest('getFields', { url: safeUrl(url), fields: keys });
       if (!response?.values || typeof response.values !== 'object' || Array.isArray(response.values)) throw new Error('The desktop did not return supported profile fields.');
       values = SecondHandGeneric.deriveValues(response.values);
@@ -252,12 +275,30 @@ async function fillSiteOnce(tabId, url) {
       }
     }
     const needYou = [...plan.unmatched.map(field => field.id), ...plan.matched.map(field => field.id).filter(id => !filled.includes(id))];
-    return siteResult('done', `Filled ${filled.length}${needYou.length ? ` · ${needYou.length} need you` : ''}. Check your answers before you submit.`,
-      { filled: filled.length, needYou });
+    return { filled: filled.length, needYou };
+  } finally { values = null; }
+}
+
+// One fill on an approved site.
+async function fillSiteOnce(tabId, url) {
+  try {
+    const { filled, needYou } = await fillPlan(tabId, url, await planGeneral(tabId));
+    return siteResult('done', `${filledSummary(filled, needYou)} Check your answers before you submit.`, { filled, needYou });
   } catch (error) {
     const { state, message } = failed(error);
     return siteResult(state, message);
-  } finally { values = null; }
+  }
+}
+
+// One fill on an Iowa page the Iowa adapter hasn't verified. Iowa's portal needs no site approval.
+async function fillIowaGeneral(tabId, state, plan) {
+  const { pageKey } = state.page;
+  try {
+    const { filled, needYou } = await fillPlan(tabId, state.url, plan);
+    return { state: 'done', filled, needYou, message: `${filledSummary(filled, needYou)} ${GENERAL_TODO}`, todo: GENERAL_TODO, pageKey };
+  } catch (error) {
+    return { ...failed(error), filled: 0, needYou: [], pageKey };
+  }
 }
 
 async function fillSite(tabId) {
@@ -288,9 +329,12 @@ async function autofill(tabId, route) {
 async function focusField(tabId, key, route) {
   const tab = await chrome.tabs.get(tabId);
   if (route !== 'site' && SecondHandIowa.isSupportedUrl(tab.url)) {
-    if (!KEY.test(key)) throw new Error('That field isn’t on this page.');
+    if (!FIELD_ID.test(key)) throw new Error('That field isn’t on this page.');
     await activePortal(tabId);
-    return chrome.tabs.sendMessage(tabId, { type: 'secondhand:focusField', key }, { frameId: 0 });
+    // Iowa's own keys go to the Iowa adapter; the general engine's field ids ("sh-…") to the engine.
+    if (KEY.test(key)) return chrome.tabs.sendMessage(tabId, { type: 'secondhand:focusField', key }, { frameId: 0 });
+    const result = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:focus', id: key }, { frameId: 0 });
+    return { focused: result?.focused === true };
   }
   if (route === 'iowa') throw new Error('Open the official Iowa portal in the active tab, then try again.');
   const { origin } = await activeSite(tabId);
@@ -325,7 +369,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   else if (message.type === 'ui:pageState') run = () => pageState(tabId, route);
   else if (message.type === 'ui:autofill' && message.confirmed === true) run = () => autofill(tabId, route);
   else if (message.type === 'ui:stop' && message.confirmed === true) run = () => stop(tabId);
-  else if (message.type === 'ui:focusField' && typeof message.key === 'string' && (route === 'iowa' ? KEY : FIELD_ID).test(message.key)) {
+  else if (message.type === 'ui:focusField' && typeof message.key === 'string' && FIELD_ID.test(message.key)) {
     run = () => focusField(tabId, message.key, route);
   } else if (panel && message.type === 'ui:enableSite' && message.confirmed === true) run = () => enableSite(tabId);
   else if (panel && message.type === 'ui:disableSite' && message.confirmed === true) run = () => disableSite(tabId);
@@ -335,10 +379,11 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   work.then(data => respond({ ok: true, data }), error => respond({ ok: false, error: error.message || 'SecondHand could not complete the request.' }));
   return true;
 });
-chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); });
+chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); generalPages.delete(tabId); });
 chrome.tabs.onUpdated?.addListener((tabId, change) => {
   if (change.status === 'loading') {
     results.delete(tabId);
+    generalPages.delete(tabId);
     // Chrome omits other sites' URLs without the tabs permission, so re-read the
     // tab: anything that is not Iowa's portal (or unreadable) ends autofill.
     if (autopilots.has(tabId)) {

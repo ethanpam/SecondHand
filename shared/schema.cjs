@@ -17,11 +17,15 @@ const FIELD_LABELS = Object.freeze({
   monthlyEarnedIncome: 'Monthly earned income', monthlyOtherIncome: 'Monthly other income',
   monthlyRent: 'Monthly rent or mortgage', monthlyUtilities: 'Monthly utilities',
   householdAdults: 'Adults in household', householdChildren: 'Children in household', householdSeniors: 'Seniors (65+) in household',
-  householdVeteran: 'Anyone in household a veteran', householdDisability: 'Anyone in household with a disability'
+  householdVeteran: 'Anyone in household a veteran', householdDisability: 'Anyone in household with a disability',
+  assetsOnHand: 'Money on hand (cash, checking, savings)', monthlyMedicalExpenses: 'Monthly medical expenses',
+  householdAllCitizens: 'Everyone in household a US citizen', householdLegalStatus: 'If not, legal documents to stay in the US',
+  householdPregnant: 'Anyone in household pregnant', householdMedicare: 'Anyone in household on Medicare'
 });
 const PROFILE_FIELDS = Object.freeze(Object.keys(FIELD_LABELS));
 const YES_NO_FIELDS = Object.freeze(['hasHomeAddress', 'mailingSameAsHome', 'isApplicant',
-  'programSnap', 'programFip', 'programMedicaid', 'helpPayMedicalBills', 'householdVeteran', 'householdDisability']);
+  'programSnap', 'programFip', 'programMedicaid', 'helpPayMedicalBills', 'householdVeteran', 'householdDisability',
+  'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare']);
 const PROFILE_CHOICES = Object.freeze({
   ...Object.fromEntries(YES_NO_FIELDS.map(field => [field, Object.freeze(['', 'yes', 'no'])])),
   suffix: Object.freeze(['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'Jr.', 'Sr.'])
@@ -83,7 +87,7 @@ function validateProfile(input) {
   for (const field of ['householdAdults', 'householdChildren', 'householdSeniors']) {
     if (result[field] && !/^(?:[0-9]|[12][0-9]|30)$/.test(result[field])) throw new Error(`${FIELD_LABELS[field]} must be a whole number from 0 to 30, or left blank.`);
   }
-  for (const field of ['monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities']) {
+  for (const field of ['monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand', 'monthlyMedicalExpenses']) {
     if (result[field] && !/^\d{1,8}(\.\d{1,2})?$/.test(result[field])) throw new Error(`${FIELD_LABELS[field]} must be a nonnegative dollar amount, or blank if unknown.`);
   }
   return result;
