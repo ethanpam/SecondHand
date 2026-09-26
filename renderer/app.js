@@ -100,7 +100,7 @@
     $('overview-heading').textContent = 'Let’s move forward.';
     $('application-count').textContent = '0';
     if ($('application-dialog').open) $('application-dialog').close();
-    for (const id of ['auth-error', 'profile-error', 'application-error', 'extension-error', 'extension-prepare-error']) clearError(id);
+    for (const id of ['auth-error', 'profile-error', 'application-error', 'extension-error', 'extension-prepare-error', 'autofill-trust-error']) clearError(id);
     setProfileDirty(false);
     clearTimeout(toastTimer);
     $('toast').hidden = true;
@@ -213,6 +213,7 @@
     const setup = vaultStatus.extensionSetup || {};
     const bundled = connected && vaultStatus.extensionId === setup.extensionId;
     $('extension-id').value = vaultStatus.extensionId || '';
+    $('autofill-trust').checked = Boolean(vaultStatus.autofillWithoutAsking);
     $('extension-status').textContent = bundled ? (setup.prepared ? 'Ready to load in Chrome' : 'Setup needs refresh') : connected ? 'Custom connection registered' : 'Needs setup';
     $('extension-status').classList.toggle('connected', connected);
     $('extension-prepared').hidden = !setup.prepared;
@@ -415,6 +416,22 @@
         vaultStatus.extensionId = result.extensionId; renderSetup(); toast('Extension registered. Keep SecondHand open while you use it.');
       } catch (error) { if (generation === vaultGeneration) showError('extension-error', error); }
     });
+  });
+  $('autofill-trust').addEventListener('change', () => {
+    clearError('autofill-trust-error');
+    const generation = vaultGeneration;
+    const wanted = $('autofill-trust').checked;
+    $('autofill-trust').disabled = true;
+    api.setAutofillTrust(wanted).then(status => {
+      if (generation !== vaultGeneration) return;
+      vaultStatus = { ...vaultStatus, ...status };
+      renderSetup();
+      toast(wanted ? 'Chrome can now autofill without asking while SecondHand is unlocked.' : 'Chrome will ask before each autofill.');
+    }, error => {
+      if (generation !== vaultGeneration) return;
+      $('autofill-trust').checked = !wanted;
+      showError('autofill-trust-error', error);
+    }).finally(() => { $('autofill-trust').disabled = false; });
   });
   $('extension-open-portal').addEventListener('click', () => pending($('extension-open-portal'), async () => {
     try { await api.openPortal(); } catch (error) { toast(error.message || 'Unable to open the Iowa portal.', true); }

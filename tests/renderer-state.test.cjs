@@ -308,3 +308,25 @@ test('an outdated bundled extension is labelled for refresh rather than a custom
   assert.match(view.get('prepare-extension').textContent, /Refresh extension files/);
   assert.equal(view.get('extension-prepared').hidden, true);
 });
+
+test('Chrome extension view toggles autofill trust through the desktop API', async t => {
+  const calls = [];
+  const view = await renderer(t, { setAutofillTrust: async enabled => { calls.push(enabled); return { exists: true, unlocked: true, extensionId: '', bridgeRunning: true, autofillWithoutAsking: enabled }; } });
+  assert.equal(view.get('autofill-trust').checked, false);
+  view.get('autofill-trust').checked = true;
+  view.get('autofill-trust').dispatchEvent(new view.window.Event('change'));
+  await tick(); await tick();
+  assert.deepEqual(calls, [true]);
+  assert.equal(view.get('autofill-trust').checked, true);
+  assert.equal(view.get('autofill-trust').disabled, false);
+  assert.doesNotMatch(view.get('view-extension').textContent, /guided/i);
+});
+
+test('a failed trust change restores the checkbox and shows the error', async t => {
+  const view = await renderer(t, { setAutofillTrust: async () => { throw new Error('Unlock your local vault first.'); } });
+  view.get('autofill-trust').checked = true;
+  view.get('autofill-trust').dispatchEvent(new view.window.Event('change'));
+  await tick(); await tick();
+  assert.equal(view.get('autofill-trust').checked, false);
+  assert.match(view.get('autofill-trust-error').textContent, /Unlock/);
+});
