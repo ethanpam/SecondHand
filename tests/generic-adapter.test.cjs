@@ -135,3 +135,8 @@ test('counts fill number dropdowns and "or more" choices; a yes/no checkbox is o
   assert.equal(doc.getElementById('dis').checked, true);
   assert.equal(filled.filled.length, 3);
 });
+
+test('the AI mapper can only suggest keys the rules engine knows how to fill', () => {
+  const ai = require('../extension/ai-mapper.js');
+  assert.deepEqual([...ai.ALLOWED_KEYS].sort(), [...generic.GENERIC_KEYS].sort());
+});
