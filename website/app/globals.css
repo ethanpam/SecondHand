@@ -859,6 +859,10 @@ kbd {
     gap: 24px;
     padding: 64px 0 40px;
   }
+  .setup-section > .section-split {
+    grid-template-columns: 1fr;
+    padding-top: 0;
+  }
   .section-intro {
     font-size: 16px;
   }
