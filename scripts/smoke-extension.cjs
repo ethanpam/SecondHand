@@ -14,8 +14,17 @@ const root = path.join(__dirname, '..');
 const portal = 'https://hhsservices.iowa.gov/apspssp/ssp.portal';
 const applicant = `${portal}/applyForBenefits/enterPersonalInfo`;
 const extensionDirectory = path.join(root, 'extension');
+const documentManualUrl = `${portal}/qa-only/document-manual`;
+const documentNextMarker = 'SECONDHAND_SYNTHETIC_FULL_DOCUMENT_NEXT';
 
 function fixture(nextStep) {
+  if (nextStep === 'document-manual-destination') {
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Synthetic manual step · test only</title></head>
+      <body><main><p data-qa-document>SYNTHETIC FULL-DOCUMENT QA FIXTURE. No government connection or real applicant data.</p>
+      <h1>Household Members</h1><label>Fictional household member<input id="qa-household-member" name="qaHouseholdMember"></label>
+      <button id="qa-manual-continue" type="button">Continue (QA only)</button></main>
+      <script>window.__manualNextClicks=0;document.getElementById('qa-manual-continue').addEventListener('click',()=>{window.__manualNextClicks++;});</script></body></html>`;
+  }
   // Address controls below are hypothetical QA controls, not an observed Iowa
   // schema. They verify the shipping adapter's refusal to operate this step.
   const addressReview = nextStep === 'address-review';
@@ -34,6 +43,13 @@ function fixture(nextStep) {
       document.querySelector('.saveAndContinueButton').addEventListener('click', () => {
         window.__nextClicks++;
         window.__lastAnswers = Object.fromEntries(Array.from(document.querySelectorAll('#personalInformation input, #personalInformation select'), element => [element.id, ['checkbox','radio'].includes(element.type) ? element.checked : element.value]));
+        if (${JSON.stringify(nextStep === 'document-manual')}) {
+          // Static QA marker survives unloading through the browser console
+          // listener. It carries no answers, tokens, or other applicant data.
+          console.info(${JSON.stringify(documentNextMarker)});
+          location.assign(${JSON.stringify(documentManualUrl)});
+          return;
+        }
         document.getElementById('synthetic-content').innerHTML = ${JSON.stringify(nextMarkup)};
         history.pushState({}, '', ${JSON.stringify(addressReview ? `${portal}/qa-only/select-address` : `${portal}/applyForBenefits/${nextStep === 'consent' ? 'consent' : 'household'}`)});
         document.getElementById('qa-address-continue')?.addEventListener('click', () => { window.__addressNextClicks++; });
@@ -130,6 +146,7 @@ async function main() {
   const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-chromium-smoke-'));
   let context, panel, page, worker;
   const errors = [];
+  let documentNextClicks = 0, documentManualLoads = 0;
   try {
     context = await chromium.launchPersistentContext(userData, {
       channel: 'chromium', headless: true, viewport: { width: 1200, height: 900 },
@@ -139,6 +156,10 @@ async function main() {
       const request = route.request(); const url = new URL(request.url());
       if (request.isNavigationRequest() && url.origin === 'https://hhsservices.iowa.gov' && url.pathname === '/apspssp/ssp.portal/applyForBenefits/enterPersonalInfo') {
         return route.fulfill({ status: 200, contentType: 'text/html', body: fixture(url.searchParams.get('next')) });
+      }
+      if (request.isNavigationRequest() && request.url() === documentManualUrl) {
+        documentManualLoads++;
+        return route.fulfill({ status: 200, contentType: 'text/html', body: fixture('document-manual-destination') });
       }
       if (url.protocol === 'chrome-extension:') return route.continue();
       return route.abort('blockedbyclient');
@@ -150,6 +171,7 @@ async function main() {
     await installNativeStub(worker);
     page = context.pages()[0] || await context.newPage();
     page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => { if (message.type() === 'info' && message.text() === documentNextMarker) documentNextClicks++; });
     await fs.mkdir(path.join(root, 'artifacts'), { recursive: true });
 
     async function startFixture({ next = 'manual', profile = {}, lockAfterFill = false } = {}) {
@@ -255,6 +277,62 @@ async function main() {
     await stop();
     console.log('Native sidebar: completing an unanswered question reveals a new branch and safely continues approved autofill.');
 
+    await startFixture({ profile: { mailingSameAsHome: 'yes' } });
+    const preservedHome = '456 Preserved Example Lane';
+    const preservedMailing = 'PO Box 999';
+    await page.locator('#hasHome1').check();
+    await page.locator('#addressLine1').fill(preservedHome);
+    await page.locator('#sameAddress2').check();
+    await page.locator('#mailingAddressLine1').fill(preservedMailing);
+    // Re-clicking this already-selected parent exercises its real fixture
+    // handler: the same-address question resets and mailing is hidden, but the
+    // existing mailing answer stays. Saved Yes must not erase that answer.
+    await page.locator('#hasHome1').click();
+    await expect(page.locator('#sameAddress1')).not.toBeChecked();
+    await expect(page.locator('#sameAddress2')).not.toBeChecked();
+    await panel.click('#start-auto');
+    await expect.poll(() => panel.text('#guided-state'), { timeout: 20000 }).toBe('WAITING FOR MISSING INFORMATION');
+    await expect.poll(() => panel.text('[data-key="mailingSameAsHome"]')).toContain('review existing dependent answers');
+    await expect.poll(() => panel.text('[data-key="mailingSameAsHome"]')).toContain('Needs manual review');
+    await expect.poll(() => panel.text('[data-key="addressLine1"]')).toContain('Complete');
+    await expect(page.locator('#addressLine1')).toHaveValue(preservedHome);
+    await expect(page.locator('#mailingAddressLine1')).toHaveValue(preservedMailing);
+    await expect(page.locator('#sameAddress1')).not.toBeChecked();
+    assert.equal(await page.evaluate(() => window.__nextClicks), 0);
+    await page.waitForTimeout(1900);
+    assert.equal(await page.evaluate(() => window.__nextClicks), 0);
+    await page.locator('#sameAddress2').check();
+    await nextOnce();
+    const preservedAnswers = await page.evaluate(() => window.__lastAnswers);
+    assert.equal(preservedAnswers.addressLine1, preservedHome);
+    assert.equal(preservedAnswers.mailingAddressLine1, preservedMailing);
+    assert.equal(preservedAnswers.sameAddress2, true);
+    await stop();
+    console.log('Native sidebar: prefilled home/mailing addresses survive autofill; a destructive parent answer pauses until manually resolved.');
+
+    await startFixture({ next: 'document-manual' });
+    documentNextClicks = 0; documentManualLoads = 0;
+    await panel.click('#start-auto');
+    await expect(page).toHaveURL(documentManualUrl, { timeout: 20000 });
+    await expect(page.locator('[data-qa-document]')).toContainText('SYNTHETIC FULL-DOCUMENT QA FIXTURE');
+    await expect(page.locator('[data-secondhand-assistant]')).toHaveCount(1);
+    await expect.poll(() => page.frames().some(frame => frame.url() === `chrome-extension://${extensionId}/panel.html?surface=launcher`), { timeout: 15000 }).toBe(true);
+    assert.equal(await page.evaluate(() => typeof window.__lastAnswers), 'undefined', 'The original document and its answer snapshot were unloaded.');
+    await expect.poll(() => panel.text('#guided-state'), { timeout: 15000 }).toBe('PAUSED FOR YOUR REVIEW');
+    await expect.poll(() => panel.text('#manual-reason')).toContain('not verified');
+    assert.equal(await panel.evaluate(() => document.querySelector('#start-auto').disabled), true);
+    assert.equal(await panel.evaluate(() => document.querySelector('#fill-next').disabled), true);
+    const fullNavigationRequests = (await worker.evaluate(() => globalThis.__nativeSmoke.calls)).filter(call => call.type === 'getFields').length;
+    assert.ok(fullNavigationRequests > 0);
+    await page.waitForTimeout(3400);
+    assert.equal(documentNextClicks, 1, 'Exactly one applicant Next click occurred before unloading.');
+    assert.equal(documentManualLoads, 1, 'The next document was requested exactly once.');
+    assert.equal(await page.evaluate(() => window.__manualNextClicks), 0);
+    await expect(page.locator('#qa-household-member')).toHaveValue('');
+    assert.equal((await worker.evaluate(() => globalThis.__nativeSmoke.calls)).filter(call => call.type === 'getFields').length, fullNavigationRequests);
+    await stop();
+    console.log('Native sidebar: full-document navigation unloads the applicant, reinjects once, and pauses without a second Next or further profile request.');
+
     await startFixture({ next: 'address-review' });
     await panel.click('#start-auto'); await nextOnce();
     await expect(page.locator('[data-qa-only]')).toContainText('HYPOTHETICAL QA CONTROLS');
@@ -326,4 +404,5 @@ async function main() {
     await fs.rm(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
-main().catch(error => { console.error(error); process.exitCode = 1; });
+module.exports = { fixture, installNativeStub, attachNativePanel, portal, applicant, extensionDirectory, syntheticProfile };
+if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; });

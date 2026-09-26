@@ -38,6 +38,7 @@ On macOS/Linux, use the desktop's Prepare Chrome extension button; it registers 
 ```sh
 npm run test:ui       # Real Electron UI smoke test; needs a desktop session
 npm run test:extension # Isolated Chromium with synthetic Iowa fixtures; install via npx playwright install chromium
+npm run test:extension:video # Record a fictional-applicant walkthrough of the extension and native sidebar
 npm run test:native   # Native protocol test (on Windows set SECONDHAND_PACKAGED_EXE to the built native host)
 npm run extension:zip
 npm run dist:win      # Run on Windows to build the NSIS .exe installer
@@ -45,6 +46,7 @@ npm run dist:mac      # Unsigned DMGs for Apple silicon and Intel Macs
 ```
 
 Fictional QA data is in [`tests/fixtures/applicant-profile.json`](tests/fixtures/applicant-profile.json). It is for isolated tests only and is never sent to the real Iowa portal.
+See [extension QA and recording](docs/extension-qa.md) for the walkthrough, test coverage, and simulated components.
 
 Address confirmation is under development. The [comparison component and integration notes](docs/address-automation.md) cover strict address matching; live address selection remains disabled pending inspection of Iowa's actual controls.
 

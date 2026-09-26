@@ -13,6 +13,7 @@
     "check": "node scripts/check.cjs",
     "test:ui": "node scripts/smoke-ui.cjs",
     "test:extension": "node scripts/smoke-extension.cjs",
+    "test:extension:video": "node scripts/qa-extension-video.cjs",
     "test:native": "node tests/desktop-native-smoke.cjs",
     "extension:zip": "node scripts/zip-extension.cjs",
     "dist:win": "node scripts/build-native-host.cjs && electron-builder --win nsis --x64 --publish never",
