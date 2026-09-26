@@ -6,6 +6,23 @@ on:
 permissions:
   contents: read
 jobs:
+  website:
+    name: Download website
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run build
   windows:
     runs-on: windows-latest
     steps:
@@ -72,7 +89,7 @@ jobs:
   release:
     name: Retain tagged installers in a draft prerelease
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, macos]
+    needs: [windows, macos, website]
     runs-on: ubuntu-latest
     permissions:
       contents: write

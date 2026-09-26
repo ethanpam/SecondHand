@@ -245,3 +245,13 @@ test('extension preparation shows manual Chrome steps and uses fixed path-copy A
   assert.equal(copied, 1);
   assert.match(view.get('toast').textContent, /Folder path copied/);
 });
+
+test('an outdated bundled extension is labelled for refresh rather than a custom connection', async t => {
+  const extensionId = 'jogldddafjfbmfjnjlbjloakjbecnjpl';
+  const view = await renderer(t, {
+    status: async () => ({ exists: true, unlocked: true, extensionId, platform: 'darwin', extensionSetup: { prepared: false, extensionId } })
+  });
+  assert.equal(view.get('extension-status').textContent, 'Setup needs refresh');
+  assert.match(view.get('prepare-extension').textContent, /Refresh extension files/);
+  assert.equal(view.get('extension-prepared').hidden, true);
+});

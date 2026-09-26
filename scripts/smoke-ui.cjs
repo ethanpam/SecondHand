@@ -8,6 +8,18 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const passphrase = 'synthetic-test-vault-passphrase';
 
+async function captureDiagnostic(page, name, options = {}) {
+  try {
+    await page.screenshot({ path: path.join(root, 'artifacts', name), ...options });
+  } catch (error) {
+    // Some hosted Intel macOS runners have no usable compositor capture surface.
+    // Screenshots are diagnostics; every DOM, IPC, and persistence assertion below
+    // must still pass. Do not suppress closed-page, timeout, or other failures.
+    if (!error.message.includes('Protocol error (Page.captureScreenshot): Unable to capture screenshot')) throw error;
+    console.warn(`Diagnostic screenshot unavailable (${name}): this runner cannot capture its display.`);
+  }
+}
+
 async function main() {
   const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-ui-'));
   const errors = [];
@@ -22,7 +34,7 @@ async function main() {
   try {
     await fs.mkdir(path.join(root, 'artifacts'), { recursive: true });
     let page = await launch();
-    await page.screenshot({ path: path.join(root, 'artifacts/vault-setup.png') });
+    await captureDiagnostic(page, 'vault-setup.png');
     await page.locator('#passphrase').fill(passphrase);
     await page.locator('#confirm-passphrase').fill(passphrase);
     await page.locator('#auth-submit').click();
@@ -49,7 +61,7 @@ async function main() {
     await expect(page.locator('#application-dialog')).not.toBeVisible();
     await expect(page.locator('#application-list')).toContainText('Synthetic follow-up task');
     await page.locator('.nav-item[data-view="overview"]').click();
-    await page.screenshot({ path: path.join(root, 'artifacts/desktop-overview.png'), fullPage: true });
+    await captureDiagnostic(page, 'desktop-overview.png', { fullPage: true });
     await page.locator('#lock-button').click();
     await expect(page.locator('#auth-view')).toBeVisible();
     const cleared = await page.evaluate(() => ({

@@ -62,7 +62,12 @@ GitHub Actions runs syntax/security configuration checks, unit/integration tests
 | `shared/` | Validated profile/application schema and portal allowlist |
 | `tests/` | Crypto, protocol, schema, and portal-adapter regression tests |
 | `scripts/` | Validation, real UI smoke test, extension packaging |
+| `website/` | Public installer download site, setup guide, and authenticated release publishing |
 | `ios/` | Native iPhone app, Safari extension, Xcode project, and iOS tests |
+
+## Download website
+
+The [public download website](https://secondhand-download.khoidoan00.chatgpt.site) serves Windows and Mac installers without requiring GitHub access. Its source is in [`website/`](website/README.md). Only software installers are hosted online; applicant information remains in the desktop vault. Website publishing credentials are never included in the app or browser bundles.
 
 ## Before broader distribution
 

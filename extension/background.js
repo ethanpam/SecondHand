@@ -29,7 +29,7 @@ function nativeRequest(type, payload = {}) {
       port.onDisconnect.addListener(() => {
         // Consume lastError without echoing OS paths or native-host diagnostics.
         void chrome.runtime.lastError;
-        finish('Cannot reach SecondHand. Open the desktop app, connect this extension ID, and unlock your vault.');
+        finish('Cannot reach SecondHand. In the desktop app, open Chrome extension and prepare or refresh its files. Follow the setup steps, then keep the app open and your vault unlocked.');
       });
       port.postMessage({ id, type, ...payload });
     } catch { finish('Cannot reach SecondHand. Check the desktop app and extension connection.'); }
