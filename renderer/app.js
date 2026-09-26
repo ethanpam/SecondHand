@@ -595,7 +595,14 @@
       $('confirm-passphrase').disabled = true;
       return;
     }
-    api.onLocked(() => showLocked({ ...vaultStatus, exists: true, unlocked: false }));
+    // The lock response and this notification can arrive in either order. Once the
+    // unlock screen is showing, saved details are already cleared, so a repeat must
+    // not reset an unlock attempt the person has started. A load still in progress
+    // while the unlock screen is hidden is always cancelled.
+    api.onLocked(() => {
+      if (!vaultStatus.unlocked && !$('auth-view').hidden) return;
+      showLocked({ ...vaultStatus, exists: true, unlocked: false });
+    });
     try {
       const status = await api.status();
       if (status.unlocked) await loadUnlocked(status); else showLocked(status);

@@ -460,3 +460,23 @@ test('reset on this computer skips the recovery key, and either method can be ch
   await tick();
   assert.deepEqual(resets.at(-1), { recoveryKey: 'typed key', password: 'new synthetic password' });
 });
+
+test('a lock notification arriving after the lock response cannot clear an unlock attempt already under way', async t => {
+  const view = await renderer(t, {
+    lock: async () => ({ exists: true, unlocked: false, recoveryKey: true, extensionId: '', bridgeRunning: true }),
+    unlock: async () => { throw new Error('Unable to unlock. Check your password or restore an intact backup.'); }
+  });
+  // The lock response shows the unlock screen before the separate notification arrives.
+  view.get('lock-button').click();
+  await tick();
+  assert.equal(view.get('auth-view').hidden, false);
+  view.edit('passphrase', 'incorrect-synthetic-password');
+  view.submit('auth-form');
+  await tick();
+  assert.equal(view.get('auth-error').hidden, false);
+
+  view.lock();
+  assert.equal(view.get('auth-error').hidden, false, 'A late lock notice must not hide the unlock error');
+  assert.match(view.get('auth-error').textContent, /Unable to unlock/);
+  assert.equal(view.get('workspace').hidden, true);
+});
