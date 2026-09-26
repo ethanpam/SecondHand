@@ -23,7 +23,7 @@
     [/^(first|given) name$|^first$/, 'firstName'],
     [/^middle (name|initial)$/, 'middleName'],
     [/^(last|family|sur) ?name$|^last$/, 'lastName'],
-    [/^(full |legal |applicant )?name$|^name of (the )?head of household$|^head of household name$/, 'fullName'],
+    [/^(full |legal |applicant )?name$|^((parents?|guardians?)( (or )?(parents?|guardians?))? )?(first (and )?last|full) name$|^name of (the )?head of household$|^head of household name$/, 'fullName'],
     [/^(date of birth|birth ?date|dob|birthday)( mm dd yyyy)?$/, 'birthDate'],
     [/^(social security( number)?|ssn)$/, 'ssn'],
     [/^e ?mail( address)?$/, 'email'],
@@ -62,8 +62,12 @@
   const normal = value => String(value || '').toLowerCase().replace(/[‘’']/g, '').replace(/#/g, ' number ').replace(/\*/g, ' ').replace(/[^a-z0-9+]+/g, ' ').trim();
   // A question number or letter the author added ("3.", "4)", "b. ") is not part of the question.
   const QUESTION_NUMBER = /^\s*(\d{1,3}\s*[.)]|[a-z][.)](?=\s))\s*/i;
+  // An aside in parentheses ("(First and Last Name)") is dropped, unless it holds numbers
+  // (age bands like "(0-5)") or points at someone other than the applicant ("(spouse)").
+  const OTHER_PERSON = /\b(child|children|kids?|spouse|partner|husband|wife|emergency|contact|pet|landlord|employer|other|previous|former|maiden|alternate|second|secondary|work|business)\b/i;
+  const aside = (text, inner) => /\d/.test(inner) || OTHER_PERSON.test(inner) ? text : ' ';
   function question(value) {
-    const words = String(value || '').replace(/([a-z])([A-Z][a-z])/g, '$1 $2').replace(QUESTION_NUMBER, '');
+    const words = String(value || '').replace(/([a-z])([A-Z][a-z])/g, '$1 $2').replace(QUESTION_NUMBER, '').replace(/\(([^()]*)\)/g, aside);
     let text = normal(words).replace(/ (required|optional)$/, '');
     for (let previous = ''; previous !== text;) { previous = text; text = text.replace(LEAD, ''); }
     return text;

@@ -54,6 +54,15 @@ test('numbered and run-together questions match once the number is dropped and w
   assert.deepEqual(result.unmatched.map(field => field.label), ['6. U.S. citizen?']);
 });
 
+test('"first and last name" and guardian names are full names; asides in parentheses are dropped unless they change who is asked', () => {
+  const labels = ['2. Guardian first and last name', 'Full Name (First and Last Name) *', 'Parent/Guardian First and Last Name', 'First & last name',
+    'Phone (optional)', 'Last name (spouse)', 'Name (of your pet)', 'Phone (work)', 'Guardian phone'];
+  const doc = page(labels.map((label, index) => `<label for="f${index}">${label}</label><input id="f${index}">`).join(''));
+  const result = generic.plan(doc);
+  assert.deepEqual(byElement(doc, result), { f0: 'fullName', f1: 'fullName', f2: 'fullName', f3: 'fullName', f4: 'phone' });
+  assert.deepEqual(result.unmatched.map(field => field.label), ['Last name (spouse)', 'Name (of your pet)', 'Phone (work)', 'Guardian phone']);
+});
+
 test('only confident matches are planned; vague labels stay unmatched for the applicant', () => {
   const doc = page('<label for="a">Name of your pet</label><input id="a"><label for="b">Emergency contact phone</label><input id="b" type="tel"><label for="c">Income last year from your side business</label><input id="c">');
   const result = generic.plan(doc);
