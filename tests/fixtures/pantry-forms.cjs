@@ -39,4 +39,14 @@ const jotformStyle = `<form class="jotform-form"><ul>
 <li class="form-line"><label class="form-label" for="input_6">Tell us about your situation</label><textarea id="input_6" name="q6_situation"></textarea></li>
 </ul></form>`;
 
-module.exports = { plainPantry, googleStyle, jotformStyle };
+// Google Form whose author numbered the questions and ran words together.
+const numberedGoogle = `<form><div role="list">
+<div role="listitem"><div id="n3" role="heading"><span>3.Email Address:</span><span aria-label="Required question"> *</span></div><input id="email" type="text" aria-labelledby="n3" required></div>
+<div role="listitem"><div id="n4" role="heading"><span>4.PhoneNumber:</span></div><input id="phone" type="text" aria-labelledby="n4"></div>
+<div role="listitem"><div id="n5" role="heading">5) ZipCode</div><input id="zip" type="text" aria-labelledby="n5"></div>
+<div role="listitem"><div id="n7" role="heading">7.DoB</div><input id="dob" type="text" aria-labelledby="n7"></div>
+<div role="listitem"><div id="nb" role="heading">b. City</div><input id="city" type="text" aria-labelledby="nb"></div>
+<div role="listitem"><div id="n6" role="heading">6. U.S. citizen?</div><input id="citizen" type="text" aria-labelledby="n6"></div>
+</div></form>`;
+
+module.exports = { plainPantry, googleStyle, jotformStyle, numberedGoogle };

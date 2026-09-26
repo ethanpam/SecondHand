@@ -47,6 +47,13 @@ test('Google Forms and Jotform layouts map through aria-labelledby, autocomplete
   assert.deepEqual(jotResult.unmatched.map(field => field.label), ['Tell us about your situation']);
 });
 
+test('numbered and run-together questions match once the number is dropped and words are split', () => {
+  const doc = page(forms.numberedGoogle);
+  const result = generic.plan(doc);
+  assert.deepEqual(byElement(doc, result), { email: 'email', phone: 'phone', zip: 'zip', dob: 'birthDate', city: 'city' });
+  assert.deepEqual(result.unmatched.map(field => field.label), ['6. U.S. citizen?']);
+});
+
 test('only confident matches are planned; vague labels stay unmatched for the applicant', () => {
   const doc = page('<label for="a">Name of your pet</label><input id="a"><label for="b">Emergency contact phone</label><input id="b" type="tel"><label for="c">Income last year from your side business</label><input id="c">');
   const result = generic.plan(doc);

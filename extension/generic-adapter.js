@@ -60,8 +60,11 @@
   const clean = value => String(value || '').replace(/\s+/g, ' ').trim().replace(/[\s*:]+$/, '').trim();
   // "#" reads as "number" ("# of adults", "Apt #").
   const normal = value => String(value || '').toLowerCase().replace(/[‘’']/g, '').replace(/#/g, ' number ').replace(/\*/g, ' ').replace(/[^a-z0-9+]+/g, ' ').trim();
+  // A question number or letter the author added ("3.", "4)", "b. ") is not part of the question.
+  const QUESTION_NUMBER = /^\s*(\d{1,3}\s*[.)]|[a-z][.)](?=\s))\s*/i;
   function question(value) {
-    let text = normal(value).replace(/ (required|optional)$/, '');
+    const words = String(value || '').replace(/([a-z])([A-Z][a-z])/g, '$1 $2').replace(QUESTION_NUMBER, '');
+    let text = normal(words).replace(/ (required|optional)$/, '');
     for (let previous = ''; previous !== text;) { previous = text; text = text.replace(LEAD, ''); }
     return text;
   }
