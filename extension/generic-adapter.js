@@ -145,7 +145,7 @@
     if (kind === 'state') return entry.kind === 'select' || (entry.kind === 'input' && type === 'text');
     if (kind === 'date') return entry.kind === 'input' && ['date', 'text', ''].includes(type);
     if (kind === 'email') return entry.kind === 'input' && ['email', 'text'].includes(type);
-    if (kind === 'tel') return entry.kind === 'input' && ['tel', 'text'].includes(type);
+    if (kind === 'tel') return entry.kind === 'input' && ['tel', 'text', 'number'].includes(type);
     if (kind === 'money') return entry.kind === 'input' && ['number', 'text', ''].includes(type);
     return entry.kind === 'textarea' || (entry.kind === 'input' && ['text', 'search', ''].includes(type));
   }
@@ -248,6 +248,7 @@
     }
     if (key === 'phone') {
       const digits = text.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
+      if (element.type === 'number') return digits;
       return digits.length === 10 ? `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}` : text;
     }
     return text;
