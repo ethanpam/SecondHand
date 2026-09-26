@@ -4,7 +4,8 @@ const { randomUUID } = require('node:crypto');
 const PORTAL_URL = 'https://hhsservices.iowa.gov/apspssp/ssp.portal';
 const FIELD_LABELS = Object.freeze({
   firstName: 'First name', middleName: 'Middle name', lastName: 'Last name',
-  birthDate: 'Date of birth', ssn: 'Social Security number', email: 'Email', phone: 'Phone',
+  birthDate: 'Date of birth', ssn: 'Social Security number', email: 'Email', phone: 'Phone (reference)',
+  homePhone: 'Home phone number', mobilePhone: 'Mobile phone number',
   addressLine1: 'Street address', addressLine2: 'Apartment or unit', city: 'City',
   state: 'State', zip: 'ZIP code', county: 'County', householdSize: 'Household size',
   monthlyEarnedIncome: 'Monthly earned income', monthlyOtherIncome: 'Monthly other income',
@@ -40,7 +41,9 @@ function validateProfile(input) {
   if (result.birthDate && (!validDate(result.birthDate) || result.birthDate > new Date().toISOString().slice(0, 10))) throw new Error('Enter a valid date of birth.');
   if (result.ssn && !/^\d{3}-?\d{2}-?\d{4}$/.test(result.ssn)) throw new Error('Enter a nine-digit Social Security number or leave it blank.');
   if (result.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(result.email)) throw new Error('Enter a valid email address.');
-  if (result.phone && !/^[+\d\s().-]{7,30}$/.test(result.phone)) throw new Error('Enter a valid phone number.');
+  for (const field of ['phone', 'homePhone', 'mobilePhone']) {
+    if (result[field] && !/^[+\d\s().-]{7,30}$/.test(result[field])) throw new Error(`Enter a valid ${FIELD_LABELS[field].toLowerCase()}.`);
+  }
   if (result.zip && !/^\d{5}(-\d{4})?$/.test(result.zip)) throw new Error('Enter a five- or nine-digit ZIP code.');
   if (result.state && !/^[A-Za-z]{2}$/.test(result.state)) throw new Error('Use a two-letter state abbreviation.');
   result.state = result.state.toUpperCase();

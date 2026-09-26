@@ -21,6 +21,10 @@ async function registerHost(app, extensionId) {
     await atomicWrite(executable, Buffer.from(`#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(app.getAppPath())} "$@"\n`));
     await fs.chmod(executable, 0o700);
   }
+  if (process.platform === 'win32') {
+    executable = path.join(path.dirname(process.execPath), 'secondHand-native.exe');
+    await fs.access(executable);
+  }
   let manifestDirectory;
   if (process.platform === 'darwin') manifestDirectory = path.join(os.homedir(), 'Library/Application Support/Google/Chrome/NativeMessagingHosts');
   else if (process.platform === 'linux') manifestDirectory = path.join(os.homedir(), '.config/google-chrome/NativeMessagingHosts');

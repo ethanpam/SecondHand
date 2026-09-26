@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { JSDOM } = require('jsdom');
+const { PROFILE_FIELDS } = require('../shared/schema.cjs');
 
 const html = fs.readFileSync(path.join(__dirname, '../renderer/index.html'), 'utf8');
 const script = fs.readFileSync(path.join(__dirname, '../renderer/app.js'), 'utf8');
@@ -89,6 +90,34 @@ test('profile edits made during a pending save remain visible and unsaved until 
   assert.equal(view.get('profile-save-state').textContent, 'Saved locally');
   assert.equal(view.get('profile-nav-dot').hidden, true);
   assert.equal(view.get('firstName').value, 'Newer unsaved edit');
+});
+
+test('profile saves every schema field and keeps home, mobile, and reference phones distinct', async t => {
+  const saved = [];
+  const view = await renderer(t, {
+    saveProfile: async profile => { saved.push(structuredClone(profile)); return structuredClone(profile); }
+  });
+  view.edit('phone', '515-555-0100');
+  view.edit('homePhone', '515-555-0101');
+  view.edit('mobilePhone', '515-555-0102');
+  view.submit('profile-form');
+  await tick();
+  assert.deepEqual(Object.keys(saved[0]).sort(), [...PROFILE_FIELDS].sort());
+  assert.equal(saved[0].phone, '515-555-0100');
+  assert.equal(saved[0].homePhone, '515-555-0101');
+  assert.equal(saved[0].mobilePhone, '515-555-0102');
+  assert.equal(view.get('homePhone').value, '515-555-0101');
+  assert.equal(view.get('mobilePhone').value, '515-555-0102');
+
+  view.edit('homePhone', '');
+  view.edit('mobilePhone', '');
+  view.submit('profile-form');
+  await tick();
+  assert.equal(saved[1].phone, '515-555-0100');
+  assert.equal(saved[1].homePhone, '');
+  assert.equal(saved[1].mobilePhone, '');
+  view.lock();
+  for (const id of ['phone', 'homePhone', 'mobilePhone']) assert.equal(view.get(id).value, '');
 });
 
 test('a pending profile save cannot repopulate fields after a vault lock', async t => {

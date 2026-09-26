@@ -1,0 +1,19 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+
+if (process.platform !== 'win32') throw new Error('Build the Windows native host on Windows.');
+const root = path.resolve(__dirname, '..');
+const windowsDirectory = process.env.WINDIR || 'C:\\Windows';
+const compiler = ['Framework64', 'Framework'].map(directory =>
+  path.join(windowsDirectory, 'Microsoft.NET', directory, 'v4.0.30319', 'csc.exe')).find(file => fs.existsSync(file));
+if (!compiler) throw new Error('The Windows .NET Framework C# compiler was not found. Enable .NET Framework 4.8 and try again.');
+const directory = path.join(root, 'build', 'native');
+fs.mkdirSync(directory, { recursive: true });
+const result = spawnSync(compiler, ['/nologo', '/target:exe', '/platform:anycpu', '/optimize+',
+  `/out:${path.join(directory, 'secondHand-native.exe')}`, path.join(root, 'desktop', 'native-launcher.cs')],
+{ stdio: 'inherit', windowsHide: true });
+if (result.error) throw result.error;
+if (result.status !== 0) process.exit(result.status || 1);
+console.log('Built Windows native messaging launcher.');

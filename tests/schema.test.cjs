@@ -16,6 +16,13 @@ test('blank facts stay unknown; explicit zero remains zero', () => {
 test('profile rejects unknown fields, invalid dates and invalid money', () => {
   for (const profile of [{ unknown: 'value' }, { firstName: {} }, { birthDate: '2020-02-30' }, { monthlyRent: '-1' }, { monthlyRent: 'unknown' }, { householdSize: '0' }, JSON.parse('{"__proto__":"bad"}')]) assert.throws(() => validateProfile(profile));
 });
+test('typed phone numbers stay distinct; legacy phone never implies home or mobile', () => {
+  const profile = validateProfile({ phone: '515-555-0100', homePhone: '(515)555-0101', mobilePhone: '5155550102' });
+  assert.equal(profile.homePhone, '(515)555-0101');
+  assert.equal(profile.mobilePhone, '5155550102');
+  assert.equal(validateProfile({ phone: '515-555-0100' }).homePhone, '');
+  assert.throws(() => validateProfile({ mobilePhone: 'call me' }));
+});
 test('submission is never inferred and requires a receipt', () => {
   assert.equal(validateApplication({}).status, 'draft');
   assert.throws(() => validateApplication({ status: 'submitted' }));

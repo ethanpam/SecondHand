@@ -2,8 +2,8 @@
 
 // Invoked explicitly with `node tests/desktop-native-smoke.cjs`. This starts an
 // actual Electron native-host process, so Linux runners need a display/Xvfb.
-// SECONDHAND_PACKAGED_EXE points to the installed/built Windows app executable
-// to exercise the exact GUI-subsystem exe Chrome launches after installation.
+// SECONDHAND_PACKAGED_EXE points to the installed/built Windows native launcher
+// (the adjacent app executable also works). This exercises Chrome's exact entry.
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -24,9 +24,13 @@ const { startBridge, frame, FrameReader } = require('../desktop/bridge.cjs');
       assert.equal(request.type, 'status');
       return { unlocked: false, applicationCount: 0 };
     });
-    const executable = packaged || require('electron');
+    const executable = packaged ? path.join(path.dirname(path.resolve(packaged)), 'secondHand-native.exe') : require('electron');
     const args = [...(packaged ? [] : [path.resolve(__dirname, '..')]), `chrome-extension://${extensionId}/`];
     const env = { ...process.env, SECONDHAND_USER_DATA: userData, LOCALAPPDATA: temporary };
+    // A Windows native host must set this before Electron starts. The packaged
+    // helper does so itself; development smoke sets the equivalent child env.
+    if (!packaged) env.ELECTRON_NO_ATTACH_CONSOLE = '1';
+    else delete env.ELECTRON_NO_ATTACH_CONSOLE;
     delete env.ELECTRON_RUN_AS_NODE;
     child = spawn(executable, args, { env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     let stderr = '';
@@ -57,7 +61,7 @@ const { startBridge, frame, FrameReader } = require('../desktop/bridge.cjs');
     assert.equal(result.code, 0, `Native host failed (${result.signal || result.code}). ${stderr}`);
     assert.equal(framingInvalid, false, `Native host emitted non-protocol stdout (${stdoutBytes} bytes; bounded synthetic hex: ${stdoutPrefix.toString('hex')}). ${stderr}`);
     assert.deepEqual(messages, [{ id: 'native-smoke', ok: true, data: { unlocked: false, applicationCount: 0 } }]);
-    process.stdout.write(`Native messaging subprocess smoke passed (${packaged ? 'packaged Windows exe' : 'development Electron'}).\n`);
+    process.stdout.write(`Native messaging subprocess smoke passed (${packaged ? 'packaged Windows launcher + app' : 'development Electron'}).\n`);
   } finally {
     if (child && child.exitCode === null) child.kill();
     if (bridge) await bridge.close();

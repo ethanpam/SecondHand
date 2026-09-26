@@ -13,33 +13,38 @@ The live public portal was inspected in Chrome without an account or applicant f
 3. That page has the heading **Household Application Information**, form `#householdApplicationForm`, and Yes/No program-intent radio controls `#householdApplyProgYes` / `#householdApplyProgNo` (name `householdApplyProg`).
 4. Selecting the intent to apply for SNAP/FIP/RCA/health coverage and continuing reached `/applyForBenefits/selectHouseholdInfo`, which required a CAPTCHA. Its `captchaAnswer` input and Refresh button were observed. The user completed the CAPTCHA manually; SecondHand did not solve or bypass it.
 5. The next **Before You Start...** page displayed informational slides. Its Continue button led to `/applyForBenefits/letsGetStarted`, **Let's get started**.
-6. That page requires the `#termChkbox` consent to use/retrieve applicant information, including asset verification, and consent for other listed people. `#buttonContiId` (Continue) remains disabled until checked. The development inspection stopped without accepting that consent.
+6. That page requires the `#termChkbox` consent to use/retrieve applicant information, including asset verification, and consent for other listed people. `#buttonContiId` (Continue) remains disabled until checked. The user reviewed and completed that consent in Chrome; the agent did not accept it.
 
-**The applicant page behind the portal's data-use consent has not been inspected. No applicant field IDs, exact current labels, application navigation, final submission, receipt capture, or authenticated status tracking have been validated live.** No account, invented personal information, consent attestation, signature, or submitted application was created by SecondHand. Public help may lag the current application. Completing this validation requires appropriate user authorization or an agency-provided test environment; do not use fictitious facts in the production portal.
+After consent, the informational **Important Information when applying and what to expect**, **Instructions**, and **About you** pages were inspected. The optional **Assisting Organization or Person** question was left unanswered; Save and Continue allowed proceeding without an answer. Its name/phone controls belong to the helper, so its `#agencyDetails` form is explicitly unsupported.
+
+The blank **Enter Personal Information** page was reached at `/applyForBenefits/enterPersonalInfo`. Its form is `#personalInformation` with action `enterPersonalInfo`. The following headings were observed: **Applicant's Information**, **Contact Information**, **Address Information**, and **Program Information**. Only schema metadata (labels, IDs, names, control types, container structure) was read. No applicant answers, tokens, cookies, or authentication values were captured. No account, invented facts, signature, or submitted application was created by SecondHand.
+
+**The ten controls below have live-inspected DOM mappings. Filling those controls and the full application have not yet been tested in a live applicant session.** The home-address controls are initially hidden until the applicant answers the home-address question themselves. Later pages, submission, receipt capture, and authenticated status tracking remain unverified.
+
+A read-only execution of the scanner's equivalent checks against the live blank form returned `recognizedPage: true`, five matches (`firstName`, `middleName`, `lastName`, `homePhone`, `mobilePhone`), 29 skipped controls, and zero ambiguous matches. This verified the actual ancestor headings, exact selectors, viewport/occlusion checks, and empty-field handling. Hidden home-address controls correctly remained excluded. The browser inspection API cannot clone DOM nodes; its read-only equivalent rejected labels containing nested controls instead of cloning them (the observed labels contained none). Only field names and counts were returned; no values were exported and no form was filled.
 
 ## Implemented mapping
 
-All mappings below are **conservative candidates tested against synthetic HTML**, not claimed captures of the post-CAPTCHA portal. The scanner requires an English heading matching `Enter Personal Information` or `Primary Applicant Information`. It stops on unknown pages; labels alone never enable filling.
+The scanner requires the **Enter Personal Information** heading plus the exact observed form ID/action. Each control must also match its observed ID, name, type, and normalized label. The popup requests only the fields the user reviewed. The source fixture is a small sanitized transcription of observed structure, not a saved government page.
 
-| Local profile field | Exact normalized labels accepted | Additional restriction |
-| --- | --- | --- |
-| `firstName` | First name; Applicant first name | Primary applicant scope |
-| `middleName` | Middle name; Applicant middle name | Does not substitute middle initial |
-| `lastName` | Last name; Applicant last name | Primary applicant scope |
-| `birthDate` | Date of birth; Birth date; Date of birth (MM/DD/YYYY) | Native date input, or explicit MM/DD/YYYY hint |
-| `ssn` | Social Security number; Social Security number (SSN) | Only plain text controls; password/masked controls unsupported |
-| `email` | Email address; E-mail address | Primary applicant scope |
-| `phone` | Phone number; Telephone number; Primary phone number | Text/tel control, no guessing alternate numbers |
-| `addressLine1` | Address line 1; Street address; Home address; Residential address line 1 | Explicit Home/Residential/Physical address group |
-| `addressLine2` | Address line 2; Apartment number; Apartment / unit; Residential address line 2 | Same home-address restriction |
-| `city` | City; City/town | Same home-address restriction |
-| `state` | State | Same restriction; select option must match value/label (IA ↔ Iowa allowed) |
-| `zip` | ZIP code; ZIP | Same home-address restriction |
-| `county` | County; County of residence | Same restriction; exact select option only |
+| Local field | Observed ID and name | Observed label | Restriction |
+| --- | --- | --- | --- |
+| `firstName` | `firstName` | First Name* | Primary applicant form only |
+| `middleName` | `middleName` | Middle Name | Full middle name, no initial substitution |
+| `lastName` | `lastName` | Last Name* | Primary applicant form only |
+| `homePhone` | `phoneNumber` | Home Phone Number (999)999-9999 | Explicit home number, formatted to the displayed pattern |
+| `mobilePhone` | `otherPhoneNumber` | Mobile Phone Number (999)999-9999 | Explicit mobile number, formatted to the displayed pattern |
+| `addressLine1` | `addressLine1` | Home Address Line 1* | Must be inside `#homeAddrDiv` and visible |
+| `addressLine2` | `addressLine2` | Home Address Line 2 | Same home-address restriction |
+| `city` | `city` | City* | Same home-address restriction |
+| `state` | `state` | State* | Same restriction; exact select option (`IA` = Iowa observed) |
+| `zip` | `zipcode` | Zip Code (99999)* | Same restriction; five digits only |
+
+Phone formatting accepts ten digits or eleven beginning with US country code 1 (including +1). Other formats are skipped. The legacy generic `phone` field is never assigned to either phone control. Maiden name and suffix are present but remain manual because they are not stored profile fields.
 
 Matching normalizes whitespace, case, a trailing required asterisk, and a trailing colon. It uses associated HTML labels or ARIA names, not broad text search or inferred IDs. Each field must have exactly one safe visible match. Repeated applicant/household names, unknown groups, mailing addresses, hidden/disabled/readonly controls, covered or offscreen elements, and already-entered answers are skipped. No automatic scrolling occurs. Scroll in the portal and scan again to consider additional visible fields.
 
-The profile may store household size, income, rent, and utilities locally, but this release does **not** automatically fill them: the question's person, time period, and meaning have not been verified. Radio buttons, checkboxes, uploads, CAPTCHA, passwords, MFA, signatures, certifications, and submit/navigation buttons are never operated.
+The profile may store birth date, SSN, email, county, household size, income, rent, and utilities locally, but this release does **not** automatically fill them: their later-page controls and contexts have not been verified. Radio buttons, checkboxes, uploads, CAPTCHA, passwords, MFA, signatures, certifications, and submit/navigation buttons are never operated.
 
 ## Local data flow
 
@@ -54,10 +59,10 @@ Entering answers shares them with the government website; its scripts may save t
 
 ## Remaining validation before treating this as a supported integration
 
-- Inspect the real applicant page after a person completes CAPTCHA and the required data-use consent, or in an agency-provided test environment. Add sanitized, value-free fixtures and exact scope/label mapping grounded in that observation. Do not commit tokens, cookies, screenshots with applicant data, or page dumps containing personal information.
+- Recheck the inspected applicant schema in a permitted live or agency-provided test session before relying on it. Add further mappings only from sanitized, value-free observations. Never commit tokens, cookies, screenshots with applicant data, or page dumps containing personal information.
 - Verify each supported field with the applicant's review, including browser masks, required formats, select values, change handlers, and duplicate household sections.
 - Exercise desktop approval and native messaging in an installed Windows build with an unpacked extension and an unlocked test vault. Unit tests mock Chrome and the native transport; they do not replace this check.
 - Confirm user-driven submission and receipt recording only with a consenting applicant or an agency-provided test environment. No production test submissions.
 - Expand income/household/navigation/document coverage only from verified forms and explicit profile semantics. Portal changes should produce a manual fallback until reviewed.
 
-Tests: `node --test tests/extension-*.test.cjs`. Adapter tests use jsdom with explicit simulated geometry; transport tests use a mocked MV3 worker. The public pre-CAPTCHA fixture is a minimal transcription of observed non-sensitive attributes, and the applicant fixture is explicitly synthetic.
+Tests: `node --test tests/extension-*.test.cjs`. Adapter tests use jsdom with explicit simulated geometry; transport tests use a mocked MV3 worker. The public pre-CAPTCHA fixture is a minimal transcription of observed non-sensitive attributes, and the applicant fixture is a sanitized reconstruction of live-inspected structure with synthetic test values supplied only inside jsdom.

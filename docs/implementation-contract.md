@@ -18,7 +18,7 @@ Runtime: Electron desktop, plain HTML/CSS/JavaScript renderer, Manifest V3 Chrom
 - `exportBackup()` / `importBackup()` -> `{ cancelled: boolean }` (native dialogs, encrypted vault bytes only; import only while locked)
 - `onLocked(callback)` -> unsubscribe function
 
-Profile is a flat object containing only optional string fields: firstName, middleName, lastName, birthDate (YYYY-MM-DD), ssn, email, phone, addressLine1, addressLine2, city, state, zip, county, householdSize, monthlyEarnedIncome, monthlyOtherIncome, monthlyRent, monthlyUtilities. Blank means unknown, never zero or false. No defaults for user facts.
+Profile is a flat object containing only optional string fields: firstName, middleName, lastName, birthDate (YYYY-MM-DD), ssn, email, phone (reference only, not automatically assigned a type), homePhone, mobilePhone, addressLine1, addressLine2, city, state, zip, county, householdSize, monthlyEarnedIncome, monthlyOtherIncome, monthlyRent, monthlyUtilities. Blank means unknown, never zero or false. No defaults for user facts.
 
 Applications: `{ id, program: 'Iowa SNAP', status, createdAt, updatedAt, confirmationNumber, notes, nextAction, dueDate }`. Allowed status: draft, in_progress, submitted, needs_action, approved, denied. Submitted requires confirmationNumber. Manual user records clearly labeled. No invented deadlines.
 

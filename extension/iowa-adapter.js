@@ -4,23 +4,19 @@
   const PORTAL = 'https://hhsservices.iowa.gov/apspssp/ssp.portal';
   const normal = value => String(value || '').replace(/\s+/g, ' ').trim().replace(/\s*\*\s*$/, '').replace(/:$/, '').trim().toLowerCase();
   const definitions = Object.freeze({
-    firstName: { label: 'First name', names: ['first name', 'applicant first name'] },
-    middleName: { label: 'Middle name', names: ['middle name', 'applicant middle name'] },
-    lastName: { label: 'Last name', names: ['last name', 'applicant last name'] },
-    birthDate: { label: 'Date of birth', names: ['date of birth', 'birth date', 'date of birth (mm/dd/yyyy)'] },
-    ssn: { label: 'Social Security number', names: ['social security number', 'social security number (ssn)'] },
-    email: { label: 'Email address', names: ['email address', 'e-mail address'] },
-    phone: { label: 'Phone number', names: ['phone number', 'telephone number', 'primary phone number'] },
-    addressLine1: { label: 'Home street address', names: ['address line 1', 'street address', 'home address', 'residential address line 1'], address: true },
-    addressLine2: { label: 'Home apartment / unit', names: ['address line 2', 'apartment number', 'apartment / unit', 'residential address line 2'], address: true },
-    city: { label: 'Home city', names: ['city', 'city/town'], address: true },
-    state: { label: 'Home state', names: ['state'], address: true },
-    zip: { label: 'Home ZIP code', names: ['zip code', 'zip'], address: true },
-    county: { label: 'Home county', names: ['county', 'county of residence'], address: true }
+    firstName: { label: 'First name', id: 'firstName', names: ['first name'] },
+    middleName: { label: 'Middle name', id: 'middleName', names: ['middle name'] },
+    lastName: { label: 'Last name', id: 'lastName', names: ['last name'] },
+    homePhone: { label: 'Home phone number', id: 'phoneNumber', names: ['home phone number (999)999-9999'] },
+    mobilePhone: { label: 'Mobile phone number', id: 'otherPhoneNumber', names: ['mobile phone number (999)999-9999'] },
+    addressLine1: { label: 'Home street address', id: 'addressLine1', names: ['home address line 1'], address: true },
+    addressLine2: { label: 'Home apartment / unit', id: 'addressLine2', names: ['home address line 2'], address: true },
+    city: { label: 'Home city', id: 'city', names: ['city'], address: true },
+    state: { label: 'Home state', id: 'state', names: ['state'], address: true },
+    zip: { label: 'Home ZIP code', id: 'zipcode', names: ['zip code (99999)'], address: true }
   });
-  const pageHeadings = new Set(['enter personal information', 'primary applicant information']);
-  const safeSections = new Set([...pageHeadings, 'personal information', 'applicant information', 'primary applicant', 'name', 'contact information', 'contact details', 'home address', 'residential address', 'physical address']);
-  const homeSections = new Set(['home address', 'residential address', 'physical address']);
+  const pageHeadings = new Set(['enter personal information']);
+  const safeSections = new Set([...pageHeadings, "applicant's information", 'contact information', 'address information']);
   const unsafe = /\b(signature|sign here|signing|certification|certify|attestation|attest|password|captcha|verification|security code|one time|username|user name|other people|other members|household members|family members|spouse|child|children|representative|employer|mailing address|mailing information)\b/i;
 
   function isSupportedUrl(raw) {
@@ -90,12 +86,12 @@
       }
       branch = node;
     }
-    return { safe: true, home: names.some(name => homeSections.has(name)) };
+    return { safe: true, home: Boolean(element.closest('#personalInformation #homeAddrDiv')) };
   }
 
   function identifyPage(doc) {
     const main = doc.querySelector('main, [role="main"], #MainContentContainer') || doc.body;
-    if (!main) return false;
+    if (!main || !doc.querySelector('form#personalInformation[action="enterPersonalInfo"]')) return false;
     // Heading visibility is checked without viewport bounds: scrolling the page
     // may move its title out of view while a field remains visible.
     return Array.from(main.querySelectorAll('h1, h2, h3')).some(heading => {
@@ -113,17 +109,18 @@
     if (!result.supported || !identifyPage(doc)) return result;
     result.recognizedPage = true;
     const candidates = new Map();
-    for (const element of doc.querySelectorAll('input, select, textarea')) {
+    for (const element of doc.querySelectorAll('form#personalInformation input, form#personalInformation select')) {
       const names = namesFor(element, doc);
       const identity = `${element.id} ${element.name} ${names.join(' ')}`.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]/g, ' ');
       const type = element.type?.toLowerCase() || 'text';
       const group = sectionInfo(element);
-      if (!visible(element, doc) || element.matches(':disabled') || element.readOnly || !group.safe || unsafe.test(identity) || !['text', 'email', 'tel', 'date', 'select-one'].includes(type)) { result.skipped++; continue; }
+      if (!visible(element, doc) || element.matches(':disabled') || element.readOnly || !group.safe || unsafe.test(identity) || !['text', 'select-one'].includes(type)) { result.skipped++; continue; }
       const matches = Object.entries(definitions).filter(([, definition]) => names.length > 0 && names.every(name => definition.names.includes(name)));
       if (matches.length !== 1) { result.skipped++; continue; }
       const [key, definition] = matches[0];
+      if (element.id !== definition.id || element.name !== definition.id) { result.skipped++; continue; }
       if (definition.address && !group.home) { result.skipped++; continue; }
-      if (element.tagName === 'SELECT' && !['state', 'county'].includes(key)) { result.skipped++; continue; }
+      if ((key === 'state') !== (element.tagName === 'SELECT')) { result.skipped++; continue; }
       if (!candidates.has(key)) candidates.set(key, []);
       candidates.get(key).push(element);
     }
@@ -140,16 +137,13 @@
   function formatValue(key, raw, element) {
     if (typeof raw !== 'string' || !raw.trim() || raw.length > 250 || /[\u0000-\u001f]/.test(raw)) return null;
     let value = raw.trim();
-    if (key === 'birthDate') {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-      const date = new Date(`${value}T00:00:00Z`);
-      if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) return null;
-      if (element.type !== 'date') {
-        const hint = `${element.placeholder || ''} ${namesFor(element, element.ownerDocument).join(' ')}`;
-        if (!/mm\/dd\/yyyy/i.test(hint)) return null;
-        value = `${value.slice(5, 7)}/${value.slice(8, 10)}/${value.slice(0, 4)}`;
-      }
+    if (key === 'homePhone' || key === 'mobilePhone') {
+      let digits = value.replace(/[()\s.-]/g, '');
+      if (/^\+?1\d{10}$/.test(digits)) digits = digits.replace(/^\+?1/, '');
+      if (!/^\d{10}$/.test(digits)) return null;
+      value = `(${digits.slice(0, 3)})${digits.slice(3, 6)}-${digits.slice(6)}`;
     }
+    if (key === 'zip' && !/^\d{5}$/.test(value)) return null;
     if (element.tagName === 'SELECT') {
       const choices = Array.from(element.options).filter(option => !option.disabled && option.value && (normal(option.value) === normal(value) || normal(option.textContent) === normal(value) || (key === 'state' && ['ia', 'iowa'].includes(normal(value)) && ['ia', 'iowa'].includes(normal(option.textContent)))));
       return choices.length === 1 ? choices[0].value : null;

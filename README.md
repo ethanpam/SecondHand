@@ -11,14 +11,14 @@ A desktop benefits companion and Chrome extension for Iowa SNAP. Your saved prof
 3. Extract `secondHand-extension.zip` into a permanent folder. In Chrome, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select that folder.
 4. Open secondHand, create a vault with a strong passphrase, and save your profile. Blank fields mean unknown. Store the passphrase somewhere safe: there is no server-side password reset.
 5. Copy the extension's 32-character ID from `chrome://extensions` into the desktop app's extension setup. Connect it to register the local Native Messaging host for your user account.
-6. Open Iowa's portal from the app. Create/sign into an Iowa account yourself, or choose the guest flow. Open the extension on a supported application page, scan the page, review the matched field names, and request filling. Approve the specific field release in secondHand, then review the filled form.
+6. Open Iowa's portal in Chrome (the desktop button uses your default browser). Create/sign into an Iowa account yourself, or choose the guest flow. Open the extension on a supported application page, scan the page, review the matched field names, and request filling. Approve the specific field release in secondHand, then review the filled form.
 7. Complete the remaining questions and submission yourself. Save the official confirmation number in the local application tracker. Tracker statuses and deadlines are your records, not live government case status.
 
 Keep the desktop app running and unlocked when using the extension. A lock, an unknown page, or a changed form stops field sharing. Register again if you move the development checkout or replace the unpacked extension and its ID changes.
 
 ## Develop
 
-Requires Node.js 22.12+ (Node 24 recommended) and npm. Windows is the installer target; macOS is supported for development.
+Requires Node.js 22.12+ (Node 24 recommended) and npm. Windows is the installer target; macOS is supported for development. The Windows build also uses the .NET Framework 4.x compiler included with supported Windows installations to compile the small native-messaging launcher from source.
 
 ```sh
 npm ci
@@ -31,6 +31,7 @@ For the development extension, load this repository's `extension/` directory unp
 
 ```sh
 npm run test:ui       # Real Electron UI smoke test; needs a desktop session
+npm run test:native   # Real native-host subprocess and binary protocol test
 npm run extension:zip
 npm run dist:win      # Run on Windows to build the NSIS .exe installer
 npm run dist:mac      # Optional unsigned local macOS application bundle

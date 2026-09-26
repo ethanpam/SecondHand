@@ -14,7 +14,7 @@
     "test:ui": "node scripts/smoke-ui.cjs",
     "test:native": "node tests/desktop-native-smoke.cjs",
     "extension:zip": "node scripts/zip-extension.cjs",
-    "dist:win": "electron-builder --win nsis --x64 --publish never",
+    "dist:win": "node scripts/build-native-host.cjs && electron-builder --win nsis --x64 --publish never",
     "dist:mac": "electron-builder --mac dir --publish never"
   },
   "devDependencies": {
@@ -30,7 +30,11 @@
     "directories": { "output": "release" },
     "files": ["desktop/**/*", "renderer/**/*", "shared/**/*", "package.json"],
     "extraResources": [{ "from": "extension", "to": "extension" }],
-    "win": { "target": "nsis", "executableName": "secondHand" },
+    "win": {
+      "target": "nsis",
+      "executableName": "secondHand",
+      "extraFiles": [{ "from": "build/native/secondHand-native.exe", "to": "secondHand-native.exe" }]
+    },
     "nsis": {
       "oneClick": false,
       "perMachine": false,

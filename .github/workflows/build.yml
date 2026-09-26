@@ -25,7 +25,7 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - run: npm run test:native
         env:
-          SECONDHAND_PACKAGED_EXE: release/win-unpacked/secondHand.exe
+          SECONDHAND_PACKAGED_EXE: release/win-unpacked/secondHand-native.exe
       - uses: actions/upload-artifact@v4
         with:
           name: secondHand-windows
