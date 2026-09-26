@@ -17,7 +17,9 @@
   'use strict';
   const ALLOWED_KEYS = Object.freeze(['firstName', 'middleName', 'lastName', 'fullName', 'suffix', 'birthDate', 'ssn', 'email', 'phone',
     'addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county', 'ageRange', 'householdSize', 'householdAdults', 'householdChildren', 'householdSeniors',
-    'householdVeteran', 'householdDisability', 'totalMonthlyIncome', 'annualIncome', 'monthlyRent', 'monthlyUtilities']);
+    'householdVeteran', 'householdDisability', 'totalMonthlyIncome', 'annualIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand',
+    'monthlyMedicalExpenses', 'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare', 'anyoneSenior', 'iowaResident',
+    'wantsHealthCoverage']);
   const UNREADABLE = 'The AI returned an unreadable answer.';
   // availability() must get the same options as create() and prompt().
   const MODEL_OPTIONS = Object.freeze({
@@ -62,7 +64,16 @@
     totalMonthlyIncome: { about: 'total household income per month', ...MONEY },
     annualIncome: { about: 'total household income per year', ...MONEY },
     monthlyRent: { about: 'monthly rent or mortgage payment', ...MONEY },
-    monthlyUtilities: { about: 'monthly utility costs', ...MONEY }
+    monthlyUtilities: { about: 'monthly utility costs', ...MONEY },
+    assetsOnHand: { about: 'money the household has on hand: cash, checking, and savings', ...MONEY },
+    monthlyMedicalExpenses: { about: 'medical expenses the household pays each month', ...MONEY },
+    householdAllCitizens: { about: 'yes or no: are all household members U.S. citizens', ...YES_NO },
+    householdLegalStatus: { about: 'yes or no: do household members who are not citizens have legal documents to stay in the U.S.', ...YES_NO },
+    householdPregnant: { about: 'yes or no: is anyone in the household pregnant', ...YES_NO },
+    householdMedicare: { about: 'yes or no: is anyone in the household enrolled in Medicare', ...YES_NO },
+    anyoneSenior: { about: 'yes or no: is anyone in the household age 65 or older', ...YES_NO },
+    iowaResident: { about: 'yes or no: is at least one household member a resident of Iowa', ...YES_NO },
+    wantsHealthCoverage: { about: 'yes or no: does the applicant want to find out about help paying for health insurance', ...YES_NO }
   });
 
   const has = (object, key) => Object.prototype.hasOwnProperty.call(object, key);

@@ -13,7 +13,9 @@ function page(html, url = 'https://pantry.example.org/intake') {
   for (const node of document.querySelectorAll('*')) { node.getBoundingClientRect = () => box; node.getClientRects = () => [box]; }
   return document;
 }
-const byElement = (doc, result) => Object.fromEntries(result.matched.map(item => [generic.elementFor(item.id)?.id || generic.elementFor(item.id)?.name || item.id, item.key]));
+// Radio groups are named by the group, other controls by their id.
+const controlName = element => (element?.type === 'radio' ? element.name : element?.id || element?.name);
+const byElement = (doc, result) => Object.fromEntries(result.matched.map(item => [controlName(generic.elementFor(item.id)) || item.id, item.key]));
 const profile = {
   firstName: 'Avery', middleName: 'Jordan', lastName: 'Example', birthDate: '1985-04-12', email: 'avery.example@example.invalid',
   mobilePhone: '2025550148', homePhone: '2025550147', addressLine1: '123 Test Way', addressLine2: 'Unit 4', city: 'Demo City', state: 'IA', zip: '50309',
@@ -39,12 +41,167 @@ test('a plain pantry intake form maps every common question to the saved profile
 test('Google Forms and Jotform layouts map through aria-labelledby, autocomplete, sub-labels, and questions', () => {
   const google = page(forms.googleStyle);
   const googleResult = generic.plan(google);
-  assert.deepEqual(googleResult.matched.map(item => item.key), ['fullName', 'email', 'zip']);
-  assert.equal(googleResult.unmatched.length, 0, 'div-based radio groups are not native controls and are left alone');
+  assert.deepEqual(googleResult.matched.map(item => item.key), ['fullName', 'email', 'zip', 'householdSize']);
+  assert.equal(googleResult.unmatched.length, 0);
   const jot = page(forms.jotformStyle);
   const jotResult = generic.plan(jot);
   assert.deepEqual(byElement(jot, jotResult), { first_3: 'firstName', last_3: 'lastName', input_4: 'state', input_5: 'monthlyRent' });
   assert.deepEqual(jotResult.unmatched.map(field => field.label), ['Tell us about your situation']);
+});
+
+test('numbered and run-together questions match once the number is dropped and words are split', () => {
+  const doc = page(forms.numberedGoogle);
+  const result = generic.plan(doc);
+  assert.deepEqual(byElement(doc, result), { email: 'email', phone: 'phone', zip: 'zip', dob: 'birthDate', city: 'city' });
+  assert.deepEqual(result.unmatched.map(field => field.label), ['6. U.S. citizen?']);
+});
+
+test('"first and last name" and guardian names are full names; asides in parentheses are dropped unless they change who is asked', () => {
+  const labels = ['2. Guardian first and last name', 'Full Name (First and Last Name) *', 'Parent/Guardian First and Last Name', 'First & last name',
+    'Phone (optional)', 'Last name (spouse)', 'Name (of your pet)', 'Phone (work)', 'Guardian phone'];
+  const doc = page(labels.map((label, index) => `<label for="f${index}">${label}</label><input id="f${index}">`).join(''));
+  const result = generic.plan(doc);
+  assert.deepEqual(byElement(doc, result), { f0: 'fullName', f1: 'fullName', f2: 'fullName', f3: 'fullName', f4: 'phone' });
+  assert.deepEqual(result.unmatched.map(field => field.label), ['Last name (spouse)', 'Name (of your pet)', 'Phone (work)', 'Guardian phone']);
+});
+
+test('a generic date or time sub-label is read together with its question, and birth dates go only to birth questions', () => {
+  const doc = page(forms.googleDates);
+  const result = generic.plan(doc);
+  assert.deepEqual(byElement(doc, result), { dob: 'birthDate' });
+  assert.deepEqual(result.unmatched.map(field => field.label),
+    ['5.Date ordered: Date', 'Pickup time: Hour', 'Pickup time: Minute', 'Birthday: Month', 'Birthday: Day', 'Birthday: Year']);
+  for (const label of ['5.Date ordered: Date', 'Birthday: Month', 'Month of birth', 'Child’s date of birth', 'Date'])
+    assert.equal(generic.canSuggest('birthDate', { label }), false, label);
+  for (const label of ['Your birthday', 'Date of birth (MM/DD/YYYY)']) assert.equal(generic.canSuggest('birthDate', { label }), true, label);
+  assert.equal(generic.canSuggest('email', { label: 'Date' }), true);
+  assert.equal(generic.canSuggest('password', { label: 'Password' }), false);
+  // A guessed birth date is never placed in a question that is not about birth.
+  const ordered = result.unmatched.find(field => field.label.startsWith('5.'));
+  const month = result.unmatched.find(field => field.label === 'Birthday: Month');
+  const dob = result.matched.find(item => item.key === 'birthDate');
+  const filled = generic.fillFields(doc, result.token, [{ id: ordered.id, key: 'birthDate', guessed: true }, { id: month.id, key: 'birthDate', guessed: false },
+    { id: dob.id, key: 'birthDate', guessed: false }], generic.deriveValues(profile));
+  assert.deepEqual(filled.filled, [dob.id]);
+  assert.equal(doc.getElementById('ordered').value, '');
+  assert.equal(doc.getElementById('month').value, '');
+  assert.equal(doc.getElementById('dob').value, '1985-04-12');
+});
+
+// Google registers a choice when its div[role=radio] is clicked; this stands in for its script.
+function googleClicks(doc) {
+  const clicks = [];
+  for (const option of doc.querySelectorAll('[role="radiogroup"] [role="radio"]')) {
+    option.addEventListener('click', () => {
+      clicks.push(option.getAttribute('data-value'));
+      for (const other of option.closest('[role="radiogroup"]').querySelectorAll('[role="radio"]')) other.setAttribute('aria-checked', String(other === option));
+    });
+  }
+  return clicks;
+}
+
+test('Google Forms choice questions are planned, counted as need-you, and filled by clicking the matching option', () => {
+  const doc = page(forms.googleChoices);
+  const clicks = googleClicks(doc);
+  const result = generic.plan(doc);
+  assert.deepEqual(result.matched.map(item => item.key), ['householdSize', 'householdVeteran']);
+  assert.deepEqual(result.unmatched.map(({ label, type, options, required }) => ({ label, type, options, required })), [
+    { label: 'Which pantry location?', type: 'radio', options: ['North', 'South'], required: true },
+    { label: 'Which items do you need?', type: 'checkbox', options: ['Produce', 'Dairy'], required: true },
+    { label: 'County', type: 'listbox', options: ['Polk', 'Story'], required: true }
+  ], 'an answered question is not planned; the rest wait for the applicant');
+  const filled = generic.fillFields(doc, result.token, [...result.matched.map(({ id, key }) => ({ id, key, guessed: false })),
+    ...result.unmatched.map(({ id }) => ({ id, key: 'county', guessed: true }))], generic.deriveValues({ ...profile, county: 'Polk' }));
+  assert.deepEqual(filled.filled, result.matched.map(item => item.id));
+  assert.deepEqual(clicks, ['Three', 'No'], 'only the matching options are clicked; the answered question is never touched');
+  const checkedIn = heading => [...doc.getElementById(heading).parentElement.querySelectorAll('[aria-checked="true"]')].map(option => option.getAttribute('data-value'));
+  assert.deepEqual(checkedIn('c1'), ['Three']);
+  assert.deepEqual(checkedIn('c4'), ['Yes']);
+  assert.equal(doc.querySelector('[role="listbox"] [aria-selected="true"]').getAttribute('data-value'), '');
+});
+
+test('number words and "or more" choices pick the right count; a click Google ignores is not reported as filled', () => {
+  const pick = size => {
+    const doc = page(forms.googleChoices);
+    googleClicks(doc);
+    const result = generic.plan(doc);
+    const size_ = result.matched.find(item => item.key === 'householdSize');
+    generic.fillFields(doc, result.token, [{ id: size_.id, key: 'householdSize', guessed: false }], { householdSize: size });
+    return [...doc.querySelectorAll('#c1 ~ [role="radiogroup"] [aria-checked="true"]')].map(option => option.getAttribute('data-value'));
+  };
+  assert.deepEqual(pick('1'), ['One (Myself)']);
+  assert.deepEqual(pick('5'), ['Five or more']);
+  assert.deepEqual(pick('8'), ['Five or more']);
+  assert.deepEqual(pick('0'), [], 'no option means zero people');
+  const doc = page(forms.googleChoices);
+  const result = generic.plan(doc);
+  const filled = generic.fillFields(doc, result.token, result.matched.map(({ id, key }) => ({ id, key, guessed: false })), generic.deriveValues(profile));
+  assert.deepEqual(filled.filled, [], 'without Google registering the click, nothing counts as filled');
+});
+
+test('age-band household questions map only when the band is exactly what the profile counts', () => {
+  const questions = {
+    kids017: '# of people in your household 0 - 17 yrs old', kidsUnder18: 'Number of children under 18', kidsAges: 'Number of household members ages 0 to 17',
+    adults1864: 'Number of adults (18-64)', adultsPeople: 'How many people in your household are 18 to 64 years old', seniors65: 'Number of seniors (65+)',
+    seniorsOlder: 'How many people 65 or older live in your household', seniorsAdults: 'Number of adults 65 and older',
+    band1859: '# of people in your household 18 - 59 yrs old', band60: '# of people in your household 60 + yrs', seniors60: 'Number of seniors (60+)',
+    kids05: '# of Children 0-5 years old', kids618: '# of Children 6-18 years old', adults18: 'Adults 18+', kidsUnder5: 'Number of children (under 5)'
+  };
+  const doc = page(Object.entries(questions).map(([id, label]) => `<label for="${id}">${label}</label><input id="${id}" type="number">`).join(''));
+  const result = generic.plan(doc);
+  assert.deepEqual(byElement(doc, result), { kids017: 'householdChildren', kidsUnder18: 'householdChildren', kidsAges: 'householdChildren',
+    adults1864: 'householdAdults', adultsPeople: 'householdAdults', seniors65: 'householdSeniors', seniorsOlder: 'householdSeniors', seniorsAdults: 'householdSeniors' });
+  assert.deepEqual(result.unmatched.map(field => field.label), [questions.band1859, questions.band60, questions.seniors60, questions.kids05, questions.kids618,
+    questions.adults18, questions.kidsUnder5]);
+});
+
+test('Iowa\'s Financial Information page maps every question it can answer from the profile', () => {
+  const doc = page(forms.iowaFinancial, 'https://hhsservices.iowa.gov/apspssp/ssp.portal/financialInfo');
+  const result = generic.plan(doc);
+  assert.deepEqual(byElement(doc, result), {
+    adults: 'householdAdults', senior: 'anyoneSenior', children: 'householdChildren', resident: 'iowaResident', income: 'totalMonthlyIncome',
+    onHand: 'assetsOnHand', medical: 'monthlyMedicalExpenses', citizens: 'householdAllCitizens', legal: 'householdLegalStatus',
+    disability: 'householdDisability', pregnant: 'householdPregnant', medicare: 'householdMedicare', healthHelp: 'wantsHealthCoverage'
+  });
+  assert.deepEqual(result.unmatched, []);
+  assert.deepEqual(generic.requestKeys(result.matched.map(item => item.key)).sort(), ['assetsOnHand', 'householdAdults', 'householdAllCitizens', 'householdChildren',
+    'householdDisability', 'householdLegalStatus', 'householdMedicare', 'householdPregnant', 'householdSeniors', 'monthlyEarnedIncome', 'monthlyMedicalExpenses',
+    'monthlyOtherIncome', 'programMedicaid', 'state']);
+
+  const saved = { ...profile, householdAdults: '9', householdSeniors: '0', programMedicaid: 'yes', assetsOnHand: '250', monthlyMedicalExpenses: '40',
+    householdAllCitizens: 'yes', householdLegalStatus: '', householdPregnant: 'no', householdMedicare: 'no' };
+  const filled = generic.fillFields(doc, result.token, result.matched.map(({ id, key }) => ({ id, key, guessed: false })), generic.deriveValues(saved));
+  assert.equal(filled.filled.length, 12, 'everything but the blank legal-documents answer');
+  const value = id => doc.getElementById(id).value;
+  const chosen = name => doc.querySelector(`input[name="${name}"]:checked`)?.id || null;
+  assert.equal(value('adults'), '8', '9 adults picks "8 or More"');
+  assert.equal(value('children'), '1');
+  assert.equal(value('income'), '1000'); assert.equal(value('onHand'), '250'); assert.equal(value('medical'), '40');
+  assert.deepEqual(['senior', 'resident', 'citizens', 'legal', 'disability', 'pregnant', 'medicare', 'healthHelp'].map(chosen),
+    ['seniorNo', 'residentYes', 'citizensYes', null, 'disabilityYes', 'pregnantNo', 'medicareNo', 'healthHelpYes']);
+  assert.equal(doc.getElementById('residentYes').getAttribute('data-secondhand-filled'), 'guess', 'residency from the home state is always a guess to review');
+  assert.equal(doc.getElementById('seniorNo').getAttribute('data-secondhand-filled'), 'rule');
+  assert.deepEqual(generic.GUESS_KEYS, ['iowaResident']);
+});
+
+test('derived yes/no answers are only offered when the saved profile settles them', () => {
+  const derive = values => generic.deriveValues(values);
+  assert.equal(derive({ householdSeniors: '2' }).anyoneSenior, 'yes');
+  assert.equal(derive({ householdSeniors: '0' }).anyoneSenior, 'no');
+  assert.equal(derive({ householdSeniors: '' }).anyoneSenior, undefined);
+  assert.equal(derive({ householdSeniors: 'a few' }).anyoneSenior, undefined);
+  assert.equal(derive({ state: 'IA' }).iowaResident, 'yes');
+  assert.equal(derive({ state: 'MN' }).iowaResident, undefined, 'living elsewhere does not settle Iowa residency');
+  assert.equal(derive({ state: '' }).iowaResident, undefined);
+  assert.equal(derive({ programMedicaid: 'yes' }).wantsHealthCoverage, 'yes');
+  assert.equal(derive({ programMedicaid: 'no' }).wantsHealthCoverage, 'no');
+  assert.equal(derive({ programMedicaid: '' }).wantsHealthCoverage, undefined);
+  assert.equal(derive({ anyoneSenior: 'yes', iowaResident: 'yes', wantsHealthCoverage: 'yes' }).anyoneSenior, undefined, 'derived answers come only from their sources');
+  for (const key of ['assetsOnHand', 'monthlyMedicalExpenses', 'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare', 'programMedicaid'])
+    assert.ok(generic.PROFILE_KEYS.includes(key), key);
+  for (const key of ['assetsOnHand', 'monthlyMedicalExpenses', 'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare', 'anyoneSenior', 'iowaResident', 'wantsHealthCoverage'])
+    assert.ok(generic.GENERIC_KEYS.includes(key), key);
+  assert.equal(generic.GENERIC_KEYS.includes('programMedicaid'), false, 'a program choice is only placed through the health-coverage question');
 });
 
 test('only confident matches are planned; vague labels stay unmatched for the applicant', () => {
@@ -113,12 +270,47 @@ test('a stale plan, an unknown key, or a field changed since planning is never f
   assert.equal(doc.getElementById('fname').value, 'Typed by the applicant');
 });
 
-test('focus finds a planned field by its id and nothing else', () => {
+// Records scrolls and focus changes; jsdom has no scrolling of its own.
+function watchAttention(doc) {
+  const seen = { scrolled: [], focus: [] };
+  doc.defaultView.HTMLElement.prototype.scrollIntoView = function () { seen.scrolled.push(this); };
+  for (const type of ['focus', 'blur']) doc.addEventListener(type, event => seen.focus.push(`${type}:${event.target.id}`), true);
+  return seen;
+}
+const highlighted = doc => [...doc.querySelectorAll('[data-secondhand-attention]')];
+
+test('showing a need-you field scrolls to its question and highlights it without moving keyboard focus', () => {
   const doc = page(forms.plainPantry);
+  const seen = watchAttention(doc);
   const result = generic.plan(doc);
   assert.equal(generic.focusField(doc, result.unmatched[0].id), true);
-  assert.equal(doc.activeElement.id, 'notes');
+  assert.deepEqual(highlighted(doc), [doc.getElementById('notes')]);
+  assert.deepEqual(seen.scrolled, [doc.getElementById('notes')]);
+  assert.equal(doc.activeElement, doc.body, 'keyboard focus stays where it was');
+  assert.deepEqual(seen.focus, []);
+  assert.match(doc.getElementById('secondhand-filled-style').textContent, /\[data-secondhand-attention\]/);
+  doc.getElementById('notes').dispatchEvent(new doc.defaultView.FocusEvent('focusin', { bubbles: true }));
+  assert.deepEqual(highlighted(doc), [], 'the highlight goes away once the applicant is in the question');
   assert.equal(generic.focusField(doc, 'input[type=password]'), false);
+});
+
+test('on Google Forms the whole question card is shown, one at a time, and no required check is triggered', () => {
+  const doc = page(forms.googleChoices);
+  const seen = watchAttention(doc);
+  const result = generic.plan(doc);
+  const card = heading => doc.getElementById(heading).closest('[role="listitem"]');
+  const [location, items] = result.unmatched;
+  assert.equal(generic.focusField(doc, location.id), true);
+  assert.deepEqual(highlighted(doc), [card('c3')]);
+  assert.equal(generic.focusField(doc, items.id), true);
+  assert.deepEqual(highlighted(doc), [card('c5')], 'the previous question is no longer highlighted');
+  assert.deepEqual(seen.scrolled, [card('c3'), card('c5')]);
+  assert.deepEqual(seen.focus, [], 'nothing is focused or blurred, so Google never flags a skipped question');
+  const dates = page(forms.googleDates);
+  watchAttention(dates);
+  const hour = generic.plan(dates).unmatched.find(field => field.label === 'Pickup time: Hour');
+  assert.equal(generic.focusField(dates, hour.id), true);
+  assert.deepEqual(highlighted(dates), [dates.getElementById('hour')], 'a question with several boxes highlights only the one asked about');
 });
 
 test('counts fill number dropdowns and "or more" choices; a yes/no checkbox is only ever checked for yes', () => {
