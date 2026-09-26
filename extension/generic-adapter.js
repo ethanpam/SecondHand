@@ -34,7 +34,7 @@
     [/^state( province)?$/, 'state'],
     [/^(zip|zip code|zipcode|postal code)$/, 'zip'],
     [/^county$/, 'county'],
-    [/^(household size|family size|size of (your )?household|(number of |total )?(people|persons|members) in (your )?household|how many people (live|are) in (your )?household|(total )?household members)$/, 'householdSize'],
+    [/^(household size|family size|size of (your )?household|(number of |total )?(people|persons|members) in (your )?household|how many people ((live|are) )?in (your )?household( .+)?|(total )?household members)$/, 'householdSize'],
     [/^((number of|how many) )?adults( in (your )?household)?( 18 64| 18 to 64)?$/, 'householdAdults'],
     [/^((number of|how many) )?(children|kids)( in (your )?household)?( under 18| 0 17)?$/, 'householdChildren'],
     [/^((number of|how many) )?(seniors|older adults)( in (your )?household)?( 65\+| 65| 60\+)?$/, 'householdSeniors'],
@@ -61,7 +61,7 @@
   // "#" reads as "number" ("# of adults", "Apt #").
   const normal = value => String(value || '').toLowerCase().replace(/[‘’']/g, '').replace(/#/g, ' number ').replace(/\*/g, ' ').replace(/[^a-z0-9+]+/g, ' ').trim();
   function question(value) {
-    let text = normal(value).replace(/ (required|optional)$/, '');
+    let text = normal(String(value || '').replace(/\([^)]*\)/g, ' ')).replace(/ (required|optional)$/, '');
     for (let previous = ''; previous !== text;) { previous = text; text = text.replace(LEAD, ''); }
     return text;
   }
