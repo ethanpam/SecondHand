@@ -16,7 +16,6 @@ test('source changes map to the part of the app that must reload', () => {
   assert.equal(classifyChange('extension/panel.js'), 'panel');
   assert.equal(classifyChange('extension/panel.css'), 'panel');
   assert.equal(classifyChange('extension/panel.html'), 'panel');
-  assert.equal(classifyChange('extension/popup.js'), 'panel');
   // Worker, content scripts, and manifest need a full extension reload.
   assert.equal(classifyChange('extension/manifest.json'), 'extension');
   assert.equal(classifyChange('extension/background.js'), 'extension');

@@ -17,7 +17,7 @@ const { PORTAL_URL } = require('../shared/schema.cjs');
 const root = path.join(__dirname, '..');
 const extensionDirectory = path.join(root, 'extension');
 const browserProfile = path.join(root, 'node_modules', '.cache', 'secondhand-dev-chromium');
-const PANEL_PAGE = /^(panel|popup)\.(html|css|js)$/;
+const PANEL_PAGE = /^panel\.(html|css|js)$/;
 const log = message => console.log(`[dev] ${message}`);
 
 function classifyChange(relativePath) {
@@ -126,7 +126,7 @@ async function startBrowser() {
       const error = await page.evaluate(id => chrome.developerPrivate.reload(id, { failQuietly: true, populateErrorForUnpacked: true }), extensionId);
       if (error) throw new Error(`Extension failed to load: ${error.error}${error.path ? ` (${error.path})` : ''}`);
     },
-    // Reloads the side panel and on-page launcher iframe in place; the worker and Iowa form are untouched.
+    // Reloads the side panel and on-page widget iframe in place; the worker and Iowa form are untouched.
     // The side panel is not a Playwright page, so reach every extension document through DevTools targets.
     async reloadPanels() {
       const cdp = await context.newCDPSession(await extensionsPage());
