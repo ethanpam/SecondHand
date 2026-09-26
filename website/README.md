@@ -15,6 +15,18 @@ Use Node24+, `npm ci`, then `npm run dev`. Validate using `npm test`, `npm run t
 
 The site URL used for canonical links, the sitemap, and share previews is in `app/site.ts`.
 
+## Visual design
+
+The website uses the cyan-on-black `GrainGradient` and settings from mxthxn’s [Shader Gradient Component](https://v0.app/templates/shader-gradient-component-cAawT1AJaki), powered by the pinned `@paper-design/shaders-react` package. Instrument Serif and Geist are self-hosted through Fontsource; the browser does not request fonts or scripts from third-party services.
+
+The decorative hero shader loads after hydration, with a CSS gradient available before loading and when WebGL is unavailable. It respects reduced motion and has a pause/play control. Paper Shaders suspends rendering when the canvas is offscreen or the document is hidden; rendering is capped at 1.5 million pixels. The same color and typography tokens style the download, setup, privacy, FAQ, confirmation, and not-found pages.
+
+For browser checks, install the root and website dependencies and Playwright Chromium (`npx playwright install chromium` from the root), then start the website with `npm run dev`. From the repository root, run `node scripts/smoke-website.cjs`. Set `SECONDHAND_WEBSITE_URL` if the preview uses a port other than 5173, or `SECONDHAND_BROWSER_CHANNEL=chrome` to use an installed Chrome. The smoke checks exercise shader motion and fallbacks, keyboard tabs, all download confirmation routes with synthetic installer responses, FAQ disclosure, privacy, 404s, and 320–1440px layouts. Screenshots are saved under `artifacts/website/`.
+
+The social preview source is `scripts/og-image.html`. After changing it, render it at 1200×630 with the website dependencies installed and save the screenshot to `app/opengraph-image.png`.
+
+Page navigation uses ordinary anchors. This static download site does not need client routing, and full document navigation reliably runs the confirmation page’s download redirect in production. The `nextjs/no-html-link-for-pages` lint override is limited to the four components that own these navigation links.
+
 ## Publish installers
 
 1. Build the reviewed desktop source for Windows x64 and Mac arm64/x64. Run its unit, UI, and packaged native-bridge tests. Generate `secondHand-extension.zip` and `SHA256SUMS.txt` with the desktop release scripts.

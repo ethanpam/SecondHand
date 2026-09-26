@@ -1,13 +1,104 @@
-<!-- Source for app/opengraph-image.png. Open in a browser at 1200x630 (or screenshot it headless) and save the result over that file. -->
-<!doctype html><html><head><meta charset="utf-8"><style>
-*{box-sizing:border-box;margin:0}
-body{width:1200px;height:630px;background:#f8faf7;color:#163a2c;font-family:Arial,Helvetica,sans-serif;padding:72px 80px;display:flex;flex-direction:column;justify-content:space-between;border-bottom:16px solid #164c38}
-.brand{display:flex;align-items:center;gap:16px;font-size:40px;letter-spacing:-1.5px}.brand b{font-weight:700}
-.mark{width:64px;height:64px;border-radius:16px 16px 16px 4px;background:#164c38;color:#fff;display:flex;align-items:center;justify-content:center;font:bold 38px Georgia,serif;letter-spacing:-3px;padding-right:3px}
-h1{font:400 76px/1.08 Georgia,'Times New Roman',serif;letter-spacing:-2.4px;max-width:1000px}
-p{font-size:30px;color:#415d4c}
-</style></head><body>
-<div class="brand"><span class="mark">sh</span><span>second<b>Hand</b></span></div>
-<h1>Fill out Iowa’s SNAP application with less typing.</h1>
-<p>Free for Windows and Mac · Encrypted on your computer · No account</p>
-</body></html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>secondHand social preview</title>
+    <style>
+      @font-face {
+        font-family: 'Instrument Serif';
+        src: url('../node_modules/@fontsource/instrument-serif/files/instrument-serif-latin-400-normal.woff2')
+          format('woff2');
+      }
+      @font-face {
+        font-family: 'Geist';
+        src: url('../node_modules/@fontsource/geist/files/geist-latin-400-normal.woff2')
+          format('woff2');
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+      }
+      body {
+        width: 1200px;
+        height: 630px;
+        color: #f2f4f3;
+        background:
+          radial-gradient(
+            ellipse at 110% -25%,
+            #02b7e6,
+            #578da0 16%,
+            transparent 48%
+          ),
+          radial-gradient(ellipse at -15% 110%, #16839f, transparent 44%),
+          #06090b;
+        font-family: 'Geist', sans-serif;
+        padding: 58px 76px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        position: relative;
+      }
+      body::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0.16;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%23fff' filter='url(%23noise)' d='M0 0h180v180H0z'/%3E%3C/svg%3E");
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 28px;
+        letter-spacing: -1px;
+      }
+      .mark {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 42px;
+        height: 45px;
+        color: #bcecf7;
+        background: #102028;
+        border: 1px solid #6b9ba9;
+        border-radius: 11px 11px 11px 3px;
+        font:
+          34px 'Instrument Serif',
+          serif;
+        letter-spacing: -3px;
+        padding-right: 3px;
+      }
+      .eyebrow {
+        color: #bcecf7;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        margin-bottom: 20px;
+      }
+      h1 {
+        font:
+          400 108px/0.95 'Instrument Serif',
+          serif;
+        letter-spacing: -2px;
+      }
+      h1 span {
+        color: #c6e8f0;
+      }
+      .caption {
+        font-size: 20px;
+        color: #b9cdd6;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="brand"><span class="mark">sh</span><span>secondHand</span></div>
+    <div>
+      <p class="eyebrow">A helping hand for Iowa SNAP</p>
+      <h1>A little help.<br /><span>A lot less typing.</span></h1>
+    </div>
+    <p class="caption">
+      Free for Windows &amp; Mac · Encrypted on your computer · No account
+    </p>
+  </body>
+</html>
