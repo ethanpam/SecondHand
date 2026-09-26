@@ -100,8 +100,7 @@
     clearRecoveryKey();
     $('application-list').replaceChildren();
     $('overview-applications').replaceChildren();
-    $('overview-heading').textContent = 'Let’s move forward.';
-    $('application-count').textContent = '0';
+        $('application-count').textContent = '0';
     if ($('application-dialog').open) $('application-dialog').close();
     for (const id of ['auth-error', 'reset-error', 'profile-error', 'application-error', 'extension-error', 'extension-prepare-error']) clearError(id);
     setProfileDirty(false);
@@ -231,11 +230,11 @@
       const emptyIcon = element('span', 'card-icon'); emptyIcon.append(icon('file'));
       const add = element('button', 'button button-primary', 'Add my first application');
       add.type = 'button'; add.addEventListener('click', () => openApplication());
-      empty.append(emptyIcon, element('h2', '', 'Your next chapter starts here.'), element('p', '', 'Add an Iowa SNAP application record to keep track of progress, agency requests, and your next step.'), add);
+      empty.append(emptyIcon, element('h2', '', 'No applications yet'), element('p', '', 'Add an Iowa SNAP application record to keep track of progress, agency requests, and your next step.'), add);
       list.append(empty);
       const compact = element('div', 'overview-empty');
       const copy = element('div');
-      copy.append(element('h3', '', 'A fresh start. Nothing to track just yet.'), element('p', '', 'When you add an application, you’ll see it here.'));
+      copy.append(element('h3', '', 'No applications yet'), element('p', '', 'When you add an application, you’ll see it here.'));
       compact.append(icon('file'), copy); overview.append(compact);
       return;
     }
