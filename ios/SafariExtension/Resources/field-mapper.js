@@ -7,7 +7,10 @@
   // 2026-09-26. Safari filling and authenticated renewal remain unvalidated.
   const definitions = Object.freeze({
     firstName: { id: "firstName", label: "First name", observed: "first name" },
+    middleName: { id: "middleName", label: "Middle name", observed: "middle name" },
     lastName: { id: "lastName", label: "Last name", observed: "last name" },
+    homePhone: { id: "phoneNumber", label: "Home phone number", observed: "home phone number (999)999-9999" },
+    mobilePhone: { id: "otherPhoneNumber", label: "Mobile phone number", observed: "mobile phone number (999)999-9999" },
     addressLine1: { id: "addressLine1", label: "Home street address", observed: "home address line 1", address: true },
     addressLine2: { id: "addressLine2", label: "Home apartment / unit", observed: "home address line 2", address: true },
     city: { id: "city", label: "Home city", observed: "city", address: true },
@@ -45,7 +48,7 @@
     if (!match) return null;
     // Autocomplete cannot substitute for the observed schema or change recipient.
     const autocomplete = String(hints.autocomplete || "").trim().toLowerCase();
-    const expected = { firstName: "given-name", lastName: "family-name", addressLine1: "address-line1",
+    const expected = { firstName: "given-name", middleName: "additional-name", lastName: "family-name", homePhone: "tel", mobilePhone: "tel", addressLine1: "address-line1",
       addressLine2: "address-line2", city: "address-level2", state: "address-level1", postalCode: "postal-code" };
     if (autocomplete && !["on", "off", expected[match[0]]].includes(autocomplete)) return null;
     if (/mailing|shipping|billing/.test(normalize(hints.groupLabel))) return null;
@@ -71,7 +74,7 @@
     };
   }
 
-  function isUsable(element, document) {
+  function isUsable(element, document, includeOffscreen = false) {
     const tag = element.tagName.toLowerCase();
     if (tag !== "input" && tag !== "select") return false;
     if (tag === "input" && element.type !== "text") return false;
@@ -80,9 +83,10 @@
       || element.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
     if (!element.getClientRects().length) return false;
     const rect = element.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0 || rect.left < 0 || rect.top < 0
-      || rect.right > document.defaultView.innerWidth || rect.bottom > document.defaultView.innerHeight) return false;
-    if (typeof document.elementFromPoint === "function") {
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    if (!includeOffscreen && (rect.left < 0 || rect.top < 0
+      || rect.right > document.defaultView.innerWidth || rect.bottom > document.defaultView.innerHeight)) return false;
+    if (!includeOffscreen && typeof document.elementFromPoint === "function") {
       const top = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
       if (!top || (top !== element && !element.contains(top))) return false;
     }
@@ -97,12 +101,12 @@
     return true;
   }
 
-  function candidates(document) {
+  function candidates(document, includeOffscreen = false) {
     const groups = new Map();
     const form = recognizedForm(document);
     if (!form) return groups;
     for (const element of document.querySelectorAll("input, select")) {
-      if (element.form !== form || !isUsable(element, document) || !safeContext(element)) continue;
+      if (element.form !== form || !isUsable(element, document, includeOffscreen) || !safeContext(element)) continue;
       const key = classify(hintsFor(element, document));
       if (!key) continue;
       if (!groups.has(key)) groups.set(key, []);
@@ -155,6 +159,12 @@
         || String(element.value || "").trim()) { skipped += 1; continue; }
       if (/[\u0000-\u001f]/.test(value) || (key === "postalCode" && !/^\d{5}$/.test(value))) { skipped += 1; continue; }
       let nextValue = value;
+      if (key === "homePhone" || key === "mobilePhone") {
+        let digits = value.replace(/[()\s.-]/g, "");
+        if (/^\+?1\d{10}$/.test(digits)) digits = digits.replace(/^\+?1/, "");
+        if (!/^\d{10}$/.test(digits)) { skipped += 1; continue; }
+        nextValue = `(${digits.slice(0, 3)})${digits.slice(3, 6)}-${digits.slice(6)}`;
+      }
       if (element.tagName.toLowerCase() === "select") {
         const options = Array.from(element.options).filter(option => !option.disabled && option.value
           && (option.value.toLowerCase() === value.toLowerCase()
@@ -162,7 +172,7 @@
             || (key === "state" && value.toUpperCase() === "IA" && option.textContent.trim().toLowerCase() === "iowa")));
         if (options.length !== 1) { skipped += 1; continue; }
         nextValue = options[0].value;
-      } else if (element.maxLength >= 0 && value.length > element.maxLength) { skipped += 1; continue; }
+      } else if (element.maxLength >= 0 && nextValue.length > element.maxLength) { skipped += 1; continue; }
       // Use the native setter so controlled forms can receive input/change events.
       const prototype = element.tagName.toLowerCase() === "select"
         ? document.defaultView.HTMLSelectElement.prototype : document.defaultView.HTMLInputElement.prototype;
@@ -216,7 +226,7 @@
     return true;
   }
 
-  const api = Object.freeze({ isAllowedURL, classify, scan, fill });
+  const api = Object.freeze({ isAllowedURL, classify, scan, fill, candidates, recognizedForm });
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.SecondHandAutofill = api;
 })(globalThis);

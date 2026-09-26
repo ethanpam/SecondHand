@@ -3,7 +3,7 @@ import CryptoKit
 import Security
 
 enum VaultError: LocalizedError {
-    case keychain(OSStatus), unavailable, invalidSession, invalidFile, futureVersion
+    case keychain(OSStatus), unavailable, invalidSession, invalidFile, futureVersion, invalidReceipt
     var errorDescription: String? {
         switch self {
         case .keychain: "Your protected storage could not be opened. Unlock your device and try again."
@@ -11,6 +11,7 @@ enum VaultError: LocalizedError {
         case .invalidSession: "Open Second Hand and authorize a new autofill session."
         case .invalidFile: "This file could not be read. Choose a PDF or image smaller than 20 MB."
         case .futureVersion: "This data was saved by a newer version of Second Hand. Update the app to open it."
+        case .invalidReceipt: "The website confirmation could not be saved. Keep a copy of your confirmation and enter it in your renewal plan."
         }
     }
 }
@@ -112,10 +113,15 @@ final class SecureVault {
     }
 
     static func readAutofillSession() throws -> AutofillSession? {
-        let vault = try shared()
-        guard let bytes = try vault.read(named: "session.sealed") else { return nil }
+        try shared().loadAutofillSession()
+    }
+
+    func loadAutofillSession(now: Date = Date()) throws -> AutofillSession? {
+        guard let bytes = try read(named: "session.sealed") else { return nil }
         let session = try JSONDecoder().decode(AutofillSession.self, from: bytes)
-        guard session.isValid() else { try vault.remove(named: "session.sealed"); return nil }
+        // A concurrent app refresh may already have replaced the file we just read.
+        // Reading an expired snapshot must never delete a newer authorized session.
+        guard session.isValid(now: now) else { return nil }
         return session
     }
 
@@ -127,8 +133,62 @@ final class SecureVault {
         if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
     }
 
+    /// The extension writes its own encrypted files. It never edits the app's profile vault.
+    static func writePendingReceipt(_ receipt: ApplicationReceipt) throws {
+        guard let session = try readAutofillSession(), session.isValid() else { throw VaultError.invalidSession }
+        try shared().savePendingReceipt(receipt)
+    }
+
+    static func pendingReceipts() throws -> [ApplicationReceipt] { try shared().loadPendingReceipts() }
+
+    static func removePendingReceipt(id: UUID) throws { try shared().remove(named: receiptFilename(id)) }
+
+    private static func receiptFilename(_ id: UUID) -> String { "receipt-\(id.uuidString).sealed" }
+
+    func savePendingReceipt(_ receipt: ApplicationReceipt) throws {
+        guard receipt.isValid else { throw VaultError.invalidReceipt }
+        let name = Self.receiptFilename(receipt.id)
+        if let bytes = try read(named: name) {
+            let existing = try JSONDecoder().decode(ApplicationReceipt.self, from: bytes)
+            // A retry may have a later capture time; its identity and confirmation must agree.
+            guard existing.id == receipt.id, existing.confirmationNumber == receipt.confirmationNumber,
+                  existing.pageURL == receipt.pageURL else { throw VaultError.invalidReceipt }
+            return
+        }
+        guard try receiptFileIDs().count < 32 else { throw VaultError.invalidReceipt }
+        try write(JSONEncoder().encode(receipt), named: name)
+    }
+
+    func loadPendingReceipts() throws -> [ApplicationReceipt] {
+        try receiptFileIDs().map { id in
+            guard let bytes = try read(named: Self.receiptFilename(id)) else { throw VaultError.invalidReceipt }
+            let receipt = try JSONDecoder().decode(ApplicationReceipt.self, from: bytes)
+            guard receipt.id == id, receipt.isValid else { throw VaultError.invalidReceipt }
+            return receipt
+        }.sorted { $0.recordedAt < $1.recordedAt }
+    }
+
+    private func receiptFileIDs() throws -> [UUID] {
+        try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).compactMap { url in
+            let name = url.lastPathComponent
+            guard name.hasPrefix("receipt-"), name.hasSuffix(".sealed") else { return nil }
+            return UUID(uuidString: String(name.dropFirst("receipt-".count).dropLast(".sealed".count)))
+        }
+    }
+
+    private static func removeAllPendingReceipts() throws {
+        guard let root = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) else { return }
+        let directory = root.appendingPathComponent("Autofill", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: directory.path) else { return }
+        for url in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) {
+            let name = url.lastPathComponent
+            if name.hasPrefix("receipt-"), name.hasSuffix(".sealed") { try FileManager.default.removeItem(at: url) }
+        }
+    }
+
     func deleteAll() throws {
         try Self.revokeAutofillSession()
+        try Self.removeAllPendingReceipts()
         for url in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) {
             try FileManager.default.removeItem(at: url)
         }

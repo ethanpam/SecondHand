@@ -1,58 +1,51 @@
-# Safari contact autofill prototype
+# Safari guided application assistant
 
-This bundled iOS Safari Web Extension offers an explicit **Preview fields → Fill saved contact details** flow. Its applicant mapping derives from this repository's [live-inspected public form metadata](../../docs/iowa-portal.md) recorded September 26, 2026. Safari filling, installed native messaging, and authenticated renewal have **not** been validated.
+The iOS extension now supports a user-started application session, explicit field mapping, approved page continuation, and separately approved submission. It uses the laptop implementation's inspected applicant-field schema. **It has not completed a live Iowa application or authenticated renewal.** See the [full pipeline](../docs/Application-assistant.md) and [validation record](../docs/Validation.md).
 
-The extension only operates in the active top-level tab at `https://hhsservices.iowa.gov/apspssp/ssp.portal/applyForBenefits/enterPersonalInfo`. It also requires the visible **Enter Personal Information** heading and the unique `form#personalInformation` with action `enterPersonalInfo`. Safari grants temporary access through `activeTab` when the user opens the extension. There are no permanent or broad host permissions, background scripts, automatically injected content scripts, network calls, external webpage message listeners, or extension storage. Enable the installed extension in Safari settings and allow it on the Iowa portal when prompted.
+## User flow
 
-## Data flow
+1. In SecondHand, review the profile and allow application sharing for ten minutes.
+2. Open an Iowa application in Safari, handle login and initial consent/verification, then start assistance from the extension. Grant Iowa website access when asked.
+3. Known applicant fields fill automatically. Other eligible fields require a user-selected match to a saved answer; these mappings last only for the current page.
+4. Review the page, complete missing answers, and explicitly Continue. Pause and Stop can interrupt filling. A paused session requires Resume.
+5. Complete the signature on Iowa's website. On a recognizable E-Signature page, check the extension's authorization box and choose **Approve and submit application**. Unknown signing or submission pages stay manual.
+6. Check Iowa's result. On a recognized confirmation page, enter the number and confirm that the website reports submission. Unlock the app to import the receipt. Otherwise record it manually in the app.
 
-1. The user unlocks SecondHand and starts its 10-minute autofill session.
-2. **Preview fields** injects `field-mapper.js` into the active tab's isolated world. It reads form metadata and whether fields are empty, and returns only friendly field names/counts. Preview does not request saved profile data.
-3. **Fill saved contact details** rechecks the active tab and exact URL, then calls native messaging from the extension popup:
+## Data and permissions
 
-   ```js
-   browser.runtime.sendNativeMessage("com.ethanpam.secondhand", {
-     action: "contactFields",
-     pageURL: "https://hhsservices.iowa.gov/apspssp/ssp.portal/applyForBenefits/enterPersonalInfo",
-     keys: ["firstName", "lastName"]
-   });
-   ```
+`activeTab`, `scripting`, `nativeMessaging`, and `storage` support the workflow. Optional host access to `https://hhsservices.iowa.gov/*` is requested only when the user starts assistance. All runtime operations additionally require the exact HTTPS origin and a clean `/apspssp/ssp.portal/applyForBenefits/` route. Query strings, fragments, account routes, subframes, and external form targets are unsupported. There are no network fetches, cookie access, external message endpoints, backend, or cloud synchronization.
 
-4. `SafariWebExtensionHandler` rejects unknown actions, extra message properties, unsupported URLs, duplicate/unknown keys, unavailable sessions, and expired sessions. It reads `SecureVault.readAutofillSession()` and returns only requested contact fields:
+The native app shares only first/middle/last name, email, explicit home/mobile phone numbers, home address, monthly income, and monthly housing cost after explicit authorization. The extension requests only fields selected for the current operation. Generic phone, household members, documents, notes, SSNs, birth dates, passwords, signatures, and consent are never supplied.
 
-   ```js
-   { fields: { firstName: "Example" }, expiresAt: 1790424000000 }
-   // Errors: { error: "session_unavailable" } or { error: "unsupported_request" }
-   ```
+The worker persists only tab ID, expiration, phase, page count, and filled count. Answers, page URLs, field labels, mappings, snapshots, and approval tokens are not written to extension storage or logs. The isolated page script keeps its private review snapshot in memory. JavaScript does not guarantee immediate memory zeroization.
 
-   `expiresAt` is milliseconds since the Unix epoch. The shared model is `AutofillSession(expiresAt: Date, fields: [String: String])`. Root app code owns vault encryption, session creation/revocation, and the shared Keychain group.
+## Native protocol
 
-5. The popup validates expiry and rechecks the tab/URL again. It sends only keys from the preview to the isolated script. The script validates the preview token, document identity, exact URL, session expiry, and current fields. The preview is single-use and expires after two minutes. No form navigation or submission is performed.
+All messages are sent to `browser.runtime.sendNativeMessage("com.ethanpam.secondhand", message)` from extension-owned code. There is no webpage-to-native bridge.
 
-## Matching boundaries
+- `{action: "applicationFields", pageURL, keys}` returns `{fields, expiresAt}` for requested allowlisted keys when the encrypted sharing session is valid.
+- `{action: "recordReceipt", pageURL, confirmationNumber, receiptID}` requires an active session, a UUID, and a 3–80 character alphanumeric/space/hyphen confirmation. It writes a separate encrypted pending receipt and returns `{recorded: true}`. This is a user report, not agency verification.
+- The older `contactFields` action remains restricted to the original applicant page and original contact subset.
 
-Supported keys: `firstName`, `lastName`, `addressLine1`, `addressLine2`, `city`, `state`, `postalCode`.
+Errors are fixed identifiers and never contain saved values, local paths, or underlying native diagnostics. Pending receipts are imported idempotently; they do not race writes to the app's profile vault or downgrade more advanced progress.
 
-Each field must match its observed **ID, name, control type, and every associated label**. Autocomplete alone is insufficient. Name controls use `firstName` / `lastName` and labels First Name / Last Name. Home address controls must also be inside `#personalInformation #homeAddrDiv`: `addressLine1` (Home Address Line 1), `addressLine2` (Home Address Line 2), `city` (City), `state` (State, a select), and `zipcode` (Zip Code (99999), mapped to local `postalCode`). Required asterisks, trailing colons, whitespace, and letter case are normalized. ZIP values must contain exactly five digits; ZIP+4 stays manual. The user must answer the home-address question themselves to expose those controls.
+## Page operations
 
-The matcher skips conflicting hints, duplicate matches (including populated duplicates), existing values, disabled/read-only/hidden/offscreen/covered fields, unknown or other-person section headings, and unsupported input types. No automatic scrolling occurs. Re-preview after scrolling. Mailing/shipping/billing addresses stay manual.
+Known fields require the inspected form, ID, name, type, labels, and recipient context. First/middle/last name and home/mobile phone mappings come from the [public inspection](../../docs/iowa-portal.md). Home address must remain in `#personalInformation #homeAddrDiv`; the user answers the home-address question before those controls can be filled. Phones must be ten digits or a US country-code variant; ZIP codes must contain five digits.
 
-The profile's generic phone cannot be assigned to the observed separate home/mobile phone controls, so neither phone is filled. Email, middle name, SSNs, birth dates, income, account numbers, signatures, uploads, checkboxes, passwords, and eligibility answers are never mapped. A changed applicant route, heading, form ID/action, field schema, or address context fails closed.
+Unknown labeled text/select fields have no automatic mapping. The user explicitly chooses a saved field. Unsupported, hidden, read-only, disabled, ambiguous, other-person, signature, verification, or sensitive controls remain manual. Existing answers are preserved. Scrolling is allowed only to reveal an already-rendered selected control, followed by another visibility and context check.
 
-Account, sign-in, registration, profile, password, and recovery routes are excluded, including the observed public route `/apspssp/ssp.portal/login/personalInfoSignup`. Pages containing password inputs or account-related headings are also rejected. A supported host alone does not establish that a page is a renewal form.
+Each preview lasts at most two minutes and is consumed on use, including failures. Popup requests echo the exact displayed preview token. Page operations recheck document identity, URL, session expiration, field identity, and current page content. Changes to review answers, attestation prose, or form targets invalidate approval. Stop/Pause cancels pending writes and actions.
 
-Once placed in a field, information is available to Iowa's website and its scripts. The user should review all answers and submit directly on the official portal. The extension has no automatic submission capability.
+Continue is always an explicit user action and runs the website's normal validation. On the known applicant page, the bundle directly reuses `extension/iowa-adapter.js` for the verified button/form schema, required labels, and conditional radio/program questions. Other pages also check visible required labels and question groups before continuing. The final action requires a recognized signing heading, one form-associated **Submit Application** button, a live session, an unchanged review, and separate approval. It never fills signature controls, bypasses validation, makes a direct HTTP submission, or automatically retries. The worker records only an attempt until the user provides a receipt. Unknown submission contexts cannot use an ordinary Continue shortcut.
 
-## Verification
+## Tests
 
-Run the deterministic, synthetic-DOM security and behavior checks from the repository root:
+From the repository root:
 
 ```sh
-node --test ios/Tests/extension.test.js
+npm ci --ignore-scripts
+node --test ios/Tests/*.test.js
 ```
 
-The tests use a sanitized synthetic transcription of the public schema and cover exact URL/page/form/field rejection, account pages, household ambiguity, address-purpose distinctions, sensitive and hidden fields, preservation of edits, changed/duplicated elements, navigation races, session expiry, select-option matching, and the popup/native data boundary.
-
-The public field metadata has been inspected; this is not a completed Safari workflow validation. Before describing a real Iowa workflow as supported, test an installed, signed build on an iPhone with a consenting test user: verify extension permissions, shared-Keychain access, session expiration/revocation, an authenticated application/renewal page, field semantics, review behavior, and that no submission occurs. Record validated selectors and portal changes separately. Do not populate or submit a real application during automated checks.
-
-Apple documents [native messaging and app-extension communication](https://developer.apple.com/documentation/safariservices/messaging-between-the-app-and-javascript-in-a-safari-web-extension). Script injection follows the documented [`scripting.executeScript` API](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/scripting/executeScript).
+The suites cover strict known-field matching, explicit mappings, multiple synthetic application pages, changed terms/answers, expiry, cancellation, one-use approvals, worker recovery, stale popups, native boundaries, receipt reporting, and no replay of submission. All form submits in tests are local synthetic events. Signed Safari native messaging and the complete live Iowa workflow still need device validation.

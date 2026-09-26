@@ -3,26 +3,46 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SecondHand contact autofill</title>
+  <title>SecondHand application assistance</title>
   <link rel="stylesheet" href="popup.css">
-  <script src="field-mapper.js" defer></script>
   <script src="popup.js" defer></script>
 </head>
 <body>
   <main>
     <p class="eyebrow">SECONDHAND · IOWA</p>
     <h1>A little less paperwork.</h1>
-    <p>Open Iowa's “Enter Personal Information” application page in Safari. Preview your name and home-address fields, then choose to fill them.</p>
-    <p class="notice">First, unlock SecondHand and enable a 10-minute autofill session. Your review and submission happen on Iowa's website.</p>
-    <button id="preview" type="button">Preview fields</button>
-    <section id="result" hidden aria-labelledby="preview-heading">
-      <h2 id="preview-heading">Contact fields found</h2>
-      <ul id="fields"></ul>
-      <p id="skipped"></p>
-      <button id="fill" type="button" disabled>Fill saved contact details</button>
-    </section>
+    <p>Fill supported application steps with saved details. Review each page before continuing, then approve submission yourself.</p>
+    <p class="notice" id="setup">First, unlock SecondHand, confirm your profile, and enable a 10-minute application-assistance session.</p>
+    <button id="start" type="button">Start application assistance</button>
     <p id="status" role="status" aria-live="polite"></p>
-    <p class="footnote">Prototype based on inspected public form labels; Safari filling and renewal remain unvalidated. Only visible, empty applicant fields are considered. Phone, email, income, household answers, signatures, and submission stay manual.</p>
+    <div id="session" hidden>
+      <p id="progress" class="muted"></p>
+      <div class="button-row">
+        <button id="refresh" type="button" class="secondary">Check current page</button>
+        <button id="pause" type="button" class="secondary">Pause</button>
+      </div>
+      <button id="resume" type="button" class="secondary" hidden>Resume assistance</button>
+      <section id="page" hidden aria-labelledby="page-title">
+        <h2 id="page-title"></h2>
+        <div id="fields"></div>
+        <button id="fill" type="button" hidden>Fill selected details</button>
+        <p id="counts" class="muted"></p>
+        <button id="continue" type="button" hidden>Continue to next step</button>
+        <div id="signature" hidden>
+          <p class="notice">Read every answer and the signature statement on Iowa’s website. Complete the electronic signature there yourself.</p>
+          <label class="check"><input id="reviewed" type="checkbox"> <span>I reviewed the application, completed its signature, and authorize this submission.</span></label>
+          <button id="submit" type="button" disabled>Approve and submit application</button>
+        </div>
+        <div id="receipt" hidden>
+          <label for="confirmation">Iowa confirmation number</label>
+          <input id="confirmation" type="text" maxlength="100" autocomplete="off" spellcheck="false">
+          <label class="check"><input id="confirmed" type="checkbox"> <span>Iowa’s website confirms my application was submitted.</span></label>
+          <button id="save-receipt" type="button" disabled>Save confirmation to SecondHand</button>
+        </div>
+      </section>
+      <button id="stop" type="button" class="quiet">Stop this session</button>
+    </div>
+    <p class="footnote">This prototype has not completed a live Iowa application or renewal. Sign-in, verification challenges, sensitive questions, uploads, and signatures need your attention. A submitted application may still require an interview or documents.</p>
   </main>
 </body>
 </html>
