@@ -3,9 +3,9 @@ name: iOS
 on:
   push:
     branches: [main]
-    paths: ['ios/**', '.github/workflows/ios.yml']
+    paths: ['ios/**', 'tests/fixtures/**', 'package-lock.json', '.github/workflows/ios.yml']
   pull_request:
-    paths: ['ios/**', '.github/workflows/ios.yml']
+    paths: ['ios/**', 'tests/fixtures/**', 'package-lock.json', '.github/workflows/ios.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -25,6 +25,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+          cache: npm
+      # The tests load jsdom and shared fixtures from the repository root. Skip
+      # install scripts: they only download Electron, which these tests don't use.
+      - run: npm ci --ignore-scripts
+        working-directory: .
       - run: node --test Tests/*.test.js
   simulator:
     name: Native and UI tests (Simulator)
