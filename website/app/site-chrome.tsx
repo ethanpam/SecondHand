@@ -12,7 +12,7 @@ export function SiteHeader() {
       <a href="#main" className="skip">Skip to content</a>
       <header className="site-header wrap">
         <Brand />
-        <nav aria-label="Main navigation"><Link href="/#setup">Setup guide</Link><Link href="/#privacy">Your privacy</Link></nav>
+        <nav aria-label="Main navigation"><Link href="/#setup">Setup guide</Link><Link href="/#faq">Questions</Link><Link href="/privacy">Privacy policy</Link></nav>
       </header>
     </>
   );
@@ -20,6 +20,12 @@ export function SiteHeader() {
 
 export function SiteFooter() {
   return (
-    <footer className="wrap"><div><Brand className="brand footer-brand" /><p>Independent software. Not affiliated with Iowa HHS.<br />Using secondHand does not determine benefit eligibility.</p></div><a href={downloads.checksums}>Download checksums <ExternalIcon size={14} /></a></footer>
+    <footer className="wrap">
+      <div><Brand className="brand footer-brand" /><p>Independent software. Not affiliated with Iowa HHS.<br />Using secondHand does not determine benefit eligibility.</p></div>
+      <nav aria-label="Footer" className="footer-links">
+        <Link href="/">Download</Link><Link href="/#setup">Setup guide</Link><Link href="/#faq">Common questions</Link><Link href="/privacy">Privacy policy</Link>
+        <a href={downloads.checksums}>Download checksums <ExternalIcon size={14} /></a>
+      </nav>
+    </footer>
   );
 }
