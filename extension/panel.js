@@ -44,7 +44,7 @@
     let cursor = 0;
     let pollTimer;
     const AI_TIMEOUT_MS = 8000;
-    const AI_UNAVAILABLE = 'On-device AI unavailable — rule matches only.';
+    const AI_UNAVAILABLE = 'On-device AI unavailable. Rule matches only.';
     // An outdated worker keeps its reload steps on screen and is not polled again.
     const trouble = error => { if (error.outdated) outdated = true; return fixedText(error.message, 120); };
 

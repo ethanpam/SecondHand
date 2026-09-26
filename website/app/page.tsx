@@ -1,72 +1,36 @@
-'use client';
+import type { Metadata } from 'next';
+import { faq } from './faq';
+import { Home } from './home';
+import { release } from './release';
+import { siteUrl } from './site';
 
-import { useState } from 'react';
-import { ArrowDown, ArrowUpRight, Check, Download, LockKeyhole, Monitor, Apple, Puzzle, ShieldCheck } from 'lucide-react';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+export const metadata: Metadata = {
+  title: { absolute: 'Download secondHand | Iowa SNAP helper for Windows and Mac' },
+  description: 'Download secondHand for Windows or Mac. Keep your details encrypted on your computer and use the included Chrome extension to fill supported fields in Iowa’s SNAP application.',
+  alternates: { canonical: '/' },
+};
 
-const release = '0.4.0';
-const windows = `/download/secondHand-${release}-win-x64.exe`;
-const macArm = `/download/secondHand-${release}-mac-arm64.dmg`;
-const macIntel = `/download/secondHand-${release}-mac-x64.dmg`;
+// Describes the app and the FAQ for search engines. The FAQ text comes from the
+// same data the page renders, so the two cannot drift apart.
+const structuredData = [
+  {
+    '@context': 'https://schema.org', '@type': 'SoftwareApplication',
+    name: 'secondHand', url: `${siteUrl}/`, downloadUrl: `${siteUrl}/`, softwareVersion: release,
+    applicationCategory: 'UtilitiesApplication', operatingSystem: 'Windows 10 or later, macOS 13 or later',
+    description: 'A desktop app and Chrome extension that keep your details encrypted on your computer and fill supported fields in Iowa’s SNAP application after you approve.',
+    offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+  },
+  {
+    '@context': 'https://schema.org', '@type': 'FAQPage',
+    mainEntity: faq.map(({ question, answer }) => ({ '@type': 'Question', name: question, acceptedAnswer: { '@type': 'Answer', text: answer } })),
+  },
+];
 
-export default function Home() {
-  const [platform, setPlatform] = useState('windows');
+export default function Page() {
   return (
     <>
-      <a href="#downloads" className="skip">Skip to downloads</a>
-      <header className="site-header wrap">
-        <a href="#" className="brand" aria-label="secondHand home"><span className="brand-mark">sh</span>second<span>Hand</span></a>
-        <nav aria-label="Main navigation"><a href="#setup">Setup guide</a><a href="#privacy">Your privacy</a></nav>
-      </header>
-      <main className="wrap">
-        <section className="intro" id="downloads">
-          <div className="intro-copy">
-            <p className="eyebrow"><span className="status-dot" /> Iowa SNAP · Early access</p>
-            <h1>A little help with<br />the paperwork.</h1>
-            <p className="lead">Keep your information on your computer. Use it to fill supported fields in Iowa’s SNAP application, with you in control.</p>
-            <div className="trust-line"><LockKeyhole size={17} /> Encrypted on your device <span>·</span> No account needed</div>
-            <a className="text-link" href="#setup">How to get set up <ArrowDown size={16} /></a>
-          </div>
-          <div className="download-panel">
-            <div className="panel-heading"><h2>Download secondHand</h2><span className="version">v{release}</span></div>
-            <Tabs value={platform} onValueChange={v => setPlatform(String(v))}>
-              <TabsList className="platform-tabs" aria-label="Choose your computer">
-                <TabsTrigger value="windows"><Monitor size={18} /> Windows</TabsTrigger>
-                <TabsTrigger value="mac"><Apple size={18} /> Mac</TabsTrigger>
-              </TabsList>
-              <TabsContent value="windows" className="download-content">
-                <p className="download-title">For your Windows PC</p>
-                <p className="muted">Windows 10 or later · 64-bit Intel / AMD</p>
-                <a className="download-button" href={windows}><Download size={20} /> Download for Windows <span>.exe</span></a>
-                <p className="micro">Chrome extension included. No separate download needed.</p>
-              </TabsContent>
-              <TabsContent value="mac" className="download-content">
-                <p className="download-title">For your Mac</p>
-                <p className="muted">macOS 13 or later · MacBook, iMac & Mac mini</p>
-                <a className="download-button" href={macArm}><Download size={20} /> Apple Silicon <span>.dmg</span></a>
-                <a className="secondary-download" href={macIntel}>Download for Intel Mac <ArrowUpRight size={16} /></a>
-                <p className="micro">Find your chip in Apple menu → About This Mac. Choose Apple Silicon for an M-series chip.</p>
-              </TabsContent>
-            </Tabs>
-            <div className="release-note"><ShieldCheck size={19} /><p><strong>Early access builds are unsigned.</strong> Your computer may show a security warning. Read the setup notes below before opening.</p></div>
-          </div>
-        </section>
-
-        <div className="scope-note"><span className="note-label">What it does today</span><p>A browser side panel tracks the applicant page with completion checkmarks and missing-field reminders. With your approval, it fills saved applicant details, address and mailing information, and your explicit program choices. It selects Save and Continue when required answers are complete, then checks the next step. Unverified later pages stay manual.</p></div>
-
-        <section id="setup" className="setup-section">
-          <div className="section-heading"><div><p className="eyebrow">One-time setup</p><h2>Three steps. Then you’re ready.</h2></div><span className="section-aside">Desktop app + Google Chrome</span></div>
-          <ol className="steps">
-            <li><span className="step-number">01</span><div><h3>Install the app</h3><p><strong>Windows:</strong> open the downloaded .exe and follow the installer.</p><p><strong>Mac:</strong> open the .dmg, drag secondHand into Applications, then open it from Applications.</p><details><summary>If your computer shows a warning</summary><div className="details-body"><p>These pilot builds don’t yet have a verified publisher signature.</p><p>On Windows, SmartScreen may show “Windows protected your PC.” Review the source before deciding whether to continue. On a managed computer, ask your administrator.</p><p>On Mac, after attempting to open the app, go to System Settings → Privacy & Security. If you trust this download, use Open Anyway. Never disable your computer’s security protections.</p><a href="https://support.apple.com/en-us/102445" target="_blank" rel="noreferrer">Apple’s guidance on opening apps <ArrowUpRight size={14} /></a></div></details></div></li>
-            <li><span className="step-number">02</span><div><h3>Create your private vault</h3><p>Choose a passphrase of at least 12 characters. Add the information you want to reuse; optional fields can stay blank.</p><p className="small-note">Keep your passphrase safe. There’s no online account or password reset. You can export an encrypted backup from the app.</p></div></li>
-            <li><span className="step-number">03</span><div><h3>Add the Chrome extension</h3><p>In the app, choose <strong>Chrome extension → Prepare Chrome extension</strong>. The app opens its extension folder and sets up the connection.</p><p>In Chrome, enter <code>chrome://extensions</code> in the address bar. Turn on <strong>Developer mode</strong>, choose <strong>Load unpacked</strong>, and select that folder.</p><details><summary>Finding the folder on Windows or Mac</summary><div className="details-body"><p>Click <strong>Copy folder path</strong> in secondHand. On Windows, paste the path into the folder chooser’s address bar. On Mac, press <kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd> in the chooser, paste the path, and confirm.</p><p>Keep the extension folder where the app created it. You only need to load it once.</p></div></details><details><summary>Updating from an earlier version</summary><div className="details-body"><p>Install the new app, choose <strong>Refresh extension files</strong>, then click Reload for secondHand on <code>chrome://extensions</code>. Reload your Iowa tab too. Use Chrome 116 or newer. Chrome may ask you to approve the extension’s updated permissions. Then click Autofill on Iowa’s applicant page.</p></div></details></div></li>
-          </ol>
-          <div className="ready-strip"><Puzzle size={25} /><div><h3>Ready to apply?</h3><p>Keep secondHand unlocked and open Iowa’s portal in Chrome. On the applicant page, click Autofill in the corner and approve once in the desktop app, or choose Always allow. Anything missing is flagged so you can jump straight to it. You review and click Continue yourself.</p></div><a href="https://hhsservices.iowa.gov/apspssp/ssp.portal" target="_blank" rel="noreferrer">Open Iowa portal <ArrowUpRight size={17} /></a></div>
-        </section>
-
-        <section id="privacy" className="privacy-section"><div><p className="eyebrow">Your information stays yours</p><h2>On your computer.<br />Under your control.</h2></div><div className="privacy-copy"><p>Your profile and application history are encrypted on your device. secondHand has no account system, cloud sync or analytics. This website hosts the installers; it does not collect your benefits information.</p><ul><li><Check size={17} /> The desktop asks before filling, unless you choose Always allow. secondHand never clicks Continue or Submit.</li><li><Check size={17} /> Information you put into Iowa’s portal goes to Iowa.</li><li><Check size={17} /> You handle CAPTCHA, consent, signatures and submission.</li></ul><p className="small-note">Like other websites, the hosting provider may process connection logs. Your browser and the Iowa portal have their own privacy practices.</p></div></section>
-      </main>
-      <footer className="wrap"><div><a href="#" className="brand footer-brand"><span className="brand-mark">sh</span>second<span>Hand</span></a><p>Independent software. Not affiliated with Iowa HHS.<br />Using secondHand does not determine benefit eligibility.</p></div><a href={`/download/SHA256SUMS.txt?release=${release}`}>Download checksums <ArrowUpRight size={14} /></a></footer>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, '\\u003c') }} />
+      <Home />
     </>
   );
 }

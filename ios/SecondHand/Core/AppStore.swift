@@ -67,6 +67,7 @@ final class AppStore: ObservableObject {
             errorMessage = nil
             // The vault still works if a development build has not configured the extension capability.
             autofillExpiresAt = try? SecureVault.readAutofillSession()?.expiresAt
+            await consumePendingReceipts()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -81,7 +82,7 @@ final class AppStore: ObservableObject {
         data = AppData()
         vault = nil
         isUnlocked = false
-        // A user-authorized contact session intentionally survives switching to Safari until its expiry.
+        // A user-authorized application session survives switching to Safari until its expiry.
     }
 
     private func storage() throws -> SecureVault {
@@ -102,8 +103,9 @@ final class AppStore: ObservableObject {
     }
 
     static func validate(_ profile: PersonalProfile) throws {
-        let strings = [profile.firstName, profile.lastName, profile.email, profile.phone, profile.addressLine1,
-                       profile.addressLine2, profile.city, profile.postalCode]
+        let strings = [profile.firstName, profile.middleName, profile.lastName, profile.email, profile.phone,
+                       profile.homePhone, profile.mobilePhone, profile.addressLine1,
+                       profile.addressLine2, profile.city, profile.state, profile.postalCode]
         guard strings.allSatisfy({ $0.count <= 250 }), profile.notes.count <= 10_000,
               profile.household.count <= 30, profile.household.allSatisfy({ $0.name.count <= 250 && $0.relationship.count <= 250 }) else {
             throw AppError.invalidProfile("One of your entries is too long. Shorten it and try again.")
@@ -126,7 +128,7 @@ final class AppStore: ObservableObject {
         var next = data
         next.profile = profile
         addingActivity("Profile updated", detail: profile.reviewedAt == nil ? "Saved on this device." : "You confirmed your information is current.", to: &next)
-        // A profile change invalidates any previously shared contact snapshot.
+        // A profile change invalidates any previously shared application snapshot.
         if autofillExpiresAt != nil { try revokeAutofill() }
         try commit(next)
     }
@@ -168,8 +170,27 @@ final class AppStore: ObservableObject {
             throw AppError.reviewRequired
         }
         let expiry = Date().addingTimeInterval(10 * 60)
-        try SecureVault.writeAutofillSession(AutofillSession(expiresAt: expiry, fields: data.profile.contactFields))
+        try SecureVault.writeAutofillSession(AutofillSession(expiresAt: expiry, fields: data.profile.applicationFields))
         autofillExpiresAt = expiry
+    }
+
+    /// Capture is reported by the extension, never an agency status synchronization.
+    /// Commit the receipt ID with the renewal update before clearing the shared file.
+    func consumePendingReceipts() async {
+        guard isUnlocked, !renewalSaveInFlight else { return }
+        do {
+            let receipts: [ApplicationReceipt]
+            do { receipts = try SecureVault.pendingReceipts() }
+            catch VaultError.unavailable { return } // Standalone app builds still work without App Groups.
+            for receipt in receipts {
+                var next = data
+                if next.importReceipt(receipt) { try commit(next) }
+                try SecureVault.removePendingReceipt(id: receipt.id)
+            }
+            if !receipts.isEmpty { await restoreReminders() }
+        } catch {
+            errorMessage = "A Safari confirmation is waiting to be saved. Reopen Second Hand to try again. Keep your website confirmation for your records."
+        }
     }
 
     func revokeAutofill() throws {
@@ -246,6 +267,7 @@ final class AppStore: ObservableObject {
             let date = previous.dueDate?.formatted(date: .abbreviated, time: .omitted) ?? "No return-by date"
             addingActivity("Previous renewal archived", detail: "\(date) · \(previous.status.title)" + (previous.confirmationNumber.isEmpty ? "" : " · Confirmation: \(previous.confirmationNumber)"), to: &next)
             next.renewal = RenewalPlan()
+            next.renewalStartedAt = Date()
             try commit(next)
         } catch {
             await restoreReminders()

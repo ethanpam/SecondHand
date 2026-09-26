@@ -206,7 +206,7 @@ function runNativeHost(userData, extensionId, input = process.stdin, output = pr
     queue = queue.then(async () => {
       let response;
       try { response = await relayRequest(userData, extensionId, request); }
-      catch { response = failure(request?.id, 'Open SecondHand, connect this extension, and unlock your local vault.'); }
+      catch { response = failure(request?.id, 'Open SecondHand, connect this extension, and unlock SecondHand.'); }
       if (!output.destroyed) await new Promise((resolve, reject) => {
         output.write(frame(response), error => error ? reject(error) : resolve());
       });

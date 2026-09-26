@@ -6,6 +6,7 @@ struct SettingsView: View {
     @State private var deletingData = false
     @State private var isWorking = false
     @State private var editingProfile = false
+    @State private var authorizingApplication = false
 
     var body: some View {
         NavigationStack {
@@ -14,14 +15,15 @@ struct SettingsView: View {
                     AppCard {
                         HStack(alignment: .top, spacing: 14) {
                             IconBadge(symbol: "safari")
-                            SectionLabel(title: "A little less typing", subtitle: "Bring your saved contact details into supported Iowa application fields in Safari.")
+                            SectionLabel(title: "Your application, with a hand", subtitle: "Start a guided application in Safari using the information you choose to share.")
                         }
                         VStack(alignment: .leading, spacing: 14) {
                             setupStep(1, title: "Enable the extension", detail: "In iPhone Settings, open Safari → Extensions → Second Hand and turn it on. On some iOS versions, Safari is under Apps.")
-                            setupStep(2, title: "Allow contact autofill below", detail: "Review your profile, then share a temporary copy of your contact and address fields with the extension.")
-                            setupStep(3, title: "Open the Iowa portal in Safari", detail: "Sign in yourself. Open Second Hand from Safari’s page menu, allow access to the Iowa site, choose Preview fields, then Fill. Review every answer before you submit.")
+                            setupStep(2, title: "Allow application sharing below", detail: "Review your profile, then approve a temporary copy of your contact details, home address, monthly income, and monthly housing amount.")
+                            setupStep(3, title: "Start in Safari", detail: "Open the Iowa portal and sign in yourself. Open Second Hand from Safari’s page menu, allow access to the Iowa site, and start the guided application. It fills recognized empty fields and pauses when it needs you.")
+                            setupStep(4, title: "Review and approve submission", detail: "Answer unsupported questions and handle verification, uploads, signatures, and consent yourself. Review the application, then explicitly approve its final submission in the extension. Enter the confirmation number from Iowa’s receipt to save it in Second Hand.")
                         }
-                        Text("Safari only. Chrome on iPhone doesn’t support this extension. Autofill is assisted and may not recognize every field.")
+                        Text("Safari only. This is an assisted application, with support for recognized pages. It doesn’t guarantee a completed application or automatic yearly renewal. Chrome on iPhone doesn’t support this extension.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
 
@@ -39,11 +41,11 @@ struct SettingsView: View {
                                 VStack(alignment: .leading, spacing: 12) {
                                     HStack {
                                         Image(systemName: "clock")
-                                        Text("Contact access ends in")
+                                        Text("Application access ends in")
                                         Text(expiry, style: .timer).monospacedDigit()
                                     }
                                     .font(.subheadline.weight(.medium)).foregroundStyle(AppTheme.accent)
-                                    Button("Revoke contact access now", role: .destructive) {
+                                    Button("Revoke application access now", role: .destructive) {
                                         do { try store.revokeAutofill() }
                                         catch { self.error = error.localizedDescription }
                                     }
@@ -51,18 +53,14 @@ struct SettingsView: View {
                                 }
                             } else {
                                 Button {
-                                    isWorking = true
-                                    Task {
-                                        do { try await store.authorizeAutofill() }
-                                        catch { self.error = error.localizedDescription }
-                                        isWorking = false
-                                    }
+                                    authorizingApplication = true
                                 } label: {
                                     if isWorking { ProgressView().frame(maxWidth: .infinity) }
-                                    else { Label("Allow contact autofill for 10 minutes", systemImage: "checkmark.shield") }
+                                    else { Label("Allow application sharing for 10 minutes", systemImage: "checkmark.shield") }
                                 }
                                 .buttonStyle(PrimaryButtonStyle())
-                                .disabled(isWorking || store.data.profile.reviewedAt == nil || store.data.profile.contactFields.isEmpty)
+                                .accessibilityIdentifier("application.authorize")
+                                .disabled(isWorking || store.data.profile.reviewedAt == nil || store.data.profile.applicationFields.isEmpty)
                             }
                         }
                         Button("Review my profile") { editingProfile = true }
@@ -75,7 +73,7 @@ struct SettingsView: View {
                         }
                         Text("The link opens your default browser. If that isn’t Safari, open this address in Safari to use the extension.")
                             .font(.caption).foregroundStyle(.secondary)
-                        Text("Only your first and last name and home address are shared. Email, phone, household notes, income, and documents stay in the app. Filled information becomes accessible to the website; revoking access doesn’t clear fields already filled.")
+                        Text("Shared for 10 minutes: first, middle, and last name; email; home and mobile phone; home address; monthly income; monthly housing cost. General phone, household notes, written notes, and documents stay in the app. The website can save information as it is filled, before final submission. Revoking access doesn’t clear fields or withdraw information already sent.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
 
@@ -84,7 +82,9 @@ struct SettingsView: View {
                             IconBadge(symbol: "lock.shield")
                             SectionLabel(title: "Private by design", subtitle: "Your profile and documents are saved locally with encryption. Second Hand has no account or cloud sync.")
                         }
-                        Text("The app locks when it goes into the background. Website access and submitting an application require internet. Second Hand never submits an application for you.")
+                        Text("The app locks when it goes into the background. Website access and submitting an application require internet. The extension needs your explicit approval before a final submission; it never supplies your electronic signature or consent.")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                        Text("A saved confirmation is reported from Safari, not a status update from Iowa HHS. Check the official website and notices for your case’s status.")
                             .font(.subheadline).foregroundStyle(.secondary)
                         Text("There is no automatic backup or recovery. Keep your original documents. Losing this iPhone or deleting the app can lose your saved information.")
                             .font(.caption).foregroundStyle(.secondary)
@@ -122,6 +122,19 @@ struct SettingsView: View {
             .background(AppTheme.canvas)
             .navigationTitle("Settings")
             .sheet(isPresented: $editingProfile) { ProfileEditor() }
+            .confirmationDialog("Share application details for 10 minutes?", isPresented: $authorizingApplication, titleVisibility: .visible) {
+                Button("Allow application sharing") {
+                    isWorking = true
+                    Task {
+                        do { try await store.authorizeAutofill() }
+                        catch { self.error = error.localizedDescription }
+                        isWorking = false
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This includes name, email, home and mobile phone, home address, monthly income, and monthly housing cost. Iowa’s website can save filled information before submission. You still review answers and approve final submission.")
+            }
             .confirmationDialog("Permanently delete all app data?", isPresented: $deletingData, titleVisibility: .visible) {
                 Button("Delete all app data", role: .destructive) {
                     isWorking = true

@@ -554,7 +554,7 @@ function languageModel({ availability = 'available', answer = JSON.stringify({ '
   };
   return { LanguageModel, calls };
 }
-const AI_UNAVAILABLE = 'On-device AI unavailable — rule matches only.';
+const AI_UNAVAILABLE = 'On-device AI unavailable. Rule matches only.';
 
 test('side panel offers to turn SecondHand on for an https tab that is not Iowa, and ignores untrusted clicks', async t => {
   const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: false } });

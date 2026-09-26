@@ -11,7 +11,7 @@ Download a Windows installer or Mac disk image from the [secondHand download web
 
 These pilot downloads are unsigned; Mac builds are not Apple-notarized. Windows or macOS may show a security warning or refuse to open them. Verify the source and decide whether you trust this pilot; don't disable your device's security protections. Signed, store-reviewed distribution is still future work.
 
-Create a local vault with a passphrase of at least 12 characters. Keep that passphrase safe: there is no online password reset. Fill in your profile; leave unknown details blank. Home and mobile phone numbers are separate fields. An “Other phone” is only a reference and is never assumed to be one of those types.
+Create a password of at least 12 characters. SecondHand then shows a one-time recovery key; copy it, save it to a file, or write it down, and keep it away from the computer. If you forget your password, choose **Forgot password?** on the unlock screen and enter the recovery key. With **Let this computer reset my password** on (the default, changeable in Privacy & backups), you can also reset it on the same computer account without the key. There is no online password reset. Fill in your profile; leave unknown details blank. Home and mobile phone numbers are separate fields. An “Other phone” is only a reference and is never assumed to be one of those types.
 
 ## Set up Chrome once
 

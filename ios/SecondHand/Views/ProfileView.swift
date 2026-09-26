@@ -13,7 +13,7 @@ struct ProfileView: View {
                         HStack(alignment: .top, spacing: 16) {
                             IconBadge(symbol: "person.text.rectangle")
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(profile.firstName.isEmpty && profile.lastName.isEmpty ? "Your information, together" : "\(profile.firstName) \(profile.lastName)".trimmingCharacters(in: .whitespaces))
+                                Text(profile.firstName.isEmpty && profile.lastName.isEmpty ? "Your information, together" : [profile.firstName, profile.middleName, profile.lastName].filter { !$0.isEmpty }.joined(separator: " "))
                                     .font(.title2.weight(.semibold)).foregroundStyle(AppTheme.ink)
                                 Text("A private place for the details you use again.")
                                     .font(.subheadline).foregroundStyle(.secondary)
@@ -34,9 +34,11 @@ struct ProfileView: View {
                     }
 
                     AppCard {
-                        SectionLabel(title: "Contact details", subtitle: "Safari autofill currently supports your name and home address. Email and phone stay here for reference.")
+                        SectionLabel(title: "Contact details", subtitle: "You can share your name, email, home and mobile phone, and home address during a Safari application session.")
                         DetailRow(label: "Email", value: profile.email)
-                        DetailRow(label: "Phone", value: profile.phone)
+                        DetailRow(label: "Home phone", value: profile.homePhone)
+                        DetailRow(label: "Mobile phone", value: profile.mobilePhone)
+                        if !profile.phone.isEmpty { DetailRow(label: "Other phone · reference only", value: profile.phone) }
                         Divider()
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Home address").font(.subheadline).foregroundStyle(.secondary)
@@ -63,7 +65,7 @@ struct ProfileView: View {
                     }
 
                     AppCard {
-                        SectionLabel(title: "Monthly amounts", subtitle: "Your notes, not an eligibility calculation.")
+                        SectionLabel(title: "Monthly amounts", subtitle: "Included when you allow application sharing. Fill only if the official question matches these monthly amounts; this is not an eligibility calculation.")
                         DetailRow(label: "Income", value: profile.monthlyIncome.isEmpty ? "" : "$\(profile.monthlyIncome)")
                         DetailRow(label: "Housing cost", value: profile.monthlyHousingCost.isEmpty ? "" : "$\(profile.monthlyHousingCost)")
                     }
@@ -100,16 +102,21 @@ struct ProfileEditor: View {
                 Section {
                     TextField("First name", text: $draft.firstName).textContentType(.givenName)
                         .accessibilityIdentifier("profile.firstName")
+                    TextField("Middle name", text: $draft.middleName).textContentType(.middleName)
                     TextField("Last name", text: $draft.lastName).textContentType(.familyName)
                         .accessibilityIdentifier("profile.lastName")
                     TextField("Email", text: $draft.email)
                         .textContentType(.emailAddress).keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .accessibilityIdentifier("profile.email")
-                    TextField("Phone", text: $draft.phone)
+                    TextField("Home phone", text: $draft.homePhone)
+                        .textContentType(.telephoneNumber).keyboardType(.phonePad)
+                    TextField("Mobile phone", text: $draft.mobilePhone)
+                        .textContentType(.telephoneNumber).keyboardType(.phonePad)
+                    TextField("Other phone (reference only)", text: $draft.phone)
                         .textContentType(.telephoneNumber).keyboardType(.phonePad)
                 } header: { Text("Contact") } footer: {
-                    Text("Only your first and last name and home address can be made available to Safari autofill. Every field is optional.")
+                    Text("Your name, email, and explicitly labeled home and mobile numbers can be shared with Safari. A previously saved general phone number stays reference-only: move it to the correct phone type yourself. Every field is optional.")
                 }
 
                 Section {
@@ -150,8 +157,8 @@ struct ProfileEditor: View {
                     }
                     TextField("Notes about income, expenses, or changes", text: $draft.notes, axis: .vertical)
                         .lineLimit(3...8)
-                } header: { Text("Private financial notes") } footer: {
-                    Text("These notes stay in the app. Use the official form’s instructions to report income and deductions.")
+                } header: { Text("Monthly amounts and private notes") } footer: {
+                    Text("Monthly income and housing amounts are included in an authorized application session. Written notes stay in the app. Use the official form’s instructions and review the meaning of each amount before filling it.")
                 }
 
                 Section {

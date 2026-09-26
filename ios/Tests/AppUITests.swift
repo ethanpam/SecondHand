@@ -57,15 +57,18 @@ final class AppUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["A home for your paperwork"].waitForExistence(timeout: 5))
         attachScreenshot(app, name: "Documents empty state")
         app.tabBars.buttons["Settings"].tap()
-        XCTAssertTrue(app.staticTexts["A little less typing"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["application.authorize"].waitForExistence(timeout: 5))
 
         // Make the temporary browser grant concrete without contacting the government website.
-        let authorize = app.buttons["Allow contact autofill for 10 minutes"]
+        let authorize = app.buttons["application.authorize"]
         for _ in 0..<5 where !authorize.isHittable { app.swipeUp() }
         XCTAssertTrue(authorize.isHittable)
         XCTAssertTrue(authorize.isEnabled)
         authorize.tap()
-        let revoke = app.buttons["Revoke contact access now"]
+        let allowSharing = app.buttons["Allow application sharing"]
+        XCTAssertTrue(allowSharing.waitForExistence(timeout: 5))
+        allowSharing.tap()
+        let revoke = app.buttons["Revoke application access now"]
         XCTAssertTrue(revoke.waitForExistence(timeout: 8))
         revoke.tap()
         XCTAssertTrue(authorize.waitForExistence(timeout: 5))
