@@ -9,7 +9,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { EventEmitter } = require('node:events');
 const { atomicWrite } = require('./vault.cjs');
-const { PROFILE_FIELDS, isPortalUrl } = require('../shared/schema.cjs');
+const { PROFILE_FIELDS, isPortalUrl, isHttpsSiteUrl } = require('../shared/schema.cjs');
 
 const HOST_NAME = 'org.secondhand.bridge';
 const MAX_MESSAGE_BYTES = 64 * 1024;
@@ -91,10 +91,14 @@ function validateRequest(request) {
   let allowed;
   if (request.type === 'status' || request.type === 'showApp') allowed = ['id', 'type'];
   else if (request.type === 'getFields') allowed = ['id', 'type', 'url', 'fields'];
+  else if (request.type === 'trustSite') allowed = ['id', 'type', 'url'];
   else if (request.type === 'recordProgress') allowed = ['id', 'type', 'url', 'filledCount'];
   else throw new Error('Unsupported bridge request.');
   if (Object.keys(request).some(key => !allowed.includes(key))) throw new Error('Unexpected request field.');
-  if (request.type !== 'status' && request.type !== 'showApp' && !isPortalUrl(request.url)) throw new Error('Only the supported Iowa portal is allowed.');
+  // Field requests and site trust may name any HTTPS site; the desktop decides whether it is trusted.
+  if (request.type === 'getFields' || request.type === 'trustSite') {
+    if (!isHttpsSiteUrl(request.url)) throw new Error('Only an https site without credentials or a custom port is allowed.');
+  } else if (request.type !== 'status' && request.type !== 'showApp' && !isPortalUrl(request.url)) throw new Error('Only the supported Iowa portal is allowed.');
   if (request.type === 'getFields') validateFieldScope(request.fields);
   if (request.type === 'recordProgress' && (!Number.isInteger(request.filledCount) || request.filledCount < 1 || request.filledCount > 100)) {
     throw new Error('Invalid filled field count.');

@@ -350,3 +350,22 @@ test('the profile form saves household counts and household flags', async t => {
   assert.equal(view.database.profile.householdVeteran, 'no');
   assert.equal(view.database.profile.householdDisability, 'yes');
 });
+
+test('trusted sites are listed with a Remove button that calls the desktop', async t => {
+  const removed = [];
+  let status = { exists: true, unlocked: true, extensionId: '', bridgeRunning: true, trustedSites: ['https://pantry.example.org', 'https://wic.example.gov'] };
+  const view = await renderer(t, {
+    status: async () => status,
+    removeTrustedSite: async origin => { removed.push(origin); status = { ...status, trustedSites: status.trustedSites.filter(site => site !== origin) }; return status; }
+  });
+  const rows = () => Array.from(view.get('trusted-sites').querySelectorAll('li'), row => row.textContent);
+  assert.deepEqual(rows().map(text => text.replace('Remove', '').trim()), ['https://pantry.example.org', 'https://wic.example.gov']);
+  view.get('trusted-sites').querySelector('button').click();
+  await tick(); await tick();
+  assert.deepEqual(removed, ['https://pantry.example.org']);
+  assert.deepEqual(rows().map(text => text.replace('Remove', '').trim()), ['https://wic.example.gov']);
+  status = { ...status, trustedSites: [] };
+  view.get('trusted-sites').querySelector('button').click();
+  await tick(); await tick();
+  assert.equal(view.get('trusted-sites-empty').hidden, false);
+});

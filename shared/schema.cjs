@@ -36,6 +36,15 @@ function isPortalUrl(value) {
   } catch { return false; }
 }
 
+// Any other site SecondHand may fill must be plain HTTPS with no credentials or custom port.
+function isHttpsSiteUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && Boolean(url.hostname) && !url.username && !url.password && !url.port;
+  } catch { return false; }
+}
+function siteOrigin(value) { return isHttpsSiteUrl(value) ? new URL(value).origin : null; }
+
 function object(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
       ![Object.prototype, null].includes(Object.getPrototypeOf(value))) throw new Error('Expected an object.');
@@ -111,4 +120,4 @@ function validateStoredApplication(input) {
   return { ...validateApplication(input), createdAt: input.createdAt, updatedAt: input.updatedAt };
 }
 
-module.exports = { PORTAL_URL, FIELD_LABELS, PROFILE_FIELDS, PROFILE_CHOICES, YES_NO_FIELDS, APPLICATION_STATUSES, isPortalUrl, validateProfile, validateApplication, validateStoredApplication };
+module.exports = { PORTAL_URL, FIELD_LABELS, PROFILE_FIELDS, PROFILE_CHOICES, YES_NO_FIELDS, APPLICATION_STATUSES, isPortalUrl, isHttpsSiteUrl, siteOrigin, validateProfile, validateApplication, validateStoredApplication };

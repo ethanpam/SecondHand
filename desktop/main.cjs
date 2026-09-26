@@ -11,7 +11,7 @@ const { startBridge, runNativeHost, nativeStreams, extensionFromOrigin, EXTENSIO
 const { registerHost } = require('./registration.cjs');
 const { getExtensionSetup, prepareBundledExtension } = require('./extension-setup.cjs');
 const { testStoragePath } = require('./test-storage-path.cjs');
-const { validateProfile, validateApplication, FIELD_LABELS, PORTAL_URL } = require('../shared/schema.cjs');
+const { validateProfile, validateApplication, FIELD_LABELS, PORTAL_URL, isPortalUrl, siteOrigin } = require('../shared/schema.cjs');
 
 app.setName('SecondHand');
 const localAppData = process.platform === 'win32' ?
@@ -41,6 +41,10 @@ if (nativeOrigin) {
   let fieldRequestPending = false;
   let extensionSetupPending = false;
   let autofillWithoutAsking = false;
+  let trustedSites = [];
+  // Released only after a named confirmation on sites other than Iowa's portal.
+  const SENSITIVE_FIELDS = ['ssn', 'birthDate', 'monthlyEarnedIncome', 'monthlyOtherIncome'];
+  const MAX_TRUSTED_SITES = 50;
   let lockGeneration = 0;
   const userData = app.getPath('userData');
   const vault = new Vault(path.join(userData, 'vault.secondhand'));
@@ -54,7 +58,7 @@ if (nativeOrigin) {
   };
 
   async function status() {
-    return { exists: await vault.exists(), unlocked: vault.unlocked, extensionId, autofillWithoutAsking,
+    return { exists: await vault.exists(), unlocked: vault.unlocked, extensionId, autofillWithoutAsking, trustedSites: [...trustedSites],
       bridgeRunning: Boolean(bridge), platform: process.platform,
       extensionSetup: await getExtensionSetup(app).catch(() => ({ prepared: false, available: false })) };
   }
@@ -73,7 +77,7 @@ if (nativeOrigin) {
     if (!vault.unlocked) throw publicError('Unlock your local vault first.');
   }
   async function saveSettings() {
-    await atomicWrite(configPath, Buffer.from(JSON.stringify({ extensionId, autofillWithoutAsking })));
+    await atomicWrite(configPath, Buffer.from(JSON.stringify({ extensionId, autofillWithoutAsking, trustedSites })));
   }
   async function saveExtensionRegistration(id) {
     let registration;
@@ -92,24 +96,58 @@ if (nativeOrigin) {
       return { shown: true };
     }
     requireUnlocked();
+    if (request.type === 'trustSite') {
+      const origin = siteOrigin(request.url);
+      if (fieldRequestPending) throw publicError('Another request is waiting for your approval.');
+      fieldRequestPending = true;
+      const generation = lockGeneration;
+      try {
+        mainWindow.show(); mainWindow.focus();
+        const answer = await dialog.showMessageBox(mainWindow, {
+          type: 'question', title: 'Trust this site?', message: `Let SecondHand fill forms on ${origin}?`,
+          detail: 'When you click Autofill on this site, SecondHand fills the saved answers it can match. It never clicks Next or Submit. Social Security number, date of birth, and income still ask every time. You can remove this site on the Chrome extension page.',
+          buttons: ['Cancel', 'Trust this site'], defaultId: 1, cancelId: 0, noLink: true
+        });
+        if (answer.response !== 1) throw publicError('You cancelled trusting this site.');
+        requireUnlocked();
+        if (generation !== lockGeneration || extensionId !== context.extensionId) throw publicError('The vault or Chrome connection changed. Try again.');
+        if (!trustedSites.includes(origin)) {
+          if (trustedSites.length >= MAX_TRUSTED_SITES) throw publicError('Remove a trusted site before adding another.');
+          trustedSites = [...trustedSites, origin];
+          await saveSettings();
+        }
+        touch();
+        return { trusted: true, origin };
+      } finally { fieldRequestPending = false; }
+    }
     if (request.type === 'getFields') {
-      const trusted = autofillWithoutAsking && extensionId === context.extensionId;
+      const iowa = isPortalUrl(request.url);
+      const origin = siteOrigin(request.url);
+      if (!iowa && !trustedSites.includes(origin)) throw publicError('This site isn’t trusted. Turn on SecondHand for it first.');
+      const sensitive = iowa ? [] : request.fields.filter(field => SENSITIVE_FIELDS.includes(field));
+      const trusted = autofillWithoutAsking && extensionId === context.extensionId && !sensitive.length;
       if (!trusted) {
         if (fieldRequestPending) throw publicError('Another field request is waiting for your approval.');
         fieldRequestPending = true;
         const generation = lockGeneration;
         try {
           mainWindow.show(); mainWindow.focus();
-          const answer = await dialog.showMessageBox(mainWindow, {
-            type: 'question', title: 'Let Chrome fill Iowa’s form?',
-            message: 'Fill these saved answers into Iowa’s application?',
-            detail: `Website: ${PORTAL_URL}\n\n${request.fields.map(field => FIELD_LABELS[field]).join(', ')}\n\nChoose “Always allow” to let the SecondHand extension fill without asking whenever this app is unlocked. You can turn it off on the Chrome extension page. Iowa’s website may save entered information. Review every answer before continuing.`,
+          const site = iowa ? 'Iowa’s application' : origin;
+          const answer = await dialog.showMessageBox(mainWindow, sensitive.length ? {
+            type: 'warning', title: 'Share sensitive details?',
+            message: `Fill sensitive details on ${origin}?`,
+            detail: `${sensitive.map(field => FIELD_LABELS[field]).join(', ')}\n\nOnly allow this if you meant to give these details to ${origin}. Other fields: ${request.fields.filter(field => !sensitive.includes(field)).map(field => FIELD_LABELS[field]).join(', ') || 'none'}.`,
+            buttons: ['Cancel', 'Allow once'], defaultId: 0, cancelId: 0, noLink: true
+          } : {
+            type: 'question', title: 'Let Chrome fill this form?',
+            message: `Fill these saved answers into ${site}?`,
+            detail: `Website: ${iowa ? PORTAL_URL : origin}\n\n${request.fields.map(field => FIELD_LABELS[field]).join(', ')}\n\nChoose “Always allow” to let the SecondHand extension fill without asking whenever this app is unlocked. You can turn it off on the Chrome extension page. The website may save entered information. Review every answer before continuing.`,
             buttons: ['Cancel', 'Allow once', 'Always allow on this computer'], defaultId: 1, cancelId: 0, noLink: true
           });
           if (answer.response !== 1 && answer.response !== 2) throw publicError('You cancelled this field request.');
           requireUnlocked();
           if (generation !== lockGeneration || extensionId !== context.extensionId) throw publicError('The vault or Chrome connection changed. Click Autofill again.');
-          if (answer.response === 2) { autofillWithoutAsking = true; await saveSettings(); }
+          if (answer.response === 2 && !sensitive.length) { autofillWithoutAsking = true; await saveSettings(); }
         } finally { fieldRequestPending = false; }
       }
       const profile = vault.getData().profile;
@@ -175,6 +213,13 @@ if (nativeOrigin) {
       requireUnlocked();
       if (typeof enabled !== 'boolean') throw publicError('Invalid setting.');
       autofillWithoutAsking = enabled;
+      await saveSettings();
+      touch(); return status();
+    },
+    async removeTrustedSite(origin) {
+      requireUnlocked();
+      if (typeof origin !== 'string' || !trustedSites.includes(origin)) throw publicError('That site isn’t in your trusted list.');
+      trustedSites = trustedSites.filter(site => site !== origin);
       await saveSettings();
       touch(); return status();
     },
@@ -267,7 +312,8 @@ if (nativeOrigin) {
     await fs.mkdir(userData, { recursive: true, mode: 0o700 });
     try {
       const stat = await fs.stat(configPath);
-      if (stat.size <= 4096) { const config = JSON.parse(await fs.readFile(configPath, 'utf8')); if (EXTENSION_ID.test(config.extensionId || '')) { extensionId = config.extensionId; autofillWithoutAsking = config.autofillWithoutAsking === true; } }
+      if (stat.size <= 4096) { const config = JSON.parse(await fs.readFile(configPath, 'utf8')); if (EXTENSION_ID.test(config.extensionId || '')) { extensionId = config.extensionId; autofillWithoutAsking = config.autofillWithoutAsking === true; }
+      if (Array.isArray(config.trustedSites)) trustedSites = [...new Set(config.trustedSites.filter(origin => typeof origin === 'string' && siteOrigin(origin) === origin))].slice(0, MAX_TRUSTED_SITES); }
     } catch { /* Missing or invalid non-sensitive setup settings are reset. */ }
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     session.defaultSession.setPermissionCheckHandler(() => false);

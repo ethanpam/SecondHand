@@ -96,7 +96,7 @@ test('untrusted autofill asks once per click with Allow once, Always allow, and 
   app.answer(async () => ({ response: 2 }));
   await app.request({ type: 'getFields', fields: ['firstName'] });
   assert.equal((await app.invoke('status')).autofillWithoutAsking, true);
-  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: true });
+  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: true, trustedSites: [] });
   await app.request({ type: 'getFields', fields: ['firstName'] });
   assert.equal(app.prompts.length, 3, 'no dialog after Always allow');
 });
@@ -116,11 +116,11 @@ test('a late approval after lock and unlock is rejected', async () => {
 test('the trust switch round-trips through the renderer and resets for a new extension ID', async () => {
   const app = await desktop();
   assert.equal((await app.invoke('setAutofillTrust', true)).autofillWithoutAsking, true);
-  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: true });
+  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: true, trustedSites: [] });
   await assert.rejects(app.invoke('setAutofillTrust', 'yes'), /Invalid setting/);
   await app.invoke('connectExtension', 'b'.repeat(32));
   assert.equal((await app.invoke('status')).autofillWithoutAsking, false);
-  assert.deepEqual(app.writes.at(-1).json, { extensionId: 'b'.repeat(32), autofillWithoutAsking: false });
+  assert.deepEqual(app.writes.at(-1).json, { extensionId: 'b'.repeat(32), autofillWithoutAsking: false, trustedSites: [] });
   const untrusted = await desktop({ settings: { extensionId: 'c'.repeat(32), autofillWithoutAsking: true } });
   await assert.rejects(untrusted.request({ type: 'getFields', fields: ['firstName'] }), /changed/);
   assert.equal(untrusted.prompts.length, 1, 'trust only applies to the stored extension ID');
@@ -140,4 +140,45 @@ test('desktop releases explicit No choices but omits unknown answers', async () 
   const fields = ['programSnap', 'programFip', 'programMedicaid', 'hasHomeAddress', 'mailingSameAsHome', 'mailingAddressLine1'];
   const { values } = await app.request({ type: 'getFields', fields });
   assert.deepEqual(plain(values), { programSnap: 'yes', programFip: 'no', hasHomeAddress: 'no', mailingSameAsHome: 'no', mailingAddressLine1: 'PO Box 123' });
+});
+
+const PANTRY = 'https://pantry.example.org/intake';
+test('a site must be trusted in the desktop before any values are released to it', async () => {
+  const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true } });
+  await assert.rejects(app.request({ type: 'getFields', url: PANTRY, fields: ['firstName'] }), /isn’t trusted/);
+  assert.equal(app.prompts.length, 0);
+  app.answer(async () => ({ response: 0 }));
+  await assert.rejects(app.request({ type: 'trustSite', url: PANTRY }), /cancelled/);
+  app.answer(async () => ({ response: 1 }));
+  assert.deepEqual(plain(await app.request({ type: 'trustSite', url: `${PANTRY}?week=2` })), { trusted: true, origin: 'https://pantry.example.org' });
+  assert.match(app.prompts.at(-1).message, /pantry\.example\.org/);
+  assert.deepEqual(plain((await app.invoke('status')).trustedSites), ['https://pantry.example.org']);
+  assert.deepEqual(app.writes.at(-1).json.trustedSites, ['https://pantry.example.org']);
+  const prompts = app.prompts.length;
+  assert.deepEqual(plain((await app.request({ type: 'getFields', url: PANTRY, fields: ['firstName'] })).values), { firstName: 'Synthetic' });
+  assert.equal(app.prompts.length, prompts, 'Always allow covers ordinary fields on trusted sites');
+});
+
+test('sensitive fields on a non-Iowa site always ask, even with Always allow on', async () => {
+  const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'] } });
+  await app.invoke('saveProfile', { firstName: 'Synthetic', ssn: '123-45-6789', monthlyEarnedIncome: '900' });
+  app.answer(async () => ({ response: 1 }));
+  const { values } = await app.request({ type: 'getFields', url: PANTRY, fields: ['firstName', 'ssn', 'monthlyEarnedIncome'] });
+  assert.equal(values.ssn, '123-45-6789');
+  assert.equal(app.prompts.length, 1);
+  assert.deepEqual(plain(app.prompts[0].buttons), ['Cancel', 'Allow once']);
+  assert.match(app.prompts[0].detail, /Social Security number/);
+  assert.match(app.prompts[0].message, /pantry\.example\.org/);
+  await app.request({ type: 'getFields', fields: ['ssn'] });
+  assert.equal(app.prompts.length, 1, 'Iowa keeps its own trust rules');
+});
+
+test('removing a trusted site stops field release; a locked vault cannot trust sites', async () => {
+  const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org', 'https://wic.example.gov'] } });
+  assert.deepEqual(plain((await app.invoke('removeTrustedSite', 'https://pantry.example.org')).trustedSites), ['https://wic.example.gov']);
+  await assert.rejects(app.request({ type: 'getFields', url: PANTRY, fields: ['firstName'] }), /isn’t trusted/);
+  await app.invoke('lock');
+  await assert.rejects(app.request({ type: 'trustSite', url: PANTRY }), /Unlock/);
+  const stored = await desktop({ settings: { extensionId, trustedSites: ['https://ok.example.org', 'http://bad.example.org', 'javascript:1', 42] } });
+  assert.deepEqual(plain((await stored.invoke('status')).trustedSites), ['https://ok.example.org']);
 });

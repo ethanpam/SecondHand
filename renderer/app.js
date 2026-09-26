@@ -215,6 +215,7 @@
     const bundled = connected && vaultStatus.extensionId === setup.extensionId;
     $('extension-id').value = vaultStatus.extensionId || '';
     $('autofill-trust').checked = Boolean(vaultStatus.autofillWithoutAsking);
+    renderTrustedSites();
     $('extension-status').textContent = bundled ? (setup.prepared ? 'Ready to load in Chrome' : 'Setup needs refresh') : connected ? 'Custom connection registered' : 'Needs setup';
     $('extension-status').classList.toggle('connected', connected);
     $('extension-prepared').hidden = !setup.prepared;
@@ -224,6 +225,29 @@
       ? 'In Chrome’s folder chooser, press Command + Shift + G, paste the copied folder path, then choose Open and Select.'
       : 'In Chrome’s folder chooser, paste the copied folder path into the address bar, then choose Select Folder.';
     $('extension-step-label').replaceChildren(document.createTextNode(connected ? 'Manage connection ' : 'Set up extension '), icon('arrow'));
+  }
+
+  function renderTrustedSites() {
+    const sites = Array.isArray(vaultStatus.trustedSites) ? vaultStatus.trustedSites : [];
+    $('trusted-sites').replaceChildren(...sites.map(origin => {
+      const row = element('li', 'trusted-site');
+      const remove = element('button', 'text-button', 'Remove');
+      remove.type = 'button';
+      remove.addEventListener('click', () => {
+        const generation = vaultGeneration;
+        pending(remove, async () => {
+          try {
+            const status = await api.removeTrustedSite(origin);
+            if (generation !== vaultGeneration) return;
+            vaultStatus = { ...vaultStatus, ...status }; renderTrustedSites();
+            toast(`SecondHand will no longer fill forms on ${origin}.`);
+          } catch (error) { if (generation === vaultGeneration) showError('autofill-trust-error', error); }
+        });
+      });
+      row.append(element('code', '', origin), remove);
+      return row;
+    }));
+    $('trusted-sites-empty').hidden = sites.length > 0;
   }
 
   function renderSummary() {
