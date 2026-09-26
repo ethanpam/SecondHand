@@ -72,7 +72,8 @@
     if (!win || !element.isConnected) return false;
     for (let node = element; node && node.nodeType === 1; node = node.parentElement) {
       const style = win.getComputedStyle(node);
-      if (node.hidden || node.hasAttribute('inert') || node.getAttribute('aria-hidden') === 'true' || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.opacity === '0') return false;
+      const customChoice = node === element && ['radio', 'checkbox'].includes(element.type) && Array.from(element.labels || []).some(rendered);
+      if (node.hidden || node.hasAttribute('inert') || node.getAttribute('aria-hidden') === 'true' || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || (style.opacity === '0' && !customChoice)) return false;
     }
     const rect = element.getBoundingClientRect();
     return Boolean(element.getClientRects().length && rect.width > 0 && rect.height > 0);
