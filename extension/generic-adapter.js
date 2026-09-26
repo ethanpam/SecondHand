@@ -115,13 +115,16 @@
     return /\b(birth|born|dob)/.test(text) && !/\b(month|day|year|time|hours?|minutes?)\b/.test(text) && !OTHER_PERSON.test(text);
   }
 
-  function rendered(element) {
+  // A label's own aria-hidden only hides it from screen readers (Jotform marks every choice
+  // label that way), so a choice label is checked with `labelOnly`; an aria-hidden ancestor still hides it.
+  function rendered(element, labelOnly = false) {
     const win = element.ownerDocument.defaultView;
     if (!win || !element.isConnected) return false;
     for (let node = element; node && node.nodeType === 1; node = node.parentElement) {
       const style = win.getComputedStyle(node);
-      const customChoice = node === element && ['radio', 'checkbox'].includes(element.type) && Array.from(element.labels || []).some(rendered);
-      if (node.hidden || node.hasAttribute('inert') || node.getAttribute('aria-hidden') === 'true' || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || (style.opacity === '0' && !customChoice)) return false;
+      const customChoice = node === element && ['radio', 'checkbox'].includes(element.type) && Array.from(element.labels || []).some(label => rendered(label, true));
+      const ariaHidden = node.getAttribute('aria-hidden') === 'true' && !(labelOnly && node === element);
+      if (node.hidden || node.hasAttribute('inert') || ariaHidden || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || (style.opacity === '0' && !customChoice)) return false;
     }
     const rect = element.getBoundingClientRect();
     return Boolean(element.getClientRects().length && rect.width > 0 && rect.height > 0);

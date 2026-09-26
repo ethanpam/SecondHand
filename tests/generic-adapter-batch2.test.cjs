@@ -98,3 +98,20 @@ test('#26 household questions about a subgroup are never answered with the whole
     assert.equal(keysOf(generic.plan(doc)).includes('householdSize'), false, label);
   }
 });
+
+test('#24 Jotform choice labels marked aria-hidden still show the choice (live SFU pantry markup)', () => {
+  const item = (n, value) => `<span class="form-radio-item"><span class="dragger-item"></span><input type="radio" class="form-radio validate[required]" id="input_34_${n}" name="q34_whatIs" aria-labelledby="label_input_34_${n}" value="${value}" style="opacity:0"><label aria-hidden="true" id="label_input_34_${n}" for="input_34_${n}">${value}</label></span>`;
+  const doc = page(`<li class="form-line jf-required" data-type="control_radio" id="id_34"><span class="form-label form-label-top" id="label_34"> What is your age range?<span class="form-required" aria-hidden="true">*</span> </span>
+    <div id="cid_34" class="form-input-wide jf-required"><div class="form-single-column" role="radiogroup" aria-required="true" aria-labelledby="label_34">
+    ${['0-5 yrs', '6-12 yrs', '13-19 yrs', '20-29 yrs', '30-64 yrs', '65+ yrs', 'Unknown'].map((value, n) => item(n, value)).join('')}</div></div></li>`);
+  const result = generic.plan(doc);
+  assert.deepEqual(keysOf(result), ['ageRange']);
+  fillAll(doc, result, { birthDate: '1985-04-12' });
+  assert.equal(doc.getElementById('input_34_4').checked, true, '30-64 yrs');
+});
+
+test('#24 an aria-hidden group of choices stays out of the plan', () => {
+  const doc = page(`<fieldset aria-hidden="true"><legend>Is anyone in your household a veteran?</legend>
+    <label><input type="radio" name="vet" value="y"> Yes</label><label><input type="radio" name="vet" value="n"> No</label></fieldset>`);
+  assert.deepEqual(generic.plan(doc).matched, []);
+});
