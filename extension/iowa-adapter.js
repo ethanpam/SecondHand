@@ -321,7 +321,7 @@
       else if (answered(elements, definition)) status = 'complete';
       else if (required) { status = 'missing'; requiredRemaining++; }
       else status = 'optional';
-      checklist.push({ key, label: clearing ? `${definition.label} — review existing dependent answers` : definition.label, status, required,
+      checklist.push({ key, label: clearing ? `${definition.label}: review existing dependent answers` : definition.label, status, required,
         fillable: !invalid && !clearing && elements.every(element => editable(element, doc)) && status !== 'complete' });
     }
     const programs = controls.filter(element => element.name === 'programs');

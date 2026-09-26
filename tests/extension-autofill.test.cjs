@@ -9,10 +9,12 @@ const adapter = require('../extension/iowa-adapter.js');
 // Values created inside the worker's vm context have foreign prototypes.
 const plain = value => JSON.parse(JSON.stringify(value));
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
+const { GENERIC_KEYS } = require('../extension/generic-adapter.js');
 // Verified Iowa pages never use the general engine; any call there is a bug.
-const noSiteEngine = { requestKeys: () => { throw new Error('Iowa used the site engine.'); }, deriveValues: () => { throw new Error('Iowa used the site engine.'); } };
+const noSiteEngine = { GENERIC_KEYS, requestKeys: () => { throw new Error('Iowa used the site engine.'); }, deriveValues: () => { throw new Error('Iowa used the site engine.'); } };
 // Stand-in for generic-adapter.js's pure helpers on pages the Iowa adapter hasn't verified.
 const generalEngine = {
+  GENERIC_KEYS,
   requestKeys: keys => [...new Set(keys.flatMap(key => key === 'totalMonthlyIncome' ? ['monthlyEarnedIncome', 'monthlyOtherIncome'] : [key]))],
   deriveValues: values => ({ ...values, ...(values.monthlyEarnedIncome && values.monthlyOtherIncome ? { totalMonthlyIncome: 'Synthetic private total' } : {}) })
 };
@@ -21,13 +23,23 @@ const financialPlan = () => ({ token: 'plan-1',
   matched: [{ id: 'sh-1-0', key: 'householdAdults', confidence: 'high' }, { id: 'sh-1-1', key: 'totalMonthlyIncome', confidence: 'high' }, { id: 'sh-1-2', key: 'householdSeniors', confidence: 'high' }],
   unmatched: [{ id: 'sh-1-3', label: 'Is anyone blind?', type: 'radio', options: ['Yes', 'No'], required: true }] });
 const financialValues = { householdAdults: '2', monthlyEarnedIncome: 'Synthetic private 900', monthlyOtherIncome: '100' };
-// The general engine's side of a page: plan, fill what has a value, focus the field that needs you.
+// The general engine's side of a page: plan what is unanswered and on screen (an answer can
+// reveal a field), fill what has a value, focus the field that needs you.
+const answeredOn = new WeakMap();
 function generalPage(message, plan) {
-  if (message.type === 'secondhand:generic:plan') return structuredClone(plan);
+  const answered = answeredOn.get(plan) || new Set();
+  answeredOn.set(plan, answered);
+  if (message.type === 'secondhand:generic:plan') {
+    const open = fields => Array.isArray(fields) ? fields.filter(field => !answered.has(field.id) && (!field.revealedBy || answered.has(field.revealedBy))) : fields;
+    return structuredClone({ ...plan, matched: open(plan.matched), unmatched: open(plan.unmatched) });
+  }
   if (message.type === 'secondhand:generic:fill') {
     if (message.token !== plan.token) return { ok: false, filled: [], skipped: [] };
-    const filled = message.assignments.filter(item => message.values[item.key]).map(item => item.id);
-    return { ok: true, filled, skipped: message.assignments.map(item => item.id).filter(id => !filled.includes(id)) };
+    const refuses = new Set([...(plan.matched || []), ...(plan.unmatched || [])].filter(field => field.rejects).map(field => field.id));
+    const rejected = message.assignments.filter(item => message.values[item.key] && refuses.has(item.id)).map(item => item.id);
+    const filled = message.assignments.filter(item => message.values[item.key] && !refuses.has(item.id)).map(item => item.id);
+    filled.forEach(id => answered.add(id));
+    return { ok: true, filled, skipped: message.assignments.map(item => item.id).filter(id => !filled.includes(id) && !rejected.includes(id)), rejected };
   }
   if (message.type === 'secondhand:generic:focus') return { focused: message.id === 'sh-1-3' };
   return undefined;
@@ -166,6 +178,16 @@ test('a vault that locks during the request, a cancelled approval, or a page cha
   }
 });
 
+test('Iowa never plans for the on-device AI or takes guesses', async () => {
+  const w = worker();
+  assert.equal((await w.launcher({ type: 'ui:plan', confirmed: true })).ok, false);
+  assert.equal((await w.panel({ type: 'ui:plan', confirmed: true })).ok, false);
+  const guessed = await w.launcher({ type: 'ui:autofill', confirmed: true, guesses: { firstName: 'firstName' } });
+  assert.equal(guessed.ok, false);
+  assert.deepEqual(w.calls.native, []);
+  assert.deepEqual(w.calls.content, []);
+});
+
 test('an unknown page where the general engine matches nothing stops autofill without contacting the desktop', async () => {
   const w = worker({ kind: 'manual', general: { ...nothingPlanned(), unmatched: financialPlan().unmatched } });
   const response = await autofill(w);
@@ -188,7 +210,8 @@ test('an unknown Iowa page gets one general fill, then waits for the applicant t
   assert.deepEqual(w.calls.native.map(call => call.type), ['status', 'getFields']);
   assert.equal(w.calls.native[1].url, `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo`);
   assert.deepEqual(plain(w.calls.native[1].fields), ['householdAdults', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'householdSeniors']);
-  assert.deepEqual(w.calls.content.map(message => message.type), ['secondhand:pageState', 'secondhand:generic:plan', 'secondhand:generic:fill']);
+  // The second plan finds nothing new it can fill, so the click ends there.
+  assert.deepEqual(w.calls.content.map(message => message.type), ['secondhand:pageState', 'secondhand:generic:plan', 'secondhand:generic:fill', 'secondhand:generic:plan']);
   const fill = plain(w.calls.content[2]);
   assert.equal(fill.token, 'plan-1');
   assert.deepEqual(fill.assignments, [{ id: 'sh-1-0', key: 'householdAdults', guessed: false }, { id: 'sh-1-1', key: 'totalMonthlyIncome', guessed: false }]);
@@ -206,6 +229,34 @@ test('an unknown Iowa page gets one general fill, then waits for the applicant t
   assert.equal(w.calls.content.filter(message => message.type === 'secondhand:generic:fill').length, 1, 'one general fill per page');
   assert.equal(w.calls.content.some(message => ['secondhand:continue', 'secondhand:fill'].includes(message.type)), false, 'never continues or uses the Iowa fill');
   assert.equal(w.calls.native.some(call => call.type === 'recordProgress'), false);
+});
+
+test('an unknown Iowa page fills questions its answers reveal in the same click, from one desktop request', async () => {
+  const plan = financialPlan();
+  plan.matched.push({ id: 'sh-1-4', key: 'householdAdults', confidence: 'high', revealedBy: 'sh-1-1' },   // its value was requested
+    { id: 'sh-1-5', key: 'monthlyRent', confidence: 'high', revealedBy: 'sh-1-0' });                        // its key was not requested
+  const w = worker({ kind: 'manual', engine: generalEngine, general: plan, desktop: { values: { ...financialValues, monthlyRent: '700' } } });
+  const result = plain((await autofill(w)).data);
+  assert.deepEqual(w.calls.native.map(call => call.type), ['status', 'getFields']);
+  assert.deepEqual(plain(w.calls.native[1].fields), ['householdAdults', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'householdSeniors']);
+  assert.deepEqual(w.calls.content.map(message => message.type), ['secondhand:pageState', 'secondhand:generic:plan', 'secondhand:generic:fill',
+    'secondhand:generic:plan', 'secondhand:generic:fill', 'secondhand:generic:plan']);
+  assert.equal(result.filled, 3);
+  assert.deepEqual(result.needYou, ['sh-1-3', 'sh-1-2', 'sh-1-5']);
+  assert.equal(result.message, 'Filled 3 · 3 need you. Check your answers, then click Continue.');
+  assert.equal(w.calls.content.some(message => message.type === 'secondhand:continue'), false);
+  assert.doesNotMatch(JSON.stringify(w.calls.content), /700/);
+});
+
+test('an answer an unknown Iowa page refuses needs the applicant and is not counted as filled', async () => {
+  const plan = financialPlan();
+  plan.matched[0].rejects = true;
+  const w = worker({ kind: 'manual', engine: generalEngine, general: plan, desktop: { values: financialValues } });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.filled, 1);
+  assert.deepEqual(result.needYou, ['sh-1-3', 'sh-1-0', 'sh-1-2']);
+  assert.equal(result.message, 'Filled 1 · 3 need you. Check your answers, then click Continue.');
+  assert.equal(w.calls.content.filter(message => message.type === 'secondhand:generic:fill').length, 1, 'a refused answer is not tried again');
 });
 
 test('need-you on a general-filled Iowa page focuses the general engine’s field; Iowa keys still go to the Iowa adapter', async () => {
@@ -261,6 +312,19 @@ test('pageState returns the last result for the same page and forgets it after n
   assert.equal((await w.panel({ type: 'ui:pageState' })).data.result.state, 'done');
   w.events.updated(7, { status: 'loading' });
   assert.equal((await w.panel({ type: 'ui:pageState' })).data.result, null);
+});
+
+test('the worker answers a build ping from its own pages with the build the panel expects', async () => {
+  const build = file => fs.readFileSync(require.resolve(`../extension/${file}`), 'utf8').match(/const BUILD = '([^']+)'/)?.[1];
+  assert.ok(build('background.js'));
+  assert.equal(build('background.js'), build('panel.js'), 'background.js and panel.js must change BUILD together');
+  const w = worker();
+  assert.deepEqual(plain((await w.panel({ type: 'ui:ping' })).data), { build: build('background.js') });
+  assert.deepEqual(plain((await w.launcher({ type: 'ui:ping' })).data), { build: build('background.js') });
+  assert.equal(await w.send({ type: 'ui:ping' }, { id: 'otherextension', url: PANEL_URL }), undefined);
+  assert.equal(await w.send({ type: 'ui:ping' }, { id: 'testextension', url: `${adapter.PORTAL}/applicant`, tab: { id: 7 } }), undefined);
+  assert.deepEqual(w.calls.native, []);
+  assert.deepEqual(w.calls.content, []);
 });
 
 test('desktop status, showApp, and focusField pass through; guided and manual-fill messages are gone', async () => {

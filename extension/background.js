@@ -1,8 +1,11 @@
 'use strict';
 importScripts('iowa-adapter.js', 'generic-adapter.js');
-if (typeof globalThis.SecondHandGeneric?.requestKeys !== 'function' || typeof globalThis.SecondHandGeneric.deriveValues !== 'function') {
+if (typeof globalThis.SecondHandGeneric?.requestKeys !== 'function' || typeof globalThis.SecondHandGeneric.deriveValues !== 'function' || !Array.isArray(globalThis.SecondHandGeneric.GENERIC_KEYS)) {
   throw new Error('SecondHand could not load generic-adapter.js. Reinstall the extension.');
 }
+// Must match BUILD in panel.js: change both together. The panel compares them to tell
+// when Chrome is still running an older worker than the pages it loaded from disk.
+const BUILD = '2026-09-26.2';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
@@ -11,6 +14,7 @@ const FRAME_ERROR = "Part of this form couldn’t be filled safely. Fill it your
 const FIELD_ID = /^[A-Za-z][A-Za-z0-9_-]{0,59}$/; // field ids from the site engine's plan
 const results = new Map(); // tabId -> last autofill result: counts, keys, and fixed messages only. Never answers.
 const siteRuns = new Map(); // tabId -> the fill running on an approved site, so two clicks share one request.
+const sitePlans = new Map(); // tabId -> { url, frames } the widget's on-device AI saw. Field metadata only.
 // tabId -> { steps, handled, running }. Memory only: a page can never turn autofill on,
 // and if Chrome restarts this worker, autofill is off and the widget shows Autofill again.
 const autopilots = new Map();
@@ -18,6 +22,12 @@ const MAX_STEPS = 15;
 // tabId -> the Iowa page (origin + path) where the general engine found fields, until the tab navigates.
 const generalPages = new Map();
 const GENERAL_TODO = 'Check your answers, then click Continue.';
+const MAX_GENERAL_PASSES = 4;
+// Sensitive answers (identity, money, health, immigration) are placed only by a confident
+// rule match, never by an AI guess.
+const SENSITIVE_KEYS = Object.freeze(['ssn', 'birthDate', 'ageRange', 'totalMonthlyIncome', 'annualIncome', 'assetsOnHand', 'monthlyMedicalExpenses',
+  'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare']);
+const AI_KEYS = Object.freeze(SecondHandGeneric.GENERIC_KEYS.filter(key => !SENSITIVE_KEYS.includes(key)));
 
 function nativeRequest(type, payload = {}) {
   return new Promise((resolve, reject) => {
@@ -311,6 +321,7 @@ async function disableSite(tabId) {
   const unused = frameOrigins.filter(value => !remaining.some(script => script.matches.includes(`${value}/*`)));
   await removeAccess([...new Set([origin, ...unused])]);
   results.delete(tabId);
+  sitePlans.delete(tabId);
   return { enabled: false, origin };
 }
 
@@ -328,127 +339,213 @@ async function enabledSiteFrames(tabId, origin) {
   return enabled;
 }
 
-const siteResult = (state, message, extra = {}) => ({ state, filled: 0, guessed: [], needYou: [], message, pageKey: 'general', ...extra });
+const siteResult = (state, message, extra = {}) => ({ state, filled: 0, guessed: 0, needYou: [], message, pageKey: 'general', ...extra });
 const filledSummary = (filled, needYou) => `Filled ${filled}${needYou.length ? ` · ${needYou.length} need you` : ''}.`;
 
-// The general engine's plan for the page: field ids, keys, and labels only.
-async function planGeneral(tabId) {
-  const plan = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:plan' }, { frameId: 0 });
-  if (!plan || typeof plan.token !== 'string' || !Array.isArray(plan.matched) || !Array.isArray(plan.unmatched)) throw new Error('This page couldn’t be checked safely. Fill it yourself.');
-  return plan;
+// Runs in the page, so Chrome serializes it and it must stand alone. Counts the questions
+// SecondHand filled (the site engine marks them) that are on screen now: a multi-page form
+// hides its other pages. Also reports whether the page shows a Next button. Counts only.
+function tallyPage() {
+  const shown = element => {
+    for (let node = element; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (node.hidden || style.display === 'none' || style.visibility === 'hidden') return false;
+    }
+    return true;
+  };
+  const counted = new Set();
+  const tally = { rule: 0, guess: 0, next: false };
+  for (const element of document.querySelectorAll('[data-secondhand-filled]')) {
+    if (!shown(element)) continue;
+    // A radio or checkbox group is one question, marked on every option.
+    const question = ['radio', 'checkbox'].includes(element.type) && element.name
+      ? `${element.type}|${element.form ? Array.from(document.forms).indexOf(element.form) : -1}|${element.name}` : element;
+    if (counted.has(question)) continue;
+    counted.add(question);
+    if (element.getAttribute('data-secondhand-filled') === 'guess') tally.guess++; else tally.rule++;
+  }
+  tally.next = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], [role="button"]'))
+    .some(control => shown(control) && /^next\b/i.test((control.textContent || control.value || '').trim()));
+  return tally;
+}
+async function tallySite(tabId, frames) {
+  try {
+    const frameIds = frames.map(frame => frame.frameId);
+    const injections = await chrome.scripting.executeScript({ target: { tabId, frameIds }, func: tallyPage });
+    if (!Array.isArray(injections) || injections.length !== frameIds.length || new Set(injections.map(item => item.frameId)).size !== frameIds.length) throw new Error(FRAME_ERROR);
+    const total = { rule: 0, guess: 0, next: false };
+    for (const { frameId, result: tally } of injections) {
+      if (!frameIds.includes(frameId) || !Number.isInteger(tally?.rule) || tally.rule < 0 || !Number.isInteger(tally.guess) || tally.guess < 0 || typeof tally.next !== 'boolean') throw new Error(FRAME_ERROR);
+      total.rule += tally.rule; total.guess += tally.guess; total.next ||= tally.next;
+    }
+    return total;
+  } catch { throw new Error(FRAME_ERROR); }
+}
+function siteSummary(filled, guessed, needYou, next) {
+  if (filled) return `Filled ${filled}${guessed ? ` · ${guessed} guessed` : ''}${needYou.length ? ` · ${needYou.length} need you` : ''}. Check your answers before you submit.`;
+  if (needYou.length) return `Nothing here matches your saved profile. ${needYou.length} need you.`;
+  return next ? 'Nothing to fill here. Click Next, then Autofill again.' : 'Nothing to fill here.';
 }
 
-// One fill from a general-engine plan: one desktop request for the matched keys, then fill.
-// Never continues, submits, or navigates.
-async function fillPlan(tabId, url, plan) {
+// The general engine's plan for the page: field ids, keys, and labels only.
+const strings = value => Array.isArray(value) && value.every(item => typeof item === 'string');
+async function planGeneral(tabId, frameId = 0, prefix = false) {
+  try {
+    const message = { type: 'secondhand:generic:plan' };
+    const plan = prefix && frameId === 0 ? await topSiteMessage(tabId, message) : await chrome.tabs.sendMessage(tabId, message, { frameId });
+    if (!plan || typeof plan.token !== 'string' || !Array.isArray(plan.matched) || !Array.isArray(plan.unmatched) ||
+      plan.unmatched.some(field => typeof field?.id !== 'string' || !FIELD_ID.test(field.id) || typeof field.label !== 'string' || typeof field.type !== 'string' ||
+        !strings(field.options) || typeof field.required !== 'boolean')) throw new Error('This page couldn’t be checked safely. Fill it yourself.');
+    if (prefix) {
+      const ids = [...plan.matched, ...plan.unmatched].map(field => field?.id);
+      if (!plan.token || ids.some(id => typeof id !== 'string' || !FIELD_ID.test(id)) || new Set(ids).size !== ids.length ||
+        plan.matched.some(field => typeof field.key !== 'string' || !KEY.test(field.key))) throw new Error(FRAME_ERROR);
+    }
+    return plan;
+  } catch (error) {
+    if (!prefix || error.code === 'site-not-ready') throw error;
+    throw new Error(FRAME_ERROR);
+  }
+}
+const ruleAssignments = plan => plan.matched.map(field => ({ id: field.id, key: field.key, guessed: false }));
+
+// Chrome's on-device AI runs only in extension pages, so the widget asks for the questions
+// the rules left open and sends back its guesses with Autofill. Labels and options only.
+async function siteFramePlans(tabId, url, stopForPending = false) {
+  try {
+    const origin = siteOrigin(url);
+    const embedded = await siteFrames(tabId, origin);
+    const top = { frameId: 0, plan: await planGeneral(tabId, 0, true) };
+    const pending = embedded.filter(frame => !frame.enabled);
+    if (stopForPending && !top.plan.matched.length && !top.plan.unmatched.length && pending.length) return { frames: [top], pending };
+    const enabled = await enabledSiteFrames(tabId, origin);
+    const frames = [top, ...await Promise.all(enabled.filter(frame => frame.frameId !== 0).map(async ({ frameId }) => ({ frameId, plan: await planGeneral(tabId, frameId, true) })))];
+    return { frames, pending };
+  } catch (error) {
+    if (error.code === 'site-not-ready') throw error;
+    throw new Error(FRAME_ERROR);
+  }
+}
+async function planSite(tabId) {
+  const { tab, origin } = await activeSite(tabId);
+  await requireSite(origin);
+  const { frames } = await siteFramePlans(tabId, tab.url);
+  sitePlans.set(tabId, { url: tab.url, frames });
+  return { unmatched: frames.flatMap(({ frameId, plan }) => plan.unmatched.map(({ id, label, type, options, required }) => ({ id: `f${frameId}:${id}`, label, type, options, required }))), allowedKeys: AI_KEYS };
+}
+// Guesses name fields of the plan the AI saw; a fresh plan would give the fields other ids.
+function guessAssignments(stored, url, guesses) {
+  if (stored?.url !== url) throw new Error('The page changed. Click Autofill again.');
+  const open = new Set(stored.frames.flatMap(({ frameId, plan }) => plan.unmatched.map(field => `f${frameId}:${field.id}`)));
+  const entries = guesses && typeof guesses === 'object' && !Array.isArray(guesses) ? Object.entries(guesses) : null;
+  if (!entries || entries.some(([id, key]) => !SITE_FIELD_ID.test(id) || !open.has(id) || !AI_KEYS.includes(key))) throw new Error('SecondHand couldn’t use the on-device AI’s matches. Nothing was filled.');
+  return stored.frames.map(({ frameId, plan }) => ({ frameId, plan, planned: [...ruleAssignments(plan),
+    ...entries.filter(([id]) => id.startsWith(`f${frameId}:`)).map(([id, key]) => ({ id: id.split(':')[1], key, guessed: true }))] }));
+}
+
+// Fills from a general-engine plan: one desktop request for the keys planned first (the
+// rules' matches and any AI guesses), then up to four fill passes so questions revealed by
+// an answer are filled too. Each pass plans the page again. Never continues, submits, or navigates.
+async function fillPlan(tabId, url, frames, prefix = false) {
   let values = null;
   try {
-    const keys = plan.matched.length ? [...new Set(SecondHandGeneric.requestKeys(plan.matched.map(field => field.key)))] : [];
+    const initial = frames.map(frame => ({ ...frame, planned: frame.planned || ruleAssignments(frame.plan) }));
+    const keys = [...new Set(SecondHandGeneric.requestKeys(initial.flatMap(frame => frame.planned.map(item => item.key))))];
     if (keys.some(key => typeof key !== 'string' || !KEY.test(key))) throw new Error('SecondHand could not prepare the field request.');
-    let filled = [];
     if (keys.length) {
       const desktop = await nativeRequest('status');
       if (!desktop?.unlocked) throw new Error('Unlock SecondHand to autofill.');
       const response = await nativeRequest('getFields', { url: safeUrl(url), fields: keys });
       if (!response?.values || typeof response.values !== 'object' || Array.isArray(response.values)) throw new Error('The desktop did not return supported profile fields.');
       values = SecondHandGeneric.deriveValues(response.values);
-      const current = await chrome.tabs.get(tabId);
-      if (current.url !== url || !current.active) throw new Error('The page changed. Click Autofill again.');
-      const assignments = plan.matched.filter(field => typeof values[field.key] === 'string' && values[field.key])
-        .map(field => ({ id: field.id, key: field.key, guessed: false }));
-      if (assignments.length) {
-        // Only the values being placed go to the page.
-        const placing = Object.fromEntries(assignments.map(({ key }) => [key, values[key]]));
-        values = null;
-        const result = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:fill', token: plan.token, assignments, values: placing }, { frameId: 0 });
-        if (!result?.ok || !Array.isArray(result.filled)) throw new Error('This page couldn’t be filled safely. Fill it yourself.');
-        filled = result.filled;
-      }
     }
-    const needYou = [...plan.unmatched.map(field => field.id), ...plan.matched.map(field => field.id).filter(id => !filled.includes(id))];
-    return { filled: filled.length, needYou };
+    let filled = 0;
+    const needYou = [];
+    for (const frame of initial) {
+      const { frameId } = frame;
+      let { plan, planned } = frame;
+      const refused = new Map(); // Refused keys stay local to this frame.
+      if (values) for (let pass = 1; ; pass++) {
+        const assignments = planned.filter(({ key }) => !refused.has(key) && typeof values[key] === 'string' && values[key]);
+        if (!assignments.length) break;
+        const current = await chrome.tabs.get(tabId);
+        if (current.url !== url || !current.active) throw new Error('The page changed. Click Autofill again.');
+        const placing = Object.fromEntries(assignments.map(({ key }) => [key, values[key]]));
+        let result;
+        try {
+          const message = { type: 'secondhand:generic:fill', token: plan.token, assignments, values: placing };
+          result = prefix && frameId === 0 ? await topSiteMessage(tabId, message) : await chrome.tabs.sendMessage(tabId, message, { frameId });
+          const assigned = new Set(assignments.map(item => item.id));
+          const validIds = ids => Array.isArray(ids) && ids.every(id => typeof id === 'string' && assigned.has(id)) && new Set(ids).size === ids.length;
+          if (!result?.ok || !validIds(result.filled) || !validIds(result.rejected) || (result.skipped !== undefined && !validIds(result.skipped))) throw new Error('This page couldn’t be filled safely. Fill it yourself.');
+        } catch (error) {
+          if (!prefix || error.code === 'site-not-ready') throw error;
+          throw new Error(FRAME_ERROR);
+        }
+        for (const { id, key } of assignments) if (result.rejected.includes(id)) refused.set(key, id);
+        const placed = assignments.filter(({ id }) => result.filled.includes(id) && !result.rejected.includes(id)).length;
+        if (!placed) break;
+        filled += placed;
+        plan = await planGeneral(tabId, frameId, prefix);
+        planned = ruleAssignments(plan);
+        if (pass === MAX_GENERAL_PASSES) break;
+      }
+      const missing = [...plan.unmatched, ...plan.matched].map(field => field.id);
+      for (const [key, id] of refused) if (!missing.includes(id) && !plan.matched.some(field => field.key === key)) missing.push(id);
+      needYou.push(...missing.map(id => prefix ? `f${frameId}:${id}` : id));
+    }
+    return { filled, needYou };
   } finally { values = null; }
 }
 
-// One fill on an approved site.
-async function fillSiteOnce(tabId, url) {
-  let values = null;
+// One click on an approved site, with the plan the AI saw when the widget sends guesses.
+async function fillSiteOnce(tabId, url, guesses) {
   try {
-    let plans;
-    try {
-      const origin = siteOrigin(url);
-      const embedded = await siteFrames(tabId, origin);
-      const readPlan = async frameId => {
-        const plan = frameId === 0 ? await topSiteMessage(tabId, { type: 'secondhand:generic:plan' })
-          : await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:plan' }, { frameId });
-        if (!plan || typeof plan.token !== 'string' || !plan.token || !Array.isArray(plan.matched) || !Array.isArray(plan.unmatched) ||
-          [...plan.matched, ...plan.unmatched].some(field => !field || typeof field.id !== 'string' || !FIELD_ID.test(field.id)) ||
-          plan.matched.some(field => typeof field.key !== 'string' || !KEY.test(field.key))) throw new Error(FRAME_ERROR);
-        const ids = [...plan.matched, ...plan.unmatched].map(field => field.id);
-        if (new Set(ids).size !== ids.length) throw new Error(FRAME_ERROR);
-        return { frameId, plan };
-      };
-      const top = await readPlan(0);
-      const pending = embedded.filter(frame => !frame.enabled);
-      // This instruction must work before Chrome permits access to child frames.
-      if (!top.plan.matched.length && !top.plan.unmatched.length && pending.length) {
-        const hosts = pending.map(frame => new URL(frame.origin).hostname).join(', ');
-        return siteResult('waiting', `This form is inside ${hosts}. Click “Also turn on the embedded form” in the SecondHand side panel.`);
-      }
-      const frames = await enabledSiteFrames(tabId, origin);
-      plans = [top, ...await Promise.all(frames.filter(frame => frame.frameId !== 0).map(frame => readPlan(frame.frameId)))];
-    } catch (error) {
-      if (error.code === 'site-not-ready') throw error;
-      throw new Error(FRAME_ERROR);
-    }
-    const keys = [...new Set(SecondHandGeneric.requestKeys(plans.flatMap(({ plan }) => plan.matched.map(field => field.key))))];
-    if (keys.some(key => typeof key !== 'string' || !KEY.test(key))) throw new Error(FRAME_ERROR);
-    const filled = new Set();
-    if (keys.length) {
-      const desktop = await nativeRequest('status');
-      if (!desktop?.unlocked) throw new Error('Unlock SecondHand to autofill.');
-      const response = await nativeRequest('getFields', { url: safeUrl(url), fields: keys });
-      if (!response?.values || typeof response.values !== 'object' || Array.isArray(response.values)) throw new Error('The desktop did not return supported profile fields.');
-      values = SecondHandGeneric.deriveValues(response.values);
-      const current = await chrome.tabs.get(tabId);
-      if (current.url !== url || !current.active) throw new Error('The page changed. Click Autofill again.');
-      for (const { frameId, plan } of plans) {
-        const assignments = plan.matched.filter(field => typeof values[field.key] === 'string' && values[field.key])
-          .map(field => ({ id: field.id, key: field.key, guessed: false }));
-        if (!assignments.length) continue;
-        try {
-          const placing = Object.fromEntries(assignments.map(({ key }) => [key, values[key]]));
-          const result = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:fill', token: plan.token, assignments, values: placing }, { frameId });
-          const assigned = new Set(assignments.map(field => field.id));
-          const validIds = ids => Array.isArray(ids) && ids.every(id => typeof id === 'string' && assigned.has(id)) && new Set(ids).size === ids.length;
-          if (result?.ok !== true || !validIds(result.filled) || (result.rejected !== undefined && !validIds(result.rejected)) || (result.skipped !== undefined && !validIds(result.skipped))) throw new Error(FRAME_ERROR);
-          for (const id of result.filled) if (!(result.rejected || []).includes(id)) filled.add(`f${frameId}:${id}`);
-        } catch { throw new Error(FRAME_ERROR); }
+    const stored = sitePlans.get(tabId);
+    sitePlans.delete(tabId);
+    let frames, pending;
+    if (guesses === undefined) ({ frames, pending } = await siteFramePlans(tabId, url, true));
+    else {
+      frames = guessAssignments(stored, url, guesses);
+      try {
+        pending = (await siteFrames(tabId, siteOrigin(url))).filter(frame => !frame.enabled);
+        const enabled = await enabledSiteFrames(tabId, siteOrigin(url));
+        if (frames.some(frame => !enabled.some(item => item.frameId === frame.frameId))) throw new Error(FRAME_ERROR);
+      } catch (error) {
+        if (error.code === 'site-not-ready') throw error;
+        throw new Error(FRAME_ERROR);
       }
     }
-    const needYou = plans.flatMap(({ frameId, plan }) => [...plan.unmatched, ...plan.matched].map(field => `f${frameId}:${field.id}`).filter(id => !filled.has(id)));
-    return siteResult('done', `${filledSummary(filled.size, needYou)} Check your answers before you submit.`, { filled: filled.size, needYou });
+    const top = frames.find(frame => frame.frameId === 0).plan;
+    if (!top.matched.length && !top.unmatched.length && pending.length) {
+      const hosts = pending.map(frame => new URL(frame.origin).hostname).join(', ');
+      return siteResult('waiting', `This form is inside ${hosts}. Click “Also turn on the embedded form” in the SecondHand side panel.`);
+    }
+    const { needYou } = await fillPlan(tabId, url, frames, true);
+    const tally = await tallySite(tabId, frames);
+    const filled = tally.rule + tally.guess;
+    return siteResult('done', siteSummary(filled, tally.guess, needYou, tally.next), { filled, guessed: tally.guess, needYou });
   } catch (error) {
     const { state, message } = failed(error);
     return siteResult(state, message);
-  } finally { values = null; }
+  }
 }
 
 // One fill on an Iowa page the Iowa adapter hasn't verified. Iowa's portal needs no site approval.
 async function fillIowaGeneral(tabId, state, plan) {
   const { pageKey } = state.page;
   try {
-    const { filled, needYou } = await fillPlan(tabId, state.url, plan);
+    const { filled, needYou } = await fillPlan(tabId, state.url, [{ frameId: 0, plan }]);
     return { state: 'done', filled, needYou, message: `${filledSummary(filled, needYou)} ${GENERAL_TODO}`, todo: GENERAL_TODO, pageKey };
   } catch (error) {
     return { ...failed(error), filled: 0, needYou: [], pageKey };
   }
 }
 
-async function fillSite(tabId) {
+async function fillSite(tabId, guesses) {
   const { tab, origin } = await activeSite(tabId);
   await requireSite(origin);
-  if (!siteRuns.has(tabId)) siteRuns.set(tabId, fillSiteOnce(tabId, tab.url).then(result => remember(tabId, result)).finally(() => siteRuns.delete(tabId)));
+  if (!siteRuns.has(tabId)) siteRuns.set(tabId, fillSiteOnce(tabId, tab.url, guesses).then(result => remember(tabId, result)).finally(() => siteRuns.delete(tabId)));
   return siteRuns.get(tabId);
 }
 
@@ -463,10 +560,13 @@ async function pageState(tabId, route) {
   return { page: { kind: 'general', pageKey: 'general' }, result: enabled && result?.pageKey === 'general' ? result : null, autopilot: false, site: { origin, enabled, ...(enabled ? await siteReadiness(tab, origin) : { frames: [], ready: false }) } };
 }
 
-async function autofill(tabId, route) {
+async function autofill(tabId, route, guesses) {
   const tab = await chrome.tabs.get(tabId);
-  if (route !== 'site' && SecondHandIowa.isSupportedUrl(tab.url)) return startAutopilot(tabId);
-  if (route !== 'iowa' && siteOrigin(tab.url)) return fillSite(tabId);
+  if (route !== 'site' && SecondHandIowa.isSupportedUrl(tab.url)) {
+    if (guesses !== undefined) throw new Error('Iowa’s form is filled by its own rules only.');
+    return startAutopilot(tabId);
+  }
+  if (route !== 'iowa' && siteOrigin(tab.url)) return fillSite(tabId, guesses);
   throw new Error('Open the official Iowa portal in the active tab, then try again.');
 }
 
@@ -501,6 +601,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   const route = !frame ? undefined : SecondHandIowa.isSupportedUrl(sender.tab.url) ? 'iowa' : siteOrigin(sender.tab.url) ? 'site' : '';
   const launcher = Boolean(route);
   if (!panel && !launcher) return;
+  if (message.type === 'ui:ping') { respond({ ok: true, data: { build: BUILD } }); return; }
   if (launcher && message.type === 'ui:openPanel' && message.confirmed === true) {
     // Keep this synchronous: Chrome requires the originating trusted user gesture.
     chrome.sidePanel.open({ tabId: sender.tab.id }).then(() => respond({ ok: true, data: { opened: true } }),
@@ -515,7 +616,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       error => { if (error.code === 'offline') return { connected: false, unlocked: false }; throw error; });
   } else if (!Number.isInteger(tabId)) return;
   else if (message.type === 'ui:pageState') run = () => pageState(tabId, route);
-  else if (message.type === 'ui:autofill' && message.confirmed === true) run = () => autofill(tabId, route);
+  else if (message.type === 'ui:autofill' && message.confirmed === true) run = () => autofill(tabId, route, message.guesses);
+  else if (message.type === 'ui:plan' && message.confirmed === true) run = () => planSite(tabId);
   else if (message.type === 'ui:stop' && message.confirmed === true) run = () => stop(tabId);
   else if (message.type === 'ui:focusField' && typeof message.key === 'string' && (FIELD_ID.test(message.key) || SITE_FIELD_ID.test(message.key))) {
     run = () => focusField(tabId, message.key, route);
@@ -528,11 +630,12 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   work.then(data => respond({ ok: true, data }), error => respond({ ok: false, error: error.message || 'SecondHand could not complete the request.' }));
   return true;
 });
-chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); generalPages.delete(tabId); });
+chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); generalPages.delete(tabId); sitePlans.delete(tabId); });
 chrome.tabs.onUpdated?.addListener((tabId, change) => {
   if (change.status === 'loading') {
     results.delete(tabId);
     generalPages.delete(tabId);
+    sitePlans.delete(tabId);
     // Chrome omits other sites' URLs without the tabs permission, so re-read the
     // tab: anything that is not Iowa's portal (or unreadable) ends autofill.
     if (autopilots.has(tabId)) {

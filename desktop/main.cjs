@@ -1,12 +1,13 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, powerMonitor, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, powerMonitor, session, safeStorage } = require('electron');
+const crypto = require('node:crypto');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const { watch } = require('node:fs');
 const os = require('node:os');
 const { pathToFileURL } = require('node:url');
-const { Vault, atomicWrite, MAX_VAULT_BYTES } = require('./vault.cjs');
+const { Vault, atomicWrite, normalizeRecoveryKey, MAX_VAULT_BYTES } = require('./vault.cjs');
 const { startBridge, runNativeHost, nativeStreams, extensionFromOrigin, EXTENSION_ID } = require('./bridge.cjs');
 const { registerHost } = require('./registration.cjs');
 const { getExtensionSetup, prepareBundledExtension } = require('./extension-setup.cjs');
@@ -49,6 +50,8 @@ if (nativeOrigin) {
   const userData = app.getPath('userData');
   const vault = new Vault(path.join(userData, 'vault.secondhand'));
   const configPath = path.join(userData, 'settings.json');
+  const deviceSecretPath = path.join(userData, 'device-reset.bin');
+  const deviceResetSupported = ['darwin', 'win32'].includes(process.platform);
   const rendererPath = path.join(__dirname, '../renderer/index.html');
   const rendererUrl = pathToFileURL(rendererPath).href;
   const AUTO_LOCK_MS = 10 * 60 * 1000;
@@ -56,9 +59,29 @@ if (nativeOrigin) {
   const validated = (validator, ...values) => {
     try { return validator(...values); } catch (error) { throw publicError(error.message); }
   };
+  const formattedRecoveryKey = value => validated(normalizeRecoveryKey, value).match(/.{4}/g).join('-');
 
+  // The operating system protects this secret (macOS Keychain or Windows data
+  // protection), so only this computer account can use it to reset the password.
+  function sealDeviceSecret() {
+    if (!deviceResetSupported || !safeStorage.isEncryptionAvailable()) throw new Error('Device reset is unavailable.');
+    const secret = crypto.randomBytes(32);
+    return { secret, sealed: safeStorage.encryptString(secret.toString('base64')) };
+  }
+  async function readDeviceSecret() {
+    try {
+      if ((await fs.stat(deviceSecretPath)).size > 4096) return null;
+      const secret = Buffer.from(safeStorage.decryptString(await fs.readFile(deviceSecretPath)), 'base64');
+      return secret.length === 32 ? secret : null;
+    } catch { return null; }
+  }
+  async function hasDeviceSecret() {
+    try { await fs.access(deviceSecretPath); return true; } catch { return false; }
+  }
   async function status() {
-    return { exists: await vault.exists(), unlocked: vault.unlocked, extensionId, autofillWithoutAsking, trustedSites: [...trustedSites],
+    const details = await vault.inspect().catch(() => null);
+    return { exists: await vault.exists(), unlocked: vault.unlocked, recoveryKey: Boolean(details?.recoveryKey),
+      deviceReset: Boolean(details?.deviceReset) && await hasDeviceSecret(), deviceResetSupported, extensionId, autofillWithoutAsking, trustedSites: [...trustedSites],
       bridgeRunning: Boolean(bridge), platform: process.platform,
       extensionSetup: await getExtensionSetup(app).catch(() => ({ prepared: false, available: false })) };
   }
@@ -74,7 +97,7 @@ if (nativeOrigin) {
     return status();
   }
   function requireUnlocked() {
-    if (!vault.unlocked) throw publicError('Unlock your local vault first.');
+    if (!vault.unlocked) throw publicError('Unlock SecondHand first.');
   }
   async function saveSettings() {
     await atomicWrite(configPath, Buffer.from(JSON.stringify({ extensionId, autofillWithoutAsking, trustedSites })));
@@ -110,7 +133,7 @@ if (nativeOrigin) {
         });
         if (answer.response !== 1) throw publicError('You cancelled trusting this site.');
         requireUnlocked();
-        if (generation !== lockGeneration || extensionId !== context.extensionId) throw publicError('The vault or Chrome connection changed. Try again.');
+        if (generation !== lockGeneration || extensionId !== context.extensionId) throw publicError('SecondHand was locked or the Chrome connection changed. Try again.');
         if (!trustedSites.includes(origin)) {
           if (trustedSites.length >= MAX_TRUSTED_SITES) throw publicError('Remove a trusted site before adding another.');
           trustedSites = [...trustedSites, origin];
@@ -146,7 +169,7 @@ if (nativeOrigin) {
           });
           if (answer.response !== 1 && answer.response !== 2) throw publicError('You cancelled this field request.');
           requireUnlocked();
-          if (generation !== lockGeneration || extensionId !== context.extensionId) throw publicError('The vault or Chrome connection changed. Click Autofill again.');
+          if (generation !== lockGeneration || extensionId !== context.extensionId) throw publicError('SecondHand was locked or the Chrome connection changed. Click Autofill again.');
           if (answer.response === 2 && !sensitive.length) { autofillWithoutAsking = true; await saveSettings(); }
         } finally { fieldRequestPending = false; }
       }
@@ -171,15 +194,77 @@ if (nativeOrigin) {
 
   const methods = {
     status,
-    async createVault(passphrase) {
-      try { await vault.create(passphrase); }
-      catch (error) { throw publicError(/passphrase|already exists/.test(error.message) ? error.message : 'Could not create the local vault.'); }
-      touch(); return status();
+    async createVault(request) {
+      let device = null;
+      let deviceResetFailed = false;
+      if (request?.allowDeviceReset === true && deviceResetSupported) {
+        try { device = sealDeviceSecret(); } catch { deviceResetFailed = true; }
+      }
+      let created;
+      try { created = await vault.create(request?.password, { deviceSecret: device?.secret }); }
+      catch (error) { throw publicError(/password/.test(error.message) ? error.message : 'Could not set up SecondHand. Please try again.'); }
+      finally { device?.secret.fill(0); }
+      // Store the sealed secret only after creation succeeds, so a failed attempt
+      // never replaces the secret that belongs to an existing file.
+      if (device) {
+        try { await atomicWrite(deviceSecretPath, device.sealed); }
+        catch { deviceResetFailed = true; await vault.setDeviceSecret(null).catch(() => {}); }
+      }
+      touch(); return { status: await status(), recoveryKey: created.recoveryKey, deviceResetFailed };
     },
     async unlock(passphrase) {
       try { await vault.unlock(passphrase); }
-      catch (error) { throw publicError(/passphrase|already unlocked|Unable to unlock/.test(error.message) ? error.message : 'Could not open the local vault.'); }
+      catch (error) { throw publicError(/password|already unlocked|Unable to unlock/.test(error.message) ? error.message : 'Could not unlock SecondHand.'); }
       touch(); return status();
+    },
+    async resetPassword(request) {
+      try {
+        if (request?.method === 'device') {
+          const secret = await readDeviceSecret();
+          try { await vault.resetWithDeviceSecret(secret, request?.password); } finally { secret?.fill(0); }
+        } else await vault.resetWithRecoveryKey(request?.recoveryKey, request?.password);
+      }
+      catch (error) { throw publicError(/password|recovery key|already unlocked/.test(error.message) ? error.message : 'Could not reset your password. Please try again.'); }
+      touch(); return status();
+    },
+    async replaceRecoveryKey() {
+      requireUnlocked();
+      let recoveryKey;
+      try { recoveryKey = await vault.replaceRecoveryKey(); }
+      catch { throw publicError('Could not create a recovery key. Please try again.'); }
+      touch(); return { recoveryKey };
+    },
+    async setDeviceReset(enabled) {
+      requireUnlocked();
+      if (typeof enabled !== 'boolean') throw publicError('Invalid setting.');
+      try {
+        if (enabled) {
+          let secret = await readDeviceSecret();
+          if (!secret) {
+            const device = sealDeviceSecret();
+            await atomicWrite(deviceSecretPath, device.sealed);
+            secret = device.secret;
+          }
+          try { await vault.setDeviceSecret(secret); } finally { secret.fill(0); }
+        } else {
+          await vault.setDeviceSecret(null);
+          await fs.rm(deviceSecretPath, { force: true });
+        }
+      } catch { throw publicError(enabled ? 'This computer couldn’t save a reset option. Your recovery key still works.' : 'Could not turn off reset on this computer. Please try again.'); }
+      touch(); return status();
+    },
+    async saveRecoveryKey(value) {
+      const recoveryKey = formattedRecoveryKey(value);
+      const result = await dialog.showSaveDialog(mainWindow, { title: 'Save recovery key', defaultPath: 'SecondHand recovery key.txt', filters: [{ name: 'Text file', extensions: ['txt'] }] });
+      if (result.canceled || !result.filePath) return { cancelled: true };
+      await atomicWrite(result.filePath, Buffer.from(`SecondHand recovery key\n\n${recoveryKey}\n\nIf you forget your password, choose "Forgot password?" on the SecondHand unlock screen and enter this key.\nAnyone with this key and your SecondHand files can open your information. Keep it somewhere safe, away from this computer.\n`));
+      return { cancelled: false };
+    },
+    async copyRecoveryKey(value) {
+      const recoveryKey = formattedRecoveryKey(value);
+      clipboard.writeText(recoveryKey);
+      setTimeout(() => { if (clipboard.readText() === recoveryKey) clipboard.clear(); }, 60 * 1000);
+      return true;
     },
     lock: lockVault,
     async getData() {
@@ -254,15 +339,15 @@ if (nativeOrigin) {
       return saveExtensionRegistration(id);
     },
     async exportBackup() {
-      if (!await vault.exists()) throw publicError('Create a local vault before exporting a backup.');
-      const result = await dialog.showSaveDialog(mainWindow, { title: 'Export encrypted backup', defaultPath: 'secondhand-backup.secondhand', filters: [{ name: 'Encrypted SecondHand vault', extensions: ['secondhand'] }] });
+      if (!await vault.exists()) throw publicError('Create a password before saving a backup.');
+      const result = await dialog.showSaveDialog(mainWindow, { title: 'Export encrypted backup', defaultPath: 'secondhand-backup.secondhand', filters: [{ name: 'SecondHand encrypted backup', extensions: ['secondhand'] }] });
       if (result.canceled || !result.filePath) return { cancelled: true };
       await atomicWrite(result.filePath, await vault.readEncrypted());
       return { cancelled: false };
     },
     async importBackup() {
-      if (vault.unlocked) throw publicError('Lock your vault before importing a backup.');
-      const result = await dialog.showOpenDialog(mainWindow, { title: 'Import encrypted backup', properties: ['openFile'], filters: [{ name: 'Encrypted SecondHand vault', extensions: ['secondhand'] }] });
+      if (vault.unlocked) throw publicError('Lock SecondHand before restoring a backup.');
+      const result = await dialog.showOpenDialog(mainWindow, { title: 'Import encrypted backup', properties: ['openFile'], filters: [{ name: 'SecondHand encrypted backup', extensions: ['secondhand'] }] });
       if (result.canceled || !result.filePaths[0]) return { cancelled: true };
       const file = result.filePaths[0];
       const stat = await fs.stat(file);
@@ -272,9 +357,9 @@ if (nativeOrigin) {
       const { parseEnvelope } = require('./vault.cjs');
       try { parseEnvelope(bytes); } catch { throw publicError('This is not a supported encrypted backup.'); }
       if (await vault.exists()) {
-        const answer = await dialog.showMessageBox(mainWindow, { type: 'warning', title: 'Replace local vault?',
-          message: 'Importing replaces your current local vault.', detail: 'An encrypted recovery copy of your current vault will be kept in the local app data folder. The imported backup requires its original passphrase; its contents cannot be verified until you unlock it.',
-          buttons: ['Cancel', 'Replace vault'], defaultId: 0, cancelId: 0, noLink: true });
+        const answer = await dialog.showMessageBox(mainWindow, { type: 'warning', title: 'Replace saved information?',
+          message: 'Restoring replaces the information saved on this computer.', detail: 'An encrypted copy of your current information will be kept in SecondHand’s data folder. The backup opens with the password it was created with. Its contents can’t be checked until you unlock it.',
+          buttons: ['Cancel', 'Replace'], defaultId: 0, cancelId: 0, noLink: true });
         if (answer.response !== 1) return { cancelled: true };
       }
       await vault.importEncrypted(bytes);
@@ -327,7 +412,7 @@ if (nativeOrigin) {
     createWindow();
     watchRendererForDev();
     try { bridge = await startBridge(userData, () => extensionId, bridgeRequest); }
-    catch { dialog.showErrorBox('Local bridge unavailable', 'Your local vault is available. Restart SecondHand to connect the Chrome extension.'); }
+    catch { dialog.showErrorBox('Local bridge unavailable', 'Your saved information is available. Restart SecondHand to connect the Chrome extension.'); }
     powerMonitor.on('suspend', () => lockVault().catch(() => {}));
     powerMonitor.on('lock-screen', () => lockVault().catch(() => {}));
   }).catch(() => { dialog.showErrorBox('SecondHand could not start', 'Check that the app can access its local data folder.'); app.quit(); });

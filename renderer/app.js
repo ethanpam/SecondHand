@@ -13,7 +13,7 @@
     'monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand', 'monthlyMedicalExpenses'];
   const viewNames = { overview: 'Overview', profile: 'My information', applications: 'Applications', extension: 'Chrome extension', privacy: 'Privacy & backups' };
   const statusNames = { draft: 'Draft', in_progress: 'In progress', submitted: 'Submitted', needs_action: 'Needs action', approved: 'Approved', denied: 'Denied' };
-  let vaultStatus = { exists: false, unlocked: false, extensionId: '', bridgeRunning: false };
+  let vaultStatus = { exists: false, unlocked: false, recoveryKey: false, deviceReset: false, deviceResetSupported: false, extensionId: '', bridgeRunning: false };
   let data = { profile: {}, applications: [] };
   let currentView = 'overview';
   let profileDirty = false;
@@ -29,6 +29,24 @@
     const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
     use.setAttribute('href', `#i-${name}`);
     svg.append(use);
+    return svg;
+  }
+
+  // Ring loader for buttons marked data-loader: a faint track plus an arc
+  // that grows, shrinks, and turns. Styles live in styles.css (the CSP allows
+  // no inline styles), and it is hidden from screen readers since the button
+  // already reports aria-busy.
+  function loader() {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.classList.add('loader');
+    svg.setAttribute('viewBox', '0 0 40 40');
+    svg.setAttribute('aria-hidden', 'true');
+    for (const part of ['loader-track', 'loader-arc']) {
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.classList.add(part);
+      for (const [name, value] of [['cx', '20'], ['cy', '20'], ['r', '17.5'], ['pathLength', '100']]) circle.setAttribute(name, value);
+      svg.append(circle);
+    }
     return svg;
   }
 
@@ -63,11 +81,13 @@
     const generation = vaultGeneration;
     button.disabled = true;
     button.setAttribute('aria-busy', 'true');
+    if (button.hasAttribute('data-loader')) button.append(loader());
     try { return await action(); }
     finally {
       if (generation === vaultGeneration) {
         button.disabled = !api;
         button.removeAttribute('aria-busy');
+        button.querySelector(':scope > .loader')?.remove();
       }
     }
   }
@@ -90,6 +110,7 @@
     document.querySelectorAll('button[aria-busy="true"]').forEach((button) => {
       button.disabled = !api;
       button.removeAttribute('aria-busy');
+      button.querySelector(':scope > .loader')?.remove();
     });
     setApplicationBusy(false);
     data = { profile: {}, applications: [] };
@@ -97,12 +118,14 @@
     $('application-form').reset();
     $('application-id').value = '';
     $('auth-form').reset();
+    $('reset-form').reset();
+    if ($('recovery-dialog').open) $('recovery-dialog').close();
+    clearRecoveryKey();
     $('application-list').replaceChildren();
     $('overview-applications').replaceChildren();
-    $('overview-heading').textContent = 'Let’s move forward.';
-    $('application-count').textContent = '0';
+        $('application-count').textContent = '0';
     if ($('application-dialog').open) $('application-dialog').close();
-    for (const id of ['auth-error', 'profile-error', 'application-error', 'extension-error', 'extension-prepare-error', 'autofill-trust-error']) clearError(id);
+    for (const id of ['auth-error', 'reset-error', 'profile-error', 'application-error', 'extension-error', 'extension-prepare-error', 'autofill-trust-error']) clearError(id);
     setProfileDirty(false);
     clearTimeout(toastTimer);
     $('toast').hidden = true;
@@ -115,16 +138,73 @@
     $('workspace').hidden = true;
     $('auth-view').hidden = false;
     const exists = Boolean(vaultStatus.exists);
-    $('auth-title').textContent = exists ? 'Welcome back.' : 'A safe place to start.';
-    $('auth-description').textContent = exists ? 'Unlock your vault to pick up where you left off. Your information is right here on this computer.' : 'Create your personal vault. Your profile and application records are encrypted and saved on this computer.';
+    $('auth-title').textContent = exists ? 'Welcome back' : 'Create a password';
+    $('auth-description').textContent = exists ? 'Enter your password to pick up where you left off. Your information is right here on this computer.' : 'Your password protects the information you save in SecondHand. It is encrypted and stays on this computer.';
     $('confirm-passphrase-field').hidden = exists;
     $('confirm-passphrase').required = !exists;
     $('passphrase').minLength = exists ? 1 : 12;
     $('passphrase').autocomplete = exists ? 'current-password' : 'new-password';
-    $('passphrase-hint').textContent = exists ? 'Enter the passphrase you used to create this vault.' : 'Use at least 12 characters. A few memorable words work well.';
-    $('auth-submit').replaceChildren(document.createTextNode(exists ? 'Unlock my vault ' : 'Create my vault '), icon(exists ? 'lock' : 'arrow'));
-    $('recovery-note').textContent = exists ? 'Your passphrase never leaves this device. There is no online passphrase recovery.' : 'Keep your passphrase somewhere safe. There is no online account or passphrase recovery.';
+    $('passphrase-hint').textContent = exists ? 'Enter the password you created for SecondHand.' : 'Use at least 12 characters. A few words you can remember work well.';
+    $('auth-submit').replaceChildren(document.createTextNode(exists ? 'Unlock ' : 'Create password '), icon(exists ? 'lock' : 'arrow'));
+    $('recovery-note').textContent = exists ? 'Your password never leaves this computer.' : 'Keep your password somewhere safe. You’ll also get a recovery key in case you forget it.';
+    $('forgot-password').hidden = !exists;
+    $('device-reset-field').hidden = exists || !vaultStatus.deviceResetSupported;
+    $('allow-device-reset').checked = true;
+    setResetMode(false);
     if (api) $('passphrase').focus();
+  }
+
+  function resetWithDevice() {
+    return Boolean(vaultStatus.deviceReset) && (!vaultStatus.recoveryKey || $('reset-method-device').checked);
+  }
+
+  function renderResetMethod() {
+    const device = resetWithDevice();
+    $('recovery-key-field').hidden = device;
+    $('recovery-key-input').required = !device;
+    $('auth-description').textContent = device ? 'Choose a new password. Your saved information stays as it is.' : 'Enter your recovery key and choose a new password. Your saved information stays as it is.';
+  }
+
+  function setResetMode(active) {
+    const available = Boolean(vaultStatus.recoveryKey || vaultStatus.deviceReset);
+    $('reset-form').reset();
+    clearError('reset-error'); clearError('auth-error');
+    $('auth-form').hidden = active;
+    $('reset-form').hidden = !active;
+    $('recovery-note').hidden = active;
+    $('reset-fields').hidden = !available;
+    $('reset-unavailable').hidden = available;
+    $('reset-submit').hidden = !available;
+    if (!active) return;
+    $('auth-title').textContent = 'Reset your password';
+    $('reset-method').hidden = !(vaultStatus.recoveryKey && vaultStatus.deviceReset);
+    if (!available) { $('auth-description').textContent = 'Without your password or a recovery key, SecondHand can’t open your saved information.'; return; }
+    renderResetMethod();
+    (resetWithDevice() ? $('reset-password') : $('recovery-key-input')).focus();
+  }
+
+  function clearRecoveryKey() {
+    $('recovery-key-value').textContent = '';
+    $('recovery-feedback').textContent = '';
+    $('recovery-saved').checked = false;
+    $('recovery-done').disabled = true;
+  }
+
+  function showRecoveryKey(recoveryKey) {
+    clearRecoveryKey();
+    $('recovery-key-value').textContent = recoveryKey;
+    $('recovery-dialog').showModal();
+  }
+
+  function renderRecovery() {
+    const hasKey = Boolean(vaultStatus.recoveryKey);
+    $('recovery-reminder').hidden = hasKey;
+    $('recovery-status').textContent = hasKey
+      ? 'You have a recovery key. Creating a new one stops the old key from working. Backups saved earlier still open with the key and password they were saved with.'
+      : 'You don’t have a recovery key yet. Create one so you can get back in if you forget your password.';
+    $('replace-recovery-key').textContent = hasKey ? 'Create a new recovery key' : 'Create recovery key';
+    $('device-reset-setting').hidden = !vaultStatus.deviceResetSupported;
+    $('device-reset-toggle').checked = Boolean(vaultStatus.deviceReset);
   }
 
   function showView(view, { skipConfirmation = false, focus = true } = {}) {
@@ -173,11 +253,11 @@
       const emptyIcon = element('span', 'card-icon'); emptyIcon.append(icon('file'));
       const add = element('button', 'button button-primary', 'Add my first application');
       add.type = 'button'; add.addEventListener('click', () => openApplication());
-      empty.append(emptyIcon, element('h2', '', 'Your next chapter starts here.'), element('p', '', 'Add an Iowa SNAP application record to keep track of progress, agency requests, and your next step.'), add);
+      empty.append(emptyIcon, element('h2', '', 'No applications yet'), element('p', '', 'Add an Iowa SNAP application record to keep track of progress, agency requests, and your next step.'), add);
       list.append(empty);
       const compact = element('div', 'overview-empty');
       const copy = element('div');
-      copy.append(element('h3', '', 'A fresh start. Nothing to track just yet.'), element('p', '', 'When you add an application, you’ll see it here.'));
+      copy.append(element('h3', '', 'No applications yet'), element('p', '', 'When you add an application, you’ll see it here.'));
       compact.append(icon('file'), copy); overview.append(compact);
       return;
     }
@@ -187,7 +267,7 @@
       const title = element('div', 'application-card-title');
       const mark = element('span', 'card-icon'); mark.append(icon('file'));
       const titleText = element('div');
-      titleText.append(element('h3', '', 'Iowa SNAP'), element('p', 'application-meta', `Started ${dateLabel(application.createdAt) || '—'}`));
+      titleText.append(element('h3', '', 'Iowa SNAP'), element('p', 'application-meta', dateLabel(application.createdAt) ? `Started ${dateLabel(application.createdAt)}` : 'Start date not recorded'));
       title.append(mark, titleText); header.append(title, badge(application.status)); card.append(header);
       if (application.nextAction || application.dueDate) {
         const details = element('div', 'application-details');
@@ -254,7 +334,7 @@
   function renderSummary() {
     const hasProfile = profileFields.some((field) => Boolean(data.profile[field]));
     $('profile-step-label').replaceChildren(document.createTextNode(hasProfile ? 'Review my profile ' : 'Set up my profile '), icon('arrow'));
-    renderApplications(); renderSetup();
+    renderApplications(); renderSetup(); renderRecovery();
   }
 
   async function loadUnlocked(status) {
@@ -264,6 +344,7 @@
     vaultStatus = status;
     data = { profile: loaded.profile || {}, applications: Array.isArray(loaded.applications) ? loaded.applications : [] };
     $('auth-form').reset();
+    $('reset-form').reset();
     $('auth-view').hidden = true;
     $('workspace').hidden = false;
     fillProfile(); renderSummary();
@@ -271,14 +352,14 @@
   }
 
   async function lockVault() {
-    if (profileDirty && !window.confirm('Lock your vault and discard unsaved profile changes?')) return;
+    if (profileDirty && !window.confirm('Lock SecondHand and discard your unsaved changes?')) return;
     const generation = vaultGeneration;
     try {
       const status = await api.lock();
       // The lock notification can arrive before the IPC response finishes
       // gathering status. Do not reset a form the user has already started using.
       if (generation === vaultGeneration) showLocked(status);
-    } catch (error) { toast(error.message || 'Unable to lock your vault.', true); }
+    } catch (error) { toast(error.message || 'Unable to lock SecondHand.', true); }
   }
 
   function openApplication(application = null) {
@@ -309,26 +390,94 @@
     event.preventDefault(); clearError('auth-error');
     if (!api) return;
     if (!vaultStatus.exists && $('passphrase').value !== $('confirm-passphrase').value) {
-      showError('auth-error', 'The passphrases don’t match. Please try again.'); $('confirm-passphrase').focus(); return;
+      showError('auth-error', 'The passwords don’t match. Please try again.'); $('confirm-passphrase').focus(); return;
     }
     pending($('auth-submit'), async () => {
       try {
-        const status = vaultStatus.exists ? await api.unlock($('passphrase').value) : await api.createVault($('passphrase').value);
-        await loadUnlocked(status);
+        if (vaultStatus.exists) await loadUnlocked(await api.unlock($('passphrase').value));
+        else {
+          const allowDeviceReset = !$('device-reset-field').hidden && $('allow-device-reset').checked;
+          const created = await api.createVault({ password: $('passphrase').value, allowDeviceReset });
+          await loadUnlocked(created.status);
+          showRecoveryKey(created.recoveryKey);
+          if (created.deviceResetFailed) $('recovery-feedback').textContent = 'This computer couldn’t save a reset option, so keep this key safe.';
+        }
       } catch (error) { showError('auth-error', error); }
       finally { $('passphrase').value = ''; $('confirm-passphrase').value = ''; }
     });
   });
 
+  $('forgot-password').addEventListener('click', () => setResetMode(true));
+  $('reset-cancel').addEventListener('click', () => showLocked(vaultStatus));
+  $('reset-form').addEventListener('submit', (event) => {
+    event.preventDefault(); clearError('reset-error');
+    if (!api) return;
+    if ($('reset-password').value !== $('reset-confirm').value) {
+      showError('reset-error', 'The passwords don’t match. Please try again.'); $('reset-confirm').focus(); return;
+    }
+    pending($('reset-submit'), async () => {
+      try {
+        const password = $('reset-password').value;
+        await loadUnlocked(await api.resetPassword(resetWithDevice() ? { method: 'device', password } : { recoveryKey: $('recovery-key-input').value, password }));
+        toast('Your password was reset. Use your new password next time.');
+      } catch (error) { showError('reset-error', error); }
+      finally { $('reset-password').value = ''; $('reset-confirm').value = ''; }
+    });
+  });
+
+  document.querySelectorAll('input[name="reset-method"]').forEach((input) => input.addEventListener('change', () => { clearError('reset-error'); renderResetMethod(); }));
+  $('device-reset-toggle').addEventListener('change', () => {
+    const enabled = $('device-reset-toggle').checked;
+    const generation = vaultGeneration;
+    $('device-reset-toggle').disabled = true;
+    api.setDeviceReset(enabled).then((status) => {
+      if (generation !== vaultGeneration) return;
+      vaultStatus = status; renderRecovery();
+      toast(enabled ? 'This computer can now reset your password.' : 'Reset on this computer is turned off.');
+    }).catch((error) => {
+      if (generation !== vaultGeneration) return;
+      $('device-reset-toggle').checked = !enabled;
+      toast(error.message || 'Unable to change this setting.', true);
+    }).finally(() => { if (generation === vaultGeneration) $('device-reset-toggle').disabled = false; });
+  });
+  $('recovery-saved').addEventListener('change', () => { $('recovery-done').disabled = !$('recovery-saved').checked; });
+  $('recovery-done').addEventListener('click', () => $('recovery-dialog').close());
+  $('recovery-dialog').addEventListener('cancel', (event) => { if (!$('recovery-saved').checked) event.preventDefault(); });
+  $('recovery-dialog').addEventListener('close', clearRecoveryKey);
+  for (const [buttonId, method, message] of [
+    ['copy-recovery-key', 'copyRecoveryKey', 'Copied. It will be cleared from the clipboard in 1 minute.'],
+    ['save-recovery-key', 'saveRecoveryKey', 'Saved. Print it or move it somewhere safe, away from this computer.']
+  ]) {
+    $(buttonId).addEventListener('click', () => pending($(buttonId), async () => {
+      try {
+        const result = await api[method]($('recovery-key-value').textContent);
+        if (!result?.cancelled) $('recovery-feedback').textContent = message;
+      } catch (error) { $('recovery-feedback').textContent = error.message || 'That didn’t work. Please try again.'; }
+    }));
+  }
+  $('replace-recovery-key').addEventListener('click', () => {
+    if (vaultStatus.recoveryKey && !window.confirm('Create a new recovery key? Your current recovery key will stop working.')) return;
+    const generation = vaultGeneration;
+    pending($('replace-recovery-key'), async () => {
+      try {
+        const { recoveryKey } = await api.replaceRecoveryKey();
+        if (!vaultStatus.unlocked || generation !== vaultGeneration) return;
+        vaultStatus.recoveryKey = true;
+        renderRecovery();
+        showRecoveryKey(recoveryKey);
+      } catch (error) { if (generation === vaultGeneration) toast(error.message || 'Unable to create a recovery key.', true); }
+    });
+  });
+
   $('auth-import').addEventListener('click', () => {
     if (!api) return;
-    if (vaultStatus.exists && !window.confirm('Restoring replaces the current vault on this computer. Make sure you have a backup of anything you want to keep. Continue?')) return;
+    if (vaultStatus.exists && !window.confirm('Restoring replaces the information saved on this computer. Make sure you have a backup of anything you want to keep. Continue?')) return;
     pending($('auth-import'), async () => {
       try {
         const result = await api.importBackup();
         if (result.cancelled) return;
         showLocked(await api.status());
-        toast('Backup restored. Unlock it with its original passphrase.');
+        toast('Backup restored. Unlock it with the password it was created with.');
       } catch (error) { showError('auth-error', error); }
     });
   });
@@ -352,7 +501,7 @@
         const newerEdits = profileDirty && profileRevision !== revision;
         if (!newerEdits) fillProfile();
         renderSummary();
-        toast(newerEdits ? 'Earlier changes saved. Your newer edits still need to be saved.' : 'Your information is saved in your local vault.');
+        toast(newerEdits ? 'Earlier changes saved. Your newer edits still need to be saved.' : 'Your information is saved on this computer.');
       } catch (error) { if (generation === vaultGeneration) showError('profile-error', error); }
     });
   });
@@ -463,7 +612,7 @@
     try { await api.openPortal(); } catch (error) { toast(error.message || 'Unable to open the Iowa portal.', true); }
   }));
   $('export-backup').addEventListener('click', () => pending($('export-backup'), async () => {
-    try { const result = await api.exportBackup(); if (!result.cancelled) toast('Encrypted backup exported. Keep your passphrase safe.'); }
+    try { const result = await api.exportBackup(); if (!result.cancelled) toast('Encrypted backup saved. You’ll need your password to restore it.'); }
     catch (error) { toast(error.message || 'Unable to export your backup.', true); }
   }));
 
@@ -489,7 +638,14 @@
       $('confirm-passphrase').disabled = true;
       return;
     }
-    api.onLocked(() => showLocked({ ...vaultStatus, exists: true, unlocked: false }));
+    // The lock response and this notification can arrive in either order. Once the
+    // unlock screen is showing, saved details are already cleared, so a repeat must
+    // not reset an unlock attempt the person has started. A load still in progress
+    // while the unlock screen is hidden is always cancelled.
+    api.onLocked(() => {
+      if (!vaultStatus.unlocked && !$('auth-view').hidden) return;
+      showLocked({ ...vaultStatus, exists: true, unlocked: false });
+    });
     try {
       const status = await api.status();
       if (status.unlocked) await loadUnlocked(status); else showLocked(status);
