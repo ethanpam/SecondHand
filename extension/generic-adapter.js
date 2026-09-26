@@ -58,7 +58,8 @@
   const LEAD = /^(what is|whats|please enter|please provide|enter|provide|your|the)\s+/;
 
   const clean = value => String(value || '').replace(/\s+/g, ' ').trim().replace(/[\s*:]+$/, '').trim();
-  const normal = value => String(value || '').toLowerCase().replace(/[‘’']/g, '').replace(/\*/g, ' ').replace(/[^a-z0-9+]+/g, ' ').trim();
+  // "#" reads as "number" ("# of adults", "Apt #").
+  const normal = value => String(value || '').toLowerCase().replace(/[‘’']/g, '').replace(/#/g, ' number ').replace(/\*/g, ' ').replace(/[^a-z0-9+]+/g, ' ').trim();
   function question(value) {
     let text = normal(value).replace(/ (required|optional)$/, '');
     for (let previous = ''; previous !== text;) { previous = text; text = text.replace(LEAD, ''); }
