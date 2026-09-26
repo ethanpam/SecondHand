@@ -50,7 +50,22 @@ npm run dist:mac      # Unsigned DMGs for Apple silicon and Intel Macs
 
 Fictional QA data is in [`tests/fixtures/applicant-profile.json`](tests/fixtures/applicant-profile.json). It is for isolated tests only and is never sent to the real Iowa portal.
 
-GitHub Actions runs syntax/security configuration checks, unit/integration tests, Electron/native smoke tests, and builds Windows installers plus Apple silicon and Intel Mac disk images. Workflow artifacts expire after 30 days and can be rebuilt with **Run workflow**; tagged builds can retain installers in a GitHub prerelease. No application server, database service, API keys, or applicant account with secondHand is required.
+No application server, database service, API keys, or applicant account with secondHand is required.
+
+## Continuous integration
+
+GitHub Actions checks every pull request and every push to `main`:
+
+| Workflow | Runs when | What it checks |
+| --- | --- | --- |
+| **Verify and build** (`build.yml`) | Every pull request, `main`, and `v*` tags | Static checks and unit tests on Node 22 and 24; website lint, tests, typecheck, and build; the Chromium extension smoke test; the Electron UI and native-host tests, then Windows and Mac installers. **CI result** passes only when all of these pass. |
+| **iOS** (`ios.yml`) | Changes under `ios/` | The Safari extension and application-assistant JavaScript tests, then native and UI tests on the newest iPhone simulator with Xcode 26. |
+| **Dependency audit** (`audit.yml`) | Lockfile changes and every Monday | `npm audit` for the desktop app and website. Critical advisories fail; high ones are reported as warnings. |
+| **Workflow lint** (`workflow-lint.yml`) | Changes to workflow files | actionlint and shellcheck. |
+
+Dependabot opens weekly update pull requests for npm packages and actions. A newer commit on a pull request cancels the older run. If a UI test fails, its screenshots (or the Xcode result bundle) are attached to the run as an artifact.
+
+**Releases.** Installers from each run are kept as artifacts for 30 days and can be rebuilt with **Run workflow**. Pushing a tag that matches `package.json` (for example `v0.4.0`) builds all installers and attaches them, with checksums, to a draft prerelease. Publishing to the public download website stays a manual step with a temporary upload token; see [`website/README.md`](website/README.md).
 
 ## Data boundaries
 
