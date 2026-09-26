@@ -6,7 +6,7 @@ Runtime: Electron desktop, plain HTML/CSS/JavaScript renderer, Manifest V3 Chrom
 
 `window.secondHand` exposes async methods returning plain values or throwing sanitized errors:
 
-- `status()` -> `{ exists, unlocked, extensionId, bridgeRunning, platform, extensionSetup }`; setup contains `{ directory, extensionId, version, prepared }`, or `{ prepared: false, available: false }` if bundled assets are unavailable
+- `status()` -> `{ exists, unlocked, extensionId, autofillWithoutAsking, bridgeRunning, platform, extensionSetup }`; setup contains `{ directory, extensionId, version, prepared }`, or `{ prepared: false, available: false }` if bundled assets are unavailable
 - `createVault(passphrase)` / `unlock(passphrase)` -> status
 - `lock()` -> status
 - `getData()` -> `{ profile, applications }`
@@ -18,6 +18,7 @@ Runtime: Electron desktop, plain HTML/CSS/JavaScript renderer, Manifest V3 Chrom
 - `openExtensionFolder()` / `copyExtensionFolderPath()` -> true (fixed prepared folder only)
 - `copyChromeExtensionsUrl()` -> true (copies the fixed `chrome://extensions` address)
 - `connectExtension(extensionId)` -> `{ extensionId, manifestPath }` (register native host for current OS)
+- `setAutofillTrust(enabled: boolean)` -> status. Stores `autofillWithoutAsking` with `extensionId` in the non-sensitive `settings.json`, never in the vault. Requires an unlocked vault.
 - `exportBackup()` / `importBackup()` -> `{ cancelled: boolean }` (native dialogs, encrypted vault bytes only; import only while locked)
 - `onLocked(callback)` -> unsubscribe function
 
@@ -41,20 +42,28 @@ Applications: `{ id, program: 'Iowa SNAP', status, createdAt, updatedAt, confirm
 Host name `org.secondhand.bridge`. Each request `{ id: string, type, ...payload }`. Response `{ id, ok: true, data }` or `{ id, ok: false, error: string }`.
 
 - `status` -> `{ unlocked, applicationCount }` (no profile values)
-- `startAssistedSession` `{ url, fields: string[] }` -> `{ assistanceToken, expiresAt, fields }`. Requires an unlocked vault and a native desktop confirmation naming the approved field scope. The dialog describes guided filling and ordinary Next / Save and Continue actions on supported Iowa SNAP pages, which may save answers to Iowa; it excludes consent, signatures, review, and final submission. `assistanceToken` is 32 random bytes encoded as 64 lowercase hex characters. `expiresAt` is an ISO timestamp exactly 15 minutes after approval. One session can be active, bound to the authenticated extension ID; starting another replaces the previous one. The lifetime is absolute and does not refresh with activity.
-- `getFields` `{ url, fields: string[], assistanceToken?: string }` -> `{ values: { field: value } }`. Requires unlocked vault, exact Iowa HTTPS origin/path, and approved extension ID. Without a token, a desktop confirmation dialog names fields before each release. With a token, it must match the active unexpired session and every requested field must be in its approved scope; an invalid token fails rather than falling back to another dialog. Fields are strictly allowlisted and only requested nonblank values are returned.
-- `endAssistedSession` `{ url, assistanceToken }` -> `{ ended: true }`. Revokes the matching session. Idempotent for stale tokens, including after the vault locks; a stale stop does not revoke a newer session.
-- `checkAssistedSession` `{ url, assistanceToken }` -> `{ active: true }`. Requires an unlocked vault and a valid matching unexpired session; returns no profile data and does not extend session expiry. The worker must check this immediately before every automatic Next action, including pages with no empty mapped fields, then recheck cancellation/tab/expiry before sending the navigation request.
+- `showApp` -> `{ shown: true }`. Shows and focuses the desktop window so the user can unlock. Works while locked and returns no profile data.
+- `getFields` `{ url, fields: string[] }` -> `{ values: { field: value } }`. Requires an unlocked vault, the exact Iowa HTTPS origin and path, and the approved extension ID. Fields are strictly allowlisted, and only requested nonblank values are returned.
+  - When `autofillWithoutAsking` is on and the caller's extension ID matches the stored one, values are returned without a dialog.
+  - Otherwise a desktop dialog names the fields, with the buttons **Cancel**, **Allow once**, and **Always allow on this computer**. "Always allow" turns the setting on and saves it.
+  - The dialog rechecks the unlocked vault, the lock generation, and the extension ID before releasing values, so a lock and re-unlock while it is open invalidates the answer.
+  - Registering a different extension ID turns the setting off.
 - `recordProgress` `{ url, filledCount: integer }` -> `{ recorded: true }`. Updates a draft/in_progress Iowa application, no page HTML, no profile values, no inferred submitted/approved status. Requires unlocked vault.
 
 Iowa portal URL: `https://hhsservices.iowa.gov/apspssp/ssp.portal`. Exact origin `https://hhsservices.iowa.gov`; path must be `/apspssp/ssp.portal` or descendants, no username/password/other ports.
 
-The bridge supplies the desktop handler with `{ extensionId }` from the authenticated native envelope; request payloads cannot override this context. Assisted tokens are held only in desktop and extension memory and never written to the vault or extension storage. Lock, suspend, screen lock, exit, extension registration changes, and profile saves revoke them. The desktop cannot attest Chrome tab IDs: the extension must bind its token to the initiating tab, stop when it leaves the supported Iowa portal, and never expose the token to the page. If Stop is clicked while initial consent is pending, the worker must end any late grant immediately and perform no fill/navigation.
+The bridge supplies the desktop handler with `{ extensionId }` from the authenticated native envelope; request payloads cannot override this context. The desktop cannot attest Chrome tab IDs, so the extension binds every autofill to the tab that asked for it and re-checks that tab's URL before each fill pass.
 
-Native host relays to running desktop over authenticated local IPC, not HTTP. Desktop is sole vault owner. Guided mode may fill approved mapped fields and use specifically supported ordinary Next / Save and Continue controls. Unknown sections, unanswered questions, signatures, consent, review, passwords, CAPTCHA, MFA, and file inputs require a pause/manual action. Never auto-submit an application or guess information. Explicitly document verified mapping coverage versus pending live validation.
+Native host relays to running desktop over authenticated local IPC, not HTTP. Desktop is sole vault owner. The extension fills approved mapped fields only; it never clicks Next, Save and Continue, or submit. Unknown sections, unanswered questions, signatures, consent, review, passwords, CAPTCHA, MFA, and file inputs stay manual. Never auto-submit an application or guess information. Explicitly document verified mapping coverage versus pending live validation.
 
 ## Browser sidebar and conditional fields
 
-Chrome 116+ uses its native `sidePanel` surface for the applicant checklist and controls. The exact extension `panel.html` URL without a tab sender may request approved operations. The page-hosted `panel.html?surface=launcher` iframe may only open the sidebar after a trusted user click; it cannot request profile fields or start assistance. The page and sidebar never receive an assistance token. The sidebar receives field keys, fixed labels, completion/missing/manual status, counts, and workflow messages, not saved or portal-entered values.
+Chrome 116+ uses its native `sidePanel` surface for the checklist. Two extension surfaces may send UI messages to the worker:
+- **Side panel:** the exact `panel.html` URL with no tab sender. It passes an explicit `tabId`.
+- **On-page widget:** the `panel.html?surface=launcher` iframe inside an Iowa tab. The worker always uses the iframe's own `sender.tab.id` and ignores any `tabId` in the message.
 
-Guided filling makes at most four fresh-preview passes per run to handle conditional fields revealed by explicit saved choices. A field key is attempted at most once per page until an explicit resume; unknown saved answers are recorded as missing keys without retry loops. On the recognized applicant page, missing required answers pause navigation. Under the same unexpired session, polling may continue after the user supplies the missing answers directly in Iowa or reveals another unattempted approved field. This never starts a new desktop grant. Stop, lock/revocation, expiry, changed tabs, unsupported steps, consent, and final submission retain their existing boundaries. Every automatic navigation still requires the desktop session check.
+Both may send `ui:pageState`, `ui:autofill` (with `confirmed: true`, from a trusted click), `ui:focusField`, and `ui:showApp`. Only the side panel may send `ui:desktopStatus`, and only the widget may send `ui:openPanel`. Content scripts and page `postMessage` calls have no path to the vault. Neither surface ever receives profile values: they get field keys, fixed labels, completion/missing/manual status, counts, and fixed messages.
+
+`ui:autofill` reads the page. If it is the recognized applicant page, the worker checks `status`, then sends one `getFields` request for every mapped key. It fills in up to four fresh-preview passes, so conditional fields revealed by explicit saved choices are filled without another request. Each key is attempted at most once per click, and saved answers that aren't in the profile are reported as "need you" keys rather than retried. Values are released when the click finishes.
+
+The result is `{ state: 'done' | 'locked' | 'offline' | 'error', filled, needYou, message, pageKey }`. It is kept per tab until that tab navigates, so both surfaces can show it.

@@ -224,7 +224,7 @@
     const filled = [], skipped = [];
     const order = Object.keys(definitions);
     // Only bindings captured in the original rendered-field preview are eligible.
-    // Newly revealed fields need a fresh scan/release in the next guided pass.
+    // Newly revealed fields need a fresh scan in the next Autofill pass.
     for (const binding of [...originalBindings].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key))) {
       const fresh = scan(doc, rawUrl);
       const { key, element } = binding;
