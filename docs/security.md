@@ -22,6 +22,8 @@ The extension uses Manifest V3, `activeTab`, `scripting`, and `nativeMessaging`.
 
 Chrome Native Messaging invokes a local host registered with an exact extension ID. The native host relays bounded, framed JSON over a Unix socket or Windows named pipe to the running desktop. A fresh random session token authenticates local requests; its file is readable only by the current Unix user and protected by the user's directory permissions on Windows. Requests are strictly typed and reject unknown fields. A request cannot run shell commands, access arbitrary files, or fetch arbitrary profile paths.
 
+The desktop's explicit Prepare Chrome extension action copies a fixed allowlist of bundled assets into its local `chrome-extension` folder and registers the ID derived from the manifest's public key. No vault data is copied, and no Chrome settings or enterprise policy are modified. Chrome's Developer mode / Load unpacked step remains manual. The public manifest key provides a stable development ID, not cryptographic proof of the code of an unpacked extension. Folder/clipboard IPC methods accept no arbitrary paths or clipboard payloads. A missing extension bundle does not prevent using the local vault.
+
 On Windows, a small compiled C# host relays bounded binary messages directly to the desktop's authenticated local named pipe. It does not launch Electron, open the vault, or store applicant fields. Its source is included and it uses the installed .NET Framework. This avoids Electron's Windows stdin/console behavior interfering with Chrome's length-prefixed protocol. macOS/Linux use the executable's native mode with raw descriptor streams. No global environment setting, localhost server, external runtime download, or shell command is needed by the Windows host at application runtime.
 
 This bridge does not protect against malicious software already running as the same OS user. Such software could read process memory, the bridge token, or impersonate a local client. The native host's origin argument is an application integration check, not proof against a hostile local process.
@@ -35,6 +37,8 @@ The adapter checks known applicant-page context and exact field labels, skips hi
 Profile/record persistence is local. Once the user authorizes filling a field, it is exposed to the official portal and potentially other software with access to that browser page. The portal may autosave before formal submission. Government servers, browser history, OS crash dumps, automatic machine backups, and third-party browser extensions are outside this application's control.
 
 Store the vault and exported backups outside cloud-synced folders if all copies must remain offline. Use a strong passphrase and device encryption. Windows uses `%LOCALAPPDATA%\SecondHand` rather than the roaming profile directory; macOS uses `~/Library/Application Support/SecondHand`; Linux uses the application config directory under `SecondHand`. Development tests use isolated temporary directories containing synthetic data only.
+
+Packaged native-host tests may opt into an isolated storage root with both `SECONDHAND_TEST_MODE=1` and an absolute `SECONDHAND_TEST_USER_DATA` path below the operating system's temporary directory. This only selects local storage; the same origin, token, vault, and approval checks run. Without the explicit test mode, packaged apps use their normal storage directory.
 
 ## Verification and remaining work
 

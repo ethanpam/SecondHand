@@ -95,7 +95,7 @@
     $('overview-heading').textContent = 'Let’s move forward.';
     $('application-count').textContent = '0';
     if ($('application-dialog').open) $('application-dialog').close();
-    for (const id of ['auth-error', 'profile-error', 'application-error', 'extension-error']) clearError(id);
+    for (const id of ['auth-error', 'profile-error', 'application-error', 'extension-error', 'extension-prepare-error']) clearError(id);
     setProfileDirty(false);
     clearTimeout(toastTimer);
     $('toast').hidden = true;
@@ -205,9 +205,17 @@
 
   function renderSetup() {
     const connected = Boolean(vaultStatus.extensionId);
+    const setup = vaultStatus.extensionSetup || {};
+    const bundled = setup.prepared && vaultStatus.extensionId === setup.extensionId;
     $('extension-id').value = vaultStatus.extensionId || '';
-    $('extension-status').textContent = connected ? 'Extension registered' : 'Not connected';
+    $('extension-status').textContent = bundled ? 'Ready to load in Chrome' : connected ? 'Custom connection registered' : 'Needs setup';
     $('extension-status').classList.toggle('connected', connected);
+    $('extension-prepared').hidden = !setup.prepared;
+    $('extension-folder-path').textContent = setup.prepared ? setup.directory : '';
+    $('prepare-extension').replaceChildren(document.createTextNode(setup.prepared ? 'Refresh extension files ' : 'Prepare Chrome extension '), icon('plug'));
+    $('extension-folder-help').textContent = vaultStatus.platform === 'darwin'
+      ? 'In Chrome’s folder chooser, press Command + Shift + G, paste the copied folder path, then choose Open and Select.'
+      : 'In Chrome’s folder chooser, paste the copied folder path into the address bar, then choose Select Folder.';
     $('extension-step-label').replaceChildren(document.createTextNode(connected ? 'Manage connection ' : 'Set up extension '), icon('arrow'));
   }
 
@@ -358,6 +366,34 @@
       finally { if (generation === vaultGeneration) setApplicationBusy(false); }
     });
   });
+
+  $('prepare-extension').addEventListener('click', () => {
+    clearError('extension-prepare-error');
+    const generation = vaultGeneration;
+    pending($('prepare-extension'), async () => {
+      try {
+        const result = await api.prepareExtension();
+        if (!vaultStatus.unlocked || generation !== vaultGeneration) return;
+        vaultStatus.extensionId = result.extensionId;
+        vaultStatus.extensionSetup = result;
+        renderSetup();
+        toast(result.folderOpened ? 'Extension prepared. Now load the folder in Chrome using step 2.' : 'Extension prepared. Copy the folder path below to load it in Chrome.');
+      } catch (error) { if (generation === vaultGeneration) showError('extension-prepare-error', error); }
+    });
+  });
+  for (const [buttonId, method, message] of [
+    ['copy-extension-path', 'copyExtensionFolderPath', 'Folder path copied. Paste it into Chrome’s folder chooser.'],
+    ['open-extension-folder', 'openExtensionFolder', ''],
+    ['copy-chrome-url', 'copyChromeExtensionsUrl', 'Chrome setup address copied. Paste it into Chrome’s address bar.']
+  ]) {
+    $(buttonId).addEventListener('click', () => {
+      const generation = vaultGeneration;
+      pending($(buttonId), async () => {
+        try { await api[method](); if (message && generation === vaultGeneration) toast(message); }
+        catch (error) { if (generation === vaultGeneration) showError('extension-prepare-error', error); }
+      });
+    });
+  }
 
   $('extension-form').addEventListener('submit', (event) => {
     event.preventDefault(); clearError('extension-error');

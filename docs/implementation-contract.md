@@ -6,7 +6,7 @@ Runtime: Electron desktop, plain HTML/CSS/JavaScript renderer, Manifest V3 Chrom
 
 `window.secondHand` exposes async methods returning plain values or throwing sanitized errors:
 
-- `status()` -> `{ exists, unlocked, extensionId, bridgeRunning, platform }`
+- `status()` -> `{ exists, unlocked, extensionId, bridgeRunning, platform, extensionSetup }`; setup contains `{ directory, extensionId, version, prepared }`, or `{ prepared: false, available: false }` if bundled assets are unavailable
 - `createVault(passphrase)` / `unlock(passphrase)` -> status
 - `lock()` -> status
 - `getData()` -> `{ profile, applications }`
@@ -14,6 +14,9 @@ Runtime: Electron desktop, plain HTML/CSS/JavaScript renderer, Manifest V3 Chrom
 - `saveApplication(application)` -> saved application (empty/missing id creates UUID)
 - `deleteApplication(id)` -> true
 - `openPortal()` -> true (fixed Iowa URL only)
+- `prepareExtension()` -> `{ directory, extensionId, version, prepared, manifestPath, folderOpened }`; copies bundled assets into the fixed local extension folder and registers its stable ID; never installs into Chrome
+- `openExtensionFolder()` / `copyExtensionFolderPath()` -> true (fixed prepared folder only)
+- `copyChromeExtensionsUrl()` -> true (copies the fixed `chrome://extensions` address)
 - `connectExtension(extensionId)` -> `{ extensionId, manifestPath }` (register native host for current OS)
 - `exportBackup()` / `importBackup()` -> `{ cancelled: boolean }` (native dialogs, encrypted vault bytes only; import only while locked)
 - `onLocked(callback)` -> unsubscribe function

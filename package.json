@@ -1,6 +1,6 @@
 {
   "name": "secondhand",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "A local benefits companion for Iowa SNAP",
   "author": "secondHand contributors",
@@ -15,7 +15,10 @@
     "test:native": "node tests/desktop-native-smoke.cjs",
     "extension:zip": "node scripts/zip-extension.cjs",
     "dist:win": "node scripts/build-native-host.cjs && electron-builder --win nsis --x64 --publish never",
-    "dist:mac": "electron-builder --mac dir --publish never"
+    "dist:mac": "electron-builder --mac dmg --arm64 --x64 --publish never",
+    "dist:mac:arm64": "electron-builder --mac dmg --arm64 --publish never",
+    "dist:mac:x64": "electron-builder --mac dmg --x64 --publish never",
+    "release:checksums": "node scripts/release-checksums.cjs"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
@@ -42,6 +45,19 @@
       "deleteAppDataOnUninstall": false,
       "createDesktopShortcut": true
     },
-    "mac": { "category": "public.app-category.productivity", "target": "dir" }
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }],
+      "identity": null,
+      "hardenedRuntime": false,
+      "notarize": false
+    },
+    "dmg": {
+      "title": "secondHand ${version}",
+      "contents": [
+        { "x": 130, "y": 200, "type": "file" },
+        { "x": 410, "y": 200, "type": "link", "path": "/Applications" }
+      ]
+    }
   }
 }

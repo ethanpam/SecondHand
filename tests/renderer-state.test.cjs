@@ -220,3 +220,28 @@ test('a profile load completed after a lock cannot show an unlocked workspace', 
   assert.equal(view.get('workspace').hidden, true);
   assert.equal(view.get('auth-view').hidden, false);
 });
+
+test('extension preparation shows manual Chrome steps and uses fixed path-copy API without an ID paste', async t => {
+  let prepared = 0;
+  let copied = 0;
+  const view = await renderer(t, {
+    prepareExtension: async () => {
+      prepared++;
+      return { prepared: true, directory: '/synthetic-only/SecondHand/chrome-extension', extensionId: 'jogldddafjfbmfjnjlbjloakjbecnjpl', folderOpened: true };
+    },
+    copyExtensionFolderPath: async () => { copied++; return true; }
+  });
+  assert.equal(view.get('extension-prepared').hidden, true);
+  view.get('prepare-extension').click();
+  await tick();
+  assert.equal(prepared, 1);
+  assert.equal(view.get('extension-id').value, 'jogldddafjfbmfjnjlbjloakjbecnjpl');
+  assert.equal(view.get('extension-prepared').hidden, false);
+  assert.equal(view.get('extension-folder-path').textContent, '/synthetic-only/SecondHand/chrome-extension');
+  assert.equal(view.get('extension-status').textContent, 'Ready to load in Chrome');
+  assert.match(view.get('view-extension').textContent, /does not install the extension automatically/);
+  view.get('copy-extension-path').click();
+  await tick();
+  assert.equal(copied, 1);
+  assert.match(view.get('toast').textContent, /Folder path copied/);
+});

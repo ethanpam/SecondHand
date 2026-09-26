@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, dialog, shell, powerMonitor, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, powerMonitor, session } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -8,13 +8,15 @@ const { pathToFileURL } = require('node:url');
 const { Vault, atomicWrite, MAX_VAULT_BYTES } = require('./vault.cjs');
 const { startBridge, runNativeHost, nativeStreams, extensionFromOrigin, EXTENSION_ID } = require('./bridge.cjs');
 const { registerHost } = require('./registration.cjs');
+const { getExtensionSetup, prepareBundledExtension } = require('./extension-setup.cjs');
+const { testStoragePath } = require('./test-storage-path.cjs');
 const { validateProfile, validateApplication, FIELD_LABELS, PORTAL_URL } = require('../shared/schema.cjs');
 
 app.setName('SecondHand');
 const localAppData = process.platform === 'win32' ?
   (process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')) : app.getPath('appData');
-app.setPath('userData', !app.isPackaged && process.env.SECONDHAND_USER_DATA ?
-  path.resolve(process.env.SECONDHAND_USER_DATA) : path.join(localAppData, 'SecondHand'));
+app.setPath('userData', testStoragePath() || (!app.isPackaged && process.env.SECONDHAND_USER_DATA ?
+  path.resolve(process.env.SECONDHAND_USER_DATA) : path.join(localAppData, 'SecondHand')));
 
 // On macOS/Linux, Chrome invokes the app executable with its origin. Handle this
 // before the desktop single-instance lock. Windows uses its standalone C# relay.
@@ -36,6 +38,7 @@ if (nativeOrigin) {
   let lockTimer;
   let quitting = false;
   let fieldRequestPending = false;
+  let extensionSetupPending = false;
   const userData = app.getPath('userData');
   const vault = new Vault(path.join(userData, 'vault.secondhand'));
   const configPath = path.join(userData, 'settings.json');
@@ -49,7 +52,8 @@ if (nativeOrigin) {
 
   async function status() {
     return { exists: await vault.exists(), unlocked: vault.unlocked, extensionId,
-      bridgeRunning: Boolean(bridge), platform: process.platform };
+      bridgeRunning: Boolean(bridge), platform: process.platform,
+      extensionSetup: await getExtensionSetup(app).catch(() => ({ prepared: false, available: false })) };
   }
   function touch() {
     clearTimeout(lockTimer);
@@ -63,6 +67,14 @@ if (nativeOrigin) {
   }
   function requireUnlocked() {
     if (!vault.unlocked) throw publicError('Unlock your local vault first.');
+  }
+  async function saveExtensionRegistration(id) {
+    let registration;
+    try { registration = await registerHost(app, id); }
+    catch (error) { throw publicError(error.message.startsWith('On Windows') ? error.message : 'Could not prepare the Chrome connection. Try again or see the setup instructions.'); }
+    await atomicWrite(configPath, Buffer.from(JSON.stringify({ extensionId: id })));
+    extensionId = id;
+    return registration;
   }
   async function bridgeRequest(request) {
     if (request.type === 'status') return { unlocked: vault.unlocked, applicationCount: vault.unlocked ? vault.getData().applications.length : 0 };
@@ -141,14 +153,34 @@ if (nativeOrigin) {
       touch(); return true;
     },
     async openPortal() { await shell.openExternal(PORTAL_URL); return true; },
+    async prepareExtension() {
+      if (extensionSetupPending) throw publicError('Extension setup is already running.');
+      extensionSetupPending = true;
+      try {
+        const setup = await prepareBundledExtension(app);
+        const registration = await saveExtensionRegistration(setup.extensionId);
+        const openError = await shell.openPath(setup.directory);
+        return { ...setup, ...registration, folderOpened: !openError };
+      } finally { extensionSetupPending = false; }
+    },
+    async openExtensionFolder() {
+      const setup = await getExtensionSetup(app);
+      if (!setup.prepared) throw publicError('Prepare the Chrome extension first.');
+      const error = await shell.openPath(setup.directory);
+      if (error) throw publicError('The folder could not be opened. Use Copy folder path instead.');
+      return true;
+    },
+    async copyExtensionFolderPath() {
+      const setup = await getExtensionSetup(app);
+      if (!setup.prepared) throw publicError('Prepare the Chrome extension first.');
+      clipboard.writeText(setup.directory);
+      return true;
+    },
+    async copyChromeExtensionsUrl() { clipboard.writeText('chrome://extensions'); return true; },
     async connectExtension(id) {
       if (typeof id !== 'string' || !EXTENSION_ID.test(id)) throw publicError('Use the 32-letter extension ID shown at chrome://extensions.');
-      let registration;
-      try { registration = await registerHost(app, id); }
-      catch (error) { throw publicError(error.message.startsWith('On Windows') ? error.message : 'Could not register the extension. See the setup instructions.'); }
-      await atomicWrite(configPath, Buffer.from(JSON.stringify({ extensionId: id })));
-      extensionId = id;
-      return registration;
+      if (extensionSetupPending) throw publicError('Wait for extension setup to finish before changing its connection.');
+      return saveExtensionRegistration(id);
     },
     async exportBackup() {
       if (!await vault.exists()) throw publicError('Create a local vault before exporting a backup.');
