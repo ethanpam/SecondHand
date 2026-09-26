@@ -42,7 +42,7 @@ export function Home() {
           <div className="intro-copy">
             <h1>Fill out Iowa’s SNAP application with less typing.</h1>
             <p className="lead">Save your details once in an encrypted app on your computer. After you approve, its Chrome extension fills the supported fields in Iowa’s SNAP application.</p>
-            <div className="trust-line">Encrypted on your device <span>·</span> No account needed</div>
+            <div className="trust-line">Encrypted on your device <span aria-hidden="true">·</span> No account needed</div>
             <a className="text-link" href="#setup">How to get set up</a>
           </div>
           <div className="download-panel">
@@ -56,13 +56,13 @@ export function Home() {
             </div>
             <div id="panel-windows" role="tabpanel" aria-labelledby="tab-windows" hidden={platform !== 'windows'} className="download-content">
                 <p className="download-title">For your Windows PC</p>
-                <p className="muted">Windows 10 or later · 64-bit Intel / AMD</p>
+                <p className="muted">Windows 10 or later <span aria-hidden="true">·</span> 64-bit Intel / AMD</p>
                 <Link className="download-button" href="/thank-you/windows"><DownloadIcon /> Download for Windows <span>.exe</span></Link>
                 <p className="micro">Chrome extension included. No separate download needed.</p>
             </div>
             <div id="panel-mac" role="tabpanel" aria-labelledby="tab-mac" hidden={platform !== 'mac'} className="download-content">
                 <p className="download-title">For your Mac</p>
-                <p className="muted">macOS 13 or later · MacBook, iMac & Mac mini</p>
+                <p className="muted">macOS 13 or later <span aria-hidden="true">·</span> MacBook, iMac &amp; Mac mini</p>
                 <Link className="download-button" href="/thank-you/mac-apple-silicon"><DownloadIcon /> Apple Silicon <span>.dmg</span></Link>
                 <Link className="secondary-download" href="/thank-you/mac-intel">Download for Intel Mac</Link>
                 <p className="micro">Find your chip in Apple menu → About This Mac. Choose Apple Silicon for an M-series chip.</p>
