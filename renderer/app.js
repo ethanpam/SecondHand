@@ -245,7 +245,7 @@
       const title = element('div', 'application-card-title');
       const mark = element('span', 'card-icon'); mark.append(icon('file'));
       const titleText = element('div');
-      titleText.append(element('h3', '', 'Iowa SNAP'), element('p', 'application-meta', `Started ${dateLabel(application.createdAt) || '—'}`));
+      titleText.append(element('h3', '', 'Iowa SNAP'), element('p', 'application-meta', dateLabel(application.createdAt) ? `Started ${dateLabel(application.createdAt)}` : 'Start date not recorded'));
       title.append(mark, titleText); header.append(title, badge(application.status)); card.append(header);
       if (application.nextAction || application.dueDate) {
         const details = element('div', 'application-details');
