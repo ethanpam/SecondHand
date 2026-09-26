@@ -39,10 +39,10 @@ export function Home() {
       <SiteHeader />
       <main id="main" className="wrap">
         <section className="intro" id="downloads">
+          <h1 className="hero-title">Fill out Iowa’s SNAP application<br className="hero-break" /> <span className="soft">with less typing.</span></h1>
           <div className="intro-copy">
-            <h1>Fill out Iowa’s SNAP application with less typing.</h1>
             <p className="lead">Save your details once in an encrypted app on your computer. After you approve, its Chrome extension fills the supported fields in Iowa’s SNAP application.</p>
-            <div className="trust-line">Encrypted on your device <span aria-hidden="true">·</span> No account needed</div>
+            <p className="mono-line"><span>Encrypted on your device <span aria-hidden="true">·</span> No account needed</span></p>
             <a className="text-link" href="#setup">How to get set up</a>
           </div>
           <div className="download-panel">
@@ -71,6 +71,11 @@ export function Home() {
           </div>
         </section>
 
+        <dl className="stats" aria-label="At a glance">
+          <div><dt>$0</dt><dd>to download and use</dd></div>
+          <div><dt>0</dt><dd>accounts to create</dd></div>
+          <div><dt>15 min</dt><dd>longest assisted session, only after you approve</dd></div>
+        </dl>
         <div className="scope-note"><span className="note-label">What it does today</span><p>A browser side panel tracks the applicant page with completion checkmarks and missing-field reminders. With your approval, it fills saved applicant details, address and mailing information, and your explicit program choices. It selects Save and Continue when required answers are complete, then checks the next step. Unverified later pages stay manual.</p></div>
 
         <section id="setup" className="setup-section">

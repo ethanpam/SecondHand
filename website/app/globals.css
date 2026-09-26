@@ -120,19 +120,21 @@ nav a:hover,
   background: #fff;
 }
 .intro {
+  position: relative;
   display: grid;
-  grid-template-columns: 1.15fr 1fr;
-  gap: 80px;
-  padding: 64px 0 48px;
-  align-items: center;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 64px;
+  padding: 96px 0 64px;
+  align-items: start;
+  row-gap: 32px;
 }
 h1 {
   font-family: var(--font-sans);
-  font-size: clamp(38px, 4.5vw, 57px);
-  line-height: 1.1;
+  font-size: clamp(44px, 6vw, 80px);
+  line-height: 0.98;
   font-weight: 400;
-  letter-spacing: -1.9px;
-  margin: 0 0 24px;
+  letter-spacing: -0.03em;
+  margin: 0 0 32px;
 }
 p {
   margin: 0 0 16px;
@@ -143,14 +145,60 @@ p {
   color: var(--muted-foreground);
   max-width: 465px;
 }
-.trust-line {
+
+.intro::before {
+  /* Faint full-width column grid behind the hero, drawn as 1px hard-edged lines. */
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 50%;
+  width: 100vw;
+  transform: translateX(-50%);
+  background-image: repeating-linear-gradient(to right, #ffffff09 0 1px, transparent 1px 120px);
+  pointer-events: none;
+  z-index: -1;
+}
+.soft {
+  color: var(--heading-soft);
+}
+.hero-title {
+  grid-column: 1 / -1;
+  margin-bottom: 8px;
+}
+.mono-line {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  font-size: 13px;
+  align-items: baseline;
+  gap: 12px;
+  margin: 24px 0 32px;
+  font-family: var(--font-mono);
+  font-size: 12px;
   color: var(--muted-foreground);
-  margin: 24px 0;
+}
+.mono-line::before {
+  content: "";
+  flex: 0 0 32px;
+  height: 1px;
+  align-self: center;
+  background: var(--border-strong);
+}
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 32px;
+  margin: 0 0 64px;
+  padding-top: 32px;
+  border-top: 1px solid var(--border);
+}
+.stats dt {
+  font-size: clamp(36px, 4vw, 48px);
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+.stats dd {
+  margin: 12px 0 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--subtle);
+  max-width: 220px;
 }
 .text-link {
   font-size: 14px;
@@ -668,12 +716,18 @@ footer p {
   }
   .intro {
     grid-template-columns: 1fr;
-    padding: 40px 0;
+    padding: 48px 0;
     gap: 32px;
   }
   h1 {
-    font-size: 36px;
-    letter-spacing: -1px;
+    font-size: 40px;
+  }
+  .hero-break {
+    display: none;
+  }
+  .stats {
+    grid-template-columns: 1fr;
+    gap: 24px;
   }
   .lead {
     font-size: 17px;
@@ -749,9 +803,6 @@ footer p {
   }
   .footer-links {
     justify-content: flex-start;
-  }
-  .trust-line {
-    font-size: 12px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
