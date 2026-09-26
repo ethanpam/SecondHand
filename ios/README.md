@@ -1,8 +1,8 @@
 # SecondHand
 
-An offline-first iPhone app for keeping an Iowa SNAP profile, documents, and renewal tasks together. A companion Safari Web Extension offers user-triggered contact autofill on the Iowa HHS portal.
+An offline-first iPhone app for keeping an Iowa SNAP profile, documents, and renewal tasks together. Its Safari extension provides a user-started application assistant: fill saved answers, review each step, and separately approve submission.
 
-This is an independent prototype, not an Iowa HHS product. It does not determine eligibility, synchronize with an agency case, or submit applications. Renewal and application statuses are entered by the user.
+This is an independent prototype, not an Iowa HHS product. It does not determine eligibility or synchronize with an agency case. Submission requires the user's review, signature on Iowa's website, and explicit approval. Confirmation numbers and application statuses are user-reported.
 
 ## What is included
 
@@ -11,7 +11,8 @@ This is an independent prototype, not an Iowa HHS product. It does not determine
 - An encrypted local document vault and document preview.
 - Local reminders with generic wording on the lock screen.
 - A device authentication gate using biometrics or the device passcode.
-- A Safari extension that receives a short-lived, explicitly enabled contact snapshot and fills recognizable, empty fields after the user chooses to fill them.
+- A Safari extension with an expiring, one-tab application session; automatic filling of verified applicant fields; user-selected mappings on other supported forms; Pause/Resume/Stop; and separate Continue and final submission actions.
+- An encrypted handoff of a user-entered website confirmation to the app's renewal tracker.
 
 Saved information and reminders work offline. Opening the Iowa website, signing in, uploading proof, and submitting an application require internet access.
 
@@ -19,11 +20,19 @@ Saved information and reminders work offline. Opening the Iowa website, signing 
 
 <img src="docs/images/overview.png" width="280" alt="Second Hand renewal overview with no saved personal data"> <img src="docs/images/documents.png" width="280" alt="Second Hand document vault empty state">
 
-## Autofill scope
+## Application assistance scope
 
-Autofill is a prototype restricted to the primary-applicant form documented in the repository's [public portal inspection](../docs/iowa-portal.md), with conservative field matching exercised against local fixtures. **Safari filling in a live applicant session and a SNAP-specific online renewal flow have not been verified.** A successful fixture test is not a guarantee that the current portal can be filled.
+**This is a guided auto-apply prototype, not a verified end-to-end Iowa integration.** The app shares the laptop implementation's inspected primary-applicant schema and verified Continue/required-question checks. Real Safari native messaging, live application submission, and an authenticated SNAP renewal flow remain unverified. Automated tests use synthetic local forms and never send an application to Iowa.
 
-The shared snapshot contains only first name, last name, and home-address fields. It expires after at most ten minutes. Generic email and phone stay in the app because the inspected form distinguishes home and mobile phone numbers. The snapshot also excludes household details, income, documents, notes, birth dates, Social Security numbers, and passwords. The extension does not sign in, upload documents, choose eligibility answers, accept attestations, or submit a form. The user reviews every answer and completes those steps on the official website.
+The assistant automatically matches first/middle/last name, explicit home/mobile phone numbers, and home address on the [inspected applicant page](../docs/iowa-portal.md). For other eligible text/select fields, the user must explicitly choose which saved answer belongs there. These mappings apply only to the current page; the assistant does not guess household, eligibility, or financial semantics.
+
+Application sharing expires after at most ten minutes. Its approved snapshot can include name, email, typed phone numbers, home address, monthly income, and monthly housing cost. Generic phone, household members, notes, documents, birth dates, SSNs, and passwords are excluded. The user handles login, CAPTCHA/verification, program choices, uploads, consent, and signatures on the website.
+
+Each **Continue** requires a user action. On a recognized **E-Signature** page, the user completes Iowa's signature, checks the extension's approval box, and clicks **Approve and submit application**. The assistant checks that the reviewed page is unchanged, uses the website's normal button once, and does not retry submission automatically. The user must read the result and enter its confirmation number; a click alone never marks the tracker submitted. Unrecognized signing/submission pages remain manual.
+
+<img src="docs/images/application-approval.png" width="300" alt="Local mock preview of the extension's approval screen, with submission disabled until the user authorizes it">
+
+*Extension approval screen rendered with local mock state; this is not a live Iowa session.*
 
 The extension is for Safari on iOS. It does not add extension support to Chrome on iOS.
 
@@ -92,16 +101,24 @@ If Xcode reports that these identifiers are unavailable to your team, change the
 
 After installing the app, enable SecondHand in Safari's extension settings and grant access to `hhsservices.iowa.gov`. On current iOS versions, Safari settings are under **Settings → Apps → Safari → Extensions**; older versions place Safari directly in Settings.
 
-Save and review your profile in the app, enable its temporary Safari sharing session, then open the official portal in Safari. Any instruction to sign in here refers to your **Iowa benefits-portal account**, not an Apple account or a Second Hand account. Open SecondHand from Safari's extension menu and use its fill action on the intended application page. Review the result, complete any remaining information, and submit yourself only when making a real application. You do not need to create or submit an Iowa application to demo the native app. Follow the instructions on your HHS notice for recertification.
+1. Save and confirm your profile in the app. In **Settings**, choose **Allow application sharing for 10 minutes** and review the sharing confirmation.
+2. Open the official portal in Safari and navigate to the application. Any sign-in here uses your **Iowa benefits-portal account**, not an Apple or Second Hand account. Complete preliminary consent and verification yourself.
+3. Open SecondHand from Safari's extension menu, choose **Start application assistance**, and allow access to the Iowa website. The session is bound to this tab.
+4. Review automatically filled applicant details. On an unfamiliar form, choose a saved answer for each field you want filled, then select **Fill selected details**. Leave uncertain matches unselected and answer them on the website.
+5. Finish remaining questions, choose **Check current page** to refresh the review, and use **Continue to next step**. Pause or Stop is available during filling. A paused session resumes only when you choose Resume.
+6. On the final signing page, review the full application and complete its signature on Iowa's website. Then separately approve submission in the extension. If the page is unsupported, use the website directly.
+7. Read Iowa's result. When the assistant recognizes a confirmation page, enter the confirmation number and confirm that Iowa reports submission. Unlock SecondHand to import the encrypted receipt into your tracker. If the receipt page is unrecognized, record the number manually in the app.
+
+You do not need to create or submit an Iowa application to demo the native app. Follow the instructions on your HHS notice for recertification; the assistant does not automatically reapply on a schedule. See the [application pipeline and limitations](docs/Application-assistant.md).
 
 ## Tests and validation
 
-Verified locally with Xcode 26.6: **7 native tests, 1 end-to-end UI test, and 30 Safari JavaScript tests pass**. The Release app and extension compile for physical iPhones. See [validation notes](docs/Validation.md) for coverage and remaining device checks.
+The app and extension compile with Xcode 26.6 for physical iPhones. Native tests cover encrypted persistence, migration, reminders, and receipt import; JavaScript tests cover page operations, the background/popup workflow, and a local multi-page application. See [validation notes](docs/Validation.md) for results and remaining device checks.
 
-Run the JavaScript matching and safety tests:
+Install the repository's pinned test dependencies from the repository root once with `npm ci --ignore-scripts`, then run the JavaScript tests from `ios/`:
 
 ```sh
-node --test Tests/extension.test.js
+node --test Tests/*.test.js
 ```
 
 Run the native test target through **Product → Test** in Xcode using an available iPhone simulator. For a command-line run, replace the destination below with a simulator shown by `xcodebuild -showdestinations -project SecondHand.xcodeproj -scheme SecondHand`:

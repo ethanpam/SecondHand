@@ -1,21 +1,30 @@
 :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, sans-serif; color: #173e37; background: #f7f8f0; }
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 290px; max-width: 380px; }
+[hidden] { display: none !important; }
+body { margin: 0; min-width: 300px; max-width: 390px; }
 main { padding: 22px; }
 .eyebrow { font-size: 10px; font-weight: 750; letter-spacing: 1.4px; }
-h1 { font-size: 25px; line-height: 1.12; letter-spacing: -0.8px; margin: 14px 0; }
-h2 { font-size: 15px; margin-top: 20px; }
-p, li { font-size: 13px; line-height: 1.5; }
+h1 { font-size: 25px; line-height: 1.12; letter-spacing: -.8px; margin: 14px 0; }
+h2 { font-size: 16px; margin-top: 20px; }
+p, label { font-size: 13px; line-height: 1.5; }
 .notice { background: #e5eddf; border-radius: 12px; padding: 12px; }
-button { border: 0; border-radius: 12px; background: #1d594b; color: #fff; padding: 13px 14px; font: inherit; font-size: 14px; font-weight: 650; width: 100%; cursor: pointer; }
-button:focus-visible { outline: 3px solid #c08130; outline-offset: 3px; }
+button { min-height: 44px; border: 0; border-radius: 12px; background: #1d594b; color: #fff; padding: 12px; margin: 6px 0; font: inherit; font-size: 13px; font-weight: 650; width: 100%; cursor: pointer; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid #c08130; outline-offset: 3px; }
 button:disabled { opacity: .5; cursor: default; }
-ul { padding-left: 20px; }
-.footnote, #skipped { color: #53675d; font-size: 11px; }
+.secondary { background: #e5eddf; color: #173e37; }
+.quiet { background: transparent; color: #53675d; text-decoration: underline; }
+.button-row { display: flex; gap: 8px; }
+.button-row button { flex: 1; }
+.field { display: block; margin: 12px 0; font-weight: 600; }
+select, input[type="text"] { width: 100%; padding: 10px; font: inherit; font-size: 13px; border: 1px solid #9aae9d; border-radius: 8px; background: #fff; color: #173e37; margin-top: 5px; }
+.check { display: flex; align-items: flex-start; gap: 8px; margin: 14px 0; }
+.check input { margin-top: 4px; flex-shrink: 0; accent-color: #1d594b; }
+.footnote, .muted { color: #53675d; font-size: 11px; }
 #status { font-weight: 600; }
 @media (prefers-color-scheme: dark) {
   :root { background: #132c26; color: #f0f4e7; }
-  .notice { background: #234438; }
+  .notice, .secondary { background: #234438; color: #f0f4e7; }
   button { background: #a9d5b5; color: #163b2d; }
-  .footnote, #skipped { color: #b8c9ba; }
+  select, input[type="text"] { background: #132c26; color: #f0f4e7; }
+  .quiet, .footnote, .muted { color: #b8c9ba; }
 }

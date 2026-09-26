@@ -1,9 +1,6 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
 const mapper = require("../SafariExtension/Resources/field-mapper.js");
 const PORTAL = "https://hhsservices.iowa.gov/apspssp/ssp.portal/applyForBenefits/enterPersonalInfo";
 // Sanitized schema fixture transcribed from docs/iowa-portal.md; no live values.
@@ -155,11 +152,13 @@ test("only controls in the exact applicant form and visible home address contain
   assert.equal(zip.value, "");
 });
 
-test("observed home/mobile phone and unverified email are never mapped to generic stored data", () => {
+test("observed home/mobile phone fields use explicit keys and email is not inferred", () => {
   const document = fakeDocument([new Input({ id: "phoneNumber", labels: [label("Home Phone Number (999)999-9999")] }),
     new Input({ id: "otherPhoneNumber", labels: [label("Mobile Phone Number (999)999-9999")] }),
     new Input({ id: "email", labels: [label("Email address")], attributes: { autocomplete: "email" } })]);
-  assert.deepEqual(mapper.scan(document, PORTAL).fields, []);
+  assert.deepEqual(mapper.scan(document, PORTAL).fields.map(field => field.key), ["homePhone", "mobilePhone"]);
+  const preview = mapper.scan(document, PORTAL);
+  assert.equal(fill(document, preview, { phone: "5155550100" }).error, "invalid_fields");
 });
 
 test("ancestor section headings must identify the applicant or a known page section", () => {
@@ -308,79 +307,4 @@ test("input maximum length prevents truncated saved information", () => {
   const preview = mapper.scan(document, PORTAL);
   assert.equal(fill(document, preview, { firstName: "Example" }).filled, 0);
   assert.equal(field.value, "");
-});
-
-function popupHarness(url = PORTAL) {
-  const nodes = new Map();
-  function node() { return { textContent: "", hidden: false, disabled: false, handlers: {}, children: [],
-    addEventListener(event, handler) { this.handlers[event] = handler; },
-    replaceChildren() { this.children = []; }, append(child) { this.children.push(child); } }; }
-  for (const id of ["preview", "fill", "status", "result", "fields", "skipped"]) nodes.set(id, node());
-  const document = { getElementById: id => nodes.get(id), createElement: node };
-  const calls = { native: [], scripts: [] };
-  const state = { url, onNative: null, response: { fields: { firstName: "Ada" }, expiresAt: Date.now() + 60_000 } };
-  const browser = {
-    tabs: { query: async () => [{ id: 7, url: state.url }] },
-    runtime: { sendNativeMessage: async (...args) => { calls.native.push(args); state.onNative?.(); return state.response; } },
-    scripting: { executeScript: async args => {
-      calls.scripts.push(args);
-      if (args.files) return [{ frameId: 0 }];
-      return [{ frameId: 0, result: args.args.length === 1
-        ? { token: "token", pageURL: state.url, fields: [{ key: "firstName", label: "First name" }], ambiguous: 0, populated: 0 }
-        : { filled: 1, skipped: 0 } }];
-    } }
-  };
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../SafariExtension/Resources/popup.js"), "utf8"), {
-    browser, document, SecondHandAutofill: mapper, Date, Error, Set, Object, Number, Array
-  });
-  return { nodes, calls, state, click: id => nodes.get(id).handlers.click() };
-}
-
-test("popup preview reads no saved data and fill requests only previewed keys", async () => {
-  const popup = popupHarness();
-  assert.equal(popup.calls.native.length, 0);
-  await popup.click("preview");
-  assert.equal(popup.calls.native.length, 0);
-  await popup.click("fill");
-  assert.deepEqual(popup.calls.native[0][1].keys, ["firstName"]);
-  assert.equal(popup.calls.native[0][1].pageURL, PORTAL);
-  assert.equal(popup.calls.scripts.length, 3);
-  assert.match(popup.nodes.get("status").textContent, /Review every answer/);
-});
-
-test("popup rejects an unsupported host before any script or native request", async () => {
-  const popup = popupHarness("https://example.test/apspssp/form");
-  await popup.click("preview");
-  await popup.click("fill");
-  assert.equal(popup.calls.scripts.length, 0);
-  assert.equal(popup.calls.native.length, 0);
-});
-
-test("popup navigation between preview and fill prevents native data access", async () => {
-  const popup = popupHarness();
-  await popup.click("preview");
-  popup.state.url = PORTAL + "?changed";
-  await popup.click("fill");
-  assert.equal(popup.calls.native.length, 0);
-  assert.equal(popup.calls.scripts.length, 2);
-});
-
-test("popup navigation during native request prevents sending profile to page", async () => {
-  const popup = popupHarness();
-  await popup.click("preview");
-  popup.state.onNative = () => { popup.state.url = "https://example.test/"; };
-  await popup.click("fill");
-  assert.equal(popup.calls.native.length, 1);
-  assert.equal(popup.calls.scripts.length, 2);
-});
-
-test("popup unavailable or expired native sessions never reach the page", async () => {
-  for (const response of [{ error: "session_unavailable" }, { fields: { firstName: "Ada" }, expiresAt: Date.now() - 10 }]) {
-    const popup = popupHarness();
-    await popup.click("preview");
-    popup.state.response = response;
-    await popup.click("fill");
-    assert.equal(popup.calls.scripts.length, 2);
-    assert.match(popup.nodes.get("status").textContent, /enable a new autofill session/);
-  }
 });

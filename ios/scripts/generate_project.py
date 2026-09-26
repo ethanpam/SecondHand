@@ -52,6 +52,9 @@ assets = ref("SecondHand/Assets.xcassets", "folder.assetcatalog")
 extension_resources = []
 for p in sorted((ROOT / "SafariExtension/Resources").iterdir()):
     extension_resources.append(ref(str(p.relative_to(ROOT)), "folder" if p.is_dir() else "text"))
+# Bundle the same verified navigation adapter as the laptop extension, without
+# maintaining a second copy of Iowa's conditional-required-question rules.
+extension_resources.append(ref("../extension/iowa-adapter.js", "sourcecode.javascript"))
 
 products = {}
 for name, ext, kind in [("SecondHand", "app", "wrapper.application"), ("SafariExtension", "appex", "wrapper.app-extension"),
