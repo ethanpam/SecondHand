@@ -55,7 +55,7 @@ The widget refreshes its state by sending `ui:pageState` for its own tab every 1
 1. `readPage(tabId)`. If the page is not recognized as fillable, throw `Nothing to fill on this page.`
 2. Request every key in `SecondHandIowa.definitions` (all of them belong to the one recognized applicant page), not only the visible ones, in one native `getFields`. That way conditional branches revealed by earlier answers need no second request. The desktop returns only nonblank saved values.
 3. Fill in up to 4 passes. Each pass rescans, then fills the currently visible empty keys that have values and haven't been attempted. It stops when a pass fills nothing.
-4. Missing = required checklist rows still `missing` after the last pass. The result is `{ filled, missing: [keys], message }`.
+4. "Need you" = checklist rows that are required and still `missing`, or `manual`, after the last pass. The result is `{ state, filled, needYou: [keys], message, pageKey }`.
 5. If `filled > 0`, send `recordProgress`.
 6. Values live only inside this function call and are released in `finally`.
 
