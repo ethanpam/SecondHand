@@ -330,3 +330,23 @@ test('a failed trust change restores the checkbox and shows the error', async t 
   assert.equal(view.get('autofill-trust').checked, false);
   assert.match(view.get('autofill-trust-error').textContent, /Unlock/);
 });
+
+test('the profile form saves household counts and household flags', async t => {
+  const view = await renderer(t);
+  view.window.document.querySelector('.nav-item[data-view="profile"]').click();
+  await tick();
+  view.edit('householdAdults', '2');
+  view.edit('householdChildren', '3');
+  view.edit('householdSeniors', '0');
+  view.get('householdVeteran').value = 'no';
+  view.get('householdVeteran').dispatchEvent(new view.window.Event('change', { bubbles: true }));
+  view.get('householdDisability').value = 'yes';
+  view.get('householdDisability').dispatchEvent(new view.window.Event('change', { bubbles: true }));
+  view.submit('profile-form');
+  await tick(); await tick();
+  assert.equal(view.database.profile.householdAdults, '2');
+  assert.equal(view.database.profile.householdChildren, '3');
+  assert.equal(view.database.profile.householdSeniors, '0');
+  assert.equal(view.database.profile.householdVeteran, 'no');
+  assert.equal(view.database.profile.householdDisability, 'yes');
+});

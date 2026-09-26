@@ -15,11 +15,13 @@ const FIELD_LABELS = Object.freeze({
   programSnap: 'Request SNAP', programFip: 'Request FIP or RCA', programMedicaid: 'Request Medicaid',
   helpPayMedicalBills: 'Request help paying medical bills from the last three calendar months', householdSize: 'Household size',
   monthlyEarnedIncome: 'Monthly earned income', monthlyOtherIncome: 'Monthly other income',
-  monthlyRent: 'Monthly rent or mortgage', monthlyUtilities: 'Monthly utilities'
+  monthlyRent: 'Monthly rent or mortgage', monthlyUtilities: 'Monthly utilities',
+  householdAdults: 'Adults in household', householdChildren: 'Children in household', householdSeniors: 'Seniors (65+) in household',
+  householdVeteran: 'Anyone in household a veteran', householdDisability: 'Anyone in household with a disability'
 });
 const PROFILE_FIELDS = Object.freeze(Object.keys(FIELD_LABELS));
 const YES_NO_FIELDS = Object.freeze(['hasHomeAddress', 'mailingSameAsHome', 'isApplicant',
-  'programSnap', 'programFip', 'programMedicaid', 'helpPayMedicalBills']);
+  'programSnap', 'programFip', 'programMedicaid', 'helpPayMedicalBills', 'householdVeteran', 'householdDisability']);
 const PROFILE_CHOICES = Object.freeze({
   ...Object.fromEntries(YES_NO_FIELDS.map(field => [field, Object.freeze(['', 'yes', 'no'])])),
   suffix: Object.freeze(['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'Jr.', 'Sr.'])
@@ -69,6 +71,9 @@ function validateProfile(input) {
     result[field] = result[field].toUpperCase();
   }
   if (result.householdSize && !/^[1-9]\d?$/.test(result.householdSize)) throw new Error('Household size must be a whole number from 1 to 99.');
+  for (const field of ['householdAdults', 'householdChildren', 'householdSeniors']) {
+    if (result[field] && !/^(?:[0-9]|[12][0-9]|30)$/.test(result[field])) throw new Error(`${FIELD_LABELS[field]} must be a whole number from 0 to 30, or left blank.`);
+  }
   for (const field of ['monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities']) {
     if (result[field] && !/^\d{1,8}(\.\d{1,2})?$/.test(result[field])) throw new Error(`${FIELD_LABELS[field]} must be a nonnegative dollar amount, or blank if unknown.`);
   }

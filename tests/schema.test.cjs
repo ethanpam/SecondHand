@@ -66,3 +66,11 @@ test('stored application timestamps survive validation without being rewritten',
   assert.throws(() => validateStoredApplication({ ...original, createdAt: 'yesterday' }));
   assert.throws(() => validateStoredApplication({ ...original, id: '' }));
 });
+
+test('household counts accept whole numbers from 0 to 30 and household flags accept only yes or no', () => {
+  for (const key of ['householdAdults', 'householdChildren', 'householdSeniors', 'householdVeteran', 'householdDisability']) assert.ok(PROFILE_FIELDS.includes(key), key);
+  for (const value of ['', '0', '7', '30']) assert.equal(validateProfile({ householdChildren: value }).householdChildren, value);
+  for (const value of ['31', '-1', '2.5', 'abc', '007']) assert.throws(() => validateProfile({ householdSeniors: value }), /whole number from 0 to 30/, value);
+  assert.equal(validateProfile({ householdVeteran: 'yes', householdDisability: 'no' }).householdVeteran, 'yes');
+  assert.throws(() => validateProfile({ householdVeteran: 'maybe' }), /Yes, No, or left unanswered/);
+});
