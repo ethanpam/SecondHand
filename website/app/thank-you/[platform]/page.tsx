@@ -1,0 +1,51 @@
+import type { Metadata } from 'next';
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { ExternalIcon } from '../../icons';
+import { downloads } from '../../release';
+import { SiteFooter, SiteHeader } from '../../site-chrome';
+
+const platforms = {
+  windows: { name: 'Windows', file: downloads.windows, install: 'Open the downloaded .exe file and follow the installer. If Windows shows “Windows protected your PC,” read the warning notes in the setup guide before continuing.' },
+  'mac-apple-silicon': { name: 'Mac with Apple silicon', file: downloads.macArm, install: 'Open the downloaded .dmg file, drag secondHand into Applications, and open it from Applications. If your Mac blocks it, follow Apple’s guidance below.' },
+  'mac-intel': { name: 'Intel Mac', file: downloads.macIntel, install: 'Open the downloaded .dmg file, drag secondHand into Applications, and open it from Applications. If your Mac blocks it, follow Apple’s guidance below.' },
+} as const;
+type PlatformId = keyof typeof platforms;
+type Props = { params: Promise<{ platform: string }> };
+
+export const dynamicParams = false;
+export function generateStaticParams() {
+  return Object.keys(platforms).map(platform => ({ platform }));
+}
+
+export const metadata: Metadata = {
+  title: 'Thanks for downloading',
+  description: 'Your secondHand download is starting. Here is how to install it, create your password, and connect Chrome.',
+  robots: { index: false, follow: true },
+};
+
+export default async function ThankYou({ params }: Props) {
+  const { platform } = await params;
+  if (!Object.hasOwn(platforms, platform)) notFound();
+  const { name, file, install } = platforms[platform as PlatformId];
+  return (
+    <>
+      {/* Starts the download without JavaScript; the installer is sent as an attachment, so this page stays open. */}
+      <meta httpEquiv="refresh" content={`1;url=${file}`} />
+      <SiteHeader />
+      <main id="main" className="wrap doc-page">
+        <h1>Thanks for downloading secondHand</h1>
+        <p className="doc-lead">Your download for {name} should start in a moment. If it doesn’t, <a href={file}>download it directly</a>.</p>
+        <h2>What to do next</h2>
+        <ol className="next-steps">
+          <li><strong>Install the app.</strong> {install}</li>
+          <li><strong>Create a password.</strong> Open secondHand and choose a password of at least 12 characters. Save the recovery key it shows you somewhere safe, away from your computer.</li>
+          <li><strong>Add the Chrome extension.</strong> In the app, choose Chrome extension, then Prepare Chrome extension, and load that folder at <code>chrome://extensions</code> with Developer mode on.</li>
+        </ol>
+        {platform !== 'windows' && <p><a href="https://support.apple.com/en-us/102445" target="_blank" rel="noreferrer">Apple’s guidance on opening apps <ExternalIcon size={14} /></a></p>}
+        <p>Need more detail? Read the <Link href="/#setup">full setup guide</Link>, the <Link href="/#faq">common questions</Link>, or our <Link href="/privacy">privacy policy</Link>.</p>
+      </main>
+      <SiteFooter />
+    </>
+  );
+}

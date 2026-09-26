@@ -1,12 +1,12 @@
 'use client';
 
+import Link from 'next/link';
 import { useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import { CheckIcon, DownloadIcon, ExternalIcon } from './icons';
 import { faq } from './faq';
-import { downloads, release } from './release';
+import { release } from './release';
 import { SiteFooter, SiteHeader } from './site-chrome';
 
-const { windows, macArm, macIntel } = downloads;
 const platforms = [{ id: 'windows', label: 'Windows' }, { id: 'mac', label: 'Mac' }] as const;
 type Platform = (typeof platforms)[number]['id'];
 
@@ -57,14 +57,14 @@ export default function Home() {
             <div id="panel-windows" role="tabpanel" aria-labelledby="tab-windows" hidden={platform !== 'windows'} className="download-content">
                 <p className="download-title">For your Windows PC</p>
                 <p className="muted">Windows 10 or later · 64-bit Intel / AMD</p>
-                <a className="download-button" href={windows}><DownloadIcon /> Download for Windows <span>.exe</span></a>
+                <Link className="download-button" href="/thank-you/windows"><DownloadIcon /> Download for Windows <span>.exe</span></Link>
                 <p className="micro">Chrome extension included. No separate download needed.</p>
             </div>
             <div id="panel-mac" role="tabpanel" aria-labelledby="tab-mac" hidden={platform !== 'mac'} className="download-content">
                 <p className="download-title">For your Mac</p>
                 <p className="muted">macOS 13 or later · MacBook, iMac & Mac mini</p>
-                <a className="download-button" href={macArm}><DownloadIcon /> Apple Silicon <span>.dmg</span></a>
-                <a className="secondary-download" href={macIntel}>Download for Intel Mac <ExternalIcon /></a>
+                <Link className="download-button" href="/thank-you/mac-apple-silicon"><DownloadIcon /> Apple Silicon <span>.dmg</span></Link>
+                <Link className="secondary-download" href="/thank-you/mac-intel">Download for Intel Mac</Link>
                 <p className="micro">Find your chip in Apple menu → About This Mac. Choose Apple Silicon for an M-series chip.</p>
             </div>
             <div className="release-note"><p><strong>Early access builds are unsigned.</strong> Your computer may show a security warning. Read the setup notes below before opening.</p></div>
