@@ -18,6 +18,15 @@
   const AUTOCOMPLETE = Object.freeze({ 'given-name': 'firstName', 'additional-name': 'middleName', 'family-name': 'lastName', name: 'fullName',
     'honorific-suffix': 'suffix', email: 'email', tel: 'phone', 'tel-national': 'phone', 'street-address': 'addressLine1', 'address-line1': 'addressLine1',
     'address-line2': 'addressLine2', 'address-level2': 'city', 'address-level1': 'state', 'postal-code': 'zip', bday: 'birthDate' });
+  // Household counts by age. An age band maps only when it is exactly the band the profile
+  // counts (children 0-17, adults 18-64, seniors 65+); "0-5", "18-59", or "60+" stay with the applicant.
+  const AGE_BANDS = Object.freeze({
+    householdChildren: '(under|below|younger than) (age )?18|(0|zero) (to |through |thru )?17|17 (and|or) (under|younger)',
+    householdAdults: '18 (to |through |thru )?64',
+    householdSeniors: '65( ?\\+| (and|or) (older|over|above|up))?|(over|older than) (age )?64'
+  });
+  const IN_HOUSEHOLD = '( in (your |the )?(household|home))?( (who )?(are|is|live|lives|living)( in (your |the )?(household|home))?)?';
+  const counted = (who, band) => new RegExp(`^((number of|how many|total) )?${who}${IN_HOUSEHOLD}${band ? ` (ages? |aged )?(${band})( (years?|yrs?)( old| of age)?)?${IN_HOUSEHOLD}` : ''}$`);
   // Anchored phrases only: a question must say what it asks, not merely mention a word.
   const RULES = [
     [/^(first|given) name$|^first$/, 'firstName'],
@@ -35,9 +44,12 @@
     [/^(zip|zip code|zipcode|postal code)$/, 'zip'],
     [/^county$/, 'county'],
     [/^(household size|family size|size of (your )?household|(number of |total )?(people|persons|members) in (your )?household|how many people (live|are) in (your )?household|(total )?household members|(number of |how many )(family |household |family household |family or household )members)$/, 'householdSize'],
-    [/^((number of|how many) )?adults( in (your )?household)?( 18 64| 18 to 64)?$/, 'householdAdults'],
-    [/^((number of|how many) )?(children|kids)( in (your )?household)?( under 18| 0 17)?$/, 'householdChildren'],
-    [/^((number of|how many) )?(seniors|older adults)( in (your )?household)?( 65\+| 65| 60\+)?$/, 'householdSeniors'],
+    [counted('adults'), 'householdAdults'],
+    [counted('(children|kids)'), 'householdChildren'],
+    [counted('(seniors|older adults)'), 'householdSeniors'],
+    [counted('(adults|people|persons|individuals|members|household members)', AGE_BANDS.householdAdults), 'householdAdults'],
+    [counted('(children|kids|people|persons|individuals|members|household members)', AGE_BANDS.householdChildren), 'householdChildren'],
+    [counted('(seniors|older adults|adults|people|persons|individuals|members|household members)', AGE_BANDS.householdSeniors), 'householdSeniors'],
     [/^(is )?anyone in (your |the )?household a (military )?veteran$|^veteran( status)?$/, 'householdVeteran'],
     [/^(does )?anyone in (your |the )?household (have|has) a disability$|^disability$/, 'householdDisability'],
     [/^(total )?(gross )?monthly (household )?income$|^(total )?household income per month$/, 'totalMonthlyIncome'],

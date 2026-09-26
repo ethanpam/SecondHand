@@ -137,6 +137,22 @@ test('number words and "or more" choices pick the right count; a click Google ig
   assert.deepEqual(filled.filled, [], 'without Google registering the click, nothing counts as filled');
 });
 
+test('age-band household questions map only when the band is exactly what the profile counts', () => {
+  const questions = {
+    kids017: '# of people in your household 0 - 17 yrs old', kidsUnder18: 'Number of children under 18', kidsAges: 'Number of household members ages 0 to 17',
+    adults1864: 'Number of adults (18-64)', adultsPeople: 'How many people in your household are 18 to 64 years old', seniors65: 'Number of seniors (65+)',
+    seniorsOlder: 'How many people 65 or older live in your household', seniorsAdults: 'Number of adults 65 and older',
+    band1859: '# of people in your household 18 - 59 yrs old', band60: '# of people in your household 60 + yrs', seniors60: 'Number of seniors (60+)',
+    kids05: '# of Children 0-5 years old', kids618: '# of Children 6-18 years old', adults18: 'Adults 18+', kidsUnder5: 'Number of children (under 5)'
+  };
+  const doc = page(Object.entries(questions).map(([id, label]) => `<label for="${id}">${label}</label><input id="${id}" type="number">`).join(''));
+  const result = generic.plan(doc);
+  assert.deepEqual(byElement(doc, result), { kids017: 'householdChildren', kidsUnder18: 'householdChildren', kidsAges: 'householdChildren',
+    adults1864: 'householdAdults', adultsPeople: 'householdAdults', seniors65: 'householdSeniors', seniorsOlder: 'householdSeniors', seniorsAdults: 'householdSeniors' });
+  assert.deepEqual(result.unmatched.map(field => field.label), [questions.band1859, questions.band60, questions.seniors60, questions.kids05, questions.kids618,
+    questions.adults18, questions.kidsUnder5]);
+});
+
 test('only confident matches are planned; vague labels stay unmatched for the applicant', () => {
   const doc = page('<label for="a">Name of your pet</label><input id="a"><label for="b">Emergency contact phone</label><input id="b" type="tel"><label for="c">Income last year from your side business</label><input id="c">');
   const result = generic.plan(doc);
