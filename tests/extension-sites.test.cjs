@@ -22,17 +22,52 @@ const generic = {
   requestKeys: keys => [...new Set(keys.flatMap(key => key === 'fullName' ? ['firstName', 'lastName'] : [key]))],
   deriveValues: values => ({ ...values, ...(values.firstName && values.lastName ? { fullName: `${values.firstName} ${values.lastName}` } : {}) })
 };
-const pantryPlan = () => ({
-  token: 'plan-1',
-  matched: [{ id: 'sh-1', key: 'fullName', confidence: 'high' }, { id: 'sh-2', key: 'zip', confidence: 'high' }, { id: 'sh-3', key: 'householdSize', confidence: 'high' }],
-  unmatched: [{ id: 'sh-4', label: 'Preferred pickup day', type: 'select-one', options: ['Monday', 'Friday'], required: true }]
-});
+const PICKUP = { name: 'pickup', label: 'Preferred pickup day', type: 'select-one', options: ['Monday', 'Friday'], required: true };
+const pantryFields = () => [{ name: 'name', key: 'fullName' }, { name: 'zip', key: 'zip' }, { name: 'size', key: 'householdSize' }, { ...PICKUP }];
 
-function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, desktop = {}, plan = pantryPlan(), duringGetFields } = {}) {
+// A model of generic-content.js on the page: like the site engine, every plan lists the
+// unanswered fields on screen under fresh ids, and answering a field can reveal others.
+function sitePage(fields) {
+  let sequence = 0, current = null;
+  const shown = field => !field.answered && !field.hidden && (!field.revealedBy || fields.some(other => other.name === field.revealedBy && other.answered));
+  return {
+    fields,
+    plan() {
+      sequence++;
+      const ids = new Map(), matched = [], unmatched = [];
+      fields.filter(shown).forEach((field, index) => {
+        const id = `sh-${sequence}-${index}`;
+        ids.set(id, field);
+        if (field.key) matched.push({ id, key: field.key, confidence: 'high' });
+        else unmatched.push({ id, label: field.label, type: field.type, options: field.options, required: field.required === true });
+      });
+      current = { token: `plan-${sequence}`, ids };
+      return { token: current.token, matched, unmatched };
+    },
+    fill({ token, assignments, values }) {
+      if (token !== current?.token) return { ok: false, filled: [], skipped: [] };
+      const filled = [];
+      for (const { id, key, guessed } of assignments) {
+        const field = current.ids.get(id);
+        if (!field || field.answered || field.refuses || !values[key]) continue;
+        field.answered = values[key]; field.mark = guessed ? 'guess' : 'rule';
+        filled.push(id);
+      }
+      return { ok: true, filled, skipped: assignments.map(item => item.id).filter(id => !filled.includes(id)) };
+    },
+    focus: id => Boolean(current?.ids.has(id)),
+    // The id a field has in the latest plan.
+    idOf: name => [...(current?.ids || [])].find(([, field]) => field.name === name)?.[0],
+    answered: () => fields.filter(field => field.answered).map(field => field.name)
+  };
+}
+
+function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, desktop = {}, fields = pantryFields(), duringGetFields } = {}) {
   const tab = { id: 7, active: true, url };
   const log = [], native = [], content = [], injected = [], opened = [];
   const permissions = new Set(granted ? [`${ORIGIN}/*`] : []);
   const registered = new Map(enabled ? [[SCRIPT_ID, structuredClone(SITE_SCRIPT)]] : []);
+  const page = sitePage(fields);
   const vault = { reachable: true, unlocked: true, getFieldsError: null, trustError: null,
     values: { firstName: 'Synthetic private first', lastName: 'Synthetic private last', zip: '50309' }, ...desktop };
   const events = {};
@@ -43,13 +78,9 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
       get: async () => ({ ...tab }),
       sendMessage: async (tabId, message, options) => {
         content.push({ tabId, frameId: options?.frameId, ...plain(message) });
-        if (message.type === 'secondhand:generic:plan') return structuredClone(plan);
-        if (message.type === 'secondhand:generic:fill') {
-          if (message.token !== plan.token) return { ok: false, filled: [], skipped: [] };
-          const filled = message.assignments.filter(item => message.values[item.key]).map(item => item.id);
-          return { ok: true, filled, skipped: message.assignments.map(item => item.id).filter(id => !filled.includes(id)) };
-        }
-        if (message.type === 'secondhand:generic:focus') return { focused: message.id === 'sh-4' };
+        if (message.type === 'secondhand:generic:plan') return page.plan();
+        if (message.type === 'secondhand:generic:fill') return page.fill(plain(message));
+        if (message.type === 'secondhand:generic:focus') return { focused: page.focus(message.id) };
         throw new Error(`Unexpected content message ${message.type}`);
       },
       onActivated: event('activated'), onRemoved: event('removed'), onUpdated: event('updated')
@@ -110,7 +141,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
     { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console });
   const send = (message, sender) => new Promise(resolve => { if (!listener(message, sender, resolve)) resolve(undefined); });
   return {
-    tab, log, native, content, injected, opened, permissions, registered, events, send,
+    tab, page, vault, log, native, content, injected, opened, permissions, registered, events, send,
     nativeTypes: () => native.map(call => call.type),
     contentTypes: () => content.map(call => call.type),
     panel: message => send({ tabId: 7, ...message }, { id: 'testextension', url: PANEL_URL }),
@@ -187,42 +218,89 @@ test('page state tells the panel whether a site is on, with metadata only', asyn
   for (const w of [off, on]) { assert.deepEqual(w.native, []); assert.deepEqual(w.content, []); }
 });
 
-test('autofill on an approved site asks for the planned keys once and fills once without navigating', async () => {
+test('autofill on an approved site asks for the planned keys once and fills without navigating', async () => {
   const w = siteWorker({ enabled: true });
   const response = await autofill(w);
   assert.equal(response.ok, true, response.error);
   assert.deepEqual(w.nativeTypes(), ['status', 'getFields']);
   assert.deepEqual(w.native[1].fields, ['firstName', 'lastName', 'zip', 'householdSize']);
   assert.equal(w.native[1].url, `${ORIGIN}/intake`);
-  assert.deepEqual(w.contentTypes(), ['secondhand:generic:plan', 'secondhand:generic:fill']);
+  // The second plan finds nothing new it can fill, so the click ends there.
+  assert.deepEqual(w.contentTypes(), ['secondhand:generic:plan', 'secondhand:generic:fill', 'secondhand:generic:plan']);
   assert.ok(w.content.every(call => call.tabId === 7 && call.frameId === 0));
   const fill = w.content[1];
   assert.equal(fill.token, 'plan-1');
-  assert.deepEqual(fill.assignments, [{ id: 'sh-1', key: 'fullName', guessed: false }, { id: 'sh-2', key: 'zip', guessed: false }]);
+  assert.deepEqual(fill.assignments, [{ id: 'sh-1-0', key: 'fullName', guessed: false }, { id: 'sh-1-1', key: 'zip', guessed: false }]);
   assert.deepEqual(fill.values, { fullName: 'Synthetic private first Synthetic private last', zip: '50309' }, 'only the values being placed reach the page');
-  assert.deepEqual(plain(response.data), { state: 'done', filled: 2, guessed: [], needYou: ['sh-4', 'sh-3'],
+  assert.deepEqual(plain(response.data), { state: 'done', filled: 2, guessed: [], needYou: [w.page.idOf('pickup'), w.page.idOf('size')],
     message: 'Filled 2 · 2 need you. Check your answers before you submit.', pageKey: 'general' });
+  assert.deepEqual(plain(response.data.needYou), ['sh-2-1', 'sh-2-0'], 'need-you ids come from the latest plan');
   assert.doesNotMatch(JSON.stringify(response), /Synthetic private/);
 
   const state = plain((await w.panel({ type: 'ui:pageState' })).data);
   assert.equal(state.autopilot, false);
   assert.equal(state.result.message, response.data.message);
   w.events.updated(7, { status: 'complete' }); await settle();
-  assert.deepEqual(w.contentTypes(), ['secondhand:generic:plan', 'secondhand:generic:fill'], 'nothing continues or navigates on its own');
+  assert.deepEqual(w.contentTypes(), ['secondhand:generic:plan', 'secondhand:generic:fill', 'secondhand:generic:plan'], 'nothing continues or navigates on its own');
   assert.deepEqual(w.nativeTypes(), ['status', 'getFields']);
   assert.deepEqual(w.injected, []);
   w.events.updated(7, { status: 'loading' });
   assert.equal((await w.panel({ type: 'ui:pageState' })).data.result, null);
 });
 
+test('answers that reveal more questions are filled in the same click from one desktop request', async () => {
+  const fields = [
+    { name: 'name', key: 'fullName' }, { name: 'email', key: 'email' },
+    { name: 'size', key: 'householdSize', refuses: true },               // the page rejects it every time
+    { name: 'confirmEmail', key: 'email', revealedBy: 'email' },          // same key: its value was requested
+    { name: 'phone', key: 'phone', revealedBy: 'name' },                  // its key was not requested
+    { ...PICKUP }
+  ];
+  const w = siteWorker({ enabled: true, fields, desktop: { values: { firstName: 'Synthetic private first', lastName: 'Synthetic private last',
+    email: 'synthetic@example.org', householdSize: '4', mobilePhone: '5155550100' } } });
+  const result = plain((await autofill(w)).data);
+  assert.deepEqual(w.nativeTypes(), ['status', 'getFields'], 'one desktop request for the whole click');
+  assert.deepEqual(w.native[1].fields, ['firstName', 'lastName', 'email', 'householdSize']);
+  assert.deepEqual(w.contentTypes(), ['secondhand:generic:plan', 'secondhand:generic:fill', 'secondhand:generic:plan', 'secondhand:generic:fill',
+    'secondhand:generic:plan', 'secondhand:generic:fill'], 'the third pass fills nothing, so the click stops');
+  assert.deepEqual(w.page.answered(), ['name', 'email', 'confirmEmail']);
+  assert.equal(result.filled, 3);
+  assert.deepEqual(result.needYou, [w.page.idOf('pickup'), w.page.idOf('size'), w.page.idOf('phone')]);
+  assert.ok(result.needYou.every(id => id.startsWith('sh-3-')), 'need-you ids come from the latest plan');
+  assert.match(result.message, /^Filled 3 · 3 need you\./);
+  assert.doesNotMatch(JSON.stringify(w.content), /5155550100/);
+});
+
+test('one click fills at most four passes of revealed questions', async () => {
+  const fields = Array.from({ length: 6 }, (_, i) => ({ name: `email${i}`, key: 'email', ...(i ? { revealedBy: `email${i - 1}` } : {}) }));
+  const w = siteWorker({ enabled: true, fields, desktop: { values: { email: 'synthetic@example.org' } } });
+  const result = plain((await autofill(w)).data);
+  assert.equal(w.contentTypes().filter(type => type === 'secondhand:generic:fill').length, 4);
+  assert.deepEqual(w.page.answered(), ['email0', 'email1', 'email2', 'email3']);
+  assert.equal(result.filled, 4);
+  assert.deepEqual(result.needYou, [w.page.idOf('email4')]);
+  assert.deepEqual(w.nativeTypes(), ['status', 'getFields']);
+});
+
+test('a second click on the next page of a multi-page form plans that page again', async () => {
+  const fields = [{ name: 'name', key: 'fullName' }, { name: 'zip', key: 'zip', hidden: true }];
+  const w = siteWorker({ enabled: true, fields });
+  assert.equal((await autofill(w)).data.filled, 1);
+  fields[0].hidden = true; fields[1].hidden = false;          // the form shows its second page at the same URL
+  const second = plain((await autofill(w)).data);
+  assert.deepEqual(w.page.answered(), ['name', 'zip']);
+  assert.deepEqual(w.native.filter(call => call.type === 'getFields').map(call => call.fields), [['firstName', 'lastName'], ['zip']]);
+  assert.equal(second.state, 'done');
+});
+
 test('a form with nothing SecondHand recognizes never contacts the desktop', async () => {
-  const w = siteWorker({ enabled: true, plan: { token: 'plan-1', matched: [], unmatched: pantryPlan().unmatched } });
+  const w = siteWorker({ enabled: true, fields: [{ ...PICKUP }] });
   const result = plain((await autofill(w)).data);
   assert.deepEqual(w.native, []);
   assert.deepEqual(w.contentTypes(), ['secondhand:generic:plan']);
   assert.equal(result.state, 'done');
   assert.equal(result.filled, 0);
-  assert.deepEqual(result.needYou, ['sh-4']);
+  assert.deepEqual(result.needYou, ['sh-1-0']);
 });
 
 test('sites that are not turned on never reach the vault or the page', async () => {
@@ -235,7 +313,7 @@ test('sites that are not turned on never reach the vault or the page', async () 
       const response = await w.launcher({ type, confirmed: true });
       assert.equal(response.ok, false, type);
     }
-    assert.equal((await w.launcher({ type: 'ui:focusField', key: 'sh-4', confirmed: true })).ok, false);
+    assert.equal((await w.launcher({ type: 'ui:focusField', key: 'sh-1-3', confirmed: true })).ok, false);
     assert.deepEqual(w.native, [], JSON.stringify(setup));
     assert.deepEqual(w.content, [], JSON.stringify(setup));
   }
@@ -278,9 +356,11 @@ test('locked, offline, cancelled, and changed pages fill nothing on approved sit
 
 test('need-you focus on approved sites goes to the site engine by field id', async () => {
   const w = siteWorker({ enabled: true });
-  assert.deepEqual(plain((await w.launcher({ type: 'ui:focusField', key: 'sh-4', confirmed: true })).data), { focused: true });
+  const [pickup] = (await autofill(w)).data.needYou;
+  assert.deepEqual(plain((await w.launcher({ type: 'ui:focusField', key: pickup, confirmed: true })).data), { focused: true });
   assert.deepEqual(plain((await w.panel({ type: 'ui:focusField', key: 'sh-9' })).data), { focused: false });
-  assert.deepEqual(w.content.map(({ type, id }) => ({ type, id })), [{ type: 'secondhand:generic:focus', id: 'sh-4' }, { type: 'secondhand:generic:focus', id: 'sh-9' }]);
+  assert.deepEqual(w.content.filter(call => call.type === 'secondhand:generic:focus').map(({ type, id }) => ({ type, id })),
+    [{ type: 'secondhand:generic:focus', id: pickup }, { type: 'secondhand:generic:focus', id: 'sh-9' }]);
   assert.equal(await w.launcher({ type: 'ui:focusField', key: 'input[type=password]', confirmed: true }), undefined);
 });
 

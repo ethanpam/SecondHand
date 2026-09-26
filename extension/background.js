@@ -19,6 +19,7 @@ const MAX_STEPS = 15;
 // tabId -> the Iowa page (origin + path) where the general engine found fields, until the tab navigates.
 const generalPages = new Map();
 const GENERAL_TODO = 'Check your answers, then click Continue.';
+const MAX_GENERAL_PASSES = 4;
 
 function nativeRequest(type, payload = {}) {
   return new Promise((resolve, reject) => {
@@ -250,39 +251,47 @@ async function planGeneral(tabId) {
   return plan;
 }
 
-// One fill from a general-engine plan: one desktop request for the matched keys, then fill.
-// Never continues, submits, or navigates.
+// Fills from a general-engine plan: one desktop request for the keys planned first, then up
+// to four fill passes so questions revealed by an answer are filled too. Each pass plans the
+// page again. Never continues, submits, or navigates.
 async function fillPlan(tabId, url, plan) {
   let values = null;
   try {
     const keys = plan.matched.length ? [...new Set(SecondHandGeneric.requestKeys(plan.matched.map(field => field.key)))] : [];
     if (keys.some(key => typeof key !== 'string' || !KEY.test(key))) throw new Error('SecondHand could not prepare the field request.');
-    let filled = [];
+    let filled = 0;
     if (keys.length) {
       const desktop = await nativeRequest('status');
       if (!desktop?.unlocked) throw new Error('Unlock SecondHand to autofill.');
       const response = await nativeRequest('getFields', { url: safeUrl(url), fields: keys });
       if (!response?.values || typeof response.values !== 'object' || Array.isArray(response.values)) throw new Error('The desktop did not return supported profile fields.');
       values = SecondHandGeneric.deriveValues(response.values);
-      const current = await chrome.tabs.get(tabId);
-      if (current.url !== url || !current.active) throw new Error('The page changed. Click Autofill again.');
-      const assignments = plan.matched.filter(field => typeof values[field.key] === 'string' && values[field.key])
-        .map(field => ({ id: field.id, key: field.key, guessed: false }));
-      if (assignments.length) {
+      for (let pass = 1; ; pass++) {
+        // A revealed question whose key wasn't requested stays with the applicant.
+        const assignments = plan.matched.filter(field => typeof values[field.key] === 'string' && values[field.key])
+          .map(field => ({ id: field.id, key: field.key, guessed: false }));
+        if (!assignments.length) break;
+        const current = await chrome.tabs.get(tabId);
+        if (current.url !== url || !current.active) throw new Error('The page changed. Click Autofill again.');
         // Only the values being placed go to the page.
         const placing = Object.fromEntries(assignments.map(({ key }) => [key, values[key]]));
-        values = null;
         const result = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:fill', token: plan.token, assignments, values: placing }, { frameId: 0 });
         if (!result?.ok || !Array.isArray(result.filled)) throw new Error('This page couldn’t be filled safely. Fill it yourself.');
-        filled = result.filled;
+        const placed = assignments.filter(({ id }) => result.filled.includes(id)).length;
+        if (!placed) break;
+        filled += placed;
+        // The next plan leaves out what is now answered and adds what the answers revealed.
+        plan = await planGeneral(tabId);
+        if (pass === MAX_GENERAL_PASSES) break;
       }
+      values = null;
     }
-    const needYou = [...plan.unmatched.map(field => field.id), ...plan.matched.map(field => field.id).filter(id => !filled.includes(id))];
-    return { filled: filled.length, needYou };
+    // Whatever the latest plan still lists needs the applicant, under that plan's ids.
+    return { filled, needYou: [...plan.unmatched, ...plan.matched].map(field => field.id) };
   } finally { values = null; }
 }
 
-// One fill on an approved site.
+// One click on an approved site.
 async function fillSiteOnce(tabId, url) {
   try {
     const { filled, needYou } = await fillPlan(tabId, url, await planGeneral(tabId));
