@@ -609,17 +609,22 @@ kbd {
   max-width: 640px;
 }
 .doc-page {
-  max-width: 760px;
-  padding-top: 48px;
+  padding-top: 96px;
   padding-bottom: 64px;
 }
-.doc-page h1 {
-  margin-bottom: 8px;
+.doc-page > :not(h1) {
+  max-width: 760px;
 }
-.doc-date {
-  font-size: 14px;
-  color: var(--subtle);
+.doc-page h1 {
+  max-width: 900px;
   margin-bottom: 24px;
+  font-size: clamp(44px, 6vw, 76px);
+}
+.doc-page .doc-date {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--subtle);
+  margin-bottom: 32px;
 }
 .doc-lead {
   font-size: 18px;
@@ -628,8 +633,10 @@ kbd {
   margin-bottom: 32px;
 }
 .doc-page h2 {
-  font-size: 22px;
-  margin: 40px 0 12px;
+  font-size: 28px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  margin: 56px 0 16px;
 }
 .doc-page p,
 .doc-page li {
@@ -663,6 +670,7 @@ kbd {
 }
 .next-steps strong {
   color: var(--foreground);
+  font-weight: 500;
 }
 .doc-page code {
   font-size: 14px;
