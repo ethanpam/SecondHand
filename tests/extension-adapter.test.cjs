@@ -141,11 +141,11 @@ test('changes between preview and approval or caused by page events cannot overw
   assert.equal(changing.querySelector('#lastName').value, 'Portal supplied');
 });
 
-test('public Iowa guest screen metadata fixture is deliberately unsupported', () => {
+test('a partial household question with a visible CAPTCHA is never filled', () => {
   // Only public non-sensitive attributes observed 2026-09-26. No tokens or values.
   const doc = page('<h3>Household Application Information</h3><form id="householdApplicationForm" action="selectHouseholdInfo"><label for="householdApplyProgYes">Yes. At least one person is applying for SNAP, FIP/RCA, or help paying for health coverage.</label><input type="radio" id="householdApplyProgYes" name="householdApplyProg"><input name="captchaAnswer"><input type="hidden" name="reCaptchaResponse"><button>Continue</button></form>', `${adapter.PORTAL}/applyForBenefits/selectHouseholdInfo`);
-  assert.equal(adapter.scan(doc, doc.location.href).recognizedPage, false);
   assert.deepEqual(keys(doc), []);
+  assert.equal(adapter.probePage(doc, doc.location.href).pageKey, 'iowa-captcha');
 });
 
 test('automatic detection is confined to Iowa portal top frames and applicant storage is unavailable', () => {
@@ -387,4 +387,105 @@ test('Select Address is a manual checklist from official help, with no guessed f
   assert.equal(result.checklist[0].status, 'manual');
   assert.equal(adapter.focusField(doc, URL, 'addressReview'), false);
   assert.doesNotMatch(JSON.stringify(result), /Private Suggested/);
+});
+
+const preApplicant = require('./fixtures/iowa-pre-applicant.cjs');
+function screen(name, change) {
+  const { html, path } = preApplicant.screens[name];
+  const dom = new JSDOM(`<!doctype html><body>${html}</body>`, { url: `${adapter.PORTAL}${path}`, pretendToBeVisual: true });
+  const { document } = dom.window;
+  const box = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 };
+  for (const node of document.querySelectorAll('*')) { node.getBoundingClientRect = () => box; node.getClientRects = () => [box]; }
+  preApplicant.attach(document);
+  change?.(document);
+  return document;
+}
+const withBox = element => { const box = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 }; element.getBoundingClientRect = () => box; element.getClientRects = () => [box]; return element; };
+const clicks = (doc, selector) => { let count = 0; doc.querySelectorAll(selector).forEach(element => element.addEventListener('click', () => count++)); return () => count; };
+
+test('household question is a fillable page answered only from an explicit saved program choice', () => {
+  const doc = screen('household');
+  const url = doc.location.href;
+  const probe = adapter.probePage(doc, url);
+  assert.equal(probe.kind, 'fillable');
+  assert.equal(probe.pageKey, 'iowa-program-intent');
+  assert.deepEqual(probe.checklist.map(item => [item.key, item.status, item.required]), [['householdApplyProg', 'missing', true]]);
+  const scanned = adapter.scan(doc, url);
+  assert.deepEqual(scanned.fields.map(field => field.key), ['householdApplyProg']);
+  assert.deepEqual(adapter.profileRequest('iowa-program-intent'), ['programSnap', 'programFip', 'programMedicaid']);
+  assert.deepEqual(adapter.profileRequest('iowa-personal-information'), Object.keys(adapter.definitions));
+  assert.deepEqual(adapter.profileRequest('iowa-instructions'), []);
+  assert.deepEqual(adapter.pageValues('iowa-program-intent', { programSnap: 'yes', programFip: 'no' }), { householdApplyProg: 'yes' });
+  for (const values of [{ programSnap: 'no', programFip: 'no', programMedicaid: 'no' }, {}, { programSnap: 'maybe' }]) {
+    assert.deepEqual(adapter.pageValues('iowa-program-intent', values), {});
+  }
+  assert.deepEqual(adapter.fill(doc, url, scanned.bindings, { householdApplyProg: 'maybe' }).filled, []);
+  const result = adapter.fill(doc, url, adapter.scan(doc, url).bindings, { householdApplyProg: 'yes' });
+  assert.deepEqual(result.filled, ['householdApplyProg']);
+  assert.equal(doc.getElementById('householdApplyProgYes').checked, true);
+  const after = adapter.probePage(doc, url);
+  assert.equal(after.kind, 'blocked');
+  assert.equal(after.pageKey, 'iowa-captcha');
+  assert.equal(after.todo, 'Solve the CAPTCHA, then click Continue.');
+});
+
+test('household matcher fails closed on an extra option, changed label, or changed handler', () => {
+  for (const change of [
+    doc => { const extra = withBox(doc.getElementById('householdApplyProgNo').cloneNode()); extra.id = 'householdApplyProgMaybe'; doc.getElementById('householdApplicationForm').append(extra); },
+    doc => { doc.querySelector('label[for="householdApplyProgYes"]').textContent = 'Yes. Everyone in the household is applying.'; },
+    doc => { doc.getElementById('householdApplyProgYes').setAttribute('onclick', 'submitNow();'); }
+  ]) {
+    const doc = screen('household', change);
+    assert.deepEqual(adapter.scan(doc, doc.location.href).fields, []);
+  }
+});
+
+test('info screens continue through only their exact recorded Continue button, once', () => {
+  for (const [name, pageKey] of [['beforeYouStart', 'iowa-before-start'], ['importantInfo', 'iowa-information'], ['instructions', 'iowa-instructions']]) {
+    const doc = screen(name);
+    const probe = adapter.probePage(doc, doc.location.href);
+    assert.equal(probe.kind, 'info', name);
+    assert.equal(probe.pageKey, pageKey);
+    const saveButton = clicks(doc, 'button.saveButton');
+    const everything = clicks(doc, 'button');
+    assert.equal(adapter.continuePage(doc, doc.location.href).continued, true, name);
+    assert.equal(saveButton(), 1);
+    assert.equal(everything(), 1, 'no illustration, Back, or carousel button is clicked');
+  }
+});
+
+test('continue refuses decoys, duplicates, hidden buttons, form fields, consent, CAPTCHA, and unknown pages', () => {
+  const refusals = [
+    ['instructions', doc => { doc.querySelector('button.saveButton').setAttribute('onclick', "submitUrlLink('submitApplication');return false;"); }],
+    ['importantInfo', doc => { doc.querySelector('main').append(withBox(doc.querySelector('button.saveButton').cloneNode(true))); }],
+    ['importantInfo', doc => { doc.querySelector('button.saveButton').style.display = 'none'; }],
+    ['beforeYouStart', doc => { const input = withBox(doc.createElement('input')); input.name = 'ssn'; doc.querySelector('main').append(input); }],
+    ['instructions', doc => { doc.querySelector('h1').textContent = 'Review and Submit'; }],
+    ['letsGetStarted', null],
+    ['household', doc => { doc.getElementById('captchaDiv').style.display = 'block'; }]
+  ];
+  for (const [name, change] of refusals) {
+    const doc = screen(name, change || undefined);
+    const clicked = clicks(doc, 'button');
+    assert.equal(adapter.continuePage(doc, doc.location.href).continued, false, name);
+    assert.equal(clicked(), 0, name);
+  }
+  const doc = screen('instructions');
+  assert.equal(adapter.continuePage(doc, `${adapter.PORTAL}/applyForBenefits/other`).continued, false);
+});
+
+test('pages that need the applicant carry a plain instruction', () => {
+  const consent = adapter.probePage(screen('letsGetStarted'), `${adapter.PORTAL}/applyForBenefits/letsGetStarted`);
+  assert.equal(consent.kind, 'blocked');
+  assert.equal(consent.pageKey, 'iowa-consent');
+  assert.equal(consent.todo, 'Read and accept Iowa’s consent, then click Continue.');
+  const assisting = adapter.probePage(page('<h1>Assisting Organization or Person</h1><input id="agencyName" name="agencyName">'), URL);
+  assert.equal(assisting.todo, 'If nobody is helping you, leave this blank and click Continue.');
+  const address = adapter.probePage(page('<h1>Select Address</h1>'), URL);
+  assert.equal(address.todo, 'Pick the correct address, then click Continue.');
+  const applicant = adapter.probePage(fullPage(), URL);
+  assert.equal(applicant.todo, 'Check your answers, then click Save and Continue.');
+  const unknown = adapter.probePage(page('<h1>Household Members</h1><input id="member" name="member">'), URL);
+  assert.equal(unknown.kind, 'manual');
+  assert.equal(unknown.todo, undefined);
 });
