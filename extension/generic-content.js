@@ -77,7 +77,11 @@
           return;
         }
         const result = withOwnPanelHidden(() => engine.fillFields(document, message.token, message.assignments, message.values));
-        respond({ ok: result?.ok === true, filled: strings(result?.filled), skipped: strings(result?.skipped), rejected: strings(result?.rejected) });
+        // Some pages (Google Forms) confirm a chosen option a moment after the click: answer once it settles.
+        engine.settle(document, message.token, result).then(
+          settled => respond({ ok: settled?.ok === true, filled: strings(settled?.filled), skipped: strings(settled?.skipped), rejected: strings(settled?.rejected) }),
+          () => respond({ ok: false, error: 'This page could not be checked safely. Review it manually.' }));
+        return true;
       } else if (message.type === 'secondhand:generic:focus' && typeof message.id === 'string') {
         respond({ focused: Boolean(withOwnPanelHidden(() => engine.focusField(document, message.id))) });
       }

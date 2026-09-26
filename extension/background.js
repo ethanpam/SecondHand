@@ -266,9 +266,10 @@ function tallyPage() {
   const tally = { rule: 0, guess: 0, next: false };
   for (const element of document.querySelectorAll('[data-secondhand-filled]')) {
     if (!shown(element)) continue;
-    // A radio or checkbox group is one question, marked on every option.
+    // A radio or checkbox group is one question, marked on every option, native or div-based (Google Forms).
+    const group = ['radio', 'checkbox'].includes(element.getAttribute('role')) ? element.closest('[role="radiogroup"], [role="group"], [role="list"]') : null;
     const question = ['radio', 'checkbox'].includes(element.type) && element.name
-      ? `${element.type}|${element.form ? Array.from(document.forms).indexOf(element.form) : -1}|${element.name}` : element;
+      ? `${element.type}|${element.form ? Array.from(document.forms).indexOf(element.form) : -1}|${element.name}` : group || element;
     if (counted.has(question)) continue;
     counted.add(question);
     if (element.getAttribute('data-secondhand-filled') === 'guess') tally.guess++; else tally.rule++;

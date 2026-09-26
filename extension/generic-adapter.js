@@ -415,10 +415,12 @@
     }
     if (entry.kind === 'ariaRadio') {
       // The page's own script registers the click; only a choice it marked as checked counts.
+      // Google Forms marks it in its next task, so an unmarked choice waits for settle().
       const index = chooseOption(entry.elements.map(ariaOptionText), key, value);
       if (index < 0) return false;
-      entry.elements[index].click();
-      return entry.elements[index].getAttribute('aria-checked') === 'true';
+      const option = entry.elements[index];
+      option.click();
+      return option.getAttribute('aria-checked') === 'true' || { pending: option };
     }
     if (entry.kind === 'checkbox' && entry.elements.length === 1 && KIND[key] === 'yesno') {
       if (value !== 'yes') return false;
@@ -440,30 +442,53 @@
     return entry.elements.some(element => element.getAttribute('aria-invalid') === 'true') || container?.classList.contains('form-line-error') ||
       Boolean(container && Array.from(container.querySelectorAll('[role="alert"]')).some(rendered));
   }
+  function mark(doc, entry, guess) {
+    ensureStyle(doc);
+    entry.elements.forEach(element => element.setAttribute('data-secondhand-filled', guess ? 'guess' : 'rule'));
+  }
   function fillFields(doc, token, assignments, values) {
     const ids = (Array.isArray(assignments) ? assignments : []).map(item => item?.id);
-    if (!current || current.token !== token || current.doc !== doc) return { ok: false, filled: [], skipped: ids, rejected: [] };
-    const filled = [], skipped = [], rejected = [];
+    if (!current || current.token !== token || current.doc !== doc) return { ok: false, filled: [], skipped: ids, rejected: [], pending: [] };
+    const filled = [], skipped = [], rejected = [], pending = [];
+    current.pending = new Map();
     for (const assignment of assignments) {
       const entry = current.map.get(assignment?.id);
       const key = assignment?.key;
       const value = values?.[key];
       // A key the rules did not choose for this question is a guess and must be one a guess may offer.
       const allowed = entry && (match(entry).key === key || canSuggest(key, { label: entry.labels[0] || '' }));
-      if (!entry || !GENERIC_KEYS.includes(key) || !allowed || typeof value !== 'string' || !value || answered(entry) || !entry.elements.every(element => element.isConnected && (ARIA_TYPES[entry.kind] ? ariaUsable(element) : eligible(element))) || !compatible(key, entry) || !fillEntry(entry, key, value)) {
-        skipped.push(assignment?.id); continue;
-      }
+      const placed = entry && GENERIC_KEYS.includes(key) && allowed && typeof value === 'string' && value && !answered(entry) &&
+        entry.elements.every(element => element.isConnected && (ARIA_TYPES[entry.kind] ? ariaUsable(element) : eligible(element))) && compatible(key, entry) && fillEntry(entry, key, value);
+      if (!placed) { skipped.push(assignment?.id); continue; }
+      const guess = assignment.guessed || GUESS_KEYS.includes(key);
+      if (placed.pending) { current.pending.set(assignment.id, { option: placed.pending, entry, guess }); pending.push(assignment.id); continue; }
       entry.elements[0].dispatchEvent(new entry.elements[0].ownerDocument.defaultView.Event('blur'));
       if (rejectedByPage(entry)) {
         if (entry.kind === 'input' || entry.kind === 'textarea' || entry.kind === 'select') setValue(entry.elements[0], '');
         rejected.push(assignment.id); continue;
       }
-      ensureStyle(doc);
-      const guess = assignment.guessed || GUESS_KEYS.includes(key);
-      entry.elements.forEach(element => element.setAttribute('data-secondhand-filled', guess ? 'guess' : 'rule'));
+      mark(doc, entry, guess);
       filled.push(assignment.id);
     }
-    return { ok: true, filled, skipped, rejected };
+    return { ok: true, filled, skipped, rejected, pending };
+  }
+  // Waits for the choices fillFields left pending to show as checked. One the page never
+  // checks (or a stale plan's) is reported as skipped; only confirmed choices count as filled.
+  async function settle(doc, token, result, { timeoutMs = 500 } = {}) {
+    if (!result?.pending?.length) return result;
+    const live = current && current.token === token && current.doc === doc ? current.pending : new Map();
+    const checked = id => live.get(id)?.option.getAttribute('aria-checked') === 'true';
+    const started = Date.now();
+    while (!result.pending.every(checked) && Date.now() - started < timeoutMs) await new Promise(resolve => doc.defaultView.setTimeout(resolve, 10));
+    const settled = { ...result, filled: [...result.filled], skipped: [...result.skipped], rejected: [...result.rejected], pending: [] };
+    for (const id of result.pending) {
+      const item = live.get(id);
+      if (!checked(id)) settled.skipped.push(id);
+      else if (rejectedByPage(item.entry)) settled.rejected.push(id);
+      else { mark(doc, item.entry, item.guess); settled.filled.push(id); }
+      live.delete(id);
+    }
+    return settled;
   }
   // What to show for a question: its whole card or fieldset when that holds only this
   // question's controls, otherwise the control (or choice group) itself.
@@ -494,7 +519,7 @@
   }
   const elementFor = id => current?.map.get(id)?.elements[0] || null;
 
-  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, GUESS_KEYS, plan, requestKeys, deriveValues, fillFields, focusField, elementFor, canSuggest });
+  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, GUESS_KEYS, plan, requestKeys, deriveValues, fillFields, settle, focusField, elementFor, canSuggest });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandGeneric = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
