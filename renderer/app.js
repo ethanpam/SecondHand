@@ -8,7 +8,9 @@
     'hasHomeAddress', 'mailingSameAsHome', 'addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county',
     'mailingAddressLine1', 'mailingAddressLine2', 'mailingCity', 'mailingState', 'mailingZip',
     'programSnap', 'programFip', 'programMedicaid', 'helpPayMedicalBills', 'householdSize',
-    'monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities'];
+    'householdAdults', 'householdChildren', 'householdSeniors', 'householdVeteran', 'householdDisability',
+    'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare',
+    'monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand', 'monthlyMedicalExpenses'];
   const viewNames = { overview: 'Overview', profile: 'My information', applications: 'Applications', extension: 'Chrome extension', privacy: 'Privacy & backups' };
   const statusNames = { draft: 'Draft', in_progress: 'In progress', submitted: 'Submitted', needs_action: 'Needs action', approved: 'Approved', denied: 'Denied' };
   let vaultStatus = { exists: false, unlocked: false, recoveryKey: false, deviceReset: false, deviceResetSupported: false, extensionId: '', bridgeRunning: false };
@@ -17,8 +19,10 @@
   let profileDirty = false;
   let profileRevision = 0;
   let applicationBusy = false;
+  let applicationRefreshRevision = 0;
   let toastTimer;
   let vaultGeneration = 0;
+  let handledLockRevision = -1;
 
   function icon(name) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -123,14 +127,19 @@
     $('overview-applications').replaceChildren();
         $('application-count').textContent = '0';
     if ($('application-dialog').open) $('application-dialog').close();
-    for (const id of ['auth-error', 'reset-error', 'profile-error', 'application-error', 'extension-error', 'extension-prepare-error']) clearError(id);
+    for (const id of ['auth-error', 'reset-error', 'profile-error', 'application-error', 'extension-error', 'extension-prepare-error', 'autofill-trust-error']) clearError(id);
     setProfileDirty(false);
     clearTimeout(toastTimer);
     $('toast').hidden = true;
     $('toast').textContent = '';
   }
 
-  function showLocked(status = vaultStatus) {
+  function showLocked(status = vaultStatus, { refresh = false } = {}) {
+    const revision = Number.isSafeInteger(status.lockRevision) && status.lockRevision >= 0 ? status.lockRevision : null;
+    // The status reply and event can arrive in either order. Clear once for
+    // that transition; a later revision must still cancel pending auth/data.
+    if (!refresh && revision !== null && revision <= handledLockRevision) return;
+    if (revision !== null) handledLockRevision = Math.max(handledLockRevision, revision);
     clearSensitiveUI();
     vaultStatus = { ...status, unlocked: false };
     $('workspace').hidden = true;
@@ -220,6 +229,7 @@
     });
     $('breadcrumb-current').textContent = viewNames[view];
     if (focus) { $('main-content').focus(); window.scrollTo(0, 0); }
+    return true;
   }
 
   function fillProfile() {
@@ -293,6 +303,8 @@
     const setup = vaultStatus.extensionSetup || {};
     const bundled = connected && vaultStatus.extensionId === setup.extensionId;
     $('extension-id').value = vaultStatus.extensionId || '';
+    $('autofill-trust').checked = Boolean(vaultStatus.autofillWithoutAsking);
+    renderTrustedSites();
     $('extension-status').textContent = bundled ? (setup.prepared ? 'Ready to load in Chrome' : 'Setup needs refresh') : connected ? 'Custom connection registered' : 'Needs setup';
     $('extension-status').classList.toggle('connected', connected);
     $('extension-prepared').hidden = !setup.prepared;
@@ -302,6 +314,29 @@
       ? 'In Chrome’s folder chooser, press Command + Shift + G, paste the copied folder path, then choose Open and Select.'
       : 'In Chrome’s folder chooser, paste the copied folder path into the address bar, then choose Select Folder.';
     $('extension-step-label').replaceChildren(document.createTextNode(connected ? 'Manage connection ' : 'Set up extension '), icon('arrow'));
+  }
+
+  function renderTrustedSites() {
+    const sites = Array.isArray(vaultStatus.trustedSites) ? vaultStatus.trustedSites : [];
+    $('trusted-sites').replaceChildren(...sites.map(origin => {
+      const row = element('li', 'trusted-site');
+      const remove = element('button', 'text-button', 'Remove');
+      remove.type = 'button';
+      remove.addEventListener('click', () => {
+        const generation = vaultGeneration;
+        pending(remove, async () => {
+          try {
+            const status = await api.removeTrustedSite(origin);
+            if (generation !== vaultGeneration) return;
+            vaultStatus = { ...vaultStatus, ...status }; renderTrustedSites();
+            toast(`SecondHand will no longer fill forms on ${origin}.`);
+          } catch (error) { if (generation === vaultGeneration) showError('autofill-trust-error', error); }
+        });
+      });
+      row.append(element('code', '', origin), remove);
+      return row;
+    }));
+    $('trusted-sites-empty').hidden = sites.length > 0;
   }
 
   function renderSummary() {
@@ -314,6 +349,11 @@
     const generation = vaultGeneration;
     const loaded = await api.getData();
     if (generation !== vaultGeneration) return;
+    // A successful unlock can supersede a delayed event for a lock that the
+    // desktop already completed before this authenticated status was returned.
+    if (Number.isSafeInteger(status.lockRevision) && status.lockRevision >= 0) {
+      handledLockRevision = Math.max(handledLockRevision, status.lockRevision);
+    }
     vaultStatus = status;
     data = { profile: loaded.profile || {}, applications: Array.isArray(loaded.applications) ? loaded.applications : [] };
     $('auth-form').reset();
@@ -352,8 +392,12 @@
 
   async function refreshApplications(generation) {
     if (!vaultStatus.unlocked || generation !== vaultGeneration) return false;
+    const revision = ++applicationRefreshRevision;
     const latest = await api.getData();
     if (!vaultStatus.unlocked || generation !== vaultGeneration) return false;
+    // A newer refresh owns the list. Still report a valid unlocked generation
+    // to save/delete callers so their completed operation can close its editor.
+    if (revision !== applicationRefreshRevision) return true;
     data.applications = Array.isArray(latest.applications) ? latest.applications : [];
     renderApplications();
     return true;
@@ -365,36 +409,50 @@
     if (!vaultStatus.exists && $('passphrase').value !== $('confirm-passphrase').value) {
       showError('auth-error', 'The passwords don’t match. Please try again.'); $('confirm-passphrase').focus(); return;
     }
+    const generation = vaultGeneration;
     pending($('auth-submit'), async () => {
       try {
-        if (vaultStatus.exists) await loadUnlocked(await api.unlock($('passphrase').value));
-        else {
+        if (vaultStatus.exists) {
+          const status = await api.unlock($('passphrase').value);
+          if (generation !== vaultGeneration) return;
+          await loadUnlocked(status);
+        } else {
           const allowDeviceReset = !$('device-reset-field').hidden && $('allow-device-reset').checked;
           const created = await api.createVault({ password: $('passphrase').value, allowDeviceReset });
+          if (generation !== vaultGeneration) return;
           await loadUnlocked(created.status);
+          if (generation !== vaultGeneration) return;
           showRecoveryKey(created.recoveryKey);
           if (created.deviceResetFailed) $('recovery-feedback').textContent = 'This computer couldn’t save a reset option, so keep this key safe.';
         }
-      } catch (error) { showError('auth-error', error); }
-      finally { $('passphrase').value = ''; $('confirm-passphrase').value = ''; }
+      } catch (error) { if (generation === vaultGeneration) showError('auth-error', error); }
+      finally {
+        if (generation === vaultGeneration) { $('passphrase').value = ''; $('confirm-passphrase').value = ''; }
+      }
     });
   });
 
   $('forgot-password').addEventListener('click', () => setResetMode(true));
-  $('reset-cancel').addEventListener('click', () => showLocked(vaultStatus));
+  $('reset-cancel').addEventListener('click', () => showLocked(vaultStatus, { refresh: true }));
   $('reset-form').addEventListener('submit', (event) => {
     event.preventDefault(); clearError('reset-error');
     if (!api) return;
     if ($('reset-password').value !== $('reset-confirm').value) {
       showError('reset-error', 'The passwords don’t match. Please try again.'); $('reset-confirm').focus(); return;
     }
+    const generation = vaultGeneration;
     pending($('reset-submit'), async () => {
       try {
         const password = $('reset-password').value;
-        await loadUnlocked(await api.resetPassword(resetWithDevice() ? { method: 'device', password } : { recoveryKey: $('recovery-key-input').value, password }));
+        const status = await api.resetPassword(resetWithDevice() ? { method: 'device', password } : { recoveryKey: $('recovery-key-input').value, password });
+        if (generation !== vaultGeneration) return;
+        await loadUnlocked(status);
+        if (generation !== vaultGeneration) return;
         toast('Your password was reset. Use your new password next time.');
-      } catch (error) { showError('reset-error', error); }
-      finally { $('reset-password').value = ''; $('reset-confirm').value = ''; }
+      } catch (error) { if (generation === vaultGeneration) showError('reset-error', error); }
+      finally {
+        if (generation === vaultGeneration) { $('reset-password').value = ''; $('reset-confirm').value = ''; }
+      }
     });
   });
 
@@ -449,13 +507,22 @@
       try {
         const result = await api.importBackup();
         if (result.cancelled) return;
-        showLocked(await api.status());
+        // Restoring changes whether a vault exists without a lock transition.
+        showLocked(await api.status(), { refresh: true });
         toast('Backup restored. Unlock it with the password it was created with.');
       } catch (error) { showError('auth-error', error); }
     });
   });
 
-  document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', (event) => { event.preventDefault(); showView(button.dataset.view); }));
+  document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', (event) => {
+    event.preventDefault();
+    const view = button.dataset.view;
+    if (showView(view) && (view === 'overview' || view === 'applications')) {
+      // Native progress may arrive while another desktop view is active. Read
+      // fresh application records on navigation without replacing profile edits.
+      refreshApplications(vaultGeneration).catch(() => { /* Keep the current list until the next refresh or lock. */ });
+    }
+  }));
   document.querySelector('.auth-brand').addEventListener('click', (event) => event.preventDefault());
   $('overview-start').addEventListener('click', () => showView('profile'));
   $('lock-button').addEventListener('click', lockVault);
@@ -565,6 +632,22 @@
       } catch (error) { if (generation === vaultGeneration) showError('extension-error', error); }
     });
   });
+  $('autofill-trust').addEventListener('change', () => {
+    clearError('autofill-trust-error');
+    const generation = vaultGeneration;
+    const wanted = $('autofill-trust').checked;
+    $('autofill-trust').disabled = true;
+    api.setAutofillTrust(wanted).then(status => {
+      if (generation !== vaultGeneration) return;
+      vaultStatus = { ...vaultStatus, ...status };
+      renderSetup();
+      toast(wanted ? 'Chrome can now autofill without asking while SecondHand is unlocked.' : 'Chrome will ask before each autofill.');
+    }, error => {
+      if (generation !== vaultGeneration) return;
+      $('autofill-trust').checked = !wanted;
+      showError('autofill-trust-error', error);
+    }).finally(() => { $('autofill-trust').disabled = false; });
+  });
   $('extension-open-portal').addEventListener('click', () => pending($('extension-open-portal'), async () => {
     try { await api.openPortal(); } catch (error) { toast(error.message || 'Unable to open the Iowa portal.', true); }
   }));
@@ -595,14 +678,11 @@
       $('confirm-passphrase').disabled = true;
       return;
     }
-    // The lock response and this notification can arrive in either order. Once the
-    // unlock screen is showing, saved details are already cleared, so a repeat must
-    // not reset an unlock attempt the person has started. A load still in progress
-    // while the unlock screen is hidden is always cancelled.
-    api.onLocked(() => {
-      if (!vaultStatus.unlocked && !$('auth-view').hidden) return;
-      showLocked({ ...vaultStatus, exists: true, unlocked: false });
-    });
+    // The lock response and this notification can arrive in either order. The lock
+    // revision lets showLocked skip a repeat of a lock already shown, so a late notice
+    // cannot reset an unlock attempt the person has started, while a newer lock still
+    // cancels any pending unlock or profile load.
+    api.onLocked(notification => showLocked({ ...vaultStatus, exists: true, unlocked: false, lockRevision: notification?.lockRevision }));
     try {
       const status = await api.status();
       if (status.unlocked) await loadUnlocked(status); else showLocked(status);

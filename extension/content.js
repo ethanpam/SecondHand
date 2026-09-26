@@ -1,6 +1,8 @@
 (function () {
   'use strict';
   const adapter = globalThis.SecondHandIowa;
+  // Fills Iowa pages the adapter hasn't verified. Loaded just before this script.
+  const engine = globalThis.SecondHandGeneric;
   if (window !== window.top || !adapter?.isSupportedUrl(location.href) || globalThis.secondHandContentInstalled) return;
   globalThis.secondHandContentInstalled = true;
 
@@ -9,11 +11,8 @@
   let revision = 0;
   let panelHost = null;
   let panelFrame = null;
-  function sizePanel() {
-    if (!panelHost || !panelFrame) return;
-    panelHost.style.setProperty('width', 'min(244px, calc(100vw - 24px))', 'important');
-    panelHost.style.setProperty('height', '62px', 'important');
-  }
+  let generalUrl = ''; // the unverified page where the general engine found fields
+  const strings = value => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
 
   function withOwnPanelHidden(work) {
     if (!panelHost) return work();
@@ -27,6 +26,18 @@
     }
   }
 
+  // A full widget on application screens SecondHand knows; a small pill elsewhere.
+  function sizePanel() {
+    let full = false;
+    try {
+      const page = withOwnPanelHidden(() => adapter.probePage(document, location.href));
+      full = page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo) || generalUrl === location.href;
+    } catch { full = false; }
+    panelHost.setAttribute('data-secondhand-size', full ? 'full' : 'pill');
+    panelHost.style.setProperty('width', full ? 'min(272px, calc(100vw - 24px))' : '46px', 'important');
+    panelHost.style.setProperty('height', full ? '70px' : '46px', 'important');
+  }
+
   function ensurePanel() {
     if (!adapter.isSupportedUrl(location.href)) {
       pending = null;
@@ -34,7 +45,7 @@
       panelHost?.remove();
       return;
     }
-    if (!document.body || panelHost?.isConnected) return;
+    if (!document.body) return;
     if (!panelHost) {
       panelHost = document.createElement('div');
       panelHost.setAttribute('data-secondhand-assistant', '');
@@ -54,7 +65,7 @@
       shadow.append(panelFrame);
     }
     sizePanel();
-    document.body.append(panelHost);
+    if (!panelHost.isConnected) document.body.append(panelHost);
   }
 
   function scanMetadata(scan, token) {
@@ -62,9 +73,9 @@
       fields: scan.fields, ambiguous: scan.ambiguous, skipped: scan.skipped };
   }
 
-  function preview(fresh = false) {
+  function preview() {
     const scan = adapter.scan(document, location.href);
-    const reusable = !fresh && pending && pending.url === location.href && pending.expires > Date.now() &&
+    const reusable = pending && pending.url === location.href && pending.expires > Date.now() &&
       pending.revision === revision && pending.bindings.length === scan.bindings.length &&
       scan.bindings.every((binding, index) => binding.key === pending.bindings[index].key &&
         binding.element === pending.bindings[index].element && binding.element.value === pending.values[index]);
@@ -75,13 +86,46 @@
     return scanMetadata(scan, pending.token);
   }
 
-  function pageState() {
-    const page = typeof adapter.probePage === 'function' ? adapter.probePage(document, location.href) :
-      { kind: 'unsupported', pageKey: 'unverified', heading: '', reason: 'This page needs manual completion.', canAdvance: false, fields: [], requiredRemaining: 0, manualRemaining: 0 };
-    const scan = preview();
-    const snapshot = typeof adapter.captureNavigation === 'function' ? adapter.captureNavigation(document, location.href) : null;
-    navigation = snapshot ? { token: crypto.randomUUID(), snapshot, url: location.href, expires: Date.now() + 15000 } : null;
-    return { page, scan, nextToken: navigation?.token || null };
+  function pageState(navigationPreview = true) {
+    const page = adapter.probePage(document, location.href), scan = preview();
+    if (navigationPreview) {
+      const snapshot = ['iowa-personal-information', 'iowa-select-address'].includes(page.pageKey) && page.canAdvance ? adapter.captureNavigation(document, location.href) : null;
+      navigation = snapshot ? { token: crypto.randomUUID(), snapshot, url: location.href, expires: Date.now() + 15000 } : null;
+    }
+    return { page, scan, nextToken: navigationPreview ? navigation?.token || null : null };
+  }
+
+  // The general engine only runs where the Iowa adapter has neither a verified form nor an instruction.
+  function unverified() {
+    const page = adapter.probePage(document, location.href);
+    return page.kind === 'manual' && !page.todo;
+  }
+  // Rebuilt field by field so nothing but labels and ids ever leaves the page.
+  const planText = value => { if (typeof value !== 'string') throw new Error('Invalid plan.'); return value; };
+  function planMetadata(plan) {
+    if (!plan || !Array.isArray(plan.matched) || !Array.isArray(plan.unmatched)) throw new Error('Invalid plan.');
+    return {
+      token: planText(plan.token),
+      matched: plan.matched.map(field => ({ id: planText(field.id), key: planText(field.key), confidence: planText(field.confidence) })),
+      unmatched: plan.unmatched.map(field => ({ id: planText(field.id), label: typeof field.label === 'string' ? field.label : '',
+        type: typeof field.type === 'string' ? field.type : '', options: strings(field.options), required: field.required === true }))
+    };
+  }
+  function general(message) {
+    if (!engine) return { ok: false, error: 'SecondHand could not load its form engine. Reinstall the extension.' };
+    if (!unverified()) return { ok: false, error: 'SecondHand fills this page with its Iowa rules.' };
+    if (message.type === 'secondhand:generic:plan') {
+      const plan = planMetadata(engine.plan(document));
+      if (plan.matched.length) generalUrl = location.href;
+      return plan;
+    }
+    if (typeof message.token !== 'string' || !Array.isArray(message.assignments) || !message.values || typeof message.values !== 'object' || Array.isArray(message.values)) {
+      return { ok: false, error: 'The fill request was malformed. Nothing was filled.' };
+    }
+    const result = engine.fillFields(document, message.token, message.assignments, message.values);
+    // A choice the page confirms a moment after the click is settled before answering.
+    return engine.settle(document, message.token, result)
+      .then(settled => ({ ok: settled?.ok === true, filled: strings(settled?.filled), skipped: strings(settled?.skipped), rejected: strings(settled?.rejected) }));
   }
 
   ensurePanel();
@@ -100,23 +144,20 @@
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (sender.id !== chrome.runtime.id || !message || window !== window.top || !adapter.isSupportedUrl(location.href)) return;
     try {
-      if (message.type === 'secondhand:scan') {
-        navigation = null;
-        respond(withOwnPanelHidden(() => preview(true)));
-      } else if (message.type === 'secondhand:pageState') {
-        respond(withOwnPanelHidden(pageState));
+      if (message.type === 'secondhand:pageState') {
+        respond(withOwnPanelHidden(() => pageState(message.navigationPreview !== false)));
+      } else if (message.type === 'secondhand:continue') {
+        pending = null; navigation = null;
+        respond(withOwnPanelHidden(() => adapter.continuePage(document, location.href)));
+      } else if (message.type === 'secondhand:next') {
+        const original = navigation; navigation = null; pending = null;
+        if (message.authorized !== true || !original || original.token !== message.token || original.url !== location.href || original.expires < Date.now()) {
+          respond({ advanced: false, reason: 'The page changed or its navigation preview expired. Check it again.' }); return;
+        }
+        respond(withOwnPanelHidden(() => adapter.advance(document, location.href, original.snapshot)));
       } else if (message.type === 'secondhand:focusField' && typeof message.key === 'string' && typeof adapter.focusField === 'function') {
         const focused = withOwnPanelHidden(() => adapter.focusField(document, location.href, message.key));
         respond({ focused: Boolean(focused) });
-      } else if (message.type === 'secondhand:next') {
-        const original = navigation;
-        navigation = null; // One authorized worker request, one navigation attempt.
-        if (message.authorized !== true || !original || message.token !== original.token || original.url !== location.href || original.expires < Date.now() || typeof adapter.advance !== 'function') {
-          respond({ advanced: false, reason: 'The page changed or its next step is not verified. Rescan and review the form.' });
-          return;
-        }
-        pending = null;
-        respond(withOwnPanelHidden(() => adapter.advance(document, location.href, original.snapshot)));
       } else if (message.type === 'secondhand:fill') {
         const original = pending;
         pending = null; // One approval, one attempt. No automatic retry.
@@ -128,6 +169,14 @@
         const bindings = original.bindings.filter(binding => message.fields.includes(binding.key));
         const result = withOwnPanelHidden(() => adapter.fill(document, location.href, bindings, message.values));
         respond({ ok: true, filledCount: result.filled.length, skippedCount: result.skipped.length });
+      } else if (message.type === 'secondhand:generic:plan' || message.type === 'secondhand:generic:fill') {
+        const answer = withOwnPanelHidden(() => general(message));
+        ensurePanel();
+        if (typeof answer?.then !== 'function') { respond(answer); return; }
+        answer.then(respond, () => respond({ ok: false, error: 'This page could not be checked safely. Review it manually, then rescan.' }));
+        return true;
+      } else if (message.type === 'secondhand:generic:focus' && typeof message.id === 'string' && engine) {
+        respond({ focused: Boolean(withOwnPanelHidden(() => engine.focusField(document, message.id))) });
       }
     } catch {
       pending = null;

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { validateProfile, validateApplication, validateStoredApplication, isPortalUrl, YES_NO_FIELDS, PROFILE_FIELDS } = require('../shared/schema.cjs');
+const { validateProfile, validateApplication, validateStoredApplication, isPortalUrl, YES_NO_FIELDS, PROFILE_FIELDS, FIELD_LABELS } = require('../shared/schema.cjs');
 const fictionalProfile = require('./fixtures/applicant-profile.json');
 
 test('only the exact HTTPS Iowa application origin and path can receive fields', () => {
@@ -43,7 +43,7 @@ test('mailing contact fields stay separate, use validated formats, and the full 
   const complete = validateProfile(fictionalProfile);
   assert.deepEqual(Object.keys(fictionalProfile).sort(), [...PROFILE_FIELDS].sort());
   assert.equal(complete.mailingAddressLine1, 'PO Box 123');
-  assert.equal(complete.addressLine1, '123 Test Way');
+  assert.equal(complete.addressLine1, fictionalProfile.addressLine1);
   assert.equal(validateProfile({ mailingState: 'ia' }).mailingState, 'IA');
   assert.throws(() => validateProfile({ mailingState: 'Iowa' }));
   assert.throws(() => validateProfile({ mailingZip: '123' }));
@@ -65,4 +65,30 @@ test('stored application timestamps survive validation without being rewritten',
   assert.deepEqual(validateStoredApplication(original), original);
   assert.throws(() => validateStoredApplication({ ...original, createdAt: 'yesterday' }));
   assert.throws(() => validateStoredApplication({ ...original, id: '' }));
+});
+
+test('household counts accept whole numbers from 0 to 30 and household flags accept only yes or no', () => {
+  for (const key of ['householdAdults', 'householdChildren', 'householdSeniors', 'householdVeteran', 'householdDisability']) assert.ok(PROFILE_FIELDS.includes(key), key);
+  for (const value of ['', '0', '7', '30']) assert.equal(validateProfile({ householdChildren: value }).householdChildren, value);
+  for (const value of ['31', '-1', '2.5', 'abc', '007']) assert.throws(() => validateProfile({ householdSeniors: value }), /whole number from 0 to 30/, value);
+  assert.equal(validateProfile({ householdVeteran: 'yes', householdDisability: 'no' }).householdVeteran, 'yes');
+  assert.throws(() => validateProfile({ householdVeteran: 'maybe' }), /Yes, No, or left unanswered/);
+});
+
+test('Iowa financial answers: money on hand and medical costs are dollar amounts; household status questions are yes or no', () => {
+  assert.deepEqual(Object.fromEntries(['assetsOnHand', 'monthlyMedicalExpenses', 'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare'].map(key => [key, FIELD_LABELS[key]])), {
+    assetsOnHand: 'Money on hand (cash, checking, savings)', monthlyMedicalExpenses: 'Monthly medical expenses',
+    householdAllCitizens: 'Everyone in household a US citizen', householdLegalStatus: 'If not, legal documents to stay in the US',
+    householdPregnant: 'Anyone in household pregnant', householdMedicare: 'Anyone in household on Medicare'
+  });
+  for (const key of ['assetsOnHand', 'monthlyMedicalExpenses']) {
+    assert.ok(PROFILE_FIELDS.includes(key), key);
+    for (const value of ['', '0', '1250', '1250.5', '99.99']) assert.equal(validateProfile({ [key]: value })[key], value);
+    for (const value of ['-1', 'abc', '1.234', '$20']) assert.throws(() => validateProfile({ [key]: value }), /nonnegative dollar amount/, value);
+  }
+  for (const key of ['householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare']) {
+    assert.ok(PROFILE_FIELDS.includes(key) && YES_NO_FIELDS.includes(key), key);
+    assert.equal(validateProfile({})[key], '', key);
+    assert.throws(() => validateProfile({ [key]: 'maybe' }), /Yes, No, or left unanswered/, key);
+  }
 });
