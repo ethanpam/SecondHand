@@ -5,15 +5,9 @@
   globalThis.secondHandContentInstalled = true;
 
   let pending = null;
-  let navigation = null;
   let revision = 0;
   let panelHost = null;
   let panelFrame = null;
-  function sizePanel() {
-    if (!panelHost || !panelFrame) return;
-    panelHost.style.setProperty('width', 'min(244px, calc(100vw - 24px))', 'important');
-    panelHost.style.setProperty('height', '62px', 'important');
-  }
 
   function withOwnPanelHidden(work) {
     if (!panelHost) return work();
@@ -27,14 +21,23 @@
     }
   }
 
+  // A full Autofill bar on the fillable applicant page; a small pill elsewhere.
+  function sizePanel() {
+    let fillable = false;
+    try { fillable = withOwnPanelHidden(() => adapter.probePage(document, location.href)).kind === 'fillable'; }
+    catch { fillable = false; }
+    panelHost.setAttribute('data-secondhand-size', fillable ? 'full' : 'pill');
+    panelHost.style.setProperty('width', fillable ? 'min(244px, calc(100vw - 24px))' : '46px', 'important');
+    panelHost.style.setProperty('height', fillable ? '62px' : '46px', 'important');
+  }
+
   function ensurePanel() {
     if (!adapter.isSupportedUrl(location.href)) {
       pending = null;
-      navigation = null;
       panelHost?.remove();
       return;
     }
-    if (!document.body || panelHost?.isConnected) return;
+    if (!document.body) return;
     if (!panelHost) {
       panelHost = document.createElement('div');
       panelHost.setAttribute('data-secondhand-assistant', '');
@@ -54,7 +57,7 @@
       shadow.append(panelFrame);
     }
     sizePanel();
-    document.body.append(panelHost);
+    if (!panelHost.isConnected) document.body.append(panelHost);
   }
 
   function scanMetadata(scan, token) {
@@ -62,9 +65,9 @@
       fields: scan.fields, ambiguous: scan.ambiguous, skipped: scan.skipped };
   }
 
-  function preview(fresh = false) {
+  function preview() {
     const scan = adapter.scan(document, location.href);
-    const reusable = !fresh && pending && pending.url === location.href && pending.expires > Date.now() &&
+    const reusable = pending && pending.url === location.href && pending.expires > Date.now() &&
       pending.revision === revision && pending.bindings.length === scan.bindings.length &&
       scan.bindings.every((binding, index) => binding.key === pending.bindings[index].key &&
         binding.element === pending.bindings[index].element && binding.element.value === pending.values[index]);
@@ -76,12 +79,7 @@
   }
 
   function pageState() {
-    const page = typeof adapter.probePage === 'function' ? adapter.probePage(document, location.href) :
-      { kind: 'unsupported', pageKey: 'unverified', heading: '', reason: 'This page needs manual completion.', canAdvance: false, fields: [], requiredRemaining: 0, manualRemaining: 0 };
-    const scan = preview();
-    const snapshot = typeof adapter.captureNavigation === 'function' ? adapter.captureNavigation(document, location.href) : null;
-    navigation = snapshot ? { token: crypto.randomUUID(), snapshot, url: location.href, expires: Date.now() + 15000 } : null;
-    return { page, scan, nextToken: navigation?.token || null };
+    return { page: adapter.probePage(document, location.href), scan: preview() };
   }
 
   ensurePanel();
@@ -95,32 +93,19 @@
   document.addEventListener('change', () => { revision++; }, true);
   window.addEventListener('popstate', ensurePanel);
   const watch = setInterval(ensurePanel, 1000);
-  window.addEventListener('pagehide', () => { clearInterval(watch); observer.disconnect(); pending = null; navigation = null; }, { once: true });
+  window.addEventListener('pagehide', () => { clearInterval(watch); observer.disconnect(); pending = null; }, { once: true });
 
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (sender.id !== chrome.runtime.id || !message || window !== window.top || !adapter.isSupportedUrl(location.href)) return;
     try {
-      if (message.type === 'secondhand:scan') {
-        navigation = null;
-        respond(withOwnPanelHidden(() => preview(true)));
-      } else if (message.type === 'secondhand:pageState') {
+      if (message.type === 'secondhand:pageState') {
         respond(withOwnPanelHidden(pageState));
       } else if (message.type === 'secondhand:focusField' && typeof message.key === 'string' && typeof adapter.focusField === 'function') {
         const focused = withOwnPanelHidden(() => adapter.focusField(document, location.href, message.key));
         respond({ focused: Boolean(focused) });
-      } else if (message.type === 'secondhand:next') {
-        const original = navigation;
-        navigation = null; // One authorized worker request, one navigation attempt.
-        if (message.authorized !== true || !original || message.token !== original.token || original.url !== location.href || original.expires < Date.now() || typeof adapter.advance !== 'function') {
-          respond({ advanced: false, reason: 'The page changed or its next step is not verified. Rescan and review the form.' });
-          return;
-        }
-        pending = null;
-        respond(withOwnPanelHidden(() => adapter.advance(document, location.href, original.snapshot)));
       } else if (message.type === 'secondhand:fill') {
         const original = pending;
         pending = null; // One approval, one attempt. No automatic retry.
-        navigation = null;
         if (!original || original.token !== message.token || original.url !== location.href || original.expires < Date.now() || !Array.isArray(message.fields) || !message.values || typeof message.values !== 'object' || Array.isArray(message.values)) {
           respond({ ok: false, error: 'The page changed or the preview expired. Scan again.' });
           return;
@@ -131,7 +116,6 @@
       }
     } catch {
       pending = null;
-      navigation = null;
       respond({ ok: false, error: 'This page could not be checked safely. Review it manually, then rescan.' });
     }
   });

@@ -19,8 +19,7 @@ function content(t, url = `${adapter.PORTAL}/applicant`) {
   const frames = [];
   const create = window.document.createElement.bind(window.document);
   window.document.createElement = name => { const element = create(name); if (name === 'iframe') frames.push(element); return element; };
-  let advanced = 0;
-  const opaque = { element: window.document.querySelector('button'), internalValue: 'SYNTHETIC-NAVIGATION-PRIVATE-STATE' };
+  let kind = 'fillable';
   window.chrome = { runtime: { id: extensionId, getURL: extensionURL, onMessage: { addListener: callback => { listener = callback; } } } };
   window.SecondHandIowa = {
     isSupportedUrl: adapter.isSupportedUrl,
@@ -29,14 +28,12 @@ function content(t, url = `${adapter.PORTAL}/applicant`) {
       const fields = element.value ? [] : [{ key: 'firstName', label: 'First name' }];
       return { supported: true, recognizedPage: true, fields, bindings: fields.map(field => ({ key: field.key, element })), ambiguous: [], skipped: [] };
     },
-    probePage: () => ({ kind: 'fillable', pageKey: 'primary-applicant', heading: 'Enter Personal Information', reason: '', canAdvance: true, fields: [{ key: 'firstName', label: 'First name' }], requiredRemaining: 0, manualRemaining: 0 }),
+    probePage: () => ({ kind, pageKey: 'primary-applicant', heading: 'Enter Personal Information', reason: '', fields: [{ key: 'firstName', label: 'First name' }], requiredRemaining: 0, manualRemaining: 0 }),
     focusField: (_document, _url, key) => { if (key !== 'firstName') return false; window.document.getElementById('firstName').focus(); return true; },
-    captureNavigation: () => opaque,
-    advance: (_document, _url, snapshot) => { assert.equal(snapshot, opaque); advanced++; return { advanced: true, reason: 'Continued to the next page.' }; },
     fill: (_document, _url, bindings, values) => { for (const binding of bindings) binding.element.value = values[binding.key]; return { filled: bindings.map(binding => binding.key), skipped: [] }; }
   };
   window.eval(source('content.js'));
-  return { window, frames, get advanced() { return advanced; },
+  return { window, frames, setKind: value => { kind = value; },
     request(message, sender = { id: extensionId }) { let response; listener?.(message, sender, value => { response = value; }); return response; } };
 }
 
@@ -64,15 +61,13 @@ test('on-page assistant is isolated in a fixed extension iframe only on the exac
   assert.equal(child.contentWindow.secondHandContentInstalled, undefined);
 });
 
-test('page-state polls reuse unchanged preview tokens and never serialize field values or navigation snapshots', async t => {
+test('page-state polls reuse unchanged preview tokens and never serialize field values', async t => {
   const page = content(t);
   await tick();
   const first = page.request({ type: 'secondhand:pageState' });
   const second = page.request({ type: 'secondhand:pageState' });
   assert.equal(second.scan.token, first.scan.token);
-  assert.ok(second.nextToken);
   const serialized = JSON.stringify(second);
-  assert.equal(serialized.includes('SYNTHETIC-NAVIGATION-PRIVATE-STATE'), false);
   assert.equal(serialized.includes('bindings'), false);
   assert.equal(serialized.includes('values'), false);
   page.window.document.querySelector('form').setAttribute('data-step', 'changed');
@@ -85,35 +80,41 @@ test('page-state polls reuse unchanged preview tokens and never serialize field 
   assert.equal(populated.scan.fields.length, 0);
 });
 
-test('fill invalidates prior navigation; Next requires an authorized fresh one-use token', t => {
+test('fill uses a fresh one-use preview and pageState carries no navigation token', t => {
   const page = content(t);
   const first = page.request({ type: 'secondhand:pageState' });
+  assert.equal('nextToken' in first, false);
   const filled = page.request({ type: 'secondhand:fill', token: first.scan.token, fields: ['firstName'], values: { firstName: 'Synthetic applicant' } });
   assert.equal(filled.filledCount, 1);
   assert.equal(JSON.stringify(filled).includes('Synthetic applicant'), false);
-  assert.equal(page.request({ type: 'secondhand:next', token: first.nextToken, authorized: true }).advanced, false);
-  const fresh = page.request({ type: 'secondhand:pageState' });
-  assert.equal(page.request({ type: 'secondhand:next', token: fresh.nextToken, authorized: true }).advanced, true);
-  assert.equal(page.advanced, 1);
-  assert.equal(page.request({ type: 'secondhand:next', token: fresh.nextToken, authorized: true }).advanced, false);
-  const denied = page.request({ type: 'secondhand:pageState' });
-  assert.equal(page.request({ type: 'secondhand:next', token: denied.nextToken }).advanced, false);
-  assert.equal(page.advanced, 1);
+  assert.equal(page.request({ type: 'secondhand:fill', token: first.scan.token, fields: ['firstName'], values: { firstName: 'Replay' } }).ok, false);
+  assert.equal(page.request({ type: 'secondhand:next', token: 'anything', authorized: true }), undefined);
+});
+
+test('widget host is a full bar on fillable pages and a small pill elsewhere', t => {
+  const page = content(t);
+  const host = page.window.document.querySelector('[data-secondhand-assistant]');
+  assert.equal(host.getAttribute('data-secondhand-size'), 'full');
+  assert.equal(host.style.height, '62px');
+  page.setKind('manual');
+  page.window.dispatchEvent(new page.window.Event('popstate'));
+  assert.equal(host.getAttribute('data-secondhand-size'), 'pill');
+  assert.equal(host.style.height, '46px');
+  assert.equal(host.style.width, '46px');
+  page.setKind('fillable');
+  page.window.dispatchEvent(new page.window.Event('popstate'));
+  assert.equal(host.getAttribute('data-secondhand-size'), 'full');
 });
 
 test('foreign extension messages cannot scan or focus, and the launcher cannot expand over the form', t => {
   const page = content(t);
   const host = page.window.document.querySelector('[data-secondhand-assistant]');
   assert.equal(page.request({ type: 'secondhand:pageState' }, { id: 'b'.repeat(32) }), undefined);
-  assert.equal(page.request({ type: 'secondhand:panel', collapsed: true }, { id: 'b'.repeat(32) }), undefined);
-  assert.equal(host.style.height, '62px');
-  page.request({ type: 'secondhand:panel', collapsed: false });
   assert.equal(host.style.height, '62px');
   assert.equal(page.request({ type: 'secondhand:focusField', key: 'firstName' }, { id: 'b'.repeat(32) }), undefined);
   assert.equal(page.request({ type: 'secondhand:focusField', key: 'firstName' }).focused, true);
   assert.equal(page.window.document.activeElement.id, 'firstName');
   assert.equal(page.request({ type: 'secondhand:focusField', key: 'unverified' }).focused, false);
-  assert.equal(page.advanced, 0);
 });
 
 test('only the assistant overlay is hidden during portal checks and is restored even after an adapter error', t => {
@@ -123,7 +124,7 @@ test('only the assistant overlay is hidden during portal checks and is restored 
   portalOverlay.id = 'portal-overlay';
   page.window.document.body.append(portalOverlay);
   const observed = [];
-  for (const method of ['scan', 'probePage', 'captureNavigation', 'fill', 'advance']) {
+  for (const method of ['scan', 'probePage', 'fill']) {
     const original = page.window.SecondHandIowa[method];
     page.window.SecondHandIowa[method] = (...args) => {
       assert.equal(host.style.visibility, 'hidden');
@@ -135,11 +136,7 @@ test('only the assistant overlay is hidden during portal checks and is restored 
   const first = page.request({ type: 'secondhand:pageState' });
   assert.equal(host.style.visibility, '');
   page.request({ type: 'secondhand:fill', token: first.scan.token, fields: ['firstName'], values: { firstName: 'Synthetic' } });
-  assert.equal(host.style.visibility, '');
-  const next = page.request({ type: 'secondhand:pageState' });
-  page.request({ type: 'secondhand:next', token: next.nextToken, authorized: true });
-  assert.equal(host.style.visibility, '');
-  for (const method of ['scan', 'probePage', 'captureNavigation', 'fill', 'advance']) assert.ok(observed.includes(method));
+  for (const method of ['scan', 'probePage', 'fill']) assert.ok(observed.includes(method));
   page.window.SecondHandIowa.probePage = () => { throw new Error('Synthetic failure'); };
   assert.equal(page.request({ type: 'secondhand:pageState' }).ok, false);
   assert.equal(host.style.visibility, '');
