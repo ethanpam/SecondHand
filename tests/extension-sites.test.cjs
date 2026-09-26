@@ -806,22 +806,22 @@ test('an https subframe answers plans without creating a widget', t => {
   assert.equal(result.token, 'plan-1');
   assert.equal(dom.window.document.querySelector('[data-secondhand-assistant]'), null);
 });
-test('content fill reports rejected ids without values', t => {
+test('content fill reports rejected ids without values', async t => {
   const page = siteContent(t);
-  page.window.SecondHandGeneric.fillFields = () => ({ ok: true, filled: [], skipped: [], rejected: ['sh-1'], values: { secret: 'private' } });
-  const result = page.request({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [], values: {} });
+  page.window.SecondHandGeneric.fillFields = () => ({ ok: true, filled: [], skipped: [], rejected: ['sh-1'], pending: [], values: { secret: 'private' } });
+  const result = await page.requestAsync({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [], values: {} });
   assert.deepEqual(plain(result), { ok: true, filled: [], skipped: [], rejected: ['sh-1'] });
 });
 
-test('malformed engine fill arrays fail visibly instead of becoming an empty success', t => {
+test('malformed engine fill arrays fail visibly instead of becoming an empty success', async t => {
   const page = siteContent(t);
   for (const result of [
-    { ok: true, filled: 'bad', skipped: [] },
-    { ok: true, filled: [], skipped: [], rejected: null },
-    { ok: true, filled: [42], skipped: [] }
+    { ok: true, filled: 'bad', skipped: [], pending: [] },
+    { ok: true, filled: [], skipped: [], rejected: null, pending: [] },
+    { ok: true, filled: [42], skipped: [], pending: [] }
   ]) {
     page.window.SecondHandGeneric.fillFields = () => result;
-    assert.equal(page.request({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [], values: {} }).ok, false);
+    assert.equal((await page.requestAsync({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [], values: {} })).ok, false);
   }
 });
 test('a malformed rejected list makes a frame fill fail', async () => {
@@ -935,8 +935,8 @@ test('tally counts both frames and keeps child Next guidance', async () => {
   assert.equal((await autofill(w)).data.message, 'Nothing to fill here. Click Next, then Autofill again.');
 });
 
-test('content rejects a missing rejected list instead of manufacturing a valid reply', t => {
+test('content rejects a missing rejected list instead of manufacturing a valid reply', async t => {
   const page = siteContent(t);
-  page.window.SecondHandGeneric.fillFields = () => ({ ok: true, filled: [], skipped: [] });
-  assert.equal(page.request({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [], values: {} }).ok, false);
+  page.window.SecondHandGeneric.fillFields = () => ({ ok: true, filled: [], skipped: [], pending: [] });
+  assert.equal((await page.requestAsync({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [], values: {} })).ok, false);
 });
