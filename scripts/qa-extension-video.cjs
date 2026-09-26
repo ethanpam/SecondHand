@@ -63,6 +63,13 @@ async function main() {
     await expect.poll(() => panel.evaluate(() => document.querySelector('#start-auto').disabled)).toBe(false);
     await expect(page.locator('#firstName')).toHaveValue('');
 
+    // Opening Chrome's native sidebar resizes its compositor surface. Discard
+    // the first capture and let that resize paint before filming; otherwise
+    // Chromium can briefly tile the old surface into the larger screenshot.
+    await page.screenshot();
+    await page.waitForTimeout(1100);
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+
     recording = await startRecording({ page, panel, outputDirectory });
     startedAt = Date.now();
     async function chapter(text, hold = 2200) {
