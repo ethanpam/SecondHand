@@ -27,11 +27,15 @@ const pantryFields = () => [{ name: 'name', key: 'fullName' }, { name: 'zip', ke
 
 // A model of generic-content.js on the page: like the site engine, every plan lists the
 // unanswered fields on screen under fresh ids, and answering a field can reveal others.
-function sitePage(fields) {
+function sitePage(fields, { next = false } = {}) {
   let sequence = 0, current = null;
-  const shown = field => !field.answered && !field.hidden && (!field.revealedBy || fields.some(other => other.name === field.revealedBy && other.answered));
+  const onScreen = field => !field.hidden && (!field.revealedBy || fields.some(other => other.name === field.revealedBy && other.answered));
+  const shown = field => !field.answered && onScreen(field);
   return {
     fields,
+    // The page as HTML, with the engine's marks on the fields it filled.
+    html: () => fields.map(field => `<div${onScreen(field) ? '' : ' style="display:none"'}><input name="${field.name}"${field.mark ? ` data-secondhand-filled="${field.mark}"` : ''}></div>`).join('') +
+      (next ? '<button type="button">Next</button>' : ''),
     plan() {
       sequence++;
       const ids = new Map(), matched = [], unmatched = [];
@@ -62,12 +66,13 @@ function sitePage(fields) {
   };
 }
 
-function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, desktop = {}, fields = pantryFields(), duringGetFields } = {}) {
+function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, desktop = {}, fields = pantryFields(), next, duringGetFields } = {}) {
   const tab = { id: 7, active: true, url };
   const log = [], native = [], content = [], injected = [], opened = [];
   const permissions = new Set(granted ? [`${ORIGIN}/*`] : []);
   const registered = new Map(enabled ? [[SCRIPT_ID, structuredClone(SITE_SCRIPT)]] : []);
-  const page = sitePage(fields);
+  const page = sitePage(fields, { next });
+  const tallies = [];
   const vault = { reachable: true, unlocked: true, getFieldsError: null, trustError: null,
     values: { firstName: 'Synthetic private first', lastName: 'Synthetic private last', zip: '50309' }, ...desktop };
   const events = {};
@@ -91,7 +96,15 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
       request: async () => { log.push('permissions.request'); throw new Error('Only the side panel may request access, inside a click.'); }
     },
     scripting: {
-      executeScript: async details => { log.push('scripting.executeScript'); injected.push(plain(details)); },
+      executeScript: async details => {
+        // A function runs in the page and answers with its result; files are only injected.
+        if (details.func) {
+          tallies.push({ target: plain(details.target), func: details.func });
+          const dom = new JSDOM(`<!doctype html><body>${page.html()}</body>`, { runScripts: 'outside-only' });
+          try { return [{ frameId: 0, result: plain(dom.window.eval(`(${details.func})()`)) }]; } finally { dom.window.close(); }
+        }
+        log.push('scripting.executeScript'); injected.push(plain(details));
+      },
       getRegisteredContentScripts: async ({ ids }) => { log.push('scripting.getRegisteredContentScripts'); return ids.filter(id => registered.has(id)).map(id => structuredClone(registered.get(id))); },
       registerContentScripts: async scripts => {
         log.push('scripting.registerContentScripts');
@@ -141,7 +154,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
     { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console });
   const send = (message, sender) => new Promise(resolve => { if (!listener(message, sender, resolve)) resolve(undefined); });
   return {
-    tab, page, vault, log, native, content, injected, opened, permissions, registered, events, send,
+    tab, page, vault, log, native, content, injected, tallies, opened, permissions, registered, events, send,
     nativeTypes: () => native.map(call => call.type),
     contentTypes: () => content.map(call => call.type),
     panel: message => send({ tabId: 7, ...message }, { id: 'testextension', url: PANEL_URL }),
@@ -291,6 +304,60 @@ test('a second click on the next page of a multi-page form plans that page again
   assert.deepEqual(w.page.answered(), ['name', 'zip']);
   assert.deepEqual(w.native.filter(call => call.type === 'getFields').map(call => call.fields), [['firstName', 'lastName'], ['zip']]);
   assert.equal(second.state, 'done');
+  assert.equal(second.filled, 1, 'only this page’s answers count');
+  assert.equal(second.message, 'Filled 1. Check your answers before you submit.');
+});
+
+test('another click on the same page reports the running total, not what that click added', async () => {
+  const w = siteWorker({ enabled: true });
+  assert.equal((await autofill(w)).data.message, 'Filled 2 · 2 need you. Check your answers before you submit.');
+  const again = plain((await autofill(w)).data);
+  assert.equal(again.filled, 2);
+  assert.equal(again.message, 'Filled 2 · 2 need you. Check your answers before you submit.');
+  assert.deepEqual(w.tallies.map(call => call.target), [{ tabId: 7, frameIds: [0] }, { tabId: 7, frameIds: [0] }]);
+  assert.deepEqual(w.injected, [], 'no files are injected');
+});
+
+test('a page where nothing matches the saved profile says so instead of Filled 0', async () => {
+  const unknown = siteWorker({ enabled: true, fields: [{ ...PICKUP }, { name: 'shoe', label: 'Shoe size', type: 'text' }] });
+  const result = plain((await autofill(unknown)).data);
+  assert.equal(result.filled, 0);
+  assert.equal(result.message, 'Nothing here matches your saved profile. 2 need you.');
+  const unsaved = siteWorker({ enabled: true, desktop: { values: {} } });
+  const empty = plain((await autofill(unsaved)).data);
+  assert.deepEqual(unsaved.nativeTypes(), ['status', 'getFields']);
+  assert.equal(empty.message, 'Nothing here matches your saved profile. 4 need you.');
+});
+
+test('a page with nothing to fill points to Next when the form has one', async () => {
+  const paged = siteWorker({ enabled: true, fields: [], next: true });
+  assert.equal(plain((await autofill(paged)).data).message, 'Nothing to fill here. Click Next, then Autofill again.');
+  const single = siteWorker({ enabled: true, fields: [] });
+  assert.equal(plain((await autofill(single)).data).message, 'Nothing to fill here.');
+  for (const w of [paged, single]) assert.deepEqual(w.native, []);
+});
+
+test('the page count takes each on-screen question SecondHand filled once and spots a Next button', async t => {
+  const w = siteWorker({ enabled: true, fields: [] });
+  await autofill(w);
+  const [{ func }] = w.tallies;
+  const run = html => {
+    const dom = new JSDOM(`<!doctype html><body>${html}</body>`, { runScripts: 'outside-only' });
+    t.after(() => dom.window.close());
+    return plain(dom.window.eval(`(${func})()`));
+  };
+  assert.deepEqual(run(`<form><input name="first" data-secondhand-filled="rule" value="Synthetic private">
+    <label><input type="radio" name="vet" value="yes" data-secondhand-filled="rule">Yes</label>
+    <label><input type="radio" name="vet" value="no" data-secondhand-filled="rule">No</label>
+    <input name="email" data-secondhand-filled="guess"><input name="untouched"></form>
+    <section style="display:none"><input name="earlier" data-secondhand-filled="rule"><button type="button">Next</button></section>
+    <div hidden><input name="tucked" data-secondhand-filled="guess"></div>
+    <button type="submit">Submit</button>`), { rule: 2, guess: 1, next: false });
+  assert.equal(run('<button type="button">Next</button>').next, true);
+  assert.equal(run('<input type="submit" value="Next page">').next, true);
+  assert.equal(run('<div role="button"><span>Next</span></div>').next, true);
+  assert.equal(run('<button type="button" style="visibility:hidden">Next</button>').next, false);
+  assert.doesNotMatch(JSON.stringify(run('<input name="first" data-secondhand-filled="rule" value="Synthetic private">')), /Synthetic/);
 });
 
 test('a form with nothing SecondHand recognizes never contacts the desktop', async () => {
@@ -301,6 +368,7 @@ test('a form with nothing SecondHand recognizes never contacts the desktop', asy
   assert.equal(result.state, 'done');
   assert.equal(result.filled, 0);
   assert.deepEqual(result.needYou, ['sh-1-0']);
+  assert.equal(result.message, 'Nothing here matches your saved profile. 1 need you.');
 });
 
 test('sites that are not turned on never reach the vault or the page', async () => {

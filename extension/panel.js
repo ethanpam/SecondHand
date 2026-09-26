@@ -50,6 +50,11 @@
       if (working) return 'Working…';
       if (note) return note;
       if (!result) return site ? `${hostOf(site.origin)} · ready` : 'Iowa SNAP · ready';
+      // Other sites: the need-you link carries the count, so it isn't repeated here.
+      if (result.state === 'done' && result.pageKey === 'general') {
+        if (Number(result.filled) > 0) return `Filled ${Number(result.filled)}`;
+        return fieldKeys(result.needYou).length ? 'Nothing here matches your saved profile.' : fixedText(result.message, 120);
+      }
       if (result.state === 'done') return [`Filled ${Number(result.filled) || 0}`, fixedText(result.todo, 90)].filter(Boolean).join(' · ');
       return fixedText(result.message, 120);
     }

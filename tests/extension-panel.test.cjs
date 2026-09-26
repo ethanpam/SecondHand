@@ -588,6 +588,24 @@ test('on a site that is on, Autofill fills once without Stop, and Turn off asks 
   assert.match(view.get('status').textContent, /off for this site/);
 });
 
+test('widget and side panel say when nothing on a site matches the saved profile instead of Filled 0', async t => {
+  const nothing = { state: 'done', filled: 0, guessed: [], needYou: ['sh-1-0', 'sh-1-1'], message: 'Nothing here matches your saved profile. 2 need you.', pageKey: 'general' };
+  const widget = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: nothing });
+  await widget.userClick('autofill');
+  assert.equal(widget.get('widget-text').textContent, 'Nothing here matches your saved profile.');
+  assert.equal(widget.get('widget-text').title, nothing.message);
+  assert.equal(widget.get('need-you').textContent, '2 need you');
+  const side = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: nothing });
+  await side.userClick('panel-autofill');
+  assert.equal(side.get('status').textContent, nothing.message);
+
+  const next = { ...nothing, needYou: [], message: 'Nothing to fill here. Click Next, then Autofill again.' };
+  const paged = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: next });
+  await paged.userClick('autofill');
+  assert.equal(paged.get('widget-text').textContent, next.message);
+  assert.equal(paged.get('need-you').hidden, true);
+});
+
 test('widget on a site that is on autofills once, lists what needs you, and never shows Stop', async t => {
   const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: siteDone });
   assert.equal(view.get('widget').hidden, false);

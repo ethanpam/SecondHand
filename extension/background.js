@@ -244,6 +244,44 @@ async function disableSite(tabId) {
 const siteResult = (state, message, extra = {}) => ({ state, filled: 0, guessed: [], needYou: [], message, pageKey: 'general', ...extra });
 const filledSummary = (filled, needYou) => `Filled ${filled}${needYou.length ? ` · ${needYou.length} need you` : ''}.`;
 
+// Runs in the page, so Chrome serializes it and it must stand alone. Counts the questions
+// SecondHand filled (the site engine marks them) that are on screen now: a multi-page form
+// hides its other pages. Also reports whether the page shows a Next button. Counts only.
+function tallyPage() {
+  const shown = element => {
+    for (let node = element; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (node.hidden || style.display === 'none' || style.visibility === 'hidden') return false;
+    }
+    return true;
+  };
+  const counted = new Set();
+  const tally = { rule: 0, guess: 0, next: false };
+  for (const element of document.querySelectorAll('[data-secondhand-filled]')) {
+    if (!shown(element)) continue;
+    // A radio or checkbox group is one question, marked on every option.
+    const question = ['radio', 'checkbox'].includes(element.type) && element.name
+      ? `${element.type}|${element.form ? Array.from(document.forms).indexOf(element.form) : -1}|${element.name}` : element;
+    if (counted.has(question)) continue;
+    counted.add(question);
+    if (element.getAttribute('data-secondhand-filled') === 'guess') tally.guess++; else tally.rule++;
+  }
+  tally.next = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], [role="button"]'))
+    .some(control => shown(control) && /^next\b/i.test((control.textContent || control.value || '').trim()));
+  return tally;
+}
+async function tallySite(tabId) {
+  const [injection] = await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, func: tallyPage });
+  const tally = injection?.result;
+  if (!Number.isInteger(tally?.rule) || !Number.isInteger(tally.guess) || typeof tally.next !== 'boolean') throw new Error('This page couldn’t be checked safely. Fill it yourself.');
+  return tally;
+}
+function siteSummary(filled, needYou, next) {
+  if (filled) return `Filled ${filled}${needYou.length ? ` · ${needYou.length} need you` : ''}. Check your answers before you submit.`;
+  if (needYou.length) return `Nothing here matches your saved profile. ${needYou.length} need you.`;
+  return next ? 'Nothing to fill here. Click Next, then Autofill again.' : 'Nothing to fill here.';
+}
+
 // The general engine's plan for the page: field ids, keys, and labels only.
 async function planGeneral(tabId) {
   const plan = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:plan' }, { frameId: 0 });
@@ -294,8 +332,11 @@ async function fillPlan(tabId, url, plan) {
 // One click on an approved site.
 async function fillSiteOnce(tabId, url) {
   try {
-    const { filled, needYou } = await fillPlan(tabId, url, await planGeneral(tabId));
-    return siteResult('done', `${filledSummary(filled, needYou)} Check your answers before you submit.`, { filled, needYou });
+    const { needYou } = await fillPlan(tabId, url, await planGeneral(tabId));
+    // The count covers every earlier click on this page too, not only this one.
+    const tally = await tallySite(tabId);
+    const filled = tally.rule + tally.guess;
+    return siteResult('done', siteSummary(filled, needYou, tally.next), { filled, needYou });
   } catch (error) {
     const { state, message } = failed(error);
     return siteResult(state, message);
