@@ -316,12 +316,12 @@ test('restoring a backup while locked refreshes create-vault UI despite an uncha
     importBackup: async () => { restored = true; return { cancelled: false }; }
   });
   assert.equal(view.get('confirm-passphrase').required, true);
-  assert.match(view.get('auth-submit').textContent, /Create my vault/);
+  assert.match(view.get('auth-submit').textContent, /Create password/);
   view.get('auth-import').click();
   await tick();
   assert.equal(view.get('confirm-passphrase').required, false);
   assert.equal(view.get('confirm-passphrase-field').hidden, true);
-  assert.match(view.get('auth-submit').textContent, /Unlock my vault/);
+  assert.match(view.get('auth-submit').textContent, /Unlock/);
   assert.equal(view.get('workspace').hidden, true);
 });
 
@@ -505,9 +505,98 @@ test('creating a password shows the recovery key once and requires acknowledgeme
   assert.equal(view.get('recovery-dialog').open, false);
 });
 
+test('locking during initial profile loading cannot redisplay the newly created recovery key', async t => {
+  const completion = deferred();
+  let dataRequests = 0;
+  const view = await renderer(t, {
+    status: async () => ({ exists: false, unlocked: false, lockRevision: 0 }),
+    createVault: async () => ({
+      status: { exists: true, unlocked: true, recoveryKey: true, lockRevision: 0 },
+      recoveryKey: 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789', deviceResetFailed: true
+    }),
+    getData: () => { dataRequests++; return completion.promise; }
+  });
+  view.edit('passphrase', 'synthetic long password');
+  view.edit('confirm-passphrase', 'synthetic long password');
+  view.submit('auth-form');
+  await tick();
+  assert.equal(dataRequests, 1);
+  view.lock(1);
+  completion.resolve({ profile: { firstName: 'Late private name' }, applications: [] });
+  await tick();
+  assert.equal(view.get('workspace').hidden, true);
+  assert.equal(view.get('firstName').value, '');
+  assert.equal(view.get('recovery-dialog').open, false);
+  assert.equal(view.get('recovery-key-value').textContent, '');
+  assert.equal(view.get('recovery-feedback').textContent, '');
+});
+
+test('late password reset responses after lock or cancel cannot reload data, show errors, or clear newer input', async t => {
+  for (const interruption of ['lock', 'cancel']) for (const result of ['success', 'failure']) {
+    await t.test(`${interruption} before ${result}`, async t => {
+      const completion = deferred();
+      let dataRequests = 0;
+      const view = await renderer(t, {
+        status: async () => ({ exists: true, unlocked: false, recoveryKey: true, lockRevision: 0 }),
+        resetPassword: () => completion.promise,
+        getData: async () => { dataRequests++; return { profile: { firstName: 'Stale private name' }, applications: [] }; }
+      });
+      view.get('forgot-password').click();
+      view.edit('recovery-key-input', 'synthetic recovery key');
+      view.edit('reset-password', 'synthetic reset password');
+      view.edit('reset-confirm', 'synthetic reset password');
+      view.submit('reset-form');
+      assert.equal(view.get('reset-submit').disabled, true);
+      if (interruption === 'lock') view.lock(1); else view.get('reset-cancel').click();
+      assert.equal(view.get('auth-form').hidden, false);
+      assert.equal(view.get('reset-form').hidden, true);
+      view.get('forgot-password').click();
+      view.edit('reset-password', 'newer synthetic input');
+      view.edit('reset-confirm', 'newer synthetic input');
+      if (result === 'success') completion.resolve({ exists: true, unlocked: true, recoveryKey: true, lockRevision: 0 });
+      else completion.reject(new Error('Old synthetic reset failure'));
+      await tick();
+      assert.equal(dataRequests, 0);
+      assert.equal(view.get('workspace').hidden, true);
+      assert.equal(view.get('firstName').value, '');
+      assert.equal(view.get('reset-error').hidden, true);
+      assert.equal(view.get('toast').hidden, true);
+      assert.equal(view.get('reset-password').value, 'newer synthetic input');
+      assert.equal(view.get('reset-confirm').value, 'newer synthetic input');
+    });
+  }
+});
+
+test('locking during a reset profile load keeps data and success feedback hidden', async t => {
+  const completion = deferred();
+  let dataRequests = 0;
+  const view = await renderer(t, {
+    status: async () => ({ exists: true, unlocked: false, recoveryKey: true, lockRevision: 0 }),
+    resetPassword: async () => ({ exists: true, unlocked: true, recoveryKey: true, lockRevision: 0 }),
+    getData: () => { dataRequests++; return completion.promise; }
+  });
+  view.get('forgot-password').click();
+  view.edit('recovery-key-input', 'synthetic recovery key');
+  view.edit('reset-password', 'synthetic reset password');
+  view.edit('reset-confirm', 'synthetic reset password');
+  view.submit('reset-form');
+  await tick();
+  assert.equal(dataRequests, 1);
+  view.lock(1);
+  view.get('forgot-password').click();
+  view.edit('reset-password', 'newer synthetic input');
+  completion.resolve({ profile: { firstName: 'Late private name' }, applications: [] });
+  await tick();
+  assert.equal(view.get('workspace').hidden, true);
+  assert.equal(view.get('firstName').value, '');
+  assert.equal(view.get('toast').hidden, true);
+  assert.equal(view.get('reset-error').hidden, true);
+  assert.equal(view.get('reset-password').value, 'newer synthetic input');
+});
+
 test('forgot password resets with a recovery key, and older saved information explains why it cannot', async t => {
   const resets = [];
-  let status = { exists: true, unlocked: false, recoveryKey: true, extensionId: '', bridgeRunning: true };
+  let status = { exists: true, unlocked: false, recoveryKey: true, lockRevision: 0, extensionId: '', bridgeRunning: true };
   const view = await renderer(t, {
     status: async () => status,
     resetPassword: async request => {
@@ -551,7 +640,7 @@ test('forgot password resets with a recovery key, and older saved information ex
   assert.equal(view.get('reset-form').hidden, true);
   assert.equal(view.get('auth-form').hidden, false);
 
-  const older = await renderer(t, { status: async () => ({ exists: true, unlocked: false, recoveryKey: false, extensionId: '', bridgeRunning: true }) });
+  const older = await renderer(t, { status: async () => ({ exists: true, unlocked: false, recoveryKey: false, lockRevision: 0, extensionId: '', bridgeRunning: true }) });
   older.get('forgot-password').click();
   assert.equal(older.get('reset-fields').hidden, true);
   assert.equal(older.get('reset-submit').hidden, true);

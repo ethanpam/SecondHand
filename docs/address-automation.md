@@ -19,7 +19,7 @@ The inspected page contained one suggestion. Local generated variants exercise m
 
 ## Selection and navigation guards
 
-`SecondHandAddressPolicy.decide(input)` is a pure, value-free decision over ordered candidate metadata, scope, and warning/error/unknown-control flags. Only the verified home scope is eligible. It chooses the first suggestion regardless of address spelling differences or the number of candidates. This intentionally replaces the earlier, unused equivalent-address comparison prototype.
+`SecondHandAddressPolicy.decide(input)` is a pure, value-free decision over ordered candidate metadata, scope, and warning/error/unknown-control flags. Only the verified home scope is eligible. It chooses the first suggestion regardless of address spelling differences, accepting up to eight structurally verified suggestions. This intentionally replaces the earlier, unused equivalent-address comparison prototype.
 
 The adapter must verify the exact form, headings, group boundaries, radio IDs/names/values/handlers, and ordinary Next control. A heading alone does not enable automation. Unexpected controls, unsupported mailing choices, visible county questions, errors, warnings, consent, and visible dialogs pause the flow.
 

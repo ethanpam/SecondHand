@@ -388,6 +388,7 @@
           const created = await api.createVault({ password: $('passphrase').value, allowDeviceReset });
           if (generation !== vaultGeneration) return;
           await loadUnlocked(created.status);
+          if (generation !== vaultGeneration) return;
           showRecoveryKey(created.recoveryKey);
           if (created.deviceResetFailed) $('recovery-feedback').textContent = 'This computer couldn’t save a reset option, so keep this key safe.';
         }
@@ -399,20 +400,26 @@
   });
 
   $('forgot-password').addEventListener('click', () => setResetMode(true));
-  $('reset-cancel').addEventListener('click', () => showLocked(vaultStatus));
+  $('reset-cancel').addEventListener('click', () => showLocked(vaultStatus, { refresh: true }));
   $('reset-form').addEventListener('submit', (event) => {
     event.preventDefault(); clearError('reset-error');
     if (!api) return;
     if ($('reset-password').value !== $('reset-confirm').value) {
       showError('reset-error', 'The passwords don’t match. Please try again.'); $('reset-confirm').focus(); return;
     }
+    const generation = vaultGeneration;
     pending($('reset-submit'), async () => {
       try {
         const password = $('reset-password').value;
-        await loadUnlocked(await api.resetPassword(resetWithDevice() ? { method: 'device', password } : { recoveryKey: $('recovery-key-input').value, password }));
+        const status = await api.resetPassword(resetWithDevice() ? { method: 'device', password } : { recoveryKey: $('recovery-key-input').value, password });
+        if (generation !== vaultGeneration) return;
+        await loadUnlocked(status);
+        if (generation !== vaultGeneration) return;
         toast('Your password was reset. Use your new password next time.');
-      } catch (error) { showError('reset-error', error); }
-      finally { $('reset-password').value = ''; $('reset-confirm').value = ''; }
+      } catch (error) { if (generation === vaultGeneration) showError('reset-error', error); }
+      finally {
+        if (generation === vaultGeneration) { $('reset-password').value = ''; $('reset-confirm').value = ''; }
+      }
     });
   });
 
