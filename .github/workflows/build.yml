@@ -65,6 +65,14 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run test:extension
+      - name: Upload test screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-extension
+          path: artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
   windows:
     runs-on: windows-latest
     timeout-minutes: 45
@@ -78,6 +86,14 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm run test:ui
+      - name: Upload test screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-windows
+          path: artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
       - run: npm run extension:zip
       - run: npm run dist:win
         env:
@@ -117,6 +133,14 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm run test:ui
+      - name: Upload test screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-macos-${{ matrix.arch }}
+          path: artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
       - run: npm run test:native
       - run: npm run dist:mac:${{ matrix.arch }}
         env:
