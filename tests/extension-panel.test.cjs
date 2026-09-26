@@ -200,7 +200,7 @@ test('native sidebar metadata does not contact the vault and rejects untrusted a
   assert.equal(view.get('fields').textContent, 'First name');
   await view.userClick('check-desktop');
   assert.equal(view.requests.filter(request => request.type === 'ui:desktopStatus').length, 1);
-  assert.match(view.get('desktop-status').textContent, /Vault unlocked/);
+  assert.match(view.get('desktop-status').textContent, /SecondHand is unlocked/);
 });
 
 test('trusted sidebar filling confirms reviewed metadata and derives its target from the active tab', async t => {

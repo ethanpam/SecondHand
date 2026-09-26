@@ -113,15 +113,15 @@
     $('workspace').hidden = true;
     $('auth-view').hidden = false;
     const exists = Boolean(vaultStatus.exists);
-    $('auth-title').textContent = exists ? 'Welcome back.' : 'A safe place to start.';
-    $('auth-description').textContent = exists ? 'Unlock your vault to pick up where you left off. Your information is right here on this computer.' : 'Create your personal vault. Your profile and application records are encrypted and saved on this computer.';
+    $('auth-title').textContent = exists ? 'Welcome back' : 'Create a password';
+    $('auth-description').textContent = exists ? 'Enter your password to pick up where you left off. Your information is right here on this computer.' : 'Your password protects the information you save in SecondHand. It is encrypted and stays on this computer.';
     $('confirm-passphrase-field').hidden = exists;
     $('confirm-passphrase').required = !exists;
     $('passphrase').minLength = exists ? 1 : 12;
     $('passphrase').autocomplete = exists ? 'current-password' : 'new-password';
-    $('passphrase-hint').textContent = exists ? 'Enter the passphrase you used to create this vault.' : 'Use at least 12 characters. A few memorable words work well.';
-    $('auth-submit').replaceChildren(document.createTextNode(exists ? 'Unlock my vault ' : 'Create my vault '), icon(exists ? 'lock' : 'arrow'));
-    $('recovery-note').textContent = exists ? 'Your passphrase never leaves this device. There is no online passphrase recovery.' : 'Keep your passphrase somewhere safe. There is no online account or passphrase recovery.';
+    $('passphrase-hint').textContent = exists ? 'Enter the password you created for SecondHand.' : 'Use at least 12 characters. A few words you can remember work well.';
+    $('auth-submit').replaceChildren(document.createTextNode(exists ? 'Unlock ' : 'Create password '), icon(exists ? 'lock' : 'arrow'));
+    $('recovery-note').textContent = exists ? 'Your password never leaves this computer.' : 'Keep your password somewhere safe. There is no online account, so no one can reset it for you.';
     if (api) $('passphrase').focus();
   }
 
@@ -244,14 +244,14 @@
   }
 
   async function lockVault() {
-    if (profileDirty && !window.confirm('Lock your vault and discard unsaved profile changes?')) return;
+    if (profileDirty && !window.confirm('Lock SecondHand and discard your unsaved changes?')) return;
     const generation = vaultGeneration;
     try {
       const status = await api.lock();
       // The lock notification can arrive before the IPC response finishes
       // gathering status. Do not reset a form the user has already started using.
       if (generation === vaultGeneration) showLocked(status);
-    } catch (error) { toast(error.message || 'Unable to lock your vault.', true); }
+    } catch (error) { toast(error.message || 'Unable to lock SecondHand.', true); }
   }
 
   function openApplication(application = null) {
@@ -282,7 +282,7 @@
     event.preventDefault(); clearError('auth-error');
     if (!api) return;
     if (!vaultStatus.exists && $('passphrase').value !== $('confirm-passphrase').value) {
-      showError('auth-error', 'The passphrases don’t match. Please try again.'); $('confirm-passphrase').focus(); return;
+      showError('auth-error', 'The passwords don’t match. Please try again.'); $('confirm-passphrase').focus(); return;
     }
     pending($('auth-submit'), async () => {
       try {
@@ -295,13 +295,13 @@
 
   $('auth-import').addEventListener('click', () => {
     if (!api) return;
-    if (vaultStatus.exists && !window.confirm('Restoring replaces the current vault on this computer. Make sure you have a backup of anything you want to keep. Continue?')) return;
+    if (vaultStatus.exists && !window.confirm('Restoring replaces the information saved on this computer. Make sure you have a backup of anything you want to keep. Continue?')) return;
     pending($('auth-import'), async () => {
       try {
         const result = await api.importBackup();
         if (result.cancelled) return;
         showLocked(await api.status());
-        toast('Backup restored. Unlock it with its original passphrase.');
+        toast('Backup restored. Unlock it with the password it was created with.');
       } catch (error) { showError('auth-error', error); }
     });
   });
@@ -325,7 +325,7 @@
         const newerEdits = profileDirty && profileRevision !== revision;
         if (!newerEdits) fillProfile();
         renderSummary();
-        toast(newerEdits ? 'Earlier changes saved. Your newer edits still need to be saved.' : 'Your information is saved in your local vault.');
+        toast(newerEdits ? 'Earlier changes saved. Your newer edits still need to be saved.' : 'Your information is saved on this computer.');
       } catch (error) { if (generation === vaultGeneration) showError('profile-error', error); }
     });
   });
@@ -420,7 +420,7 @@
     try { await api.openPortal(); } catch (error) { toast(error.message || 'Unable to open the Iowa portal.', true); }
   }));
   $('export-backup').addEventListener('click', () => pending($('export-backup'), async () => {
-    try { const result = await api.exportBackup(); if (!result.cancelled) toast('Encrypted backup exported. Keep your passphrase safe.'); }
+    try { const result = await api.exportBackup(); if (!result.cancelled) toast('Encrypted backup saved. You’ll need your password to restore it.'); }
     catch (error) { toast(error.message || 'Unable to export your backup.', true); }
   }));
 

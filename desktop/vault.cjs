@@ -12,9 +12,8 @@ const KDF = Object.freeze({ name: 'scrypt', N: 32768, r: 8, p: 1 });
 const AAD = Buffer.from('SecondHand encrypted vault v1');
 
 function passphraseBytes(passphrase) {
-  if (typeof passphrase !== 'string' || passphrase.length < 12 || Buffer.byteLength(passphrase) > 1024) {
-    throw new Error('Use a passphrase of at least 12 characters and at most 1024 bytes.');
-  }
+  if (typeof passphrase !== 'string' || passphrase.length < 12) throw new Error('Use a password with at least 12 characters.');
+  if (Buffer.byteLength(passphrase) > 1024) throw new Error('That password is too long. Use a shorter password.');
   return Buffer.from(passphrase, 'utf8');
 }
 
@@ -111,7 +110,7 @@ class Vault {
   }
   create(passphrase) {
     return this.enqueue(async () => {
-      if (await this.exists()) throw new Error('A local vault already exists. Unlock it instead.');
+      if (await this.exists()) throw new Error('SecondHand already has a password on this computer. Unlock it instead.');
       const salt = crypto.randomBytes(32);
       const key = await deriveKey(passphrase, salt);
       const data = { version: 1, profile: {}, applications: [] };
@@ -122,7 +121,7 @@ class Vault {
   }
   unlock(passphrase) {
     return this.enqueue(async () => {
-      if (this.unlocked) throw new Error('The vault is already unlocked.');
+      if (this.unlocked) throw new Error('SecondHand is already unlocked.');
       const envelope = parseEnvelope(await this.readEncrypted());
       const key = await deriveKey(passphrase, envelope.salt);
       let plaintext;
@@ -134,7 +133,7 @@ class Vault {
         this.key = key; this.salt = envelope.salt;
       } catch {
         key.fill(0); this.data = null;
-        throw new Error('Unable to unlock. Check the passphrase or restore an intact backup.');
+        throw new Error('Unable to unlock. Check your password or restore an intact backup.');
       } finally { if (plaintext) plaintext.fill(0); }
     });
   }
@@ -145,7 +144,7 @@ class Vault {
     });
   }
   getData() {
-    if (!this.unlocked) throw new Error('Unlock your local vault first.');
+    if (!this.unlocked) throw new Error('Unlock SecondHand first.');
     return structuredClone(this.data);
   }
   update(mutator) {
@@ -167,7 +166,7 @@ class Vault {
   }
   importEncrypted(bytes) {
     return this.enqueue(async () => {
-      if (this.unlocked) throw new Error('Lock your vault before importing a backup.');
+      if (this.unlocked) throw new Error('Lock SecondHand before restoring a backup.');
       parseEnvelope(bytes);
       if (await this.exists()) {
         const stat = await fs.stat(this.filePath);

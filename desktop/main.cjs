@@ -70,7 +70,7 @@ if (nativeOrigin) {
     return status();
   }
   function requireUnlocked() {
-    if (!vault.unlocked) throw publicError('Unlock your local vault first.');
+    if (!vault.unlocked) throw publicError('Unlock SecondHand first.');
   }
   async function saveExtensionRegistration(id) {
     assistance.revoke();
@@ -105,7 +105,7 @@ if (nativeOrigin) {
         });
         if (answer.response !== 1) throw publicError('You cancelled guided assistance.');
         requireUnlocked();
-        if (generation !== assistance.generation || extensionId !== context.extensionId) throw publicError('The vault or Chrome connection changed. Start guided assistance again.');
+        if (generation !== assistance.generation || extensionId !== context.extensionId) throw publicError('SecondHand was locked or the Chrome connection changed. Start guided assistance again.');
         const grant = assistance.issue({ ...request, extensionId: context.extensionId });
         touch();
         return grant;
@@ -133,7 +133,7 @@ if (nativeOrigin) {
         });
         if (answer.response !== 1) throw publicError('You cancelled this field request.');
         requireUnlocked();
-        if (generation !== assistance.generation || extensionId !== context.extensionId) throw publicError('The vault or Chrome connection changed. Review this request again.');
+        if (generation !== assistance.generation || extensionId !== context.extensionId) throw publicError('SecondHand was locked or the Chrome connection changed. Review this request again.');
         const profile = vault.getData().profile;
         const values = {};
         for (const field of request.fields) if (typeof profile[field] === 'string' && profile[field].trim()) values[field] = profile[field];
@@ -158,12 +158,12 @@ if (nativeOrigin) {
     status,
     async createVault(passphrase) {
       try { await vault.create(passphrase); }
-      catch (error) { throw publicError(/passphrase|already exists/.test(error.message) ? error.message : 'Could not create the local vault.'); }
+      catch (error) { throw publicError(/password/.test(error.message) ? error.message : 'Could not set up SecondHand. Please try again.'); }
       touch(); return status();
     },
     async unlock(passphrase) {
       try { await vault.unlock(passphrase); }
-      catch (error) { throw publicError(/passphrase|already unlocked|Unable to unlock/.test(error.message) ? error.message : 'Could not open the local vault.'); }
+      catch (error) { throw publicError(/password|already unlocked|Unable to unlock/.test(error.message) ? error.message : 'Could not unlock SecondHand.'); }
       touch(); return status();
     },
     lock: lockVault,
@@ -227,15 +227,15 @@ if (nativeOrigin) {
       return saveExtensionRegistration(id);
     },
     async exportBackup() {
-      if (!await vault.exists()) throw publicError('Create a local vault before exporting a backup.');
-      const result = await dialog.showSaveDialog(mainWindow, { title: 'Export encrypted backup', defaultPath: 'secondhand-backup.secondhand', filters: [{ name: 'Encrypted SecondHand vault', extensions: ['secondhand'] }] });
+      if (!await vault.exists()) throw publicError('Create a password before saving a backup.');
+      const result = await dialog.showSaveDialog(mainWindow, { title: 'Export encrypted backup', defaultPath: 'secondhand-backup.secondhand', filters: [{ name: 'SecondHand encrypted backup', extensions: ['secondhand'] }] });
       if (result.canceled || !result.filePath) return { cancelled: true };
       await atomicWrite(result.filePath, await vault.readEncrypted());
       return { cancelled: false };
     },
     async importBackup() {
-      if (vault.unlocked) throw publicError('Lock your vault before importing a backup.');
-      const result = await dialog.showOpenDialog(mainWindow, { title: 'Import encrypted backup', properties: ['openFile'], filters: [{ name: 'Encrypted SecondHand vault', extensions: ['secondhand'] }] });
+      if (vault.unlocked) throw publicError('Lock SecondHand before restoring a backup.');
+      const result = await dialog.showOpenDialog(mainWindow, { title: 'Import encrypted backup', properties: ['openFile'], filters: [{ name: 'SecondHand encrypted backup', extensions: ['secondhand'] }] });
       if (result.canceled || !result.filePaths[0]) return { cancelled: true };
       const file = result.filePaths[0];
       const stat = await fs.stat(file);
@@ -245,9 +245,9 @@ if (nativeOrigin) {
       const { parseEnvelope } = require('./vault.cjs');
       try { parseEnvelope(bytes); } catch { throw publicError('This is not a supported encrypted backup.'); }
       if (await vault.exists()) {
-        const answer = await dialog.showMessageBox(mainWindow, { type: 'warning', title: 'Replace local vault?',
-          message: 'Importing replaces your current local vault.', detail: 'An encrypted recovery copy of your current vault will be kept in the local app data folder. The imported backup requires its original passphrase; its contents cannot be verified until you unlock it.',
-          buttons: ['Cancel', 'Replace vault'], defaultId: 0, cancelId: 0, noLink: true });
+        const answer = await dialog.showMessageBox(mainWindow, { type: 'warning', title: 'Replace saved information?',
+          message: 'Restoring replaces the information saved on this computer.', detail: 'An encrypted copy of your current information will be kept in SecondHand’s data folder. The backup opens with the password it was created with. Its contents can’t be checked until you unlock it.',
+          buttons: ['Cancel', 'Replace'], defaultId: 0, cancelId: 0, noLink: true });
         if (answer.response !== 1) return { cancelled: true };
       }
       await vault.importEncrypted(bytes);
@@ -288,7 +288,7 @@ if (nativeOrigin) {
     });
     createWindow();
     try { bridge = await startBridge(userData, () => extensionId, bridgeRequest); }
-    catch { dialog.showErrorBox('Local bridge unavailable', 'Your local vault is available. Restart SecondHand to connect the Chrome extension.'); }
+    catch { dialog.showErrorBox('Local bridge unavailable', 'Your saved information is available. Restart SecondHand to connect the Chrome extension.'); }
     powerMonitor.on('suspend', () => lockVault().catch(() => {}));
     powerMonitor.on('lock-screen', () => lockVault().catch(() => {}));
   }).catch(() => { dialog.showErrorBox('SecondHand could not start', 'Check that the app can access its local data folder.'); app.quit(); });

@@ -91,7 +91,7 @@ test('wrong passphrase and authenticated ciphertext tampering do not unlock or c
 test('failed validation preserves vault and serial updates do not lose changes', async t => {
   const { directory, file } = await fixture(t);
   const vault = new Vault(file);
-  await assert.rejects(vault.create('too short'), /passphrase/);
+  await assert.rejects(vault.create('too short'), /password/);
   await vault.create(PASSPHRASE);
   const before = await fs.readFile(file);
   await assert.rejects(vault.update(data => { data.profile = { websitePassword: 'never store this' }; }), /Unknown profile/);
