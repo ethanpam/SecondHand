@@ -259,7 +259,6 @@
     }
     return { filled, skipped };
   }
-  const navigationSnapshots = new WeakMap();
 
   function currentControls(form, doc) {
     return Array.from(form.querySelectorAll('input, select, textarea')).filter(element =>
@@ -337,25 +336,8 @@
     return doc.activeElement === element;
   }
 
-  function navigationButton(doc, rawUrl) {
-    if (!isSupportedUrl(rawUrl) || !identifyPage(doc)) return null;
-    const forms = doc.querySelectorAll('form#personalInformation[action="enterPersonalInfo"]');
-    if (forms.length !== 1) return null;
-    const form = forms[0];
-    // Even a familiar relative action must resolve to the observed Iowa endpoint.
-    if (form.action !== `${PORTAL}/applyForBenefits/enterPersonalInfo` || form.method.toLowerCase() !== 'post' || form.hasAttribute('onsubmit') || form.hasAttribute('target')) return null;
-    const buttons = Array.from(form.querySelectorAll('button')).filter(button => normal(button.textContent) === 'save and continue');
-    if (buttons.length !== 1) return null;
-    const button = buttons[0];
-    if (button.type !== 'button' || !button.classList.contains('saveAndContinueButton') || button.getAttribute('onclick')?.trim() !== "submitAction('#personalInformation');" ||
-        !rendered(button, doc) || button.matches(':disabled') || button.getAttribute('aria-disabled') === 'true' ||
-        button.hasAttribute('formaction') || button.hasAttribute('formtarget') || button.hasAttribute('formnovalidate') ||
-        (button.getAttribute('form') && button.getAttribute('form') !== form.id)) return null;
-    return { form, button };
-  }
-
   function probePage(doc, rawUrl) {
-    const result = { kind: 'unsupported', pageKey: 'unsupported', heading: 'Unsupported website', reason: 'Open the official Iowa benefits portal.', canAdvance: false, fields: [], checklist: [], requiredRemaining: 0, manualRemaining: 0 };
+    const result = { kind: 'unsupported', pageKey: 'unsupported', heading: 'Unsupported website', reason: 'Open the official Iowa benefits portal.', fields: [], checklist: [], requiredRemaining: 0, manualRemaining: 0 };
     if (!isSupportedUrl(rawUrl)) return result;
     result.kind = 'manual'; result.pageKey = 'iowa-manual'; result.heading = 'Iowa benefits application';
     result.reason = 'Complete this step in Iowa’s form. SecondHand has not verified its controls.';
@@ -384,51 +366,11 @@
     const scanResult = scan(doc, rawUrl);
     const form = doc.querySelector('form#personalInformation[action="enterPersonalInfo"]');
     const issues = personalIssues(form, doc);
-    const next = navigationButton(doc, rawUrl);
     return { ...result, ...issues, kind: 'fillable', pageKey: 'iowa-personal-information', heading: 'Enter Personal Information', fields: scanResult.fields,
-      canAdvance: Boolean(next && issues.requiredRemaining === 0 && issues.manualRemaining === 0 && scanResult.ambiguous.length === 0),
-      reason: issues.manualRemaining ? 'Answer the remaining questions and correct any errors in Iowa’s form, then check again.' : issues.requiredRemaining ? 'Complete the required applicant fields before continuing.' : next ? 'Review all answers. Next saves this page to Iowa and opens the following step; it does not submit the application.' : 'The expected Next button was not found safely. Continue directly in Iowa’s form.' };
+      reason: issues.manualRemaining ? 'Answer the remaining questions and correct any errors in Iowa’s form.' : issues.requiredRemaining ? 'Complete the required applicant fields in Iowa’s form.' : 'Review your answers, then click Save and Continue in Iowa’s form.' };
   }
 
-  function controlState(form) {
-    return Array.from(form.querySelectorAll('input, select, textarea')).filter(element => element.type !== 'hidden').map(element => ({ element,
-      value: element.value, checked: element.checked, disabled: element.disabled, readOnly: element.readOnly, required: element.required,
-      id: element.id, name: element.name, type: element.type, ariaInvalid: element.getAttribute('aria-invalid'), ariaRequired: element.getAttribute('aria-required'),
-      rendered: rendered(element, form.ownerDocument), labels: namesFor(element, form.ownerDocument).join('|') }));
-  }
-
-  function sameControlState(before, form) {
-    const after = controlState(form);
-    return before.length === after.length && before.every((state, index) => Object.keys(state).every(key => state[key] === after[index][key]));
-  }
-
-  function captureNavigation(doc, rawUrl) {
-    if (doc.location.href !== rawUrl || !probePage(doc, rawUrl).canAdvance) return null;
-    const next = navigationButton(doc, rawUrl);
-    if (!next) return null;
-    // The public token has no enumerable data. DOM refs and answers stay private
-    // in this isolated world's memory and are never included in a page probe.
-    const token = Object.freeze({});
-    navigationSnapshots.set(token, { doc, url: rawUrl, ...next, controls: controlState(next.form), expires: Date.now() + 120000,
-      buttonType: next.button.type, onclick: next.button.getAttribute('onclick') });
-    return token;
-  }
-
-  function advance(doc, rawUrl, token) {
-    const original = token && navigationSnapshots.get(token);
-    if (token) navigationSnapshots.delete(token);
-    const fail = reason => ({ advanced: false, reason });
-    if (!original || original.doc !== doc || original.url !== rawUrl || doc.location.href !== rawUrl || original.expires < Date.now()) return fail('The page changed or the Next preview expired. Check this page again.');
-    const page = probePage(doc, rawUrl), next = navigationButton(doc, rawUrl);
-    if (!page.canAdvance || !next || next.form !== original.form || next.button !== original.button ||
-        next.button.type !== original.buttonType || next.button.getAttribute('onclick') !== original.onclick || !sameControlState(original.controls, next.form)) return fail('The page or an answer changed. Review it and check again before Next.');
-    if (!scrollToField(next.button, doc) || doc.location.href !== rawUrl || !probePage(doc, rawUrl).canAdvance || !sameControlState(original.controls, next.form)) return fail('The Next button is not safely accessible. Continue in Iowa’s form.');
-    try { next.button.click(); }
-    catch { return fail('Iowa’s Next control could not be activated. Check the page before trying again.'); }
-    return { advanced: true, reason: 'Next was clicked once. Check the following page for required questions or errors.' };
-  }
-
-  const api = Object.freeze({ PORTAL, definitions, isSupportedUrl, rendered, visible, scan, fill, formatValue, focusField, probePage, captureNavigation, advance });
+  const api = Object.freeze({ PORTAL, definitions, isSupportedUrl, rendered, visible, scan, fill, formatValue, focusField, probePage });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandIowa = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

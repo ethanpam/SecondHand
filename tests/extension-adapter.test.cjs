@@ -27,6 +27,7 @@ function page(html = basic, url = URL) {
   return document;
 }
 const keys = doc => adapter.scan(doc, doc.location.href).fields.map(field => field.key);
+const needsYou = result => result.requiredRemaining + result.manualRemaining > 0;
 
 test('only exact HTTPS Iowa portal origin and path are supported', () => {
   for (const url of [adapter.PORTAL, URL, `${URL}?step=1#main`]) assert.equal(adapter.isSupportedUrl(url), true, url);
@@ -186,7 +187,7 @@ function fullPage() {
   fixture.attachConditionalHandlers(doc);
   return doc;
 }
-function navigationPage() {
+function answeredPage() {
   const doc = fullPage();
   doc.querySelector('#firstName').value = 'Example';
   doc.querySelector('#lastName').value = 'Applicant';
@@ -199,21 +200,23 @@ function navigationPage() {
 }
 
 test('probe returns sanitized page facts and stops at verification, consent, and unknown pages', () => {
-  const ready = navigationPage();
+  const ready = answeredPage();
   const result = adapter.probePage(ready, URL);
   assert.equal(result.kind, 'fillable');
-  assert.equal(result.canAdvance, true);
+  assert.equal(needsYou(result), false);
+  assert.equal('canAdvance' in result, false);
+  assert.equal('advance' in adapter, false);
+  assert.equal('captureNavigation' in adapter, false);
   assert.doesNotMatch(JSON.stringify(result), /Example|:"Applicant"|50309/);
   assert.equal(adapter.probePage(ready, 'https://example.com/').kind, 'unsupported');
   assert.equal(adapter.probePage(page('<h1>Household Members</h1>'), URL).kind, 'manual');
   for (const html of ['<h1>Confirmation</h1>', '<h1>Review and submit</h1>', '<h1>Enter Personal Information</h1><input id="termChkbox" type="checkbox">', '<input name="captchaAnswer">', '<input type="password">']) {
     const doc = page(html);
     assert.equal(adapter.probePage(doc, URL).kind, 'blocked', html);
-    assert.equal(adapter.captureNavigation(doc, URL), null);
   }
 });
 
-test('required blank fields, unanswered choices, unknown controls, and errors disable Next', () => {
+test('required blank fields, unanswered choices, unknown controls, and errors need attention', () => {
   for (const change of [
     doc => { doc.querySelector('#firstName').value = ''; },
     doc => { doc.querySelector('#hasHome1').checked = false; },
@@ -221,57 +224,11 @@ test('required blank fields, unanswered choices, unknown controls, and errors di
     doc => { doc.querySelector('#lastName').setAttribute('aria-invalid', 'true'); },
     doc => { doc.querySelector('#firstName').name = 'otherPerson'; },
     doc => { doc.querySelector('#applicant1').remove(); },
-    doc => { const field = doc.querySelector('#firstName'); field.id = 'unknownRequired'; field.required = true; },
-    doc => { doc.querySelector('button.saveAndContinueButton').setAttribute('formaction', 'https://example.com/submit'); }
+    doc => { const field = doc.querySelector('#firstName'); field.id = 'unknownRequired'; field.required = true; }
   ]) {
-    const doc = navigationPage(); change(doc);
-    assert.equal(adapter.probePage(doc, URL).canAdvance, false);
-    assert.equal(adapter.captureNavigation(doc, URL), null);
+    const doc = answeredPage(); change(doc);
+    assert.equal(needsYou(adapter.probePage(doc, URL)), true);
   }
-});
-
-test('Next requires a single-use private snapshot and clicks the exact observed button once', () => {
-  const doc = navigationPage();
-  let clicks = 0;
-  doc.querySelector('button.saveAndContinueButton').addEventListener('click', event => { event.preventDefault(); clicks++; });
-  assert.equal(adapter.advance(doc, URL).advanced, false);
-  const snapshot = adapter.captureNavigation(doc, URL);
-  assert.ok(snapshot);
-  assert.equal(JSON.stringify(snapshot), '{}');
-  assert.equal(adapter.advance(doc, URL, snapshot).advanced, true);
-  assert.equal(clicks, 1);
-  assert.equal(adapter.advance(doc, URL, snapshot).advanced, false);
-  assert.equal(clicks, 1);
-});
-
-test('Next stops on answer, page, form, handler, or button changes after preview', () => {
-  for (const change of [
-    doc => { doc.querySelector('#firstName').value = 'User changed'; },
-    doc => { doc.querySelector('form').setAttribute('action', 'submitApplication'); },
-    doc => { doc.querySelector('button.saveAndContinueButton').textContent = 'Submit Application'; },
-    doc => { doc.querySelector('button.saveAndContinueButton').setAttribute('onclick', 'changedHandler()'); },
-    doc => { doc.querySelector('button.saveAndContinueButton').replaceWith(doc.querySelector('button.saveAndContinueButton').cloneNode(true)); },
-    doc => { doc.defaultView.history.replaceState({}, '', `${adapter.PORTAL}/different`); }
-  ]) {
-    const doc = navigationPage();
-    const snapshot = adapter.captureNavigation(doc, URL);
-    let clicks = 0;
-    doc.addEventListener('click', () => clicks++);
-    change(doc);
-    assert.equal(adapter.advance(doc, URL, snapshot).advanced, false);
-    assert.equal(clicks, 0);
-  }
-});
-
-test('save-and-exit, final submission, and duplicate Next buttons never advance', () => {
-  for (const label of ['Save and Exit', 'Submit Application', 'Sign and Continue', 'Finish']) {
-    const doc = navigationPage(); doc.querySelector('button.saveAndContinueButton').textContent = label;
-    assert.equal(adapter.probePage(doc, URL).canAdvance, false, label);
-  }
-  const duplicate = navigationPage();
-  const button = duplicate.querySelector('button.saveAndContinueButton').cloneNode(true);
-  duplicate.querySelector('form').append(button);
-  assert.equal(adapter.probePage(duplicate, URL).canAdvance, false);
 });
 
 test('full applicant checklist contains only currently relevant static labels and statuses', () => {
@@ -279,7 +236,6 @@ test('full applicant checklist contains only currently relevant static labels an
   const result = adapter.probePage(doc, URL);
   assert.equal(result.requiredRemaining, 4);
   assert.equal(result.manualRemaining, 0);
-  assert.equal(result.canAdvance, false);
   assert.deepEqual(result.checklist.filter(item => item.status === 'missing').map(item => item.key), ['firstName', 'lastName', 'hasHomeAddress', 'isApplicant']);
   assert.equal(result.checklist.some(item => item.key === 'mailingCity'), false);
   assert.equal(result.checklist.some(item => item.key === 'programSnap'), false);
@@ -291,7 +247,7 @@ test('full applicant checklist contains only currently relevant static labels an
   const box = doc.querySelector('#lastName').getBoundingClientRect();
   control.getBoundingClientRect = () => box; control.getClientRects = () => [box];
   const changed = adapter.probePage(doc, URL);
-  assert.equal(changed.canAdvance, false);
+  assert.equal(needsYou(changed), true);
   assert.equal(changed.checklist.find(item => item.key === 'manualReview').status, 'manual');
   assert.doesNotMatch(JSON.stringify(changed), /Private/);
 });
@@ -318,7 +274,7 @@ test('visible-only passes fill explicit choices then revealed mailing/program fi
   assert.equal(doc.querySelector('#mailingState').value, 'IA');
   assert.equal(doc.querySelector('#helpPayMedBill2').checked, true);
   assert.equal(doc.querySelector('#tanf').checked, false);
-  assert.equal(adapter.probePage(doc, URL).canAdvance, true);
+  assert.equal(needsYou(adapter.probePage(doc, URL)), false);
   for (const key of ['firstName','lastName','hasHomeAddress','mailingSameAsHome','mailingAddressLine1','isApplicant','programSnap','helpPayMedicalBills']) {
     assert.equal(adapter.probePage(doc, URL).checklist.find(item => item.key === key).status, 'complete', key);
   }
@@ -335,7 +291,7 @@ test('no-home answer reveals mailing fields without inventing a home or a same-a
   assert.equal(doc.querySelector('#sameAddress2').checked, false);
   assert.equal(doc.querySelector('#mailingAddressLine1').value, values.mailingAddressLine1);
   assert.equal(doc.querySelector('#snap').checked, false);
-  assert.equal(adapter.probePage(doc, URL).canAdvance, true);
+  assert.equal(needsYou(adapter.probePage(doc, URL)), false);
 });
 
 test('choice mapping requires exact observed values, handlers, legends, and containers', () => {
@@ -347,7 +303,7 @@ test('choice mapping requires exact observed values, handlers, legends, and cont
   ]) {
     const doc = fullPage(); change(doc);
     assert.equal(keys(doc).includes('hasHomeAddress'), false);
-    assert.equal(adapter.probePage(doc, URL).canAdvance, false);
+    assert.equal(needsYou(adapter.probePage(doc, URL)), true);
   }
   const wrongContainer = fullPage(); wrongContainer.querySelector('#applicant1').click();
   wrongContainer.querySelector('#progSelection').id = 'otherPersonPrograms';
@@ -386,15 +342,15 @@ test('parent choices cannot clear preexisting dependent answers and produce manu
     assert.equal(entry.status, 'manual');
     assert.equal(entry.fillable, false);
     assert.match(entry.label, /review existing dependent answers/);
-    assert.equal(adapter.probePage(doc, URL).canAdvance, false);
+    assert.equal(needsYou(adapter.probePage(doc, URL)), true);
   }
 });
 
 test('known optional medical question can remain blank; required conditional fields cannot disappear', () => {
-  const doc = navigationPage(); doc.querySelector('#medicaid').click();
+  const doc = answeredPage(); doc.querySelector('#medicaid').click();
   const medical = adapter.probePage(doc, URL).checklist.find(item => item.key === 'helpPayMedicalBills');
   assert.equal(medical.status, 'optional'); assert.equal(medical.required, false);
-  assert.equal(adapter.probePage(doc, URL).canAdvance, true);
+  assert.equal(needsYou(adapter.probePage(doc, URL)), false);
   for (const change of [
     doc => { doc.querySelector('#homeAddrDiv').style.display = 'none'; },
     doc => doc.querySelector('#sameAddress1').remove(),
@@ -402,8 +358,8 @@ test('known optional medical question can remain blank; required conditional fie
     doc => { doc.querySelector('#hasHome1').hidden = true; },
     doc => doc.querySelector('#tanf').remove()
   ]) {
-    const changed = navigationPage(); change(changed);
-    assert.equal(adapter.probePage(changed, URL).canAdvance, false);
+    const changed = answeredPage(); change(changed);
+    assert.equal(needsYou(adapter.probePage(changed, URL)), true);
   }
 });
 
@@ -423,11 +379,11 @@ test('checklist focus only scrolls and focuses a verified control on the exact p
   assert.equal(doc.activeElement.id, 'lastName');
 });
 
-test('Select Address is a manual checklist from official help, with no guessed field mapping or Next', () => {
+test('Select Address is a manual checklist from official help, with no guessed field mapping', () => {
   const doc = page('<h1>Select Address</h1><p>Private Suggested Address</p><input name="selectedAddress"><button>Save and Continue</button>');
   const result = adapter.probePage(doc, URL);
   assert.equal(result.pageKey, 'iowa-select-address');
-  assert.equal(result.kind, 'manual'); assert.equal(result.canAdvance, false);
+  assert.equal(result.kind, 'manual'); assert.equal(needsYou(result), true);
   assert.equal(result.checklist[0].status, 'manual');
   assert.equal(adapter.focusField(doc, URL, 'addressReview'), false);
   assert.doesNotMatch(JSON.stringify(result), /Private Suggested/);
