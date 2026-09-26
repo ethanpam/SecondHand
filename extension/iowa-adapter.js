@@ -2,6 +2,7 @@
 (function (root) {
   'use strict';
   const PORTAL = 'https://hhsservices.iowa.gov/apspssp/ssp.portal';
+  const addressPolicy = typeof module === 'object' && module.exports ? require('./address-policy.js') : root.SecondHandAddressPolicy;
   const normal = value => String(value || '').replace(/\s+/g, ' ').trim().replace(/\s*\*\s*$/, '').replace(/:$/, '').trim().toLowerCase();
   const questions = Object.freeze({
     home: 'Do you have a home address?', same: 'Is your mailing address the same as your home address?',
@@ -179,7 +180,9 @@
 
   function scan(doc, rawUrl) {
     const result = { supported: isSupportedUrl(rawUrl), recognizedPage: false, fields: [], bindings: [], ambiguous: [], skipped: 0 };
-    if (!result.supported || !identifyPage(doc)) return result;
+    if (!result.supported) return result;
+    if (addressContext(doc, rawUrl)) { result.recognizedPage = true; return result; }
+    if (!identifyPage(doc)) return result;
     result.recognizedPage = true;
     for (const [key, definition] of Object.entries(definitions)) {
       const elements = matchingControls(doc, definition);
@@ -326,8 +329,119 @@
     return { requiredRemaining, manualRemaining, checklist };
   }
 
+  // Only this observed HOME-only layout is actionable. Displayed addresses are
+  // used solely for private mutation detection, never for policy or UI output.
+  function addressContext(doc, rawUrl) {
+    if (!isSupportedUrl(rawUrl) || rawUrl !== `${PORTAL}/applyForBenefits/addressValidation` ||
+        !addressPolicy || typeof addressPolicy.decide !== 'function') return null;
+    const headings = Array.from(doc.querySelectorAll('h2')).filter(element => rendered(element, doc) && normal(element.textContent) === 'select address');
+    const forms = doc.querySelectorAll('form#addressValue');
+    if (headings.length !== 1 || forms.length !== 1) return null;
+    const form = forms[0];
+    if (form.getAttribute('action') !== 'selectedAddress' || form.action !== `${PORTAL}/applyForBenefits/selectedAddress` ||
+        form.method !== 'post' || form.hasAttribute('onsubmit') || form.hasAttribute('target') ||
+        Array.from(form.elements).some(element => !form.contains(element))) return null;
+    if (Array.from(doc.querySelectorAll('[role="dialog"], [aria-modal="true"]')).some(element => rendered(element, doc))) return null;
+    const bodies = form.querySelectorAll(':scope > div.colWrapper.topMargin > div#alignmentleft.formLayout.alignmentLeft > table > tbody > tr > td > table.fullwidth > tbody');
+    if (bodies.length !== 1 || doc.querySelectorAll('[id="alignmentleft"]').length !== 1) return null;
+    const tbody = bodies[0], rows = Array.from(tbody.children);
+    const text = element => String(element.textContent || '').replace(/\s+/g, ' ').trim();
+    const rowText = (row, expected) => row && row.tagName === 'TR' && !row.querySelector('input,select,textarea,button') && text(row) === expected;
+    const separator = row => rowText(row, '') && !row.id;
+    if (!rowText(rows[0], 'Possible matches for your home address:')) return null;
+    const originals = rows.map((row, index) => rowText(row, 'Your Home address as you entered is:') ? index : -1).filter(index => index >= 0);
+    if (originals.length !== 1) return null;
+    const originalStart = originals[0], radios = [], labels = [], countyRows = [];
+    let originalCounty = null;
+    function choice(row, county, index, original) {
+      if (!row || row.tagName !== 'TR' || !county || county.id !== `homeAddrCounty${index}` ||
+          !county.classList.contains('displayNone') || doc.querySelectorAll(`[id="homeAddrCounty${index}"]`).length !== 1) return false;
+      const fields = row.querySelectorAll(':scope > td > fieldset');
+      if (fields.length !== 1 || row.querySelectorAll('fieldset').length !== 1) return false;
+      const fieldset = fields[0];
+      const legends = fieldset.querySelectorAll(':scope > legend');
+      if (legends.length !== 1 || text(legends[0]) !== 'applyforBenefits.legend.linkText1') return false;
+      const controls = row.querySelectorAll('input,select,textarea,button');
+      if (controls.length !== 1) return false;
+      const radio = controls[0], id = `homeAddressIndex${index}`;
+      if (radio.tagName !== 'INPUT' || radio.id !== id || doc.querySelectorAll(`[id="${id}"]`).length !== 1 || radio.type !== 'radio' ||
+          radio.name !== 'homeAddressIndex' || radio.getAttribute('value') !== String(index) || radio.value !== String(index) ||
+          radio.getAttribute('onclick') !== `onHomeAddrSelect('${index}');` || radio.hasAttribute('onchange') ||
+          !editable(radio, doc) || radio.getAttribute('aria-invalid') === 'true') return false;
+      const associated = Array.from(radio.labels || []);
+      if (associated.length !== 1 || associated[0].getAttribute('for') !== id || !fieldset.contains(associated[0]) ||
+          associated[0].querySelectorAll(':scope > div').length !== 1 || associated[0].querySelector('input,select,textarea,button') ||
+          !text(associated[0]) || associated[0].textContent.length > 2000 || !rendered(associated[0], doc)) return false;
+      const countyControls = county.querySelectorAll('input,select,textarea,button');
+      if (original) {
+        if (countyControls.length !== 1) return false;
+        const select = countyControls[0];
+        if (select.tagName !== 'SELECT' || select.type !== 'select-one' || select.id !== `homeAddressLst${index}.county` ||
+            select.name !== `homeAddressLst[${index}].county` || doc.querySelectorAll(`[id="${select.id}"]`).length !== 1 ||
+            rendered(select, doc) || namesFor(select, doc).join('|') !== 'county') return false;
+        originalCounty = select;
+      } else if (countyControls.length || text(county)) return false;
+      radios.push(radio); labels.push(associated[0]); countyRows.push(county);
+      return true;
+    }
+    let position = 1;
+    while (position < originalStart) {
+      if (separator(rows[position])) { position++; continue; }
+      if (radios.length >= 8 || !choice(rows[position], rows[position + 1], radios.length, false)) return null;
+      position += 2;
+    }
+    if (position !== originalStart || !radios.length) return null;
+    const candidateCount = radios.length;
+    if (!choice(rows[originalStart + 1], rows[originalStart + 2], candidateCount, true) ||
+        rows.slice(originalStart + 3).some(row => !separator(row))) return null;
+    if (form.querySelectorAll('input[name="homeAddressIndex"]').length !== radios.length || radios.filter(radio => radio.checked).length > 1) return null;
+    const allowed = new Set([...radios, originalCounty]);
+    const unknownControls = Array.from(form.querySelectorAll('input,select,textarea')).some(element => element.type !== 'hidden' && !allowed.has(element)) ||
+      Boolean(form.querySelector('[contenteditable]:not([contenteditable="false"])'));
+    const errors = Array.from(form.querySelectorAll('#selectMailingAddrError,#selectPhysicalAddrError,#errorMsg,#errorMsgHome,#errorMsgMail,[role="alert"],.error,.errors,.errorMessage,[aria-invalid="true"]'))
+      .some(element => rendered(element, doc) && (text(element) || element.getAttribute('aria-invalid') === 'true'));
+    const warnings = Array.from(form.querySelectorAll('.warning,.warnings')).some(element => rendered(element, doc) && text(element));
+    const decision = addressPolicy.decide({ scope: 'home', candidates: radios.slice(0, candidateCount).map((radio, index) => ({ id: radio.id, index, role: 'suggestion' })),
+      hasErrors: Boolean(errors), hasWarnings: Boolean(warnings), hasUnknownControls: unknownControls });
+    if (!decision.eligible) return null;
+    const buttons = Array.from(form.querySelectorAll('button')).filter(button => normal(button.textContent) === 'save and continue');
+    if (buttons.length !== 1) return null;
+    const button = buttons[0];
+    if (button.type !== 'button' || !['btn', 'btn-primary', 'saveAndContinueButton'].every(name => button.classList.contains(name)) ||
+        button.getAttribute('onclick') !== 'submitForm();' || !editable(button, doc) || button.getAttribute('aria-disabled') === 'true' ||
+        ['formaction', 'formtarget', 'formnovalidate', 'formmethod', 'formenctype'].some(name => button.hasAttribute(name)) ||
+        (button.hasAttribute('form') && button.getAttribute('form') !== form.id)) return null;
+    // Only the observed Back and hidden modal buttons may accompany Next.
+    const unfamiliarButton = Array.from(form.querySelectorAll('button,input[type="button"],input[type="submit"],input[type="reset"]')).some(other => {
+      if (other === button) return false;
+      if (other.closest('#simplemodal.modal.fade[role="dialog"]') && !rendered(other, doc)) return false;
+      return other.tagName !== 'BUTTON' || other.type !== 'button' || normal(other.textContent) !== 'back' ||
+        other.getAttribute('onclick') !== "submitUrlLink('enterPersonalInfo?enterPersonalInfo=true');return false;";
+    });
+    if (unfamiliarButton) return null;
+    return { kind: 'address', form, button, first: radios[decision.candidateIndex], radios, labels, countyRows, tbody, candidateCount };
+  }
+
+  function addressState(context) {
+    return { tbody: context.tbody, radios: [...context.radios], labels: context.labels.map(element => ({ element, text: element.textContent })),
+      countyRows: [...context.countyRows], hidden: Array.from(context.form.querySelectorAll('input[type="hidden"]')).map(element => ({ element, id: element.id, name: element.name, value: element.value })) };
+  }
+
+  function sameAddressState(before, context) {
+    const after = addressState(context);
+    return before.tbody === after.tbody && ['radios', 'countyRows'].every(key => before[key].length === after[key].length && before[key].every((element, index) => element === after[key][index])) &&
+      ['labels', 'hidden'].every(key => before[key].length === after[key].length && before[key].every((state, index) => Object.keys(state).every(name => state[name] === after[key][index][name])));
+  }
+
   function focusField(doc, rawUrl, key) {
-    if (!isSupportedUrl(rawUrl) || doc.location.href !== rawUrl || !identifyPage(doc)) return false;
+    if (!isSupportedUrl(rawUrl) || doc.location.href !== rawUrl) return false;
+    if (key === 'addressReview') {
+      const address = addressContext(doc, rawUrl);
+      if (!address || !scrollToField(address.first, doc) || !addressContext(doc, rawUrl)) return false;
+      address.first.focus({ preventScroll: true });
+      return doc.activeElement === address.first;
+    }
+    if (!identifyPage(doc)) return false;
     const definition = definitions[key === 'programs' ? 'programMedicaid' : key];
     if (!definition) return false;
     const elements = matchingControls(doc, definition);
@@ -338,6 +452,8 @@
   }
 
   function navigationButton(doc, rawUrl) {
+    const address = addressContext(doc, rawUrl);
+    if (address) return address;
     if (!isSupportedUrl(rawUrl) || !identifyPage(doc)) return null;
     const forms = doc.querySelectorAll('form#personalInformation[action="enterPersonalInfo"]');
     if (forms.length !== 1) return null;
@@ -360,14 +476,20 @@
     result.kind = 'manual'; result.pageKey = 'iowa-manual'; result.heading = 'Iowa benefits application';
     result.reason = 'Complete this step in Iowa’s form. SecondHand has not verified its controls.';
     const headings = Array.from(doc.querySelectorAll('h1,h2,h3')).filter(element => rendered(element, doc)).map(element => normal(element.textContent));
-    if (Array.from(doc.querySelectorAll('input[type="password"], [name="captchaAnswer"], #securityCode, #termChkbox, [aria-modal="true"]')).some(element => rendered(element, doc)) ||
+    if (Array.from(doc.querySelectorAll('input[type="password"], [name="captchaAnswer"], #securityCode, #termChkbox, [aria-modal="true"], [role="dialog"]')).some(element => rendered(element, doc)) ||
         headings.some(heading => /\b(signature|certification|attestation|review and submit|submit application|confirmation|terms and conditions)\b/.test(heading))) {
       return { ...result, kind: 'blocked', pageKey: 'iowa-protected-step', heading: 'Finish this step yourself', reason: 'Account access, verification, consent, signatures, and final submission must be completed directly in Iowa’s portal.' };
+    }
+    if (headings.includes('select address')) {
+      const address = addressContext(doc, rawUrl);
+      return { ...result, kind: address ? 'fillable' : 'manual', pageKey: 'iowa-select-address', heading: 'Select Address',
+        canAdvance: Boolean(address), manualRemaining: address ? 0 : 1,
+        checklist: [{ key: 'addressReview', label: 'First suggested home address', status: address ? (address.first.checked ? 'complete' : 'missing') : 'manual', required: true, fillable: false }],
+        reason: address ? 'Next selects Iowa’s first suggested home address and saves this step. Review the selected address before final submission.' : 'Review this address step in Iowa’s form. The expected home suggestions could not be verified, or another address question or error needs attention.' };
     }
     if (!identifyPage(doc)) {
       if (headings.includes('household application information')) { result.pageKey = 'iowa-program-intent'; result.heading = 'Household Application Information'; result.reason = 'Choose the household’s application intent and complete verification in Iowa’s form.'; }
       else if (headings.includes('assisting organization or person')) { result.pageKey = 'iowa-assistance'; result.heading = 'Assisting Organization or Person'; result.reason = 'Answer who is helping with the application yourself. These fields do not describe the applicant.'; }
-      else if (headings.includes('select address')) { result.pageKey = 'iowa-select-address'; result.heading = 'Select Address'; result.reason = 'Review Iowa’s suggested address yourself. This address-verification step has not been live-verified for automatic actions.'; result.manualRemaining = 1; result.checklist = [{ key: 'addressReview', label: 'Review and choose the correct address in Iowa’s form', status: 'manual', required: true, fillable: false }]; }
       else if (headings.includes("let's get started")) { result.kind = 'blocked'; result.pageKey = 'iowa-consent'; result.heading = 'Let’s get started'; result.reason = 'Review and complete Iowa’s data-use consent yourself.'; }
       else {
         const informational = [
@@ -410,7 +532,7 @@
     // in this isolated world's memory and are never included in a page probe.
     const token = Object.freeze({});
     navigationSnapshots.set(token, { doc, url: rawUrl, ...next, controls: controlState(next.form), expires: Date.now() + 120000,
-      buttonType: next.button.type, onclick: next.button.getAttribute('onclick') });
+      buttonType: next.button.type, onclick: next.button.getAttribute('onclick'), address: next.kind === 'address' ? addressState(next) : null });
     return token;
   }
 
@@ -421,7 +543,26 @@
     if (!original || original.doc !== doc || original.url !== rawUrl || doc.location.href !== rawUrl || original.expires < Date.now()) return fail('The page changed or the Next preview expired. Check this page again.');
     const page = probePage(doc, rawUrl), next = navigationButton(doc, rawUrl);
     if (!page.canAdvance || !next || next.form !== original.form || next.button !== original.button ||
-        next.button.type !== original.buttonType || next.button.getAttribute('onclick') !== original.onclick || !sameControlState(original.controls, next.form)) return fail('The page or an answer changed. Review it and check again before Next.');
+        next.button.type !== original.buttonType || next.button.getAttribute('onclick') !== original.onclick || !sameControlState(original.controls, next.form) ||
+        (original.address && (!next.first || !sameAddressState(original.address, next)))) return fail('The page or an answer changed. Review it and check again before Next.');
+    if (original.address) {
+      const unchanged = expected => {
+        const fresh = addressContext(doc, rawUrl);
+        return doc.location.href === rawUrl && fresh && fresh.form === original.form && fresh.button === original.button &&
+          sameAddressState(original.address, fresh) && sameControlState(expected, fresh.form) && probePage(doc, rawUrl).canAdvance;
+      };
+      let expected = original.controls;
+      if (!next.first.checked) {
+        if (!scrollToField(next.first, doc) || !unchanged(expected)) return fail('The address choice changed or is not safely accessible. Check this page again.');
+        try { next.first.click(); }
+        catch { return fail('The first address suggestion could not be selected. Review Iowa’s form.'); }
+        expected = original.controls.map(state => next.radios.includes(state.element) ? { ...state, checked: state.element === next.first } : state);
+      }
+      if (!next.first.checked || !unchanged(expected) || !scrollToField(next.button, doc) || !unchanged(expected)) return fail('The address page changed after selection. Review it before continuing.');
+      try { next.button.click(); }
+      catch { return fail('Iowa’s Next control could not be activated. Check the page before trying again.'); }
+      return { advanced: true, reason: 'The first suggested home address was selected and Next was clicked once. Review the address before final submission.' };
+    }
     if (!scrollToField(next.button, doc) || doc.location.href !== rawUrl || !probePage(doc, rawUrl).canAdvance || !sameControlState(original.controls, next.form)) return fail('The Next button is not safely accessible. Continue in Iowa’s form.');
     try { next.button.click(); }
     catch { return fail('Iowa’s Next control could not be activated. Check the page before trying again.'); }

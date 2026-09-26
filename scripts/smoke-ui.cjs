@@ -168,7 +168,7 @@ async function main() {
     await page.locator('#auth-submit').click();
     await expect(page.locator('#workspace')).toBeVisible();
     const bytes = await fs.readFile(path.join(userData, 'vault.secondhand'), 'utf8');
-    for (const secret of ['Avery', 'Example', '123 Test Way', '2025550147', 'SYNTHETIC-RECEIPT-ONLY', passphrase, resetPassword, recoveryKey, recoveryKey.replace(/-/g, '')]) assert.equal(bytes.includes(secret), false);
+    for (const secret of ['Avery', 'Example', applicantFixture.addressLine1, '2025550147', 'SYNTHETIC-RECEIPT-ONLY', passphrase, resetPassword, recoveryKey, recoveryKey.replace(/-/g, '')]) assert.equal(bytes.includes(secret), false);
     assert.deepEqual(errors, []);
     console.log('Electron UI smoke passed: create, save full applicant choices and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence, recovery key password reset.');
   } catch (error) {

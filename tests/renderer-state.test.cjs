@@ -137,7 +137,7 @@ test('new profile choices default to unknown, save explicit no, and clear with a
   assert.equal(view.get('programFip').value, 'no');
   assert.equal(view.get('mailingSameAsHome').value, 'no');
   assert.equal(view.get('mailingAddressLine1').value, 'PO Box 123');
-  assert.equal(view.get('addressLine1').value, '123 Test Way');
+  assert.equal(view.get('addressLine1').value, fictionalProfile.addressLine1);
   view.lock();
   for (const field of PROFILE_FIELDS) assert.equal(view.get(field).value, '', field);
 });

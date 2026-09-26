@@ -38,13 +38,23 @@ An on-screen QA caption identifies the simulated portal and desktop connection.
 It contains no audio and does not show a live Iowa filing. The JSON report
 includes timed chapters, assertions, and the recording's scope.
 
-The broader browser smoke also checks conditional address/program branches,
+The broader browser smoke additionally exercises the observed home-address
+confirmation structure using `tests/fixtures/iowa-select-address.cjs`: it chooses
+the first possible home match, advances exactly once, makes no additional profile
+request at that step, and pauses at an unsupported later page. Generated variants
+cover prior selections, multiple suggestions, errors, visible dialogs/county
+questions, and unsupported mailing controls. The video flow above retains the
+separate hypothetical address page to demonstrate the unverified-layout pause.
+
+The browser smoke also checks conditional address/program branches,
 preservation of existing answers, potentially destructive parent choices,
 full-document navigation and extension reinjection, consent pauses, per-page
 Fill & Next, lock handling, and that sidebar messages omit profile values and
 approval tokens.
 
 The applicant fixture uses sanitized metadata from the observed blank Iowa
-form. The address-choice and later-page fixtures are hypothetical. These tests
-do not establish support for those live pages, and passing them does not mean
-the extension can complete an entire SNAP application.
+form. The new home-address fixture reconstructs observed controls with a public
+campus test address; multiple-choice variants and the later-page fixtures are
+synthetic. Browser requests never reach Iowa. These tests do not establish live
+end-to-end filing, and passing them does not mean the extension can complete an
+entire SNAP application.

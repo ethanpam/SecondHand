@@ -1,39 +1,34 @@
-# Address confirmation development
+# Home-address confirmation
 
-The current released extension pauses on **Select Address**. `extension/address-policy.js` is a tested comparison component for the next integration; it is not loaded by the manifest, worker, or content script and cannot select an address or navigate Iowa's portal by itself. Live address controls and later application pages still need inspection.
+This development branch supports Iowa's observed **Select Address** home-address step. During approved guided autofill, it selects the first entry under **Possible matches for your home address** and uses the verified **Save and Continue** button. This follows the requested first-suggestion preference; it does not establish that the address is correct. The applicant must review the chosen address before final submission. The public 0.4 download has not been updated with this change.
 
-Iowa's [Select Address help](https://hhsservices.iowa.gov/apspssp/pages/WebHelp/select_address.htm) describes confirming correct addresses and saving them with **Save and Continue**. It does not document the current application form's field IDs, original/suggested address containers, choice values, warnings, or navigation handler. A help-page heading is insufficient to enable automatic actions.
+The adapter uses Iowa's suggestions for the address entered in the current application. It does not reread or substitute the desktop profile at this step. The originally entered-address option is identified separately and is never used as a fallback when suggestions are missing. Address values remain in the page and private, short-lived navigation snapshot; the sidebar receives only a static checklist and status.
 
-## Comparison contract
+## Observed controls
 
-The pure `SecondHandAddressPolicy.decide(input)` function accepts:
+Read-only inspection on September 26, 2026 verified:
 
-```js
-{
-  scope: 'home', // 'home' or 'mailing'; evaluated separately
-  submitted: { line1: '123 Test Way', line2: 'Unit 4', city: 'Demo City', state: 'IA', zip: '50309' },
-  candidates: [
-    { id: 'suggestion-1', address: { line1: '123 TEST WAY', line2: 'UNIT 4', city: 'DEMO CITY', state: 'IA', zip: '50309' } }
-  ],
-  hasWarnings: false,
-  hasErrors: false
-}
-```
+- Path `/applyForBenefits/addressValidation`, heading **Select Address**, and `form#addressValue` posting to `selectedAddress`.
+- A home-address table with distinct **Possible matches for your home address:** and **Your Home address as you entered is:** rows.
+- Suggestion radio `#homeAddressIndex0`, name `homeAddressIndex`, value `0`, handler `onHomeAddrSelect('0');`. The original-address radio follows the suggestions with its own sequential index.
+- A separate associated label and county row for each choice. The observed suggested address had no county input; the original address had a hidden county select.
+- A visible `button[type="button"].saveAndContinueButton` labeled **Save and Continue**, handler `submitForm();`.
+- Known home/mailing error containers and a hidden modal containing **Sign & Submit**. Any rendered modal blocks automation. The visible `#infoMsg` is ordinary selection guidance, not an error.
 
-The example is fictional and must not be entered into the live portal. Every input key is required, including an explicit empty `line2` when no unit or second line exists. Candidate IDs are adapter-local identifiers, not applicant answers. Candidates represent verified suggestions, separately from the original entered-address display.
+The inspected page contained one suggestion. Local generated variants exercise multiple suggestions with the same structure; those variants have not been verified live. Separate mailing-address confirmation is not mapped.
 
-The decision is eligible only when there is exactly one valid suggestion, no warning or error, and every component matches after ASCII capitalization and whitespace normalization. No punctuation is removed, no abbreviations are expanded, and no fuzzy matching, transliteration, inferred apartment, or ZIP+4 addition is accepted. Several candidates pause even when one matches. Home and mailing details are never substituted for each other.
+## Selection and navigation guards
 
-Results contain only `eligible`, a fixed `reason` code, `candidateIndex` (zero or null), and static `differingComponents` names. They contain no address strings or candidate IDs. The module performs no DOM operations, network requests, logging, or storage and does not determine deliverability or benefit eligibility.
+`SecondHandAddressPolicy.decide(input)` is a pure, value-free decision over ordered candidate metadata, scope, and warning/error/unknown-control flags. Only the verified home scope is eligible. It chooses the first suggestion regardless of address spelling differences or the number of candidates. This intentionally replaces the earlier, unused equivalent-address comparison prototype.
 
-## Live integration requirements
+The adapter must verify the exact form, headings, group boundaries, radio IDs/names/values/handlers, and ordinary Next control. A heading alone does not enable automation. Unexpected controls, unsupported mailing choices, visible county questions, errors, warnings, consent, and visible dialogs pause the flow.
 
-Use the address actually entered in this application, including manual edits, as the comparison source. A saved desktop profile can be stale. The real screen must establish which controls represent that original address and which are suggestions; if it cannot, pause. Address details remain ephemeral and must not enter screenshots, fixtures, logs, sidebar messages, or persistent extension storage.
+The single-use navigation snapshot binds the document, URL, original elements, ordered choices, current selection, and displayed address text. Changed choices or addresses invalidate it. Immediately before automatic navigation, the worker checks the existing desktop grant and tab/cancellation/expiry guards. The adapter revalidates the snapshot, selects the first suggestion if needed, then checks the resulting selection and page state before clicking Next once. An uncertain result is not retried automatically.
 
-Before activating selection and navigation, verify the real form/action, home and mailing group boundaries, complete address components, suggestion controls, handlers, warning/error containers, and the exact ordinary **Save and Continue** control. Transcribe only sanitized structure into a fixture. Recheck the decision and original DOM elements immediately before selecting; recheck selected state and any resulting errors before navigation. Reuse the desktop session check, cancellation/tab/expiry guards, and single-use navigation snapshot. A comparison result alone never authorizes a click.
+The desktop approval dialog and sidebar disclose first-suggestion selection. The home address stored in a real profile has no fixture default. The campus address in the QA profile is used only by isolated tests.
 
-Changed addresses, missing units, multiple suggestions, unclear controls, consent, signatures, review, and final submission require the applicant. No automatic retry should follow an uncertain navigation result. Later pages need their own verified mappings; this component does not make the whole SNAP application automatic.
+**Save and Continue sends and may save answers with Iowa before final submission.** Signatures, consent, review, final submission, and unverified later pages require the applicant. This feature does not automate the whole SNAP application.
 
 ## Validation
 
-Run `node --test tests/address-policy.test.cjs` for structured comparison cases. The real Chromium smoke (`npm run test:extension`) also includes an explicitly hypothetical Select Address page. It verifies that the current production extension stops after the applicant page, displays the manual address checklist, leaves choices untouched, and makes no second navigation or extra profile requests. That scenario proves the current boundary; it does not validate real Iowa address selection.
+`tests/fixtures/iowa-select-address.cjs` reconstructs the observed schema with the public campus test location. It contains no captured page, cookies, or session values. Policy and adapter tests cover first-suggestion selection, altered markup and snapshots, error/modal/county pauses, and single-use navigation. The isolated Chromium smoke exercises applicant → verified home-address confirmation → unsupported later page with the actual extension and a simulated native bridge. A separate hypothetical address fixture continues to prove that unverified markup stays manual.

@@ -52,7 +52,7 @@ npm run dist:mac      # Unsigned DMGs for Apple silicon and Intel Macs
 Fictional QA data is in [`tests/fixtures/applicant-profile.json`](tests/fixtures/applicant-profile.json). It is for isolated tests only and is never sent to the real Iowa portal.
 See [extension QA and recording](docs/extension-qa.md) for the walkthrough, test coverage, and simulated components.
 
-Address confirmation is under development. The [comparison component and integration notes](docs/address-automation.md) cover strict address matching; live address selection remains disabled pending inspection of Iowa's actual controls.
+This development branch also supports the observed home-only **Select Address** step: guided autofill chooses Iowa's first possible home-address match, then Save and Continue. Review that choice before submitting. Separate mailing confirmation, county questions, and unverified later pages remain manual. See [address confirmation coverage](docs/address-automation.md). Public 0.4 downloads do not yet include this change.
 
 GitHub Actions runs syntax/security configuration checks, unit/integration tests, Electron/native smoke tests, and builds Windows installers plus Apple silicon and Intel Mac disk images. Workflow artifacts expire after 30 days and can be rebuilt with **Run workflow**; tagged builds can retain installers in a GitHub prerelease. No application server, database service, API keys, or applicant account with secondHand is required.
 

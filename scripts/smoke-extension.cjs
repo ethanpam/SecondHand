@@ -10,12 +10,38 @@ const path = require('node:path');
 const { chromium, expect } = require('@playwright/test');
 const syntheticProfile = require('../tests/fixtures/applicant-profile.json');
 const applicantFixture = require('../tests/fixtures/iowa-personal-information.cjs');
+const addressFixture = require('../tests/fixtures/iowa-select-address.cjs');
 const root = path.join(__dirname, '..');
 const portal = 'https://hhsservices.iowa.gov/apspssp/ssp.portal';
 const applicant = `${portal}/applyForBenefits/enterPersonalInfo`;
 const extensionDirectory = path.join(root, 'extension');
 const documentManualUrl = `${portal}/qa-only/document-manual`;
 const documentNextMarker = 'SECONDHAND_SYNTHETIC_FULL_DOCUMENT_NEXT';
+const addressUrl = addressFixture.URL;
+const verifiedApplicantMarker = 'SECONDHAND_VERIFIED_ADDRESS_APPLICANT_NEXT';
+const verifiedAddressMarker = 'SECONDHAND_VERIFIED_ADDRESS_NEXT:';
+const addressVariants = {
+  original: { selected: 'original' },
+  second: { selected: 'second', candidateCount: 2 },
+  error: { selected: 'original', error: true },
+  modal: { selected: 'original', modal: true },
+  mailing: { selected: 'original', mailing: true },
+  county: { selected: 'original', renderedCounty: true }
+};
+
+function verifiedAddressFixture(variant) {
+  const options = addressVariants[variant];
+  if (!options) throw new Error('Unknown isolated address QA variant.');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Verified address structure · isolated QA</title>
+    <style>body{font:16px system-ui;background:#f7f8f2;color:#294035;margin:0;padding:30px}main{max-width:900px}label{display:block;margin:12px 0}button{padding:12px 18px;margin:12px}table{border-collapse:collapse}td,th{padding:10px;text-align:left}</style></head>
+    <body><main><p data-verified-address-qa>ISOLATED QA · FICTIONAL APPLICANT · PUBLIC CAMPUS ADDRESS. No government connection.</p>${addressFixture.makeHtml(options)}</main>
+    <script>(${addressFixture.attachHandlers.toString()})(document);
+      document.querySelector(${JSON.stringify(addressFixture.NEXT_SELECTOR)}).addEventListener('click', () => {
+        console.info(${JSON.stringify(verifiedAddressMarker)} + JSON.stringify(document.__addressQa));
+        location.assign(${JSON.stringify(documentManualUrl)});
+      });
+    </script></body></html>`;
+}
 
 function fixture(nextStep) {
   if (nextStep === 'document-manual-destination') {
@@ -28,8 +54,10 @@ function fixture(nextStep) {
   // Address controls below are hypothetical QA controls, not an observed Iowa
   // schema. They verify the shipping adapter's refusal to operate this step.
   const addressReview = nextStep === 'address-review';
+  const verifiedAddressVariant = typeof nextStep === 'string' && nextStep.startsWith('verified-address-') ? nextStep.slice('verified-address-'.length) : null;
+  if (verifiedAddressVariant && !Object.hasOwn(addressVariants, verifiedAddressVariant)) throw new Error('Unknown address fixture transition.');
   const nextMarkup = addressReview
-    ? '<h1>Select Address</h1><p data-qa-only>HYPOTHETICAL QA CONTROLS. These are not verified Iowa selectors or address-selection behavior.</p><fieldset><legend>Fictional address choices for the isolation test</legend><label><input id="qa-original-address" name="qa-address-choice" type="radio" value="original">123 Test Way, Unit 4, Demo City, IA 50309</label><label><input id="qa-suggested-address" name="qa-address-choice" type="radio" value="suggested">123 TEST WAY, UNIT 4, DEMO CITY, IA 50309</label></fieldset><button id="qa-address-continue" type="button">Continue (QA only)</button>'
+    ? '<h1>Select Address</h1><p data-qa-only>HYPOTHETICAL QA CONTROLS. These are not verified Iowa selectors or address-selection behavior.</p><fieldset><legend>Public-campus address choices for the fictional applicant isolation test</legend><label><input id="qa-original-address" name="qa-address-choice" type="radio" value="original">411 Morrill Rd, Ames, IA 50011</label><label><input id="qa-suggested-address" name="qa-address-choice" type="radio" value="suggested">411 MORRILL RD, AMES, IA 50011</label></fieldset><button id="qa-address-continue" type="button">Continue (QA only)</button>'
     : nextStep === 'consent'
     ? '<h1>Terms and Consent</h1><label><input id="termChkbox" type="checkbox">I agree to the terms</label><button type="button">Continue</button>'
     : '<h1>Household Members</h1><label>Household member<input name="householdMember"></label><button type="button">Continue</button>';
@@ -43,6 +71,11 @@ function fixture(nextStep) {
       document.querySelector('.saveAndContinueButton').addEventListener('click', () => {
         window.__nextClicks++;
         window.__lastAnswers = Object.fromEntries(Array.from(document.querySelectorAll('#personalInformation input, #personalInformation select'), element => [element.id, ['checkbox','radio'].includes(element.type) ? element.checked : element.value]));
+        if (${JSON.stringify(Boolean(verifiedAddressVariant))}) {
+          console.info(${JSON.stringify(verifiedApplicantMarker)});
+          location.assign(${JSON.stringify(addressUrl)});
+          return;
+        }
         if (${JSON.stringify(nextStep === 'document-manual')}) {
           // Static QA marker survives unloading through the browser console
           // listener. It carries no answers, tokens, or other applicant data.
@@ -59,17 +92,23 @@ function fixture(nextStep) {
 }
 
 async function installNativeStub(worker) {
-  await worker.evaluate(profile => {
+  await worker.evaluate(({ profile, addressUrl }) => {
     globalThis.__nativeSmoke = { locked: false, lockAfterFill: false, calls: [], profile };
     nativeRequest = async (type, payload = {}) => {
       const state = globalThis.__nativeSmoke;
-      state.calls.push({ type, fields: payload.fields || [], session: Boolean(payload.assistanceToken) });
+      state.calls.push({ type, fields: payload.fields || [], session: Boolean(payload.assistanceToken), url: payload.url || '' });
       if (type === 'status') return { unlocked: !state.locked, applicationCount: 0 };
       if (type === 'startAssistedSession') {
         if (state.locked) throw new Error('Unlock the synthetic desktop vault first.');
         return { assistanceToken: 'a'.repeat(64), fields: payload.fields, expiresAt: new Date(Date.now() + 900000).toISOString() };
       }
-      if (type === 'checkAssistedSession') return { active: !state.locked };
+      if (type === 'checkAssistedSession') {
+        if (payload.url === addressUrl && state.holdAddressNavigation) {
+          state.addressChecks = (state.addressChecks || 0) + 1;
+          await new Promise(resolve => { state.releaseAddressNavigation = resolve; });
+        }
+        return { active: !state.locked };
+      }
       if (type === 'endAssistedSession') return { ended: true };
       if (type === 'getFields') {
         if (state.locked) throw new Error('Unlock the synthetic desktop vault first.');
@@ -78,7 +117,7 @@ async function installNativeStub(worker) {
       if (type === 'recordProgress') { if (state.lockAfterFill) state.locked = true; return { recorded: true }; }
       throw new Error('Unexpected native test message: ' + type);
     };
-  }, syntheticProfile);
+  }, { profile: syntheticProfile, addressUrl });
 }
 
 // Chrome native side-panel targets are real extension pages but are not exposed
@@ -147,6 +186,9 @@ async function main() {
   let context, panel, page, worker;
   const errors = [];
   let documentNextClicks = 0, documentManualLoads = 0;
+  let verifiedApplicantClicks = 0, verifiedAddressLoads = 0;
+  let currentAddressVariant = 'original';
+  const verifiedAddressNext = [];
   try {
     context = await chromium.launchPersistentContext(userData, {
       channel: 'chromium', headless: true, viewport: { width: 1200, height: 900 },
@@ -161,6 +203,10 @@ async function main() {
         documentManualLoads++;
         return route.fulfill({ status: 200, contentType: 'text/html', body: fixture('document-manual-destination') });
       }
+      if (request.isNavigationRequest() && `${url.origin}${url.pathname}` === addressUrl) {
+        verifiedAddressLoads++;
+        return route.fulfill({ status: 200, contentType: 'text/html', body: verifiedAddressFixture(currentAddressVariant) });
+      }
       if (url.protocol === 'chrome-extension:') return route.continue();
       return route.abort('blockedbyclient');
     });
@@ -171,11 +217,17 @@ async function main() {
     await installNativeStub(worker);
     page = context.pages()[0] || await context.newPage();
     page.on('pageerror', error => errors.push(error.message));
-    page.on('console', message => { if (message.type() === 'info' && message.text() === documentNextMarker) documentNextClicks++; });
+    page.on('console', message => {
+      if (message.type() !== 'info') return;
+      if (message.text() === documentNextMarker) documentNextClicks++;
+      if (message.text() === verifiedApplicantMarker) verifiedApplicantClicks++;
+      if (message.text().startsWith(verifiedAddressMarker)) verifiedAddressNext.push(JSON.parse(message.text().slice(verifiedAddressMarker.length)));
+    });
     await fs.mkdir(path.join(root, 'artifacts'), { recursive: true });
 
     async function startFixture({ next = 'manual', profile = {}, lockAfterFill = false } = {}) {
       if (panel && await panel.visible('#pause-auto')) await panel.click('#pause-auto');
+      if (next.startsWith('verified-address-')) currentAddressVariant = next.slice('verified-address-'.length);
       await worker.evaluate(({ profile, lockAfterFill }) => {
         globalThis.__nativeSmoke = { locked: false, lockAfterFill, calls: [], profile };
       }, { profile: { ...syntheticProfile, ...profile }, lockAfterFill });
@@ -220,7 +272,7 @@ async function main() {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       return JSON.stringify(await chrome.runtime.sendMessage({ type: 'ui:pageState', tabId: tab.id }));
     });
-    for (const value of ['Avery', 'Jordan', 'Example', '123 Test Way', '2025550147', 'PO Box 123']) {
+    for (const value of [syntheticProfile.firstName, syntheticProfile.middleName, syntheticProfile.lastName, syntheticProfile.addressLine1, syntheticProfile.homePhone, syntheticProfile.mailingAddressLine1]) {
       assert.equal(sidebarText.includes(value), false, `Sidebar must never render a profile value: ${value}`);
       assert.equal(sidebarMessage.includes(value), false, `Sidebar messages must never receive a profile value: ${value}`);
     }
@@ -238,7 +290,7 @@ async function main() {
     const fullAnswers = await page.evaluate(() => window.__lastAnswers);
     assert.equal(fullAnswers.firstName, syntheticProfile.firstName);
     assert.equal(fullAnswers.suffix, 'III'); assert.equal(fullAnswers.sameAddress2, true);
-    assert.equal(fullAnswers.mailingCity, 'Demo City'); assert.equal(fullAnswers.snap, true);
+    assert.equal(fullAnswers.mailingCity, syntheticProfile.mailingCity); assert.equal(fullAnswers.snap, true);
     assert.equal(fullAnswers.bestTime, syntheticProfile.bestContactTime);
     await stop();
     console.log('Native Chrome sidebar: complete applicant autofill, checklist metadata, missing-profile focus, wait, and manual completion → exactly one Next passed.');
@@ -333,11 +385,78 @@ async function main() {
     await stop();
     console.log('Native sidebar: full-document navigation unloads the applicant, reinjects once, and pauses without a second Next or further profile request.');
 
+    for (const variant of ['original', 'second']) {
+      await startFixture({ next: `verified-address-${variant}`, profile: { mailingSameAsHome: 'yes' } });
+      verifiedApplicantClicks = 0; verifiedAddressLoads = 0; verifiedAddressNext.length = 0; documentManualLoads = 0;
+      // Hold only the synthetic desktop validity response, so the genuine
+      // sidebar can render the address checklist before the approved Next.
+      await worker.evaluate(() => { globalThis.__nativeSmoke.holdAddressNavigation = true; });
+      await panel.click('#start-auto');
+      await expect(page).toHaveURL(addressUrl, { timeout: 20000 });
+      await expect.poll(() => worker.evaluate(() => globalThis.__nativeSmoke.addressChecks || 0), { timeout: 15000 }).toBe(1);
+      await expect.poll(() => panel.text('[data-key="addressReview"]'), { timeout: 15000 }).toContain('First suggested home address');
+      await expect(page.locator('#homeAddressIndex0')).not.toBeChecked();
+      await expect(page.locator('#homeAddressIndex1')).toBeChecked();
+      assert.deepEqual(await page.evaluate(() => document.__addressQa), { selectionClicks: [], selectedIndexes: [], nextClicks: 0 });
+      const addressSidebar = await panel.evaluate(async () => {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const state = await chrome.runtime.sendMessage({ type: 'ui:pageState', tabId: tab.id });
+        return { text: document.body.innerText, message: JSON.stringify(state) };
+      });
+      assert.ok(addressSidebar.message.includes('iowa-select-address'));
+      for (const value of ['411 Morrill', '411 MORRILL', '415 MORRILL', 'Ames', 'AMES', '50011', 'qaAddressLine', 'assistanceToken', 'a'.repeat(64)]) {
+        assert.equal(addressSidebar.text.includes(value), false, `Address text must stay out of the sidebar: ${value}`);
+        assert.equal(addressSidebar.message.includes(value), false, `Address text must stay out of extension UI messages: ${value}`);
+      }
+      const requestsBeforeAddress = (await worker.evaluate(() => globalThis.__nativeSmoke.calls)).filter(call => call.type === 'getFields').length;
+      assert.ok(requestsBeforeAddress > 0);
+      await worker.evaluate(() => {
+        const state = globalThis.__nativeSmoke;
+        state.holdAddressNavigation = false;
+        state.releaseAddressNavigation();
+        delete state.releaseAddressNavigation;
+      });
+      await expect(page).toHaveURL(documentManualUrl, { timeout: 20000 });
+      await expect.poll(() => panel.text('#guided-state'), { timeout: 15000 }).toBe('PAUSED FOR YOUR REVIEW');
+      await page.waitForTimeout(1900);
+      assert.equal(verifiedApplicantClicks, 1);
+      assert.equal(verifiedAddressLoads, 1);
+      assert.equal(documentManualLoads, 1);
+      assert.deepEqual(verifiedAddressNext, [{ selectionClicks: ['0'], selectedIndexes: [['0']], nextClicks: 1 }], 'First possible home address replaces the previous selection before one address Next.');
+      assert.equal(await page.evaluate(() => window.__manualNextClicks), 0);
+      const callsAfterAddress = await worker.evaluate(() => globalThis.__nativeSmoke.calls);
+      assert.equal(callsAfterAddress.filter(call => call.type === 'getFields').length, requestsBeforeAddress, 'The address step must never request profile values.');
+      assert.equal(callsAfterAddress.filter(call => call.type === 'getFields' && call.url === addressUrl).length, 0);
+      await stop();
+      console.log(`Native sidebar: verified home-address selection replaces ${variant}, chooses first possible match, and advances each document exactly once without profile requests.`);
+    }
+
+    for (const variant of ['error', 'modal', 'mailing', 'county']) {
+      await startFixture({ next: `verified-address-${variant}`, profile: { mailingSameAsHome: 'yes' } });
+      verifiedApplicantClicks = 0; verifiedAddressLoads = 0; verifiedAddressNext.length = 0;
+      await panel.click('#start-auto');
+      await expect(page).toHaveURL(addressUrl, { timeout: 20000 });
+      await expect.poll(() => panel.text('#guided-state'), { timeout: 15000 }).toBe('PAUSED FOR YOUR REVIEW');
+      const requestsAtAddress = (await worker.evaluate(() => globalThis.__nativeSmoke.calls)).filter(call => call.type === 'getFields').length;
+      await page.waitForTimeout(1900);
+      await expect(page.locator('#homeAddressIndex0')).not.toBeChecked();
+      await expect(page.locator('#homeAddressIndex1')).toBeChecked();
+      assert.deepEqual(await page.evaluate(() => document.__addressQa), { selectionClicks: [], selectedIndexes: [], nextClicks: 0 });
+      assert.equal(verifiedApplicantClicks, 1);
+      assert.equal(verifiedAddressLoads, 1);
+      assert.deepEqual(verifiedAddressNext, []);
+      const calls = await worker.evaluate(() => globalThis.__nativeSmoke.calls);
+      assert.equal(calls.filter(call => call.type === 'getFields').length, requestsAtAddress);
+      assert.equal(calls.filter(call => call.type === 'getFields' && call.url === addressUrl).length, 0);
+      await stop();
+      console.log(`Native sidebar: address ${variant} variant stays manual with unchanged selection, no Next, and no profile request.`);
+    }
+
     await startFixture({ next: 'address-review' });
     await panel.click('#start-auto'); await nextOnce();
     await expect(page.locator('[data-qa-only]')).toContainText('HYPOTHETICAL QA CONTROLS');
     await expect.poll(() => panel.text('[data-key="addressReview"]')).toContain('Needs manual review');
-    await expect.poll(() => panel.text('#manual-reason')).toContain('has not been live-verified');
+    await expect.poll(() => panel.text('#manual-reason')).toContain('could not be verified');
     assert.equal(await panel.evaluate(() => document.querySelector('#start-auto').disabled), true);
     assert.equal(await panel.evaluate(() => document.querySelector('#fill-next').disabled), true);
     const addressProfileRequests = (await worker.evaluate(() => globalThis.__nativeSmoke.calls)).filter(call => call.type === 'getFields').length;
@@ -404,5 +523,5 @@ async function main() {
     await fs.rm(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
-module.exports = { fixture, installNativeStub, attachNativePanel, portal, applicant, extensionDirectory, syntheticProfile };
+module.exports = { fixture, verifiedAddressFixture, installNativeStub, attachNativePanel, portal, applicant, addressUrl, documentManualUrl, extensionDirectory, syntheticProfile };
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; });

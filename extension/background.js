@@ -1,5 +1,5 @@
 'use strict';
-importScripts('iowa-adapter.js');
+importScripts('address-policy.js', 'iowa-adapter.js');
 const HOST = 'org.secondhand.bridge';
 const scans = new Map();
 const pages = new Map();
@@ -79,7 +79,7 @@ async function activePortal(tabId) {
   return tab;
 }
 async function inject(tabId) {
-  await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ['iowa-adapter.js', 'content.js'] });
+  await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ['address-policy.js', 'iowa-adapter.js', 'content.js'] });
 }
 function rememberScan(tabId, scan, url) {
   const allowed = Object.keys(SecondHandIowa.definitions);

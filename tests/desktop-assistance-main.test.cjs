@@ -91,6 +91,9 @@ test('desktop requires one scoped guided consent and retains manual per-request 
   assert.equal(app.prompts.length, 1);
   assert.deepEqual(await app.request({ type: 'checkAssistedSession', assistanceToken: grant.assistanceToken }), { active: true });
   assert.match(app.prompts[0].detail, /Next or Save and Continue/);
+  assert.match(app.prompts[0].detail, /automatically select Iowa's first possible home-address suggestion and choose Save and Continue/);
+  assert.match(app.prompts[0].detail, /applies to home-address suggestions only/);
+  assert.match(app.prompts[0].detail, /Review the chosen home address before final submission/);
   assert.match(app.prompts[0].detail, /does not authorize consent, signatures, or submitting/);
   assert.equal((await app.request({ type: 'getFields', fields: ['firstName'], assistanceToken: grant.assistanceToken })).values.firstName, 'Synthetic');
   assert.equal(app.prompts.length, 1);
