@@ -3,11 +3,7 @@
 import type { GrainGradient } from '@paper-design/shaders-react';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
-const colors = [
-  'hsl(193, 85%, 66%)',
-  'hsl(196, 100%, 83%)',
-  'hsl(195, 100%, 50%)',
-];
+const colors = ['#8bb89a', '#d7e6cf', '#337d5b'];
 const motionQuery = '(prefers-reduced-motion: reduce)';
 
 function subscribeToMotion(onChange: () => void) {
@@ -61,7 +57,7 @@ export function GradientBackground() {
           <Shader
             className="gradient-canvas"
             style={{ height: '100%', width: '100%' }}
-            colorBack="hsl(0, 0%, 0%)"
+            colorBack="#f8faf7"
             softness={0.76}
             intensity={0.45}
             noise={0}

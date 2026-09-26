@@ -17,7 +17,7 @@ The site URL used for canonical links, the sitemap, and share previews is in `ap
 
 ## Visual design
 
-The website uses the cyan-on-black `GrainGradient` and settings from mxthxn’s [Shader Gradient Component](https://v0.app/templates/shader-gradient-component-cAawT1AJaki), powered by the pinned `@paper-design/shaders-react` package. Instrument Serif and Geist are self-hosted through Fontsource; the browser does not request fonts or scripts from third-party services.
+The website adapts the `GrainGradient` motion and texture from mxthxn’s [Shader Gradient Component](https://v0.app/templates/shader-gradient-component-cAawT1AJaki) to secondHand’s original green-and-white palette: forest green (`#164c38`), soft white (`#f8faf7`), and sage accents. It uses the pinned `@paper-design/shaders-react` package. Instrument Serif and Geist are self-hosted through Fontsource; the browser does not request fonts or scripts from third-party services.
 
 The decorative hero shader loads after hydration, with a CSS gradient available before loading and when WebGL is unavailable. It respects reduced motion and has a pause/play control. Paper Shaders suspends rendering when the canvas is offscreen or the document is hidden; rendering is capped at 1.5 million pixels. The same color and typography tokens style the download, setup, privacy, FAQ, confirmation, and not-found pages.
 

@@ -1,15 +1,15 @@
 @import 'tailwindcss';
 
 :root {
-  color-scheme: dark;
-  --background: #06090b;
-  --foreground: #f2f4f3;
-  --primary: #bcecf7;
-  --primary-foreground: #08171c;
-  --muted: #11191e;
-  --muted-foreground: #a3b0b6;
-  --border: #263037;
-  --ring: #6bd5ef;
+  color-scheme: light;
+  --background: #f8faf7;
+  --foreground: #163a2c;
+  --primary: #164c38;
+  --primary-foreground: #fff;
+  --muted: #e9eee8;
+  --muted-foreground: #52665b;
+  --border: #d7e1d6;
+  --ring: #337d5b;
   --serif: 'Instrument Serif', Georgia, 'Times New Roman', serif;
   --radius: 1rem;
 }
@@ -31,8 +31,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 ::selection {
-  background: #bcecf7;
-  color: #08171c;
+  background: #164c38;
+  color: #fff;
 }
 a {
   color: inherit;
@@ -125,10 +125,10 @@ svg {
 .brand-mark {
   width: 35px;
   height: 37px;
-  border: 1px solid #50727b;
+  border: 1px solid #164c38;
   border-radius: 10px 10px 10px 3px;
-  background: #0f1b21;
-  color: var(--primary);
+  background: #164c38;
+  color: var(--primary-foreground);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -142,7 +142,7 @@ nav {
   align-items: center;
   gap: 30px;
   font-size: 13px;
-  color: #b4bec3;
+  color: #52665b;
 }
 nav a,
 .text-link {
@@ -156,14 +156,14 @@ nav a:hover,
   display: inline-flex;
   align-items: center;
   gap: 20px;
-  border: 1px solid #3a4a52;
+  border: 1px solid #c5d5c6;
   border-radius: 7px;
   padding: 9px 16px;
   font-size: 12px;
 }
 .header-download:hover {
   border-color: var(--primary);
-  background: #142129;
+  background: #e9eee8;
 }
 
 .hero {
@@ -173,7 +173,7 @@ nav a:hover,
   display: flex;
   flex-direction: column;
   justify-content: center;
-  background: #000;
+  background: #f8faf7;
 }
 .gradient-background {
   position: absolute;
@@ -182,17 +182,17 @@ nav a:hover,
   overflow: hidden;
   pointer-events: none;
   background:
-    radial-gradient(ellipse at 100% 0%, #20b5d9 0, #579fb5 8%, transparent 43%),
-    radial-gradient(ellipse at 0% 100%, #2386a4 0, #346f80 8%, transparent 40%),
-    #000;
+    radial-gradient(ellipse at 100% 0%, #337d5b 0, #8bb89a 8%, transparent 43%),
+    radial-gradient(ellipse at 0% 100%, #8bb89a 0, #d7e6cf 8%, transparent 40%),
+    #f8faf7;
 }
 .gradient-background::after {
   content: '';
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(180deg, #06090b12, #0008 45%, #06090b 100%),
-    radial-gradient(ellipse at center, #0007, transparent 70%);
+    linear-gradient(180deg, #f8faf712, #f8faf799 45%, #f8faf7 100%),
+    radial-gradient(ellipse at center, #f8faf766, transparent 70%);
 }
 .hero-content {
   width: 100%;
@@ -206,15 +206,15 @@ nav a:hover,
   align-items: center;
   justify-content: center;
   gap: 10px;
-  color: #d4e3e8;
+  color: #415d4c;
   margin-bottom: 28px;
 }
 .status-dot {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: #8edff2;
-  box-shadow: 0 0 12px #6bd5ef77;
+  background: #337d5b;
+  box-shadow: 0 0 12px #337d5b33;
 }
 .hero h1 {
   font-size: clamp(72px, 8.4vw, 114px);
@@ -223,12 +223,12 @@ nav a:hover,
   margin-bottom: 30px;
 }
 .hero h1 > span {
-  color: #c6e8f0;
+  color: #337d5b;
 }
 .hero-lead {
   max-width: 465px;
   margin: 0 auto 32px;
-  color: #b7c4ca;
+  color: #415d4c;
   font-size: 16px;
   line-height: 1.8;
   text-wrap: pretty;
@@ -260,19 +260,19 @@ nav a:hover,
     box-shadow 160ms ease;
 }
 .primary-link:hover {
-  background: #d9f6fd;
-  box-shadow: 0 0 28px #6bd5ef18;
+  background: #226143;
+  box-shadow: 0 0 28px #164c3818;
 }
 .secondary-link {
   padding-block: 14px;
-  color: #e2e9eb;
+  color: #164c38;
 }
 .secondary-link:hover {
   color: var(--primary);
 }
 .hero-note {
   font-size: 11px;
-  color: #a5b3b9;
+  color: #52665b;
   margin: 20px 0 0;
 }
 .hero-caption {
@@ -284,7 +284,7 @@ nav a:hover,
   margin-top: auto;
   padding-top: 22px;
   padding-bottom: 24px;
-  color: #a8b7be;
+  color: #52665b;
   font-size: 11px;
 }
 .hero-caption > span {
@@ -308,15 +308,15 @@ nav a:hover,
   gap: 8px;
   min-height: 36px;
   padding: 7px 11px;
-  color: #c2d0d5;
-  background: #070e14ba;
-  border: 1px solid #52626a;
+  color: #415d4c;
+  background: #ffffffd9;
+  border: 1px solid #b9ccbe;
   border-radius: 6px;
   font-size: 10px;
   cursor: pointer;
 }
 .motion-toggle:hover {
-  color: #fff;
+  color: #164c38;
   border-color: var(--primary);
 }
 
@@ -342,7 +342,7 @@ nav a:hover,
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  color: #bac8ce;
+  color: #415d4c;
   font-size: 11px;
   margin: 28px 0 24px;
 }
@@ -358,10 +358,10 @@ nav a:hover,
 }
 .download-panel {
   padding: 30px;
-  background: linear-gradient(140deg, #142127, #0d1318 60%);
-  border: 1px solid #34454e;
+  background: linear-gradient(140deg, #fff, #fbfdf9 60%);
+  border: 1px solid #d7e1d6;
   border-radius: var(--radius);
-  box-shadow: 0 16px 60px #0003;
+  box-shadow: 0 16px 60px #164c380d;
 }
 .panel-heading {
   display: flex;
@@ -377,15 +377,15 @@ nav a:hover,
 .version {
   font-size: 10px;
   color: var(--primary);
-  border: 1px solid #34505b;
+  border: 1px solid #d7e1d6;
   border-radius: 5px;
   padding: 3px 7px;
-  background: #17282e;
+  background: #edf3e9;
 }
 .phone-note {
   display: none;
   font-size: 13px;
-  color: #c3d4db;
+  color: #415d4c;
   line-height: 1.7;
   border-left: 2px solid var(--primary);
   padding: 4px 0 4px 14px;
@@ -398,8 +398,8 @@ nav a:hover,
   min-height: 46px;
   padding: 4px;
   border-radius: 8px;
-  background: #060c10;
-  border: 1px solid #25343c;
+  background: #e9eee8;
+  border: 1px solid #d7e1d6;
 }
 .platform-tabs button {
   flex: 1;
@@ -419,9 +419,9 @@ nav a:hover,
   color: var(--foreground);
 }
 .platform-tabs [aria-selected='true'] {
-  background: #22323b;
-  color: #e1f5fb;
-  box-shadow: inset 0 0 0 1px #374b56;
+  background: #fff;
+  color: #164c38;
+  box-shadow: inset 0 0 0 1px #d7e1d6;
 }
 .download-content {
   padding-top: 26px;
@@ -449,13 +449,13 @@ nav a:hover,
   font-weight: 600;
 }
 .download-button:hover {
-  background: #daf6fc;
+  background: #226143;
 }
 .download-button > span {
   font-size: 11px;
   font-weight: 400;
   margin-left: auto;
-  color: #354f59;
+  color: #e2eee5;
 }
 .secondary-download {
   display: flex;
@@ -472,7 +472,7 @@ nav a:hover,
 }
 .micro {
   font-size: 11px;
-  color: #a5b2b8;
+  color: #52665b;
   line-height: 1.7;
   margin: 13px 0 0;
 }
@@ -490,7 +490,7 @@ nav a:hover,
 .release-note strong {
   display: block;
   font-weight: 500;
-  color: #d3dfe3;
+  color: #364c3f;
 }
 .scope-note {
   display: grid;
@@ -501,7 +501,7 @@ nav a:hover,
 }
 .note-label {
   font-size: 12px;
-  color: #d3e3e9;
+  color: #364c3f;
 }
 .scope-note p {
   font-size: 12px;
@@ -538,14 +538,14 @@ nav a:hover,
 .steps > li {
   padding: 28px;
   border: 1px solid var(--border);
-  background: linear-gradient(150deg, #10171c, #0a0f13);
+  background: linear-gradient(150deg, #fff, #fbfcf9);
   border-radius: 12px;
 }
 .step-number {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid #34454e;
+  border: 1px solid #d7e1d6;
   color: var(--primary);
   font-size: 12px;
   width: 34px;
@@ -560,12 +560,12 @@ nav a:hover,
 }
 .steps strong {
   font-weight: 500;
-  color: #d3e0e6;
+  color: #304d3b;
 }
 .small-note,
 .steps .small-note {
   font-size: 11px;
-  color: #a2b2bb;
+  color: #52665b;
   line-height: 1.85;
 }
 details {
@@ -578,7 +578,7 @@ summary {
   cursor: pointer;
   font-weight: 500;
   line-height: 1.7;
-  color: #d0dde3;
+  color: #304d3b;
 }
 summary:hover {
   color: var(--primary);
@@ -601,10 +601,10 @@ summary:hover {
 code,
 kbd {
   padding: 2px 5px;
-  background: #1c2b33;
-  color: #c6e2ec;
+  background: #e8eee5;
+  color: #304d3b;
   font-size: 0.9em;
-  border: 1px solid #2c404a;
+  border: 1px solid #d7e1d6;
   border-radius: 4px;
   overflow-wrap: anywhere;
 }
@@ -614,8 +614,8 @@ kbd {
   gap: 42px;
   padding: 28px 32px;
   margin-top: 22px;
-  background: #0e1c22;
-  border: 1px solid #294650;
+  background: #eaf0e5;
+  border: 1px solid #d7e1d6;
   border-radius: 12px;
 }
 .ready-strip > div {
@@ -628,7 +628,7 @@ kbd {
 .ready-strip p {
   font-size: 12px;
   line-height: 1.85;
-  color: #acc1cb;
+  color: #52665b;
   margin: 0;
 }
 .ready-strip > a {
@@ -660,9 +660,9 @@ kbd {
   height: 70px;
   margin-top: 32px;
   color: var(--primary);
-  border: 1px solid #36515d;
+  border: 1px solid #c8d9c9;
   border-radius: 20px;
-  background: radial-gradient(at top right, #23414e, #0c1418 75%);
+  background: radial-gradient(at top right, #d7e6cf, #f5f9f2 75%);
 }
 .privacy-copy > p {
   color: var(--muted-foreground);
@@ -681,7 +681,7 @@ kbd {
   display: flex;
   align-items: start;
   gap: 12px;
-  color: #c8d7de;
+  color: #415d4c;
   font-size: 12px;
 }
 .privacy-copy li svg {
@@ -726,7 +726,7 @@ kbd {
   content: '+';
   font-size: 20px;
   font-weight: 400;
-  color: #a8cbd8;
+  color: #337d5b;
   line-height: 1.2;
 }
 .faq-list details[open] summary::after {
@@ -742,13 +742,13 @@ kbd {
   text-align: center;
   padding: 75px 24px;
   margin-bottom: 90px;
-  border: 1px solid #2e424a;
+  border: 1px solid #d7e1d6;
   border-radius: 16px;
   background: radial-gradient(
     ellipse at 50% 140%,
-    #215165 0%,
-    #0b141a 58%,
-    #0b1014 100%
+    #c5dfc2 0%,
+    #eff5eb 58%,
+    #f8faf7 100%
   );
 }
 .closing-section .eyebrow {
@@ -758,7 +758,7 @@ kbd {
   margin-bottom: 30px;
 }
 .closing-section .micro {
-  color: #b2c2ca;
+  color: #52665b;
 }
 
 .doc-page {
@@ -766,7 +766,7 @@ kbd {
   padding-top: 88px;
   padding-bottom: 100px;
   min-height: 65vh;
-  background: radial-gradient(ellipse at 100% 0%, #13303c35, transparent 50%);
+  background: radial-gradient(ellipse at 100% 0%, #d7e6cf55, transparent 50%);
 }
 .doc-page h1 {
   font-size: clamp(48px, 6vw, 76px);
@@ -782,7 +782,7 @@ kbd {
 .doc-page .doc-lead {
   font-size: 18px;
   line-height: 1.8;
-  color: #c7d9e1;
+  color: #304d3b;
   margin-bottom: 40px;
 }
 .doc-page h2 {
@@ -813,7 +813,7 @@ kbd {
   text-underline-offset: 4px;
 }
 .doc-page a:hover {
-  color: #fff;
+  color: #164c38;
 }
 .next-steps {
   display: grid;
@@ -826,7 +826,7 @@ kbd {
   padding-left: 8px;
 }
 .next-steps strong {
-  color: #e0edf2;
+  color: #304d3b;
   font-weight: 500;
 }
 .not-found-links a {
@@ -845,7 +845,7 @@ footer.wrap {
 footer p {
   font-size: 10px;
   line-height: 1.8;
-  color: #a2afb6;
+  color: #52665b;
   margin: 16px 0 0;
 }
 .footer-brand {
