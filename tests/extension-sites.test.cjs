@@ -18,7 +18,10 @@ const SCRIPT_ID = 'site-pantry.example.org';
 const SITE_SCRIPT = { id: SCRIPT_ID, matches: [`${ORIGIN}/*`], js: ['generic-adapter.js', 'generic-content.js'], runAt: 'document_idle', persistAcrossSessions: true };
 
 // Stand-in for generic-adapter.js's pure helpers; the real engine has its own tests.
+const { GENERIC_KEYS } = require('../extension/generic-adapter.js');
+const SENSITIVE = ['ssn', 'birthDate', 'totalMonthlyIncome', 'annualIncome', 'assetsOnHand'];
 const generic = {
+  GENERIC_KEYS,
   requestKeys: keys => [...new Set(keys.flatMap(key => key === 'fullName' ? ['firstName', 'lastName'] : [key]))],
   deriveValues: values => ({ ...values, ...(values.firstName && values.lastName ? { fullName: `${values.firstName} ${values.lastName}` } : {}) })
 };
@@ -43,7 +46,7 @@ function sitePage(fields, { next = false } = {}) {
         const id = `sh-${sequence}-${index}`;
         ids.set(id, field);
         if (field.key) matched.push({ id, key: field.key, confidence: 'high' });
-        else unmatched.push({ id, label: field.label, type: field.type, options: field.options, required: field.required === true });
+        else unmatched.push({ id, label: field.label, type: field.type, options: field.options || [], required: field.required === true });
       });
       current = { token: `plan-${sequence}`, ids };
       return { token: current.token, matched, unmatched };
@@ -245,7 +248,7 @@ test('autofill on an approved site asks for the planned keys once and fills with
   assert.equal(fill.token, 'plan-1');
   assert.deepEqual(fill.assignments, [{ id: 'sh-1-0', key: 'fullName', guessed: false }, { id: 'sh-1-1', key: 'zip', guessed: false }]);
   assert.deepEqual(fill.values, { fullName: 'Synthetic private first Synthetic private last', zip: '50309' }, 'only the values being placed reach the page');
-  assert.deepEqual(plain(response.data), { state: 'done', filled: 2, guessed: [], needYou: [w.page.idOf('pickup'), w.page.idOf('size')],
+  assert.deepEqual(plain(response.data), { state: 'done', filled: 2, guessed: 0, needYou: [w.page.idOf('pickup'), w.page.idOf('size')],
     message: 'Filled 2 · 2 need you. Check your answers before you submit.', pageKey: 'general' });
   assert.deepEqual(plain(response.data.needYou), ['sh-2-1', 'sh-2-0'], 'need-you ids come from the latest plan');
   assert.doesNotMatch(JSON.stringify(response), /Synthetic private/);
@@ -358,6 +361,81 @@ test('the page count takes each on-screen question SecondHand filled once and sp
   assert.equal(run('<div role="button"><span>Next</span></div>').next, true);
   assert.equal(run('<button type="button" style="visibility:hidden">Next</button>').next, false);
   assert.doesNotMatch(JSON.stringify(run('<input name="first" data-secondhand-filled="rule" value="Synthetic private">')), /Synthetic/);
+});
+
+// Questions the rules leave open, for Chrome's on-device AI in the widget.
+const openQuestions = () => [{ name: 'name', key: 'fullName' }, { ...PICKUP },
+  { name: 'reach', label: 'Where can we email you?', type: 'email' }, { name: 'call', label: 'Best number to reach you', type: 'tel' }];
+const plan = async w => plain((await w.launcher({ type: 'ui:plan', confirmed: true })).data);
+
+test('the widget gets the open questions and the keys the AI may use, never sensitive ones or values', async () => {
+  const w = siteWorker({ enabled: true, fields: openQuestions() });
+  assert.equal(await w.launcher({ type: 'ui:plan' }), undefined, 'only a confirmed click plans');
+  const planned = await plan(w);
+  assert.deepEqual(planned.unmatched, [
+    { id: 'sh-1-1', label: 'Preferred pickup day', type: 'select-one', options: ['Monday', 'Friday'], required: true },
+    { id: 'sh-1-2', label: 'Where can we email you?', type: 'email', options: [], required: false },
+    { id: 'sh-1-3', label: 'Best number to reach you', type: 'tel', options: [], required: false }]);
+  assert.deepEqual(planned.allowedKeys, GENERIC_KEYS.filter(key => !SENSITIVE.includes(key)));
+  for (const key of SENSITIVE) assert.equal(planned.allowedKeys.includes(key), false, key);
+  assert.deepEqual(Object.keys(planned), ['unmatched', 'allowedKeys']);
+  assert.deepEqual(w.native, [], 'planning never reaches the vault');
+  assert.deepEqual(w.contentTypes(), ['secondhand:generic:plan']);
+
+  const off = siteWorker({ fields: openQuestions() });
+  assert.equal((await off.launcher({ type: 'ui:plan', confirmed: true })).ok, false);
+  assert.deepEqual(off.content, []);
+});
+
+test('AI guesses join the one desktop request and are filled with the guessed mark', async () => {
+  const w = siteWorker({ enabled: true, fields: openQuestions(), desktop: { values: { firstName: 'Synthetic private first', lastName: 'Synthetic private last',
+    email: 'synthetic@example.org', phone: '5155550100' } } });
+  const { unmatched } = await plan(w);
+  const [, reach, call] = unmatched.map(field => field.id);
+  const response = await w.launcher({ type: 'ui:autofill', confirmed: true, guesses: { [reach]: 'email', [call]: 'phone' } });
+  assert.equal(response.ok, true, response.error);
+  assert.deepEqual(w.nativeTypes(), ['status', 'getFields']);
+  assert.deepEqual(w.native[1].fields, ['firstName', 'lastName', 'email', 'phone']);
+  // The fill uses the plan the AI saw, then plans again for anything revealed.
+  assert.deepEqual(w.contentTypes(), ['secondhand:generic:plan', 'secondhand:generic:fill', 'secondhand:generic:plan']);
+  assert.deepEqual(w.content[1].assignments, [{ id: 'sh-1-0', key: 'fullName', guessed: false }, { id: reach, key: 'email', guessed: true }, { id: call, key: 'phone', guessed: true }]);
+  assert.deepEqual(w.page.fields.map(field => field.mark), ['rule', undefined, 'guess', 'guess']);
+  const result = plain(response.data);
+  assert.equal(result.filled, 3);
+  assert.equal(result.guessed, 2);
+  assert.equal(result.message, 'Filled 3 · 2 guessed · 1 need you. Check your answers before you submit.');
+  assert.doesNotMatch(JSON.stringify(result), /Synthetic private|5155550100/);
+});
+
+test('guesses outside the plan’s open questions or for sensitive keys are refused before the vault is asked', async () => {
+  const bad = [ids => ({ [ids.name]: 'email' }), () => ({ 'sh-9-9': 'email' }), ids => ({ [ids.reach]: 'notAKey' }), () => [], () => 'email',
+    ...SENSITIVE.map(key => ids => ({ [ids.reach]: key }))];
+  for (const guesses of bad) {
+    const w = siteWorker({ enabled: true, fields: openQuestions() });
+    await plan(w);
+    const ids = { name: w.page.idOf('name'), reach: w.page.idOf('reach') };
+    const result = plain((await w.launcher({ type: 'ui:autofill', confirmed: true, guesses: guesses(ids) })).data);
+    assert.equal(result.state, 'error', JSON.stringify(guesses(ids)));
+    assert.match(result.message, /couldn’t use the on-device AI/);
+    assert.deepEqual(w.native, [], JSON.stringify(guesses(ids)));
+    assert.equal(w.contentTypes().includes('secondhand:generic:fill'), false);
+  }
+});
+
+test('guesses without a current plan for this page are refused', async () => {
+  const unplanned = siteWorker({ enabled: true, fields: openQuestions() });
+  const refused = plain((await unplanned.launcher({ type: 'ui:autofill', confirmed: true, guesses: { 'sh-1-2': 'email' } })).data);
+  assert.match(refused.message, /page changed/);
+  const moved = siteWorker({ enabled: true, fields: openQuestions() });
+  await plan(moved);
+  moved.events.updated(7, { status: 'loading' });              // a new page reuses the same ids
+  assert.match(plain((await moved.launcher({ type: 'ui:autofill', confirmed: true, guesses: { 'sh-1-2': 'email' } })).data).message, /page changed/);
+  const used = siteWorker({ enabled: true, fields: openQuestions() });
+  await plan(used);
+  await autofill(used);                                         // a fill without guesses plans afresh
+  assert.match(plain((await used.launcher({ type: 'ui:autofill', confirmed: true, guesses: { 'sh-1-2': 'email' } })).data).message, /page changed/);
+  for (const w of [unplanned, moved]) assert.deepEqual(w.native, []);
+  assert.equal(used.nativeTypes().filter(type => type === 'getFields').length, 1);
 });
 
 test('a form with nothing SecondHand recognizes never contacts the desktop', async () => {

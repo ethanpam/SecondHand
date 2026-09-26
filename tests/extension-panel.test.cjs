@@ -300,6 +300,7 @@ async function panel(t, initial = {}) {
     if (initial.silent === true || initial.silent?.includes(payload.type)) return undefined;
     let data;
     if (payload.type === 'ui:ping') data = { build: initial.build ?? BUILD };
+    else if (payload.type === 'ui:plan') data = structuredClone(initial.plan ?? { unmatched: [], allowedKeys: ['email'] });
     else if (payload.type === 'ui:pageState') data = initial.pageState ? await initial.pageState(state) : structuredClone(state);
     else if (payload.type === 'ui:autofill') { state.result = initial.autofill || doneResult; state.autopilot = Boolean(initial.autopilotAfterAutofill); data = structuredClone(state.result); }
     else if (payload.type === 'ui:stop') { state.autopilot = false; state.result = { state: 'stopped', filled: 0, needYou: [], message: 'Autofill stopped.', pageKey: 'iowa-personal-information' }; data = structuredClone(state.result); }
@@ -313,7 +314,10 @@ async function panel(t, initial = {}) {
     } else return { ok: false, error: `Unexpected ${payload.type}` };
     return { ok: true, data };
   } } };
-  window.eval(source('panel.js'));
+  // Chrome's on-device AI exists only where a test provides a stand-in.
+  if (initial.LanguageModel) window.LanguageModel = initial.LanguageModel;
+  // Run the page's own scripts, in the order panel.html lists them.
+  for (const [, file] of source('panel.html').matchAll(/<script src="([^"]+)"/g)) window.eval(source(file));
   await tick(); await tick();
   const get = id => window.document.getElementById(id);
   const clickNow = target => clicks.get(typeof target === 'string' ? get(target) : target)({ isTrusted: true });
@@ -410,6 +414,7 @@ test('widget on a fillable page offers one-click Autofill and cycles through wha
   assert.equal(view.types().includes('ui:autofill'), false);
   await view.userClick('autofill');
   assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:autofill')), { type: 'ui:autofill', confirmed: true });
+  assert.equal(view.types().includes('ui:plan'), false, 'Iowa never asks the on-device AI');
   assert.equal(view.get('widget-text').textContent, 'Filled 3');
   assert.equal(view.get('need-you').hidden, false);
   assert.equal(view.get('need-you').textContent, '2 need you');
@@ -530,7 +535,26 @@ test('the pill is a fixed circle that cannot stretch into an oval', () => {
 // Sites other than Iowa, turned on one at a time.
 const SITE = { id: 7, url: 'https://pantry.example.org/intake?step=1' };
 const ORIGIN = 'https://pantry.example.org';
-const siteDone = { state: 'done', filled: 2, guessed: [], needYou: ['sh-4', 'sh-3'], message: 'Filled 2 · 2 need you. Check your answers before you submit.', pageKey: 'general' };
+const siteDone = { state: 'done', filled: 2, guessed: 0, needYou: ['sh-4', 'sh-3'], message: 'Filled 2 · 2 need you. Check your answers before you submit.', pageKey: 'general' };
+// What the worker's ui:plan answers: the questions the rules left open, and the keys the AI may use.
+const openPlan = { unmatched: [
+  { id: 'sh-1-2', label: 'Where can we email you?', type: 'email', options: [], required: false },
+  { id: 'sh-1-1', label: 'Preferred pickup day', type: 'select-one', options: ['Monday', 'Friday'], required: true },
+  { id: 'sh-1-3', label: '  ', type: 'text', options: [], required: false }
+], allowedKeys: ['email', 'phone'] };
+// A stand-in for Chrome's LanguageModel (the Prompt API).
+function languageModel({ availability = 'available', answer = JSON.stringify({ 'sh-1-2': 'email', 'sh-1-1': null }), failure } = {}) {
+  const calls = { availability: 0, create: [], prompt: [] };
+  const LanguageModel = {
+    async availability() { calls.availability++; return availability; },
+    async create(options) {
+      calls.create.push(options);
+      return { async prompt(text, options) { calls.prompt.push({ text, options }); if (failure) throw failure; return answer; }, destroy() {} };
+    }
+  };
+  return { LanguageModel, calls };
+}
+const AI_UNAVAILABLE = 'On-device AI unavailable — rule matches only.';
 
 test('side panel offers to turn SecondHand on for an https tab that is not Iowa, and ignores untrusted clicks', async t => {
   const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: false } });
@@ -586,6 +610,62 @@ test('on a site that is on, Autofill fills once without Stop, and Turn off asks 
   assert.equal(view.get('site-enable').hidden, false);
   assert.equal(view.get('site-disable').hidden, true);
   assert.match(view.get('status').textContent, /off for this site/);
+});
+
+test('widget on a site asks the on-device AI about open questions and sends its guesses with Autofill', async t => {
+  const ai = languageModel();
+  const guessed = { state: 'done', filled: 3, guessed: 1, needYou: ['sh-2-0'], message: 'Filled 3 · 1 guessed · 1 need you. Check your answers before you submit.', pageKey: 'general' };
+  const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: openPlan, LanguageModel: ai.LanguageModel, autofill: guessed });
+  assert.equal(ai.calls.availability, 0, 'nothing is asked before a click');
+  await view.userClick('autofill');
+  assert.deepEqual(plainRequests(view.requests.slice(-2)), [{ type: 'ui:plan', confirmed: true }, { type: 'ui:autofill', confirmed: true, guesses: { 'sh-1-2': 'email' } }]);
+  assert.equal(ai.calls.prompt.length, 1);
+  assert.match(ai.calls.prompt[0].text, /Where can we email you\?/);
+  assert.doesNotMatch(ai.calls.prompt[0].text, /sh-1-3/, 'a question without a label is not sent');
+  const system = ai.calls.create[0].initialPrompts[0].content;
+  assert.match(system, /- email:/);
+  assert.match(system, /- phone:/);
+  assert.doesNotMatch(system, /ssn|birthDate|Income|firstName/, 'the AI only learns the keys the worker allows');
+  assert.equal(view.get('widget-text').textContent, 'Filled 3 · 1 guessed');
+  assert.equal(view.get('need-you').textContent, '1 need you');
+});
+
+test('without the on-device AI the widget fills with rule matches only and says so', async t => {
+  const setups = [{}, { availability: 'downloadable' }, { availability: 'downloading' }, { failure: new Error('Synthetic model failure') }, { answer: 'not json' }];
+  for (const setup of setups) {
+    const options = { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: openPlan, autofill: siteDone };
+    const view = await panel(t, Object.keys(setup).length ? { ...options, LanguageModel: languageModel(setup).LanguageModel } : options);
+    await view.userClick('autofill');
+    assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'ui:autofill', confirmed: true }, JSON.stringify(setup));
+    assert.equal(view.get('widget-text').textContent, `Filled 2 · ${AI_UNAVAILABLE}`, JSON.stringify(setup));
+    assert.match(view.get('widget-text').title, /On-device AI unavailable/);
+  }
+});
+
+test('the widget asks the on-device AI once per click, with a time limit, and only about open questions', async t => {
+  const ai = languageModel();
+  const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: openPlan, LanguageModel: ai.LanguageModel, autofill: siteDone });
+  const calls = [];
+  const mapper = view.window.SecondHandAI;
+  view.window.SecondHandAI = { ...mapper, mapWithChromeAI: (fields, options) => { calls.push({ fields, options }); return mapper.mapWithChromeAI(fields, options); } };
+  await view.userClick('autofill');
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].fields.map(field => field.id), ['sh-1-2', 'sh-1-1']);
+  assert.deepEqual([...calls[0].options.allowedKeys], openPlan.allowedKeys);
+  assert.ok(Number.isFinite(calls[0].options.timeoutMs) && calls[0].options.timeoutMs > 0 && calls[0].options.timeoutMs <= 10000);
+
+  const answered = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { unmatched: [], allowedKeys: ['email'] }, LanguageModel: ai.LanguageModel, autofill: siteDone });
+  await answered.userClick('autofill');
+  assert.equal(ai.calls.availability, 1, 'no open questions, no AI');
+  assert.equal(answered.get('widget-text').textContent, 'Filled 2');
+  assert.deepEqual(plainRequests(answered.requests.at(-1)), { type: 'ui:autofill', confirmed: true });
+});
+
+test('a worker too old to plan for the AI gets the reload steps, not a fill', async t => {
+  const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, silent: ['ui:plan'], LanguageModel: languageModel().LanguageModel });
+  await view.userClick('autofill');
+  assert.equal(view.get('widget-text').textContent, OUTDATED);
+  assert.equal(view.types().includes('ui:autofill'), false);
 });
 
 test('widget and side panel say when nothing on a site matches the saved profile instead of Filled 0', async t => {

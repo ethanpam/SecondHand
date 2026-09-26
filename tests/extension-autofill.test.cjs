@@ -9,10 +9,12 @@ const adapter = require('../extension/iowa-adapter.js');
 // Values created inside the worker's vm context have foreign prototypes.
 const plain = value => JSON.parse(JSON.stringify(value));
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
+const { GENERIC_KEYS } = require('../extension/generic-adapter.js');
 // Verified Iowa pages never use the general engine; any call there is a bug.
-const noSiteEngine = { requestKeys: () => { throw new Error('Iowa used the site engine.'); }, deriveValues: () => { throw new Error('Iowa used the site engine.'); } };
+const noSiteEngine = { GENERIC_KEYS, requestKeys: () => { throw new Error('Iowa used the site engine.'); }, deriveValues: () => { throw new Error('Iowa used the site engine.'); } };
 // Stand-in for generic-adapter.js's pure helpers on pages the Iowa adapter hasn't verified.
 const generalEngine = {
+  GENERIC_KEYS,
   requestKeys: keys => [...new Set(keys.flatMap(key => key === 'totalMonthlyIncome' ? ['monthlyEarnedIncome', 'monthlyOtherIncome'] : [key]))],
   deriveValues: values => ({ ...values, ...(values.monthlyEarnedIncome && values.monthlyOtherIncome ? { totalMonthlyIncome: 'Synthetic private total' } : {}) })
 };
@@ -172,6 +174,16 @@ test('a vault that locks during the request, a cancelled approval, or a page cha
     assert.equal(w.filled().length, 0);
     assert.equal(w.calls.native.some(call => call.type === 'recordProgress'), false);
   }
+});
+
+test('Iowa never plans for the on-device AI or takes guesses', async () => {
+  const w = worker();
+  assert.equal((await w.launcher({ type: 'ui:plan', confirmed: true })).ok, false);
+  assert.equal((await w.panel({ type: 'ui:plan', confirmed: true })).ok, false);
+  const guessed = await w.launcher({ type: 'ui:autofill', confirmed: true, guesses: { firstName: 'firstName' } });
+  assert.equal(guessed.ok, false);
+  assert.deepEqual(w.calls.native, []);
+  assert.deepEqual(w.calls.content, []);
 });
 
 test('an unknown page where the general engine matches nothing stops autofill without contacting the desktop', async () => {

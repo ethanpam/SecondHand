@@ -1,6 +1,6 @@
 'use strict';
 importScripts('iowa-adapter.js', 'generic-adapter.js');
-if (typeof globalThis.SecondHandGeneric?.requestKeys !== 'function' || typeof globalThis.SecondHandGeneric.deriveValues !== 'function') {
+if (typeof globalThis.SecondHandGeneric?.requestKeys !== 'function' || typeof globalThis.SecondHandGeneric.deriveValues !== 'function' || !Array.isArray(globalThis.SecondHandGeneric.GENERIC_KEYS)) {
   throw new Error('SecondHand could not load generic-adapter.js. Reinstall the extension.');
 }
 // Must match BUILD in panel.js: change both together. The panel compares them to tell
@@ -12,6 +12,7 @@ const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile 
 const FIELD_ID = /^[A-Za-z][A-Za-z0-9_-]{0,59}$/; // field ids from the site engine's plan
 const results = new Map(); // tabId -> last autofill result: counts, keys, and fixed messages only. Never answers.
 const siteRuns = new Map(); // tabId -> the fill running on an approved site, so two clicks share one request.
+const sitePlans = new Map(); // tabId -> { url, plan } the widget's on-device AI saw. Field metadata only.
 // tabId -> { steps, handled, running }. Memory only: a page can never turn autofill on,
 // and if Chrome restarts this worker, autofill is off and the widget shows Autofill again.
 const autopilots = new Map();
@@ -20,6 +21,9 @@ const MAX_STEPS = 15;
 const generalPages = new Map();
 const GENERAL_TODO = 'Check your answers, then click Continue.';
 const MAX_GENERAL_PASSES = 4;
+// Sensitive answers are placed only by a confident rule match, never by an AI guess.
+const SENSITIVE_KEYS = Object.freeze(['ssn', 'birthDate', 'totalMonthlyIncome', 'annualIncome', 'assetsOnHand']);
+const AI_KEYS = Object.freeze(SecondHandGeneric.GENERIC_KEYS.filter(key => !SENSITIVE_KEYS.includes(key)));
 
 function nativeRequest(type, payload = {}) {
   return new Promise((resolve, reject) => {
@@ -238,10 +242,11 @@ async function disableSite(tabId) {
   if ((await chrome.scripting.getRegisteredContentScripts({ ids: [script.id] })).length) await chrome.scripting.unregisterContentScripts({ ids: [script.id] });
   if (!(await chrome.permissions.remove({ origins: [`${origin}/*`] }))) throw new Error('Chrome kept SecondHand’s access to this site. Remove it on Chrome’s extension page.');
   results.delete(tabId);
+  sitePlans.delete(tabId);
   return { enabled: false, origin };
 }
 
-const siteResult = (state, message, extra = {}) => ({ state, filled: 0, guessed: [], needYou: [], message, pageKey: 'general', ...extra });
+const siteResult = (state, message, extra = {}) => ({ state, filled: 0, guessed: 0, needYou: [], message, pageKey: 'general', ...extra });
 const filledSummary = (filled, needYou) => `Filled ${filled}${needYou.length ? ` · ${needYou.length} need you` : ''}.`;
 
 // Runs in the page, so Chrome serializes it and it must stand alone. Counts the questions
@@ -276,26 +281,48 @@ async function tallySite(tabId) {
   if (!Number.isInteger(tally?.rule) || !Number.isInteger(tally.guess) || typeof tally.next !== 'boolean') throw new Error('This page couldn’t be checked safely. Fill it yourself.');
   return tally;
 }
-function siteSummary(filled, needYou, next) {
-  if (filled) return `Filled ${filled}${needYou.length ? ` · ${needYou.length} need you` : ''}. Check your answers before you submit.`;
+function siteSummary(filled, guessed, needYou, next) {
+  if (filled) return `Filled ${filled}${guessed ? ` · ${guessed} guessed` : ''}${needYou.length ? ` · ${needYou.length} need you` : ''}. Check your answers before you submit.`;
   if (needYou.length) return `Nothing here matches your saved profile. ${needYou.length} need you.`;
   return next ? 'Nothing to fill here. Click Next, then Autofill again.' : 'Nothing to fill here.';
 }
 
 // The general engine's plan for the page: field ids, keys, and labels only.
+const strings = value => Array.isArray(value) && value.every(item => typeof item === 'string');
 async function planGeneral(tabId) {
   const plan = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:plan' }, { frameId: 0 });
-  if (!plan || typeof plan.token !== 'string' || !Array.isArray(plan.matched) || !Array.isArray(plan.unmatched)) throw new Error('This page couldn’t be checked safely. Fill it yourself.');
+  if (!plan || typeof plan.token !== 'string' || !Array.isArray(plan.matched) || !Array.isArray(plan.unmatched) ||
+    plan.unmatched.some(field => typeof field?.id !== 'string' || !FIELD_ID.test(field.id) || typeof field.label !== 'string' || typeof field.type !== 'string' ||
+      !strings(field.options) || typeof field.required !== 'boolean')) throw new Error('This page couldn’t be checked safely. Fill it yourself.');
   return plan;
 }
+const ruleAssignments = plan => plan.matched.map(field => ({ id: field.id, key: field.key, guessed: false }));
 
-// Fills from a general-engine plan: one desktop request for the keys planned first, then up
-// to four fill passes so questions revealed by an answer are filled too. Each pass plans the
-// page again. Never continues, submits, or navigates.
-async function fillPlan(tabId, url, plan) {
+// Chrome's on-device AI runs only in extension pages, so the widget asks for the questions
+// the rules left open and sends back its guesses with Autofill. Labels and options only.
+async function planSite(tabId) {
+  const { tab, origin } = await activeSite(tabId);
+  await requireSite(origin);
+  const plan = await planGeneral(tabId);
+  sitePlans.set(tabId, { url: tab.url, plan });
+  return { unmatched: plan.unmatched.map(({ id, label, type, options, required }) => ({ id, label, type, options, required })), allowedKeys: AI_KEYS };
+}
+// Guesses name fields of the plan the AI saw; a fresh plan would give the fields other ids.
+function guessAssignments(stored, url, guesses) {
+  if (stored?.url !== url) throw new Error('The page changed. Click Autofill again.');
+  const open = new Set(stored.plan.unmatched.map(field => field.id));
+  const entries = guesses && typeof guesses === 'object' && !Array.isArray(guesses) ? Object.entries(guesses) : null;
+  if (!entries || entries.some(([id, key]) => !open.has(id) || !AI_KEYS.includes(key))) throw new Error('SecondHand couldn’t use the on-device AI’s matches. Nothing was filled.');
+  return [...ruleAssignments(stored.plan), ...entries.map(([id, key]) => ({ id, key, guessed: true }))];
+}
+
+// Fills from a general-engine plan: one desktop request for the keys planned first (the
+// rules' matches and any AI guesses), then up to four fill passes so questions revealed by
+// an answer are filled too. Each pass plans the page again. Never continues, submits, or navigates.
+async function fillPlan(tabId, url, plan, planned = ruleAssignments(plan)) {
   let values = null;
   try {
-    const keys = plan.matched.length ? [...new Set(SecondHandGeneric.requestKeys(plan.matched.map(field => field.key)))] : [];
+    const keys = planned.length ? [...new Set(SecondHandGeneric.requestKeys(planned.map(item => item.key)))] : [];
     if (keys.some(key => typeof key !== 'string' || !KEY.test(key))) throw new Error('SecondHand could not prepare the field request.');
     let filled = 0;
     if (keys.length) {
@@ -306,8 +333,7 @@ async function fillPlan(tabId, url, plan) {
       values = SecondHandGeneric.deriveValues(response.values);
       for (let pass = 1; ; pass++) {
         // A revealed question whose key wasn't requested stays with the applicant.
-        const assignments = plan.matched.filter(field => typeof values[field.key] === 'string' && values[field.key])
-          .map(field => ({ id: field.id, key: field.key, guessed: false }));
+        const assignments = planned.filter(({ key }) => typeof values[key] === 'string' && values[key]);
         if (!assignments.length) break;
         const current = await chrome.tabs.get(tabId);
         if (current.url !== url || !current.active) throw new Error('The page changed. Click Autofill again.');
@@ -320,6 +346,7 @@ async function fillPlan(tabId, url, plan) {
         filled += placed;
         // The next plan leaves out what is now answered and adds what the answers revealed.
         plan = await planGeneral(tabId);
+        planned = ruleAssignments(plan);
         if (pass === MAX_GENERAL_PASSES) break;
       }
       values = null;
@@ -329,14 +356,18 @@ async function fillPlan(tabId, url, plan) {
   } finally { values = null; }
 }
 
-// One click on an approved site.
-async function fillSiteOnce(tabId, url) {
+// One click on an approved site, with the plan the AI saw when the widget sends guesses.
+async function fillSiteOnce(tabId, url, guesses) {
   try {
-    const { needYou } = await fillPlan(tabId, url, await planGeneral(tabId));
+    // A plan the AI saw is used by the next fill only.
+    const stored = sitePlans.get(tabId);
+    sitePlans.delete(tabId);
+    const planned = guesses === undefined ? undefined : guessAssignments(stored, url, guesses);
+    const { needYou } = await fillPlan(tabId, url, planned ? stored.plan : await planGeneral(tabId), planned);
     // The count covers every earlier click on this page too, not only this one.
     const tally = await tallySite(tabId);
     const filled = tally.rule + tally.guess;
-    return siteResult('done', siteSummary(filled, needYou, tally.next), { filled, needYou });
+    return siteResult('done', siteSummary(filled, tally.guess, needYou, tally.next), { filled, guessed: tally.guess, needYou });
   } catch (error) {
     const { state, message } = failed(error);
     return siteResult(state, message);
@@ -354,10 +385,10 @@ async function fillIowaGeneral(tabId, state, plan) {
   }
 }
 
-async function fillSite(tabId) {
+async function fillSite(tabId, guesses) {
   const { tab, origin } = await activeSite(tabId);
   await requireSite(origin);
-  if (!siteRuns.has(tabId)) siteRuns.set(tabId, fillSiteOnce(tabId, tab.url).then(result => remember(tabId, result)).finally(() => siteRuns.delete(tabId)));
+  if (!siteRuns.has(tabId)) siteRuns.set(tabId, fillSiteOnce(tabId, tab.url, guesses).then(result => remember(tabId, result)).finally(() => siteRuns.delete(tabId)));
   return siteRuns.get(tabId);
 }
 
@@ -372,10 +403,13 @@ async function pageState(tabId, route) {
   return { page: { kind: 'general', pageKey: 'general' }, result: enabled && result?.pageKey === 'general' ? result : null, autopilot: false, site: { origin, enabled } };
 }
 
-async function autofill(tabId, route) {
+async function autofill(tabId, route, guesses) {
   const tab = await chrome.tabs.get(tabId);
-  if (route !== 'site' && SecondHandIowa.isSupportedUrl(tab.url)) return startAutopilot(tabId);
-  if (route !== 'iowa' && siteOrigin(tab.url)) return fillSite(tabId);
+  if (route !== 'site' && SecondHandIowa.isSupportedUrl(tab.url)) {
+    if (guesses !== undefined) throw new Error('Iowa’s form is filled by its own rules only.');
+    return startAutopilot(tabId);
+  }
+  if (route !== 'iowa' && siteOrigin(tab.url)) return fillSite(tabId, guesses);
   throw new Error('Open the official Iowa portal in the active tab, then try again.');
 }
 
@@ -421,7 +455,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       error => { if (error.code === 'offline') return { connected: false, unlocked: false }; throw error; });
   } else if (!Number.isInteger(tabId)) return;
   else if (message.type === 'ui:pageState') run = () => pageState(tabId, route);
-  else if (message.type === 'ui:autofill' && message.confirmed === true) run = () => autofill(tabId, route);
+  else if (message.type === 'ui:autofill' && message.confirmed === true) run = () => autofill(tabId, route, message.guesses);
+  else if (message.type === 'ui:plan' && message.confirmed === true) run = () => planSite(tabId);
   else if (message.type === 'ui:stop' && message.confirmed === true) run = () => stop(tabId);
   else if (message.type === 'ui:focusField' && typeof message.key === 'string' && FIELD_ID.test(message.key)) {
     run = () => focusField(tabId, message.key, route);
@@ -433,11 +468,12 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   work.then(data => respond({ ok: true, data }), error => respond({ ok: false, error: error.message || 'SecondHand could not complete the request.' }));
   return true;
 });
-chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); generalPages.delete(tabId); });
+chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); generalPages.delete(tabId); sitePlans.delete(tabId); });
 chrome.tabs.onUpdated?.addListener((tabId, change) => {
   if (change.status === 'loading') {
     results.delete(tabId);
     generalPages.delete(tabId);
+    sitePlans.delete(tabId);
     // Chrome omits other sites' URLs without the tabs permission, so re-read the
     // tab: anything that is not Iowa's portal (or unreadable) ends autofill.
     if (autopilots.has(tabId)) {

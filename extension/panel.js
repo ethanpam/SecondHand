@@ -40,8 +40,11 @@
     let note = '';
     let working = false;
     let outdated = false;
+    let ai = { note: '', reason: '' };
     let cursor = 0;
     let pollTimer;
+    const AI_TIMEOUT_MS = 8000;
+    const AI_UNAVAILABLE = 'On-device AI unavailable — rule matches only.';
     // An outdated worker keeps its reload steps on screen and is not polled again.
     const trouble = error => { if (error.outdated) outdated = true; return fixedText(error.message, 120); };
 
@@ -52,8 +55,10 @@
       if (!result) return site ? `${hostOf(site.origin)} · ready` : 'Iowa SNAP · ready';
       // Other sites: the need-you link carries the count, so it isn't repeated here.
       if (result.state === 'done' && result.pageKey === 'general') {
-        if (Number(result.filled) > 0) return `Filled ${Number(result.filled)}`;
-        return fieldKeys(result.needYou).length ? 'Nothing here matches your saved profile.' : fixedText(result.message, 120);
+        const guessed = Number(result.guessed) > 0 ? ` · ${Number(result.guessed)} guessed` : '';
+        const summary = Number(result.filled) > 0 ? `Filled ${Number(result.filled)}${guessed}`
+          : fieldKeys(result.needYou).length ? 'Nothing here matches your saved profile.' : fixedText(result.message, 120);
+        return ai.note ? `${summary.replace(/\.$/, '')} · ${ai.note}` : summary;
       }
       if (result.state === 'done') return [`Filled ${Number(result.filled) || 0}`, fixedText(result.todo, 90)].filter(Boolean).join(' · ');
       return fixedText(result.message, 120);
@@ -71,7 +76,7 @@
       $('need-you').hidden = outdated || !needYou.length;
       $('need-you').textContent = `${needYou.length} need you`;
       $('widget-text').textContent = statusText();
-      $('widget-text').title = outdated ? OUTDATED : fixedText(result?.message, 240);
+      $('widget-text').title = outdated ? OUTDATED : fixedText([result?.message, ai.note, ai.reason].filter(Boolean).join(' '), 240);
     }
     async function poll() {
       clearTimeout(pollTimer);
@@ -93,11 +98,29 @@
       if (!outdated) pollTimer = setTimeout(poll, 1500);
     }
 
+    // Chrome's on-device AI runs only in extension pages like this one, not in the worker.
+    // It sees the labels and options of the questions the rules left open, never values,
+    // and gets one try per click within its time limit.
+    async function aiGuesses() {
+      const plan = await send({ type: 'ui:plan', confirmed: true });
+      const fields = (Array.isArray(plan?.unmatched) ? plan.unmatched : []).filter(field => typeof field?.label === 'string' && field.label.trim());
+      if (!fields.length) return { status: 'mapped', mapping: {} };
+      try { return await SecondHandAI.mapWithChromeAI(fields, { allowedKeys: plan.allowedKeys, timeoutMs: AI_TIMEOUT_MS }); }
+      catch (error) { return { status: 'error', reason: error.message }; }
+    }
+
     $('autofill').addEventListener('click', trusted(async () => {
       if (working || outdated) return;
-      working = true; note = ''; render();
+      working = true; note = ''; ai = { note: '', reason: '' }; render();
       try {
-        result = await send({ type: 'ui:autofill', confirmed: true });
+        const request = { type: 'ui:autofill', confirmed: true };
+        // Iowa's form is filled by its own rules; other sites also get the AI's guesses.
+        if (site) {
+          const answer = await aiGuesses();
+          if (answer?.status !== 'mapped') ai = { note: AI_UNAVAILABLE, reason: fixedText(answer?.reason, 160) };
+          else if (Object.keys(answer.mapping).length) request.guesses = answer.mapping;
+        }
+        result = await send(request);
         cursor = 0;
         autopilot = continuing(result);
       } catch (error) { result = { state: 'error', message: trouble(error) }; autopilot = false; }
