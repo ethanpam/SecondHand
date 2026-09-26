@@ -1,5 +1,6 @@
 import { ArrowIcon, ExternalIcon } from './icons';
 import { downloads } from './release';
+import { VariableWordmark } from './variable-wordmark';
 
 function Brand({ className = 'brand' }: { className?: string }) {
   return (
@@ -32,24 +33,31 @@ export function SiteHeader() {
 
 export function SiteFooter() {
   return (
-    <footer className="wrap">
-      <div>
-        <Brand className="brand footer-brand" />
-        <p>
-          Independent software. Not affiliated with Iowa HHS.
-          <br />
-          Using secondHand does not determine benefit eligibility.
-        </p>
+    <footer className="site-footer wrap">
+      <div className="footer-top">
+        <div>
+          <Brand className="brand footer-brand" />
+          <p>
+            Independent software. Not affiliated with Iowa HHS.
+            <br />
+            Using secondHand does not determine benefit eligibility.
+          </p>
+        </div>
+        <nav aria-label="Footer" className="footer-links">
+          <a href="/">Download</a>
+          <a href="/#setup">Setup guide</a>
+          <a href="/#faq">Common questions</a>
+          <a href="/privacy">Privacy policy</a>
+          <a href={downloads.checksums}>
+            Download checksums <ExternalIcon size={14} />
+          </a>
+        </nav>
       </div>
-      <nav aria-label="Footer" className="footer-links">
-        <a href="/">Download</a>
-        <a href="/#setup">Setup guide</a>
-        <a href="/#faq">Common questions</a>
-        <a href="/privacy">Privacy policy</a>
-        <a href={downloads.checksums}>
-          Download checksums <ExternalIcon size={14} />
-        </a>
-      </nav>
+      <VariableWordmark />
+      <div className="footer-bottom">
+        <span>A helping hand for Iowa SNAP.</span>
+        <a href="#main">Back to top ↑</a>
+      </div>
     </footer>
   );
 }

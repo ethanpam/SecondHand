@@ -13,7 +13,6 @@ export default function PrivacyPolicy() {
     <>
       <SiteHeader />
       <main id="main" className="wrap doc-page">
-        <p className="eyebrow">Your information, in your hands</p>
         <h1>Privacy policy</h1>
         <p className="doc-date">Last updated September 26, 2026</p>
         <p className="doc-lead">

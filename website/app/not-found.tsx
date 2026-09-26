@@ -13,7 +13,6 @@ export default function NotFound() {
     <>
       <SiteHeader />
       <main id="main" className="wrap doc-page">
-        <p className="eyebrow">404 / A small detour</p>
         <h1>Page not found</h1>
         <p className="doc-lead">
           This page doesn’t exist or has moved. These links can help you find

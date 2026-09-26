@@ -18,7 +18,7 @@ async function inspectLayout(page) {
 async function inspectHeroLayout(page) {
   const background = await page.locator('.gradient-background').boundingBox();
   const header = await page.locator('.site-header').boundingBox();
-  const content = await page.locator('.hero .eyebrow').boundingBox();
+  const content = await page.locator('.hero h1').boundingBox();
   assert.ok(background && header && content);
   assert.ok(background.y <= header.y, 'Shader must extend behind the top navigation');
   assert.equal(background.x, 0, 'Shader must reach the left edge');
@@ -31,6 +31,62 @@ async function inspectHeroLayout(page) {
       return parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
     }), 0, 'Header and hero transitions must not have a dividing border');
   }
+}
+
+async function inspectReactBits(page) {
+  await page.goto(site, { waitUntil: 'networkidle' });
+  const preview = page.getByRole('region', { name: 'How secondHand works' });
+  const count = page.locator('.stack-count');
+  await expect(preview).toHaveAttribute('data-autoplay', 'true');
+  const initialStep = await count.textContent();
+  await expect.poll(() => count.textContent(), { timeout: 7000 }).not.toBe(initialStep);
+  await page.getByRole('button', { name: 'Pause animations' }).click();
+  await expect(preview).toHaveAttribute('data-autoplay', 'false');
+  const pausedStep = await count.textContent();
+  await page.waitForTimeout(5100);
+  assert.equal(await count.textContent(), pausedStep, 'Pause must stop automatic card cycling');
+  const next = page.getByRole('button', { name: 'Next preview step' });
+  await next.focus();
+  await next.press('Enter');
+  await expect(count).not.toHaveText(pausedStep);
+  await expect(page.locator('.stack-layer[aria-hidden="false"]')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Previous preview step' }).press('Enter');
+  await expect(count).toHaveText(pausedStep);
+  const letter = page.locator('.variable-wordmark [data-letter]').nth(4);
+  await letter.hover();
+  const weight = () => letter.evaluate(element => getComputedStyle(element).fontVariationSettings);
+  assert.equal(await weight(), '"wght" 450', 'Paused wordmark must remain still');
+  await page.getByRole('button', { name: 'Play animations' }).click();
+  await letter.hover();
+  await expect.poll(weight).not.toBe('"wght" 450');
+  await page.mouse.move(0, 0);
+  await expect.poll(weight).toBe('"wght" 450');
+  await expect(preview).toHaveAttribute('data-autoplay', 'false');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await letter.hover();
+  assert.equal(await weight(), '"wght" 450', 'Reduced motion must disable proximity animation');
+  await next.focus();
+  const reducedStep = await count.textContent();
+  await next.press('Enter');
+  await expect(count).not.toHaveText(reducedStep);
+  await expect(preview).toHaveAttribute('data-autoplay', 'false');
+  await expect(page.locator('.motion-toggle')).toHaveCount(0);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await expect(preview).toHaveAttribute('data-autoplay', 'false');
+  await page.getByRole('heading', { level: 1 }).click();
+  await expect(preview).toHaveAttribute('data-autoplay', 'true');
+  await page.locator('.paper-stack').hover();
+  await expect(preview).toHaveAttribute('data-autoplay', 'false');
+  const front = page.locator('.stack-layer[data-front="true"] .paper-card');
+  const bounds = await front.boundingBox();
+  const beforeDrag = await count.textContent();
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 90);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + bounds.width / 2 + 130, bounds.y + 90, { steps: 12 });
+  await page.mouse.up();
+  await expect(count).not.toHaveText(beforeDrag);
+  await page.mouse.move(0, 0);
+  console.log('React Bits deck autoplay, keyboard controls, drag, shared pause, reduced motion, offscreen suspension, and proximity wordmark passed.');
 }
 
 async function main() {
@@ -59,13 +115,13 @@ async function main() {
     const shaderFrame = () => page.locator('.gradient-canvas[data-paper-shader]').evaluate(element => element.paperShaderMount.getCurrentFrame());
     const initialFrame = await shaderFrame();
     await expect.poll(shaderFrame).toBeGreaterThan(initialFrame);
-    await page.getByRole('button', { name: 'Pause background animation' }).click();
-    await expect(page.getByRole('button', { name: 'Play background animation' })).toBeVisible();
+    await page.getByRole('button', { name: 'Pause animations' }).click();
+    await expect(page.getByRole('button', { name: 'Play animations' })).toBeVisible();
     const pausedFrame = await shaderFrame();
     await page.waitForTimeout(200);
     assert.equal(await shaderFrame(), pausedFrame, 'Pause must stop drawing new frames');
     await page.screenshot({ path: path.join(artifacts, 'desktop.png'), fullPage: true });
-    await page.getByRole('button', { name: 'Play background animation' }).click();
+    await page.getByRole('button', { name: 'Play animations' }).click();
     await expect.poll(shaderFrame).toBeGreaterThan(pausedFrame);
 
     await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -78,6 +134,7 @@ async function main() {
     await page.locator('#setup').evaluate(element => element.scrollIntoView({ behavior: 'instant', block: 'start' }));
     await expect.poll(() => page.locator('.gradient-canvas[data-paper-shader]').evaluate(element => element.paperShaderMount.currentSpeed)).toBe(0);
     console.log('Shader rendering, pause/play, reduced motion, and offscreen suspension passed.');
+    await inspectReactBits(page);
 
     await page.getByRole('tab', { name: 'Windows', exact: true }).click();
     await page.getByRole('tab', { name: 'Windows', exact: true }).press('ArrowRight');
@@ -139,6 +196,11 @@ async function main() {
       await mobile.setViewportSize({ width, height: 844 });
       await inspectLayout(mobile);
       await inspectHeroLayout(mobile);
+      for (let step = 0; step < 3; step++) {
+        const card = mobile.locator('.stack-layer[data-front="true"] .paper-card');
+        assert.equal(await card.evaluate(element => element.scrollHeight <= element.clientHeight + 1), true, 'Every preview step must fit its paper at every viewport width');
+        await mobile.getByRole('button', { name: 'Next preview step' }).click();
+      }
     }
     await mobile.setViewportSize({ width: 390, height: 844 });
     await mobile.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Privacy', exact: true }).click();
@@ -146,12 +208,12 @@ async function main() {
     await inspectLayout(mobile);
     await mobile.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Setup guide' }).click();
     await expect(mobile).toHaveURL(`${site}/#setup`);
-    await expect(mobile.getByRole('heading', { name: 'A few steps. Then you’re set.' })).toBeInViewport();
+    await expect(mobile.getByRole('heading', { name: /A few steps.*Then you’re set./ })).toBeInViewport();
 
     await page.goto(site, { waitUntil: 'networkidle' });
     await page.locator('canvas').evaluate(canvas => canvas.getContext('webgl2').getExtension('WEBGL_lose_context').loseContext());
     await expect(page.locator('.gradient-background canvas')).toHaveCount(0);
-    await expect(page.locator('.motion-toggle')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Pause animations' })).toBeVisible();
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
 
     const fallback = await context.newPage();
@@ -163,6 +225,7 @@ async function main() {
     });
     await fallback.goto(site, { waitUntil: 'networkidle' });
     await expect(fallback.locator('canvas')).toHaveCount(0);
+    await expect(fallback.getByRole('button', { name: 'Pause animations' })).toBeVisible();
     await expect(fallback.getByRole('heading', { level: 1 })).toBeVisible();
     await fallback.getByRole('tab', { name: 'Mac', exact: true }).click();
     await expect(fallback.getByRole('link', { name: 'Apple Silicon' })).toBeVisible();
@@ -171,6 +234,8 @@ async function main() {
     await staticPage.goto(site);
     await expect(staticPage.getByRole('heading', { level: 1 })).toBeVisible();
     await inspectHeroLayout(staticPage);
+    await expect(staticPage.locator('.stack-buttons')).toBeHidden();
+    await expect(staticPage.locator('.stack-layer[data-front="true"] h2')).toBeVisible();
     await expect(staticPage.getByRole('link', { name: 'Download for Windows' })).toBeAttached();
     assert.deepEqual(errors, [], 'No browser runtime errors');
     assert.deepEqual([...externalRequests], [], 'Fonts and shaders must stay self-hosted');

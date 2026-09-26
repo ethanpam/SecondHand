@@ -54,7 +54,6 @@ export default async function ThankYou({ params }: Props) {
       <meta httpEquiv="refresh" content={`1;url=${file}`} />
       <SiteHeader />
       <main id="main" className="wrap doc-page">
-        <p className="eyebrow">A simpler start</p>
         <h1>Thanks for downloading secondHand</h1>
         <p className="doc-lead">
           Your download for {name} should start in a moment. If it doesn’t,{' '}
