@@ -5,8 +5,12 @@ const invoke = (method, ...args) => ipcRenderer.invoke('secondhand:invoke', meth
 
 contextBridge.exposeInMainWorld('secondHand', Object.freeze({
   status: () => invoke('status'),
-  createVault: passphrase => invoke('createVault', passphrase),
+  createVault: request => invoke('createVault', request),
   unlock: passphrase => invoke('unlock', passphrase),
+  resetPassword: request => invoke('resetPassword', request),
+  replaceRecoveryKey: () => invoke('replaceRecoveryKey'),
+  saveRecoveryKey: recoveryKey => invoke('saveRecoveryKey', recoveryKey),
+  copyRecoveryKey: recoveryKey => invoke('copyRecoveryKey', recoveryKey),
   lock: () => invoke('lock'),
   getData: () => invoke('getData'),
   saveProfile: profile => invoke('saveProfile', profile),

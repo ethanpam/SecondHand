@@ -308,3 +308,91 @@ test('an outdated bundled extension is labelled for refresh rather than a custom
   assert.match(view.get('prepare-extension').textContent, /Refresh extension files/);
   assert.equal(view.get('extension-prepared').hidden, true);
 });
+
+test('creating a password shows the recovery key once and requires acknowledgement before continuing', async t => {
+  const created = [];
+  const recoveryKey = 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789';
+  const view = await renderer(t, {
+    status: async () => ({ exists: false, unlocked: false, recoveryKey: false, extensionId: '', bridgeRunning: true }),
+    createVault: async request => {
+      created.push({ ...request });
+      return { status: { exists: true, unlocked: true, recoveryKey: true, extensionId: '', bridgeRunning: true }, recoveryKey };
+    }
+  });
+  assert.equal(view.get('forgot-password').hidden, true);
+  view.edit('passphrase', 'synthetic long password');
+  view.edit('confirm-passphrase', 'synthetic long password');
+  view.submit('auth-form');
+  await tick(); await tick();
+  assert.deepEqual(created, [{ password: 'synthetic long password' }]);
+  assert.equal(view.get('workspace').hidden, false);
+  assert.equal(view.get('recovery-dialog').open, true);
+  assert.equal(view.get('recovery-key-value').textContent, recoveryKey);
+  assert.equal(view.get('recovery-reminder').hidden, true);
+
+  const cancel = new view.window.Event('cancel', { cancelable: true });
+  view.get('recovery-dialog').dispatchEvent(cancel);
+  assert.equal(cancel.defaultPrevented, true);
+  assert.equal(view.get('recovery-done').disabled, true);
+  view.get('recovery-saved').checked = true;
+  view.get('recovery-saved').dispatchEvent(new view.window.Event('change'));
+  assert.equal(view.get('recovery-done').disabled, false);
+  view.get('recovery-done').click();
+  assert.equal(view.get('recovery-dialog').open, false);
+});
+
+test('forgot password resets with a recovery key, and older saved information explains why it cannot', async t => {
+  const resets = [];
+  let status = { exists: true, unlocked: false, recoveryKey: true, extensionId: '', bridgeRunning: true };
+  const view = await renderer(t, {
+    status: async () => status,
+    resetPassword: async request => {
+      resets.push({ ...request });
+      if (request.recoveryKey !== 'good key') throw new Error('That recovery key didn’t work. Check it and try again.');
+      status = { ...status, unlocked: true };
+      return status;
+    }
+  });
+  assert.equal(view.get('forgot-password').hidden, false);
+  view.get('forgot-password').click();
+  assert.equal(view.get('auth-form').hidden, true);
+  assert.equal(view.get('reset-form').hidden, false);
+  assert.equal(view.get('reset-fields').hidden, false);
+  assert.equal(view.get('auth-title').textContent, 'Reset your password');
+
+  view.edit('recovery-key-input', 'bad key');
+  view.edit('reset-password', 'new synthetic password');
+  view.edit('reset-confirm', 'different synthetic password');
+  view.submit('reset-form');
+  await tick();
+  assert.match(view.get('reset-error').textContent, /don’t match/);
+  assert.equal(resets.length, 0);
+
+  view.edit('reset-confirm', 'new synthetic password');
+  view.submit('reset-form');
+  await tick();
+  assert.match(view.get('reset-error').textContent, /didn’t work/);
+  assert.equal(view.get('reset-password').value, '');
+
+  view.edit('recovery-key-input', 'good key');
+  view.edit('reset-password', 'new synthetic password');
+  view.edit('reset-confirm', 'new synthetic password');
+  view.submit('reset-form');
+  await tick(); await tick();
+  assert.deepEqual(resets.at(-1), { recoveryKey: 'good key', password: 'new synthetic password' });
+  assert.equal(view.get('workspace').hidden, false);
+  assert.equal(view.get('recovery-key-input').value, '');
+
+  view.lock();
+  assert.equal(view.get('reset-form').hidden, true);
+  assert.equal(view.get('auth-form').hidden, false);
+
+  const older = await renderer(t, { status: async () => ({ exists: true, unlocked: false, recoveryKey: false, extensionId: '', bridgeRunning: true }) });
+  older.get('forgot-password').click();
+  assert.equal(older.get('reset-fields').hidden, true);
+  assert.equal(older.get('reset-submit').hidden, true);
+  assert.equal(older.get('reset-unavailable').hidden, false);
+  older.get('reset-cancel').click();
+  assert.equal(older.get('auth-form').hidden, false);
+  assert.equal(older.get('auth-title').textContent, 'Welcome back');
+});

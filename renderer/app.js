@@ -11,7 +11,7 @@
     'monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities'];
   const viewNames = { overview: 'Overview', profile: 'My information', applications: 'Applications', extension: 'Chrome extension', privacy: 'Privacy & backups' };
   const statusNames = { draft: 'Draft', in_progress: 'In progress', submitted: 'Submitted', needs_action: 'Needs action', approved: 'Approved', denied: 'Denied' };
-  let vaultStatus = { exists: false, unlocked: false, extensionId: '', bridgeRunning: false };
+  let vaultStatus = { exists: false, unlocked: false, recoveryKey: false, extensionId: '', bridgeRunning: false };
   let data = { profile: {}, applications: [] };
   let currentView = 'overview';
   let profileDirty = false;
@@ -95,12 +95,15 @@
     $('application-form').reset();
     $('application-id').value = '';
     $('auth-form').reset();
+    $('reset-form').reset();
+    if ($('recovery-dialog').open) $('recovery-dialog').close();
+    clearRecoveryKey();
     $('application-list').replaceChildren();
     $('overview-applications').replaceChildren();
     $('overview-heading').textContent = 'Let’s move forward.';
     $('application-count').textContent = '0';
     if ($('application-dialog').open) $('application-dialog').close();
-    for (const id of ['auth-error', 'profile-error', 'application-error', 'extension-error', 'extension-prepare-error']) clearError(id);
+    for (const id of ['auth-error', 'reset-error', 'profile-error', 'application-error', 'extension-error', 'extension-prepare-error']) clearError(id);
     setProfileDirty(false);
     clearTimeout(toastTimer);
     $('toast').hidden = true;
@@ -121,8 +124,48 @@
     $('passphrase').autocomplete = exists ? 'current-password' : 'new-password';
     $('passphrase-hint').textContent = exists ? 'Enter the password you created for SecondHand.' : 'Use at least 12 characters. A few words you can remember work well.';
     $('auth-submit').replaceChildren(document.createTextNode(exists ? 'Unlock ' : 'Create password '), icon(exists ? 'lock' : 'arrow'));
-    $('recovery-note').textContent = exists ? 'Your password never leaves this computer.' : 'Keep your password somewhere safe. There is no online account, so no one can reset it for you.';
+    $('recovery-note').textContent = exists ? 'Your password never leaves this computer.' : 'Keep your password somewhere safe. You’ll also get a recovery key in case you forget it.';
+    $('forgot-password').hidden = !exists;
+    setResetMode(false);
     if (api) $('passphrase').focus();
+  }
+
+  function setResetMode(active) {
+    const available = Boolean(vaultStatus.recoveryKey);
+    $('reset-form').reset();
+    clearError('reset-error'); clearError('auth-error');
+    $('auth-form').hidden = active;
+    $('reset-form').hidden = !active;
+    $('recovery-note').hidden = active;
+    $('reset-fields').hidden = !available;
+    $('reset-unavailable').hidden = available;
+    $('reset-submit').hidden = !available;
+    if (!active) return;
+    $('auth-title').textContent = 'Reset your password';
+    $('auth-description').textContent = available ? 'Enter your recovery key and choose a new password. Your saved information stays as it is.' : 'Without your password or a recovery key, SecondHand can’t open your saved information.';
+    if (available) $('recovery-key-input').focus();
+  }
+
+  function clearRecoveryKey() {
+    $('recovery-key-value').textContent = '';
+    $('recovery-feedback').textContent = '';
+    $('recovery-saved').checked = false;
+    $('recovery-done').disabled = true;
+  }
+
+  function showRecoveryKey(recoveryKey) {
+    clearRecoveryKey();
+    $('recovery-key-value').textContent = recoveryKey;
+    $('recovery-dialog').showModal();
+  }
+
+  function renderRecovery() {
+    const hasKey = Boolean(vaultStatus.recoveryKey);
+    $('recovery-reminder').hidden = hasKey;
+    $('recovery-status').textContent = hasKey
+      ? 'You have a recovery key. Creating a new one stops the old key from working. Backups saved earlier still open with the key and password they were saved with.'
+      : 'You don’t have a recovery key yet. Create one so you can get back in if you forget your password.';
+    $('replace-recovery-key').textContent = hasKey ? 'Create a new recovery key' : 'Create recovery key';
   }
 
   function showView(view, { skipConfirmation = false, focus = true } = {}) {
@@ -227,7 +270,7 @@
   function renderSummary() {
     const hasProfile = profileFields.some((field) => Boolean(data.profile[field]));
     $('profile-step-label').replaceChildren(document.createTextNode(hasProfile ? 'Review my profile ' : 'Set up my profile '), icon('arrow'));
-    renderApplications(); renderSetup();
+    renderApplications(); renderSetup(); renderRecovery();
   }
 
   async function loadUnlocked(status) {
@@ -237,6 +280,7 @@
     vaultStatus = status;
     data = { profile: loaded.profile || {}, applications: Array.isArray(loaded.applications) ? loaded.applications : [] };
     $('auth-form').reset();
+    $('reset-form').reset();
     $('auth-view').hidden = true;
     $('workspace').hidden = false;
     fillProfile(); renderSummary();
@@ -286,10 +330,60 @@
     }
     pending($('auth-submit'), async () => {
       try {
-        const status = vaultStatus.exists ? await api.unlock($('passphrase').value) : await api.createVault($('passphrase').value);
-        await loadUnlocked(status);
+        if (vaultStatus.exists) await loadUnlocked(await api.unlock($('passphrase').value));
+        else {
+          const created = await api.createVault({ password: $('passphrase').value });
+          await loadUnlocked(created.status);
+          showRecoveryKey(created.recoveryKey);
+        }
       } catch (error) { showError('auth-error', error); }
       finally { $('passphrase').value = ''; $('confirm-passphrase').value = ''; }
+    });
+  });
+
+  $('forgot-password').addEventListener('click', () => setResetMode(true));
+  $('reset-cancel').addEventListener('click', () => showLocked(vaultStatus));
+  $('reset-form').addEventListener('submit', (event) => {
+    event.preventDefault(); clearError('reset-error');
+    if (!api) return;
+    if ($('reset-password').value !== $('reset-confirm').value) {
+      showError('reset-error', 'The passwords don’t match. Please try again.'); $('reset-confirm').focus(); return;
+    }
+    pending($('reset-submit'), async () => {
+      try {
+        await loadUnlocked(await api.resetPassword({ recoveryKey: $('recovery-key-input').value, password: $('reset-password').value }));
+        toast('Your password was reset. Use your new password next time.');
+      } catch (error) { showError('reset-error', error); }
+      finally { $('reset-password').value = ''; $('reset-confirm').value = ''; }
+    });
+  });
+
+  $('recovery-saved').addEventListener('change', () => { $('recovery-done').disabled = !$('recovery-saved').checked; });
+  $('recovery-done').addEventListener('click', () => $('recovery-dialog').close());
+  $('recovery-dialog').addEventListener('cancel', (event) => { if (!$('recovery-saved').checked) event.preventDefault(); });
+  $('recovery-dialog').addEventListener('close', clearRecoveryKey);
+  for (const [buttonId, method, message] of [
+    ['copy-recovery-key', 'copyRecoveryKey', 'Copied. It will be cleared from the clipboard in 1 minute.'],
+    ['save-recovery-key', 'saveRecoveryKey', 'Saved. Print it or move it somewhere safe, away from this computer.']
+  ]) {
+    $(buttonId).addEventListener('click', () => pending($(buttonId), async () => {
+      try {
+        const result = await api[method]($('recovery-key-value').textContent);
+        if (!result?.cancelled) $('recovery-feedback').textContent = message;
+      } catch (error) { $('recovery-feedback').textContent = error.message || 'That didn’t work. Please try again.'; }
+    }));
+  }
+  $('replace-recovery-key').addEventListener('click', () => {
+    if (vaultStatus.recoveryKey && !window.confirm('Create a new recovery key? Your current recovery key will stop working.')) return;
+    const generation = vaultGeneration;
+    pending($('replace-recovery-key'), async () => {
+      try {
+        const { recoveryKey } = await api.replaceRecoveryKey();
+        if (!vaultStatus.unlocked || generation !== vaultGeneration) return;
+        vaultStatus.recoveryKey = true;
+        renderRecovery();
+        showRecoveryKey(recoveryKey);
+      } catch (error) { if (generation === vaultGeneration) toast(error.message || 'Unable to create a recovery key.', true); }
     });
   });
 

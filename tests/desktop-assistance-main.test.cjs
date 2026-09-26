@@ -24,6 +24,7 @@ async function desktop() {
   class Vault {
     constructor() { this.unlocked = true; this.data = { profile: { firstName: 'Synthetic', lastName: '' }, applications: [] }; }
     async exists() { return true; }
+    async inspect() { return { recoveryKey: true }; }
     async lock() { this.unlocked = false; }
     async unlock() { this.unlocked = true; }
     getData() { return this.data; }

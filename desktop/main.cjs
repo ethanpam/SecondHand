@@ -5,7 +5,7 @@ const path = require('node:path');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const { pathToFileURL } = require('node:url');
-const { Vault, atomicWrite, MAX_VAULT_BYTES } = require('./vault.cjs');
+const { Vault, atomicWrite, normalizeRecoveryKey, MAX_VAULT_BYTES } = require('./vault.cjs');
 const { startBridge, runNativeHost, nativeStreams, extensionFromOrigin, EXTENSION_ID } = require('./bridge.cjs');
 const { registerHost } = require('./registration.cjs');
 const { getExtensionSetup, prepareBundledExtension } = require('./extension-setup.cjs');
@@ -51,9 +51,11 @@ if (nativeOrigin) {
   const validated = (validator, ...values) => {
     try { return validator(...values); } catch (error) { throw publicError(error.message); }
   };
+  const formattedRecoveryKey = value => validated(normalizeRecoveryKey, value).match(/.{4}/g).join('-');
 
   async function status() {
-    return { exists: await vault.exists(), unlocked: vault.unlocked, extensionId,
+    const details = await vault.inspect().catch(() => null);
+    return { exists: await vault.exists(), unlocked: vault.unlocked, recoveryKey: Boolean(details?.recoveryKey), extensionId,
       bridgeRunning: Boolean(bridge), platform: process.platform,
       extensionSetup: await getExtensionSetup(app).catch(() => ({ prepared: false, available: false })) };
   }
@@ -156,15 +158,41 @@ if (nativeOrigin) {
 
   const methods = {
     status,
-    async createVault(passphrase) {
-      try { await vault.create(passphrase); }
+    async createVault(request) {
+      let created;
+      try { created = await vault.create(request?.password); }
       catch (error) { throw publicError(/password/.test(error.message) ? error.message : 'Could not set up SecondHand. Please try again.'); }
-      touch(); return status();
+      touch(); return { status: await status(), recoveryKey: created.recoveryKey };
     },
     async unlock(passphrase) {
       try { await vault.unlock(passphrase); }
       catch (error) { throw publicError(/password|already unlocked|Unable to unlock/.test(error.message) ? error.message : 'Could not unlock SecondHand.'); }
       touch(); return status();
+    },
+    async resetPassword(request) {
+      try { await vault.resetWithRecoveryKey(request?.recoveryKey, request?.password); }
+      catch (error) { throw publicError(/password|recovery key|already unlocked/.test(error.message) ? error.message : 'Could not reset your password. Please try again.'); }
+      touch(); return status();
+    },
+    async replaceRecoveryKey() {
+      requireUnlocked();
+      let recoveryKey;
+      try { recoveryKey = await vault.replaceRecoveryKey(); }
+      catch { throw publicError('Could not create a recovery key. Please try again.'); }
+      touch(); return { recoveryKey };
+    },
+    async saveRecoveryKey(value) {
+      const recoveryKey = formattedRecoveryKey(value);
+      const result = await dialog.showSaveDialog(mainWindow, { title: 'Save recovery key', defaultPath: 'SecondHand recovery key.txt', filters: [{ name: 'Text file', extensions: ['txt'] }] });
+      if (result.canceled || !result.filePath) return { cancelled: true };
+      await atomicWrite(result.filePath, Buffer.from(`SecondHand recovery key\n\n${recoveryKey}\n\nIf you forget your password, choose "Forgot password?" on the SecondHand unlock screen and enter this key.\nAnyone with this key and your SecondHand files can open your information. Keep it somewhere safe, away from this computer.\n`));
+      return { cancelled: false };
+    },
+    async copyRecoveryKey(value) {
+      const recoveryKey = formattedRecoveryKey(value);
+      clipboard.writeText(recoveryKey);
+      setTimeout(() => { if (clipboard.readText() === recoveryKey) clipboard.clear(); }, 60 * 1000);
+      return true;
     },
     lock: lockVault,
     async getData() {
