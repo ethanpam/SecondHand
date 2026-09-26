@@ -62,20 +62,13 @@ This development branch also supports the observed home-only **Select Address** 
 
 No application server, database service, API keys, or applicant account with secondHand is required.
 
-## Continuous integration
+## Local validation and releases
 
-GitHub Actions checks every pull request and every push to `main`:
+GitHub Actions CI workflows have been removed to avoid hosted-runner usage. Pull requests, pushes, and tags do not automatically run project checks, build installers, or create releases.
 
-| Workflow | Runs when | What it checks |
-| --- | --- | --- |
-| **Verify and build** (`build.yml`) | Every pull request, `main`, and `v*` tags | Static checks and unit tests on Node 22 and 24; website lint, tests, typecheck, and build; the Chromium extension smoke test; the Electron UI and native-host tests, then Windows and Mac installers. **CI result** passes only when all of these pass. |
-| **iOS** (`ios.yml`) | Changes under `ios/` | The Safari extension and application-assistant JavaScript tests, then native and UI tests on the newest iPhone simulator with Xcode 26. |
-| **Dependency audit** (`audit.yml`) | Lockfile changes and every Monday | `npm audit` for the desktop app and website. Critical advisories fail; high ones are reported as warnings. |
-| **Workflow lint** (`workflow-lint.yml`) | Changes to workflow files | actionlint and shellcheck. |
+Run the local test and build commands in [Develop](#develop) before sharing changes. The [website](website/README.md), [iOS](ios/README.md), and [Android](android/README.md) guides retain their platform-specific validation instructions. Dependency audits can also be run locally with `npm audit` in the repository root and in `website/`.
 
-Dependabot opens weekly update pull requests for npm packages and actions. A newer commit on a pull request cancels the older run. If a UI test fails, its screenshots (or the Xcode result bundle) are attached to the run as an artifact.
-
-**Releases.** Installers from each run are kept as artifacts for 30 days and can be rebuilt with **Run workflow**. Pushing a tag that matches `package.json` (for example `v0.4.0`) builds all installers and attaches them, with checksums, to a draft prerelease. Publishing to the public download website stays a manual step with a temporary upload token; see [`website/README.md`](website/README.md).
+Build installers locally with `npm run dist:win` on Windows or `npm run dist:mac` on macOS. Releases and installer uploads are manual. Publishing to the public download website uses a temporary upload token; see [`website/README.md`](website/README.md).
 
 ## Data boundaries
 
