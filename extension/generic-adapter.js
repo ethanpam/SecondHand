@@ -8,11 +8,11 @@
     'addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county', 'householdSize', 'householdAdults', 'householdChildren', 'householdSeniors',
     'householdVeteran', 'householdDisability', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities']);
   const SOURCES = Object.freeze({ fullName: ['firstName', 'lastName'], phone: ['mobilePhone', 'homePhone', 'phone'],
-    totalMonthlyIncome: ['monthlyEarnedIncome', 'monthlyOtherIncome'], annualIncome: ['monthlyEarnedIncome', 'monthlyOtherIncome'] });
+    ageRange: ['birthDate'], totalMonthlyIncome: ['monthlyEarnedIncome', 'monthlyOtherIncome'], annualIncome: ['monthlyEarnedIncome', 'monthlyOtherIncome'] });
   const GENERIC_KEYS = Object.freeze(['firstName', 'middleName', 'lastName', 'fullName', 'suffix', 'birthDate', 'ssn', 'email', 'phone',
-    'addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county', 'householdSize', 'householdAdults', 'householdChildren', 'householdSeniors',
+    'addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county', 'ageRange', 'householdSize', 'householdAdults', 'householdChildren', 'householdSeniors',
     'householdVeteran', 'householdDisability', 'totalMonthlyIncome', 'annualIncome', 'monthlyRent', 'monthlyUtilities']);
-  const KIND = Object.freeze({ birthDate: 'date', email: 'email', phone: 'tel', state: 'state', householdSize: 'count', householdAdults: 'count',
+  const KIND = Object.freeze({ birthDate: 'date', email: 'email', phone: 'tel', state: 'state', ageRange: 'ageRange', householdSize: 'count', householdAdults: 'count',
     householdChildren: 'count', householdSeniors: 'count', householdVeteran: 'yesno', householdDisability: 'yesno', totalMonthlyIncome: 'money',
     annualIncome: 'money', monthlyRent: 'money', monthlyUtilities: 'money' });
   const AUTOCOMPLETE = Object.freeze({ 'given-name': 'firstName', 'additional-name': 'middleName', 'family-name': 'lastName', name: 'fullName',
@@ -25,6 +25,7 @@
     [/^(last|family|sur) ?name$|^last$/, 'lastName'],
     [/^(full |legal |applicant )?name$|^name of (the )?head of household$|^head of household name$/, 'fullName'],
     [/^(date of birth|birth ?date|dob|birthday)( mm dd yyyy)?$/, 'birthDate'],
+    [/^(age range|age group)$/, 'ageRange'],
     [/^(social security( number)?|ssn)$/, 'ssn'],
     [/^e ?mail( address)?$/, 'email'],
     [/^((cell|mobile|home|best|primary) )?(phone|telephone)( number)?$|^(mobile|cell) number$/, 'phone'],
@@ -34,7 +35,7 @@
     [/^state( province)?$/, 'state'],
     [/^(zip|zip code|zipcode|postal code)$/, 'zip'],
     [/^county$/, 'county'],
-    [/^(household size|family size|size of (your )?household|(number of |total )?(people|persons|members) in (your )?household|how many people (live|are) in (your )?household|(total )?household members)$/, 'householdSize'],
+    [/^(household size|family size|size of (your )?household|(number of |total )?(people|persons|members) in (your )?household|how many people ((live|are) )?in (your )?household( (?!.*\b(are|is|who|that|have|has|work\w*|employ\w*|over|under|aged?|between|older|younger|adults?|child(ren)?|kids?|seniors?|veterans?|disab\w*|students?|infants?|bab(y|ies)|\d+)\b).+)?|(total )?household members)$/, 'householdSize'],
     [/^((number of|how many) )?adults( in (your )?household)?( 18 64| 18 to 64)?$/, 'householdAdults'],
     [/^((number of|how many) )?(children|kids)( in (your )?household)?( under 18| 0 17)?$/, 'householdChildren'],
     [/^((number of|how many) )?(seniors|older adults)( in (your )?household)?( 65\+| 65| 60\+)?$/, 'householdSeniors'],
@@ -61,7 +62,7 @@
   // "#" reads as "number" ("# of adults", "Apt #").
   const normal = value => String(value || '').toLowerCase().replace(/[‘’']/g, '').replace(/#/g, ' number ').replace(/\*/g, ' ').replace(/[^a-z0-9+]+/g, ' ').trim();
   function question(value) {
-    let text = normal(value).replace(/ (required|optional)$/, '');
+    let text = normal(String(value || '').replace(/\([^)]*\)/g, ' ')).replace(/ (required|optional)$/, '');
     for (let previous = ''; previous !== text;) { previous = text; text = text.replace(LEAD, ''); }
     return text;
   }
@@ -72,7 +73,8 @@
     if (!win || !element.isConnected) return false;
     for (let node = element; node && node.nodeType === 1; node = node.parentElement) {
       const style = win.getComputedStyle(node);
-      if (node.hidden || node.hasAttribute('inert') || node.getAttribute('aria-hidden') === 'true' || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.opacity === '0') return false;
+      const customChoice = node === element && ['radio', 'checkbox'].includes(element.type) && Array.from(element.labels || []).some(rendered);
+      if (node.hidden || node.hasAttribute('inert') || node.getAttribute('aria-hidden') === 'true' || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || (style.opacity === '0' && !customChoice)) return false;
     }
     const rect = element.getBoundingClientRect();
     return Boolean(element.getClientRects().length && rect.width > 0 && rect.height > 0);
@@ -134,17 +136,19 @@
   }
   const isYesNo = options => options.some(option => /^yes\b/.test(normal(option))) && options.some(option => /^no\b/.test(normal(option)));
   const isNumeric = options => options.length > 0 && options.every(option => /^\d+\+?$|^\d+ or more$/.test(normal(option)));
+  const ageRange = option => /^(\d+) (\d+)( yrs?| years?)?$/.exec(normal(option)) || /^(\d+)(\+| and older| or older)( yrs?| years?)?$/.exec(normal(option));
   // A key is only placed on a control that can hold its kind of answer.
   function compatible(key, entry) {
     const kind = KIND[key] || 'text';
     const type = (entry.elements[0].type || 'text').toLowerCase();
     const options = optionsOf(entry);
     if (kind === 'yesno') return (entry.kind === 'radio' || entry.kind === 'select') ? isYesNo(options) : entry.kind === 'checkbox' && entry.elements.length === 1;
+    if (kind === 'ageRange') return (entry.kind === 'radio' || entry.kind === 'select') && options.some(ageRange);
     if (kind === 'count') return (entry.kind === 'input' && ['number', 'text', 'tel', ''].includes(type)) || ((entry.kind === 'select' || entry.kind === 'radio') && isNumeric(options.filter(option => normal(option))));
     if (kind === 'state') return entry.kind === 'select' || (entry.kind === 'input' && type === 'text');
     if (kind === 'date') return entry.kind === 'input' && ['date', 'text', ''].includes(type);
     if (kind === 'email') return entry.kind === 'input' && ['email', 'text'].includes(type);
-    if (kind === 'tel') return entry.kind === 'input' && ['tel', 'text'].includes(type);
+    if (kind === 'tel') return entry.kind === 'input' && ['tel', 'text', 'number'].includes(type);
     if (kind === 'money') return entry.kind === 'input' && ['number', 'text', ''].includes(type);
     return entry.kind === 'textarea' || (entry.kind === 'input' && ['text', 'search', ''].includes(type));
   }
@@ -212,6 +216,11 @@
     if (result.firstName && result.lastName) result.fullName = `${result.firstName} ${result.lastName}`;
     const phone = values?.mobilePhone || values?.homePhone || values?.phone;
     if (phone) result.phone = phone; else delete result.phone;
+    const birth = /^(\d{4})-(\d{2})-(\d{2})$/.exec(values?.birthDate || '');
+    if (birth) {
+      const today = new Date(), year = Number(birth[1]), month = Number(birth[2]), day = Number(birth[3]);
+      result.ageRange = String(today.getFullYear() - year - (today.getMonth() + 1 < month || (today.getMonth() + 1 === month && today.getDate() < day) ? 1 : 0));
+    } else delete result.ageRange;
     const earned = cents(values?.monthlyEarnedIncome), other = cents(values?.monthlyOtherIncome);
     // A total is only offered when both parts are known; a partial sum would understate income.
     if (earned !== null && other !== null) { result.totalMonthlyIncome = dollars(earned + other); result.annualIncome = dollars((earned + other) * 12); }
@@ -229,6 +238,7 @@
   function chooseOption(options, key, value) {
     const wanted = normal(value);
     if (KIND[key] === 'yesno') return options.findIndex(option => new RegExp(`^${wanted}\\b`).test(normal(option)));
+    if (KIND[key] === 'ageRange') return options.findIndex(option => { const range = ageRange(option); return range && Number(value) >= Number(range[1]) && (range[2] === '+' || range[2] === ' and older' || range[2] === ' or older' || Number(value) <= Number(range[2])); });
     if (key === 'state') return options.findIndex(option => [wanted, normal(STATES[String(value).toUpperCase()])].includes(normal(option)));
     if (KIND[key] === 'count') {
       const exact = options.findIndex(option => normal(option) === wanted);
@@ -247,6 +257,7 @@
     }
     if (key === 'phone') {
       const digits = text.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
+      if (element.type === 'number') return digits;
       return digits.length === 10 ? `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}` : text;
     }
     return text;
@@ -286,10 +297,15 @@
     style.textContent = '[data-secondhand-filled="rule"]{outline:2px solid #5f9b62!important;outline-offset:1px!important}[data-secondhand-filled="guess"]{outline:2px dashed #d99a2b!important;outline-offset:1px!important}';
     (doc.head || doc.documentElement).append(style);
   }
+  function rejectedByPage(entry) {
+    const container = entry.elements[0].closest('.form-line');
+    return entry.elements.some(element => element.getAttribute('aria-invalid') === 'true') || container?.classList.contains('form-line-error') ||
+      Boolean(container && Array.from(container.querySelectorAll('[role="alert"]')).some(rendered));
+  }
   function fillFields(doc, token, assignments, values) {
     const ids = (Array.isArray(assignments) ? assignments : []).map(item => item?.id);
-    if (!current || current.token !== token || current.doc !== doc) return { ok: false, filled: [], skipped: ids };
-    const filled = [], skipped = [];
+    if (!current || current.token !== token || current.doc !== doc) return { ok: false, filled: [], skipped: ids, rejected: [] };
+    const filled = [], skipped = [], rejected = [];
     for (const assignment of assignments) {
       const entry = current.map.get(assignment?.id);
       const key = assignment?.key;
@@ -297,11 +313,16 @@
       if (!entry || !GENERIC_KEYS.includes(key) || typeof value !== 'string' || !value || answered(entry) || !entry.elements.every(element => element.isConnected && eligible(element)) || !compatible(key, entry) || !fillEntry(entry, key, value)) {
         skipped.push(assignment?.id); continue;
       }
+      entry.elements[0].dispatchEvent(new entry.elements[0].ownerDocument.defaultView.Event('blur'));
+      if (rejectedByPage(entry)) {
+        if (entry.kind === 'input' || entry.kind === 'textarea' || entry.kind === 'select') setValue(entry.elements[0], '');
+        rejected.push(assignment.id); continue;
+      }
       ensureStyle(doc);
       entry.elements.forEach(element => element.setAttribute('data-secondhand-filled', assignment.guessed ? 'guess' : 'rule'));
       filled.push(assignment.id);
     }
-    return { ok: true, filled, skipped };
+    return { ok: true, filled, skipped, rejected };
   }
   function focusField(doc, id) {
     const entry = current && current.doc === doc ? current.map.get(id) : null;

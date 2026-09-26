@@ -16,7 +16,7 @@
 (function (root) {
   'use strict';
   const ALLOWED_KEYS = Object.freeze(['firstName', 'middleName', 'lastName', 'fullName', 'suffix', 'birthDate', 'ssn', 'email', 'phone',
-    'addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county', 'householdSize', 'householdAdults', 'householdChildren', 'householdSeniors',
+    'addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county', 'ageRange', 'householdSize', 'householdAdults', 'householdChildren', 'householdSeniors',
     'householdVeteran', 'householdDisability', 'totalMonthlyIncome', 'annualIncome', 'monthlyRent', 'monthlyUtilities']);
   const UNREADABLE = 'The AI returned an unreadable answer.';
   // availability() must get the same options as create() and prompt().
@@ -34,6 +34,7 @@
   const COUNT = { types: ['number'], choices: 'count' };
   const YES_NO = { types: [], choices: 'yesNo' };
   const MONEY = { types: ['number', 'text'] };
+  const AGE_RANGE = { types: [], choices: 'ageRange' };
   // What each key means to the model, and which inputs it may be placed in.
   const KEYS = Object.freeze({
     firstName: { about: 'first (given) name', types: TEXT },
@@ -51,6 +52,7 @@
     state: { about: 'state', types: ['text', 'select'] },
     zip: { about: 'ZIP or postal code', types: ['text', 'number'] },
     county: { about: 'county', types: ['text', 'select'] },
+    ageRange: { about: 'age range or age group', ...AGE_RANGE },
     householdSize: { about: 'number of people in the household', ...COUNT },
     householdAdults: { about: 'number of adults in the household', ...COUNT },
     householdChildren: { about: 'number of children in the household', ...COUNT },
@@ -99,6 +101,7 @@
     const options = field.options || [];
     if (rule.types.includes(type)) return true;
     if (rule.choices === 'count') return ['select', 'radio'].includes(type) && options.some(option => /\d/.test(option));
+    if (rule.choices === 'ageRange') return ['select', 'radio'].includes(type) && options.some(option => /\d/.test(option));
     if (rule.choices === 'yesNo') {
       if (type === 'checkbox') return options.some(isYes);
       return ['select', 'radio'].includes(type) && options.some(isYes) && options.some(isNo);

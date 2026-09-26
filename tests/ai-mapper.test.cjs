@@ -52,7 +52,7 @@ const never = () => new Promise(() => {});
 
 test('the default allowlist is the fixed set of profile keys', () => {
   assert.deepEqual([...ai.ALLOWED_KEYS], ['firstName', 'middleName', 'lastName', 'fullName', 'suffix', 'birthDate', 'ssn', 'email', 'phone',
-    'addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county', 'householdSize', 'householdAdults', 'householdChildren', 'householdSeniors',
+    'addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county', 'ageRange', 'householdSize', 'householdAdults', 'householdChildren', 'householdSeniors',
     'householdVeteran', 'householdDisability', 'totalMonthlyIncome', 'annualIncome', 'monthlyRent', 'monthlyUtilities']);
   assert.ok(Object.isFrozen(ai.ALLOWED_KEYS));
 });
