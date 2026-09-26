@@ -37,6 +37,7 @@ if (nativeOrigin) {
   let bridge;
   let extensionId = null;
   let lockTimer;
+  let lockRevision = 0;
   let quitting = false;
   let fieldRequestPending = false;
   let extensionSetupPending = false;
@@ -53,7 +54,7 @@ if (nativeOrigin) {
   };
 
   async function status() {
-    return { exists: await vault.exists(), unlocked: vault.unlocked, extensionId,
+    return { exists: await vault.exists(), unlocked: vault.unlocked, lockRevision, extensionId,
       bridgeRunning: Boolean(bridge), platform: process.platform,
       extensionSetup: await getExtensionSetup(app).catch(() => ({ prepared: false, available: false })) };
   }
@@ -66,7 +67,8 @@ if (nativeOrigin) {
     assistance.revoke();
     await vault.lock();
     assistance.revoke();
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('secondhand:locked');
+    lockRevision++;
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('secondhand:locked', { lockRevision });
     return status();
   }
   function requireUnlocked() {

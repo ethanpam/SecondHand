@@ -6,7 +6,7 @@ Runtime: Electron desktop, plain HTML/CSS/JavaScript renderer, Manifest V3 Chrom
 
 `window.secondHand` exposes async methods returning plain values or throwing sanitized errors:
 
-- `status()` -> `{ exists, unlocked, extensionId, bridgeRunning, platform, extensionSetup }`; setup contains `{ directory, extensionId, version, prepared }`, or `{ prepared: false, available: false }` if bundled assets are unavailable
+- `status()` -> `{ exists, unlocked, lockRevision, extensionId, bridgeRunning, platform, extensionSetup }`; setup contains `{ directory, extensionId, version, prepared }`, or `{ prepared: false, available: false }` if bundled assets are unavailable
 - `createVault(passphrase)` / `unlock(passphrase)` -> status
 - `lock()` -> status
 - `getData()` -> `{ profile, applications }`
@@ -19,7 +19,9 @@ Runtime: Electron desktop, plain HTML/CSS/JavaScript renderer, Manifest V3 Chrom
 - `copyChromeExtensionsUrl()` -> true (copies the fixed `chrome://extensions` address)
 - `connectExtension(extensionId)` -> `{ extensionId, manifestPath }` (register native host for current OS)
 - `exportBackup()` / `importBackup()` -> `{ cancelled: boolean }` (native dialogs, encrypted vault bytes only; import only while locked)
-- `onLocked(callback)` -> unsubscribe function
+- `onLocked(callback)` -> unsubscribe function; the callback receives `{ lockRevision }` (invalid or legacy notifications provide no revision and still clear sensitive UI)
+
+`lockRevision` is a monotonic, process-local counter used to correlate a lock response with its notification. The renderer applies a transition once, regardless of their delivery order, so a delayed duplicate notification cannot erase a newly typed passphrase or authentication error. A newer lock transition must still clear sensitive UI and invalidate pending data loads. The counter is not an applicant field or persisted vault data.
 
 Profile is a flat object containing only optional string fields, allowlisted by `shared/schema.cjs`:
 

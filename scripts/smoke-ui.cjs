@@ -22,20 +22,40 @@ async function captureDiagnostic(page, name, options = {}) {
   }
 }
 
+async function rejectedPassphrase(page, afterEntry) {
+  await page.locator('#passphrase').fill('incorrect-passphrase');
+  if (afterEntry) await afterEntry();
+  await expect(page.locator('#passphrase')).toHaveValue('incorrect-passphrase');
+  await page.locator('#auth-submit').click();
+  await expect(page.locator('#auth-error')).toBeVisible();
+  await expect(page.locator('#workspace')).not.toBeVisible();
+}
+
 async function main() {
   const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-ui-'));
   const errors = [];
   let application;
+  let page;
   const launch = async () => {
     application = await electron.launch({ args: [root], env: { ...process.env, SECONDHAND_USER_DATA: userData }, timeout: 30000 });
     const page = await application.firstWindow();
     page.on('pageerror', error => errors.push(error.message));
     await page.locator('#auth-view').waitFor({ state: 'visible' });
+    await page.evaluate(() => {
+      // Failure diagnostics contain event types/booleans only, never input text.
+      window.__secondHandSmokeAuth = [];
+      const record = event => {
+        window.__secondHandSmokeAuth.push(event);
+        if (window.__secondHandSmokeAuth.length > 30) window.__secondHandSmokeAuth.shift();
+      };
+      for (const type of ['submit', 'invalid', 'reset']) document.querySelector('#auth-form').addEventListener(type, () => record({ type }), true);
+      window.secondHand.onLocked(event => record({ type: 'locked', revision: event?.lockRevision }));
+    });
     return page;
   };
   try {
     await fs.mkdir(path.join(root, 'artifacts'), { recursive: true });
-    let page = await launch();
+    page = await launch();
     await captureDiagnostic(page, 'vault-setup.png');
     await page.locator('#passphrase').fill(passphrase);
     await page.locator('#confirm-passphrase').fill(passphrase);
@@ -77,15 +97,37 @@ async function main() {
     assert.deepEqual(cleared, { firstName: '', notes: '', cards: '', overview: '' });
     const clearedProfile = await page.locator('#profile-form').evaluate(form => Object.fromEntries(Array.from(form.querySelectorAll('[name]'), control => [control.name, control.value])));
     assert.deepEqual(clearedProfile, Object.fromEntries(PROFILE_FIELDS.map(field => [field, ''])));
-    await page.locator('#passphrase').fill('incorrect-passphrase');
-    await page.locator('#auth-submit').click();
-    await expect(page.locator('#auth-error')).toBeVisible();
-    await expect(page.locator('#workspace')).not.toBeVisible();
+    await rejectedPassphrase(page);
     await page.locator('#passphrase').fill(passphrase);
     await page.locator('#auth-submit').click();
     await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('.nav-item[data-view="profile"]').click();
     await expect(page.locator('#firstName')).toHaveValue(applicantFixture.firstName);
+
+    // Force the opposite IPC ordering: the lock status reply is rendered before
+    // its notification. This test-only main-process hook is not shipped code.
+    await application.evaluate(({ BrowserWindow }) => {
+      const webContents = BrowserWindow.getAllWindows()[0].webContents;
+      const send = webContents.send.bind(webContents);
+      webContents.send = (...args) => {
+        if (args[0] !== 'secondhand:locked') return send(...args);
+        webContents.send = send;
+        globalThis.__secondHandSmokeDeliverLock = () => { send(...args); return args[1].lockRevision; };
+      };
+    });
+    await page.locator('#lock-button').click();
+    await expect(page.locator('#auth-view')).toBeVisible();
+    await rejectedPassphrase(page, async () => {
+      const revision = await application.evaluate(() => {
+        const deliver = globalThis.__secondHandSmokeDeliverLock;
+        delete globalThis.__secondHandSmokeDeliverLock;
+        return deliver();
+      });
+      await expect.poll(() => page.evaluate(() => window.__secondHandSmokeAuth.filter(event => event.type === 'locked').at(-1)?.revision)).toBe(revision);
+    });
+    await page.locator('#passphrase').fill(passphrase);
+    await page.locator('#auth-submit').click();
+    await expect(page.locator('#workspace')).toBeVisible();
     await page.evaluate(() => window.secondHand.lock());
     await expect(page.locator('#auth-view')).toBeVisible();
     await expect(page.locator('#firstName')).toHaveValue('');
@@ -102,7 +144,21 @@ async function main() {
     const bytes = await fs.readFile(path.join(userData, 'vault.secondhand'), 'utf8');
     for (const secret of ['Avery', 'Example', '123 Test Way', '2025550147', 'SYNTHETIC-RECEIPT-ONLY', passphrase]) assert.equal(bytes.includes(secret), false);
     assert.deepEqual(errors, []);
-    console.log('Electron UI smoke passed: create, save full applicant choices and mailing details, track application, lock/clear all fields, wrong password, unlock, restart persistence.');
+    console.log('Electron UI smoke passed: create, save full applicant choices and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence.');
+  } catch (error) {
+    if (page && !page.isClosed()) {
+      const auth = await page.evaluate(() => ({
+        events: window.__secondHandSmokeAuth,
+        focused: document.hasFocus(), activeControl: document.activeElement?.id,
+        passphrasePresent: Boolean(document.querySelector('#passphrase').value),
+        errorHidden: document.querySelector('#auth-error').hidden,
+        submitDisabled: document.querySelector('#auth-submit').disabled,
+        submitBusy: document.querySelector('#auth-submit').getAttribute('aria-busy'),
+        workspaceHidden: document.querySelector('#workspace').hidden
+      })).catch(() => ({ unavailable: true }));
+      console.error('Sanitized auth failure diagnostics:', JSON.stringify(auth));
+    }
+    throw error;
   } finally {
     if (application) await application.close().catch(() => {});
     await fs.rm(userData, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });

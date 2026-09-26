@@ -20,6 +20,7 @@ async function desktop() {
   let window;
   let answer = async () => ({ response: 1 });
   const prompts = [];
+  const notifications = [];
   const powerEvents = new Map();
   class Vault {
     constructor() { this.unlocked = true; this.data = { profile: { firstName: 'Synthetic', lastName: '' }, applications: [] }; }
@@ -33,7 +34,7 @@ async function desktop() {
     constructor() {
       window = this;
       this.webContents = { mainFrame: { url: pathToFileURL(path.join(root, 'renderer/index.html')).href },
-        setWindowOpenHandler() {}, on() {}, send() {} };
+        setWindowOpenHandler() {}, on() {}, send(...args) { notifications.push(args); } };
     }
     show() {} focus() {} setMenuBarVisibility() {} once() {} on() {} loadFile() {}
     isDestroyed() { return false; }
@@ -61,13 +62,27 @@ async function desktop() {
   await tick();
   assert.equal(typeof bridge, 'function');
   return {
-    prompts,
+    prompts, notifications,
     answer: callback => { answer = callback; },
     request: request => bridge({ id: 'synthetic', url: PORTAL_URL, ...request }, context),
     invoke: (method, argument) => invoke({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, method, ...(argument === undefined ? [] : [argument])),
     async sleep() { powerEvents.get('suspend')(); await tick(); }
   };
 }
+
+test('renderer lock status and notifications identify each completed lock monotonically', async () => {
+  const app = await desktop();
+  assert.equal((await app.invoke('status')).lockRevision, 0);
+  const first = await app.invoke('lock');
+  assert.equal(first.lockRevision, 1);
+  assert.equal(first.unlocked, false);
+  assert.equal(app.notifications[0][0], 'secondhand:locked');
+  assert.deepEqual(JSON.parse(JSON.stringify(app.notifications[0][1])), { lockRevision: 1 });
+  assert.equal((await app.invoke('unlock', 'synthetic-passphrase')).lockRevision, 1);
+  await app.sleep();
+  assert.equal((await app.invoke('status')).lockRevision, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(app.notifications[1][1])), { lockRevision: 2 });
+});
 
 test('desktop requires one scoped guided consent and retains manual per-request consent', async () => {
   const app = await desktop();

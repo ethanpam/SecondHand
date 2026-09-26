@@ -19,6 +19,7 @@
   let applicationBusy = false;
   let toastTimer;
   let vaultGeneration = 0;
+  let handledLockRevision = -1;
 
   function icon(name) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -107,7 +108,12 @@
     $('toast').textContent = '';
   }
 
-  function showLocked(status = vaultStatus) {
+  function showLocked(status = vaultStatus, { refresh = false } = {}) {
+    const revision = Number.isSafeInteger(status.lockRevision) && status.lockRevision >= 0 ? status.lockRevision : null;
+    // The status reply and event can arrive in either order. Clear once for
+    // that transition; a later revision must still cancel pending auth/data.
+    if (!refresh && revision !== null && revision <= handledLockRevision) return;
+    if (revision !== null) handledLockRevision = Math.max(handledLockRevision, revision);
     clearSensitiveUI();
     vaultStatus = { ...status, unlocked: false };
     $('workspace').hidden = true;
@@ -234,6 +240,11 @@
     const generation = vaultGeneration;
     const loaded = await api.getData();
     if (generation !== vaultGeneration) return;
+    // A successful unlock can supersede a delayed event for a lock that the
+    // desktop already completed before this authenticated status was returned.
+    if (Number.isSafeInteger(status.lockRevision) && status.lockRevision >= 0) {
+      handledLockRevision = Math.max(handledLockRevision, status.lockRevision);
+    }
     vaultStatus = status;
     data = { profile: loaded.profile || {}, applications: Array.isArray(loaded.applications) ? loaded.applications : [] };
     $('auth-form').reset();
@@ -284,12 +295,16 @@
     if (!vaultStatus.exists && $('passphrase').value !== $('confirm-passphrase').value) {
       showError('auth-error', 'The passphrases don’t match. Please try again.'); $('confirm-passphrase').focus(); return;
     }
+    const generation = vaultGeneration;
     pending($('auth-submit'), async () => {
       try {
         const status = vaultStatus.exists ? await api.unlock($('passphrase').value) : await api.createVault($('passphrase').value);
+        if (generation !== vaultGeneration) return;
         await loadUnlocked(status);
-      } catch (error) { showError('auth-error', error); }
-      finally { $('passphrase').value = ''; $('confirm-passphrase').value = ''; }
+      } catch (error) { if (generation === vaultGeneration) showError('auth-error', error); }
+      finally {
+        if (generation === vaultGeneration) { $('passphrase').value = ''; $('confirm-passphrase').value = ''; }
+      }
     });
   });
 
@@ -300,7 +315,8 @@
       try {
         const result = await api.importBackup();
         if (result.cancelled) return;
-        showLocked(await api.status());
+        // Restoring changes whether a vault exists without a lock transition.
+        showLocked(await api.status(), { refresh: true });
         toast('Backup restored. Unlock it with its original passphrase.');
       } catch (error) { showError('auth-error', error); }
     });
@@ -446,7 +462,7 @@
       $('confirm-passphrase').disabled = true;
       return;
     }
-    api.onLocked(() => showLocked({ ...vaultStatus, exists: true, unlocked: false }));
+    api.onLocked(notification => showLocked({ ...vaultStatus, exists: true, unlocked: false, lockRevision: notification?.lockRevision }));
     try {
       const status = await api.status();
       if (status.unlocked) await loadUnlocked(status); else showLocked(status);

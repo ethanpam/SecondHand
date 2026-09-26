@@ -48,7 +48,10 @@ async function renderer(t, overrides = {}) {
       get(id).dispatchEvent(new window.Event('input', { bubbles: true }));
     },
     submit(id) { get(id).dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); },
-    lock() { status = { ...status, unlocked: false }; onLocked(); }
+    lock(lockRevision) {
+      status = { ...status, unlocked: false, lockRevision };
+      onLocked(lockRevision === undefined ? undefined : { lockRevision });
+    }
   };
 }
 
@@ -192,6 +195,133 @@ test('a delayed manual lock response cannot clear a passphrase entered after the
   assert.deepEqual(attemptedPassphrases, ['incorrect-synthetic-passphrase']);
   assert.equal(view.get('auth-error').hidden, false);
   assert.match(view.get('auth-error').textContent, /Unable to unlock/);
+  assert.equal(view.get('workspace').hidden, true);
+});
+
+test('a delayed lock notification cannot clear a passphrase entered after the manual lock response', async t => {
+  const completion = deferred();
+  const attemptedPassphrases = [];
+  const view = await renderer(t, {
+    lock: () => completion.promise,
+    unlock: async passphrase => {
+      attemptedPassphrases.push(passphrase);
+      throw new Error('Unable to unlock the local vault.');
+    }
+  });
+  view.get('lock-button').click();
+  completion.resolve({ exists: true, unlocked: false, lockRevision: 1, extensionId: '', bridgeRunning: true });
+  await tick();
+  assert.equal(view.get('auth-view').hidden, false);
+  view.edit('passphrase', 'incorrect-synthetic-passphrase');
+  view.lock(1);
+  assert.equal(view.get('passphrase').value, 'incorrect-synthetic-passphrase');
+  view.submit('auth-form');
+  await tick();
+  assert.deepEqual(attemptedPassphrases, ['incorrect-synthetic-passphrase']);
+  assert.equal(view.get('auth-error').hidden, false);
+  assert.equal(view.get('workspace').hidden, true);
+});
+
+test('a delayed lock notification cannot erase a completed wrong-password error', async t => {
+  const view = await renderer(t, {
+    lock: async () => ({ exists: true, unlocked: false, lockRevision: 1, extensionId: '', bridgeRunning: true }),
+    unlock: async () => { throw new Error('Unable to unlock the local vault.'); }
+  });
+  view.get('lock-button').click();
+  await tick();
+  view.edit('passphrase', 'incorrect-synthetic-passphrase');
+  view.submit('auth-form');
+  await tick();
+  assert.equal(view.get('auth-error').hidden, false);
+  view.lock(1);
+  assert.equal(view.get('auth-error').hidden, false);
+  assert.match(view.get('auth-error').textContent, /Unable to unlock/);
+  assert.equal(view.get('workspace').hidden, true);
+});
+
+test('a fresh lock revision cancels a pending unlock and preserves subsequent input from its late completion', async t => {
+  const completion = deferred();
+  let dataRequests = 0;
+  const view = await renderer(t, {
+    unlock: () => completion.promise,
+    getData: async () => { dataRequests++; return { profile: { firstName: 'Private synthetic name' }, applications: [] }; }
+  });
+  view.lock(1);
+  view.edit('passphrase', 'synthetic-current-attempt');
+  view.submit('auth-form');
+  assert.equal(view.get('auth-submit').disabled, true);
+  view.lock(2);
+  view.edit('passphrase', 'synthetic-next-attempt');
+  completion.resolve({ exists: true, unlocked: true, lockRevision: 1 });
+  await tick();
+  assert.equal(dataRequests, 1, 'A stale unlock must not request profile data');
+  assert.equal(view.get('workspace').hidden, true);
+  assert.equal(view.get('firstName').value, '');
+  assert.equal(view.get('passphrase').value, 'synthetic-next-attempt');
+  assert.equal(view.get('auth-error').hidden, true);
+});
+
+test('a fresh lock revision cancels a pending unlock data load', async t => {
+  const completion = deferred();
+  let dataRequests = 0;
+  const view = await renderer(t, {
+    unlock: async () => ({ exists: true, unlocked: true, lockRevision: 1 }),
+    getData: async () => ++dataRequests === 1 ? { profile: {}, applications: [] } : completion.promise
+  });
+  view.lock(1);
+  view.edit('passphrase', 'synthetic-current-attempt');
+  view.submit('auth-form');
+  await tick();
+  assert.equal(dataRequests, 2);
+  view.lock(2);
+  completion.resolve({ profile: { firstName: 'Late private synthetic name' }, applications: [] });
+  await tick();
+  assert.equal(view.get('workspace').hidden, true);
+  assert.equal(view.get('firstName').value, '');
+  assert.equal(view.get('passphrase').value, '');
+});
+
+test('invalid or legacy lock revisions fail closed instead of being treated as duplicates', async t => {
+  const view = await renderer(t);
+  view.lock(1);
+  for (const revision of [undefined, -1, 1.5, '1', Number.MAX_SAFE_INTEGER + 1]) {
+    view.edit('passphrase', 'synthetic-input-to-clear');
+    view.lock(revision);
+    assert.equal(view.get('passphrase').value, '');
+    assert.equal(view.get('workspace').hidden, true);
+  }
+});
+
+test('a successful unlock ignores its earlier lock notification but a fresh lock still clears it', async t => {
+  const view = await renderer(t, {
+    unlock: async () => ({ exists: true, unlocked: true, lockRevision: 2 })
+  });
+  view.lock(1);
+  view.edit('passphrase', 'synthetic-current-attempt');
+  view.submit('auth-form');
+  await tick();
+  assert.equal(view.get('workspace').hidden, false);
+  assert.equal(view.get('firstName').value, 'Initial');
+  view.lock(2);
+  assert.equal(view.get('workspace').hidden, false);
+  view.lock(3);
+  assert.equal(view.get('workspace').hidden, true);
+  assert.equal(view.get('firstName').value, '');
+});
+
+test('restoring a backup while locked refreshes create-vault UI despite an unchanged lock revision', async t => {
+  let restored = false;
+  const view = await renderer(t, {
+    status: async () => ({ exists: restored, unlocked: false, lockRevision: 0 }),
+    importBackup: async () => { restored = true; return { cancelled: false }; }
+  });
+  assert.equal(view.get('confirm-passphrase').required, true);
+  assert.match(view.get('auth-submit').textContent, /Create my vault/);
+  view.get('auth-import').click();
+  await tick();
+  assert.equal(view.get('confirm-passphrase').required, false);
+  assert.equal(view.get('confirm-passphrase-field').hidden, true);
+  assert.match(view.get('auth-submit').textContent, /Unlock my vault/);
   assert.equal(view.get('workspace').hidden, true);
 });
 
