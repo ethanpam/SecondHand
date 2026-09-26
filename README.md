@@ -33,6 +33,8 @@ npm test
 npm start
 ```
 
+For live reloading, run `npm run dev` (needs `npx playwright install chromium` once). It starts the desktop app and a separate Chromium window with the repository's `extension/` loaded. Edits to `renderer/` reload the app window, and edits to `desktop/` or `shared/` restart the app. Edits to `panel`/`popup` files reload those pages in place. Other `extension/` edits reload the extension; refresh the Iowa tab yourself for content-script changes. The dev browser uses its own profile and copies Chrome's native bridge registration after you choose Prepare Chrome extension.
+
 On macOS/Linux, use the desktop's Prepare Chrome extension button; it registers a development native-host launcher automatically. You can also load the repository's `extension/` directory directly: its manifest key pins the same ID. On Windows, build/install the `.exe` before connecting, because Chrome needs the packaged native relay. The desktop UI itself runs with `npm start` on either platform.
 
 ```sh

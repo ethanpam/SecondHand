@@ -3,6 +3,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, powerMonitor, session } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
+const { watch } = require('node:fs');
 const os = require('node:os');
 const { pathToFileURL } = require('node:url');
 const { Vault, atomicWrite, MAX_VAULT_BYTES } = require('./vault.cjs');
@@ -270,6 +271,16 @@ if (nativeOrigin) {
     mainWindow.loadFile(rendererPath);
   }
 
+  // `npm run dev` sets this so renderer edits reload the window without locking the vault.
+  function watchRendererForDev() {
+    if (app.isPackaged || process.env.SECONDHAND_DEV_RELOAD !== '1') return;
+    let timer;
+    watch(path.dirname(rendererPath), () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => mainWindow?.webContents.reloadIgnoringCache(), 100);
+    });
+  }
+
   app.on('second-instance', () => { if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); } });
   app.whenReady().then(async () => {
     await fs.mkdir(userData, { recursive: true, mode: 0o700 });
@@ -287,6 +298,7 @@ if (nativeOrigin) {
       catch (error) { throw new Error(error.publicMessage || 'The local operation could not be completed. Please try again.'); }
     });
     createWindow();
+    watchRendererForDev();
     try { bridge = await startBridge(userData, () => extensionId, bridgeRequest); }
     catch { dialog.showErrorBox('Local bridge unavailable', 'Your local vault is available. Restart SecondHand to connect the Chrome extension.'); }
     powerMonitor.on('suspend', () => lockVault().catch(() => {}));
