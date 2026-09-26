@@ -90,3 +90,11 @@ test('#29 age-range choices are answered from the saved birth date', () => {
   const planned = generic.plan(unknown);
   assert.equal(fillAll(unknown, planned, {}).filled.length, 0, 'no birth date, nothing chosen');
 });
+
+test('#26 household questions about a subgroup are never answered with the whole household size', () => {
+  for (const label of ['How many people in your household are over 65?', 'How many people in your household are children under 18?',
+    'How many people in your household are veterans?', 'How many people in your household work?']) {
+    const doc = page(`<label for="q">${label}</label><input id="q" type="number">`);
+    assert.equal(keysOf(generic.plan(doc)).includes('householdSize'), false, label);
+  }
+});

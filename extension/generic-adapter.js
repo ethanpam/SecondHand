@@ -35,7 +35,7 @@
     [/^state( province)?$/, 'state'],
     [/^(zip|zip code|zipcode|postal code)$/, 'zip'],
     [/^county$/, 'county'],
-    [/^(household size|family size|size of (your )?household|(number of |total )?(people|persons|members) in (your )?household|how many people ((live|are) )?in (your )?household( .+)?|(total )?household members)$/, 'householdSize'],
+    [/^(household size|family size|size of (your )?household|(number of |total )?(people|persons|members) in (your )?household|how many people ((live|are) )?in (your )?household( (?!.*\b(are|is|who|that|have|has|work\w*|employ\w*|over|under|aged?|between|older|younger|adults?|child(ren)?|kids?|seniors?|veterans?|disab\w*|students?|infants?|bab(y|ies)|\d+)\b).+)?|(total )?household members)$/, 'householdSize'],
     [/^((number of|how many) )?adults( in (your )?household)?( 18 64| 18 to 64)?$/, 'householdAdults'],
     [/^((number of|how many) )?(children|kids)( in (your )?household)?( under 18| 0 17)?$/, 'householdChildren'],
     [/^((number of|how many) )?(seniors|older adults)( in (your )?household)?( 65\+| 65| 60\+)?$/, 'householdSeniors'],
