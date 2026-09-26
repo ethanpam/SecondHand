@@ -2,6 +2,8 @@
 
 These browser captures show the production build with secondHand's original green-and-white palette and the new grain shader.
 
+The shader extends behind the transparent homepage header with no dividing rules. Its lower-left color stays visible before fading softly into the page background.
+
 - `desktop.jpg`: 1440 × 1000 desktop viewport.
 - `mobile.jpg`: 390 × 844 touch viewport.
 - `full-page.jpg`: the complete desktop page.

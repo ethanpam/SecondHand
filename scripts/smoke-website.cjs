@@ -15,6 +15,24 @@ async function inspectLayout(page) {
   assert.equal(await page.evaluate(width => document.documentElement.scrollWidth > width + 1, page.viewportSize().width), false, 'Page must not overflow horizontally');
 }
 
+async function inspectHeroLayout(page) {
+  const background = await page.locator('.gradient-background').boundingBox();
+  const header = await page.locator('.site-header').boundingBox();
+  const content = await page.locator('.hero .eyebrow').boundingBox();
+  assert.ok(background && header && content);
+  assert.ok(background.y <= header.y, 'Shader must extend behind the top navigation');
+  assert.equal(background.x, 0, 'Shader must reach the left edge');
+  assert.equal(background.width, page.viewportSize().width, 'Shader must span the viewport');
+  assert.ok(header.y + header.height < content.y, 'Navigation must not overlap hero copy');
+  assert.notEqual(await page.locator('.gradient-background').evaluate(element => getComputedStyle(element).maskImage), 'none', 'Shader must fade out before its bottom edge');
+  for (const selector of ['.site-header', '.site-header nav', '.intro']) {
+    assert.equal(await page.locator(selector).evaluate(element => {
+      const style = getComputedStyle(element);
+      return parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+    }), 0, 'Header and hero transitions must not have a dividing border');
+  }
+}
+
 async function main() {
   await fs.mkdir(artifacts, { recursive: true });
   const browser = await chromium.launch({ channel: process.env.SECONDHAND_BROWSER_CHANNEL || undefined });
@@ -37,6 +55,7 @@ async function main() {
     await page.goto(site, { waitUntil: 'networkidle' });
     await expect(page.locator('.gradient-background canvas')).toBeVisible();
     await inspectLayout(page);
+    await inspectHeroLayout(page);
     const shaderFrame = () => page.locator('.gradient-canvas[data-paper-shader]').evaluate(element => element.paperShaderMount.getCurrentFrame());
     const initialFrame = await shaderFrame();
     await expect.poll(shaderFrame).toBeGreaterThan(initialFrame);
@@ -119,6 +138,7 @@ async function main() {
     for (const width of [320, 390, 768, 1024]) {
       await mobile.setViewportSize({ width, height: 844 });
       await inspectLayout(mobile);
+      await inspectHeroLayout(mobile);
     }
     await mobile.setViewportSize({ width: 390, height: 844 });
     await mobile.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Privacy', exact: true }).click();
@@ -150,6 +170,7 @@ async function main() {
     const staticPage = await browser.newPage({ javaScriptEnabled: false });
     await staticPage.goto(site);
     await expect(staticPage.getByRole('heading', { level: 1 })).toBeVisible();
+    await inspectHeroLayout(staticPage);
     await expect(staticPage.getByRole('link', { name: 'Download for Windows' })).toBeAttached();
     assert.deepEqual(errors, [], 'No browser runtime errors');
     assert.deepEqual([...externalRequests], [], 'Fonts and shaders must stay self-hosted');

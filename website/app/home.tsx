@@ -55,7 +55,7 @@ export function Home() {
     document.getElementById(`tab-${platforms[next].id}`)?.focus();
   };
   return (
-    <>
+    <div className="home-page">
       <SiteHeader />
       <main id="main">
         <section className="hero" aria-labelledby="hero-heading">
@@ -431,6 +431,6 @@ export function Home() {
         </div>
       </main>
       <SiteFooter />
-    </>
+    </div>
   );
 }
