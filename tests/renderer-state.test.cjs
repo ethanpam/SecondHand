@@ -308,6 +308,77 @@ test('restoring a backup while locked refreshes create-vault UI despite an uncha
   assert.equal(view.get('workspace').hidden, true);
 });
 
+test('opening Applications or Overview refreshes progress recorded while another view was active', async t => {
+  for (const destination of ['applications', 'overview']) await t.test(destination, async t => {
+    const view = await renderer(t);
+    view.window.document.querySelector('.nav-item[data-view="extension"]').click();
+    view.database.applications = [{ id: 'synthetic-native-progress', status: 'in_progress', nextAction: 'Synthetic newly recorded progress' }];
+    view.database.profile.firstName = 'Changed only in stored profile';
+    view.window.dispatchEvent(new view.window.Event('focus'));
+    await tick();
+    assert.equal(view.get('application-count').textContent, '0');
+    view.window.document.querySelector(`.nav-item[data-view="${destination}"]`).click();
+    await tick();
+    assert.equal(view.get(`view-${destination}`).hidden, false);
+    assert.equal(view.get('application-count').textContent, '1');
+    assert.match(view.get('application-list').textContent, /Synthetic newly recorded progress/);
+    assert.match(view.get('overview-applications').textContent, /Synthetic newly recorded progress/);
+    assert.equal(view.get('firstName').value, 'Initial', 'Refreshing progress must not replace profile inputs');
+  });
+});
+
+test('declining to leave unsaved profile edits does not refresh the tracker', async t => {
+  let reads = 0;
+  const view = await renderer(t, { getData: async () => { reads++; return { profile: {}, applications: [] }; } });
+  view.window.document.querySelector('.nav-item[data-view="profile"]').click();
+  view.edit('firstName', 'Unsaved fictional name');
+  view.window.confirm = () => false;
+  view.window.document.querySelector('.nav-item[data-view="applications"]').click();
+  await tick();
+  assert.equal(reads, 1);
+  assert.equal(view.get('view-profile').hidden, false);
+  assert.equal(view.get('firstName').value, 'Unsaved fictional name');
+});
+
+test('late tracker navigation responses cannot repopulate a locked screen or show stale errors', async t => {
+  for (const outcome of ['success', 'failure']) await t.test(outcome, async t => {
+    const completion = deferred();
+    let reads = 0;
+    const view = await renderer(t, { getData: () => ++reads === 1 ? Promise.resolve({ profile: {}, applications: [] }) : completion.promise });
+    view.window.document.querySelector('.nav-item[data-view="applications"]').click();
+    assert.equal(reads, 2);
+    view.lock(1);
+    view.edit('passphrase', 'new synthetic unlock input');
+    if (outcome === 'success') completion.resolve({ profile: {}, applications: [{ status: 'in_progress', nextAction: 'Late private progress' }] });
+    else completion.reject(new Error('Old refresh failure'));
+    await tick();
+    assert.equal(view.get('workspace').hidden, true);
+    assert.equal(view.get('application-count').textContent, '0');
+    assert.equal(view.get('application-list').textContent, '');
+    assert.equal(view.get('overview-applications').textContent, '');
+    assert.equal(view.get('toast').hidden, true);
+    assert.equal(view.get('passphrase').value, 'new synthetic unlock input');
+  });
+});
+
+test('an older tracker refresh cannot replace progress from a newer navigation', async t => {
+  const completions = [];
+  let reads = 0;
+  const view = await renderer(t, { getData: () => {
+    if (++reads === 1) return Promise.resolve({ profile: {}, applications: [] });
+    const completion = deferred(); completions.push(completion); return completion.promise;
+  } });
+  view.window.document.querySelector('.nav-item[data-view="applications"]').click();
+  view.window.document.querySelector('.nav-item[data-view="overview"]').click();
+  assert.equal(completions.length, 2);
+  completions[1].resolve({ profile: {}, applications: [{ status: 'in_progress', nextAction: 'Newest synthetic progress' }] });
+  await tick();
+  completions[0].resolve({ profile: {}, applications: [] });
+  await tick();
+  assert.equal(view.get('application-count').textContent, '1');
+  assert.match(view.get('overview-applications').textContent, /Newest synthetic progress/);
+});
+
 test('application editor freezes during save and restores editing after an error', async t => {
   const saves = [];
   const view = await renderer(t, {

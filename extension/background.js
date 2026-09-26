@@ -259,6 +259,14 @@ async function startAutomatic(tabId) {
       assistance = { tabId, token: grant.assistanceToken, expiresAt: grant.expiresAt, fields: grant.fields, url: safeUrl(tab.url), enabled: true, paused: false, waitingForInfo: false, reason: '', visited: new Set(), attempted: new Set(), attemptedPage: '', steps: 0 };
     }
     lastResult = { message: 'Guided autofill is ready. It pauses when a step needs your input.' };
+  } catch (error) {
+    // Native failures already contain public desktop messages. Bound and clean
+    // them before retaining UI status so polling cannot restore the obsolete
+    // approval prompt. A canceled request must not overwrite a newer action.
+    const message = typeof error?.message === 'string' ? error.message.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 240) : '';
+    const safeMessage = message || 'Guided assistance could not start. Check SecondHand and try again.';
+    if (epoch === actionEpoch) lastResult = { message: safeMessage, error: true };
+    throw new Error(safeMessage);
   } finally { busy = false; busyTab = null; }
   await runAutomatic(tabId);
   return status(tabId);

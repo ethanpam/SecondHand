@@ -18,7 +18,9 @@ async function registerHost(app, extensionId) {
   if (!app.isPackaged) {
     if (process.platform === 'win32') throw new Error('On Windows, install the packaged SecondHand app before connecting the extension.');
     executable = path.join(userData, 'secondhand-native-host');
-    await atomicWrite(executable, Buffer.from(`#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(app.getAppPath())} "$@"\n`));
+    // Chrome launches this process with its own environment. Keep it bound to
+    // the desktop that registered it, including an isolated development vault.
+    await atomicWrite(executable, Buffer.from(`#!/bin/sh\nexport SECONDHAND_USER_DATA=${shellQuote(userData)}\nunset SECONDHAND_TEST_MODE SECONDHAND_TEST_USER_DATA\nexec ${shellQuote(process.execPath)} ${shellQuote(app.getAppPath())} "$@"\n`));
     await fs.chmod(executable, 0o700);
   }
   if (process.platform === 'win32') {

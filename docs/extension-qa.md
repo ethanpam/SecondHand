@@ -61,3 +61,26 @@ end-to-end filing, and passing them does not mean the extension can complete an
 entire SNAP application.
 
 The separately authorized [live journey](iowa-live-journey.md) was operated manually through E-Signature and stopped with all signature controls untouched. It is not part of the isolated extension smoke or the earlier video, and it does not establish automated end-to-end filing.
+
+## Recording the real desktop connection
+
+A live walkthrough uses the running desktop app, its registered native host,
+and the installed Chrome extension. Enter only the agreed fictional profile in
+an isolated demo vault. The operator completes CAPTCHA and consent. Ordinary
+Save and Continue can send and save draft answers before final submission;
+stop before signing or submitting. On a Mac, label the footage as a macOS
+desktop run rather than a Windows executable test.
+
+For an existing recording, this macOS helper preserves the original, removes
+audio, and converts an explicitly selected range to H.264 MP4:
+
+```sh
+node scripts/record-live-demo.cjs --source /path/to/recording.mov \
+  --output artifacts/live-demo/clip.mp4 --start 60 --duration 120
+```
+
+It requires macOS `avconvert` and Swift Command Line Tools. It does not capture
+the screen or upload files. Review the finished clip and crop unrelated windows
+with a video editor before sharing. Keep manual actions and pauses visible, and
+describe any cuts or speed changes; the recording is evidence only of the steps
+it actually shows.

@@ -325,3 +325,53 @@ test('checking after profile changes replaces a revoked waiting grant in the sam
  await start(w);
  assert.equal(w.calls.native.filter(x=>x.type==='startAssistedSession').length,2);
 });
+
+test('guided-start rejection remains visible across page polling instead of restoring the approval prompt',async()=>{
+ const w=worker();w.failNative('startAssistedSession','Unlock SecondHand first.');
+ const result=await start(w);
+ assert.equal(result.ok,false);assert.equal(result.error,'Unlock SecondHand first.');
+ for(let index=0;index<3;index++){
+  const state=(await w.send({type:'ui:pageState'})).data;
+  assert.equal(state.busy,false);assert.equal(state.automatic.enabled,false);
+  assert.equal(state.lastResult.message,'Unlock SecondHand first.');assert.equal(state.lastResult.error,true);
+ }
+ assert.equal(w.calls.native.filter(request=>request.type==='startAssistedSession').length,1);
+ assert.equal(w.calls.content.some(message=>['secondhand:fill','secondhand:next'].includes(message.type)),false);
+});
+
+test('retained guided-start errors are bounded public text and replaced by a successful new session',async()=>{
+ const w=worker();w.failNative('startAssistedSession','Desktop\nrequest\u0000 declined. '+'x'.repeat(400));
+ const failure=await start(w);
+ const failed=(await w.send({type:'ui:status'})).data.lastResult;
+ assert.equal(failed.error,true);assert.ok(failed.message.length<=240);assert.doesNotMatch(failed.message,/[\u0000-\u001f\u007f]/);
+ assert.equal(failure.error,failed.message);
+ w.failNative('startAssistedSession',null);
+ assert.equal((await start(w)).ok,true);
+ const ready=(await w.send({type:'ui:status'})).data;
+ assert.equal(ready.automatic.enabled,true);assert.notEqual(ready.lastResult.error,true);
+ assert.doesNotMatch(ready.lastResult.message,/declined|Approve a 15-minute/);
+ assert.equal(w.calls.native.filter(request=>request.type==='startAssistedSession').length,2);
+});
+
+test('late rejected or approved guided-start responses cannot overwrite Stop or the next session',async()=>{
+ for(const rejected of [true,false]){
+  const w=worker({holdType:'startAssistedSession'});
+  if(rejected)w.failNative('startAssistedSession','Late desktop rejection.');
+  const pending=start(w);await settle();
+  await stop(w);
+  const stopped=(await w.send({type:'ui:status'})).data.lastResult.message;
+  assert.equal(stopped,'Guided autofill stopped.');
+  // Busy remains true until the original request settles, so a replacement
+  // cannot race it. Its late completion must preserve the Stop epoch's status.
+  const whilePending=await start(w);assert.equal(whilePending.ok,false);
+  w.release();assert.equal((await pending).ok,false);
+  const after=(await w.send({type:'ui:pageState'})).data;
+  assert.equal(after.lastResult.message,stopped);assert.notEqual(after.lastResult.error,true);assert.equal(after.automatic.enabled,false);
+  assert.equal(w.calls.content.some(message=>['secondhand:fill','secondhand:next'].includes(message.type)),false);
+  w.failNative('startAssistedSession',null);
+  assert.equal((await start(w)).ok,true);
+  const resumed=(await w.send({type:'ui:status'})).data;
+  assert.equal(resumed.automatic.enabled,true);assert.notEqual(resumed.lastResult.error,true);
+  assert.doesNotMatch(resumed.lastResult.message,/Late desktop rejection|stopped before approval|Approve a 15-minute/);
+ }
+});

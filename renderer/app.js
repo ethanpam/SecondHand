@@ -17,6 +17,7 @@
   let profileDirty = false;
   let profileRevision = 0;
   let applicationBusy = false;
+  let applicationRefreshRevision = 0;
   let toastTimer;
   let vaultGeneration = 0;
   let handledLockRevision = -1;
@@ -226,6 +227,7 @@
     });
     $('breadcrumb-current').textContent = viewNames[view];
     if (focus) { $('main-content').focus(); window.scrollTo(0, 0); }
+    return true;
   }
 
   function fillProfile() {
@@ -363,8 +365,12 @@
 
   async function refreshApplications(generation) {
     if (!vaultStatus.unlocked || generation !== vaultGeneration) return false;
+    const revision = ++applicationRefreshRevision;
     const latest = await api.getData();
     if (!vaultStatus.unlocked || generation !== vaultGeneration) return false;
+    // A newer refresh owns the list. Still report a valid unlocked generation
+    // to save/delete callers so their completed operation can close its editor.
+    if (revision !== applicationRefreshRevision) return true;
     data.applications = Array.isArray(latest.applications) ? latest.applications : [];
     renderApplications();
     return true;
@@ -481,7 +487,15 @@
     });
   });
 
-  document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', (event) => { event.preventDefault(); showView(button.dataset.view); }));
+  document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', (event) => {
+    event.preventDefault();
+    const view = button.dataset.view;
+    if (showView(view) && (view === 'overview' || view === 'applications')) {
+      // Native progress may arrive while another desktop view is active. Read
+      // fresh application records on navigation without replacing profile edits.
+      refreshApplications(vaultGeneration).catch(() => { /* Keep the current list until the next refresh or lock. */ });
+    }
+  }));
   document.querySelector('.auth-brand').addEventListener('click', (event) => event.preventDefault());
   $('overview-start').addEventListener('click', () => showView('profile'));
   $('lock-button').addEventListener('click', lockVault);
