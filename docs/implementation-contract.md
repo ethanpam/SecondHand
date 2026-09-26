@@ -62,8 +62,14 @@ Chrome 116+ uses its native `sidePanel` surface for the checklist. Two extension
 - **Side panel:** the exact `panel.html` URL with no tab sender. It passes an explicit `tabId`.
 - **On-page widget:** the `panel.html?surface=launcher` iframe inside an Iowa tab. The worker always uses the iframe's own `sender.tab.id` and ignores any `tabId` in the message.
 
-Both may send `ui:pageState`, `ui:autofill` (with `confirmed: true`, from a trusted click), `ui:focusField`, and `ui:showApp`. Only the side panel may send `ui:desktopStatus`, and only the widget may send `ui:openPanel`. Content scripts and page `postMessage` calls have no path to the vault. Neither surface ever receives profile values: they get field keys, fixed labels, completion/missing/manual status, counts, and fixed messages.
+Both may send `ui:pageState`, `ui:autofill` and `ui:stop` (each with `confirmed: true`, from a trusted click), `ui:focusField`, and `ui:showApp`. Only the side panel may send `ui:desktopStatus`, and only the widget may send `ui:openPanel`. Content scripts and page `postMessage` calls have no path to the vault. Neither surface ever receives profile values: they get field keys, fixed labels, completion/missing/manual status, counts, and fixed messages.
 
-`ui:autofill` reads the page. If it is the recognized applicant page, the worker checks `status`, then sends one `getFields` request for every mapped key. It fills in up to four fresh-preview passes, so conditional fields revealed by explicit saved choices are filled without another request. Each key is attempted at most once per click, and saved answers that aren't in the profile are reported as "need you" keys rather than retried. Values are released when the click finishes.
+`ui:autofill` turns **autopilot** on for that tab and runs a step; `ui:stop` turns it off. Autopilot state lives only in worker memory, and a page can never turn it on. Each step reads the page, skips a `url|pageKey` it has already handled in this run, and acts on the adapter's classification:
+- `info`: the content script runs `continuePage`, which clicks the page's recorded Continue once.
+- `fillable`: the worker checks `status`, sends one `getFields` for `profileRequest(pageKey)`, turns those values into page answers with `pageValues`, and fills them in up to four fresh-preview passes. Each key is attempted at most once, and saved answers that are blank are reported as "need you" keys rather than retried.
+- A page with a `todo`: autopilot waits with that instruction.
+- Anything else: autopilot turns off with "SecondHand doesn't know this page yet."
 
-The result is `{ state: 'done' | 'locked' | 'offline' | 'error', filled, needYou, message, pageKey }`. It is kept per tab until that tab navigates, so both surfaces can show it.
+A step runs when the tab finishes loading and on widget polls. Autopilot turns off after 15 steps, on a locked or unreachable desktop, on a cancelled or failed fill, when the tab closes, or when a page load leaves Iowa's portal. The worker re-reads the tab on every load, because Chrome hides other sites' URLs without the `tabs` permission. Values are released when each fill finishes.
+
+The result is `{ state: 'done' | 'waiting' | 'continuing' | 'stopped' | 'locked' | 'offline' | 'error', filled, needYou, message, todo?, pageKey }`. It is kept per tab until that tab navigates. `ui:pageState` returns `{ page, scan, result, autopilot }`.

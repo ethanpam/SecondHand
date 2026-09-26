@@ -65,6 +65,26 @@ Official [personal information help](https://hhsservices.iowa.gov/apspssp/pages/
 
 CAPTCHA, passwords, MFA, consent, signatures, certifications, uploads, review/final-submission steps, and Save and Exit are never operated automatically.
 
+## Pre-applicant screens (autopilot)
+
+A second read-only inspection on September 26, 2026 walked Back through a guest session and recorded each earlier screen's visible heading, controls, and button handlers. No answers were read.
+
+| Screen | Recorded controls | Autofill |
+| --- | --- | --- |
+| Household Application Information | `form#householdApplicationForm[action=selectHouseholdInfo]`. Radios `#householdApplyProgYes` (`true`) and `#householdApplyProgNo` (`false`), name `householdApplyProg`, `onclick="toggleCaptcha();"`, with exact label text. Continue runs `validateMsg();`. | Picks Yes only when a saved program choice is an explicit Yes. Choosing reveals Iowa's CAPTCHA, which stays with the applicant. |
+| Before You Start... | Continue `submitUrlLink('letsGetStarted');return false;`. No named controls. | Continues |
+| Let's get started | `#termChkbox` in `form#welcomeForm[action=forceLogin]`. Continue runs `welcomeSubmit();`. | Waits for consent |
+| Important Information when applying and what to expect. | Continue `submitUrlLink('instructions');return false;` | Continues |
+| Instructions | Continue `submitUrlLink('aboutYou');return false;`. The page also shows illustration buttons (Save and Continue, Edit, Submit Application) with empty handlers, and unnamed sample controls. | Continues |
+
+An info screen is continued only when:
+- its heading is in the registry;
+- exactly one rendered `button.saveButton` reads "Continue" and has that screen's recorded `onclick`;
+- no rendered named field exists outside the language menu;
+- no CAPTCHA, consent, verification, pop-up, or signature step is visible.
+
+The adapter re-verifies all of this immediately before its single click. Illustration buttons never qualify.
+
 ## Local data flow and validation limits
 
 Content scripts run only in the top frame under the official Iowa portal path. Chrome’s host permission is restricted to `https://hhsservices.iowa.gov/*`; stricter runtime path checks guard every operation. The native Chrome side panel runs in the extension origin. There are no storage, sync, cookie, history, or externally-connectable permissions.

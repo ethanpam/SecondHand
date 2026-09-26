@@ -30,13 +30,26 @@ The prepared extension folder stays in the local SecondHand app-data directory. 
 
 Open [Iowa's Self-Service Portal](https://hhsservices.iowa.gov/apspssp/ssp.portal) in **Chrome**. The desktop's portal button uses your default browser, which may be different. The widget and side panel identify the current step without retrieving your saved profile. Choose the guest flow or create/sign into your own Iowa account. Complete the initial program-intent screen, verification, and data-use consent yourself.
 
-On **Enter Personal Information**, click **Autofill** on the page (or **Autofill this page** in the side panel). One click fills every empty supported field from your saved profile. It also fills fields that your saved answers reveal, such as a separate mailing address. It fills explicit saved Yes/No and program choices but never infers them from your address, income, or other facts. It never changes an answer that is already on the page.
+Start the application and click **Autofill** in the widget (or **Autofill this page** in the side panel). Autofill then stays on for that tab and works screen by screen:
+
+| Screen | What Autofill does |
+| --- | --- |
+| Household Application Information | Picks **Yes** when one of your saved programs (SNAP, FIP, Medicaid) is an explicit Yes, then asks you to solve the CAPTCHA and click Continue |
+| Before You Start, Important Information, Instructions | Clicks Continue for you (these screens send no answers) |
+| Let's get started | Waits for you to read and accept Iowa's consent |
+| About you, Assisting Organization or Person | Waits for you to click Continue (leave the assisting fields blank if nobody is helping you) |
+| Enter Personal Information | Fills your saved answers, then waits for you to check them and click Save and Continue |
+| Any other screen | Stops: SecondHand doesn't know it yet |
+
+After you finish a step and continue, Autofill picks up on the next screen. Click **Stop** in the widget, or **Stop autofill** in the side panel, to end it. Locking SecondHand, leaving Iowa's site, or closing the tab also ends it, and it stops after 15 automatic steps so you can check where you are.
+
+On **Enter Personal Information**, one click fills every empty supported field from your saved profile. It also fills fields that your saved answers reveal, such as a separate mailing address. It fills explicit saved Yes/No and program choices but never infers them from your address, income, or other facts. It never changes an answer that is already on the page.
 
 The first time, the desktop app asks before sharing your saved answers. Choose **Allow once** to be asked again next time, or **Always allow on this computer** to skip the pop-up whenever the app is unlocked. Turn that off under **Chrome extension → Let Chrome autofill without asking**. Locking the vault, manually, after 10 idle minutes, or when your computer sleeps or locks, stops autofill until you unlock again. The widget then shows **Unlock SecondHand**, which brings the app to the front.
 
 After filling, the widget shows **Filled N** and, when something is missing, **N need you**. Click it to jump to each missing field in turn. **Details** opens the side panel, which lists each relevant question as **Done**, **Needs you**, **Optional**, or **Do it yourself**. Click a row to bring that field into view. Checkmarks describe the form's completeness, not agency approval.
 
-SecondHand never clicks **Save and Continue**. Review every answer, then continue yourself.
+SecondHand never clicks **Save and Continue**, Submit, or anything on consent, CAPTCHA, or sign-in screens. Review every answer, then continue yourself.
 
 **Current scope is the initial applicant page:** names, suffix, maiden name, explicit home/mobile phones, home/mailing addresses and address questions, applying-for-benefits choice, saved SNAP/FIP/Medicaid choices, optional medical-bill help choice, and and best time to call. Later application pages remain manual. The helper can scroll rendered fields into view; it skips hidden, covered, ambiguous, and already-entered fields. Review every filled answer. Iowa can receive or save information as it is entered, and Save and Continue sends the page's current answers to Iowa.
 
