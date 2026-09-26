@@ -27,9 +27,10 @@ async function main() {
   const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-ui-'));
   const errors = [];
   let application;
+  let currentPage;
   const launch = async () => {
     application = await electron.launch({ args: [root], env: { ...process.env, SECONDHAND_USER_DATA: userData }, timeout: 30000 });
-    const page = await application.firstWindow();
+    const page = currentPage = await application.firstWindow();
     page.on('pageerror', error => errors.push(error.message));
     await page.locator('#auth-view').waitFor({ state: 'visible' });
     return page;
@@ -129,6 +130,10 @@ async function main() {
     for (const secret of ['Avery', 'Example', '123 Test Way', '2025550147', 'SYNTHETIC-RECEIPT-ONLY', passphrase, resetPassword, recoveryKey, recoveryKey.replace(/-/g, '')]) assert.equal(bytes.includes(secret), false);
     assert.deepEqual(errors, []);
     console.log('Electron UI smoke passed: create, save full applicant choices and mailing details, track application, lock/clear all fields, wrong password, unlock, restart persistence, recovery key password reset.');
+  } catch (error) {
+    // Record what the window showed when a step failed; CI uploads artifacts/.
+    if (currentPage && !currentPage.isClosed()) await captureDiagnostic(currentPage, 'ui-smoke-failure.png').catch(() => {});
+    throw error;
   } finally {
     if (application) await application.close().catch(() => {});
     await fs.rm(userData, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
