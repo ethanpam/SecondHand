@@ -8,11 +8,11 @@
     'addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county', 'householdSize', 'householdAdults', 'householdChildren', 'householdSeniors',
     'householdVeteran', 'householdDisability', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities']);
   const SOURCES = Object.freeze({ fullName: ['firstName', 'lastName'], phone: ['mobilePhone', 'homePhone', 'phone'],
-    totalMonthlyIncome: ['monthlyEarnedIncome', 'monthlyOtherIncome'], annualIncome: ['monthlyEarnedIncome', 'monthlyOtherIncome'] });
+    ageRange: ['birthDate'], totalMonthlyIncome: ['monthlyEarnedIncome', 'monthlyOtherIncome'], annualIncome: ['monthlyEarnedIncome', 'monthlyOtherIncome'] });
   const GENERIC_KEYS = Object.freeze(['firstName', 'middleName', 'lastName', 'fullName', 'suffix', 'birthDate', 'ssn', 'email', 'phone',
-    'addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county', 'householdSize', 'householdAdults', 'householdChildren', 'householdSeniors',
+    'addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county', 'ageRange', 'householdSize', 'householdAdults', 'householdChildren', 'householdSeniors',
     'householdVeteran', 'householdDisability', 'totalMonthlyIncome', 'annualIncome', 'monthlyRent', 'monthlyUtilities']);
-  const KIND = Object.freeze({ birthDate: 'date', email: 'email', phone: 'tel', state: 'state', householdSize: 'count', householdAdults: 'count',
+  const KIND = Object.freeze({ birthDate: 'date', email: 'email', phone: 'tel', state: 'state', ageRange: 'ageRange', householdSize: 'count', householdAdults: 'count',
     householdChildren: 'count', householdSeniors: 'count', householdVeteran: 'yesno', householdDisability: 'yesno', totalMonthlyIncome: 'money',
     annualIncome: 'money', monthlyRent: 'money', monthlyUtilities: 'money' });
   const AUTOCOMPLETE = Object.freeze({ 'given-name': 'firstName', 'additional-name': 'middleName', 'family-name': 'lastName', name: 'fullName',
@@ -25,6 +25,7 @@
     [/^(last|family|sur) ?name$|^last$/, 'lastName'],
     [/^(full |legal |applicant )?name$|^name of (the )?head of household$|^head of household name$/, 'fullName'],
     [/^(date of birth|birth ?date|dob|birthday)( mm dd yyyy)?$/, 'birthDate'],
+    [/^(age range|age group)$/, 'ageRange'],
     [/^(social security( number)?|ssn)$/, 'ssn'],
     [/^e ?mail( address)?$/, 'email'],
     [/^((cell|mobile|home|best|primary) )?(phone|telephone)( number)?$|^(mobile|cell) number$/, 'phone'],
@@ -135,12 +136,14 @@
   }
   const isYesNo = options => options.some(option => /^yes\b/.test(normal(option))) && options.some(option => /^no\b/.test(normal(option)));
   const isNumeric = options => options.length > 0 && options.every(option => /^\d+\+?$|^\d+ or more$/.test(normal(option)));
+  const ageRange = option => /^(\d+) (\d+)( yrs?| years?)?$/.exec(normal(option)) || /^(\d+)(\+| and older| or older)( yrs?| years?)?$/.exec(normal(option));
   // A key is only placed on a control that can hold its kind of answer.
   function compatible(key, entry) {
     const kind = KIND[key] || 'text';
     const type = (entry.elements[0].type || 'text').toLowerCase();
     const options = optionsOf(entry);
     if (kind === 'yesno') return (entry.kind === 'radio' || entry.kind === 'select') ? isYesNo(options) : entry.kind === 'checkbox' && entry.elements.length === 1;
+    if (kind === 'ageRange') return (entry.kind === 'radio' || entry.kind === 'select') && options.some(ageRange);
     if (kind === 'count') return (entry.kind === 'input' && ['number', 'text', 'tel', ''].includes(type)) || ((entry.kind === 'select' || entry.kind === 'radio') && isNumeric(options.filter(option => normal(option))));
     if (kind === 'state') return entry.kind === 'select' || (entry.kind === 'input' && type === 'text');
     if (kind === 'date') return entry.kind === 'input' && ['date', 'text', ''].includes(type);
@@ -213,6 +216,11 @@
     if (result.firstName && result.lastName) result.fullName = `${result.firstName} ${result.lastName}`;
     const phone = values?.mobilePhone || values?.homePhone || values?.phone;
     if (phone) result.phone = phone; else delete result.phone;
+    const birth = /^(\d{4})-(\d{2})-(\d{2})$/.exec(values?.birthDate || '');
+    if (birth) {
+      const today = new Date(), year = Number(birth[1]), month = Number(birth[2]), day = Number(birth[3]);
+      result.ageRange = String(today.getFullYear() - year - (today.getMonth() + 1 < month || (today.getMonth() + 1 === month && today.getDate() < day) ? 1 : 0));
+    } else delete result.ageRange;
     const earned = cents(values?.monthlyEarnedIncome), other = cents(values?.monthlyOtherIncome);
     // A total is only offered when both parts are known; a partial sum would understate income.
     if (earned !== null && other !== null) { result.totalMonthlyIncome = dollars(earned + other); result.annualIncome = dollars((earned + other) * 12); }
@@ -230,6 +238,7 @@
   function chooseOption(options, key, value) {
     const wanted = normal(value);
     if (KIND[key] === 'yesno') return options.findIndex(option => new RegExp(`^${wanted}\\b`).test(normal(option)));
+    if (KIND[key] === 'ageRange') return options.findIndex(option => { const range = ageRange(option); return range && Number(value) >= Number(range[1]) && (range[2] === '+' || range[2] === ' and older' || range[2] === ' or older' || Number(value) <= Number(range[2])); });
     if (key === 'state') return options.findIndex(option => [wanted, normal(STATES[String(value).toUpperCase()])].includes(normal(option)));
     if (KIND[key] === 'count') {
       const exact = options.findIndex(option => normal(option) === wanted);
