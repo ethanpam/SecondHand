@@ -11,7 +11,6 @@ const { startBridge, runNativeHost, nativeStreams, extensionFromOrigin, EXTENSIO
 const { registerHost } = require('./registration.cjs');
 const { getExtensionSetup, prepareBundledExtension } = require('./extension-setup.cjs');
 const { testStoragePath } = require('./test-storage-path.cjs');
-const { AssistedSession } = require('./assistance.cjs');
 const { validateProfile, validateApplication, FIELD_LABELS, PORTAL_URL } = require('../shared/schema.cjs');
 
 app.setName('SecondHand');
@@ -41,9 +40,10 @@ if (nativeOrigin) {
   let quitting = false;
   let fieldRequestPending = false;
   let extensionSetupPending = false;
+  let autofillWithoutAsking = false;
+  let lockGeneration = 0;
   const userData = app.getPath('userData');
   const vault = new Vault(path.join(userData, 'vault.secondhand'));
-  const assistance = new AssistedSession();
   const configPath = path.join(userData, 'settings.json');
   const rendererPath = path.join(__dirname, '../renderer/index.html');
   const rendererUrl = pathToFileURL(rendererPath).href;
@@ -54,7 +54,7 @@ if (nativeOrigin) {
   };
 
   async function status() {
-    return { exists: await vault.exists(), unlocked: vault.unlocked, extensionId,
+    return { exists: await vault.exists(), unlocked: vault.unlocked, extensionId, autofillWithoutAsking,
       bridgeRunning: Boolean(bridge), platform: process.platform,
       extensionSetup: await getExtensionSetup(app).catch(() => ({ prepared: false, available: false })) };
   }
@@ -64,83 +64,59 @@ if (nativeOrigin) {
   }
   async function lockVault() {
     clearTimeout(lockTimer);
-    assistance.revoke();
+    lockGeneration++;
     await vault.lock();
-    assistance.revoke();
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('secondhand:locked');
     return status();
   }
   function requireUnlocked() {
     if (!vault.unlocked) throw publicError('Unlock your local vault first.');
   }
+  async function saveSettings() {
+    await atomicWrite(configPath, Buffer.from(JSON.stringify({ extensionId, autofillWithoutAsking })));
+  }
   async function saveExtensionRegistration(id) {
-    assistance.revoke();
     let registration;
     try { registration = await registerHost(app, id); }
     catch (error) { throw publicError(error.message.startsWith('On Windows') ? error.message : 'Could not prepare the Chrome connection. Try again or see the setup instructions.'); }
-    await atomicWrite(configPath, Buffer.from(JSON.stringify({ extensionId: id })));
+    // Trust belongs to one extension identity; a different ID must be approved again.
+    if (id !== extensionId) autofillWithoutAsking = false;
     extensionId = id;
-    assistance.revoke();
+    await saveSettings();
     return registration;
   }
   async function bridgeRequest(request, context) {
     if (request.type === 'status') return { unlocked: vault.unlocked, applicationCount: vault.unlocked ? vault.getData().applications.length : 0 };
-    if (request.type === 'endAssistedSession') return assistance.end({ ...request, extensionId: context.extensionId });
+    if (request.type === 'showApp') {
+      if (mainWindow) { if (mainWindow.isMinimized?.()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); }
+      return { shown: true };
+    }
     requireUnlocked();
-    if (request.type === 'checkAssistedSession') {
-      const active = validated(assistance.check.bind(assistance), { ...request, extensionId: context.extensionId });
-      touch();
-      return active;
-    }
-    if (request.type === 'startAssistedSession') {
-      if (fieldRequestPending) throw publicError('Another request is waiting for your approval.');
-      fieldRequestPending = true;
-      const generation = assistance.generation;
-      try {
-        mainWindow.show(); mainWindow.focus();
-        const answer = await dialog.showMessageBox(mainWindow, {
-          type: 'question', title: 'Start guided Iowa SNAP assistance?',
-          message: 'Allow guided filling for the next 15 minutes?',
-          detail: `Website: ${PORTAL_URL}\n\nApproved profile fields: ${request.fields.map(field => FIELD_LABELS[field]).join(', ')}\n\nSecondHand may fill these saved fields and click ordinary Next or Save and Continue on supported Iowa SNAP pages. These actions send entered answers to Iowa, which may save them immediately.\n\nIt must pause for unsupported or unanswered questions, CAPTCHA, consent, signatures, review, and final submission. This approval does not authorize consent, signatures, or submitting your application.\n\nStop from the extension or lock SecondHand at any time.`,
-          buttons: ['Cancel', 'Allow guided assistance'], defaultId: 0, cancelId: 0, noLink: true
-        });
-        if (answer.response !== 1) throw publicError('You cancelled guided assistance.');
-        requireUnlocked();
-        if (generation !== assistance.generation || extensionId !== context.extensionId) throw publicError('The vault or Chrome connection changed. Start guided assistance again.');
-        const grant = assistance.issue({ ...request, extensionId: context.extensionId });
-        touch();
-        return grant;
-      } finally { fieldRequestPending = false; }
-    }
     if (request.type === 'getFields') {
-      if (request.assistanceToken) {
-        validated(assistance.authorize.bind(assistance), { ...request, extensionId: context.extensionId });
-        const profile = vault.getData().profile;
-        const values = {};
-        for (const field of request.fields) if (typeof profile[field] === 'string' && profile[field].trim()) values[field] = profile[field];
-        touch();
-        return { values };
+      const trusted = autofillWithoutAsking && extensionId === context.extensionId;
+      if (!trusted) {
+        if (fieldRequestPending) throw publicError('Another field request is waiting for your approval.');
+        fieldRequestPending = true;
+        const generation = lockGeneration;
+        try {
+          mainWindow.show(); mainWindow.focus();
+          const answer = await dialog.showMessageBox(mainWindow, {
+            type: 'question', title: 'Let Chrome fill Iowa’s form?',
+            message: 'Fill these saved answers into Iowa’s application?',
+            detail: `Website: ${PORTAL_URL}\n\n${request.fields.map(field => FIELD_LABELS[field]).join(', ')}\n\nChoose “Always allow” to let the SecondHand extension fill without asking whenever this app is unlocked. You can turn it off on the Chrome extension page. Iowa’s website may save entered information. Review every answer before continuing.`,
+            buttons: ['Cancel', 'Allow once', 'Always allow on this computer'], defaultId: 1, cancelId: 0, noLink: true
+          });
+          if (answer.response !== 1 && answer.response !== 2) throw publicError('You cancelled this field request.');
+          requireUnlocked();
+          if (generation !== lockGeneration || extensionId !== context.extensionId) throw publicError('The vault or Chrome connection changed. Click Autofill again.');
+          if (answer.response === 2) { autofillWithoutAsking = true; await saveSettings(); }
+        } finally { fieldRequestPending = false; }
       }
-      if (fieldRequestPending) throw publicError('Another field request is waiting for your approval.');
-      fieldRequestPending = true;
-      const generation = assistance.generation;
-      try {
-        mainWindow.show(); mainWindow.focus();
-        const answer = await dialog.showMessageBox(mainWindow, {
-          type: 'question', title: 'Share fields with Iowa HHS?',
-          message: 'Allow this page to fill these fields once?',
-          detail: `Website: ${PORTAL_URL}\n\n${request.fields.map(field => FIELD_LABELS[field]).join(', ')}\n\nThe Iowa website may save entered information. Review every answer before submitting.`,
-          buttons: ['Cancel', 'Allow once'], defaultId: 0, cancelId: 0, noLink: true
-        });
-        if (answer.response !== 1) throw publicError('You cancelled this field request.');
-        requireUnlocked();
-        if (generation !== assistance.generation || extensionId !== context.extensionId) throw publicError('The vault or Chrome connection changed. Review this request again.');
-        const profile = vault.getData().profile;
-        const values = {};
-        for (const field of request.fields) if (typeof profile[field] === 'string' && profile[field].trim()) values[field] = profile[field];
-        touch();
-        return { values };
-      } finally { fieldRequestPending = false; }
+      const profile = vault.getData().profile;
+      const values = {};
+      for (const field of request.fields) if (typeof profile[field] === 'string' && profile[field].trim()) values[field] = profile[field];
+      touch();
+      return { values };
     }
     if (request.type === 'recordProgress') {
       await vault.update(data => {
@@ -175,9 +151,7 @@ if (nativeOrigin) {
     async saveProfile(profile) {
       requireUnlocked();
       const clean = validated(validateProfile, profile);
-      assistance.revoke();
       await vault.update(data => { data.profile = clean; });
-      assistance.revoke();
       touch(); return clean;
     },
     async saveApplication(application) {
@@ -196,6 +170,13 @@ if (nativeOrigin) {
       if (typeof id !== 'string' || id.length > 64) throw publicError('Invalid application record.');
       await vault.update(data => { data.applications = data.applications.filter(item => item.id !== id); });
       touch(); return true;
+    },
+    async setAutofillTrust(enabled) {
+      requireUnlocked();
+      if (typeof enabled !== 'boolean') throw publicError('Invalid setting.');
+      autofillWithoutAsking = enabled;
+      await saveSettings();
+      touch(); return status();
     },
     async openPortal() { await shell.openExternal(PORTAL_URL); return true; },
     async prepareExtension() {
@@ -286,7 +267,7 @@ if (nativeOrigin) {
     await fs.mkdir(userData, { recursive: true, mode: 0o700 });
     try {
       const stat = await fs.stat(configPath);
-      if (stat.size <= 4096) { const config = JSON.parse(await fs.readFile(configPath, 'utf8')); if (EXTENSION_ID.test(config.extensionId || '')) extensionId = config.extensionId; }
+      if (stat.size <= 4096) { const config = JSON.parse(await fs.readFile(configPath, 'utf8')); if (EXTENSION_ID.test(config.extensionId || '')) { extensionId = config.extensionId; autofillWithoutAsking = config.autofillWithoutAsking === true; } }
     } catch { /* Missing or invalid non-sensitive setup settings are reset. */ }
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     session.defaultSession.setPermissionCheckHandler(() => false);
@@ -309,7 +290,6 @@ if (nativeOrigin) {
     if (quitting) return;
     event.preventDefault(); quitting = true;
     clearTimeout(lockTimer);
-    assistance.revoke();
     Promise.allSettled([vault.lock(), bridge?.close()]).then(() => app.quit());
   });
 }
