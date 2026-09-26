@@ -220,9 +220,35 @@ test('guided mode can be stopped while busy, paused, or waiting for missing info
     assert.equal(view.get('fill-page').disabled, true);
     if (automatic.waitingForInfo) {
       assert.equal(view.get('guided-state').textContent, 'WAITING FOR MISSING INFORMATION');
+      assert.equal(view.get('header-state').textContent, 'WAITING FOR REQUIRED ANSWERS');
       assert.match(view.get('automatic-reason').textContent, /check again automatically/);
+      assert.match(view.get('automatic-reason').textContent, /missing required answers/);
       assert.equal(view.get('start-auto').textContent, 'Check and continue →');
     }
+    await view.userClick('pause-auto');
+    assert.deepEqual(view.requests.find(request => request.type === 'ui:auto'), { type: 'ui:auto', enabled: false, confirmed: true, tabId: 7 });
+  }
+});
+
+test('DOB-only self-information waiting uses manual continuation copy without promising automatic Next', async t => {
+  const reason = 'SecondHand can fill your saved date of birth on this verified self-information page. Review and answer the other questions, then choose Save and Continue directly in Iowa’s form.';
+  for (const status of ['optional', 'complete']) {
+    const view = await panel(t, {
+      automatic: { enabled: true, waitingForInfo: true, reason: 'Generic waiting reason.' },
+      pageState: state => ({ ...state,
+        page: { kind: 'fillable', pageKey: 'iowa-self-details', requiredRemaining: 0, manualRemaining: 2, canAdvance: false, reason,
+          checklist: [{ key: 'birthDate', label: 'Date of birth', status, required: false, fillable: status === 'optional' },
+            { key: 'self-question01', label: 'Gender question', status: 'manual', required: false, fillable: false }] },
+        scan: { recognizedPage: true, token: 'reviewed-preview', fields: status === 'optional' ? [{ key: 'birthDate', label: 'Date of birth' }] : [] }
+      })
+    });
+    assert.equal(view.get('guided-state').textContent, 'CONTINUE IN IOWA’S FORM');
+    assert.equal(view.get('header-state').textContent, 'WAITING FOR YOUR NEXT STEP');
+    assert.equal(view.get('start-auto').textContent, 'Check this page →');
+    assert.equal(view.get('automatic-reason').textContent, reason);
+    assert.doesNotMatch(view.get('automatic-reason').textContent, /missing required|check again automatically|Generic waiting/);
+    assert.equal(view.get('pause-auto').hidden, false);
+    assert.equal(view.get('pause-auto').disabled, false);
     await view.userClick('pause-auto');
     assert.deepEqual(view.requests.find(request => request.type === 'ui:auto'), { type: 'ui:auto', enabled: false, confirmed: true, tabId: 7 });
   }

@@ -86,18 +86,21 @@
     document.querySelectorAll('.checklist-item').forEach(button => { button.disabled = busy() || !target; });
     $('confirm').disabled = busy() || automatic.enabled;
     const waiting = Boolean(automatic.waitingForInfo);
+    // This verified page only supports DOB filling. Its remaining questions and
+    // navigation stay manual, even while the existing session waits for input.
+    const manualContinuation = waiting && snapshot?.page?.pageKey === 'iowa-self-details';
     const running = automatic.enabled && !automatic.paused && !waiting;
     $('start-auto').hidden = running || activeAction === 'start';
     $('pause-auto').hidden = !automatic.enabled && activeAction !== 'start';
     $('pause-auto').disabled = activeAction === 'pause';
     $('pause-auto').textContent = automatic.paused || waiting ? 'Stop guided session' : 'Pause automatic mode';
     $('start-auto').disabled = busy() || !preview?.recognizedPage || !target;
-    $('start-auto').textContent = waiting ? 'Check and continue →' : automatic.paused ? 'Resume guided autofill →' : 'Start guided autofill →';
-    $('guided-state').textContent = waiting ? 'WAITING FOR MISSING INFORMATION' : running ? 'GUIDED AUTOFILL IS ACTIVE' : automatic.paused ? 'PAUSED FOR YOUR REVIEW' : 'YOU CHOOSE WHEN TO START';
-    const reason = waiting ? `${fixedText(automatic.reason)} Add the missing required answers in Iowa’s form. Guided mode will check again automatically.` : fixedText(automatic.reason);
+    $('start-auto').textContent = manualContinuation ? 'Check this page →' : waiting ? 'Check and continue →' : automatic.paused ? 'Resume guided autofill →' : 'Start guided autofill →';
+    $('guided-state').textContent = manualContinuation ? 'CONTINUE IN IOWA’S FORM' : waiting ? 'WAITING FOR MISSING INFORMATION' : running ? 'GUIDED AUTOFILL IS ACTIVE' : automatic.paused ? 'PAUSED FOR YOUR REVIEW' : 'YOU CHOOSE WHEN TO START';
+    const reason = manualContinuation ? fixedText(snapshot.page.reason) || fixedText(automatic.reason) || 'Review this step and continue directly in Iowa’s form.' : waiting ? `${fixedText(automatic.reason)} Add the missing required answers in Iowa’s form. Guided mode will check again automatically.` : fixedText(automatic.reason);
     $('automatic-reason').hidden = !reason;
     $('automatic-reason').textContent = reason;
-    $('header-state').textContent = waiting ? 'WAITING FOR REQUIRED ANSWERS' : running ? 'GUIDED AUTOFILL ACTIVE' : automatic.paused ? 'WAITING FOR YOUR NEXT STEP' : 'IOWA SNAP ASSISTANT';
+    $('header-state').textContent = manualContinuation ? 'WAITING FOR YOUR NEXT STEP' : waiting ? 'WAITING FOR REQUIRED ANSWERS' : running ? 'GUIDED AUTOFILL ACTIVE' : automatic.paused ? 'WAITING FOR YOUR NEXT STEP' : 'IOWA SNAP ASSISTANT';
   }
   function renderFields(scan, pageKey) {
     const fields = Array.isArray(scan?.fields) ? scan.fields.filter(field => field && typeof field.key === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,79}$/.test(field.key) && typeof field.label === 'string').slice(0, 50) : [];

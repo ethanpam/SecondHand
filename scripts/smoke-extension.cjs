@@ -11,6 +11,7 @@ const { chromium, expect } = require('@playwright/test');
 const syntheticProfile = require('../tests/fixtures/applicant-profile.json');
 const applicantFixture = require('../tests/fixtures/iowa-personal-information.cjs');
 const addressFixture = require('../tests/fixtures/iowa-select-address.cjs');
+const selfFixture = require('../tests/fixtures/iowa-self-details.cjs');
 const root = path.join(__dirname, '..');
 const portal = 'https://hhsservices.iowa.gov/apspssp/ssp.portal';
 const applicant = `${portal}/applyForBenefits/enterPersonalInfo`;
@@ -18,6 +19,7 @@ const extensionDirectory = path.join(root, 'extension');
 const documentManualUrl = `${portal}/qa-only/document-manual`;
 const documentNextMarker = 'SECONDHAND_SYNTHETIC_FULL_DOCUMENT_NEXT';
 const addressUrl = addressFixture.URL;
+const selfDetailsUrl = selfFixture.URL;
 const verifiedApplicantMarker = 'SECONDHAND_VERIFIED_ADDRESS_APPLICANT_NEXT';
 const verifiedAddressMarker = 'SECONDHAND_VERIFIED_ADDRESS_NEXT:';
 const addressVariants = {
@@ -40,6 +42,26 @@ function verifiedAddressFixture(variant) {
         console.info(${JSON.stringify(verifiedAddressMarker)} + JSON.stringify(document.__addressQa));
         location.assign(${JSON.stringify(documentManualUrl)});
       });
+    </script></body></html>`;
+}
+
+function selfDetailsFixture(variant = 'verified') {
+  let html = selfFixture.html;
+  if (variant === 'people') html = html.replace('People | Unvisited', 'People | Active');
+  else if (variant === 'form') html = html.replace('action="simple"', 'action="otherPerson"');
+  else if (variant === 'heading') html = html.replace('<h2>Tell Us More</h2>', '<h2>Tell Us About Another Person</h2>');
+  else if (variant !== 'verified') throw new Error('Unknown self-details QA variant.');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Self-information DOB · isolated QA</title>
+    <style>body{font:16px system-ui;background:#f7f8f2;color:#294035;margin:0;padding:30px}main{max-width:900px}label{display:block;margin:8px 0}input[type=text]{padding:8px}button{padding:12px;margin:10px}.questionAnswer{margin:16px 0}</style></head>
+    <body><main><p>ISOLATED QA · FICTIONAL APPLICANT. Only date-of-birth metadata is verified; the additional test controls below are synthetic guards.</p>${html}</main>
+    <script>
+      // These controls are deliberately QA-only, not purported Iowa mappings.
+      document.getElementById('question01').insertAdjacentHTML('beforeend', '<label><input data-qa-manual name="qaGender" type="radio" value="qa-option-one">QA gender option one</label><label><input data-qa-manual name="qaGender" type="radio" value="qa-option-two">QA gender option two</label>');
+      document.getElementById('question06179').insertAdjacentHTML('beforeend', '<label><input data-qa-manual name="qaCitizenship" type="radio" value="qa-option-one">QA citizenship option one</label><label><input data-qa-manual name="qaCitizenship" type="radio" value="qa-option-two">QA citizenship option two</label>');
+      document.getElementById('question02420').insertAdjacentHTML('beforeend', '<label>QA SSN placeholder<input data-qa-manual name="qaSsn" type="text"></label><label><input data-qa-manual name="qaSsnChoice" type="checkbox">QA SSN choice</label>');
+      window.__selfQa = { nextClicks: 0, manualChanges: 0 };
+      document.querySelectorAll('[data-qa-manual]').forEach(element => element.addEventListener('change', () => { window.__selfQa.manualChanges++; }));
+      document.getElementById('dqButtonId309').onclick = () => { window.__selfQa.nextClicks++; };
     </script></body></html>`;
 }
 
@@ -188,6 +210,7 @@ async function main() {
   let documentNextClicks = 0, documentManualLoads = 0;
   let verifiedApplicantClicks = 0, verifiedAddressLoads = 0;
   let currentAddressVariant = 'original';
+  let currentSelfVariant = 'verified';
   const verifiedAddressNext = [];
   try {
     context = await chromium.launchPersistentContext(userData, {
@@ -206,6 +229,9 @@ async function main() {
       if (request.isNavigationRequest() && `${url.origin}${url.pathname}` === addressUrl) {
         verifiedAddressLoads++;
         return route.fulfill({ status: 200, contentType: 'text/html', body: verifiedAddressFixture(currentAddressVariant) });
+      }
+      if (request.isNavigationRequest() && request.url() === selfDetailsUrl) {
+        return route.fulfill({ status: 200, contentType: 'text/html', body: selfDetailsFixture(currentSelfVariant) });
       }
       if (url.protocol === 'chrome-extension:') return route.continue();
       return route.abort('blockedbyclient');
@@ -505,6 +531,73 @@ async function main() {
     await panel.click('#start-auto'); await nextOnce();
     assert.equal((await worker.evaluate(() => globalThis.__nativeSmoke.calls)).filter(call => call.type === 'startAssistedSession').length, 2);
     await stop();
+
+    async function startSelfDetails(variant) {
+      currentSelfVariant = variant;
+      await worker.evaluate(profile => { globalThis.__nativeSmoke = { locked: false, lockAfterFill: false, calls: [], profile }; }, syntheticProfile);
+      await page.goto(selfDetailsUrl, { waitUntil: 'domcontentloaded' });
+      await page.bringToFront();
+      await expect(page.locator('[data-secondhand-assistant]')).toHaveCount(1);
+      await panel.click('#refresh');
+      await expect(page.locator(`[id="${selfFixture.DOB_ID}"]`)).toHaveValue('');
+    }
+    const selfControls = () => page.evaluate(dobId => Array.from(document.querySelectorAll('input')).filter(element => element.id !== dobId)
+      .map(element => ({ id: element.id, name: element.name, value: element.value, checked: element.checked })), selfFixture.DOB_ID);
+    const sidebarState = () => panel.evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const result = await chrome.runtime.sendMessage({ type: 'ui:pageState', tabId: tab.id });
+      if (!result.ok) throw new Error(result.error);
+      return { text: document.body.innerText, state: result.data };
+    });
+
+    // Direct navigation is intentional: summary/review navigation remains a
+    // manual action, and only this exact self-information context is mapped.
+    await startSelfDetails('verified');
+    const untouchedSelfControls = await selfControls();
+    await expect.poll(() => panel.text('[data-key="birthDate"]'), { timeout: 15000 }).toContain('Date of birth');
+    await expect.poll(() => panel.evaluate(() => document.querySelector('#start-auto').disabled)).toBe(false);
+    await panel.click('#start-auto');
+    await expect(page.locator(`[id="${selfFixture.DOB_ID}"]`)).toHaveValue('04/12/1985');
+    await expect.poll(() => panel.text('#guided-state'), { timeout: 15000 }).toBe('CONTINUE IN IOWA’S FORM');
+    assert.doesNotMatch(await panel.text('#automatic-reason'), /missing required answers|check again automatically/);
+    await expect.poll(() => panel.text('[data-key="birthDate"]')).toContain('Complete');
+    for (const key of ['self-question01', 'self-question02420', 'self-question06179']) {
+      await expect.poll(() => panel.text(`[data-key="${key}"]`)).toContain('Needs manual review');
+    }
+    await page.waitForTimeout(1900);
+    assert.deepEqual(await selfControls(), untouchedSelfControls, 'Manual gender/citizenship/SSN guards and hidden alternate DOB controls stay untouched.');
+    assert.deepEqual(await page.evaluate(() => window.__selfQa), { nextClicks: 0, manualChanges: 0 });
+    const selfSidebar = await sidebarState();
+    assert.equal(selfSidebar.state.page.pageKey, 'iowa-self-details');
+    assert.equal(selfSidebar.state.page.canAdvance, false);
+    const selfMessages = JSON.stringify(selfSidebar.state);
+    for (const value of ['Avery', 'Jordan', 'Example', '1985-04-12', '04/12/1985', 'assistanceToken', 'a'.repeat(64)]) {
+      assert.equal(selfSidebar.text.includes(value), false, `Self-information sidebar must not render private values: ${value}`);
+      assert.equal(selfMessages.includes(value), false, `Self-information metadata must not contain private values: ${value}`);
+    }
+    const selfCalls = await worker.evaluate(() => globalThis.__nativeSmoke.calls);
+    assert.deepEqual(selfCalls.filter(call => call.type === 'getFields').map(call => ({ url: call.url, fields: call.fields })), [{ url: selfDetailsUrl, fields: ['birthDate'] }]);
+    assert.equal(selfCalls.filter(call => call.type === 'startAssistedSession').length, 1);
+    await panel.screenshot(path.join(root, 'artifacts/extension-self-details-sidebar.png'));
+    await stop();
+    console.log('Native sidebar: verified self-only DOB formats ISO as MM/DD/YYYY; manual gender/citizenship/SSN guards, hidden alternatives, and Next remain untouched, with static private-value-free metadata.');
+
+    for (const variant of ['people', 'form', 'heading']) {
+      await startSelfDetails(variant);
+      await expect.poll(async () => (await sidebarState()).state.scan.recognizedPage, { timeout: 15000 }).toBe(false);
+      await expect.poll(() => panel.evaluate(() => document.querySelector('#start-auto').disabled)).toBe(true);
+      const originalControls = await selfControls();
+      await page.waitForTimeout(1600);
+      const state = (await sidebarState()).state;
+      assert.notEqual(state.page.kind, 'fillable');
+      assert.equal(state.page.canAdvance, false);
+      assert.deepEqual(state.scan.fields, []);
+      await expect(page.locator(`[id="${selfFixture.DOB_ID}"]`)).toHaveValue('');
+      assert.deepEqual(await selfControls(), originalControls);
+      assert.deepEqual(await page.evaluate(() => window.__selfQa), { nextClicks: 0, manualChanges: 0 });
+      assert.equal((await worker.evaluate(() => globalThis.__nativeSmoke.calls)).filter(call => ['getFields', 'startAssistedSession'].includes(call.type)).length, 0);
+      console.log(`Native sidebar: unverified self-information ${variant} context stays manual with no profile release, answers, or Next.`);
+    }
     assert.deepEqual(errors, []);
     console.log('Native sidebar: vault lock blocks Next and Resume gets fresh consent. All browser fixtures/data were synthetic; native desktop responses were DevTools stubs.');
   } catch (error) {
@@ -523,5 +616,5 @@ async function main() {
     await fs.rm(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
-module.exports = { fixture, verifiedAddressFixture, installNativeStub, attachNativePanel, portal, applicant, addressUrl, documentManualUrl, extensionDirectory, syntheticProfile };
+module.exports = { fixture, verifiedAddressFixture, selfDetailsFixture, installNativeStub, attachNativePanel, portal, applicant, addressUrl, selfDetailsUrl, documentManualUrl, extensionDirectory, syntheticProfile };
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; });

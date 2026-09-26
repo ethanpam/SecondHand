@@ -40,6 +40,11 @@
   const pageHeadings = new Set(['enter personal information']);
   const safeSections = new Set([...pageHeadings, "applicant's information", 'contact information', 'address information', 'program information', ...Object.values(questions).map(normal)]);
   const unsafe = /\b(signature|sign here|signing|certification|certify|attestation|attest|password|captcha|verification|security code|one time|username|user name|other people|other members|household members|family members|spouse|child|representative|employer)\b/i;
+  const selfQuestions = Object.freeze({
+    question01: 'Gender question', question02420: 'Social Security number question', question06179: 'Citizenship question',
+    question04: 'Marital status question', question01007331: 'Military service question', question02422: 'Household eating arrangement question',
+    question07: 'Disability question', question0565: 'Blindness question'
+  });
 
   function isSupportedUrl(raw) {
     try {
@@ -182,6 +187,15 @@
     const result = { supported: isSupportedUrl(rawUrl), recognizedPage: false, fields: [], bindings: [], ambiguous: [], skipped: 0 };
     if (!result.supported) return result;
     if (addressContext(doc, rawUrl)) { result.recognizedPage = true; return result; }
+    const self = selfDetailsContext(doc, rawUrl);
+    if (self) {
+      result.recognizedPage = true;
+      if (editable(self.birthDate, doc) && !self.birthDate.value.trim()) {
+        result.fields.push({ key: 'birthDate', label: 'Date of birth' });
+        result.bindings.push({ key: 'birthDate', element: self.birthDate, elements: [self.birthDate], self: selfDetailsState(self) });
+      } else result.skipped++;
+      return result;
+    }
     if (!identifyPage(doc)) return result;
     result.recognizedPage = true;
     for (const [key, definition] of Object.entries(definitions)) {
@@ -200,6 +214,12 @@
   function formatValue(key, raw, element) {
     if (typeof raw !== 'string' || !raw.trim() || raw.length > 250 || /[\u0000-\u001f]/.test(raw)) return null;
     let value = raw.trim();
+    if (key === 'birthDate') {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+      const date = new Date(`${value}T00:00:00.000Z`);
+      if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value || value > new Date().toISOString().slice(0, 10)) return null;
+      value = `${value.slice(5, 7)}/${value.slice(8, 10)}/${value.slice(0, 4)}`;
+    }
     if (key === 'homePhone' || key === 'mobilePhone') {
       let digits = value.replace(/[()\s.-]/g, '');
       if (/^\+?1\d{10}$/.test(digits)) digits = digits.replace(/^\+?1/, '');
@@ -224,6 +244,7 @@
   }
 
   function fill(doc, rawUrl, originalBindings, values) {
+    if (originalBindings.some(binding => binding.key === 'birthDate')) return fillSelfDetails(doc, rawUrl, originalBindings, values);
     const filled = [], skipped = [];
     const order = Object.keys(definitions);
     // Only bindings captured in the original rendered-field preview are eligible.
@@ -263,6 +284,81 @@
     return { filled, skipped };
   }
   const navigationSnapshots = new WeakMap();
+
+  // The observed Start Application / Tell Us More page explicitly says these
+  // answers describe "yourself". People and later dynamic-question pages share
+  // templates, so URL/input IDs alone never establish the recipient.
+  function selfDetailsContext(doc, rawUrl) {
+    if (rawUrl !== `${PORTAL}/applyForBenefits/dynamicQuestions` || !isSupportedUrl(rawUrl)) return null;
+    const forms = doc.querySelectorAll('form#answerSet');
+    if (forms.length !== 1) return null;
+    const form = forms[0];
+    if (form.getAttribute('action') !== 'simple' || form.action !== `${PORTAL}/applyForBenefits/simple` || form.method !== 'post' ||
+        form.hasAttribute('onsubmit') || form.hasAttribute('target') || Array.from(form.elements).some(element => !form.contains(element))) return null;
+    const headings = Array.from(doc.querySelectorAll('h1,h2,h3')).filter(element => rendered(element, doc));
+    if (headings.filter(element => element.tagName === 'H2' && normal(element.textContent) === 'tell us more').length !== 1 ||
+        headings.some(element => /\b(signature|certification|attestation|consent|review|submit|confirmation)\b/.test(normal(element.textContent)))) return null;
+    if (Array.from(doc.querySelectorAll('[role="dialog"],[aria-modal="true"],input[type="password"],[name="captchaAnswer"],#securityCode,#termChkbox'))
+      .some(element => rendered(element, doc))) return null;
+    const intro = 'Please give us additional information about yourself. If you cannot answer a question you can skip it.';
+    const introductions = Array.from(doc.querySelectorAll('div.fullrow.floatLeft > p')).filter(element => !form.contains(element) &&
+      rendered(element, doc) && element.textContent.replace(/\s+/g, ' ').trim().startsWith(intro));
+    const active = doc.querySelectorAll('a[title="Start Application | Active"]');
+    const people = doc.querySelectorAll('a[title="People | Unvisited"]');
+    if (introductions.length !== 1 || active.length !== 1 || people.length !== 1 || !active[0].parentElement.matches('li.current') ||
+        !people[0].parentElement.matches('li.next') || !rendered(active[0], doc) || !rendered(people[0], doc)) return null;
+    const panels = form.querySelectorAll('div.panel-group');
+    if (panels.length !== 1) return null;
+    const groups = panels[0].querySelectorAll('div.questionGroup.interviewQuestion');
+    if (groups.length !== 2 || !groups[0].classList.contains('peTaxInfoName') || groups[1].classList.contains('peTaxInfoName')) return null;
+    const names = groups[0].querySelectorAll('div.medium > h3');
+    if (names.length !== 1 || !rendered(names[0], doc) || !names[0].textContent.trim() || names[0].textContent.length > 250) return null;
+    const questions = doc.querySelectorAll('[id="question02419"]');
+    const inputs = doc.querySelectorAll('[id="answerSets0.answers3.answerValue"]');
+    if (questions.length !== 1 || inputs.length !== 1) return null;
+    const question = questions[0], birthDate = inputs[0];
+    if (!question.matches('.questionAnswer') || question.closest('.disabledQuestion') || !groups[1].contains(question) ||
+        !question.querySelector(':scope > div.answer > div.fullrow.flex')?.contains(birthDate) || !rendered(question, doc) || !rendered(birthDate, doc) ||
+        birthDate.tagName !== 'INPUT' || birthDate.type !== 'text' || birthDate.name !== 'answerSets[0].answers[3].answerValue' ||
+        birthDate.form !== form || form.querySelectorAll('input[name="answerSets[0].answers[3].answerValue"]').length !== 1 ||
+        birthDate.title !== 'mm/dd/yyyy' || !birthDate.classList.contains('date-format-class') || !birthDate.classList.contains('hasDatepicker') ||
+        birthDate.maxLength !== -1 || birthDate.required || birthDate.hasAttribute('pattern') ||
+        Array.from(birthDate.attributes).some(attribute => attribute.name.startsWith('on')) ||
+        namesFor(birthDate, doc).join('|') !== 'date of birth (mm/dd/yyyy)') return null;
+    // A second rendered birth-date control means the current person/template
+    // scope differs from the inspected self-only page.
+    const visibleBirthDates = Array.from(form.querySelectorAll('input')).filter(element => rendered(element, doc) &&
+      namesFor(element, doc).some(label => /\bdate of birth\b/.test(label)));
+    if (visibleBirthDates.length !== 1 || visibleBirthDates[0] !== birthDate) return null;
+    return { form, birthDate, question, nameHeading: names[0], group: groups[1], intro: introductions[0], active: active[0], people: people[0] };
+  }
+
+  function selfDetailsState(context) {
+    return { form: context.form, question: context.question, group: context.group, nameHeading: context.nameHeading,
+      nameText: context.nameHeading.textContent, intro: context.intro, introText: context.intro.textContent, active: context.active, people: context.people };
+  }
+
+  function fillSelfDetails(doc, rawUrl, bindings, values) {
+    const filled = [], skipped = [];
+    for (const binding of bindings) {
+      const current = () => {
+        const context = selfDetailsContext(doc, rawUrl);
+        if (!context || doc.location.href !== rawUrl || binding.key !== 'birthDate' || context.birthDate !== binding.element ||
+            !binding.self || !editable(context.birthDate, doc) || context.birthDate.value.trim()) return null;
+        const state = selfDetailsState(context);
+        return Object.keys(state).every(key => state[key] === binding.self[key]) ? context : null;
+      };
+      const context = current();
+      const value = context && Object.hasOwn(values, 'birthDate') ? formatValue('birthDate', values.birthDate, binding.element) : null;
+      if (!context || value === null || !scrollToField(binding.element, doc) || !current()) { skipped.push(binding.key); continue; }
+      const setter = Object.getOwnPropertyDescriptor(doc.defaultView.HTMLInputElement.prototype, 'value').set;
+      setter.call(binding.element, value);
+      binding.element.dispatchEvent(new doc.defaultView.Event('input', { bubbles: true }));
+      binding.element.dispatchEvent(new doc.defaultView.Event('change', { bubbles: true }));
+      if (binding.element.value === value) filled.push('birthDate'); else skipped.push('birthDate');
+    }
+    return { filled, skipped };
+  }
 
   function currentControls(form, doc) {
     return Array.from(form.querySelectorAll('input, select, textarea')).filter(element =>
@@ -435,6 +531,12 @@
 
   function focusField(doc, rawUrl, key) {
     if (!isSupportedUrl(rawUrl) || doc.location.href !== rawUrl) return false;
+    if (key === 'birthDate') {
+      const self = selfDetailsContext(doc, rawUrl);
+      if (!self || !editable(self.birthDate, doc) || !scrollToField(self.birthDate, doc) || selfDetailsContext(doc, rawUrl)?.birthDate !== self.birthDate) return false;
+      self.birthDate.focus({ preventScroll: true });
+      return doc.activeElement === self.birthDate;
+    }
     if (key === 'addressReview') {
       const address = addressContext(doc, rawUrl);
       if (!address || !scrollToField(address.first, doc) || !addressContext(doc, rawUrl)) return false;
@@ -486,6 +588,19 @@
         canAdvance: Boolean(address), manualRemaining: address ? 0 : 1,
         checklist: [{ key: 'addressReview', label: 'First suggested home address', status: address ? (address.first.checked ? 'complete' : 'missing') : 'manual', required: true, fillable: false }],
         reason: address ? 'Next selects Iowa’s first suggested home address and saves this step. Review the selected address before final submission.' : 'Review this address step in Iowa’s form. The expected home suggestions could not be verified, or another address question or error needs attention.' };
+    }
+    const self = selfDetailsContext(doc, rawUrl);
+    if (self) {
+      const fields = scan(doc, rawUrl).fields;
+      const checklist = [{ key: 'birthDate', label: 'Date of birth', status: self.birthDate.value.trim() ? 'complete' : editable(self.birthDate, doc) ? 'optional' : 'manual', required: false, fillable: fields.length === 1 }];
+      for (const [id, label] of Object.entries(selfQuestions)) {
+        const group = self.form.querySelector(`[id="${id}"]`);
+        if (group && rendered(group, doc)) checklist.push({ key: `self-${id}`, label, status: 'manual', required: false, fillable: false });
+      }
+      checklist.push({ key: 'selfDetailsReview', label: 'Review the remaining questions and continue in Iowa’s form', status: 'manual', required: false, fillable: false });
+      return { ...result, kind: 'fillable', pageKey: 'iowa-self-details', heading: 'Tell Us More', fields, checklist,
+        manualRemaining: checklist.filter(item => item.status === 'manual').length, canAdvance: false,
+        reason: 'SecondHand can fill your saved date of birth on this verified self-information page. Review and answer the other questions, then choose Save and Continue directly in Iowa’s form.' };
     }
     if (!identifyPage(doc)) {
       if (headings.includes('household application information')) { result.pageKey = 'iowa-program-intent'; result.heading = 'Household Application Information'; result.reason = 'Choose the household’s application intent and complete verification in Iowa’s form.'; }
@@ -569,7 +684,10 @@
     return { advanced: true, reason: 'Next was clicked once. Check the following page for required questions or errors.' };
   }
 
-  const api = Object.freeze({ PORTAL, definitions, isSupportedUrl, rendered, visible, scan, fill, formatValue, focusField, probePage, captureNavigation, advance });
+  // The worker uses only this union's keys for its explicit desktop grant. Each
+  // page still uses its own exact selectors and recipient checks internally.
+  const supportedDefinitions = Object.freeze({ ...definitions, birthDate: Object.freeze({ label: 'Date of birth' }) });
+  const api = Object.freeze({ PORTAL, definitions: supportedDefinitions, isSupportedUrl, rendered, visible, scan, fill, formatValue, focusField, probePage, captureNavigation, advance });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandIowa = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

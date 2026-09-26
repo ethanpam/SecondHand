@@ -46,6 +46,8 @@ cover prior selections, multiple suggestions, errors, visible dialogs/county
 questions, and unsupported mailing controls. The video flow above retains the
 separate hypothetical address page to demonstrate the unverified-layout pause.
 
+The browser smoke also exercises the sanitized primary-applicant **Tell Us More** fixture: it requests only `birthDate`, formats it as `MM/DD/YYYY`, preserves manual and hidden controls, and makes zero Next clicks. Changed person phase, form, or heading prevents profile release. The sidebar exposes static checklist labels without the applicant name, birth date, or approval token.
+
 The browser smoke also checks conditional address/program branches,
 preservation of existing answers, potentially destructive parent choices,
 full-document navigation and extension reinjection, consent pauses, per-page
@@ -54,7 +56,8 @@ approval tokens.
 
 The applicant fixture uses sanitized metadata from the observed blank Iowa
 form. The new home-address fixture reconstructs observed controls with a public
-campus test address; multiple-choice variants and the later-page fixtures are
-synthetic. Browser requests never reach Iowa. These tests do not establish live
+campus test address. The birth-date fixture reproduces observed self-page metadata with explicitly synthetic placeholders for unmapped questions. Multiple-address variants and unsupported-page fixtures are synthetic. Browser requests never reach Iowa. These tests do not establish live
 end-to-end filing, and passing them does not mean the extension can complete an
 entire SNAP application.
+
+The separately authorized [live journey](iowa-live-journey.md) was operated manually through E-Signature and stopped with all signature controls untouched. It is not part of the isolated extension smoke or the earlier video, and it does not establish automated end-to-end filing.

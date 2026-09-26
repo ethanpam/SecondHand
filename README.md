@@ -49,10 +49,10 @@ npm run dist:win      # Run on Windows to build the NSIS .exe installer
 npm run dist:mac      # Unsigned DMGs for Apple silicon and Intel Macs
 ```
 
-Fictional QA data is in [`tests/fixtures/applicant-profile.json`](tests/fixtures/applicant-profile.json). It is for isolated tests only and is never sent to the real Iowa portal.
+Fictional QA data is in [`tests/fixtures/applicant-profile.json`](tests/fixtures/applicant-profile.json). Automated tests use it only in isolated browsers with all Iowa requests intercepted. The separately authorized manual live inspection is documented in [the journey record](docs/iowa-live-journey.md); it stopped at E-Signature without signing or submitting.
 See [extension QA and recording](docs/extension-qa.md) for the walkthrough, test coverage, and simulated components.
 
-This development branch also supports the observed home-only **Select Address** step: guided autofill chooses Iowa's first possible home-address match, then Save and Continue. Review that choice before submitting. Separate mailing confirmation, county questions, and unverified later pages remain manual. See [address confirmation coverage](docs/address-automation.md). Public 0.4 downloads do not yet include this change.
+This development branch also supports the observed home-only **Select Address** step: guided autofill chooses Iowa's first possible home-address match, then Save and Continue. Review that choice before submitting. Separate mailing confirmation, county questions, and unverified later pages remain manual. See [address confirmation coverage](docs/address-automation.md). The branch also fills the primary applicant’s saved birth date on the verified **Tell Us More** page; its other answers and Next stay manual. Public 0.4 downloads do not yet include these changes.
 
 No application server, database service, API keys, or applicant account with secondHand is required.
 
