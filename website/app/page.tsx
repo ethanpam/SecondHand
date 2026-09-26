@@ -1,16 +1,28 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type KeyboardEvent } from 'react';
 import { ArrowDown, ArrowUpRight, Check, Download, LockKeyhole, Monitor, Apple, Puzzle, ShieldCheck } from 'lucide-react';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 const release = '0.4.0';
 const windows = `/download/secondHand-${release}-win-x64.exe`;
 const macArm = `/download/secondHand-${release}-mac-arm64.dmg`;
 const macIntel = `/download/secondHand-${release}-mac-x64.dmg`;
+const platforms = [{ id: 'windows', label: 'Windows', Icon: Monitor }, { id: 'mac', label: 'Mac', Icon: Apple }] as const;
+type Platform = (typeof platforms)[number]['id'];
 
 export default function Home() {
-  const [platform, setPlatform] = useState('windows');
+  const [platform, setPlatform] = useState<Platform>('windows');
+  // Arrow keys, Home, and End move between tabs, following the ARIA tabs pattern.
+  const moveBetweenTabs = (event: KeyboardEvent<HTMLButtonElement>) => {
+    const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+    if (!keys.includes(event.key)) return;
+    event.preventDefault();
+    const index = platforms.findIndex(item => item.id === platform);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? platforms.length - 1 :
+      (index + (event.key === 'ArrowRight' ? 1 : -1) + platforms.length) % platforms.length;
+    setPlatform(platforms[next].id);
+    document.getElementById(`tab-${platforms[next].id}`)?.focus();
+  };
   return (
     <>
       <a href="#downloads" className="skip">Skip to downloads</a>
@@ -29,25 +41,25 @@ export default function Home() {
           </div>
           <div className="download-panel">
             <div className="panel-heading"><h2>Download secondHand</h2><span className="version">v{release}</span></div>
-            <Tabs value={platform} onValueChange={v => setPlatform(String(v))}>
-              <TabsList className="platform-tabs" aria-label="Choose your computer">
-                <TabsTrigger value="windows"><Monitor size={18} /> Windows</TabsTrigger>
-                <TabsTrigger value="mac"><Apple size={18} /> Mac</TabsTrigger>
-              </TabsList>
-              <TabsContent value="windows" className="download-content">
+            <div className="platform-tabs" role="tablist" aria-label="Choose your computer">
+              {platforms.map(({ id, label, Icon }) => (
+                <button key={id} id={`tab-${id}`} type="button" role="tab" aria-selected={platform === id} aria-controls={`panel-${id}`}
+                  tabIndex={platform === id ? 0 : -1} onClick={() => setPlatform(id)} onKeyDown={moveBetweenTabs}><Icon size={18} /> {label}</button>
+              ))}
+            </div>
+            <div id="panel-windows" role="tabpanel" aria-labelledby="tab-windows" hidden={platform !== 'windows'} className="download-content">
                 <p className="download-title">For your Windows PC</p>
                 <p className="muted">Windows 10 or later · 64-bit Intel / AMD</p>
                 <a className="download-button" href={windows}><Download size={20} /> Download for Windows <span>.exe</span></a>
                 <p className="micro">Chrome extension included. No separate download needed.</p>
-              </TabsContent>
-              <TabsContent value="mac" className="download-content">
+            </div>
+            <div id="panel-mac" role="tabpanel" aria-labelledby="tab-mac" hidden={platform !== 'mac'} className="download-content">
                 <p className="download-title">For your Mac</p>
                 <p className="muted">macOS 13 or later · MacBook, iMac & Mac mini</p>
                 <a className="download-button" href={macArm}><Download size={20} /> Apple Silicon <span>.dmg</span></a>
                 <a className="secondary-download" href={macIntel}>Download for Intel Mac <ArrowUpRight size={16} /></a>
                 <p className="micro">Find your chip in Apple menu → About This Mac. Choose Apple Silicon for an M-series chip.</p>
-              </TabsContent>
-            </Tabs>
+            </div>
             <div className="release-note"><ShieldCheck size={19} /><p><strong>Early access builds are unsigned.</strong> Your computer may show a security warning. Read the setup notes below before opening.</p></div>
           </div>
         </section>
