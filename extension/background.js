@@ -21,8 +21,10 @@ const MAX_STEPS = 15;
 const generalPages = new Map();
 const GENERAL_TODO = 'Check your answers, then click Continue.';
 const MAX_GENERAL_PASSES = 4;
-// Sensitive answers are placed only by a confident rule match, never by an AI guess.
-const SENSITIVE_KEYS = Object.freeze(['ssn', 'birthDate', 'totalMonthlyIncome', 'annualIncome', 'assetsOnHand']);
+// Sensitive answers (identity, money, health, immigration) are placed only by a confident
+// rule match, never by an AI guess.
+const SENSITIVE_KEYS = Object.freeze(['ssn', 'birthDate', 'ageRange', 'totalMonthlyIncome', 'annualIncome', 'assetsOnHand', 'monthlyMedicalExpenses',
+  'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare']);
 const AI_KEYS = Object.freeze(SecondHandGeneric.GENERIC_KEYS.filter(key => !SENSITIVE_KEYS.includes(key)));
 
 function nativeRequest(type, payload = {}) {

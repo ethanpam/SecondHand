@@ -19,7 +19,8 @@ const SITE_SCRIPT = { id: SCRIPT_ID, matches: [`${ORIGIN}/*`], js: ['generic-ada
 
 // Stand-in for generic-adapter.js's pure helpers; the real engine has its own tests.
 const { GENERIC_KEYS } = require('../extension/generic-adapter.js');
-const SENSITIVE = ['ssn', 'birthDate', 'totalMonthlyIncome', 'annualIncome', 'assetsOnHand'];
+const SENSITIVE = ['ssn', 'birthDate', 'ageRange', 'totalMonthlyIncome', 'annualIncome', 'assetsOnHand', 'monthlyMedicalExpenses',
+  'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare'];
 const generic = {
   GENERIC_KEYS,
   requestKeys: keys => [...new Set(keys.flatMap(key => key === 'fullName' ? ['firstName', 'lastName'] : [key]))],
