@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import { CheckIcon, DownloadIcon, ExternalIcon } from './icons';
+import { faq } from './faq';
 
 const release = '0.4.0';
 const windows = `/download/secondHand-${release}-win-x64.exe`;
@@ -83,6 +84,14 @@ export default function Home() {
         </section>
 
         <section id="privacy" className="privacy-section"><div><h2>Your information stays on your computer</h2></div><div className="privacy-copy"><p>Your profile and application history are encrypted on your device. secondHand has no account system, cloud sync or analytics. This website hosts the installers; it does not collect your benefits information.</p><ul><li><CheckIcon /> The desktop asks you to approve filling and guided navigation.</li><li><CheckIcon /> Information you put into Iowa’s portal goes to Iowa.</li><li><CheckIcon /> You handle CAPTCHA, consent, signatures and submission.</li></ul><p className="small-note">Like other websites, the hosting provider may process connection logs. Your browser and the Iowa portal have their own privacy practices.</p></div></section>
+        <section id="faq" className="faq-section" aria-labelledby="faq-heading">
+          <h2 id="faq-heading">Common questions</h2>
+          <div className="faq-list">
+            {faq.map(({ question, answer }) => (
+              <details key={question}><summary>{question}</summary><p>{answer}</p></details>
+            ))}
+          </div>
+        </section>
       </main>
       <footer className="wrap"><div><a href="#" className="brand footer-brand"><span className="brand-mark">sh</span>second<span>Hand</span></a><p>Independent software. Not affiliated with Iowa HHS.<br />Using secondHand does not determine benefit eligibility.</p></div><a href={`/download/SHA256SUMS.txt?release=${release}`}>Download checksums <ExternalIcon size={14} /></a></footer>
     </>
