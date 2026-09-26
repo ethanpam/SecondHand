@@ -9,16 +9,37 @@ const adapter = require('../extension/iowa-adapter.js');
 // Values created inside the worker's vm context have foreign prototypes.
 const plain = value => JSON.parse(JSON.stringify(value));
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
-// Iowa never uses the site engine; any call is a bug.
+// Verified Iowa pages never use the general engine; any call there is a bug.
 const noSiteEngine = { requestKeys: () => { throw new Error('Iowa used the site engine.'); }, deriveValues: () => { throw new Error('Iowa used the site engine.'); } };
+// Stand-in for generic-adapter.js's pure helpers on pages the Iowa adapter hasn't verified.
+const generalEngine = {
+  requestKeys: keys => [...new Set(keys.flatMap(key => key === 'totalMonthlyIncome' ? ['monthlyEarnedIncome', 'monthlyOtherIncome'] : [key]))],
+  deriveValues: values => ({ ...values, ...(values.monthlyEarnedIncome && values.monthlyOtherIncome ? { totalMonthlyIncome: 'Synthetic private total' } : {}) })
+};
+const nothingPlanned = () => ({ token: 'plan-0', matched: [], unmatched: [] });
+const financialPlan = () => ({ token: 'plan-1',
+  matched: [{ id: 'sh-1-0', key: 'householdAdults', confidence: 'high' }, { id: 'sh-1-1', key: 'totalMonthlyIncome', confidence: 'high' }, { id: 'sh-1-2', key: 'householdSeniors', confidence: 'high' }],
+  unmatched: [{ id: 'sh-1-3', label: 'Is anyone blind?', type: 'radio', options: ['Yes', 'No'], required: true }] });
+const financialValues = { householdAdults: '2', monthlyEarnedIncome: 'Synthetic private 900', monthlyOtherIncome: '100' };
+// The general engine's side of a page: plan, fill what has a value, focus the field that needs you.
+function generalPage(message, plan) {
+  if (message.type === 'secondhand:generic:plan') return structuredClone(plan);
+  if (message.type === 'secondhand:generic:fill') {
+    if (message.token !== plan.token) return { ok: false, filled: [], skipped: [] };
+    const filled = message.assignments.filter(item => message.values[item.key]).map(item => item.id);
+    return { ok: true, filled, skipped: message.assignments.map(item => item.id).filter(id => !filled.includes(id)) };
+  }
+  if (message.type === 'secondhand:generic:focus') return { focused: message.id === 'sh-1-3' };
+  return undefined;
+}
 
 // A small page model: answering "has home address" reveals a mailing field,
 // the way Iowa's form reveals conditional sections.
-function worker({ kind = 'fillable', desktop = {}, duringGetFields } = {}) {
+function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noSiteEngine, general = nothingPlanned() } = {}) {
   const model = { kind, filled: [], revealed: false, token: null };
   const vault = { reachable: true, unlocked: true, getFieldsError: null,
     values: { firstName: 'Synthetic private first', hasHomeAddress: 'yes', mailingCity: 'Synthetic private city' }, ...desktop };
-  const calls = { native: [], content: [], pageTabs: [] };
+  const calls = { native: [], content: [], pageTabs: [], injected: [] };
   const tab = { id: 7, active: true, url: `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo` };
   const events = {};
   const event = key => ({ addListener: value => { events[key] = value; } });
@@ -26,7 +47,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields } = {}) {
   function pageState() {
     model.token = `preview-${model.filled.length}`;
     return {
-      page: { kind: model.kind, pageKey: 'iowa-personal-information', checklist: visible().map(key => ({ key, label: key, required: true, status: model.filled.includes(key) ? 'complete' : 'missing' })) },
+      page: { kind: model.kind, pageKey: model.kind === 'manual' ? 'iowa-manual' : 'iowa-personal-information', checklist: visible().map(key => ({ key, label: key, required: true, status: model.filled.includes(key) ? 'complete' : 'missing' })) },
       scan: { token: model.token, recognizedPage: model.kind === 'fillable', fields: visible().filter(key => !model.filled.includes(key)).map(key => ({ key, label: key })) }
     };
   }
@@ -48,12 +69,14 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields } = {}) {
           return { ok: true, filledCount, skippedCount: message.fields.length - filledCount };
         }
         if (message.type === 'secondhand:focusField') return { focused: true };
+        const answer = generalPage(message, general);
+        if (answer) return answer;
         throw new Error(`Unexpected content message ${message.type}`);
       },
       onActivated: event('activated'), onRemoved: event('removed'), onUpdated: event('updated')
     },
     sidePanel: { setPanelBehavior: async () => {}, open: async () => {} },
-    scripting: { executeScript: async () => {}, getRegisteredContentScripts: async () => [] },
+    scripting: { executeScript: async details => { calls.injected.push(plain(details)); }, getRegisteredContentScripts: async () => [] },
     permissions: { contains: async () => false },
     runtime: {
       id: 'testextension', getURL: file => `chrome-extension://testextension/${file}`,
@@ -86,7 +109,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields } = {}) {
     }
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../extension/background.js'), 'utf8'),
-    { chrome, SecondHandIowa: adapter, SecondHandGeneric: noSiteEngine, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console });
+    { chrome, SecondHandIowa: adapter, SecondHandGeneric: engine, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console });
   const send = (message, sender) => new Promise(resolve => { if (!listener(message, sender, resolve)) resolve(undefined); });
   return {
     calls, tab, events, filled: () => [...model.filled],
@@ -112,6 +135,8 @@ test('one click makes one status and one getFields request, fills revealed field
   assert.deepEqual(result.needYou, ['lastName']);
   assert.match(result.message, /Filled 3 · 1 need you/);
   assert.doesNotMatch(JSON.stringify(response), /Synthetic private/);
+  assert.equal(w.calls.content.some(message => message.type.startsWith('secondhand:generic:')), false, 'verified pages never use the general engine');
+  assert.deepEqual(w.calls.injected[0], { target: { tabId: 7, frameIds: [0] }, files: ['iowa-adapter.js', 'generic-adapter.js', 'content.js'] });
 });
 
 test('locked and unreachable desktops map to widget states without filling', async () => {
@@ -141,14 +166,74 @@ test('a vault that locks during the request, a cancelled approval, or a page cha
   }
 });
 
-test('an unknown page stops autofill without contacting the desktop', async () => {
-  const w = worker({ kind: 'manual' });
+test('an unknown page where the general engine matches nothing stops autofill without contacting the desktop', async () => {
+  const w = worker({ kind: 'manual', general: { ...nothingPlanned(), unmatched: financialPlan().unmatched } });
   const response = await autofill(w);
   assert.equal(response.ok, true);
   assert.equal(response.data.state, 'stopped');
   assert.match(response.data.message, /doesn’t know this page yet/);
   assert.equal(w.calls.native.length, 0);
-  assert.equal((await w.panel({ type: 'ui:pageState' })).data.autopilot, false);
+  assert.deepEqual(w.calls.content.map(message => message.type), ['secondhand:pageState', 'secondhand:generic:plan']);
+  const state = (await w.panel({ type: 'ui:pageState' })).data;
+  assert.equal(state.autopilot, false);
+  assert.equal(state.page.todo, undefined);
+});
+
+test('an unknown Iowa page gets one general fill, then waits for the applicant to check it and continue', async () => {
+  const w = worker({ kind: 'manual', engine: generalEngine, general: financialPlan(), desktop: { values: financialValues } });
+  const response = await autofill(w);
+  assert.equal(response.ok, true, response.error);
+  assert.deepEqual(plain(response.data), { state: 'done', filled: 2, needYou: ['sh-1-3', 'sh-1-2'],
+    message: 'Filled 2 · 2 need you. Check your answers, then click Continue.', todo: 'Check your answers, then click Continue.', pageKey: 'iowa-manual' });
+  assert.deepEqual(w.calls.native.map(call => call.type), ['status', 'getFields']);
+  assert.equal(w.calls.native[1].url, `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo`);
+  assert.deepEqual(plain(w.calls.native[1].fields), ['householdAdults', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'householdSeniors']);
+  assert.deepEqual(w.calls.content.map(message => message.type), ['secondhand:pageState', 'secondhand:generic:plan', 'secondhand:generic:fill']);
+  const fill = plain(w.calls.content[2]);
+  assert.equal(fill.token, 'plan-1');
+  assert.deepEqual(fill.assignments, [{ id: 'sh-1-0', key: 'householdAdults', guessed: false }, { id: 'sh-1-1', key: 'totalMonthlyIncome', guessed: false }]);
+  assert.deepEqual(Object.keys(fill.values), ['householdAdults', 'totalMonthlyIncome'], 'only the values being placed reach the page');
+  assert.doesNotMatch(JSON.stringify(response), /Synthetic private/);
+
+  const state = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.equal(state.autopilot, true, 'autofill keeps going after the applicant continues');
+  assert.equal(state.result.message, response.data.message);
+  assert.equal(state.page.todo, 'Check your answers, then click Continue.');
+  assert.doesNotMatch(JSON.stringify(state), /Synthetic private/);
+  w.events.updated(7, { status: 'complete' });
+  await new Promise(resolve => setImmediate(resolve));
+  await w.panel({ type: 'ui:pageState' });
+  assert.equal(w.calls.content.filter(message => message.type === 'secondhand:generic:fill').length, 1, 'one general fill per page');
+  assert.equal(w.calls.content.some(message => ['secondhand:continue', 'secondhand:fill'].includes(message.type)), false, 'never continues or uses the Iowa fill');
+  assert.equal(w.calls.native.some(call => call.type === 'recordProgress'), false);
+});
+
+test('need-you on a general-filled Iowa page focuses the general engine’s field; Iowa keys still go to the Iowa adapter', async () => {
+  const w = worker({ kind: 'manual', engine: generalEngine, general: financialPlan(), desktop: { values: financialValues } });
+  await autofill(w);
+  assert.deepEqual(plain((await w.launcher({ type: 'ui:focusField', key: 'sh-1-3', confirmed: true })).data), { focused: true });
+  assert.deepEqual(plain((await w.panel({ type: 'ui:focusField', key: 'sh-9-9' })).data), { focused: false });
+  assert.deepEqual(plain((await w.launcher({ type: 'ui:focusField', key: 'lastName', confirmed: true })).data), { focused: true });
+  assert.deepEqual(w.calls.content.filter(message => /focus/i.test(message.type)).map(({ type, id, key }) => ({ type, target: id || key })),
+    [{ type: 'secondhand:generic:focus', target: 'sh-1-3' }, { type: 'secondhand:generic:focus', target: 'sh-9-9' }, { type: 'secondhand:focusField', target: 'lastName' }]);
+  assert.equal(await w.launcher({ type: 'ui:focusField', key: 'input[type=password]', confirmed: true }), undefined);
+});
+
+test('a locked, cancelled, or unreadable general fill on an unknown Iowa page stops autofill and fills nothing', async () => {
+  const locked = worker({ kind: 'manual', engine: generalEngine, general: financialPlan(), desktop: { unlocked: false } });
+  const result = plain((await autofill(locked)).data);
+  assert.equal(result.state, 'locked');
+  assert.equal(result.pageKey, 'iowa-manual');
+  const cancelled = worker({ kind: 'manual', engine: generalEngine, general: financialPlan(), desktop: { getFieldsError: 'You cancelled this field request.' } });
+  assert.equal((await autofill(cancelled)).data.message, 'Cancelled. Nothing was filled.');
+  const unreadable = worker({ kind: 'manual', engine: generalEngine, general: { matched: [] } });
+  assert.match((await autofill(unreadable)).data.message, /couldn’t be checked safely/);
+  for (const w of [locked, cancelled, unreadable]) {
+    assert.equal(w.calls.content.some(message => message.type === 'secondhand:generic:fill'), false);
+    assert.equal((await w.panel({ type: 'ui:pageState' })).data.autopilot, false);
+  }
+  // Once the engine found fields, the page offers Autofill again, for example after unlocking.
+  assert.equal((await locked.panel({ type: 'ui:pageState' })).data.page.todo, 'Check your answers, then click Continue.');
 });
 
 test('launcher is bound to its own tab, needs confirmed clicks, and cannot use panel-only or unknown types', async () => {
@@ -199,7 +284,7 @@ test('desktop status, showApp, and focusField pass through; guided and manual-fi
 // A multi-screen walk: each Continue moves the tab to the next screen and fires
 // Chrome's loading/complete updates, the way a real navigation does.
 const settle = async () => { for (let i = 0; i < 30; i++) await new Promise(resolve => setImmediate(resolve)); };
-function journey({ screens, desktop = {}, continueStays = false } = {}) {
+function journey({ screens, desktop = {}, continueStays = false, engine = noSiteEngine } = {}) {
   const vault = { unlocked: true, values: { programSnap: 'yes', firstName: 'Synthetic private first', lastName: 'Synthetic private last' }, ...desktop };
   const calls = { native: [], content: [] };
   let index = 0;
@@ -233,7 +318,7 @@ function journey({ screens, desktop = {}, continueStays = false } = {}) {
           keys.forEach(key => filled.add(key));
           return { ok: true, filledCount: keys.length, skippedCount: message.fields.length - keys.length };
         }
-        return { focused: true };
+        return generalPage(message, current().general || nothingPlanned()) || { focused: true };
       },
       onActivated: event('activated'), onRemoved: event('removed'), onUpdated: event('updated')
     },
@@ -260,7 +345,7 @@ function journey({ screens, desktop = {}, continueStays = false } = {}) {
     }
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../extension/background.js'), 'utf8'),
-    { chrome, SecondHandIowa: adapter, SecondHandGeneric: noSiteEngine, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, setImmediate, URL, Map, Set, console });
+    { chrome, SecondHandIowa: adapter, SecondHandGeneric: engine, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, setImmediate, URL, Map, Set, console });
   const send = (message, sender = { id: 'testextension', url: PANEL_URL }) => new Promise(resolve => { if (!listener({ tabId: 7, ...message }, sender, resolve)) resolve(undefined); });
   return { calls, vault, events, send, filled: () => [...filled], at: () => current().name,
     userContinues: () => navigate(),
@@ -311,6 +396,32 @@ test('one click walks the application: fills, continues info screens, and waits 
   assert.match(unknown.result.message, /doesn’t know this page yet/);
   assert.equal(w.getFields().length, 2, 'values are only requested on pages that need them');
   assert.doesNotMatch(JSON.stringify(w.calls.native.filter(call => call.type !== 'getFields')), /Synthetic private/);
+});
+
+test('the walk fills an unknown page with the general engine, waits for the applicant, then carries on', async () => {
+  const w = journey({ engine: generalEngine, desktop: { values: financialValues }, screens: [
+    { name: 'financial', path: '/applyForBenefits/financialInformation', general: financialPlan(), page: { kind: 'manual', pageKey: 'iowa-manual', checklist: [] } },
+    info('importantInfo', '/applyForBenefits/importantInfo', 'iowa-information'),
+    { name: 'members', path: '/applyForBenefits/householdMembers', page: { kind: 'manual', pageKey: 'iowa-manual', checklist: [] } }
+  ] });
+  const first = (await w.send({ type: 'ui:autofill', confirmed: true })).data;
+  assert.equal(first.message, 'Filled 2 · 2 need you. Check your answers, then click Continue.');
+  await settle();
+  w.events.updated(7, { status: 'complete' }); await settle();
+  const waiting = await lastResult(w);
+  assert.equal(w.at(), 'financial');
+  assert.equal(waiting.autopilot, true);
+  assert.equal(waiting.result.message, first.message);
+  assert.equal(w.continues(), 0, 'SecondHand never clicks Continue on a page the general engine filled');
+  assert.equal(w.calls.content.filter(type => type === 'secondhand:generic:fill').length, 1);
+
+  w.userContinues(); await settle();            // applicant checked the answers and continued
+  assert.equal(w.continues(), 1, 'the next information screen is continued as before');
+  const unknown = await lastResult(w);
+  assert.equal(w.at(), 'members');
+  assert.equal(unknown.autopilot, false);
+  assert.match(unknown.result.message, /doesn’t know this page yet/);
+  assert.equal(w.getFields().length, 1);
 });
 
 test('Stop ends autofill; later page loads do nothing', async () => {

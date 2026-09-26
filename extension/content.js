@@ -1,6 +1,8 @@
 (function () {
   'use strict';
   const adapter = globalThis.SecondHandIowa;
+  // Fills Iowa pages the adapter hasn't verified. Loaded just before this script.
+  const engine = globalThis.SecondHandGeneric;
   if (window !== window.top || !adapter?.isSupportedUrl(location.href) || globalThis.secondHandContentInstalled) return;
   globalThis.secondHandContentInstalled = true;
 
@@ -8,6 +10,8 @@
   let revision = 0;
   let panelHost = null;
   let panelFrame = null;
+  let generalUrl = ''; // the unverified page where the general engine found fields
+  const strings = value => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
 
   function withOwnPanelHidden(work) {
     if (!panelHost) return work();
@@ -26,7 +30,7 @@
     let full = false;
     try {
       const page = withOwnPanelHidden(() => adapter.probePage(document, location.href));
-      full = page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo);
+      full = page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo) || generalUrl === location.href;
     } catch { full = false; }
     panelHost.setAttribute('data-secondhand-size', full ? 'full' : 'pill');
     panelHost.style.setProperty('width', full ? 'min(272px, calc(100vw - 24px))' : '46px', 'important');
@@ -84,6 +88,37 @@
     return { page: adapter.probePage(document, location.href), scan: preview() };
   }
 
+  // The general engine only runs where the Iowa adapter has neither a verified form nor an instruction.
+  function unverified() {
+    const page = adapter.probePage(document, location.href);
+    return page.kind === 'manual' && !page.todo;
+  }
+  // Rebuilt field by field so nothing but labels and ids ever leaves the page.
+  const planText = value => { if (typeof value !== 'string') throw new Error('Invalid plan.'); return value; };
+  function planMetadata(plan) {
+    if (!plan || !Array.isArray(plan.matched) || !Array.isArray(plan.unmatched)) throw new Error('Invalid plan.');
+    return {
+      token: planText(plan.token),
+      matched: plan.matched.map(field => ({ id: planText(field.id), key: planText(field.key), confidence: planText(field.confidence) })),
+      unmatched: plan.unmatched.map(field => ({ id: planText(field.id), label: typeof field.label === 'string' ? field.label : '',
+        type: typeof field.type === 'string' ? field.type : '', options: strings(field.options), required: field.required === true }))
+    };
+  }
+  function general(message) {
+    if (!engine) return { ok: false, error: 'SecondHand could not load its form engine. Reinstall the extension.' };
+    if (!unverified()) return { ok: false, error: 'SecondHand fills this page with its Iowa rules.' };
+    if (message.type === 'secondhand:generic:plan') {
+      const plan = planMetadata(engine.plan(document));
+      if (plan.matched.length) generalUrl = location.href;
+      return plan;
+    }
+    if (typeof message.token !== 'string' || !Array.isArray(message.assignments) || !message.values || typeof message.values !== 'object' || Array.isArray(message.values)) {
+      return { ok: false, error: 'The fill request was malformed. Nothing was filled.' };
+    }
+    const result = engine.fillFields(document, message.token, message.assignments, message.values);
+    return { ok: result?.ok === true, filled: strings(result?.filled), skipped: strings(result?.skipped) };
+  }
+
   ensurePanel();
   document.addEventListener('DOMContentLoaded', ensurePanel, { once: true });
   // Observe page changes only. The cross-origin panel DOM never enters this observer.
@@ -118,6 +153,11 @@
         const bindings = original.bindings.filter(binding => message.fields.includes(binding.key));
         const result = withOwnPanelHidden(() => adapter.fill(document, location.href, bindings, message.values));
         respond({ ok: true, filledCount: result.filled.length, skippedCount: result.skipped.length });
+      } else if (message.type === 'secondhand:generic:plan' || message.type === 'secondhand:generic:fill') {
+        respond(withOwnPanelHidden(() => general(message)));
+        ensurePanel();
+      } else if (message.type === 'secondhand:generic:focus' && typeof message.id === 'string' && engine) {
+        respond({ focused: Boolean(withOwnPanelHidden(() => engine.focusField(document, message.id))) });
       }
     } catch {
       pending = null;

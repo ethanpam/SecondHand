@@ -11,7 +11,25 @@ const extensionURL = file => `chrome-extension://${extensionId}/${file}`;
 const source = file => fs.readFileSync(path.join(__dirname, '../extension', file), 'utf8');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
-function content(t, url = `${adapter.PORTAL}/applicant`) {
+const plain = value => JSON.parse(JSON.stringify(value));
+
+// Stand-in for generic-adapter.js; the real engine has its own tests. Plans carry
+// elements and values so the tests can prove only metadata leaves the page.
+function generalEngine(window, calls, { matched = true } = {}) {
+  const element = () => window.document.getElementById('firstName');
+  return {
+    plan: () => {
+      calls.push('plan');
+      return { token: 'plan-1', element: element(),
+        matched: matched ? [{ id: 'sh-1-0', key: 'householdAdults', confidence: 'high', element: element(), value: 'Synthetic private value' }] : [],
+        unmatched: [{ id: 'sh-1-1', label: 'Is anyone blind?', type: 'radio', options: ['Yes', 'No'], required: true, element: element(), value: 'Synthetic private value' }] };
+    },
+    fillFields: (_doc, token, assignments, values) => { calls.push({ token, assignments: plain(assignments), values: plain(values) }); return { ok: true, filled: ['sh-1-0'], skipped: [], values }; },
+    focusField: (_doc, id) => { calls.push(`focus:${id}`); if (id !== 'sh-1-1') return false; element().focus(); return true; }
+  };
+}
+
+function content(t, url = `${adapter.PORTAL}/applicant`, { engine = true, matched = true } = {}) {
   const dom = new JSDOM('<!doctype html><body><form><input id="firstName"><button type="button">Save and Continue</button></form></body>', { url, runScripts: 'outside-only' });
   t.after(() => dom.window.close());
   const window = dom.window;
@@ -22,7 +40,9 @@ function content(t, url = `${adapter.PORTAL}/applicant`) {
   let kind = 'fillable';
   let todo;
   let continued = 0;
+  const calls = [];
   window.chrome = { runtime: { id: extensionId, getURL: extensionURL, onMessage: { addListener: callback => { listener = callback; } } } };
+  if (engine) window.SecondHandGeneric = generalEngine(window, calls, { matched });
   window.SecondHandIowa = {
     isSupportedUrl: adapter.isSupportedUrl,
     scan: () => {
@@ -36,7 +56,8 @@ function content(t, url = `${adapter.PORTAL}/applicant`) {
     fill: (_document, _url, bindings, values) => { for (const binding of bindings) binding.element.value = values[binding.key]; return { filled: bindings.map(binding => binding.key), skipped: [] }; }
   };
   window.eval(source('content.js'));
-  return { window, frames, setKind: (value, instruction) => { kind = value; todo = instruction; }, get continued() { return continued; },
+  return { window, frames, calls, setKind: (value, instruction) => { kind = value; todo = instruction; }, get continued() { return continued; },
+    host: () => window.document.querySelector('[data-secondhand-assistant]'),
     request(message, sender = { id: extensionId }) { let response; listener?.(message, sender, value => { response = value; }); return response; } };
 }
 
@@ -125,6 +146,78 @@ test('widget host is a full bar on fillable pages and a small pill elsewhere', t
   page.setKind('fillable');
   page.window.dispatchEvent(new page.window.Event('popstate'));
   assert.equal(host.getAttribute('data-secondhand-size'), 'full');
+});
+
+test('the Iowa content script loads the general engine before content.js', () => {
+  assert.deepEqual(JSON.parse(source('manifest.json')).content_scripts[0].js, ['iowa-adapter.js', 'generic-adapter.js', 'content.js']);
+});
+
+test('on Iowa pages the adapter has not verified, the general engine plans, fills, and focuses with metadata only', t => {
+  const page = content(t);
+  page.setKind('manual');
+  const plan = page.request({ type: 'secondhand:generic:plan' });
+  assert.deepEqual(plain(plan), { token: 'plan-1', matched: [{ id: 'sh-1-0', key: 'householdAdults', confidence: 'high' }],
+    unmatched: [{ id: 'sh-1-1', label: 'Is anyone blind?', type: 'radio', options: ['Yes', 'No'], required: true }] });
+  const filled = page.request({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [{ id: 'sh-1-0', key: 'householdAdults', guessed: false }], values: { householdAdults: '2' } });
+  assert.deepEqual(plain(filled), { ok: true, filled: ['sh-1-0'], skipped: [] });
+  assert.deepEqual(page.calls[1], { token: 'plan-1', assignments: [{ id: 'sh-1-0', key: 'householdAdults', guessed: false }], values: { householdAdults: '2' } });
+  assert.doesNotMatch(JSON.stringify([plan, filled]), /Synthetic private/);
+  assert.deepEqual(plain(page.request({ type: 'secondhand:generic:focus', id: 'sh-1-1' })), { focused: true });
+  assert.equal(page.window.document.activeElement.id, 'firstName');
+  assert.deepEqual(plain(page.request({ type: 'secondhand:generic:focus', id: 'sh-9-9' })), { focused: false });
+});
+
+test('verified Iowa pages and pages with Iowa instructions never reach the general engine', t => {
+  const page = content(t);
+  for (const [kind, todo] of [['fillable'], ['info'], ['blocked', 'Solve the CAPTCHA, then click Continue.'], ['manual', 'Pick the correct address, then click Continue.'], ['unsupported']]) {
+    page.setKind(kind, todo);
+    assert.equal(page.request({ type: 'secondhand:generic:plan' }).ok, false, kind);
+    assert.equal(page.request({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [{ id: 'sh-1-0', key: 'householdAdults', guessed: false }], values: { householdAdults: '2' } }).ok, false, kind);
+  }
+  assert.deepEqual(page.calls, []);
+});
+
+test('general-engine messages refuse other extensions, malformed fills, and a missing engine', t => {
+  const page = content(t);
+  page.setKind('manual');
+  const foreign = { id: 'b'.repeat(32) };
+  assert.equal(page.request({ type: 'secondhand:generic:plan' }, foreign), undefined);
+  assert.equal(page.request({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [], values: {} }, foreign), undefined);
+  assert.equal(page.request({ type: 'secondhand:generic:focus', id: 'sh-1-1' }, foreign), undefined);
+  for (const message of [{ token: 'plan-1', assignments: 'sh-1-0', values: {} }, { token: 'plan-1', assignments: [], values: [] }, { token: 7, assignments: [], values: {} }]) {
+    assert.equal(page.request({ type: 'secondhand:generic:fill', ...message }).ok, false);
+  }
+  assert.deepEqual(page.calls, []);
+  const missing = content(t, undefined, { engine: false });
+  missing.setKind('manual');
+  assert.ok(missing.host(), 'Iowa pages keep their widget without the general engine');
+  const refused = missing.request({ type: 'secondhand:generic:plan' });
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /Reinstall/);
+});
+
+test('the widget grows to full size once the general engine finds fields on an unknown Iowa page', t => {
+  const page = content(t);
+  const host = page.host();
+  page.setKind('manual');
+  page.window.dispatchEvent(new page.window.Event('popstate'));
+  assert.equal(host.getAttribute('data-secondhand-size'), 'pill');
+  const seen = [];
+  const engine = page.window.SecondHandGeneric;
+  const plan = engine.plan;
+  engine.plan = doc => { seen.push(host.style.visibility); return plan(doc); };
+  page.request({ type: 'secondhand:generic:plan' });
+  assert.deepEqual(seen, ['hidden'], 'the widget is hidden while the engine reads the page');
+  assert.equal(host.style.visibility, '');
+  assert.equal(host.getAttribute('data-secondhand-size'), 'full');
+  assert.equal(host.style.height, '70px');
+  page.window.dispatchEvent(new page.window.Event('popstate'));
+  assert.equal(host.getAttribute('data-secondhand-size'), 'full', 'stays full on the same page');
+
+  const nothing = content(t, undefined, { matched: false });
+  nothing.setKind('manual');
+  nothing.request({ type: 'secondhand:generic:plan' });
+  assert.equal(nothing.host().getAttribute('data-secondhand-size'), 'pill', 'a page with nothing to fill keeps the pill');
 });
 
 test('foreign extension messages cannot scan or focus, and the launcher cannot expand over the form', t => {
