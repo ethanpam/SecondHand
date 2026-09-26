@@ -3,11 +3,10 @@
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import { CheckIcon, DownloadIcon, ExternalIcon } from './icons';
 import { faq } from './faq';
+import { downloads, release } from './release';
+import { SiteFooter, SiteHeader } from './site-chrome';
 
-const release = '0.4.0';
-const windows = `/download/secondHand-${release}-win-x64.exe`;
-const macArm = `/download/secondHand-${release}-mac-arm64.dmg`;
-const macIntel = `/download/secondHand-${release}-mac-x64.dmg`;
+const { windows, macArm, macIntel } = downloads;
 const platforms = [{ id: 'windows', label: 'Windows' }, { id: 'mac', label: 'Mac' }] as const;
 type Platform = (typeof platforms)[number]['id'];
 
@@ -32,12 +31,8 @@ export default function Home() {
   };
   return (
     <>
-      <a href="#downloads" className="skip">Skip to downloads</a>
-      <header className="site-header wrap">
-        <a href="#" className="brand" aria-label="secondHand home"><span className="brand-mark">sh</span>second<span>Hand</span></a>
-        <nav aria-label="Main navigation"><a href="#setup">Setup guide</a><a href="#privacy">Your privacy</a></nav>
-      </header>
-      <main className="wrap">
+      <SiteHeader />
+      <main id="main" className="wrap">
         <section className="intro" id="downloads">
           <div className="intro-copy">
             <h1>Fill out Iowa’s SNAP application with less typing.</h1>
@@ -93,7 +88,7 @@ export default function Home() {
           </div>
         </section>
       </main>
-      <footer className="wrap"><div><a href="#" className="brand footer-brand"><span className="brand-mark">sh</span>second<span>Hand</span></a><p>Independent software. Not affiliated with Iowa HHS.<br />Using secondHand does not determine benefit eligibility.</p></div><a href={`/download/SHA256SUMS.txt?release=${release}`}>Download checksums <ExternalIcon size={14} /></a></footer>
+      <SiteFooter />
     </>
   );
 }
