@@ -194,10 +194,12 @@ function siteOrigin(raw) {
 }
 const siteScript = origin => ({ id: `site-${new URL(origin).hostname}`, matches: [`${origin}/*`],
   js: ['generic-adapter.js', 'generic-content.js'], allFrames: true, runAt: 'document_idle', persistAcrossSessions: true });
+const frameScriptPrefix = origin => `frame-${new URL(origin).hostname}--`;
+const frameScript = (topOrigin, origin) => ({ ...siteScript(origin), id: `${frameScriptPrefix(topOrigin)}${new URL(origin).hostname}` });
 async function siteEnabled(origin) {
-  const [scripts, allowed] = await Promise.all([chrome.scripting.getRegisteredContentScripts({ ids: [siteScript(origin).id] }),
+  const [scripts, allowed] = await Promise.all([chrome.scripting.getRegisteredContentScripts(),
     chrome.permissions.contains({ origins: [`${origin}/*`] })]);
-  return scripts.length === 1 && allowed;
+  return scripts.some(script => script.matches.includes(`${origin}/*`)) && allowed;
 }
 async function requireSite(origin) {
   if (!(await siteEnabled(origin))) throw new Error('Turn on SecondHand for this site in the side panel first.');
@@ -230,10 +232,33 @@ async function enableSite(tabId) {
   return { enabled: true, origin };
 }
 
+// Only Chrome's absent-receiver error means the top content script is missing.
+// A closed port or malformed response is a real failure, not a readiness signal.
+async function topSiteMessage(tabId, message) {
+  try { return await chrome.tabs.sendMessage(tabId, message, { frameId: 0 }); }
+  catch (error) {
+    if (error.message === 'Could not establish connection. Receiving end does not exist.' || error.message === 'Receiving end does not exist.') {
+      const missing = new Error('Reload this page, then click Autofill.');
+      missing.code = 'site-not-ready';
+      throw missing;
+    }
+    throw error;
+  }
+}
+
+async function siteReadiness(tab, origin) {
+  if (tab.status === 'loading') return { frames: [], ready: false };
+  try { return { frames: await siteFrames(tab.id, origin), ready: true }; }
+  catch (error) {
+    if (error.code === 'site-not-ready') return { frames: [], ready: false };
+    throw error;
+  }
+}
+
 // Discover embedded origins through the approved top document, without reaching
 // into an iframe before Chrome and the desktop have approved its origin.
 async function siteFrames(tabId, origin) {
-  const reply = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:frames' }, { frameId: 0 });
+  const reply = await topSiteMessage(tabId, { type: 'secondhand:generic:frames' });
   if (!reply || !Array.isArray(reply.origins) || reply.origins.some(value => typeof value !== 'string')) throw new Error(FRAME_ERROR);
   const origins = [...new Set(reply.origins.map(siteOrigin).filter(value => value && value !== origin))];
   return Promise.all(origins.map(async origin => ({ origin, enabled: await siteEnabled(origin) })));
@@ -266,7 +291,7 @@ async function enableFrames(tabId) {
     throw error;
   }
   for (const frameOrigin of pending) {
-    const script = siteScript(frameOrigin);
+    const script = frameScript(origin, frameOrigin);
     if ((await chrome.scripting.getRegisteredContentScripts({ ids: [script.id] })).length) await chrome.scripting.updateContentScripts([script]);
     else await chrome.scripting.registerContentScripts([script]);
   }
@@ -276,11 +301,15 @@ async function enableFrames(tabId) {
 
 async function disableSite(tabId) {
   const { origin } = await activeSite(tabId);
-  const frames = await siteEnabled(origin) ? await siteFrames(tabId, origin) : [];
-  const origins = [origin, ...frames.filter(frame => frame.enabled).map(frame => frame.origin)];
-  const scripts = await chrome.scripting.getRegisteredContentScripts({ ids: origins.map(value => siteScript(value).id) });
-  if (scripts.length) await chrome.scripting.unregisterContentScripts({ ids: scripts.map(script => script.id) });
-  await removeAccess(origins);
+  // Registrations survive worker/extension restarts and identify which frames
+  // this site enabled, even when no content script can answer in the open tab.
+  const scripts = await chrome.scripting.getRegisteredContentScripts();
+  const owned = scripts.filter(script => script.id === siteScript(origin).id || script.id.startsWith(frameScriptPrefix(origin)));
+  if (owned.length) await chrome.scripting.unregisterContentScripts({ ids: owned.map(script => script.id) });
+  const remaining = await chrome.scripting.getRegisteredContentScripts();
+  const frameOrigins = owned.flatMap(script => script.matches.map(pattern => siteOrigin(pattern.slice(0, -2)))).filter(Boolean);
+  const unused = frameOrigins.filter(value => !remaining.some(script => script.matches.includes(`${value}/*`)));
+  await removeAccess([...new Set([origin, ...unused])]);
   results.delete(tabId);
   return { enabled: false, origin };
 }
@@ -350,7 +379,8 @@ async function fillSiteOnce(tabId, url) {
       const origin = siteOrigin(url);
       const embedded = await siteFrames(tabId, origin);
       const readPlan = async frameId => {
-        const plan = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:plan' }, { frameId });
+        const plan = frameId === 0 ? await topSiteMessage(tabId, { type: 'secondhand:generic:plan' })
+          : await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:plan' }, { frameId });
         if (!plan || typeof plan.token !== 'string' || !plan.token || !Array.isArray(plan.matched) || !Array.isArray(plan.unmatched) ||
           [...plan.matched, ...plan.unmatched].some(field => !field || typeof field.id !== 'string' || !FIELD_ID.test(field.id)) ||
           plan.matched.some(field => typeof field.key !== 'string' || !KEY.test(field.key))) throw new Error(FRAME_ERROR);
@@ -367,7 +397,10 @@ async function fillSiteOnce(tabId, url) {
       }
       const frames = await enabledSiteFrames(tabId, origin);
       plans = [top, ...await Promise.all(frames.filter(frame => frame.frameId !== 0).map(frame => readPlan(frame.frameId)))];
-    } catch { throw new Error(FRAME_ERROR); }
+    } catch (error) {
+      if (error.code === 'site-not-ready') throw error;
+      throw new Error(FRAME_ERROR);
+    }
     const keys = [...new Set(SecondHandGeneric.requestKeys(plans.flatMap(({ plan }) => plan.matched.map(field => field.key))))];
     if (keys.some(key => typeof key !== 'string' || !KEY.test(key))) throw new Error(FRAME_ERROR);
     const filled = new Set();
@@ -427,7 +460,7 @@ async function pageState(tabId, route) {
   if (!origin) throw new Error('Open the official Iowa portal in the active tab, then try again.');
   const enabled = await siteEnabled(origin);
   const result = results.get(tabId);
-  return { page: { kind: 'general', pageKey: 'general' }, result: enabled && result?.pageKey === 'general' ? result : null, autopilot: false, site: { origin, enabled, frames: enabled ? await siteFrames(tabId, origin) : [] } };
+  return { page: { kind: 'general', pageKey: 'general' }, result: enabled && result?.pageKey === 'general' ? result : null, autopilot: false, site: { origin, enabled, ...(enabled ? await siteReadiness(tab, origin) : { frames: [], ready: false }) } };
 }
 
 async function autofill(tabId, route) {

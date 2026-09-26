@@ -591,3 +591,16 @@ test('declining frame permission sends no enableFrames request', async t => {
   assert.equal(view.types().includes('ui:enableFrames'), false);
   assert.equal(view.get('frames-enable').hidden, false);
 });
+
+for (const loading of [false, true]) {
+  test(`unready site keeps Turn off and explains ${loading ? 'loading' : 'reload'}`, async t => {
+    const view = await panel(t, { tab: { ...SITE, status: loading ? 'loading' : 'complete' }, site: {
+      origin: ORIGIN, enabled: true, ready: false, frames: [{ origin: 'https://form.jotform.com', enabled: false }]
+    } });
+    assert.equal(view.get('status').textContent, loading ? 'Waiting for the page to finish loading…' : 'Reload this page so SecondHand can read it.');
+    assert.equal(view.get('status').classList.contains('error'), false);
+    assert.equal(view.get('site-disable').hidden, false);
+    assert.equal(view.get('panel-autofill').disabled, true);
+    assert.equal(view.get('frames-enable').hidden, true);
+  });
+}

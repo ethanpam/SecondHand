@@ -28,14 +28,14 @@ const pantryPlan = () => ({
   unmatched: [{ id: 'sh-4', label: 'Preferred pickup day', type: 'select-one', options: ['Monday', 'Friday'], required: true }]
 });
 
-function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, desktop = {}, plan = pantryPlan(), frames = [], duringGetFields, keepAccess = false, discoveryError = false } = {}) {
+function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, desktop = {}, plan = pantryPlan(), frames = [], duringGetFields, keepAccess = false, discoveryError = false, topError, framesReply } = {}) {
   const tab = { id: 7, active: true, url };
   const log = [], native = [], content = [], injected = [], opened = [];
   const permissions = new Set(granted ? [`${ORIGIN}/*`] : []);
   const registered = new Map(enabled ? [[SCRIPT_ID, structuredClone(SITE_SCRIPT)]] : []);
   for (const frame of frames) {
     if (frame.granted || frame.enabled) permissions.add(`${frame.origin}/*`);
-    if (frame.enabled) { const id = `site-${new URL(frame.origin).hostname}`; registered.set(id, { ...SITE_SCRIPT, id, matches: [`${frame.origin}/*`] }); }
+    if (frame.enabled) { const id = `frame-pantry.example.org--${new URL(frame.origin).hostname}`; registered.set(id, { ...SITE_SCRIPT, id, matches: [`${frame.origin}/*`] }); }
   }
   const vault = { reachable: true, unlocked: true, getFieldsError: null, trustError: null,
     values: { firstName: 'Synthetic private first', lastName: 'Synthetic private last', zip: '50309' }, ...desktop };
@@ -47,7 +47,8 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
       get: async () => ({ ...tab }),
       sendMessage: async (tabId, message, options) => {
         content.push({ tabId, frameId: options?.frameId, ...plain(message) });
-        if (message.type === 'secondhand:generic:frames') return { origins: frames.map(frame => frame.origin) };
+        if (options?.frameId === 0 && topError) throw new Error(topError);
+        if (message.type === 'secondhand:generic:frames') return framesReply === undefined ? { origins: frames.map(frame => frame.origin) } : framesReply;
         const frame = frames.find(frame => frame.frameId === options?.frameId);
         const framePlan = frame?.plan || plan;
         if (message.type === 'secondhand:generic:plan') {
@@ -73,7 +74,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
     },
     scripting: {
       executeScript: async details => { log.push('scripting.executeScript'); injected.push(plain(details)); if (details.func && discoveryError) throw new Error('Cannot access an unapproved frame'); return details.func ? [{ frameId: 0, result: ORIGIN }, ...frames.map(frame => ({ frameId: frame.frameId, result: frame.origin }))] : []; },
-      getRegisteredContentScripts: async ({ ids }) => { log.push('scripting.getRegisteredContentScripts'); return ids.filter(id => registered.has(id)).map(id => structuredClone(registered.get(id))); },
+      getRegisteredContentScripts: async ({ ids } = {}) => { log.push('scripting.getRegisteredContentScripts'); return (ids || [...registered.keys()]).filter(id => registered.has(id)).map(id => structuredClone(registered.get(id))); },
       registerContentScripts: async scripts => {
         log.push('scripting.registerContentScripts');
         for (const script of plain(scripts)) { if (registered.has(script.id)) throw new Error(`Duplicate script ID '${script.id}'`); registered.set(script.id, script); }
@@ -192,10 +193,10 @@ test('a site is only turned on by a confirmed side-panel request with Chrome acc
 test('page state tells the panel whether a site is on, with metadata only', async () => {
   const off = siteWorker({ granted: true });
   assert.deepEqual(plain((await off.panel({ type: 'ui:pageState' })).data),
-    { page: { kind: 'general', pageKey: 'general' }, result: null, autopilot: false, site: { origin: ORIGIN, enabled: false, frames: [] } });
+    { page: { kind: 'general', pageKey: 'general' }, result: null, autopilot: false, site: { origin: ORIGIN, enabled: false, frames: [], ready: false } });
   const on = siteWorker({ enabled: true });
   assert.deepEqual(plain((await on.panel({ type: 'ui:pageState' })).data),
-    { page: { kind: 'general', pageKey: 'general' }, result: null, autopilot: false, site: { origin: ORIGIN, enabled: true, frames: [] } });
+    { page: { kind: 'general', pageKey: 'general' }, result: null, autopilot: false, site: { origin: ORIGIN, enabled: true, frames: [], ready: true } });
   for (const w of [off, on]) assert.deepEqual(w.native, []);
   assert.deepEqual(off.content, []);
   assert.deepEqual(on.contentTypes(), ['secondhand:generic:frames']);
@@ -424,7 +425,7 @@ const secondFrame = (extra = {}) => ({ origin: FRAME_ORIGIN, frameId: 4, ...extr
 test('pageState discovers pending frames through the approved top frame only', async () => {
   const w = siteWorker({ enabled: true, frames: [secondFrame()] });
   assert.deepEqual(plain((await w.panel({ type: 'ui:pageState' })).data.site), {
-    origin: ORIGIN, enabled: true, frames: [{ origin: FRAME_ORIGIN, enabled: false }]
+    origin: ORIGIN, enabled: true, ready: true, frames: [{ origin: FRAME_ORIGIN, enabled: false }]
   });
   assert.deepEqual(w.content, [{ tabId: 7, frameId: 0, type: 'secondhand:generic:frames' }]);
   assert.deepEqual(w.injected, []);
@@ -435,7 +436,7 @@ test('enableFrames re-derives origins, trusts each, registers allFrames and inje
   const result = await w.panel({ type: 'ui:enableFrames', confirmed: true, origins: ['https://evil.example'] });
   assert.equal(result?.ok, true);
   assert.deepEqual(w.native.map(({ type, url }) => ({ type, url })), [{ type: 'trustSite', url: FRAME_ORIGIN }, { type: 'trustSite', url: other }]);
-  for (const origin of [FRAME_ORIGIN, other]) assert.equal(w.registered.get(`site-${new URL(origin).hostname}`).allFrames, true);
+  for (const origin of [FRAME_ORIGIN, other]) assert.equal(w.registered.get(`frame-pantry.example.org--${new URL(origin).hostname}`).allFrames, true);
   assert.ok(w.injected.some(call => call.target.allFrames && call.files.includes('generic-content.js')));
 });
 test('declining a frame trust returns all pending permissions and registers nothing', async () => {
@@ -551,4 +552,67 @@ test('a pending form explains approval before attempting all-frame script execut
   const result = (await autofill(w)).data;
   assert.match(result.message, /Click “Also turn on the embedded form”/);
   assert.deepEqual(w.injected, []);
+});
+
+const NO_RECEIVER = 'Could not establish connection. Receiving end does not exist.';
+test('missing top receiver preserves enabled page state with ready false', async () => {
+  const w = siteWorker({ enabled: true, topError: NO_RECEIVER });
+  const reply = await w.panel({ type: 'ui:pageState' });
+  assert.equal(reply.ok, true);
+  assert.deepEqual(plain(reply.data.site), { origin: ORIGIN, enabled: true, frames: [], ready: false });
+});
+test('loading page state does not message the top document', async () => {
+  const w = siteWorker({ enabled: true }); w.tab.status = 'loading';
+  const reply = await w.panel({ type: 'ui:pageState' });
+  assert.equal(reply.data.site.ready, false);
+  assert.deepEqual(w.content, []);
+});
+test('a ready content script reports ready true', async () => {
+  const w = siteWorker({ enabled: true });
+  assert.equal((await w.panel({ type: 'ui:pageState' })).data.site.ready, true);
+});
+test('malformed frames and other receiver errors still fail page state', async () => {
+  for (const setup of [{ framesReply: {} }, { topError: 'The message port closed before a response was received.' }]) {
+    const w = siteWorker({ enabled: true, ...setup });
+    assert.equal((await w.panel({ type: 'ui:pageState' })).ok, false);
+  }
+});
+const ownedFrameId = `frame-pantry.example.org--form.jotform.com`;
+function registerOwnedFrame(w, id = ownedFrameId) {
+  w.registered.set(id, { ...SITE_SCRIPT, id, matches: [`${FRAME_ORIGIN}/*`] });
+  w.permissions.add(`${FRAME_ORIGIN}/*`);
+}
+test('enableFrames records the top site in its persistent frame registration', async () => {
+  const w = siteWorker({ enabled: true, frames: [secondFrame({ granted: true })] });
+  assert.equal((await w.panel({ type: 'ui:enableFrames', confirmed: true })).ok, true);
+  assert.deepEqual(w.registered.get(ownedFrameId), { ...SITE_SCRIPT, id: ownedFrameId, matches: [`${FRAME_ORIGIN}/*`] });
+});
+test('a frame owned by another site is enabled when permission is held', async () => {
+  const w = siteWorker({ enabled: true, frames: [secondFrame()] });
+  registerOwnedFrame(w, 'frame-other.example.org--form.jotform.com');
+  assert.equal((await w.panel({ type: 'ui:pageState' })).data.site.frames[0].enabled, true);
+  w.permissions.delete(`${FRAME_ORIGIN}/*`);
+  assert.equal((await w.panel({ type: 'ui:pageState' })).data.site.frames[0].enabled, false);
+});
+test('disable without a receiver removes owned frame registrations and access', async () => {
+  const w = siteWorker({ enabled: true, topError: NO_RECEIVER });
+  registerOwnedFrame(w);
+  assert.equal((await w.panel({ type: 'ui:disableSite', confirmed: true })).ok, true);
+  assert.equal(w.registered.size, 0);
+  assert.equal(w.permissions.size, 0);
+  assert.deepEqual(w.content, []);
+});
+test('disable preserves frame permission while another registration uses it', async () => {
+  const w = siteWorker({ enabled: true, topError: NO_RECEIVER });
+  registerOwnedFrame(w);
+  const other = 'frame-other.example.org--form.jotform.com';
+  registerOwnedFrame(w, other);
+  assert.equal((await w.panel({ type: 'ui:disableSite', confirmed: true })).ok, true);
+  assert.deepEqual([...w.registered.keys()], [other]);
+  assert.deepEqual([...w.permissions], [`${FRAME_ORIGIN}/*`]);
+});
+test('autofill without a top receiver asks for reload', async () => {
+  const w = siteWorker({ enabled: true, topError: NO_RECEIVER });
+  assert.equal((await autofill(w)).data.message, 'Reload this page, then click Autofill.');
+  assert.deepEqual(w.native, []);
 });

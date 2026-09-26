@@ -13,7 +13,7 @@
   // Autofill keeps going only on Iowa; other sites get one fill per click.
   const continuing = result => result?.pageKey !== 'general' && !['stopped', 'locked', 'offline', 'error'].includes(result?.state);
   // The worker's metadata for a site other than Iowa: its origin and whether it is turned on.
-  const siteOf = state => state?.site && typeof state.site.origin === 'string' ? { origin: state.site.origin, enabled: state.site.enabled === true, frames: Array.isArray(state.site.frames) ? state.site.frames.filter(frame => frame && typeof frame.origin === 'string') : [] } : null;
+  const siteOf = state => state?.site && typeof state.site.origin === 'string' ? { origin: state.site.origin, enabled: state.site.enabled === true, ready: state.site.ready !== false, frames: Array.isArray(state.site.frames) ? state.site.frames.filter(frame => frame && typeof frame.origin === 'string') : [] } : null;
   const hostOf = origin => fixedText(new URL(origin).hostname, 90);
 
   if (location.search === '?surface=launcher' && !location.hash) { widget(); return; }
@@ -153,7 +153,7 @@
     }
     function controls() {
       const off = Boolean(target && site && !site.enabled);
-      const pending = site?.enabled ? site.frames.filter(frame => !frame.enabled) : [];
+      const pending = site?.enabled && site.ready ? site.frames.filter(frame => !frame.enabled) : [];
       $('frames-enable').hidden = !target || !pending.length;
       $('frames-enable').disabled = working;
       $('frames-enable').textContent = `Also turn on the embedded form (${pending.map(frame => hostOf(frame.origin)).join(', ')})`;
@@ -204,11 +204,12 @@
       if (!state || typeof state !== 'object') throw new Error('The page state could not be read. Reload Iowa’s page.');
       const page = state.page || {};
       site = siteOf(state);
-      fillable = site ? site.enabled : page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo);
+      fillable = site ? site.enabled && site.ready : page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo);
       autopilot = Boolean(state.autopilot);
       renderChecklist(page);
       const result = state.result;
-      if (result?.message) show(result.message, result.state === 'error' || result.state === 'offline');
+      if (site?.enabled && !site.ready) show(target?.status === 'loading' ? 'Waiting for the page to finish loading…' : 'Reload this page so SecondHand can read it.');
+      else if (result?.message) show(result.message, result.state === 'error' || result.state === 'offline');
       else if (site && !site.enabled) show(`SecondHand can fill forms on ${hostOf(site.origin)} after you turn it on here and approve it in the SecondHand app.`);
       else if (site) show('Click Autofill. SecondHand fills what it recognizes and lists what needs you. It never submits.');
       else if (fillable) show('Click Autofill. SecondHand fills what it can and tells you what it needs.');
@@ -232,6 +233,7 @@
             contextRevision++; revision = contextRevision;
             clearPage(); target = { id: tab.id, url: tab.url };
           }
+          target.status = tab.status;
           const state = await send({ type: 'ui:pageState', tabId: tab.id });
           if (revision === contextRevision && !stopped) render(state);
         } catch (error) {
