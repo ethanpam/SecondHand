@@ -12,14 +12,38 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
     func beginRequest(with context: NSExtensionContext) {
         guard let item = context.inputItems.first as? NSExtensionItem,
               let message = item.userInfo?[SFExtensionMessageKey] as? [String: Any],
-              Set(message.keys) == Set(["action", "pageURL", "keys"]),
-              message["action"] as? String == "contactFields",
-              let pageURL = message["pageURL"] as? String,
-              Self.isAllowedPage(pageURL),
+              let action = message["action"] as? String,
+              let pageURL = message["pageURL"] as? String else {
+            respond(["error": "unsupported_request"], to: context)
+            return
+        }
+
+        if action == "recordReceipt" {
+            guard Set(message.keys) == Set(["action", "pageURL", "confirmationNumber", "receiptID"]),
+                  let number = message["confirmationNumber"] as? String, number.count <= 100,
+                  let receiptID = message["receiptID"] as? String, receiptID.count == 36,
+                  let receipt = ApplicationReceipt(receiptID: receiptID, confirmationNumber: number, pageURL: pageURL) else {
+                respond(["error": "unsupported_request"], to: context)
+                return
+            }
+            do {
+                try SecureVault.writePendingReceipt(receipt)
+                respond(["recorded": true], to: context)
+            } catch VaultError.invalidSession {
+                respond(["error": "session_unavailable"], to: context)
+            } catch {
+                respond(["error": "receipt_unavailable"], to: context)
+            }
+            return
+        }
+
+        let allowed = action == "applicationFields" ? IowaApplicationBridge.allowedFieldKeys : Self.allowedKeys
+        guard Set(message.keys) == Set(["action", "pageURL", "keys"]),
+              (action == "applicationFields" && IowaApplicationBridge.allowsApplicationPage(pageURL))
+                || (action == "contactFields" && Self.isAllowedPage(pageURL)),
               let keys = message["keys"] as? [String],
-              !keys.isEmpty, keys.count <= Self.allowedKeys.count,
-              Set(keys).count == keys.count,
-              Set(keys).isSubset(of: Self.allowedKeys) else {
+              !keys.isEmpty, keys.count <= allowed.count,
+              Set(keys).count == keys.count, Set(keys).isSubset(of: allowed) else {
             respond(["error": "unsupported_request"], to: context)
             return
         }
@@ -32,7 +56,7 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             let requested = Set(keys)
             let fields = session.fields.filter {
                 requested.contains($0.key) && !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    && $0.value.count <= 500
+                    && $0.value.count <= 250
             }
             respond(["fields": fields, "expiresAt": session.expiresAt.timeIntervalSince1970 * 1_000], to: context)
         } catch {

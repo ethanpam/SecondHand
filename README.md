@@ -6,7 +6,7 @@ A desktop benefits companion and Chrome extension for Iowa SNAP. Your saved prof
 
 ## iPhone app
 
-A native SwiftUI iOS companion and Safari extension are in [`ios/`](ios/README.md). Open [`ios/SecondHand.xcodeproj`](ios/SecondHand.xcodeproj) in Xcode. It provides encrypted on-device profile and document storage, notice-based renewal reminders, and user-reviewed contact autofill. The iPhone and desktop vaults are independent; there is no cross-device synchronization. See the [iOS setup and validation guide](ios/README.md) for signing, Simulator tests, and current portal limitations.
+A native SwiftUI iOS companion and Safari extension are in [`ios/`](ios/README.md). Open [`ios/SecondHand.xcodeproj`](ios/SecondHand.xcodeproj) in Xcode. It provides encrypted on-device storage, renewal reminders, and a guided application assistant with saved-answer filling, explicit page continuation, separately approved submission, and user-reported confirmation capture. This is a prototype; live Iowa filing and authenticated renewal remain unverified. The iPhone and desktop vaults are independent; there is no cross-device synchronization. See the [iOS setup guide](ios/README.md) and [application pipeline](ios/docs/Application-assistant.md).
 
 ## Install on Windows or Mac
 
