@@ -219,12 +219,47 @@ test('a stale plan, an unknown key, or a field changed since planning is never f
   assert.equal(doc.getElementById('fname').value, 'Typed by the applicant');
 });
 
-test('focus finds a planned field by its id and nothing else', () => {
+// Records scrolls and focus changes; jsdom has no scrolling of its own.
+function watchAttention(doc) {
+  const seen = { scrolled: [], focus: [] };
+  doc.defaultView.HTMLElement.prototype.scrollIntoView = function () { seen.scrolled.push(this); };
+  for (const type of ['focus', 'blur']) doc.addEventListener(type, event => seen.focus.push(`${type}:${event.target.id}`), true);
+  return seen;
+}
+const highlighted = doc => [...doc.querySelectorAll('[data-secondhand-attention]')];
+
+test('showing a need-you field scrolls to its question and highlights it without moving keyboard focus', () => {
   const doc = page(forms.plainPantry);
+  const seen = watchAttention(doc);
   const result = generic.plan(doc);
   assert.equal(generic.focusField(doc, result.unmatched[0].id), true);
-  assert.equal(doc.activeElement.id, 'notes');
+  assert.deepEqual(highlighted(doc), [doc.getElementById('notes')]);
+  assert.deepEqual(seen.scrolled, [doc.getElementById('notes')]);
+  assert.equal(doc.activeElement, doc.body, 'keyboard focus stays where it was');
+  assert.deepEqual(seen.focus, []);
+  assert.match(doc.getElementById('secondhand-filled-style').textContent, /\[data-secondhand-attention\]/);
+  doc.getElementById('notes').dispatchEvent(new doc.defaultView.FocusEvent('focusin', { bubbles: true }));
+  assert.deepEqual(highlighted(doc), [], 'the highlight goes away once the applicant is in the question');
   assert.equal(generic.focusField(doc, 'input[type=password]'), false);
+});
+
+test('on Google Forms the whole question card is shown, one at a time, and no required check is triggered', () => {
+  const doc = page(forms.googleChoices);
+  const seen = watchAttention(doc);
+  const result = generic.plan(doc);
+  const card = heading => doc.getElementById(heading).closest('[role="listitem"]');
+  const [location, items] = result.unmatched;
+  assert.equal(generic.focusField(doc, location.id), true);
+  assert.deepEqual(highlighted(doc), [card('c3')]);
+  assert.equal(generic.focusField(doc, items.id), true);
+  assert.deepEqual(highlighted(doc), [card('c5')], 'the previous question is no longer highlighted');
+  assert.deepEqual(seen.scrolled, [card('c3'), card('c5')]);
+  assert.deepEqual(seen.focus, [], 'nothing is focused or blurred, so Google never flags a skipped question');
+  const dates = page(forms.googleDates);
+  watchAttention(dates);
+  const hour = generic.plan(dates).unmatched.find(field => field.label === 'Pickup time: Hour');
+  assert.equal(generic.focusField(dates, hour.id), true);
+  assert.deepEqual(highlighted(dates), [dates.getElementById('hour')], 'a question with several boxes highlights only the one asked about');
 });
 
 test('counts fill number dropdowns and "or more" choices; a yes/no checkbox is only ever checked for yes', () => {

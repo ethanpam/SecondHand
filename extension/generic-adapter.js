@@ -391,7 +391,8 @@
     if (doc.getElementById('secondhand-filled-style')) return;
     const style = doc.createElement('style');
     style.id = 'secondhand-filled-style';
-    style.textContent = '[data-secondhand-filled="rule"]{outline:2px solid #5f9b62!important;outline-offset:1px!important}[data-secondhand-filled="guess"]{outline:2px dashed #d99a2b!important;outline-offset:1px!important}';
+    style.textContent = '[data-secondhand-filled="rule"]{outline:2px solid #5f9b62!important;outline-offset:1px!important}[data-secondhand-filled="guess"]{outline:2px dashed #d99a2b!important;outline-offset:1px!important}' +
+      '[data-secondhand-attention]{outline:3px solid #d99a2b!important;outline-offset:3px!important;box-shadow:0 0 0 7px #d99a2b40!important}';
     (doc.head || doc.documentElement).append(style);
   }
   function fillFields(doc, token, assignments, values) {
@@ -413,13 +414,32 @@
     }
     return { ok: true, filled, skipped };
   }
+  // What to show for a question: its whole card or fieldset when that holds only this
+  // question's controls, otherwise the control (or choice group) itself.
+  function attentionTargets(entry, doc) {
+    const box = enclosingQuestion(entry.group || entry.elements[0], doc)?.box;
+    const own = new Set(entry.elements);
+    if (box && Array.from(box.querySelectorAll(`input:not([type="hidden"]), select, textarea, ${ARIA_CONTROLS}`)).every(control => own.has(control))) return [box];
+    return entry.group ? [entry.group] : entry.elements;
+  }
+  let clearAttention = () => {};
+  // Scrolls a question into view and highlights it. Keyboard focus is never moved: focusing
+  // and then leaving an empty field makes sites such as Google Forms flag it as required.
   function focusField(doc, id) {
     const entry = current && current.doc === doc ? current.map.get(id) : null;
     const element = entry?.elements[0];
     if (!element || !element.isConnected || !rendered(element)) return false;
-    if (typeof element.scrollIntoView === 'function') element.scrollIntoView({ block: 'center', inline: 'nearest' });
-    element.focus({ preventScroll: true });
-    return doc.activeElement === element;
+    clearAttention();
+    const targets = attentionTargets(entry, doc);
+    ensureStyle(doc);
+    const clear = () => {
+      for (const target of targets) { target.removeAttribute('data-secondhand-attention'); target.removeEventListener('focusin', clear); }
+      if (clearAttention === clear) clearAttention = () => {};
+    };
+    for (const target of targets) { target.setAttribute('data-secondhand-attention', ''); target.addEventListener('focusin', clear); }
+    clearAttention = clear;
+    if (typeof targets[0].scrollIntoView === 'function') targets[0].scrollIntoView({ block: 'center', inline: 'nearest' });
+    return true;
   }
   const elementFor = id => current?.map.get(id)?.elements[0] || null;
 
