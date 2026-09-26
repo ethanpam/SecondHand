@@ -15,6 +15,8 @@ This is an independent prototype, not an Iowa HHS product. It does not determine
 
 Saved information and reminders work offline. Opening the Iowa website, signing in, uploading proof, and submitting an application require internet access.
 
+**Second Hand has no app account or sign-in.** You can demo it without a paid Apple Developer subscription: Simulator needs no Apple account, and testing on your own iPhone uses a free Apple account in Xcode. An Iowa benefits-portal account is only relevant when using the official website. Apple's [account guidance](https://developer.apple.com/help/account/basics/about-your-developer-account) explains free personal-device testing and its limits.
+
 <img src="docs/images/overview.png" width="280" alt="Second Hand renewal overview with no saved personal data"> <img src="docs/images/documents.png" width="280" alt="Second Hand document vault empty state">
 
 ## Autofill scope
@@ -35,7 +37,7 @@ Open `ios/SecondHand.xcodeproj` from the repository root in Xcode and select the
 python3 scripts/generate_project.py
 ```
 
-Build for the simulator without device signing:
+Compile for the simulator without device signing (this checks the build only; use the demo steps below to run the app):
 
 ```sh
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
@@ -48,9 +50,34 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
 
 `DEVELOPER_DIR` selects Xcode for this command without changing the Mac's global developer-tool setting. Use the path to your Xcode installation if it differs.
 
-## Run on your iPhone
+## Demo in Simulator for free
 
-Choose your own Apple development team under **Signing & Capabilities** for both the app and Safari extension targets. Configure matching capabilities and provisioning for both targets; the repository contains no development-team credentials.
+No iPhone, Apple sign-in, or paid membership is needed. Apple also supports [testing Safari web extensions in Simulator](https://developer.apple.com/documentation/safariservices/running-your-safari-web-extension) before joining the Developer Program.
+
+1. Open `ios/SecondHand.xcodeproj` in Xcode and select the **SecondHand** scheme.
+2. In the destination menu beside the Run button, select an available **iPhone Simulator**.
+3. Open **Product → Scheme → Edit Scheme → Run → Arguments**. Add and enable `--ui-testing` under **Arguments Passed On Launch**.
+4. Click **▶ Run** or press **Command-R**, then explore the app using made-up sample information.
+
+The launch argument skips the device-authentication gate only in a **Debug Simulator build**. It has no effect on a physical iPhone or in a Release build. Keep Xcode's default local signing enabled: the app needs its Keychain and App Group entitlements even in Simulator. Do not use `CODE_SIGNING_ALLOWED=NO` for an interactive demo.
+
+## Demo on your iPhone for free
+
+You can install the app directly from your Mac with a **free Apple account / Personal Team**. You do not need to enroll in the paid Apple Developer Program for this personal-device demo. Apple's current [iOS capability matrix](https://developer.apple.com/help/account/reference/supported-capabilities-ios) includes App Groups and Keychain sharing for free Apple Developer accounts; provisioning still needs to succeed for your own account and identifiers.
+
+1. Connect your iPhone to the Mac with a data-capable USB cable. Unlock it and tap **Trust This Computer** if prompted. Use an iPhone with a device passcode set, since the app protects access with Face ID, Touch ID, or the device passcode.
+2. In **Xcode → Settings → Apple Accounts**, add your Apple account and complete sign-in. Internet access is needed for Xcode to set up signing.
+3. Open `ios/SecondHand.xcodeproj`. Select the blue project icon, then the **SecondHand** target. Under **Signing & Capabilities**, enable **Automatically manage signing** and choose your **Personal Team**. Repeat for the **SafariExtension** target using the same team.
+4. Select the **SecondHand** scheme and your connected **iPhone** in Xcode's destination menu, then click **▶ Run** or press **Command-R**.
+5. If Xcode asks for Developer Mode, open **Settings → Privacy & Security → Developer Mode** on the iPhone, turn it on, and follow the restart and confirmation prompts. Unlock the phone and run the app from Xcode again. If the setting is missing, let Xcode recognize the connected phone first.
+
+See Apple's [device setup instructions](https://developer.apple.com/documentation/xcode/running-your-app-on-simulated-or-physical-devices) and [Developer Mode guide](https://developer.apple.com/documentation/xcode/enabling-developer-mode-on-a-device).
+
+Once installed, you can disconnect the cable and demo the offline features. Free Personal Team provisioning lasts **7 days**; rebuild and run from Xcode with the same team and identifiers after it expires. You do not need to delete the app to renew it. Paid membership is needed for distribution through TestFlight or the App Store, not this personal-device demo. See [Apple's account guidance](https://developer.apple.com/help/account/basics/about-your-developer-account).
+
+### Signing identifiers
+
+The repository contains no development-team credentials. Both targets must use matching App Group and Keychain settings:
 
 | Setting | Value |
 | --- | --- |
@@ -59,11 +86,13 @@ Choose your own Apple development team under **Signing & Capabilities** for both
 | Shared App Group | `group.com.ethanpam.secondhand` |
 | Shared Keychain access group | `$(AppIdentifierPrefix)com.ethanpam.secondhand.shared` |
 
-If these identifiers are unavailable to your team, change them consistently in the project generator, entitlements, and matching source constants. App Groups and shared Keychain access must resolve to the same values in both signed targets. Your Apple account must support provisioning the required capabilities.
+If Xcode reports that these identifiers are unavailable to your team, change them consistently in `scripts/generate_project.py`, both targets' entitlements and `Info.plist` files, and matching source constants in `SecondHand/Core/SecureVault.swift`, then regenerate the project. Recheck the signing team after regeneration. App Groups and shared Keychain access must resolve to the same values in both signed targets. An identifier conflict does not mean you need a paid subscription.
 
-Build and run the app on the connected iPhone. Enable SecondHand in Safari's extension settings and grant access to `hhsservices.iowa.gov`. On current iOS versions, Safari settings are under **Settings → Apps → Safari → Extensions**; older versions place Safari directly in Settings.
+### Try Safari autofill (optional)
 
-Save and review your profile in the app, enable its temporary Safari sharing session, then open the official portal in Safari. Sign in yourself if needed. Open SecondHand from Safari's extension menu and use its fill action on the intended application page. Review the result, complete any remaining information, and submit yourself. Follow the instructions on your HHS notice for recertification.
+After installing the app, enable SecondHand in Safari's extension settings and grant access to `hhsservices.iowa.gov`. On current iOS versions, Safari settings are under **Settings → Apps → Safari → Extensions**; older versions place Safari directly in Settings.
+
+Save and review your profile in the app, enable its temporary Safari sharing session, then open the official portal in Safari. Any instruction to sign in here refers to your **Iowa benefits-portal account**, not an Apple account or a Second Hand account. Open SecondHand from Safari's extension menu and use its fill action on the intended application page. Review the result, complete any remaining information, and submit yourself only when making a real application. You do not need to create or submit an Iowa application to demo the native app. Follow the instructions on your HHS notice for recertification.
 
 ## Tests and validation
 
@@ -87,7 +116,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
 
 Tests use local ad-hoc signing so the Simulator can enforce the app's Keychain and App Group entitlements. Unlike the compile-only command above, do not disable signing for an interactive run or UI test.
 
-For automated UI tests, the `--ui-testing` launch argument skips device authentication **only in a Debug build running in the iOS Simulator**. It does not bypass authentication in a Release build or on a physical iPhone. To explore the prototype in Simulator, add that argument in **Edit Scheme → Run → Arguments**. Use synthetic test records. Simulator UI testing does not validate Face ID, Touch ID, or device-passcode behavior.
+Automated UI tests use the same Debug Simulator-only `--ui-testing` authentication bypass described in the Simulator demo steps above. Simulator UI testing does not validate Face ID, Touch ID, or device-passcode behavior.
 
 Before distributing the app, validate signed App Group and Keychain sharing, biometrics and device-passcode authentication, document lifecycle, notifications, accessibility, and Safari behavior on a real device. Physical-device authentication and authenticated live SNAP-case testing remain pending. No App Store release has been performed.
 
