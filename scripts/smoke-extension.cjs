@@ -16,7 +16,12 @@ const applicant = `${portal}/applyForBenefits/enterPersonalInfo`;
 const extensionDirectory = path.join(root, 'extension');
 
 function fixture(nextStep) {
-  const nextMarkup = nextStep === 'consent'
+  // Address controls below are hypothetical QA controls, not an observed Iowa
+  // schema. They verify the shipping adapter's refusal to operate this step.
+  const addressReview = nextStep === 'address-review';
+  const nextMarkup = addressReview
+    ? '<h1>Select Address</h1><p data-qa-only>HYPOTHETICAL QA CONTROLS. These are not verified Iowa selectors or address-selection behavior.</p><fieldset><legend>Fictional address choices for the isolation test</legend><label><input id="qa-original-address" name="qa-address-choice" type="radio" value="original">123 Test Way, Unit 4, Demo City, IA 50309</label><label><input id="qa-suggested-address" name="qa-address-choice" type="radio" value="suggested">123 TEST WAY, UNIT 4, DEMO CITY, IA 50309</label></fieldset><button id="qa-address-continue" type="button">Continue (QA only)</button>'
+    : nextStep === 'consent'
     ? '<h1>Terms and Consent</h1><label><input id="termChkbox" type="checkbox">I agree to the terms</label><button type="button">Continue</button>'
     : '<h1>Household Members</h1><label>Household member<input name="householdMember"></label><button type="button">Continue</button>';
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Synthetic Iowa flow · test only</title>
@@ -25,11 +30,14 @@ function fixture(nextStep) {
     ${applicantFixture.html}</main><script>
       (${applicantFixture.attachConditionalHandlers.toString()})(document);
       window.__nextClicks = 0; window.__lastAnswers = null;
+      window.__addressNextClicks = 0; window.__addressChoiceEvents = 0;
       document.querySelector('.saveAndContinueButton').addEventListener('click', () => {
         window.__nextClicks++;
         window.__lastAnswers = Object.fromEntries(Array.from(document.querySelectorAll('#personalInformation input, #personalInformation select'), element => [element.id, ['checkbox','radio'].includes(element.type) ? element.checked : element.value]));
         document.getElementById('synthetic-content').innerHTML = ${JSON.stringify(nextMarkup)};
-        history.pushState({}, '', ${JSON.stringify(`${portal}/applyForBenefits/${nextStep === 'consent' ? 'consent' : 'household'}`)});
+        history.pushState({}, '', ${JSON.stringify(addressReview ? `${portal}/qa-only/select-address` : `${portal}/applyForBenefits/${nextStep === 'consent' ? 'consent' : 'household'}`)});
+        document.getElementById('qa-address-continue')?.addEventListener('click', () => { window.__addressNextClicks++; });
+        document.querySelectorAll('[name="qa-address-choice"]').forEach(input => input.addEventListener('change', () => { window.__addressChoiceEvents++; }));
       });
     </script></body></html>`;
 }
@@ -246,6 +254,27 @@ async function main() {
     assert.equal((await page.evaluate(() => window.__lastAnswers)).snap, true);
     await stop();
     console.log('Native sidebar: completing an unanswered question reveals a new branch and safely continues approved autofill.');
+
+    await startFixture({ next: 'address-review' });
+    await panel.click('#start-auto'); await nextOnce();
+    await expect(page.locator('[data-qa-only]')).toContainText('HYPOTHETICAL QA CONTROLS');
+    await expect.poll(() => panel.text('[data-key="addressReview"]')).toContain('Needs manual review');
+    await expect.poll(() => panel.text('#manual-reason')).toContain('has not been live-verified');
+    assert.equal(await panel.evaluate(() => document.querySelector('#start-auto').disabled), true);
+    assert.equal(await panel.evaluate(() => document.querySelector('#fill-next').disabled), true);
+    const addressProfileRequests = (await worker.evaluate(() => globalThis.__nativeSmoke.calls)).filter(call => call.type === 'getFields').length;
+    assert.ok(addressProfileRequests > 0, 'The known applicant page must have used the approved fictional profile first.');
+    // Let the actual sidebar poll the address heading multiple times. These
+    // hypothetical radios and Continue button must remain untouched throughout.
+    await page.waitForTimeout(3400);
+    await expect(page.locator('#qa-original-address')).not.toBeChecked();
+    await expect(page.locator('#qa-suggested-address')).not.toBeChecked();
+    assert.deepEqual(await page.evaluate(() => ({ applicantNext: window.__nextClicks, addressNext: window.__addressNextClicks, addressChanges: window.__addressChoiceEvents })), { applicantNext: 1, addressNext: 0, addressChanges: 0 });
+    assert.equal((await worker.evaluate(() => globalThis.__nativeSmoke.calls)).filter(call => call.type === 'getFields').length, addressProfileRequests);
+    await expect.poll(() => panel.text('#guided-state')).toBe('PAUSED FOR YOUR REVIEW');
+    await panel.screenshot(path.join(root, 'artifacts/extension-address-pause.png'));
+    await stop();
+    console.log('Native sidebar: hypothetical Select Address remains manual, with no address choice, second Next, or further native profile request.');
 
     await startFixture({ next: 'consent' });
     await panel.click('#start-auto'); await nextOnce();

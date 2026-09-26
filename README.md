@@ -46,6 +46,8 @@ npm run dist:mac      # Unsigned DMGs for Apple silicon and Intel Macs
 
 Fictional QA data is in [`tests/fixtures/applicant-profile.json`](tests/fixtures/applicant-profile.json). It is for isolated tests only and is never sent to the real Iowa portal.
 
+Address confirmation is under development. The [comparison component and integration notes](docs/address-automation.md) cover strict address matching; live address selection remains disabled pending inspection of Iowa's actual controls.
+
 GitHub Actions runs syntax/security configuration checks, unit/integration tests, Electron/native smoke tests, and builds Windows installers plus Apple silicon and Intel Mac disk images. Workflow artifacts expire after 30 days and can be rebuilt with **Run workflow**; tagged builds can retain installers in a GitHub prerelease. No application server, database service, API keys, or applicant account with secondHand is required.
 
 ## Data boundaries
