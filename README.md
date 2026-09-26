@@ -18,7 +18,7 @@ Keep the desktop app running and unlocked when using the extension. A lock, an u
 
 ## Develop
 
-Requires Node.js 22.12+ (Node 24 recommended) and npm. Windows is the installer target; macOS is supported for development. The Windows build also uses the .NET Framework 4.x compiler included with supported Windows installations to compile the small native-messaging launcher from source.
+Requires Node.js 22.12+ (Node 24 recommended) and npm. Windows is the installer target; macOS is supported for development. The Windows build also uses the .NET Framework 4.x compiler included with supported Windows installations to compile the small native-messaging host from source.
 
 ```sh
 npm ci
@@ -31,7 +31,7 @@ For the development extension, load this repository's `extension/` directory unp
 
 ```sh
 npm run test:ui       # Real Electron UI smoke test; needs a desktop session
-npm run test:native   # Real native-host subprocess and binary protocol test
+npm run test:native   # Native protocol test (on Windows set SECONDHAND_PACKAGED_EXE to the built native host)
 npm run extension:zip
 npm run dist:win      # Run on Windows to build the NSIS .exe installer
 npm run dist:mac      # Optional unsigned local macOS application bundle

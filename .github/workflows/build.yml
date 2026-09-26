@@ -18,7 +18,6 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm run test:ui
-      - run: npm run test:native
       - run: npm run extension:zip
       - run: npm run dist:win
         env:

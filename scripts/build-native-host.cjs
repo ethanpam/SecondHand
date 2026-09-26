@@ -11,9 +11,9 @@ const compiler = ['Framework64', 'Framework'].map(directory =>
 if (!compiler) throw new Error('The Windows .NET Framework C# compiler was not found. Enable .NET Framework 4.8 and try again.');
 const directory = path.join(root, 'build', 'native');
 fs.mkdirSync(directory, { recursive: true });
-const result = spawnSync(compiler, ['/nologo', '/target:exe', '/platform:anycpu', '/optimize+',
+const result = spawnSync(compiler, ['/nologo', '/target:exe', '/platform:anycpu', '/optimize+', '/reference:System.Web.Extensions.dll',
   `/out:${path.join(directory, 'secondHand-native.exe')}`, path.join(root, 'desktop', 'native-launcher.cs')],
 { stdio: 'inherit', windowsHide: true });
 if (result.error) throw result.error;
 if (result.status !== 0) process.exit(result.status || 1);
-console.log('Built Windows native messaging launcher.');
+console.log('Built Windows native messaging relay.');

@@ -1,8 +1,8 @@
 'use strict';
 
 // Invoked explicitly with `node tests/desktop-native-smoke.cjs`. This starts an
-// actual Electron native-host process, so Linux runners need a display/Xvfb.
-// SECONDHAND_PACKAGED_EXE points to the installed/built Windows native launcher
+// actual native-host process; the Electron path on Linux needs a display/Xvfb.
+// SECONDHAND_PACKAGED_EXE points to the installed/built Windows native relay
 // (the adjacent app executable also works). This exercises Chrome's exact entry.
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
@@ -12,9 +12,10 @@ const { spawn } = require('node:child_process');
 const { startBridge, frame, FrameReader } = require('../desktop/bridge.cjs');
 
 (async () => {
-  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-native-smoke-'));
   const packaged = process.env.SECONDHAND_PACKAGED_EXE;
+  if (process.platform === 'win32' && !packaged) throw new Error('Windows native messaging requires the compiled host. Run npm run dist:win and set SECONDHAND_PACKAGED_EXE to release/win-unpacked/secondHand-native.exe.');
   if (packaged && process.platform !== 'win32') throw new Error('Packaged smoke currently isolates app data on Windows only.');
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-native-smoke-'));
   const userData = packaged ? path.join(temporary, 'SecondHand') : path.join(temporary, 'dev-data');
   const extensionId = 'a'.repeat(32);
   let bridge;
@@ -27,10 +28,8 @@ const { startBridge, frame, FrameReader } = require('../desktop/bridge.cjs');
     const executable = packaged ? path.join(path.dirname(path.resolve(packaged)), 'secondHand-native.exe') : require('electron');
     const args = [...(packaged ? [] : [path.resolve(__dirname, '..')]), `chrome-extension://${extensionId}/`];
     const env = { ...process.env, SECONDHAND_USER_DATA: userData, LOCALAPPDATA: temporary };
-    // A Windows native host must set this before Electron starts. The packaged
-    // helper does so itself; development smoke sets the equivalent child env.
-    if (!packaged) env.ELECTRON_NO_ATTACH_CONSOLE = '1';
-    else delete env.ELECTRON_NO_ATTACH_CONSOLE;
+    // The Windows production host is independent of Electron and its console.
+    delete env.ELECTRON_NO_ATTACH_CONSOLE;
     delete env.ELECTRON_RUN_AS_NODE;
     child = spawn(executable, args, { env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     let stderr = '';
@@ -56,12 +55,13 @@ const { startBridge, frame, FrameReader } = require('../desktop/bridge.cjs');
       child.once('close', (code, signal) => { clearTimeout(timeout); resolve({ code, signal }); });
     });
     child.stdin.on('error', () => {});
-    child.stdin.end(frame({ id: 'native-smoke', type: 'status' }));
+    const identifiers = ['native-smoke', 'native-smoke-again'];
+    child.stdin.end(Buffer.concat(identifiers.map(id => frame({ id, type: 'status' }))));
     const result = await ended;
     assert.equal(result.code, 0, `Native host failed (${result.signal || result.code}). ${stderr}`);
     assert.equal(framingInvalid, false, `Native host emitted non-protocol stdout (${stdoutBytes} bytes; bounded synthetic hex: ${stdoutPrefix.toString('hex')}). ${stderr}`);
-    assert.deepEqual(messages, [{ id: 'native-smoke', ok: true, data: { unlocked: false, applicationCount: 0 } }]);
-    process.stdout.write(`Native messaging subprocess smoke passed (${packaged ? 'packaged Windows launcher + app' : 'development Electron'}).\n`);
+    assert.deepEqual(messages, identifiers.map(id => ({ id, ok: true, data: { unlocked: false, applicationCount: 0 } })));
+    process.stdout.write(`Native messaging subprocess smoke passed (${packaged ? 'packaged Windows native relay' : 'development Electron'}).\n`);
   } finally {
     if (child && child.exitCode === null) child.kill();
     if (bridge) await bridge.close();

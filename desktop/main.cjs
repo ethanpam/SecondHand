@@ -16,8 +16,8 @@ const localAppData = process.platform === 'win32' ?
 app.setPath('userData', !app.isPackaged && process.env.SECONDHAND_USER_DATA ?
   path.resolve(process.env.SECONDHAND_USER_DATA) : path.join(localAppData, 'SecondHand'));
 
-// Chrome invokes the same packaged executable with its origin. Handle this BEFORE
-// taking the desktop single-instance lock so Chrome receives framed stdout.
+// On macOS/Linux, Chrome invokes the app executable with its origin. Handle this
+// before the desktop single-instance lock. Windows uses its standalone C# relay.
 const nativeOrigin = process.argv.find(argument => argument.startsWith('chrome-extension://'));
 if (nativeOrigin) {
   const extensionId = extensionFromOrigin(nativeOrigin);
