@@ -60,6 +60,8 @@ node --test ios/Tests/*.test.js android/tests/*.test.js
 
 See [validation results](docs/Validation.md) for actual checks and remaining device work.
 
+The [Iowa guest-page QA report](docs/Iowa-guest-QA.md) covers the exact `guestLogin` URL and a fictional-profile run against the reconstructed applicant form. The live check is opt-in and never fills or saves applicant answers.
+
 ## How application assistance works
 
 1. Save and confirm the current profile. Review income and housing amounts before sharing them.

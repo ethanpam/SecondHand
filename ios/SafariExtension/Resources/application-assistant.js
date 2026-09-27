@@ -87,6 +87,12 @@
     const headings = Array.from(doc.querySelectorAll("h1,h2,h3"))
       .filter(element => rendered(element, doc)).map(element => normalize(element.textContent));
     const inputs = Array.from(doc.querySelectorAll("input,select,textarea"));
+    // The laptop's address-selection policy is not integrated with mobile.
+    // Never let this observed address step fall through to generic Continue.
+    if (new URL(url).pathname === "/apspssp/ssp.portal/applyForBenefits/addressValidation"
+      || headings.includes("select address")) {
+      return { kind: "manual", title: "Review Iowa’s address choices", reason: "Choose and confirm the correct address directly on Iowa’s website, then check the next page to resume assistance." };
+    }
     const challenge = inputs.some(element => rendered(element, doc) &&
       (element.type === "password" || /captcha|one.?time|security.?code|verification.?code|\botp\b/i.test(
         words(`${element.id} ${element.name} ${labels(element, doc).join(" ")}`))));

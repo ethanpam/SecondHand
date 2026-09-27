@@ -6,6 +6,7 @@ const assistant = require("../SafariExtension/Resources/application-assistant.js
 const BASE = "https://hhsservices.iowa.gov/apspssp/ssp.portal/applyForBenefits/";
 const APPLICANT = BASE + "enterPersonalInfo";
 const applicantFixture = require("../../tests/fixtures/iowa-personal-information.cjs");
+const addressFixture = require("../../tests/fixtures/iowa-select-address.cjs");
 const knownHTML = applicantFixture.html;
 function page(html = knownHTML, url = APPLICANT) {
   const dom = new JSDOM(`<!doctype html><html><body><main>${html}</main></body></html>`, { url, pretendToBeVisual: true });
@@ -93,6 +94,33 @@ test("login, CAPTCHA, preliminary consent, uploads and receipt pages pause", () 
   ]) {
     const scan = inspect(page(html, BASE + route));
     assert.equal(scan.kind, kind);
+    assert.deepEqual(scan.fields, []);
+    assert.deepEqual(scan.actions, []);
+  }
+});
+
+test("observed Iowa address selection stays manual on mobile, including errors and dialogs", async () => {
+  for (const [name, options] of [["normal", {}], ["error", { error: true }], ["dialog", { modal: true }]]) {
+    const doc = page(addressFixture.makeHtml(options), addressFixture.URL);
+    addressFixture.attachHandlers(doc);
+    const scan = inspect(doc);
+    assert.equal(scan.kind, "manual", name);
+    assert.deepEqual(scan.fields, [], name);
+    assert.deepEqual(scan.actions, [], name);
+    const result = await act(doc, addressFixture.URL, scan.token, "action-0", false);
+    assert.equal(result.error, "approval_required", name);
+    assert.equal(doc.__addressQa.nextClicks, 0, name);
+    assert.deepEqual(doc.__addressQa.selectionClicks, [], name);
+  }
+});
+
+test("address route or heading independently blocks generic mobile Continue", () => {
+  for (const [html, url] of [
+    ['<h1>Changed layout</h1><form action="selectedAddress"><button>Continue</button></form>', addressFixture.URL],
+    ['<h1>Select Address</h1><form action="more"><button>Continue</button></form>', BASE + "more"]
+  ]) {
+    const scan = inspect(page(html, url));
+    assert.equal(scan.kind, "manual");
     assert.deepEqual(scan.fields, []);
     assert.deepEqual(scan.actions, []);
   }
