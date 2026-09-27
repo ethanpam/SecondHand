@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { CheckIcon } from './icons';
-import { MotionToggle, useVisibleMotion } from './site-motion';
+import { useVisibleMotion } from './site-motion';
 
 const stages = [
   { name: 'approach', duration: 1100, filled: 0 },
@@ -20,10 +20,8 @@ const fields = [
 ];
 
 export function AutofillDemo() {
-  const { ref, active, enabled, reducedMotion } =
-    useVisibleMotion<HTMLElement>();
+  const { ref, active, enabled } = useVisibleMotion<HTMLElement>();
   const [stageIndex, setStageIndex] = useState(0);
-  const [replay, setReplay] = useState(0);
   const stage = stages[enabled ? stageIndex : stages.length - 1];
 
   useEffect(() => {
@@ -33,12 +31,7 @@ export function AutofillDemo() {
       stages[stageIndex].duration,
     );
     return () => clearTimeout(timeout);
-  }, [active, stageIndex, replay]);
-
-  function replayDemo() {
-    setStageIndex(0);
-    setReplay((count) => count + 1);
-  }
+  }, [active, stageIndex]);
 
   return (
     <figure
@@ -49,7 +42,7 @@ export function AutofillDemo() {
       data-running={active}
       data-motion={enabled}
     >
-      <div key={replay} className="autofill-scene" aria-hidden="true">
+      <div className="autofill-scene" aria-hidden="true">
         <div className="autofill-toolbar">
           <span>With your permission.</span>
           <div className="autofill-trigger">
@@ -100,19 +93,6 @@ export function AutofillDemo() {
           and Ames. You review the answers before continuing.
         </span>
       </figcaption>
-      {!reducedMotion && (
-        <div className="autofill-controls">
-          <button
-            className="replay-demo"
-            type="button"
-            onClick={replayDemo}
-            disabled={!enabled}
-          >
-            Replay demo <span aria-hidden="true">↻</span>
-          </button>
-          <MotionToggle label="all animations" />
-        </div>
-      )}
     </figure>
   );
 }

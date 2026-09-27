@@ -287,17 +287,6 @@ nav a:hover {
   align-items: center;
   gap: 18px;
 }
-.motion-toggle {
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
-  min-height: 40px;
-  padding: 8px 0;
-  background: none;
-  border: 0;
-  color: var(--foreground);
-  font-size: 11px;
-}
 .intro {
   display: grid;
   grid-template-columns: 1fr 0.92fr;
@@ -848,35 +837,6 @@ kbd {
   margin-top: 14px;
   color: var(--muted-foreground);
   font-size: 11px;
-}
-.autofill-controls {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 28px;
-  margin-top: 6px;
-}
-.replay-demo {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 40px;
-  padding: 8px 0;
-  border: 0;
-  background: none;
-  color: var(--foreground);
-  font-size: 11px;
-  text-underline-offset: 4px;
-}
-.replay-demo:hover:enabled {
-  text-decoration: underline;
-}
-.replay-demo:disabled {
-  color: var(--muted-foreground);
-  cursor: default;
-}
-.replay-demo span {
-  font-size: 18px;
 }
 @keyframes autofill-approach {
   from {
