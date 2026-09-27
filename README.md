@@ -53,6 +53,7 @@ npm run test:native   # Native protocol test (on Windows set SECONDHAND_PACKAGED
 npm run extension:zip
 npm run dist:win      # Run on Windows to build the NSIS .exe installer
 npm run dist:mac      # Unsigned DMGs for Apple silicon and Intel Macs
+swift scripts/generate-icons.swift # On a Mac: rebuild every app icon from website/public/brand/secondhand-mascot.png
 ```
 
 Fictional QA data is in [`tests/fixtures/applicant-profile.json`](tests/fixtures/applicant-profile.json). Automated tests use it only in isolated browsers with all Iowa requests intercepted. The separately authorized manual live inspection is documented in [the journey record](docs/iowa-live-journey.md); it stopped at E-Signature without signing or submitting.
