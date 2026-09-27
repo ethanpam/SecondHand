@@ -647,6 +647,9 @@
       showError('autofill-trust-error', error);
     }).finally(() => { $('autofill-trust').disabled = false; });
   });
+  $('extension-guide').addEventListener('click', () => pending($('extension-guide'), async () => {
+    try { await api.openExtensionGuide(); } catch (error) { toast(error.message || 'Unable to open the guide.', true); }
+  }));
   $('extension-open-portal').addEventListener('click', () => pending($('extension-open-portal'), async () => {
     try { await api.openPortal(); } catch (error) { toast(error.message || 'Unable to open the Iowa portal.', true); }
   }));

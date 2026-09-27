@@ -14,7 +14,7 @@ const source = fs.readFileSync(path.join(root, 'desktop/main.cjs'), 'utf8');
 
 // Runs the real main process and vault against a temporary folder. Only the
 // operating system's protected storage is simulated, so no Keychain is touched.
-async function desktop(t, { encryptionAvailable = true } = {}) {
+async function desktop(t, { encryptionAvailable = true, shell = {}, env = {}, isPackaged = false } = {}) {
   const userData = await fsp.mkdtemp(path.join(os.tmpdir(), 'secondhand-recovery-main-'));
   t.after(() => fsp.rm(userData, { recursive: true, force: true }));
   let invoke;
@@ -37,11 +37,11 @@ async function desktop(t, { encryptionAvailable = true } = {}) {
     show() {} focus() {} setMenuBarVisibility() {} once() {} on() {} loadFile() {}
     isDestroyed() { return false; }
   }
-  const app = { isPackaged: false, setName() {}, setPath() {}, getPath: () => userData,
+  const app = { isPackaged, setName() {}, setPath() {}, getPath: () => userData,
     requestSingleInstanceLock: () => true, whenReady: () => Promise.resolve(), on() {} };
   const electron = { app, BrowserWindow, safeStorage, ipcMain: { handle(_name, handler) { invoke = handler; } },
     dialog: { showErrorBox() { assert.fail('Desktop setup failed'); } },
-    shell: {}, clipboard: {}, powerMonitor: { on() {} },
+    shell, clipboard: {}, powerMonitor: { on() {} },
     session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, webRequest: { onBeforeRequest() {} } } } };
   const overrides = {
     electron,
@@ -52,7 +52,7 @@ async function desktop(t, { encryptionAvailable = true } = {}) {
   };
   vm.runInNewContext(source, {
     require: name => Object.hasOwn(overrides, name) ? overrides[name] : require(name.startsWith('.') ? path.join(root, 'desktop', name) : name),
-    __dirname: path.join(root, 'desktop'), process: { platform: 'darwin', env: {}, argv: ['synthetic-electron'] },
+    __dirname: path.join(root, 'desktop'), process: { platform: 'darwin', env, argv: ['synthetic-electron'] },
     setTimeout: () => 1, clearTimeout() {}, Buffer
   });
   for (let attempt = 0; !window && attempt < 200; attempt++) await new Promise(resolve => setTimeout(resolve, 5));
@@ -104,4 +104,16 @@ test('without protected storage, a new password still gets a recovery key and re
   assert.match(created.recoveryKey, /^[0-9A-Z]{4}(?:-[0-9A-Z]{4}){7}$/);
   await assert.rejects(fsp.access(app.secretPath));
   await assert.rejects(app.invoke('setDeviceReset', true), /couldn’t save a reset option/);
+});
+
+test('the Chrome setup guide opens the published page, or a local website only during development', async t => {
+  const published = 'https://secondhand-download.khoidoan00.chatgpt.site/chrome-extension';
+  const opened = [];
+  const shell = { openExternal: async url => { opened.push(url); } };
+  for (const options of [{}, { env: { SECONDHAND_WEBSITE_URL: 'http://localhost:3002' } }, { env: { SECONDHAND_WEBSITE_URL: 'javascript:alert(1)' } },
+    { env: { SECONDHAND_WEBSITE_URL: 'file:///etc/passwd' } }, { isPackaged: true, env: { SECONDHAND_WEBSITE_URL: 'http://localhost:3002' } }]) {
+    const app = await desktop(t, { shell, ...options });
+    assert.equal(await app.invoke('openExtensionGuide'), true);
+  }
+  assert.deepEqual(opened, [published, 'http://localhost:3002/chrome-extension', published, published, published]);
 });
