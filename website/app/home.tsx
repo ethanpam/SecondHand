@@ -14,6 +14,8 @@ import { faq } from './faq';
 import { release } from './release';
 import { SiteFooter, SiteHeader } from './site-chrome';
 import { MotionProvider, MotionToggle } from './site-motion';
+import { TextType } from './text-type';
+import { AutofillDemo } from './autofill-demo';
 
 const platforms = [
   { id: 'windows', label: 'Windows' },
@@ -452,10 +454,9 @@ export function Home() {
               aria-labelledby="closing-heading"
             >
               <h2 id="closing-heading">
-                Ready for
-                <br />
-                less typing?
+                <TextType text={'Ready for\nless typing?'} />
               </h2>
+              <AutofillDemo />
               <a className="primary-link" href="#downloads">
                 Download SecondHand <ArrowIcon />
               </a>

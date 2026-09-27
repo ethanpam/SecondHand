@@ -3,6 +3,8 @@
 import {
   createContext,
   useContext,
+  useEffect,
+  useRef,
   useState,
   useSyncExternalStore,
   type ReactNode,
@@ -41,7 +43,40 @@ export function useSiteMotion() {
   };
 }
 
-export function MotionToggle() {
+function subscribeToVisibility(onChange: () => void) {
+  document.addEventListener('visibilitychange', onChange);
+  return () => document.removeEventListener('visibilitychange', onChange);
+}
+
+export function useVisibleMotion<Element extends HTMLElement>() {
+  const motion = useSiteMotion();
+  const ref = useRef<Element>(null);
+  const [visible, setVisible] = useState(false);
+  const documentVisible = useSyncExternalStore(
+    subscribeToVisibility,
+    () => document.visibilityState === 'visible',
+    () => false,
+  );
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setVisible(entry.isIntersecting),
+      { threshold: 0.15 },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  return {
+    ...motion,
+    ref,
+    active: motion.enabled && visible && documentVisible,
+  };
+}
+
+export function MotionToggle({ label = 'animations' }: { label?: string }) {
   const { paused, toggle, reducedMotion } = useSiteMotion();
   if (reducedMotion) return null;
   return (
@@ -49,7 +84,7 @@ export function MotionToggle() {
       type="button"
       className="motion-toggle"
       onClick={toggle}
-      aria-label={paused ? 'Play animations' : 'Pause animations'}
+      aria-label={`${paused ? 'Play' : 'Pause'} ${label}`}
       aria-pressed={paused}
     >
       <svg

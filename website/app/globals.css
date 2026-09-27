@@ -737,6 +737,213 @@ kbd {
 .closing-section .micro {
   margin-top: 24px;
 }
+.screen-reader-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.text-type {
+  display: inline-grid;
+  max-width: 100%;
+  white-space: pre-wrap;
+}
+.text-type__reserve,
+.text-type__visible {
+  grid-area: 1 / 1;
+}
+.text-type__reserve {
+  visibility: hidden;
+}
+.text-type__cursor {
+  display: inline-block;
+  width: 0;
+  font-weight: 400;
+  color: var(--ring);
+  animation: text-type-cursor 1s step-end infinite;
+}
+.text-type[data-running='false'] .text-type__cursor {
+  animation-play-state: paused;
+}
+.text-type[data-motion='false'] .text-type__cursor {
+  visibility: hidden;
+}
+@keyframes text-type-cursor {
+  50% {
+    opacity: 0;
+  }
+}
+.autofill-demo {
+  max-width: 560px;
+  margin: 0 auto 36px;
+  font-size: 13px;
+}
+.autofill-scene {
+  overflow: clip;
+  padding: 26px 28px 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  text-align: left;
+}
+.autofill-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+.autofill-toolbar > span {
+  max-width: 160px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.autofill-trigger {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  gap: 14px;
+  padding: 11px 16px;
+  border-radius: 100px;
+  color: #fff;
+  background: var(--primary);
+  font-size: 12px;
+  font-weight: 500;
+}
+.autofill-cursor {
+  position: absolute;
+  z-index: 1;
+  top: 65%;
+  left: 32%;
+  pointer-events: none;
+}
+.autofill-demo[data-phase='approach'] .autofill-cursor {
+  animation: autofill-approach 1100ms cubic-bezier(0.22, 0.65, 0.35, 1) both;
+}
+.autofill-demo[data-phase='click'] .autofill-cursor {
+  animation: autofill-click 280ms ease both;
+}
+.autofill-click-ring {
+  position: absolute;
+  top: 65%;
+  left: 32%;
+  width: 24px;
+  height: 24px;
+  margin: -12px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  opacity: 0;
+}
+.autofill-demo[data-phase='click'] .autofill-click-ring {
+  animation: autofill-ring 280ms ease-out both;
+}
+.autofill-demo[data-running='false'] .autofill-cursor,
+.autofill-demo[data-running='false'] .autofill-click-ring {
+  animation-play-state: paused;
+}
+.autofill-demo[data-phase='complete'] .autofill-cursor,
+.autofill-demo[data-motion='false'] .autofill-cursor {
+  visibility: hidden;
+}
+.autofill-fields {
+  display: grid;
+  gap: 14px;
+}
+.autofill-label {
+  display: block;
+  font-size: 11px;
+  margin-bottom: 5px;
+  color: var(--muted-foreground);
+}
+.autofill-value {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid #dcded8;
+  border-radius: 5px;
+  color: var(--muted-foreground);
+  font-size: 14px;
+}
+.autofill-field[data-filled='true'] .autofill-value {
+  color: var(--foreground);
+  background: #f1f6ee;
+}
+.autofill-value svg {
+  color: var(--ring);
+}
+.autofill-result {
+  margin: 20px 0 0;
+  min-height: 40px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.autofill-demo figcaption {
+  margin-top: 14px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.autofill-controls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 28px;
+  margin-top: 6px;
+}
+.replay-demo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 8px 0;
+  border: 0;
+  background: none;
+  color: var(--foreground);
+  font-size: 11px;
+  text-underline-offset: 4px;
+}
+.replay-demo:hover:enabled {
+  text-decoration: underline;
+}
+.replay-demo:disabled {
+  color: var(--muted-foreground);
+  cursor: default;
+}
+.replay-demo span {
+  font-size: 18px;
+}
+@keyframes autofill-approach {
+  from {
+    transform: translate(clamp(24px, 6vw, 76px), 144px);
+  }
+  to {
+    transform: translate(0, 0);
+  }
+}
+@keyframes autofill-click {
+  50% {
+    transform: scale(0.82);
+  }
+}
+@keyframes autofill-ring {
+  from {
+    opacity: 0.8;
+    transform: scale(0.3);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
 .doc-page {
   max-width: 900px;
   padding-top: 80px;
@@ -1055,6 +1262,17 @@ footer p {
   .closing-section h2 {
     font-size: clamp(58px, 11vw, 90px);
     letter-spacing: -2.5px;
+  }
+  .autofill-scene {
+    padding: 22px 18px 16px;
+  }
+  .autofill-toolbar {
+    gap: 12px;
+  }
+  .autofill-trigger {
+    gap: 8px;
+    padding: 10px 12px;
+    font-size: 11px;
   }
   .footer-top {
     flex-direction: column;
