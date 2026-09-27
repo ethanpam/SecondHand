@@ -145,7 +145,7 @@ function correctOption(question, profile, { today } = {}) {
 const unit = text => crypto.createHash('sha256').update(text).digest().readUInt32BE(0) / 2 ** 32;
 // Where a form's decisions come from: its URL, or its file for training-only rewordings.
 const formKey = file => file.source.kind === 'synthetic' ? `synthetic:${file.file}` : file.source.url;
-const formSplit = file => file.source.kind === 'synthetic' ? 'train' : splitFor(file.source.url);
+const formSplit = file => file.source.kind === 'synthetic' ? 'train' : file.source.holdout ? 'test' : splitFor(file.source.url);
 // Test forms are held out whole (about 20%), so the model is judged on forms it never saw.
 function splitFor(url) {
   return unit(url) < 0.8 ? 'train' : 'test';

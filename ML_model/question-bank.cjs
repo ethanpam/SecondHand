@@ -49,6 +49,10 @@ function validateQuestionFile(file, where = 'form') {
     if (url.protocol !== 'https:') throw new Error(`${where}: source.url must be an https URL.`);
   }
   if (!text(source.title, 200)) throw new Error(`${where}: source.title is required.`);
+  // Held-out forms are always test forms: a clean check on forms nothing was tuned against.
+  if (source.holdout !== undefined && (source.holdout !== true || source.kind === 'synthetic')) {
+    throw new Error(`${where}: source.holdout can only be true, and only on a real form.`);
+  }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(source.retrieved || '')) throw new Error(`${where}: source.retrieved must be a YYYY-MM-DD date.`);
   if (!Array.isArray(questions) || !questions.length) throw new Error(`${where}: needs at least one question.`);
   const seen = new Set();

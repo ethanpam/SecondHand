@@ -172,3 +172,11 @@ test('applicant-only and narrower questions are answered only where the househol
   assert.equal(pickFor({ name: 'noIncome' }, yesNo), 'No');
   assert.equal(pickFor({ name: 'noIncome' }, yesNo, { monthlyEarnedIncome: '0' }), ABSTAIN);
 });
+
+test('forms marked holdout are always test forms, whatever their URL hashes to', () => {
+  const urls = Array.from({ length: 30 }, (_, i) => `https://pantry.example.org/fresh-${i}`);
+  const bank = urls.map(url => ({ source: { url, title: 'Fresh', holdout: true }, questions: [q({ name: 'anyChildren' }, yesNo)] }));
+  const rows = buildRows(bank, [family], { today: TODAY });
+  assert.ok(urls.some(url => splitFor(url) === 'train'), 'some of these would otherwise train');
+  assert.ok(rows.every(row => row.split === 'test'));
+});

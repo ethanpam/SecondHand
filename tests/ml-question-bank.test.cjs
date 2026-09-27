@@ -63,3 +63,9 @@ test('synthetic rewordings are marked as such, need no URL, and live apart from 
   for (const file of loadSyntheticBank()) assert.equal(file.source.kind, 'synthetic');
   for (const file of loadQuestionBank()) assert.notEqual(file.source.kind, 'synthetic', 'real forms and rewordings are never mixed');
 });
+
+test('holdout is a yes-or-nothing flag on real forms only', () => {
+  assert.doesNotThrow(() => validateQuestionFile(form([yesNo], { holdout: true })));
+  assert.throws(() => validateQuestionFile(form([yesNo], { holdout: 'yes' })), /holdout/i);
+  assert.throws(() => validateQuestionFile({ source: { title: 'R', kind: 'synthetic', retrieved: '2026-09-26', holdout: true }, questions: [yesNo] }), /holdout/i);
+});

@@ -25,6 +25,7 @@ Check your files with `node --test tests/ml-question-bank.test.cjs`.
 - `type` is one of `radio`, `select`, `checkbox`, `text`, `textarea`, `number`, `date`, `email`, `tel`.
 - `options` lists the choices exactly, in page order, leaving out empty "Choose" placeholders. It's `[]` for text boxes.
 - `note` (optional) explains a judgment call, e.g. why a question is `none`.
+- `source.holdout: true` keeps a form in the test set for good. Use it only for fresh forms collected as a clean final check.
 
 ## Picking a rule
 The full list, with what each rule means and which question types it fits, is in `ML_model/answer-rules.cjs`. The most common:
