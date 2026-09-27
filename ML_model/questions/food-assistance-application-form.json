@@ -1,0 +1,20 @@
+{
+  "source": {
+    "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFewu19xIUtbZ6UVBqAOgkPHh9iwHzdoniVDZLD3fsEbT_ZxwdkWP1ENTH4YVF60kFLtDQnSsf4TRi_Yq5_H7TqF6Ed6Egkb0iuz40jvjx8PtYquN8f-DW6AY7IcGyRYnHBSGcGdhfQ",
+    "title": "Food Assistance Application Form",
+    "kind": "jotform",
+    "retrieved": "2026-09-26",
+    "region": "US",
+    "holdout": true
+  },
+  "questions": [
+    { "id": "q1", "label": "Name", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" } },
+    { "id": "q2", "label": "Upload Copy of Id", "type": "text", "options": [], "rule": { "name": "none" }, "note": "File upload." },
+    { "id": "q3", "label": "Upload Copy of Food Stamp Determination Letter", "type": "text", "options": [], "rule": { "name": "none" } },
+    { "id": "q4", "label": "Upload Copy of Current Bank Statement", "type": "text", "options": [], "rule": { "name": "none" } },
+    { "id": "q5", "label": "Address", "type": "text", "options": [], "rule": { "name": "field", "key": "addressLine1" } },
+    { "id": "q6", "label": "Do you agree to the following participation statement", "type": "select", "options": ["Please Select", "Yes", "No"], "rule": { "name": "never" }, "note": "Consent/Attestation" },
+    { "id": "q7", "label": "By Signing Clicking Yes on This Statement I Certify the Following", "type": "select", "options": ["Please Select", "Yes", "No"], "rule": { "name": "never" }, "note": "Consent/Attestation" },
+    { "id": "q8", "label": "Signature", "type": "text", "options": [], "rule": { "name": "never" } }
+  ]
+}

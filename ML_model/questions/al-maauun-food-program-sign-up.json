@@ -1,0 +1,33 @@
+{
+  "source": {
+    "url": "https://docs.google.com/forms/d/e/1FAIpQLSefdY9YWn2opsvg-AyZZYLDacn_uIjqh729tkhu_wHDjON_NQ/viewform",
+    "title": "ALM COVID19 & TC Protest Response Food Program Sign Up",
+    "kind": "google-form",
+    "retrieved": "2026-09-26",
+    "region": "Minneapolis, MN",
+    "holdout": true
+  },
+  "questions": [
+    { "id": "q1", "label": "Email", "type": "email", "options": [], "rule": { "name": "field", "key": "email" }, "note": "The form's own email box (Google's collect-email setting), shown above the questions." },
+    { "id": "q2", "label": "Zip Code", "type": "checkbox", "options": ["55411", "55412", "55405"], "rule": { "name": "none" }, "note": "Pick the ZIP from three North Minneapolis codes; no answer rule matches the saved ZIP to choices." },
+    { "id": "q3", "label": "I am filling this form out for?", "type": "radio", "options": ["I am filling this form out for Me and My Household", "I am filling this form out for a Senior NOT In my household"], "rule": { "name": "none" }, "note": "Who the form is for; not in the profile." },
+    { "id": "q4", "label": "Authorized Agent Full Name (First & Last)", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Only shown when filling in for a senior outside the household; the agent is not the household the profile describes." },
+    { "id": "q5", "label": "Authorized Agent Phone Number", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Only shown when filling in for a senior outside the household; the agent's phone, not the household's." },
+    { "id": "q6", "label": "First Name", "type": "text", "options": [], "rule": { "name": "field", "key": "firstName" } },
+    { "id": "q7", "label": "Last Name", "type": "text", "options": [], "rule": { "name": "field", "key": "lastName" } },
+    { "id": "q8", "label": "Full Street Address w/Apt #", "type": "text", "options": [], "rule": { "name": "field", "key": "addressLine1" }, "note": "One box for the street address, with any apartment number added; the street address is the saved field it holds." },
+    { "id": "q9", "label": "City", "type": "checkbox", "options": ["Minneapolis"], "rule": { "name": "none" }, "note": "A lone checkbox confirming the city; no answer rule checks the saved city." },
+    { "id": "q10", "label": "State", "type": "checkbox", "options": ["MN"], "rule": { "name": "livesInState", "state": "Minnesota" }, "note": "A lone checkbox; ticking \"MN\" says the household lives in Minnesota." },
+    { "id": "q11", "label": "Phone Number", "type": "text", "options": [], "rule": { "name": "field", "key": "phone" } },
+    { "id": "q12", "label": "How many people in your household", "type": "text", "options": [], "rule": { "name": "field", "key": "householdSize" }, "note": "The form validates a number from 0 to 10." },
+    { "id": "q13", "label": "How Many Children in household between Ages 0 - 18", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Ages 0-18 counts 18-year-olds, whom the profile counts as adults; the profile's children are 0-17." },
+    { "id": "q14", "label": "How Many Adults in household between Ages 19 - 64", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Ages 19-64 leaves out 18-year-olds; the profile counts adults 18-64." },
+    { "id": "q15", "label": "How Many Seniors in household Ages 65+", "type": "text", "options": [], "rule": { "name": "field", "key": "householdSeniors" }, "note": "Help text: if no seniors in the household put 0." },
+    { "id": "q16", "label": "Would you like", "type": "radio", "options": ["Meals Only", "Groceries Only", "Both"], "rule": { "name": "none" }, "note": "Meals or groceries preference." },
+    { "id": "q17", "label": "Accurate Information Agreement: By entering your initials in the box below, you are in effect providing your signature, indicating that all the information on this form is true and accurate, to the best of your knowledge.", "type": "checkbox", "options": ["I Agree"], "rule": { "name": "never" }, "note": "Attests the form is accurate." },
+    { "id": "q18", "label": "Enter your initials in the box below", "type": "text", "options": [], "rule": { "name": "never" }, "note": "Initials given as a signature." },
+    { "id": "q19", "label": "Agreement/Disclaimer: By entering your FULL NAME in the box below, you are effect providing your signature as consent, indicating that You give permission to Al-Maa'uun's staff and volunteers to deliver meals for the number of children and/or seniors indicated in this registration.", "type": "text", "options": [], "rule": { "name": "never" }, "note": "A full name typed as a signature. Label cut to the 300-character limit; the page continues: \"A food shelf Box will be delivered to the specific address you have listed above for your household.\"" },
+    { "id": "q20", "label": "Do you have any of these devices in your household?", "type": "radio", "options": ["Smart Phone with Audio/Video Capabilities", "Tablet with Audio/Video Capabilities", "Laptop or Desktop Computer with Audio/Video Capabilities", "Internet Service", "No I have no Technology listed above in my home"], "rule": { "name": "none" }, "note": "Technology survey; not in the profile." },
+    { "id": "q21", "label": "In order to better serve you please answer a few questions: *What are other needs you may have during this Pandemic? *Do You or any one in your household have a physical disability? If so please list the age of the person/people.", "type": "textarea", "options": [], "rule": { "name": "none" }, "note": "Open description of needs and the ages of anyone with a physical disability; the profile has no text for this." }
+  ]
+}
