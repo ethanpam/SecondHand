@@ -577,4 +577,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; });
-module.exports = { fixture, verifiedAddressFixture, selfDetailsFixture, installNativeStub, attachNativePanel, portal, applicant, addressUrl, selfDetailsUrl, documentManualUrl, extensionDirectory, syntheticProfile };
+module.exports = { fixture, preApplicantPage, verifiedAddressFixture, selfDetailsFixture, installNativeStub, attachNativePanel, portal, applicant, addressUrl, selfDetailsUrl, documentManualUrl, extensionDirectory, syntheticProfile };
