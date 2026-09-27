@@ -2,18 +2,35 @@
 
 (() => {
   const $ = id => document.getElementById(id);
+  const strings = globalThis.SecondHandStrings;
+  const translation = globalThis.SecondHandTranslation;
   // Must match BUILD in background.js: change both together. Chrome loads these pages
   // from disk right away but keeps running the old worker until SecondHand is reloaded.
-  const BUILD = '2026-09-26.3';
-  const OUTDATED = 'SecondHand was updated. Open chrome://extensions and click the reload arrow on SecondHand, then reload this page.';
+  const BUILD = '2026-09-26.4';
+  // The applicant's language: the choice saved in this extension's storage, else the browser's.
+  let language = strings.language();
+  const t = (key, params = {}) => strings.text(language, key, params);
   const fixedText = (value, length = 360) => typeof value === 'string' ? value.slice(0, length) : '';
+  // A message is { key, params } from the catalog, or { text } as it arrived from an older worker.
+  // Only text from outside the catalog is cut to length.
+  const words = (message, length) => message?.key ? t(message.key, message.params || {}) : fixedText(message?.text, length);
+  const fromResult = result => ({ key: result?.messageKey, params: result?.messageParams, text: result?.message });
+  const hasMessage = result => Boolean(result?.message || result?.messageKey);
+  // An error as the applicant reads it: its catalog key, or its own words passed on as a detail.
+  const problem = (error, fallback = 'panel.assistantUnavailable') => error?.messageKey ? { key: error.messageKey, params: error.messageParams }
+    : fixedText(error?.message) ? { key: 'detail', params: { detail: fixedText(error.message) } } : { key: fallback };
+  const keyedError = (key, params = {}) => Object.assign(new Error(strings.english(key, params)), { messageKey: key, messageParams: params });
   const trusted = callback => event => { if (event.isTrusted) return callback(event); };
-  const outdatedError = () => Object.assign(new Error(OUTDATED), { outdated: true });
+  const outdatedError = () => Object.assign(keyedError('panel.outdated'), { outdated: true });
   const send = async payload => {
     const response = await chrome.runtime.sendMessage(payload);
     // An outdated worker ignores messages it doesn't know, so Chrome resolves with no response.
     if (response === undefined) throw outdatedError();
-    if (!response?.ok) throw new Error(fixedText(response?.error) || 'The assistant is unavailable. Reload the extension and this page.');
+    if (!response?.ok) {
+      if (response?.errorKey) throw Object.assign(new Error(fixedText(response.error)), { messageKey: response.errorKey, messageParams: response.errorParams || {} });
+      if (fixedText(response?.error)) throw new Error(fixedText(response.error));
+      throw keyedError('panel.assistantUnavailable');
+    }
     return response.data;
   };
   // An older worker that still answers is caught by its build.
@@ -24,7 +41,28 @@
   // The worker's metadata for a site other than Iowa: its origin and whether it is turned on.
   const siteOf = state => state?.site && typeof state.site.origin === 'string' ? { origin: state.site.origin, enabled: state.site.enabled === true, ready: state.site.ready !== false, frames: Array.isArray(state.site.frames) ? state.site.frames.filter(frame => frame && typeof frame.origin === 'string') : [] } : null;
   const hostOf = origin => fixedText(new URL(origin).hostname, 90);
+  const languageName = code => new Intl.DisplayNames([language], { type: 'language' }).of(code);
+  // Each question's own words; SecondHand's labels come from its catalog instead.
+  const pageWords = items => items.filter(item => !item.labelKey).map(item => item.label);
 
+  // Every fixed word on either surface comes from the catalog.
+  function applyStatic() {
+    document.documentElement.lang = language;
+    document.documentElement.dir = strings.direction(language);
+    for (const element of document.querySelectorAll('[data-i18n]')) element.textContent = t(element.dataset.i18n);
+    for (const element of document.querySelectorAll('[data-i18n-title]')) element.title = t(element.dataset.i18nTitle);
+    for (const element of document.querySelectorAll('[data-i18n-aria-label]')) element.setAttribute('aria-label', t(element.dataset.i18nAriaLabel));
+  }
+  // A choice made on the other surface reaches this one through the extension's shared storage.
+  function followLanguage(relabel) {
+    window.addEventListener('storage', event => {
+      if (event.key !== strings.STORAGE_KEY) return;
+      language = strings.language();
+      relabel();
+    });
+  }
+
+  applyStatic();
   if (location.search === '?surface=launcher' && !location.hash) { widget(); return; }
   if (location.search || location.hash) return;
   sidePanel();
@@ -33,35 +71,43 @@
   function widget() {
     document.body.classList.add('launcher-surface');
     $('launcher').hidden = false;
+    const service = translation.create();
     let known = false;
     let autopilot = false;
     let site = null;
     let result = null;
-    let note = '';
+    let note = null;
     let working = false;
     let outdated = false;
-    let ai = { note: '', reason: '' };
+    let ai = { note: null, reason: '' };
     let cursor = 0;
     let pollTimer;
+    // The page's language, checked once per page: the widget offers the translated view when it differs.
+    let pageLanguage = '';
+    let languageChecked = false;
+    let languageTrouble = null;
     const AI_TIMEOUT_MS = 8000;
-    const AI_UNAVAILABLE = 'On-device AI unavailable. Rule matches only.';
     // An outdated worker keeps its reload steps on screen and is not polled again.
-    const trouble = error => { if (error.outdated) outdated = true; return fixedText(error.message, 120); };
+    const trouble = error => { if (error.outdated) outdated = true; return problem(error); };
 
     function statusText() {
-      if (outdated) return OUTDATED;
-      if (working) return 'Working…';
-      if (note) return note;
-      if (!result) return site ? `${hostOf(site.origin)} · ready` : 'Iowa · uses first home address suggestion';
+      if (outdated) return t('panel.outdated');
+      if (working) return t('widget.working');
+      if (note) return words(note, 120);
+      if (!result) return languageTrouble ? t('widget.languageCheckFailed') : site ? t('widget.siteReady', { host: hostOf(site.origin) }) : t('widget.iowaReady');
       // Other sites: the need-you link carries the count, so it isn't repeated here.
       if (result.state === 'done' && result.pageKey === 'general') {
-        const guessed = Number(result.guessed) > 0 ? ` · ${Number(result.guessed)} guessed` : '';
-        const summary = Number(result.filled) > 0 ? `Filled ${Number(result.filled)}${guessed}`
-          : fieldKeys(result.needYou).length ? 'Nothing here matches your saved profile.' : fixedText(result.message, 120);
-        return ai.note ? `${summary.replace(/\.$/, '')} · ${ai.note}` : summary;
+        const filled = Number(result.filled) || 0;
+        const guessed = Number(result.guessed) || 0;
+        const summary = filled > 0 ? (guessed > 0 ? t('widget.filledGuessed', { count: filled, guessed }) : t('widget.filled', { count: filled }))
+          : fieldKeys(result.needYou).length ? t('widget.nothingMatches') : words(fromResult(result), 120);
+        return ai.note ? `${summary.replace(/\.$/, '')} · ${words(ai.note)}` : summary;
       }
-      if (result.state === 'done') return [`Filled ${Number(result.filled) || 0}`, fixedText(result.todo, 90)].filter(Boolean).join(' · ');
-      return fixedText(result.message, 120);
+      if (result.state === 'done') {
+        const todo = words({ key: result.todoKey, params: result.todoParams, text: result.todo }, 90);
+        return [t('widget.filled', { count: Number(result.filled) || 0 }), todo].filter(Boolean).join(' · ');
+      }
+      return words(fromResult(result), 120);
     }
     function render() {
       $('widget').hidden = !known && !autopilot && !outdated;
@@ -74,10 +120,12 @@
       $('autofill').disabled = working;
       const needYou = ['done', 'waiting'].includes(result?.state) ? fieldKeys(result.needYou) : [];
       $('need-you').hidden = outdated || !needYou.length;
-      $('need-you').textContent = `${needYou.length} need you`;
+      $('need-you').textContent = t('widget.needYou', { count: needYou.length });
       $('widget-text').textContent = statusText();
-      $('autofill').title = site ? 'Fill supported fields on this site once. Review every answer.' : 'Autofill continues verified information screens and complete applicant pages, then selects the first suggested home address and continues. Review the selected address before submitting.';
-      $('widget-text').title = outdated ? OUTDATED : fixedText([result?.message, ai.note, ai.reason].filter(Boolean).join(' '), 240);
+      $('autofill').title = site ? t('widget.autofillSiteTitle') : t('widget.autofillIowaTitle');
+      const details = [hasMessage(result) ? words(fromResult(result)) : '', ai.note ? words(ai.note) : '', ai.reason, fixedText(languageTrouble?.message, 160)];
+      $('widget-text').title = outdated ? t('panel.outdated') : fixedText(details.filter(Boolean).join(' '), 240);
+      $('translate-offer').hidden = outdated || !known || !pageLanguage || pageLanguage === language;
     }
     async function poll() {
       clearTimeout(pollTimer);
@@ -92,11 +140,27 @@
           // While autofill runs, the worker moves ahead between polls. Otherwise keep
           // this widget's own result and adopt the worker's only after a reload.
           if (autopilot || !result) result = state?.result || result;
-          note = '';
+          note = null;
         } catch (error) { note = trouble(error); }
         render();
+        if (known && !outdated && !languageChecked) checkLanguage();
       }
       if (!outdated) pollTimer = setTimeout(poll, 1500);
+    }
+
+    // Is this page in the applicant's language? Chrome's detector reads the page's own question words
+    // (or the page's declared language when the detector isn't ready). Nothing is asked without
+    // Chrome's translator: then there is no translated view to offer.
+    async function checkLanguage() {
+      if (!service.supported()) return;
+      languageChecked = true;
+      let reply;
+      try { reply = await send({ type: 'ui:questions' }); }
+      catch (error) { note = trouble(error); render(); return; }
+      const items = Array.isArray(reply?.questions) ? reply.questions.filter(item => typeof item?.label === 'string') : [];
+      try { pageLanguage = await service.pageLanguage(pageWords(items), reply?.lang); }
+      catch (error) { languageTrouble = error; }
+      render();
     }
 
     // Chrome's on-device AI runs only in extension pages like this one, not in the worker.
@@ -112,19 +176,19 @@
 
     $('autofill').addEventListener('click', trusted(async () => {
       if (working || outdated) return;
-      working = true; note = ''; ai = { note: '', reason: '' }; render();
+      working = true; note = null; ai = { note: null, reason: '' }; render();
       try {
         const request = { type: 'ui:autofill', confirmed: true };
         // Iowa's form is filled by its own rules; other sites also get the AI's guesses.
         if (site) {
           const answer = await aiGuesses();
-          if (answer?.status !== 'mapped') ai = { note: AI_UNAVAILABLE, reason: fixedText(answer?.reason, 160) };
+          if (answer?.status !== 'mapped') ai = { note: { key: 'widget.aiUnavailable' }, reason: fixedText(answer?.reason, 160) };
           else if (Object.keys(answer.mapping).length) request.guesses = answer.mapping;
         }
         result = await send(request);
         cursor = 0;
         autopilot = continuing(result);
-      } catch (error) { result = { state: 'error', message: trouble(error) }; autopilot = false; }
+      } catch (error) { const shown = trouble(error); result = { state: 'error', message: error.message, messageKey: shown.key, messageParams: shown.params }; autopilot = false; }
       finally { working = false; render(); }
     }));
     $('stop').addEventListener('click', trusted(async () => {
@@ -139,14 +203,14 @@
       cursor++;
       try {
         const focused = await send({ type: 'ui:focusField', key, confirmed: true });
-        note = focused?.focused ? '' : site ? 'Find it in the form.' : 'Find it in Iowa’s form.';
+        note = focused?.focused ? null : { key: site ? 'widget.findInForm' : 'widget.findInIowa' };
       } catch (error) { note = trouble(error); }
       render();
     }));
     $('unlock').addEventListener('click', trusted(async () => {
       try {
         await send({ type: 'ui:showApp', confirmed: true });
-        result = { state: 'waiting', message: 'Unlock SecondHand, then click Autofill.' };
+        result = { state: 'waiting', messageKey: 'desktop.unlockThenAutofill', messageParams: {} };
       } catch (error) { note = trouble(error); }
       render();
     }));
@@ -156,19 +220,27 @@
         send({ type: 'ui:openPanel', confirmed: true }).catch(error => { note = trouble(error); render(); });
       }));
     }
+    // The offer opens the side panel straight on the page's questions.
+    $('translate-offer').addEventListener('click', trusted(() => {
+      send({ type: 'ui:openPanel', confirmed: true, questions: true }).catch(error => { note = trouble(error); render(); });
+    }));
+    followLanguage(() => { applyStatic(); render(); });
     document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
     window.addEventListener('pagehide', () => clearTimeout(pollTimer), { once: true });
     render();
     checkBuild().catch(error => { note = trouble(error); render(); }).then(poll);
   }
 
-  // Chrome's side panel: desktop status, one Autofill button, and the checklist.
+  // Chrome's side panel: desktop status, one Autofill button, the checklist, and the page's
+  // questions in the applicant's language.
   function sidePanel() {
     $('sidepanel').hidden = false;
+    const service = translation.create();
     let target = null;
     let fillable = false;
     let autopilot = false;
     let site = null;
+    let page = null;
     let contextRevision = 0;
     let checklistSignature = '';
     let working = false;
@@ -176,11 +248,23 @@
     let pollTimer;
     let refreshAgain = false;
     let stopped = false;
-    const STATUS = { complete: 'Done', missing: 'Needs you', optional: 'Optional', manual: 'Do it yourself' };
-    const show = (text, error = false) => {
-      $('status').textContent = fixedText(text, 650);
-      $('status').classList.toggle('error', error);
-    };
+    let status = { message: { key: 'panel.checkingTab' }, error: false };
+    let desktopLine = null;
+    // The question list for the page on screen: the worker's items, and Chrome's translations of their words.
+    let questions = null;
+    let translated = new Map();
+    let questionNote = null;
+    let needsDownload = false;
+    let questionBusy = false;
+    let questionRun = 0;
+    const STATUS = { complete: 'checklist.complete', missing: 'checklist.missing', optional: 'checklist.optional', manual: 'checklist.manual' };
+    const MARKS = { complete: '✓', manual: '!', missing: '○', optional: '○' };
+    const show = (message, error = false) => { status = { message, error }; renderStatus(); };
+    function renderStatus() {
+      $('status').textContent = words(status.message, 650);
+      $('status').classList.toggle('error', status.error);
+    }
+    function renderDesktop() { if (desktopLine) $('desktop-status').textContent = words(desktopLine); }
     function supportedUrl(raw) {
       try {
         const url = new URL(raw);
@@ -201,30 +285,32 @@
       const pending = site?.enabled && site.ready ? site.frames.filter(frame => !frame.enabled) : [];
       $('frames-enable').hidden = !target || !pending.length;
       $('frames-enable').disabled = working;
-      $('frames-enable').textContent = `Also turn on the embedded form (${pending.map(frame => hostOf(frame.origin)).join(', ')})`;
+      $('frames-enable').textContent = t('panel.framesEnableHosts', { hosts: pending.map(frame => hostOf(frame.origin)).join(', ') });
       $('site-enable').hidden = !off;
       $('site-enable').disabled = working;
       $('site-disable').hidden = !(target && site?.enabled);
       $('site-disable').disabled = working;
       $('panel-autofill').hidden = off;
-      $('panel-autofill').textContent = autopilot ? 'Stop autofill' : 'Autofill this page';
+      $('panel-autofill').textContent = t(autopilot ? 'panel.stopAutofill' : 'panel.autofill');
       $('panel-autofill').disabled = !target || (!fillable && !autopilot) || working;
       document.querySelectorAll('.checklist-item').forEach(button => { button.disabled = working || !target; });
+      renderQuestionControls();
     }
     function clearPage() {
-      fillable = false; autopilot = false; site = null; checklistSignature = '';
+      fillable = false; autopilot = false; site = null; page = null; checklistSignature = '';
       $('page-checklist').replaceChildren();
       $('checklist-section').hidden = true;
+      resetQuestions();
     }
     function invalidateTarget() {
       if (stopped) return;
       contextRevision++; working = false; target = null;
       clearPage(); controls();
-      show('Checking the application in your active tab…');
+      show({ key: 'panel.checkingTab' });
     }
     function renderChecklist(page) {
       const entries = Array.isArray(page.checklist) ? page.checklist.filter(item => item && fieldKeys([item.key]).length && typeof item.label === 'string' && Object.hasOwn(STATUS, item.status)).slice(0, 80) : [];
-      const signature = JSON.stringify(entries);
+      const signature = JSON.stringify([language, entries]);
       if (signature === checklistSignature) return;
       checklistSignature = signature;
       $('page-checklist').replaceChildren();
@@ -232,35 +318,40 @@
         const button = document.createElement('button');
         button.type = 'button'; button.className = `checklist-item ${item.status}`; button.dataset.key = item.key;
         const mark = document.createElement('span'); mark.className = 'checklist-mark'; mark.setAttribute('aria-hidden', 'true');
-        mark.textContent = item.status === 'complete' ? '✓' : item.status === 'manual' ? '!' : '○';
+        mark.textContent = MARKS[item.status];
         const copy = document.createElement('span'); copy.className = 'checklist-copy';
-        const label = document.createElement('span'); label.className = 'checklist-label'; label.textContent = fixedText(item.label, 100);
-        const detail = document.createElement('span'); detail.className = 'checklist-detail'; detail.textContent = STATUS[item.status];
+        const text = words({ key: item.labelKey, params: item.labelParams, text: item.label }, 100);
+        const label = document.createElement('span'); label.className = 'checklist-label'; label.textContent = text;
+        const detail = document.createElement('span'); detail.className = 'checklist-detail'; detail.textContent = t(STATUS[item.status]);
         copy.append(label, detail);
-        button.setAttribute('aria-label', `${fixedText(item.label, 100)}: ${STATUS[item.status]}. Find it in Iowa’s form.`);
+        button.setAttribute('aria-label', t('checklist.rowLabel', { label: text, status: t(STATUS[item.status]) }));
         button.append(mark, copy);
         button.addEventListener('click', trusted(() => { if (!button.disabled) focusField(item.key); }));
         $('page-checklist').append(button);
       }
       const done = entries.filter(item => item.status === 'complete').length;
-      $('checklist-summary').textContent = `${done} of ${entries.length} done`;
+      $('checklist-summary').textContent = t('checklist.summary', { done, total: entries.length });
       $('checklist-section').hidden = !entries.length;
     }
     function render(state) {
-      if (!state || typeof state !== 'object') throw new Error('The page state could not be read. Reload Iowa’s page.');
-      const page = state.page || {};
+      if (!state || typeof state !== 'object') throw keyedError('panel.pageUnreadable');
+      page = state.page || {};
       site = siteOf(state);
       fillable = site ? site.enabled && site.ready : page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo);
       autopilot = Boolean(state.autopilot);
       renderChecklist(page);
       const result = state.result;
-      if (site?.enabled && !site.ready) show(target?.status === 'loading' ? 'Waiting for the page to finish loading…' : 'Reload this page so SecondHand can read it.');
-      else if (result?.message) show(result.message, result.state === 'error' || result.state === 'offline');
-      else if (site && !site.enabled) show(`SecondHand can fill forms on ${hostOf(site.origin)} after you turn it on here and approve it in the SecondHand app.`);
-      else if (site) show('Click Autofill. SecondHand fills what it recognizes and lists what needs you. It never submits.');
-      else if (fillable) show('Click Autofill. SecondHand fills what it can and tells you what it needs.');
-      else show(fixedText(page.reason) || 'Nothing to fill on this page. Continue in Iowa’s form.');
+      const loading = target?.status === 'loading';
+      if (site?.enabled && !site.ready) show({ key: loading ? 'panel.waitingLoad' : 'panel.reloadToRead' });
+      else if (hasMessage(result)) show(fromResult(result), result.state === 'error' || result.state === 'offline');
+      else if (site && !site.enabled) show({ key: 'panel.siteOff', params: { host: hostOf(site.origin) } });
+      else if (site) show({ key: 'panel.siteHint' });
+      else if (fillable) show({ key: 'panel.iowaHint' });
+      else if (page.reason) show({ key: page.reasonKey, params: page.reasonParams, text: page.reason });
+      else show({ key: 'panel.nothingToFill' });
       controls();
+      // The widget's language offer opened this panel: show the questions without another click.
+      if (state.showQuestions === true) showQuestions(false);
     }
     async function refresh() {
       if (stopped) return;
@@ -272,7 +363,7 @@
           if (revision !== contextRevision || stopped) return;
           if (!tab || !Number.isInteger(tab.id) || (!supportedUrl(tab.url) && !siteUrl(tab.url))) {
             target = null; clearPage(); controls();
-            show('Open Iowa’s SNAP application in this tab. Your checklist appears here automatically. On another food-assistance form, click the SecondHand toolbar icon.');
+            show({ key: 'panel.openIowa' });
             return;
           }
           if (!target || target.id !== tab.id || target.url !== tab.url) {
@@ -283,7 +374,7 @@
           const state = await send({ type: 'ui:pageState', tabId: tab.id });
           if (revision === contextRevision && !stopped) render(state);
         } catch (error) {
-          if (revision === contextRevision) { clearPage(); controls(); show(error.message, true); }
+          if (revision === contextRevision) { clearPage(); controls(); show(problem(error), true); }
         } finally {
           pollPromise = null;
           if (refreshAgain && !stopped) { refreshAgain = false; queueMicrotask(refresh); }
@@ -303,14 +394,15 @@
       try {
         const desktop = await send({ type: 'ui:desktopStatus' });
         const ready = desktop?.connected && desktop.unlocked;
-        $('desktop-status').textContent = !desktop?.connected ? 'SecondHand isn’t running. Open the app on this computer.' : desktop.unlocked ? 'SecondHand is unlocked.' : 'SecondHand is locked.';
+        desktopLine = { key: !desktop?.connected ? 'desktop.notRunning' : desktop.unlocked ? 'desktop.unlocked' : 'desktop.locked' };
         $('desktop-action').hidden = !desktop?.connected || desktop.unlocked;
         $('desktop-status').parentElement.classList.toggle('error', !ready);
       } catch (error) {
-        $('desktop-status').textContent = error.message;
+        desktopLine = problem(error);
         $('desktop-action').hidden = true;
         $('desktop-status').parentElement.classList.add('error');
       }
+      renderDesktop();
     }
     // Every action re-reads the active tab so a stale checklist can never act on another page.
     async function act(payload, waiting) {
@@ -325,7 +417,7 @@
         if (waiting) show(waiting);
         return await send({ ...payload, tabId: selected.id });
       } catch (error) {
-        if (revision === contextRevision) show(error.message, true);
+        if (revision === contextRevision) show(problem(error), true);
         return null;
       } finally {
         if (revision === contextRevision) { working = false; controls(); }
@@ -334,15 +426,125 @@
     }
     async function focusField(key) {
       const result = await act({ type: 'ui:focusField', key });
-      if (result && !result.focused) show('That field isn’t on screen right now. Find it in Iowa’s form.');
+      if (result && !result.focused) show({ key: 'panel.fieldOffScreen' });
+    }
+
+    // The page's questions in the applicant's language. SecondHand's own labels come from its
+    // catalog; the page's words from Chrome's translator on this computer. They are shown here
+    // only: nothing translated is ever sent toward the page or written into a field.
+    function resetQuestions() {
+      questionRun++;
+      questions = null; translated = new Map(); questionNote = null; needsDownload = false; questionBusy = false;
+      service.forget();
+      renderQuestionList();
+    }
+    function renderQuestionControls() {
+      const readable = Boolean(target) && fillable;
+      const supported = service.supported();
+      $('questions-show').hidden = !(readable && supported && (language !== 'en' || questions)) || questionBusy;
+      $('questions-show').disabled = working || questionBusy;
+      $('questions-show').textContent = needsDownload ? t('translate.download', { language: languageName(language) }) : t(questions ? 'questions.refresh' : 'questions.show');
+      // Without Chrome's translator the feature is hidden behind one plain line.
+      const note = readable && !supported && language !== 'en' ? { message: { key: 'translate.missing' }, error: false } : readable ? questionNote : null;
+      $('questions-note').hidden = !note;
+      $('questions-note').textContent = note ? words(note.message) : '';
+      $('questions-note').classList.toggle('error', Boolean(note?.error));
+      $('questions').hidden = !readable || !questions;
+    }
+    function renderQuestionList() {
+      $('questions-list').replaceChildren(...(questions?.items || []).map(questionRow));
+      $('questions-summary').textContent = questions ? t('questions.count', { count: questions.items.filter(item => item.id).length }) : '';
+      $('questions-pending').hidden = !questions?.pending;
+      renderQuestionControls();
+    }
+    function questionRow(item) {
+      // A question finds its place in the form; words from an information screen are only read.
+      const row = document.createElement(item.id ? 'button' : 'div');
+      row.className = item.id ? 'checklist-item question' : 'checklist-item question info';
+      if (item.id) {
+        row.type = 'button';
+        row.disabled = working || !target;
+        row.addEventListener('click', trusted(() => { if (!row.disabled) focusField(item.id); }));
+      }
+      // SecondHand's own label is simply shown in the applicant's language; a translation of the
+      // page's words keeps the original underneath, to match it with the form.
+      const own = item.labelKey ? t(item.labelKey, item.labelParams || {}) : translated.get(item.label);
+      const copy = document.createElement('span'); copy.className = 'checklist-copy';
+      const label = document.createElement('span'); label.className = 'checklist-label'; label.textContent = fixedText(own || item.label, 400);
+      const original = document.createElement('span'); original.className = 'checklist-detail'; original.textContent = !item.labelKey && own && own !== item.label ? fixedText(item.label, 400) : '';
+      original.hidden = !original.textContent;
+      copy.append(label, original);
+      row.append(copy);
+      return row;
+    }
+    function listedItems(reply) {
+      const valid = reply && Array.isArray(reply.questions) && reply.questions.every(item => typeof item?.id === 'string' && typeof item.label === 'string');
+      if (!valid) throw keyedError('worker.questionsUnreadable');
+      return reply.questions;
+    }
+    async function showQuestions(click) {
+      if (questionBusy || !target || !service.supported()) return;
+      const run = ++questionRun;
+      const revision = contextRevision;
+      const chosen = language;
+      const current = () => run === questionRun && revision === contextRevision && chosen === language && !stopped;
+      const say = (message, error = false) => { if (current()) { questionNote = { message, error }; renderQuestionControls(); } };
+      questionBusy = true; needsDownload = false;
+      say({ key: 'questions.reading' });
+      try {
+        const reply = await act({ type: 'ui:questions' });
+        if (!current()) return;
+        // act() already put any error in the status line.
+        if (!reply) { questionNote = null; return; }
+        const items = listedItems(reply);
+        questions = { items, pending: Number(reply.pending) || 0 };
+        translated = new Map();
+        renderQuestionList();
+        const texts = pageWords(items);
+        // SecondHand's own labels are already in the applicant's language.
+        if (!texts.length) {
+          if (items.length) { questionNote = null; renderQuestionControls(); } else say({ key: 'questions.none' });
+          return;
+        }
+        const source = await service.pageLanguage(texts, reply.lang);
+        if (!current()) return;
+        if (!source) return say({ key: 'questions.unknownLanguage' });
+        if (source === chosen) return say({ key: 'questions.sameLanguage', params: { language: languageName(chosen) } });
+        const names = { source: languageName(source), target: languageName(chosen) };
+        const availability = await service.availability(source, chosen);
+        if (!current()) return;
+        if (availability === 'unavailable') return say({ key: 'translate.unavailable', params: names });
+        // Chrome downloads a language only from the applicant's click.
+        if (availability !== 'available' && !click) {
+          needsDownload = true;
+          return say({ key: 'translate.needsDownload', params: { language: names.target } });
+        }
+        const downloading = percent => say({ key: 'translate.downloading', params: { language: names.target, percent } });
+        if (availability === 'available') say({ key: 'translate.translating' }); else downloading(0);
+        const translator = await service.translator(source, chosen, {
+          onProgress: loaded => downloading(Math.round(loaded * 100)),
+          onStall: () => say({ key: 'translate.stalled', params: { language: names.target, source: names.source } }, true)
+        });
+        if (!current()) return;
+        say({ key: 'translate.translating' });
+        const results = await service.translate(translator, source, chosen, texts);
+        if (!current()) return;
+        translated = results;
+        renderQuestionList();
+        say({ key: 'translate.done' });
+      } catch (error) {
+        say({ key: 'translate.failed', params: { detail: fixedText(error.message, 200) } }, true);
+      } finally {
+        if (run === questionRun) { questionBusy = false; renderQuestionControls(); }
+      }
     }
 
     $('panel-autofill').addEventListener('click', trusted(async () => {
       if ($('panel-autofill').disabled) return;
       const stopping = autopilot;
-      const result = await act(stopping ? { type: 'ui:stop', confirmed: true } : { type: 'ui:autofill', confirmed: true }, stopping ? 'Stopping autofill…' : 'Filling your saved answers…');
+      const result = await act(stopping ? { type: 'ui:stop', confirmed: true } : { type: 'ui:autofill', confirmed: true }, { key: stopping ? 'panel.stopping' : 'panel.filling' });
       if (result) autopilot = !stopping && continuing(result);
-      if (result?.message) show(result.message, result.state === 'error' || result.state === 'offline');
+      if (hasMessage(result)) show(fromResult(result), result.state === 'error' || result.state === 'offline');
       controls();
       if (!stopping) await desktopStatus();
       await refresh();
@@ -352,11 +554,11 @@
       let granted;
       // Ask before anything is awaited: Chrome only shows its prompt inside the user's click.
       try { granted = await chrome.permissions.request({ origins: [`${site.origin}/*`] }); }
-      catch (error) { show(fixedText(error.message) || 'Chrome couldn’t ask for access to this site.', true); return; }
-      if (!granted) { show('Chrome didn’t allow SecondHand on this site. Nothing changed.', true); return; }
-      const result = await act({ type: 'ui:enableSite', confirmed: true }, 'Approve this site in the SecondHand app…');
+      catch (error) { show(problem(error, 'panel.chromeCouldntAskSite'), true); return; }
+      if (!granted) { show({ key: 'panel.chromeDeclinedSite' }, true); return; }
+      const result = await act({ type: 'ui:enableSite', confirmed: true }, { key: 'panel.approveSite' });
       await refresh();
-      if (result?.enabled) show(`SecondHand is on for ${hostOf(result.origin)}. Click Autofill.`);
+      if (result?.enabled) show({ key: 'panel.siteOn', params: { host: hostOf(result.origin) } });
     }));
     $('frames-enable').addEventListener('click', trusted(async () => {
       if ($('frames-enable').disabled || !target || !site?.enabled) return;
@@ -365,31 +567,50 @@
       let granted;
       // Keep the Chrome request in this trusted click, before any awaited work.
       try { granted = await chrome.permissions.request({ origins: pending.map(frame => `${frame.origin}/*`) }); }
-      catch (error) { show(fixedText(error.message) || 'Chrome couldn’t ask for access to the embedded form.', true); return; }
-      if (!granted) { show('Chrome didn’t allow SecondHand on the embedded form. Nothing changed.', true); return; }
-      const result = await act({ type: 'ui:enableFrames', confirmed: true }, 'Approve the embedded form in the SecondHand app…');
+      catch (error) { show(problem(error, 'panel.chromeCouldntAskFrames'), true); return; }
+      if (!granted) { show({ key: 'panel.chromeDeclinedFrames' }, true); return; }
+      const result = await act({ type: 'ui:enableFrames', confirmed: true }, { key: 'panel.approveFrames' });
       await refresh();
-      if (result?.enabled) show('SecondHand is on for the embedded form. Click Autofill.');
+      if (result?.enabled) show({ key: 'panel.framesOn' });
     }));
     $('site-disable').addEventListener('click', trusted(async () => {
       if ($('site-disable').disabled) return;
-      const result = await act({ type: 'ui:disableSite', confirmed: true }, 'Turning SecondHand off for this site…');
+      const result = await act({ type: 'ui:disableSite', confirmed: true }, { key: 'panel.turningOff' });
       await refresh();
-      if (result && !result.enabled) show('SecondHand is off for this site. Reload the page to remove its button.');
+      if (result && !result.enabled) show({ key: 'panel.siteOffDone' });
     }));
     $('desktop-action').addEventListener('click', trusted(async () => {
-      try { await send({ type: 'ui:showApp', confirmed: true }); $('desktop-status').textContent = 'Unlock SecondHand, then click Autofill.'; }
-      catch (error) { $('desktop-status').textContent = error.message; }
+      try { await send({ type: 'ui:showApp', confirmed: true }); desktopLine = { key: 'desktop.unlockThenAutofill' }; }
+      catch (error) { desktopLine = problem(error); }
+      renderDesktop();
     }));
+    $('questions-show').addEventListener('click', trusted(() => { if (!$('questions-show').disabled) showQuestions(true); }));
+    // The choice is saved in this extension's storage; the widget follows through the storage event.
+    function relabel() {
+      applyStatic();
+      $('language').value = language;
+      if (page) renderChecklist(page);
+      renderStatus();
+      renderDesktop();
+      resetQuestions();
+      controls();
+    }
+    $('language').value = language;
+    $('language').addEventListener('change', () => {
+      strings.setLanguage($('language').value);
+      language = strings.language();
+      relabel();
+    });
+    followLanguage(relabel);
     // An outdated worker stops the panel with its reload steps on screen.
     async function start() {
       try { await checkBuild(); } catch (error) {
         if (error.outdated) {
-          stopped = true; target = null; clearPage(); controls(); show(OUTDATED, true);
+          stopped = true; target = null; clearPage(); controls(); show(problem(error), true);
           $('desktop-status').parentElement.hidden = true;
           return;
         }
-        show(error.message, true);
+        show(problem(error), true);
       }
       refresh().then(desktopStatus);
       schedulePoll();

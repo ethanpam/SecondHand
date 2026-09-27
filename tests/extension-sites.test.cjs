@@ -7,6 +7,7 @@ const vm = require('node:vm');
 const { webcrypto } = require('node:crypto');
 const { JSDOM } = require('jsdom');
 const adapter = require('../extension/iowa-adapter.js');
+const strings = require('../extension/strings.js');
 
 // Values created inside the worker's vm context have foreign prototypes.
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -37,8 +38,8 @@ const pantryPlan = () => ({
 
 // A model of generic-content.js on the page: like the site engine, every plan lists the
 // unanswered fields on screen under fresh ids, and answering a field can reveal others.
-function sitePage(fields, { next = false, tokenPrefix = 'plan' } = {}) {
-  let sequence = 0, current = null;
+function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = {}) {
+  let sequence = 0, current = null, listings = 0, listed = null;
   const onScreen = field => !field.hidden && (!field.revealedBy || fields.some(other => other.name === field.revealedBy && other.answered));
   const shown = field => !field.answered && onScreen(field);
   return {
@@ -71,7 +72,13 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan' } = {}) {
       }
       return { ok: true, filled, skipped: assignments.map(item => item.id).filter(id => !filled.includes(id) && !rejected.includes(id)), rejected };
     },
-    focus: id => Boolean(current?.ids.has(id)),
+    // Every question on screen, answered or not, under its own ids: labels only.
+    questions() {
+      listings++;
+      listed = new Map(fields.filter(onScreen).map((field, index) => [`sq-${listings}-${index}`, field]));
+      return { lang, questions: [...listed].map(([id, field]) => ({ id, label: field.label || field.name })) };
+    },
+    focus: id => Boolean(current?.ids.has(id) || listed?.has(id)),
     // The id a field has in the latest plan.
     idOf: name => [...(current?.ids || [])].find(([, field]) => field.name === name)?.[0],
     answered: () => fields.filter(field => field.answered).map(field => field.name)
@@ -88,7 +95,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
     if (frame.enabled) { const id = `frame-pantry.example.org--${new URL(frame.origin).hostname}`; registered.set(id, { ...SITE_SCRIPT, id, matches: [`${frame.origin}/*`] }); }
   }
   const page = sitePage(fields, { next });
-  for (const frame of frames) frame.page = sitePage(frame.fields || pantryFields(), { next: frame.next, tokenPrefix: `frame${frame.frameId}` });
+  for (const frame of frames) frame.page = sitePage(frame.fields || pantryFields(), { next: frame.next, tokenPrefix: `frame${frame.frameId}`, lang: frame.lang });
   const tallies = [];
   let statusChecks = 0;
   const vault = { reachable: true, unlocked: true, accessRevision: 0, getFieldsError: null, trustError: null,
@@ -114,6 +121,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
           return typeof frame?.fillResult === 'function' ? frame.fillResult(plain(message), model) : frame?.fillResult || model.fill(plain(message));
         }
         if (message.type === 'secondhand:generic:focus') return { focused: model.focus(message.id) };
+        if (message.type === 'secondhand:generic:questions') return model.questions();
         throw new Error(`Unexpected content message ${message.type}`);
       },
       onActivated: event('activated'), onRemoved: event('removed'), onUpdated: event('updated')
@@ -188,7 +196,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
     }
   };
   vm.runInNewContext(source('background.js'),
-    { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console });
+    { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console });
   const send = (message, sender) => new Promise(resolve => { if (!listener(message, sender, resolve)) resolve(undefined); });
   return {
     tab, page, vault, log, native, content, injected, tallies, opened, permissions, registered, events, send,
@@ -201,11 +209,12 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
 const autofill = w => w.panel({ type: 'ui:autofill', confirmed: true });
 const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(resolve => setImmediate(resolve)); };
 
-test('the worker loads the site engine next to the Iowa adapter and refuses to start without it', () => {
+test('the worker loads the site engine and its text next to the Iowa adapter and refuses to start without either', () => {
   const imported = [];
   const chrome = { runtime: { onMessage: { addListener: () => {} } }, tabs: {}, sidePanel: { setPanelBehavior: async () => {} } };
   assert.throws(() => vm.runInNewContext(source('background.js'), { chrome, SecondHandIowa: adapter, importScripts: (...files) => imported.push(...files), crypto: webcrypto, URL, Map, Set }), /generic-adapter\.js/);
-  assert.deepEqual(imported, ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js']);
+  assert.deepEqual(imported, ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'strings.js']);
+  assert.throws(() => vm.runInNewContext(source('background.js'), { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }), /strings\.js/);
 });
 
 test('turning a site on checks Chrome access, asks the desktop, then registers and injects the site scripts', async () => {
@@ -285,7 +294,7 @@ test('autofill on an approved site asks for the planned keys once and fills with
   assert.deepEqual(fill.assignments, [{ id: 'sh-1-0', key: 'fullName', guessed: false }, { id: 'sh-1-1', key: 'zip', guessed: false }]);
   assert.deepEqual(fill.values, { fullName: 'Synthetic private first Synthetic private last', zip: '50309' }, 'only the values being placed reach the page');
   assert.deepEqual(plain(response.data), { state: 'done', filled: 2, guessed: 0, needYou: [w.page.idOf('pickup'), w.page.idOf('size')].map(id => `f0:${id}`),
-    message: 'Filled 2 · 2 need you. Check your answers before you submit.', pageKey: 'general' });
+    message: 'Filled 2 · 2 need you. Check your answers before you submit.', messageKey: 'result.siteFilledNeedYou', messageParams: { count: 2, needYou: 2 }, pageKey: 'general' });
   assert.deepEqual(plain(response.data.needYou), ['f0:sh-2-1', 'f0:sh-2-0'], 'need-you ids come from the latest plan');
   assert.doesNotMatch(JSON.stringify(response), /Synthetic private/);
 
@@ -660,7 +669,7 @@ test('on approved sites the widget is a closed, full-size extension iframe in th
   assert.equal(page.frames[0].referrerPolicy, 'no-referrer');
   assert.equal(page.frames[0].getAttribute('sandbox'), 'allow-scripts allow-same-origin');
   // Chrome's on-device AI (Prompt API) is blocked in a cross-origin iframe unless the embedder delegates it.
-  assert.equal(page.frames[0].getAttribute('allow'), 'language-model');
+  assert.equal(page.frames[0].getAttribute('allow'), 'language-model; language-detector', 'the widget may use Chrome’s on-device AI and language detector');
   assert.equal(host.getAttribute('data-secondhand-size'), 'full');
   assert.equal(host.style.height, '70px');
   assert.equal(host.style.position, 'fixed');
@@ -973,4 +982,52 @@ test('content rejects a missing rejected list instead of manufacturing a valid r
   const page = siteContent(t);
   page.window.SecondHandGeneric.fillFields = () => ({ ok: true, filled: [], skipped: [], pending: [] });
   assert.equal((await page.requestAsync({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [], values: {} })).ok, false);
+});
+
+test('site results and errors name their catalog key, and the key renders the same English', async () => {
+  const guessed = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { name: 'zip', key: 'zip' }, { name: 'email', label: 'Where can we email you?' }, { ...PICKUP }] });
+  await guessed.launcher({ type: 'ui:plan', confirmed: true });
+  const result = (await guessed.launcher({ type: 'ui:autofill', confirmed: true, guesses: { [`f0:${guessed.page.idOf('email')}`]: 'email' } })).data;
+  assert.equal(strings.text('en', result.messageKey, result.messageParams), result.message);
+  assert.ok(strings.text('es', result.messageKey, result.messageParams));
+  const off = await siteWorker().panel({ type: 'ui:autofill', confirmed: true });
+  assert.equal(off.ok, false);
+  assert.equal(off.errorKey, 'worker.turnOnSiteFirst');
+  assert.equal(strings.text('en', off.errorKey, off.errorParams), off.error);
+});
+
+test('the site question list covers the page and every embedded form that is on, answered or not, as labels only', async () => {
+  const w = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName', label: 'Full name' }, { ...PICKUP }], frames: [
+    { origin: FRAME_ORIGIN, frameId: 4, enabled: true, lang: 'en-US', fields: [{ name: 'size', key: 'householdSize', label: 'Household size' },
+      { name: 'later', label: 'Hidden question', hidden: true }, { name: 'note', label: 'Anything else?' }, { name: 'day', label: 'Which day works?' }] },
+    { origin: 'https://other.example.org', frameId: 5 }] });
+  w.page.fields[0].answered = 'Synthetic private answer';
+  const reply = await w.panel({ type: 'ui:questions' });
+  assert.equal(reply.ok, true, reply.error);
+  assert.deepEqual(plain(reply.data), { lang: 'en-US', pending: 1, questions: [
+    { id: 'f0:sq-1-0', label: 'Full name' }, { id: 'f0:sq-1-1', label: 'Preferred pickup day' },
+    { id: 'f4:sq-1-0', label: 'Household size' }, { id: 'f4:sq-1-1', label: 'Anything else?' }, { id: 'f4:sq-1-2', label: 'Which day works?' }] },
+    'the page language is the one declared by the frame with the most questions');
+  assert.deepEqual(w.content.filter(call => call.type === 'secondhand:generic:questions').map(call => call.frameId), [0, 4], 'a frame that is not on is never asked');
+  assert.deepEqual(w.native, [], 'listing questions never reaches the desktop');
+  assert.doesNotMatch(JSON.stringify(reply), /Synthetic private/);
+  assert.deepEqual(plain((await w.panel({ type: 'ui:focusField', key: 'f4:sq-1-1' })).data), { focused: true }, 'a row click uses the existing focus route');
+  assert.deepEqual(plain((await w.launcher({ type: 'ui:questions' })).data.questions.length), 5, 'the widget on the site gets the same list');
+  const off = await siteWorker().launcher({ type: 'ui:questions' });
+  assert.equal(off.ok, false, 'a site that is not on is never read');
+});
+
+test('a site frame answers the question request with its declared language and each question’s label, for our extension only', t => {
+  const page = siteContent(t);
+  page.window.document.documentElement.lang = 'es';
+  let visibility;
+  page.window.SecondHandGeneric.questions = doc => {
+    visibility = page.host().style.visibility;
+    return [{ id: 'sq-1-0', label: 'Your name', element: doc.getElementById('name'), value: 'Synthetic private value' }];
+  };
+  const reply = page.request({ type: 'secondhand:generic:questions' });
+  assert.deepEqual(plain(reply), { lang: 'es', questions: [{ id: 'sq-1-0', label: 'Your name' }] });
+  assert.equal(visibility, 'hidden', 'the widget is hidden while the engine reads the page');
+  assert.doesNotMatch(JSON.stringify(reply), /Synthetic private/);
+  assert.equal(page.request({ type: 'secondhand:generic:questions' }, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
 });

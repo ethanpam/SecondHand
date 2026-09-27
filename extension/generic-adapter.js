@@ -280,7 +280,11 @@
 
   let current = null;
   let sequence = 0;
-  function scan(doc) {
+  // The question list's own ids, kept apart from the plan so listing never invalidates a fill.
+  let listed = null;
+  let listings = 0;
+  // Every eligible question on the page with its labels, answered or not.
+  function questionsOn(doc) {
     const entries = [];
     const groups = new Map();
     for (const element of doc.querySelectorAll(`input, select, textarea, ${ARIA_CONTROLS}`)) {
@@ -306,8 +310,27 @@
       entry.labels = ARIA_TYPES[entry.kind] ? ariaLabels(entry, doc) : grouped ? groupQuestion(entry.elements, doc) : labelsFor(entry.elements[0], doc);
       if (ARIA_TYPES[entry.kind]) entry.required = ariaRequired(entry, doc);
     }
+    return entries;
+  }
+  function scan(doc) {
     // A div question is only safe to leave to the rules when nothing on it asks for secrets.
-    return entries.filter(entry => !answered(entry) && !(ARIA_TYPES[entry.kind] && UNSAFE.test(normal(entry.labels.join(' ')))));
+    return questionsOn(doc).filter(entry => !answered(entry) && !(ARIA_TYPES[entry.kind] && UNSAFE.test(normal(entry.labels.join(' ')))));
+  }
+
+  // The page's questions for the applicant to read in their language: ids and labels only,
+  // never answers. Each id can be shown with focusField.
+  function questions(doc) {
+    const sequence = ++listings;
+    const map = new Map();
+    const items = [];
+    for (const entry of questionsOn(doc)) {
+      if (!entry.labels[0]) continue;
+      const id = `sq-${sequence}-${items.length}`;
+      map.set(id, entry);
+      items.push({ id, label: entry.labels[0] });
+    }
+    listed = { doc, map };
+    return items;
   }
 
   function plan(doc) {
@@ -502,7 +525,7 @@
   // Scrolls a question into view and highlights it. Keyboard focus is never moved: focusing
   // and then leaving an empty field makes sites such as Google Forms flag it as required.
   function focusField(doc, id) {
-    const entry = current && current.doc === doc ? current.map.get(id) : null;
+    const entry = (current?.doc === doc ? current.map.get(id) : null) || (listed?.doc === doc ? listed.map.get(id) : null);
     const element = entry?.elements[0];
     if (!element || !element.isConnected || !rendered(element)) return false;
     clearAttention();
@@ -519,7 +542,7 @@
   }
   const elementFor = id => current?.map.get(id)?.elements[0] || null;
 
-  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, GUESS_KEYS, plan, requestKeys, deriveValues, fillFields, settle, focusField, elementFor, canSuggest });
+  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, GUESS_KEYS, plan, questions, requestKeys, deriveValues, fillFields, settle, focusField, elementFor, canSuggest });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandGeneric = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

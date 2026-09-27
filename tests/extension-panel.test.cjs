@@ -6,6 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { JSDOM } = require('jsdom');
 const adapter = require('../extension/iowa-adapter.js');
+const strings = require('../extension/strings.js');
 const extensionId = 'a'.repeat(32);
 const extensionURL = file => `chrome-extension://${extensionId}/${file}`;
 const source = file => fs.readFileSync(path.join(__dirname, '../extension', file), 'utf8');
@@ -81,6 +82,7 @@ test('on-page assistant is isolated in a fixed extension iframe only on the exac
   assert.equal(page.frames[0].src, extensionURL('panel.html?surface=launcher'));
   assert.equal(page.frames[0].referrerPolicy, 'no-referrer');
   assert.equal(page.frames[0].getAttribute('sandbox'), 'allow-scripts allow-same-origin');
+  assert.equal(page.frames[0].getAttribute('allow'), 'language-detector', 'the widget may use Chrome’s on-device language detector');
   page.window.eval(source('content.js'));
   assert.equal(page.frames.length, 1);
 
@@ -311,7 +313,11 @@ async function panel(t, initial = {}) {
     let data;
     if (payload.type === 'ui:ping') data = { build: initial.build ?? BUILD };
     else if (payload.type === 'ui:plan') data = structuredClone(initial.plan ?? { unmatched: [], allowedKeys: ['email'] });
-    else if (payload.type === 'ui:pageState') data = initial.pageState ? await initial.pageState(state) : structuredClone(state);
+    else if (payload.type === 'ui:pageState') {
+      data = initial.pageState ? await initial.pageState(state) : structuredClone(state);
+      // The worker hands the side panel a widget's request for the question list once.
+      if (!initial.launcher && showQuestions) { showQuestions = false; data = { ...data, showQuestions: true }; }
+    } else if (payload.type === 'ui:questions') data = structuredClone(initial.questions ?? { lang: 'en', pending: 0, questions: [] });
     else if (payload.type === 'ui:autofill') { state.result = initial.autofill || doneResult; state.autopilot = Boolean(initial.autopilotAfterAutofill); data = structuredClone(state.result); }
     else if (payload.type === 'ui:stop') { state.autopilot = false; state.result = { state: 'stopped', filled: 0, needYou: [], message: 'Autofill stopped.', pageKey: 'iowa-personal-information' }; data = structuredClone(state.result); }
     else if (payload.type === 'ui:desktopStatus') data = { ...desktop };
@@ -325,14 +331,29 @@ async function panel(t, initial = {}) {
     } else return { ok: false, error: `Unexpected ${payload.type}` };
     return { ok: true, data };
   } } };
+  let showQuestions = initial.showQuestions === true;
   // Chrome's on-device AI exists only where a test provides a stand-in.
   if (initial.LanguageModel) window.LanguageModel = initial.LanguageModel;
+  if (initial.Translator) window.Translator = initial.Translator;
+  if (initial.LanguageDetector) window.LanguageDetector = initial.LanguageDetector;
+  // Chrome gives extension pages localStorage; jsdom has none for this origin. A shared map is one browser profile.
+  const storage = initial.storage || new Map();
+  Object.defineProperty(window, 'localStorage', { configurable: true, value: {
+    getItem: key => storage.has(key) ? storage.get(key) : null, setItem: (key, value) => { storage.set(key, String(value)); }, removeItem: key => { storage.delete(key); } } });
+  if (initial.language) Object.defineProperty(window.navigator, 'language', { configurable: true, get: () => initial.language });
   // Run the page's own scripts, in the order panel.html lists them.
-  for (const [, file] of source('panel.html').matchAll(/<script src="([^"]+)"/g)) window.eval(source(file));
+  for (const [, file] of source('panel.html').matchAll(/<script src="([^"]+)"/g)) {
+    window.eval(source(file));
+    // A shorter wait before a download that never starts is reported (the service's own tests cover the timing).
+    if (file === 'translation.js' && initial.stallMs) {
+      const service = window.SecondHandTranslation;
+      window.SecondHandTranslation = { ...service, create: (scope, options) => service.create(scope, { ...options, stallMs: initial.stallMs }) };
+    }
+  }
   await tick(); await tick();
   const get = id => window.document.getElementById(id);
   const clickNow = target => clicks.get(typeof target === 'string' ? get(target) : target)({ isTrusted: true });
-  return { window, requests, state, tabs, listeners, get, clickNow,
+  return { window, requests, state, tabs, listeners, get, clickNow, storage,
     types: () => requests.map(request => request.type),
     row: key => window.document.querySelector(`[data-key="${key}"]`),
     async userClick(target) { clickNow(target); await tick(); await tick(); } };
@@ -778,6 +799,20 @@ test('manual-only Tell Us More instruction is preserved without invented require
 });
 
 
+test('the Iowa question request answers the page language, info-screen text, and the general engine’s labels, for our extension only', t => {
+  const page = content(t);
+  page.window.document.documentElement.lang = 'en';
+  page.window.SecondHandIowa.instructions = () => ['Have these ready before you start your application.'];
+  page.window.SecondHandGeneric.questions = doc => [{ id: 'sq-1-0', label: 'Is anyone blind?', element: doc.getElementById('firstName'), value: 'Synthetic private value' }];
+  page.setKind('manual');
+  const reply = page.request({ type: 'secondhand:questions' });
+  assert.deepEqual(plain(reply), { lang: 'en', instructions: ['Have these ready before you start your application.'], questions: [{ id: 'sq-1-0', label: 'Is anyone blind?' }] });
+  assert.doesNotMatch(JSON.stringify(reply), /Synthetic private/);
+  assert.equal(page.request({ type: 'secondhand:questions' }, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
+  page.setKind('fillable');
+  assert.deepEqual(plain(page.request({ type: 'secondhand:questions' })).questions, [], 'a verified page is listed from its checklist, never the general engine');
+});
+
 test('verified navigation keeps its private snapshot local and consumes one authorized content token', t => {
   const page = content(t, `${adapter.PORTAL}/applicant`, { navigation: true });
   const first = page.request({ type: 'secondhand:pageState' });
@@ -794,4 +829,266 @@ test('verified navigation keeps its private snapshot local and consumes one auth
   assert.equal(page.request({ type: 'secondhand:next', token: fresh.nextToken }).advanced, false);
   assert.equal(page.request({ type: 'secondhand:next', token: fresh.nextToken, authorized: true }).advanced, false);
   assert.equal(page.advanced, 1);
+});
+
+// Applicant-language tests. Mocks of Chrome's Translator and LanguageDetector live only here.
+const { en: EN, es: ES } = strings.catalogs;
+const englishOnly = new Set(Object.keys(EN).filter(key => typeof EN[key] === 'string' && EN[key] !== ES[key]).map(key => EN[key]));
+// Every word of SecondHand's the applicant can see or hear: visible text, tooltips, and screen-reader
+// labels. The page's own words, kept under their translation in the question list, are the page's.
+function shownText(view) {
+  const found = [view.window.document.title];
+  for (const element of view.window.document.body.querySelectorAll('*')) {
+    if (element.closest('[hidden]') || element.closest('#questions-list .checklist-detail')) continue;
+    for (const node of element.childNodes) if (node.nodeType === 3 && node.textContent.trim()) found.push(node.textContent.trim());
+    for (const name of ['title', 'aria-label']) if (element.getAttribute(name)) found.push(element.getAttribute(name));
+  }
+  return found;
+}
+const spanish = key => strings.text('es', key);
+function translatorStub({ availability = 'available', create } = {}) {
+  const calls = { availability: [], create: [], translate: [] };
+  const Translator = {
+    async availability(options) { calls.availability.push(options); return availability; },
+    async create(options) {
+      calls.create.push(options);
+      if (create) return create(options);
+      return { async translate(text) { calls.translate.push(text); return `[${options.targetLanguage}] ${text}`; } };
+    }
+  };
+  return { Translator, calls };
+}
+function detectorStub({ availability = 'available', detected = 'en', failure } = {}) {
+  const calls = { detect: [] };
+  const LanguageDetector = {
+    async availability() { return availability; },
+    async create() { return { async detect(text) { calls.detect.push(text); if (failure) throw failure; return [{ detectedLanguage: detected, confidence: 0.95 }]; } }; }
+  };
+  return { LanguageDetector, calls };
+}
+const keyedChecklist = state => ({ ...structuredClone(state), page: { ...structuredClone(state.page), reasonKey: 'iowa.manualStep', reasonParams: {},
+  checklist: state.page.checklist.map(item => ({ ...item, labelKey: `iowa.${item.key}`, labelParams: {} })).filter(item => Object.hasOwn(EN, item.labelKey)) } });
+const pageQuestions = { lang: 'en', pending: 0, questions: [
+  { id: '', label: 'Have these ready before you start your application.' },
+  { id: 'firstName', label: 'First name', labelKey: 'iowa.firstName', labelParams: {} },
+  { id: 'f0:sq-1-0', label: 'Preferred pickup day' }] };
+const settle = async () => { for (let i = 0; i < 12; i++) await tick(); };
+
+test('with Spanish as the browser language, the side panel shows none of SecondHand’s English', async t => {
+  const view = await panel(t, { language: 'es-ES', pageState: keyedChecklist });
+  assert.equal(view.window.document.documentElement.lang, 'es');
+  assert.equal(view.window.document.title, spanish('app.title'));
+  assert.equal(view.get('panel-autofill').textContent, spanish('panel.autofill'));
+  assert.equal(view.get('status').textContent, spanish('panel.iowaHint'));
+  assert.equal(view.get('desktop-status').textContent, spanish('desktop.unlocked'));
+  assert.match(view.row('firstName').textContent, new RegExp(`${spanish('iowa.firstName')}.*${spanish('checklist.missing')}`));
+  assert.equal(view.get('checklist-summary').textContent, strings.text('es', 'checklist.summary', { done: 1, total: 3 }));
+  assert.equal(view.get('language').value, 'es');
+  assert.deepEqual(shownText(view).filter(text => englishOnly.has(text)), []);
+  // Nothing about the language changes what the panel asks the worker.
+  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:ping' }, { type: 'ui:pageState', tabId: 7 }, { type: 'ui:desktopStatus' }]);
+});
+
+test('with Spanish as the browser language, the widget shows none of SecondHand’s English', async t => {
+  const view = await panel(t, { launcher: true, language: 'es-ES' });
+  assert.equal(view.get('autofill').textContent, spanish('widget.autofill'));
+  assert.equal(view.get('widget-text').textContent, spanish('widget.iowaReady'));
+  assert.equal(view.get('autofill').title, spanish('widget.autofillIowaTitle'));
+  assert.deepEqual(shownText(view).filter(text => englishOnly.has(text)), []);
+  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:ping' }, { type: 'ui:pageState' }], 'without Chrome’s translator the widget asks nothing more');
+});
+
+test('results the worker names by key show in Spanish in the widget and the side panel; a bare message shows as sent', async t => {
+  const iowa = { state: 'done', filled: 3, needYou: ['firstName', 'lastName'], pageKey: 'iowa-personal-information',
+    message: 'Filled 3 · 2 need you. Complete the missing answers in Iowa’s form. SecondHand will check again before continuing.',
+    messageKey: 'result.thenTodo', messageParams: { summary: { key: 'result.filledNeedYou', params: { count: 3, needYou: 2 } }, todo: { key: 'iowa.missingAnswers', params: {} } },
+    todo: 'Complete the missing answers in Iowa’s form. SecondHand will check again before continuing.', todoKey: 'iowa.missingAnswers', todoParams: {} };
+  const widget = await panel(t, { launcher: true, language: 'es-ES', autofill: iowa });
+  await widget.userClick('autofill');
+  assert.equal(widget.get('widget-text').textContent, `${strings.text('es', 'widget.filled', { count: 3 })} · ${spanish('iowa.missingAnswers')}`);
+  assert.equal(widget.get('need-you').textContent, 'Faltan 2');
+  assert.equal(widget.get('widget-text').title, strings.text('es', iowa.messageKey, iowa.messageParams));
+  const side = await panel(t, { language: 'es-ES', autofill: iowa });
+  await side.userClick('panel-autofill');
+  assert.equal(side.get('status').textContent, strings.text('es', iowa.messageKey, iowa.messageParams));
+
+  const site = await panel(t, { launcher: true, language: 'es-ES', tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: openPlan,
+    autofill: { ...siteDone, messageKey: 'result.siteFilledNeedYou', messageParams: { count: 2, needYou: 2 } } });
+  assert.equal(site.get('widget-text').textContent, strings.text('es', 'widget.siteReady', { host: 'pantry.example.org' }));
+  await site.userClick('autofill');
+  assert.equal(site.get('widget-text').textContent, `${strings.text('es', 'widget.filled', { count: 2 })} · ${spanish('widget.aiUnavailable')}`);
+  // A result without a key (an older worker) is shown exactly as it arrived.
+  const bare = await panel(t, { language: 'es-ES', autofill: { ...siteDone, message: 'Synthetic bare message.' }, tab: SITE, site: { origin: ORIGIN, enabled: true } });
+  await bare.userClick('panel-autofill');
+  assert.equal(bare.get('status').textContent, 'Synthetic bare message.');
+});
+
+test('an error reply the worker names by key shows in Spanish; one without a key is marked as English', async t => {
+  const reply = { ok: false, error: 'Open the official Iowa portal in the active tab, then try again.', errorKey: 'worker.openIowaPortal', errorParams: {} };
+  const view = await panel(t, { language: 'es-ES', pageState: () => { throw Object.assign(new Error(reply.error), { reply }); } });
+  view.window.chrome.runtime.sendMessage = async payload => {
+    if (payload.type === 'ui:pageState') return reply;
+    return { ok: true, data: payload.type === 'ui:ping' ? { build: BUILD } : { connected: true, unlocked: true } };
+  };
+  view.listeners.activated({ tabId: 7 }); await settle();
+  assert.equal(view.get('status').textContent, spanish('worker.openIowaPortal'));
+  assert.equal(view.get('status').classList.contains('error'), true);
+  reply.errorKey = undefined; reply.error = 'Synthetic Chrome error.';
+  view.listeners.activated({ tabId: 7 }); await settle();
+  assert.equal(view.get('status').textContent, strings.text('es', 'detail', { detail: 'Synthetic Chrome error.' }));
+});
+
+test('the language picker saves the choice in the extension’s storage, changes the panel at once, survives a reload, and the widget follows', async t => {
+  const storage = new Map();
+  const view = await panel(t, { storage, pageState: keyedChecklist });
+  assert.equal(view.get('language').value, 'en');
+  assert.equal(view.get('panel-autofill').textContent, 'Autofill this page');
+  view.get('language').value = 'es';
+  view.get('language').dispatchEvent(new view.window.Event('change'));
+  await settle();
+  assert.equal(storage.get('secondhand.language'), 'es');
+  assert.equal(view.get('panel-autofill').textContent, spanish('panel.autofill'));
+  assert.equal(view.get('status').textContent, spanish('panel.iowaHint'));
+  assert.equal(view.get('iowa-policy').textContent, spanish('panel.iowaPolicy'));
+  assert.deepEqual(shownText(view).filter(text => englishOnly.has(text)), []);
+
+  const reloaded = await panel(t, { storage });
+  assert.equal(reloaded.get('language').value, 'es', 'the saved choice wins over the English browser');
+  assert.equal(reloaded.get('panel-autofill').textContent, spanish('panel.autofill'));
+  const widget = await panel(t, { launcher: true, storage });
+  assert.equal(widget.get('autofill').textContent, spanish('widget.autofill'));
+  // A choice made while the widget is open reaches it through the storage event.
+  storage.set('secondhand.language', 'en');
+  widget.window.dispatchEvent(Object.assign(new widget.window.Event('storage'), { key: 'secondhand.language' }));
+  await settle();
+  assert.equal(widget.get('autofill').textContent, 'Autofill');
+  assert.equal(widget.get('widget-text').textContent, 'Iowa · uses first home address suggestion');
+});
+
+test('the side panel lists every question in Spanish; a row click finds it through the existing focus route; nothing is written to the page', async t => {
+  const ai = translatorStub();
+  const detector = detectorStub();
+  const view = await panel(t, { language: 'es-ES', Translator: ai.Translator, LanguageDetector: detector.LanguageDetector, questions: pageQuestions, pageState: keyedChecklist });
+  assert.equal(view.get('questions-show').hidden, false);
+  assert.equal(view.get('questions-show').textContent, spanish('questions.show'));
+  view.get('questions-show').click(); await settle();
+  assert.equal(view.types().includes('ui:questions'), false, 'an untrusted click does nothing');
+  await view.userClick('questions-show'); await settle();
+  assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:questions')), { type: 'ui:questions', tabId: 7 });
+  assert.deepEqual(detector.calls.detect, ['Have these ready before you start your application.\nPreferred pickup day'], 'the detector reads the page’s own words');
+  assert.deepEqual(ai.calls.create.map(options => [options.sourceLanguage, options.targetLanguage]), [['en', 'es']]);
+  assert.deepEqual(ai.calls.translate, ['Have these ready before you start your application.', 'Preferred pickup day'], 'SecondHand’s own labels come from its catalog, not the translator');
+  const rows = [...view.get('questions-list').children];
+  assert.deepEqual(rows.map(row => [row.tagName, row.querySelector('.checklist-label').textContent, row.querySelector('.checklist-detail').textContent]), [
+    ['DIV', '[es] Have these ready before you start your application.', 'Have these ready before you start your application.'],
+    ['BUTTON', spanish('iowa.firstName'), ''],
+    ['BUTTON', '[es] Preferred pickup day', 'Preferred pickup day']]);
+  assert.equal(view.get('questions').hidden, false);
+  assert.equal(view.get('questions-summary').textContent, strings.text('es', 'questions.count', { count: 2 }));
+  assert.equal(view.get('questions-note').textContent, spanish('translate.done'));
+  assert.equal(view.get('questions-show').textContent, spanish('questions.refresh'));
+  await view.userClick(rows[2]);
+  assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'ui:focusField', key: 'f0:sq-1-0', tabId: 7 });
+  assert.deepEqual([...new Set(view.types())].sort(), ['ui:desktopStatus', 'ui:focusField', 'ui:pageState', 'ui:ping', 'ui:questions']);
+  assert.doesNotMatch(JSON.stringify(view.requests), /\[es\]/, 'no translation is ever sent toward the page');
+  assert.deepEqual(shownText(view).filter(text => englishOnly.has(text)), []);
+});
+
+test('without the Translator API the question list is hidden behind one plain line, and nothing else changes', async t => {
+  const view = await panel(t, { language: 'es-ES' });
+  assert.equal(view.get('questions-show').hidden, true);
+  assert.equal(view.get('questions-note').hidden, false);
+  assert.equal(view.get('questions-note').textContent, spanish('translate.missing'));
+  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:ping' }, { type: 'ui:pageState', tabId: 7 }, { type: 'ui:desktopStatus' }]);
+  const english = await panel(t, {});
+  assert.equal(english.get('questions-show').hidden, true);
+  assert.equal(english.get('questions-note').hidden, true, 'an applicant reading English sees nothing new');
+  assert.equal(english.get('questions').hidden, true);
+});
+
+test('a language pair Chrome can’t translate, a page already in Spanish, or a failed translation each says so in one line and keeps the questions', async t => {
+  const unavailable = await panel(t, { language: 'es-ES', Translator: translatorStub({ availability: 'unavailable' }).Translator, questions: pageQuestions });
+  await unavailable.userClick('questions-show'); await settle();
+  assert.equal(unavailable.get('questions-note').textContent, strings.text('es', 'translate.unavailable', { source: 'inglés', target: 'español' }));
+  assert.equal(unavailable.get('questions-list').children.length, 3, 'the questions are still listed in their own words');
+  const same = await panel(t, { language: 'es-ES', Translator: translatorStub().Translator, questions: { ...pageQuestions, lang: 'es' } });
+  await same.userClick('questions-show'); await settle();
+  assert.equal(same.get('questions-note').textContent, strings.text('es', 'questions.sameLanguage', { language: 'español' }));
+  const failing = translatorStub({ create: async () => ({ async translate() { throw new Error('Synthetic translation failure'); } }) });
+  const failed = await panel(t, { language: 'es-ES', Translator: failing.Translator, questions: pageQuestions });
+  await failed.userClick('questions-show'); await settle();
+  assert.equal(failed.get('questions-note').textContent, strings.text('es', 'translate.failed', { detail: 'Synthetic translation failure' }));
+  assert.equal(failed.get('questions-note').classList.contains('error'), true);
+  const unknown = await panel(t, { language: 'es-ES', Translator: translatorStub().Translator, questions: { ...pageQuestions, lang: '' } });
+  await unknown.userClick('questions-show'); await settle();
+  assert.equal(unknown.get('questions-note').textContent, spanish('questions.unknownLanguage'));
+});
+
+test('a translator Chrome must download starts from the applicant’s click, shows its progress, and says so when the download never starts', async t => {
+  let monitor, finish;
+  const downloading = translatorStub({ availability: 'downloadable', create: options => { options.monitor(monitor = new EventTarget()); return new Promise(resolve => { finish = resolve; }); } });
+  const view = await panel(t, { language: 'es-ES', Translator: downloading.Translator, questions: pageQuestions });
+  await view.userClick('questions-show'); await settle();
+  assert.equal(view.get('questions-note').textContent, strings.text('es', 'translate.downloading', { language: 'español', percent: 0 }));
+  monitor.dispatchEvent(Object.assign(new Event('downloadprogress'), { loaded: 0.42 }));
+  assert.equal(view.get('questions-note').textContent, strings.text('es', 'translate.downloading', { language: 'español', percent: 42 }));
+  finish({ async translate(text) { return `[es] ${text}`; } }); await settle();
+  assert.equal(view.get('questions-note').textContent, spanish('translate.done'));
+  assert.equal(view.get('questions-list').children[2].querySelector('.checklist-label').textContent, '[es] Preferred pickup day');
+
+  const stuck = translatorStub({ availability: 'downloadable', create: () => new Promise(() => {}) });
+  const stalled = await panel(t, { language: 'es-ES', Translator: stuck.Translator, questions: pageQuestions, stallMs: 15 });
+  await stalled.userClick('questions-show'); await settle();
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(stalled.get('questions-note').textContent, strings.text('es', 'translate.stalled', { language: 'español', source: 'inglés' }));
+  assert.equal(stalled.get('questions-list').children.length, 3, 'the questions stay listed in their own words');
+});
+
+test('the widget offers the Spanish view when the page is in English, and the offer opens the side panel on the list', async t => {
+  const detector = detectorStub();
+  const view = await panel(t, { launcher: true, language: 'es-ES', Translator: translatorStub().Translator, LanguageDetector: detector.LanguageDetector, questions: pageQuestions });
+  await settle();
+  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:ping' }, { type: 'ui:pageState' }, { type: 'ui:questions' }]);
+  assert.equal(view.get('translate-offer').hidden, false);
+  assert.equal(view.get('translate-offer').textContent, spanish('widget.offer'));
+  assert.equal(view.get('translate-offer').title, spanish('widget.offerTitle'));
+  view.get('translate-offer').click(); await tick();
+  assert.equal(view.types().includes('ui:openPanel'), false);
+  view.clickNow('translate-offer');
+  // Sent inside the click: Chrome opens the side panel only from the applicant's gesture.
+  assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'ui:openPanel', confirmed: true, questions: true });
+
+  // Without a ready detector, the page's declared language decides (headless Chromium has none).
+  const declared = await panel(t, { launcher: true, language: 'es-ES', Translator: translatorStub().Translator, LanguageDetector: detectorStub({ availability: 'unavailable' }).LanguageDetector, questions: pageQuestions });
+  await settle();
+  assert.equal(declared.get('translate-offer').hidden, false);
+  const english = await panel(t, { launcher: true, Translator: translatorStub().Translator, LanguageDetector: detectorStub().LanguageDetector, questions: pageQuestions });
+  await settle();
+  assert.equal(english.get('translate-offer').hidden, true, 'an English page for an English reader needs no offer');
+  const pill = await panel(t, { launcher: true, kind: 'manual', language: 'es-ES', Translator: translatorStub().Translator, questions: pageQuestions });
+  await settle();
+  assert.equal(pill.types().includes('ui:questions'), false, 'a page with nothing to fill is not read');
+  const failing = await panel(t, { launcher: true, language: 'es-ES', Translator: translatorStub().Translator, LanguageDetector: detectorStub({ failure: new Error('Synthetic detector failure') }).LanguageDetector, questions: pageQuestions });
+  await settle();
+  assert.equal(failing.get('translate-offer').hidden, true);
+  assert.equal(failing.get('widget-text').textContent, spanish('widget.languageCheckFailed'));
+});
+
+test('when the widget’s offer opened the side panel, the panel shows the list by itself and asks for a click only to download', async t => {
+  const ai = translatorStub({ availability: 'downloadable' });
+  const view = await panel(t, { language: 'es-ES', Translator: ai.Translator, questions: pageQuestions, showQuestions: true });
+  await settle();
+  assert.equal(view.types().filter(type => type === 'ui:questions').length, 1);
+  assert.equal(view.get('questions-list').children.length, 3);
+  assert.deepEqual(ai.calls.create, [], 'no download starts without the applicant’s click');
+  assert.equal(view.get('questions-note').textContent, strings.text('es', 'translate.needsDownload', { language: 'español' }));
+  assert.equal(view.get('questions-show').textContent, strings.text('es', 'translate.download', { language: 'español' }));
+  await view.userClick('questions-show'); await settle();
+  assert.equal(ai.calls.create.length, 1);
+  assert.equal(view.get('questions-note').textContent, spanish('translate.done'));
+  // An English reader on a page the widget found to be in another language gets the list too.
+  const english = await panel(t, { Translator: translatorStub().Translator, questions: { ...pageQuestions, lang: 'es' }, showQuestions: true });
+  await settle();
+  assert.equal(english.get('questions').hidden, false);
+  assert.equal(english.get('questions-list').children[2].querySelector('.checklist-label').textContent, '[en] Preferred pickup day');
 });

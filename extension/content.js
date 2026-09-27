@@ -60,6 +60,7 @@
       panelFrame.src = chrome.runtime.getURL('panel.html?surface=launcher');
       panelFrame.title = 'Open SecondHand in Chrome’s sidebar';
       panelFrame.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+      panelFrame.setAttribute('allow', 'language-detector'); // lets the widget check the page's language on this computer
       panelFrame.referrerPolicy = 'no-referrer';
       for (const [property, value] of Object.entries({ width: '100%', height: '100%', display: 'block', border: '0', margin: '0', padding: '0', 'border-radius': '14px', background: 'transparent' })) panelFrame.style.setProperty(property, value, 'important');
       shadow.append(panelFrame);
@@ -110,6 +111,12 @@
       unmatched: plan.unmatched.map(field => ({ id: planText(field.id), label: typeof field.label === 'string' ? field.label : '',
         type: typeof field.type === 'string' ? field.type : '', options: strings(field.options), required: field.required === true }))
     };
+  }
+  // For the applicant's translated question list: the page's declared language, the words on
+  // Iowa's information-only screens, and on pages the adapter hasn't verified, the engine's labels.
+  function questions() {
+    return { lang: document.documentElement.lang || '', instructions: adapter.instructions(document, location.href),
+      questions: engine && unverified() ? engine.questions(document).map(({ id, label }) => ({ id, label })) : [] };
   }
   function general(message) {
     if (!engine) return { ok: false, error: 'SecondHand could not load its form engine. Reinstall the extension.' };
@@ -175,6 +182,8 @@
         if (typeof answer?.then !== 'function') { respond(answer); return; }
         answer.then(respond, () => respond({ ok: false, error: 'This page could not be checked safely. Review it manually, then rescan.' }));
         return true;
+      } else if (message.type === 'secondhand:questions') {
+        respond(withOwnPanelHidden(questions));
       } else if (message.type === 'secondhand:generic:focus' && typeof message.id === 'string' && engine) {
         respond({ focused: Boolean(withOwnPanelHidden(() => engine.focusField(document, message.id))) });
       }

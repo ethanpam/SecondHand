@@ -332,3 +332,24 @@ test('the AI mapper can only suggest keys the rules engine knows how to fill', (
   const ai = require('../extension/ai-mapper.js');
   assert.deepEqual([...ai.ALLOWED_KEYS].sort(), [...generic.GENERIC_KEYS].sort());
 });
+
+test('the question list names every question on the page, answered or not, and each one can be shown without disturbing a fill', () => {
+  const doc = page(forms.plainPantry);
+  const seen = watchAttention(doc);
+  doc.getElementById('fname').value = 'Typed by the applicant';
+  const plan = generic.plan(doc);
+  const listed = generic.questions(doc);
+  assert.deepEqual(listed.map(item => item.label), ['First Name', 'Last Name', 'Date of Birth', 'Street Address', 'City', 'State', 'ZIP Code', 'Phone Number', 'Email',
+    'How many people live in your household?', 'Number of adults', 'Number of children', 'Number of seniors (65+)', 'Is anyone in your household a veteran?', 'Total monthly household income',
+    'Anything else we should know?'], 'the answered first name is listed too');
+  assert.ok(listed.every(item => /^sq-\d+-\d+$/.test(item.id) && Object.keys(item).sort().join() === 'id,label'), 'ids and labels only');
+  assert.doesNotMatch(JSON.stringify(listed), /Typed by the applicant|Create a password|Card number/, 'no answers, and password and card fields are never listed');
+  assert.equal(generic.focusField(doc, listed.at(-1).id), true);
+  assert.deepEqual(seen.scrolled, [doc.getElementById('notes')]);
+  assert.equal(generic.focusField(doc, 'sq-999-0'), false);
+  // Listing never replaces the plan a fill is using.
+  const lastName = plan.matched.find(item => item.key === 'lastName');
+  assert.equal(generic.fillFields(doc, plan.token, [{ id: lastName.id, key: 'lastName', guessed: false }], generic.deriveValues(profile)).ok, true);
+  assert.equal(doc.getElementById('lname').value, 'Example');
+  assert.equal(doc.getElementById('fname').value, 'Typed by the applicant');
+});
