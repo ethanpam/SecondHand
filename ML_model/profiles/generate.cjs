@@ -68,7 +68,7 @@ function household(next, today) {
   };
   // Blank answers, so the model learns when the facts don't say.
   const sparse = chance(0.03);
-  for (const field of Object.keys(profile)) if (profile[field] && chance(sparse ? 0.8 : 0.08)) profile[field] = '';
+  for (const field of Object.keys(profile)) if (profile[field] && chance(sparse ? 0.8 : 0.12)) profile[field] = '';
   return Object.fromEntries(Object.entries(profile).filter(([, value]) => value !== ''));
 }
 
