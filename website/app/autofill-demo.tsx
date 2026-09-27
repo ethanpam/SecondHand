@@ -14,9 +14,13 @@ const stages = [
 ] as const;
 
 const fields = [
-  { label: 'Full name', value: 'Avery Example', placeholder: 'Your name' },
-  { label: 'Email', value: 'avery@example.com', placeholder: 'Your email' },
-  { label: 'City', value: 'Ames', placeholder: 'Your city' },
+  { label: 'Full name', value: 'Daniel Ceaser', placeholder: 'Your name' },
+  {
+    label: 'Email',
+    value: 'Ceaser.Daniel@example.com',
+    placeholder: 'Your email',
+  },
+  { label: 'City', value: 'Toronto', placeholder: 'Your city' },
 ];
 
 export function AutofillDemo() {
@@ -89,8 +93,9 @@ export function AutofillDemo() {
       <figcaption id="autofill-caption">
         Illustration with fictional details. Nothing is sent.
         <span className="screen-reader-only">
-          After approval, the example fills Avery Example, avery@example.com,
-          and Ames. You review the answers before continuing.
+          After approval, the example fills Daniel Ceaser,
+          Ceaser.Daniel@example.com, and Toronto. You review the answers before
+          continuing.
         </span>
       </figcaption>
     </figure>
