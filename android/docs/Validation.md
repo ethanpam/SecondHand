@@ -46,6 +46,8 @@ Gradle writes reports under `app/build/reports/`. Instrumentation screenshots us
 
 ## Remaining real-device and portal work
 
+The follow-up [guest-page QA report](Iowa-guest-QA.md) documents a GET-only live entry check and the fuller fictional applicant-form test. Neither establishes live filing. Its opt-in live test is skipped during ordinary offline regression runs.
+
 - Live Iowa login, CAPTCHA, full application, authenticated renewal, and confirmation behavior remain unverified. Successful synthetic tests do not establish successful agency filing.
 - Physical-device credential/biometric prompts, document import/preview, accessibility at large text sizes, and notification delivery through battery restrictions need device checks.
 - Portal file uploads currently require an external browser. Browser sessions are separate; signing in again or resuming through Iowa may be necessary.
