@@ -50,7 +50,7 @@ On **Enter Personal Information**, one click fills every empty supported field f
 The first time, the desktop app asks before sharing your saved answers. Choose **Allow once** to be asked again next time, or **Always allow on this computer** to skip the pop-up whenever the app is unlocked. Turn that off under **Chrome extension → Let Chrome autofill without asking**. Locking the vault, manually, after 10 idle minutes, or when your computer sleeps or locks, stops autofill until you unlock again. The widget then shows **Unlock SecondHand**, which brings the app to the front.
 
 
-After filling, the widget shows **Filled N** and, when something is missing, **N need you**. Click it to jump to each missing field in turn. **Details** opens the side panel, which lists each relevant question as **Done**, **Needs you**, **Optional**, or **Do it yourself**. Click a row to bring that field into view. Checkmarks describe the form's completeness, not agency approval.
+After filling, the card shows a yellow **N need you** link when something is missing. Click it to jump to each missing field in turn. Click the SecondHand logo on the card to open the side panel, which shows how many answers were filled and lists each relevant question as **Done**, **Needs you**, **Optional**, or **Do it yourself**. Click a row to bring that field into view. Checkmarks describe the form's completeness, not agency approval.
 
 Autofill can use **Save and Continue** on the verified complete applicant page and home-address confirmation. It never operates consent, CAPTCHA, sign-in, signature, or final Submit controls. Iowa may save answers as they are entered or a page is continued. Review every answer and the selected address before final submission.
 
