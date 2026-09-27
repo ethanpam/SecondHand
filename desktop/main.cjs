@@ -185,6 +185,15 @@ if (nativeOrigin) {
       return true;
     } finally { fieldRequestPending = false; }
   }
+  // warmLaya: when an Autofill click starts on a page with open questions, the model's first load
+  // after idle (process start, checksum, load: seconds) happens here, not in the click's Laya
+  // budget. Answers with Laya's state; a model that fails to load reports as an error.
+  async function warmLaya() {
+    if ((await extensionLayaState()).state === 'ready') {
+      try { await laya.warm(); } catch (error) { if (error.code !== 'LAYA_NOT_READY') throw error; }
+    }
+    return extensionLayaState();
+  }
   // suggestFields and answerFields: question labels and options in, a saved-field key or an
   // option's text out, within the time the click has left. The facts sheet never leaves this app.
   // Matching needs no approval: its keys' values come through getFields, which asks.
@@ -229,6 +238,7 @@ if (nativeOrigin) {
       if (mainWindow) { if (mainWindow.isMinimized?.()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); }
       return { shown: true };
     }
+    if (request.type === 'warmLaya') return warmLaya();
     if (request.type === 'suggestFields' || request.type === 'answerFields') return layaRequest(request, context);
     requireUnlocked();
     if (request.type === 'trustSite') {

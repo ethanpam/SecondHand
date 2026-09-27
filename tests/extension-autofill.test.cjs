@@ -116,7 +116,8 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
               if (request.type === 'status') return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: 0, ...(vault.layaState ? { laya: { state: vault.layaState } } : {}) });
               if (request.type === 'showApp') return reply({ shown: true });
               if (request.type === 'recordProgress') return reply({ recorded: true });
-              // Laya (#39, #42): this build's desktop has no runtime and answers "not ready", unless a test plays it.
+              // Laya (#39, #42): readied before a click's questions; "not ready" unless a test plays it.
+              if (request.type === 'warmLaya') return reply({ state: vault.layaState || 'unavailable' });
               if (request.type === 'suggestFields' || request.type === 'answerFields') {
                 const play = vault.laya?.[request.type];
                 if (!play) return onMessage({ id: request.id, ok: false, error: 'Laya isn’t ready on this computer.', code: 'LAYA_NOT_READY' });
@@ -208,7 +209,7 @@ test('an unknown page where the general engine matches nothing stops autofill; t
   assert.equal(response.ok, true);
   assert.equal(response.data.state, 'stopped');
   assert.match(response.data.message, /doesn’t know this page yet/);
-  assert.deepEqual(w.calls.native.map(call => call.type), ['status']);
+  assert.deepEqual(w.calls.native.map(call => call.type), ['warmLaya']);
   assert.deepEqual(w.calls.content.map(message => message.type), ['secondhand:pageState', 'secondhand:generic:plan']);
   const state = (await w.panel({ type: 'ui:pageState' })).data;
   assert.equal(state.autopilot, false);
@@ -223,9 +224,9 @@ test('an unknown Iowa page gets one general fill, then waits for the applicant t
     message: 'Filled 2 · 2 need you. Check your answers, then click Continue.', todo: 'Check your answers, then click Continue.', pageKey: 'iowa-manual',
     messageKey: 'result.thenTodo', messageParams: { summary: { key: 'result.filledNeedYou', params: { count: 2, needYou: 2 } }, todo: { key: 'worker.checkThenContinue', params: {} } },
     todoKey: 'worker.checkThenContinue', todoParams: {} });
-  assert.deepEqual(w.calls.native.map(call => call.type).filter(type => type !== 'status'), ['getFields', 'answerFields'], 'Laya is asked about the open question and isn’t ready');
-  assert.equal(w.calls.native[1].url, `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo`);
-  assert.deepEqual(plain(w.calls.native[1].fields), ['householdAdults', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'householdSeniors']);
+  assert.deepEqual(w.calls.native.map(call => call.type).filter(type => type !== 'status'), ['warmLaya', 'getFields'], 'Laya is readied for the open question and isn’t ready');
+  assert.equal(w.calls.native[2].url, `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo`);
+  assert.deepEqual(plain(w.calls.native[2].fields), ['householdAdults', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'householdSeniors']);
   // The second plan finds nothing new it can fill, so the click ends there.
   assert.deepEqual(w.calls.content.map(message => message.type), ['secondhand:pageState', 'secondhand:generic:plan', 'secondhand:generic:fill', 'secondhand:generic:plan']);
   const fill = plain(w.calls.content[2]);
@@ -253,8 +254,8 @@ test('an unknown Iowa page fills questions its answers reveal in the same click,
     { id: 'sh-1-5', key: 'monthlyRent', confidence: 'high', revealedBy: 'sh-1-0' });                        // its key was not requested
   const w = worker({ kind: 'manual', engine: generalEngine, general: plan, desktop: { values: { ...financialValues, monthlyRent: '700' } } });
   const result = plain((await autofill(w)).data);
-  assert.deepEqual(w.calls.native.map(call => call.type).filter(type => type !== 'status'), ['getFields', 'answerFields']);
-  assert.deepEqual(plain(w.calls.native[1].fields), ['householdAdults', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'householdSeniors']);
+  assert.deepEqual(w.calls.native.map(call => call.type).filter(type => type !== 'status'), ['warmLaya', 'getFields']);
+  assert.deepEqual(plain(w.calls.native[2].fields), ['householdAdults', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'householdSeniors']);
   assert.deepEqual(w.calls.content.map(message => message.type), ['secondhand:pageState', 'secondhand:generic:plan', 'secondhand:generic:fill',
     'secondhand:generic:plan', 'secondhand:generic:fill', 'secondhand:generic:plan']);
   assert.equal(result.filled, 3);
@@ -324,7 +325,7 @@ test('with Laya ready, an unknown Iowa page the rules can’t fill gets Laya’s
   const general = { ...nothingPlanned(), unmatched: [blind] };
   const w = worker({ kind: 'manual', engine: generalEngine, general, desktop: layaAnswers(() => ({ [blind.id]: 'No' })) });
   const result = plain((await autofill(w)).data);
-  assert.deepEqual(w.calls.native.map(call => call.type), ['status', 'answerFields', 'status']);
+  assert.deepEqual(w.calls.native.map(call => call.type), ['warmLaya', 'answerFields', 'status']);
   assert.equal(result.state, 'done');
   assert.equal(result.filled, 1);
   const state = plain((await w.panel({ type: 'ui:pageState' })).data);
@@ -453,6 +454,7 @@ function journey({ screens, desktop = {}, continueStays = false, engine = noSite
               const reply = data => onMessage({ id: request.id, ok: true, data });
               if (request.type === 'status') return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: 0 });
               if (request.type === 'getFields') return reply({ accessRevision: 0, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])) });
+              if (request.type === 'warmLaya') return reply({ state: 'unavailable' });
               if (request.type === 'suggestFields' || request.type === 'answerFields') return onMessage({ id: request.id, ok: false, error: 'Laya isn’t ready on this computer.', code: 'LAYA_NOT_READY' });
               return reply({ recorded: true });
             });

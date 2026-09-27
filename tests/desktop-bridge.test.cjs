@@ -204,3 +204,10 @@ test('a "Laya not ready" refusal keeps its code through the local bridge; other 
     'only a public refusal carries a code');
   assert.deepEqual(await relayRequest(directory, EXTENSION, { id: 'status-1', type: 'status' }), { id: 'status-1', ok: false, error: 'Unlock SecondHand first.' });
 });
+
+test('warmLaya carries nothing but its id: it only readies Laya’s model before a click’s questions are asked', () => {
+  assert.deepEqual(validateRequest({ id: 'warm-1', type: 'warmLaya' }), { id: 'warm-1', type: 'warmLaya' });
+  for (const extra of [{ url: LAYA_SITE }, { fields: [box()] }, { questions: [choice()] }, { budgetMs: 3000 }]) {
+    assert.throws(() => validateRequest({ id: 'warm-1', type: 'warmLaya', ...extra }), /Unexpected/, JSON.stringify(extra));
+  }
+});

@@ -592,14 +592,13 @@ function guessAssignments(stored, url, guesses) {
 const plainEntries = value => value && typeof value === 'object' && !Array.isArray(value) ? Object.entries(value) : null;
 const layaText = (value, max) => typeof value === 'string' && value.trim() !== '' && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
 const utf8Length = text => { let bytes = 0; for (const char of text) { const code = char.codePointAt(0); bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4; } return bytes; };
-// Laya's state as the desktop reports it. A desktop app from before Laya reports none.
-function layaState(status) {
-  if (status?.laya === undefined) return 'unavailable';
-  if (!LAYA_STATES.includes(status.laya?.state)) throw fault('worker.desktopUnexpected');
-  return status.laya.state;
-}
+const knownLayaState = state => { if (!LAYA_STATES.includes(state)) throw fault('worker.desktopUnexpected'); return state; };
+// Laya's state as the desktop's status reports it. A desktop app from before Laya reports none.
+const layaState = status => status?.laya === undefined ? 'unavailable' : knownLayaState(status.laya?.state);
+// Whether Laya can answer in this click, once the desktop has readied its model: the first load
+// after idle takes seconds, and that time must not come out of the click's Laya budget.
 async function layaReady() {
-  try { return layaState(await nativeRequest('status')) === 'ready'; }
+  try { return knownLayaState((await nativeRequest('warmLaya'))?.state) === 'ready'; }
   catch (error) {
     if (error.code === 'offline') return false;
     throw error;
@@ -690,10 +689,15 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       frame.planned = [...frame.planned, { id: own, ...answer, guessed: true }];
       fromLaya.add(`${frameId}|${own}`);
     };
-    // Once Laya says it isn't ready, it isn't asked again in this click.
+    // Once Laya says it isn't ready, it isn't asked again in this click. Unless the widget's plan
+    // already readied it, it is readied now, before the click's budget starts.
     let layaOn = laya !== false;
+    if (laya === null && (open.boxes.length || open.choices.length)) {
+      layaOn = await layaReady();
+      guard();
+    }
     const budget = layaBudget();
-    if (open.boxes.length) {
+    if (layaOn && open.boxes.length) {
       const suggestions = await budget.use(budgetMs => layaSuggestions(url, open.boxes, budgetMs));
       guard();
       if (suggestions === null) layaOn = false;

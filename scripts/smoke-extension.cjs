@@ -153,7 +153,8 @@ async function installNativeStub(worker) {
         return { values, accessRevision: receipt };
       }
       if (type === 'recordProgress') return { recorded: true };
-      // This build's desktop has no Laya runtime, so both Laya requests answer "not ready".
+      // This build ships no Laya model, so Laya is unavailable and both Laya requests answer "not ready".
+      if (type === 'warmLaya') return { state: 'unavailable' };
       if (type === 'suggestFields' || type === 'answerFields') throw Object.assign(new Error('Laya isn’t ready on this computer.'), { code: 'LAYA_NOT_READY' });
       throw new Error('Unexpected native test message: ' + type);
     };

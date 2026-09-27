@@ -513,3 +513,28 @@ test('the desktop stops Laya at the time the click has left, and a decision that
   assert.deepEqual(plain(await slow.request(suggest([box], { budgetMs: 3000 }))), { suggestions: { 'f0:sh-1-2': 'email' } });
   assert.deepEqual(plain((await slow.request(answerRequest([veteran], { budgetMs: 3000 }))).answers), { 'f0:sh-1-4': 'No' });
 });
+
+test('warmLaya loads Laya’s model before a click’s questions are asked and answers with Laya’s state; it reads no saved answers and needs no unlock', async () => {
+  const laya = stubLaya();
+  const app = await desktop({ laya, settings: asking });
+  await app.invoke('lock');
+  const reads = app.dataReads;
+  assert.deepEqual(plain(await app.request({ type: 'warmLaya' })), { state: 'ready' });
+  assert.equal(laya.warms.length, 1);
+  assert.equal(app.dataReads, reads);
+  assert.equal(app.prompts.length, 0);
+
+  const off = stubLaya(() => 0.5, 'off');
+  const offApp = await desktop({ laya: off });
+  assert.deepEqual(plain(await offApp.request({ type: 'warmLaya' })), { state: 'off' });
+  assert.equal(off.warms.length, 0, 'a Laya that is off is not loaded');
+  assert.deepEqual(plain(await (await desktop()).request({ type: 'warmLaya' })), { state: 'unavailable' }, 'this build ships no model');
+
+  // A model that fails to load reports as an error, as the runtime does, instead of failing the click.
+  let state = 'ready';
+  const broken = { ...stubLaya(), status: async () => ({ state, enabled: true }),
+    warm: async () => { state = 'error'; throw Object.assign(new Error('The Laya model couldn’t be loaded (synthetic).'), { code: 'LAYA_NOT_READY' }); } };
+  assert.deepEqual(plain(await (await desktop({ laya: broken })).request({ type: 'warmLaya' })), { state: 'error' });
+  const crashing = { ...stubLaya(), warm: async () => { throw new Error('synthetic bug'); } };
+  await assert.rejects((await desktop({ laya: crashing })).request({ type: 'warmLaya' }), /synthetic bug/, 'anything else fails loudly');
+});
