@@ -246,6 +246,20 @@ if (nativeOrigin) {
       catch (error) { throw publicError(/password|recovery key|already unlocked/.test(error.message) ? error.message : 'Could not reset your password. Please try again.'); }
       touch(); return status();
     },
+    // For someone who has lost both their password and recovery key: erase the
+    // saved information and the reset secret so a new password can be created.
+    // Chrome extension settings stay. The person must type the phrase.
+    async startOver(request) {
+      if (vault.unlocked) throw publicError('Lock SecondHand before starting over.');
+      if (typeof request?.confirmation !== 'string' || request.confirmation.trim().toLowerCase() !== 'start over') throw publicError('Type “start over” to confirm.');
+      accessRevision++;
+      try {
+        await vault.erase();
+        await fs.rm(deviceSecretPath, { force: true });
+      } catch { throw publicError('Could not erase your saved information. Please try again.'); }
+      finally { accessRevision++; }
+      return status();
+    },
     async replaceRecoveryKey() {
       requireUnlocked();
       let recoveryKey;

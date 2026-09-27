@@ -11,6 +11,7 @@ Runtime: Electron desktop, plain HTML/CSS/JavaScript renderer, Manifest V3 Chrom
 - `createVault({ password, allowDeviceReset })` -> `{ status, recoveryKey, deviceResetFailed }`; the recovery key is returned once and never stored
 - `unlock(password)` -> status
 - `resetPassword({ recoveryKey, password } | { method: 'device', password })` -> status (unlocked with the new password)
+- `startOver({ confirmation })` -> status (locked only; `confirmation` must be the typed phrase `start over`). Erases the encrypted file, copies kept by earlier restores, and the reset secret for this computer; Chrome extension settings stay. `status.exists` is then false, so a new password can be created
 - `replaceRecoveryKey()` -> `{ recoveryKey }` (unlocked only; retires the previous key)
 - `setDeviceReset(enabled)` -> status (unlocked only)
 - `saveRecoveryKey(recoveryKey)` -> `{ cancelled }` / `copyRecoveryKey(recoveryKey)` -> true
