@@ -71,7 +71,7 @@ Laya is an optional decision model that helps recognize form questions. It is of
 - **Inference is local:** the desktop app runs the model with onnxruntime-node on the CPU, in a separate utility process, so a native failure cannot take down the vault process. The model is loaded on the first decision and that process is ended after 5 idle minutes, which returns its memory (about 0.5 GB loaded, up to about 1.3 GB while deciding a batch). Each request has a timeout. Decisions make no network requests (tested with the network blocked).
 - **No profile data leaves the computer:** Laya's inputs are built by desktop code from question text, candidate answers, and facts derived from the vault, and they stay in the desktop and its model process. The renderer cannot run the model, and the only network traffic Laya causes is the model download, which carries no applicant data. Confidence bars and sensitive-field rules belong to the features that call Laya, not to the runtime.
 - **Platforms:** Windows, Linux, and Macs with Apple silicon. onnxruntime-node has no Intel Mac build, so Intel Macs show Laya as unavailable.
-- **Developer override:** `SECONDHAND_LAYA_MODEL_DIR` points the desktop app at a local export folder instead of a download. That folder is used as-is, without the SHA-256 pin; it is meant for testing an export before it is published.
+- **Developer override:** `SECONDHAND_LAYA_MODEL_DIR` points the desktop app at a local export folder instead of a download. That folder is used as-is, without the SHA-256 pin, so only unpackaged development builds accept it; a packaged app ignores it and loads only a verified download.
 
 ## What local-only means
 

@@ -45,7 +45,7 @@ async function modelServer(t) {
 
 // The real main process with Electron simulated. Laya is the real runtime with a stub model
 // runner (tests only), and the manifest is swapped for a local test one when given.
-async function desktop(t, { settings = { extensionId }, manifest, env = {}, unlocked = true } = {}) {
+async function desktop(t, { settings = { extensionId }, manifest, env = {}, unlocked = true, packaged = false } = {}) {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'secondhand-laya-main-'));
   t.after(() => fs.rmSync(userData, { recursive: true, force: true }));
   fs.writeFileSync(path.join(userData, 'settings.json'), JSON.stringify(settings));
@@ -72,7 +72,7 @@ async function desktop(t, { settings = { extensionId }, manifest, env = {}, unlo
     show() {} focus() {} setMenuBarVisibility() {} once() {} on() {} loadFile() {}
     isDestroyed() { return false; }
   }
-  const app = { isPackaged: false, setName() {}, setPath() {}, getPath: () => userData, requestSingleInstanceLock: () => true,
+  const app = { isPackaged: packaged, setName() {}, setPath() {}, getPath: () => userData, requestSingleInstanceLock: () => true,
     whenReady: () => Promise.resolve(), on(name, handler) { if (name === 'before-quit') quit = handler; }, quit() {} };
   const electron = { app, BrowserWindow, ipcMain: { handle(_name, handler) { invoke = handler; } },
     dialog: { showErrorBox() { assert.fail('Desktop setup failed'); } }, shell: {}, clipboard: {}, powerMonitor: { on() {} },
@@ -180,6 +180,13 @@ test('SECONDHAND_LAYA_MODEL_DIR points Laya at a local model folder instead of a
   assert.equal(app.created[0].options.modelDir, folder);
   assert.equal((await app.invoke('layaStatus')).state, 'ready');
   await assert.rejects(app.invoke('downloadLaya'), /SECONDHAND_LAYA_MODEL_DIR/);
+});
+
+test('a packaged app ignores SECONDHAND_LAYA_MODEL_DIR: shipped builds only load a verified download', async t => {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'secondhand-laya-folder-'));
+  t.after(() => fs.rmSync(folder, { recursive: true, force: true }));
+  const app = await desktop(t, { env: { SECONDHAND_LAYA_MODEL_DIR: folder }, packaged: true, settings: { extensionId, layaEnabled: true } });
+  assert.equal(app.created[0].options.modelDir, undefined);
 });
 
 test('quitting stops a download and releases the model', async t => {

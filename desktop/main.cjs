@@ -56,7 +56,8 @@ if (nativeOrigin) {
   // The app's one Laya runtime. Nothing is read, downloaded, or loaded until the person turns it
   // on and a decision is asked for; desktop request handlers call laya.decide / laya.decideBatch.
   const laya = createLaya({ userDataDir: userData, manifest: require('./laya-model.json'),
-    modelDir: process.env.SECONDHAND_LAYA_MODEL_DIR ? path.resolve(process.env.SECONDHAND_LAYA_MODEL_DIR) : undefined });
+    // A local export skips the SHA-256 pin, so only development builds accept one.
+    modelDir: !app.isPackaged && process.env.SECONDHAND_LAYA_MODEL_DIR ? path.resolve(process.env.SECONDHAND_LAYA_MODEL_DIR) : undefined });
   // An unreadable Laya status is shown as an error; it must not keep the app from opening.
   const layaStatus = () => laya.status().catch(error => ({ state: 'error', enabled: layaEnabled, message: `Laya’s status couldn’t be read (${error.message}).` }));
   const vault = new Vault(path.join(userData, 'vault.secondhand'));
