@@ -190,12 +190,13 @@ function summarize(rows) {
 }
 
 function writeDataset(outDir, bank, households, options = {}) {
-  const answer = buildRows(bank, households, options);
-  const match = buildMatchRows(bank);
+  const answer = buildRows(bank, households, options).map(row => ({ ...row, task: 'answer' }));
+  const match = buildMatchRows(bank).map(row => ({ ...row, task: 'match' }));
   const rows = [...answer, ...match];
   fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, 'questions.json'), `${JSON.stringify({ correct: DECISION }, null, 2)}\n`);
-  fs.writeFileSync(path.join(outDir, 'rows.jsonl'), rows.map(({ state, answers, split }) => JSON.stringify({ state, answers, split })).join('\n') + '\n');
+  // `task` and `decision` let our own evaluation regroup the candidates of one decision; the training driver strips them.
+  fs.writeFileSync(path.join(outDir, 'rows.jsonl'), rows.map(({ state, answers, split, task, group }) => JSON.stringify({ state, answers, split, task, decision: group })).join('\n') + '\n');
   return { ...summarize(rows), tasks: { answer: summarize(answer), match: summarize(match) } };
 }
 

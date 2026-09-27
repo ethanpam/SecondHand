@@ -103,7 +103,9 @@ test('the dataset is written in LayaStudio\'s format', () => {
     assert.equal(DECISION.type, 'noul');
     const lines = fs.readFileSync(path.join(out, 'rows.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
     assert.equal(lines.length, 3);
-    assert.deepEqual(Object.keys(lines[0]), ['state', 'answers', 'split']);
+    assert.deepEqual(Object.keys(lines[0]), ['state', 'answers', 'split', 'task', 'decision']);
+    assert.equal(lines[0].task, 'answer');
+    assert.equal(new Set(lines.map(line => line.decision)).size, 1, 'the three candidates of one decision share its id');
     assert.equal(summary.rows, 3);
   } finally { fs.rmSync(out, { recursive: true, force: true }); }
 });

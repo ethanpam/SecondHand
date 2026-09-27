@@ -59,7 +59,8 @@ def main():
     print(f"base model: {args.base}", flush=True)
     model_dir = snapshot_download(args.base, allow_patterns=list(engine.CHECKPOINT_FILES))
 
-    text = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows)
+    # LayaStudio reads state, answers and split; the task and decision ids are only for our evaluation.
+    text = "\n".join(json.dumps({key: row[key] for key in ("state", "answers", "split")}, ensure_ascii=False) for row in rows)
     meta = engine.create_dataset(f"{args.name}-{int(time.time())}", questions, text, "rows.jsonl", seed=args.seed)
     if meta["error_count"]:
         raise SystemExit(f"LayaStudio rejected {meta['error_count']} rows, first: {meta['errors'][0]}")
