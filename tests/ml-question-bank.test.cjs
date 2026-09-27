@@ -69,3 +69,13 @@ test('holdout is a yes-or-nothing flag on real forms only', () => {
   assert.throws(() => validateQuestionFile(form([yesNo], { holdout: 'yes' })), /holdout/i);
   assert.throws(() => validateQuestionFile({ source: { title: 'R', kind: 'synthetic', retrieved: '2026-09-26', holdout: true }, questions: [yesNo] }), /holdout/i);
 });
+
+test('a field rule only fits text boxes: the matching task has no dropdowns', () => {
+  const dropdown = { id: 'q1', label: 'State', type: 'select', options: ['Iowa', 'Illinois'], rule: { name: 'field', key: 'state' } };
+  assert.throws(() => validateQuestionFile(form([dropdown])), /field doesn't fit a select/);
+});
+
+test('a missing synthetic folder is an error, not an empty bank', () => {
+  const { loadSyntheticBank } = require('../ML_model/question-bank.cjs');
+  assert.throws(() => loadSyntheticBank('/nonexistent/secondhand/synthetic'), /ENOENT/);
+});

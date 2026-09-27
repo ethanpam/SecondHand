@@ -180,3 +180,19 @@ test('forms marked holdout are always test forms, whatever their URL hashes to',
   assert.ok(urls.some(url => splitFor(url) === 'train'), 'some of these would otherwise train');
   assert.ok(rows.every(row => row.split === 'test'));
 });
+
+test('labels read saved answers the way the facts sheet does, spaces and all', () => {
+  const spaced = { ...family, householdVeteran: ' yes ', state: ' ia ', programSnap: 'yes ' };
+  assert.equal(pickFor({ name: 'veteran' }, yesNo, spaced), 'Yes');
+  assert.equal(pickFor({ name: 'livesInState', state: 'Iowa' }, yesNo, spaced), 'Yes');
+  assert.equal(pickFor({ name: 'state' }, ['Iowa', 'Illinois'], spaced, 'select'), 'Iowa');
+  assert.equal(pickFor({ name: 'applyingSnap' }, yesNo, spaced), 'Yes');
+});
+
+test('a per-question limit that isn\'t a positive whole number is refused, not read as zero', () => {
+  const bank = [{ file: 'f.json', source: { url: 'https://pantry.example.org/a', kind: 'web' }, questions: [q({ name: 'anyChildren' }, yesNo)] }];
+  for (const perQuestion of [Number('abc'), 0, -1, 2.5]) {
+    assert.throws(() => buildRows(bank, [family], { today: TODAY, perQuestion }), /per-question/i, String(perQuestion));
+  }
+  assert.ok(buildRows(bank, [family], { today: TODAY, perQuestion: 1 }).length);
+});

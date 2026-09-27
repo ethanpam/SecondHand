@@ -7,7 +7,7 @@ const { GENERIC_KEYS } = require('../extension/generic-adapter.js');
 
 const CHOICE = ['radio', 'select'];
 const YES_NO = ['radio', 'select', 'checkbox'];
-const TEXT = ['text', 'textarea', 'number', 'date', 'email', 'tel', 'select'];
+const TEXT = ['text', 'textarea', 'number', 'date', 'email', 'tel'];
 const ALL = ['radio', 'select', 'checkbox', 'text', 'textarea', 'number', 'date', 'email', 'tel'];
 const PERIOD = { type: 'string', enum: ['month', 'year'], required: true };
 

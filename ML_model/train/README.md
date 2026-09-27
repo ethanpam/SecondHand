@@ -1,3 +1,10 @@
 # Training
 
-Fine-tunes Laya locally on Apple Silicon with [LayaStudio](https://github.com/biplovgautam/LayaStudio) (`~/Projects/LayaStudio`), driven by a script through `layastudio.engine.train` so runs are reproducible. It exports int8 ONNX for the desktop app (#38). Runs go to `train/runs/` (git-ignored). See #41.
+Fine-tunes Laya locally on Apple Silicon with [LayaStudio](https://github.com/biplovgautam/LayaStudio) (`~/Projects/LayaStudio`), driven by `run.py` through `layastudio.engine.train`. It imports `dataset/out/` with our splits pinned, keeps at most one "leave it for the applicant" decision per answerable one in training and validation, and fine-tunes with LoRA. Runs and model files go to LayaStudio's `workspace/runs/`. See #41.
+
+```
+uv run --project ~/Projects/LayaStudio python ML_model/train/run.py --epochs 1 --name <name>
+uv run --project ~/Projects/LayaStudio python -m unittest discover -s ML_model/train
+```
+
+LayaStudio's own evaluation after training loads the model in float16, which can overflow for a bfloat16-trained model and end the run with an error after the model is saved. Score models with `ML_model/eval/decisions.py`, which loads them in their training precision.

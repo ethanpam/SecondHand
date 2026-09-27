@@ -16,7 +16,6 @@ playwright-report/
 # ML_model outputs (datasets, runs, model files)
 ML_model/dataset/out/
 __pycache__/
-ML_model/train/runs/
 ML_model/**/*.onnx
 ML_model/**/*.safetensors
 ML_model/**/*.mlpackage

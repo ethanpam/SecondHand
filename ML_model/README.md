@@ -4,7 +4,7 @@ Training and evaluation for SecondHand's local AI: a [Laya](https://huggingface.
 
 ## How a training example is made
 1. **A real question** from a public form, copied into `questions/` and tagged with an answer rule.
-2. **A fictional household**, run through `shared/facts.cjs`. The app uses that same file at runtime to turn a saved profile into plain facts, and all math happens there.
+2. **A fictional household**, run through `shared/facts.cjs`, which turns a saved profile into plain facts. All math (ages, totals) happens there, not in the model.
 3. **The correct answer**, computed by code from the rule and the facts. No person or AI guesses the labels.
 4. **One example per candidate answer.** The state holds the facts, the form question and one candidate, and the fixed yes/no question is "Is this candidate the correct answer, given the facts?"
 
@@ -17,7 +17,7 @@ Training and evaluation for SecondHand's local AI: a [Laya](https://huggingface.
 | `profiles/` | Generator for fictional households |
 | `dataset/` | Builds LayaStudio training rows from questions × households |
 | `train/` | Local fine-tuning with LayaStudio on Apple Silicon |
-| `eval/` | Our own accuracy and calibration checks on held-out forms |
+| `eval/` | Per-question precision, coverage and wrong fills on held-out forms |
 
 Generated datasets, training runs, and model files are git-ignored. Only code, the question bank, and reports are committed.
 

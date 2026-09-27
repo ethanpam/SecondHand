@@ -28,15 +28,17 @@ def balance(rows, abstain_ratio, seed):
     answerable one in each task and split, so "leave it for the applicant" can't swamp training."""
     if not abstain_ratio:
         return rows
-    decisions = {}
+    by_split = {}
     for row in rows:
-        decisions.setdefault((row["task"], row["split"], row["decision"]), []).append(row)
+        by_split.setdefault((row["task"], row["split"]), {}).setdefault(row["decision"], []).append(row)
     rng = random.Random(seed)
     kept = []
-    for task, split in {(task, split) for task, split, _ in decisions}:
-        groups = [group for (t, s, _), group in decisions.items() if t == task and s == split]
-        answerable = [g for g in groups if any(r["answers"]["correct"] and r["state"]["candidate"] != ABSTAIN for r in g)]
-        abstain = [g for g in groups if g not in answerable]
+    # Sorted, so the same seed keeps the same rows in every run.
+    for (_, split), decisions in sorted(by_split.items(), key=lambda item: item[0]):
+        answerable, abstain = [], []
+        for group in decisions.values():
+            real = any(r["answers"]["correct"] and r["state"]["candidate"] != ABSTAIN for r in group)
+            (answerable if real else abstain).append(group)
         rng.shuffle(abstain)
         keep_abstain = abstain if split == "test" else abstain[: max(1, round(abstain_ratio * len(answerable)))]
         for group in answerable + keep_abstain:

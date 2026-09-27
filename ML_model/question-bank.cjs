@@ -87,7 +87,6 @@ function loadQuestionBank(directory = QUESTIONS_DIR) {
 
 // Training-only rewordings.
 function loadSyntheticBank(directory = SYNTHETIC_DIR) {
-  if (!fs.existsSync(directory)) return [];
   const files = readFiles(directory);
   const real = files.find(file => file.source.kind !== 'synthetic');
   if (real) throw new Error(`${real.file}: only synthetic rewordings belong in questions/synthetic/.`);

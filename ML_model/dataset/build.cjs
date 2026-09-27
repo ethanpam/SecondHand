@@ -22,7 +22,7 @@ const NUMBER_WORDS = { none: 0, zero: 0, one: 1, two: 2, three: 3, four: 4, five
 
 const present = value => typeof value === 'string' && value.trim() !== '';
 const count = (profile, field) => present(profile[field]) ? Number(profile[field]) : null;
-const yes = (profile, field) => present(profile[field]) ? profile[field] === 'yes' : null;
+const yes = (profile, field) => present(profile[field]) ? profile[field].trim() === 'yes' : null;
 const dollars = (profile, field) => present(profile[field]) ? Number(profile[field]) : null;
 const place = value => String(value).toLowerCase().replace(/\bcounty\b/g, '').replace(/[^a-z]+/g, ' ').trim();
 const stateMatches = (code, value) => {
@@ -95,7 +95,7 @@ function decide(rule, profile, age) {
       const earned = dollars(profile, 'monthlyEarnedIncome'), other = dollars(profile, 'monthlyOtherIncome');
       return earned === null || other === null ? null : earned + other === 0;
     }
-    case 'livesInState': return present(profile.state) ? stateMatches(profile.state.toUpperCase(), rule.state) : null;
+    case 'livesInState': return present(profile.state) ? stateMatches(profile.state.trim().toUpperCase(), rule.state) : null;
     case 'livesInCounty': return present(profile.county) ? place(profile.county) === place(rule.county) : null;
     case 'incomeBelow': {
       const earned = dollars(profile, 'monthlyEarnedIncome'), other = dollars(profile, 'monthlyOtherIncome');
@@ -130,7 +130,7 @@ function correctOption(question, profile, { today } = {}) {
     }
     case 'state': {
       if (!present(profile.state)) return ABSTAIN;
-      const hits = question.options.filter(option => stateMatches(profile.state.toUpperCase(), option));
+      const hits = question.options.filter(option => stateMatches(profile.state.trim().toUpperCase(), option));
       return hits.length === 1 ? hits[0] : ABSTAIN;
     }
     case 'county': {
@@ -156,6 +156,7 @@ const decisionSplit = (formSplit, group) => formSplit === 'test' ? 'test' : unit
 // One row per candidate answer for every choice question and household. With `perQuestion`,
 // households are taken round-robin across the correct answers so every answer is represented.
 function buildRows(bank, households, { today, perQuestion = Infinity } = {}) {
+  if (perQuestion !== Infinity && !(Number.isInteger(perQuestion) && perQuestion > 0)) throw new Error('per-question must be a positive whole number.');
   const rows = [];
   const sheets = households.map(profile => factsText(buildFacts(profile, { today })));
   for (const file of bank) {
