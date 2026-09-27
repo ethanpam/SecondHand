@@ -1,0 +1,19 @@
+{
+  "source": {
+    "url": "https://docs.google.com/forms/d/e/1FAIpQLSdlWWgfjTOvl1NOG-9fwp2W3Ip_vhj5awtBDDqU6oRnYhi9Fg/viewform",
+    "title": "UIS Cares - Stars Food Pantry Order Form",
+    "kind": "google-form",
+    "retrieved": "2026-09-26",
+    "region": "Springfield, IL"
+  },
+  "questions": [
+    { "id": "q1", "label": "Please specify your level of need:", "type": "radio", "options": ["Low:  I have enough food, and money to purchase more to meet my needs", "Medium: I have enough food, but not enough money/resources to purchase more to meet my needs", "High: I do not have enough food or money to purchase more to meet my needs. I am in great need."], "rule": { "name": "none" }, "note": "Self-reported level of need; not in the profile. The page also has an \"Other:\" free-text option, left out here." },
+    { "id": "q2", "label": "Please select food items you would like", "type": "checkbox", "options": ["Milk (1/2 Gallon)", "Eggs (1/2 Dozen = 6 eggs)", "Butter", "Cheese (slices)", "Apple", "Orange", "Onion", "Tomatoe", "Green Pepper", "Potato", "Sliced bread (half loaf)"], "rule": { "name": "none" }, "note": "Food item choices." },
+    { "id": "q3", "label": "Are there items you would like to have available to order in the future? Please list these items", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Suggestions for future items." },
+    { "id": "q4", "label": "UIS email (we will not fill orders placed with a gmail or any other personal email address)", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Must be the university-issued UIS email; the saved email may be a personal address, which the form rejects." },
+    { "id": "q5", "label": "I will pick up my order on:", "type": "radio", "options": ["Tuesday May 9     Noon - 2:30pm", "Wednesday May 10     2-5pm", "Thursday May 11     2-4pm"], "rule": { "name": "none" }, "note": "Pickup day and time." },
+    { "id": "q6", "label": "UIN:", "type": "number", "options": [], "rule": { "name": "none" }, "note": "University ID number (UIN); not in the profile." },
+    { "id": "q7", "label": "Phone number:", "type": "number", "options": [], "rule": { "name": "field", "key": "phone" }, "note": "The form validates this box as a number." },
+    { "id": "q8", "label": "Current Residence:", "type": "radio", "options": ["On Campus", "Off Campus"], "rule": { "name": "none" }, "note": "On or off campus housing; the profile only knows the home address." }
+  ]
+}

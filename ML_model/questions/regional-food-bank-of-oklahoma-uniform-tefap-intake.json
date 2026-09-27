@@ -1,0 +1,24 @@
+{
+  "source": {
+    "url": "https://www.regionalfoodbank.org/wp-content/uploads/2025/02/FY25-Uniform-TEFAP-Intake-Form-for-Household-Consumption-English.pdf",
+    "title": "Uniform TEFAP Intake Form",
+    "kind": "pdf",
+    "retrieved": "2026-09-26",
+    "region": "Oklahoma City, OK"
+  },
+  "questions": [
+    { "id": "q1", "label": "Name", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" } },
+    { "id": "q2", "label": "Number of People in Household", "type": "number", "options": [], "rule": { "name": "field", "key": "householdSize" } },
+    { "id": "q3", "label": "Zip Code", "type": "text", "options": [], "rule": { "name": "field", "key": "zip" } },
+    { "id": "q4", "label": "County of Residence", "type": "text", "options": [], "rule": { "name": "field", "key": "county" } },
+    { "id": "q5", "label": "You are eligible to receive USDA foods in TEFAP if your household participates in certain Federal programs. If you or anyone in your household participates in one of these programs, please circle it:",
+      "type": "checkbox", "options": ["SNAP (formerly called food stamps)", "WIC", "CSFP", "FDPIR", "SSI"], "rule": { "name": "none" },
+      "note": "Programs the household already takes part in; the profile only knows what the applicant is applying for." },
+    { "id": "q6", "label": "Is your household’s income at or below the limit listed in the chart for the number of people in your household?", "type": "radio",
+      "options": ["YES", "NO"], "rule": { "name": "none" }, "note": "income table by household size" },
+    { "id": "q7", "label": "I authorize the release of information on this application form to other organizations administering assistance programs for use in determining my eligibility for participation in other public assistance programs and for program outreach purposes.",
+      "type": "radio", "options": ["YES", "NO"], "rule": { "name": "never" }, "note": "Consent to share the application with other programs." },
+    { "id": "q8", "label": "Signature", "type": "text", "options": [], "rule": { "name": "never" } },
+    { "id": "q9", "label": "Date", "type": "date", "options": [], "rule": { "name": "never" }, "note": "Date written beside the signature." }
+  ]
+}

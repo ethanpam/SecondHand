@@ -1,0 +1,23 @@
+{
+  "source": {
+    "url": "https://docs.google.com/forms/d/e/1FAIpQLSd0cnJkLvgaP_oRQGFJZUGGUaWnpl2CJ3qJrgJ5YVFBWsvYNQ/viewform",
+    "title": "Hornets Market Food Pantry",
+    "kind": "google-form",
+    "retrieved": "2026-09-26",
+    "region": "Colby, WI"
+  },
+  "questions": [
+    { "id": "q1", "label": "Is this your first time using this pantry this year?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "none" }, "note": "Visit history at this pantry; not in the profile." },
+    { "id": "q2", "label": "Is this your first visit this month?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "none" }, "note": "Visit history at this pantry; not in the profile." },
+    { "id": "q3", "label": "# of people in your household 0 - 17 yrs old", "type": "text", "options": [], "rule": { "name": "field", "key": "householdChildren" } },
+    { "id": "q4", "label": "# of people in your household 18 - 59 yrs old", "type": "text", "options": [], "rule": { "name": "none" }, "note": "The profile counts adults 18-64 and seniors 65+, so the 18-59 count is unknown when anyone is 60-64. A household age-band count rule could answer it with members' ages." },
+    { "id": "q5", "label": "# of people in your household 60 + yrs", "type": "text", "options": [], "rule": { "name": "none" }, "note": "The profile counts seniors 65+, not 60+. Only answerable if members' ages were saved." },
+    { "id": "q6", "label": "Student name and grade. Order will be assigned to(first and Last)", "type": "text", "options": [], "rule": { "name": "none" }, "note": "The student's name and school grade; the profile holds the applicant, not a student." },
+    { "id": "q7", "label": "Guardian first and last name", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" }, "note": "The guardian is the person filling in the form." },
+    { "id": "q8", "label": "Email Address:", "type": "text", "options": [], "rule": { "name": "field", "key": "email" } },
+    { "id": "q9", "label": "PhoneNumber:", "type": "text", "options": [], "rule": { "name": "field", "key": "phone" } },
+    { "id": "q10", "label": "Date ordered:", "type": "date", "options": [], "rule": { "name": "none" }, "note": "Today's order date, not a saved fact." },
+    { "id": "q11", "label": "When would you like to pick up your pantry items:", "type": "radio", "options": ["Pick up your items/time", "Go home with your child on bus"], "rule": { "name": "none" }, "note": "Pickup preference." },
+    { "id": "q12", "label": "Check all food items you'd like. Please note as we provide to families items make deplete. Also we do add items weekly that are not on the list.", "type": "checkbox", "options": ["Chicken Legs", "Macaroni 16 oz", "Chunked Chicken Meat-4.5 oz", "Ground Sausage", "Loaf of Bread", "Flour -5lbs.", "1 lb. ground beef", "Canned Vegetables", "Pancake Mix-32oz. box", "Sugar 3 lb.", "Whole kernel corn-15 oz", "Assorted Chips", "Frozen Fruit Bars", "Pinto Beans-16 oz", "Rice Meal-13oz", "Non Food Sanitizer-17 oz", "1 lb. cheddar cheese", "Please be aware we may have to substitute is a product runs out", "chicken noodle ,mushroom, tomato soup", "Toilet Paper", "Tooth Brushes", "Laundry Soap", "Many other items not listed also"], "rule": { "name": "none" }, "note": "Food item choices." }
+  ]
+}

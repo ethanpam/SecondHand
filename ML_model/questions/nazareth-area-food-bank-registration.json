@@ -1,0 +1,37 @@
+{
+  "source": {
+    "url": "https://nazarethareafoodbank.org/wp-content/uploads/2022/09/NAFB-Client-registration-form.pdf",
+    "title": "Nazareth Area Food Bank Registration Form",
+    "kind": "pdf",
+    "retrieved": "2026-09-26",
+    "region": "Nazareth, PA"
+  },
+  "questions": [
+    { "id": "q1", "label": "Name", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" } },
+    { "id": "q2", "label": "Age", "type": "number", "options": [], "rule": { "name": "none" },
+      "note": "The applicant's age in years; no saved field holds it (it's worked out from the birth date). Proposed rule: applicantAge." },
+    { "id": "q3", "label": "Date of Birth", "type": "date", "options": [], "rule": { "name": "field", "key": "birthDate" } },
+    { "id": "q4", "label": "Home Phone Number", "type": "tel", "options": [], "rule": { "name": "field", "key": "phone" } },
+    { "id": "q5", "label": "Cell Phone Number", "type": "tel", "options": [], "rule": { "name": "field", "key": "phone" } },
+    { "id": "q6", "label": "Street Address", "type": "text", "options": [], "rule": { "name": "field", "key": "addressLine1" } },
+    { "id": "q7", "label": "City, State and Zip Code", "type": "text", "options": [], "rule": { "name": "none" },
+      "note": "One box for city, state and ZIP together; no single saved field holds all three." },
+    { "id": "q8", "label": "E-mail address", "type": "email", "options": [], "rule": { "name": "field", "key": "email" } },
+    { "id": "q9", "label": "In the event that you are unable to pick up your food, please list the name of the person to whom you give permission to pick up your food.",
+      "type": "text", "options": [], "rule": { "name": "none" }, "note": "Someone else who may pick up food; not in the profile." },
+    { "id": "q10", "label": "Proof of residency is required at the NAFB. Please bring two forms of residency listed below.", "type": "checkbox",
+      "options": ["Driver’s License", "Water/Sewer Bill", "Electric Bill", "Other"], "rule": { "name": "none" },
+      "note": "Which proof documents are brought; not in the profile." },
+    { "id": "q11", "label": "Please Specify", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Write-in for an Other proof of residency." },
+    { "id": "q12", "label": "Total Number of Adults", "type": "number", "options": [], "rule": { "name": "none" },
+      "note": "Adults aren't banded here, so it likely counts everyone 18+; the profile counts adults 18-64 and seniors 65+ separately." },
+    { "id": "q13", "label": "Total Number of Children", "type": "number", "options": [], "rule": { "name": "field", "key": "householdChildren" } },
+    { "id": "q14", "label": "Household Information: Family Member’s Name", "type": "text", "options": [], "rule": { "name": "none" }, "note": "household member grid" },
+    { "id": "q15", "label": "Household Information: Age", "type": "text", "options": [], "rule": { "name": "none" }, "note": "household member grid" },
+    { "id": "q16", "label": "Household Information: Date of Birth", "type": "text", "options": [], "rule": { "name": "none" }, "note": "household member grid" },
+    { "id": "q17", "label": "Household Information: Relationship", "type": "text", "options": [], "rule": { "name": "none" }, "note": "household member grid" },
+    { "id": "q18", "label": "Signature", "type": "text", "options": [], "rule": { "name": "never" },
+      "note": "Confirms the information and agrees to the NAFB terms and conditions." },
+    { "id": "q19", "label": "Date", "type": "date", "options": [], "rule": { "name": "never" }, "note": "Date written beside the signature." }
+  ]
+}

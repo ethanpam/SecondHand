@@ -1,0 +1,17 @@
+{
+  "source": {
+    "url": "https://docs.google.com/forms/d/e/1FAIpQLScZSIV7Vqaea5nhxFBxw_vUH5CCJDp-EVvt8X2KpGrxQta8fw/viewform",
+    "title": "Canterbury House Food Pantry-",
+    "kind": "google-form",
+    "retrieved": "2026-09-26",
+    "region": "Houghton, MI"
+  },
+  "questions": [
+    { "id": "q1", "label": "Email", "type": "checkbox", "options": ["Record my email address with my response"], "rule": { "name": "none" }, "note": "Google's verified-email box (required): ticking it records the signed-in Google account's address. There is nothing to type, and it needs the applicant's own Google sign-in." },
+    { "id": "q2", "label": "Please select the age range of those living in your household (select all that apply)", "type": "checkbox", "options": ["0-18", "19-26", "27-35", "over 35"], "rule": { "name": "none" }, "note": "Asks which age bands (0-18, 19-26, 27-35, over 35) anyone in the household falls in. The profile only counts under 18, 18-64 and 65+, so the bands don't line up. Proposed rule: householdAgeBands." },
+    { "id": "q3", "label": "Please indicate the size of your household (total amount of people living within your residence)", "type": "radio", "options": ["1", "2", "3", "4", "5"], "rule": { "name": "householdSize" }, "note": "Options stop at 5; a larger household would type its size into the dropped Other box. The page also has an \"Other:\" free-text option, left out here." },
+    { "id": "q4", "label": "Have you previously used any services provided by Canterbury House or participated in events?", "type": "checkbox", "options": ["Wednesday night dinner", "ESL tutoring", "Food Pantry"], "rule": { "name": "none" }, "note": "Past use of Canterbury House services. The page also has an \"Other:\" free-text option, left out here." },
+    { "id": "q5", "label": "Day of completing this form:", "type": "date", "options": [], "rule": { "name": "none" }, "note": "Today's date, not a saved fact." },
+    { "id": "q6", "label": "Which items would you like? (select up to 10)", "type": "checkbox", "options": ["Old Fashioned Oats", "Peanut Butter", "Macaroni and Cheese", "Chicken Noodle Soup", "Minestrone Soup", "Tomato Soup", "Chicken Broth", "Pasta", "Pasta Sauce", "Canned Green Beans", "Canned Diced Tomatoes", "Canned Corn", "Canned Black Beans", "Canned Chickpeas", "Canned Tuna in Water", "Dry Pinto Beans", "Dry Chickpeas", "Dry Red Kidney Beans", "Dry Navy Beans", "Dry Red Lentils", "Wild Blueberry Muffin Mix", "Instant Mashed Potatoes", "Triscuits", "Basil Spice", "Garlic Powder", "Onion Powder", "Ground Black Pepper", "Condoms", "Jasmine Rice 2lb", "Basmati Rice 5lb", "Basmati Rice 20lb", "Castille Soap", "Oatmeal Instant", "Yellow Corn Tortilla", "Granola Bar assorted", "Cookies assorted", "Kidney Bean Canned", "Pinto Bean Canned", "Tuna Fish Foil Pack", "Chicken Canned", "Nuts Assorted", "Peanut Butter Crunchy", "Spaghetti Sauce", "Tomato Paste", "Tomato Sauce", "Chicken Ramen 4 pack", "Vegetarian Ramen 4 pack", "Ramen Beef - 4 pack", "Conditioner", "Tumeric", "Salt Iodized", "Italian Seasoning", "Olive Oil", "Canola Oil", "Tea Assorted", "Jam Assorted", "Applesauce", "Apple Juice", "Vegetable Broth", "Popcorn", "Jasmine Rice 5lb", "Panty-Liners", "Lentil Green Dried", "Regular Tampons", "Toothpaste", "Hand Sanitizer", "Shampoo", "Cumin", "Toilet Paper", "Paper Towel", "Alcohol Wipes"], "rule": { "name": "none" }, "note": "Food item choices. The page also has an \"Other:\" free-text option, left out here." }
+  ]
+}

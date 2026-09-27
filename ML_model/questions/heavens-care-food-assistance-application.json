@@ -1,0 +1,22 @@
+{
+  "source": {
+    "url": "https://form.jotform.com/Heavens_Care/I_Need_Help",
+    "title": "Food Assistance Application Form",
+    "kind": "jotform",
+    "retrieved": "2026-09-26",
+    "holdout": true
+  },
+  "questions": [
+    { "id": "q1", "label": "Name", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" }, "note": "Jotform name box with First Name and Last Name parts." },
+    { "id": "q2", "label": "Birth Date", "type": "date", "options": [], "rule": { "name": "field", "key": "birthDate" } },
+    { "id": "q3", "label": "Address", "type": "text", "options": [], "rule": { "name": "field", "key": "addressLine1" }, "note": "Jotform address box; its first line is the street address." },
+    { "id": "q4", "label": "How much money do the members of your household have in cash or in a bank account?", "type": "text", "options": [], "rule": { "name": "field", "key": "assetsOnHand" }, "note": "A dollar box." },
+    { "id": "q5", "label": "What is the total amount of income you expect your household to receive this month?", "type": "text", "options": [], "rule": { "name": "field", "key": "totalMonthlyIncome" }, "note": "A dollar box." },
+    { "id": "q6", "label": "What is your current monthly rent/mortgage payment?", "type": "text", "options": [], "rule": { "name": "field", "key": "monthlyRent" }, "note": "A dollar box." },
+    { "id": "q7", "label": "Have you or anyone in your household received or do you expect to receive Food Assistance benefits from any other county or any other state this month?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "none" }, "note": "Benefits from another county or state; not in the profile." },
+    { "id": "q8", "label": "Household Members", "type": "text", "options": [], "rule": { "name": "none" }, "note": "A list of household members with their own columns; not one saved answer." },
+    { "id": "q9", "label": "Do you agree to the following participation statement", "type": "select", "options": ["Yes", "No"], "rule": { "name": "never" }, "note": "Consent to share client records." },
+    { "id": "q10", "label": "By Signing Clicking Yes on This Statement I Certify the Following", "type": "select", "options": ["Yes", "No"], "rule": { "name": "never" }, "note": "Attestation." },
+    { "id": "q11", "label": "Signature", "type": "text", "options": [], "rule": { "name": "never" }, "note": "A drawn signature." }
+  ]
+}
