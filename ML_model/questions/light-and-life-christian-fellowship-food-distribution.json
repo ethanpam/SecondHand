@@ -1,0 +1,18 @@
+{
+  "source": {
+    "url": "https://docs.google.com/forms/d/e/1FAIpQLSdCpSWFJpziy3VIdyu2tq6UVBb6fEkI_K1nm_DNEU156DUvdQ/viewform",
+    "title": "LLCF Food Distribution",
+    "kind": "google-form",
+    "retrieved": "2026-09-26",
+    "region": "Long Beach, CA"
+  },
+  "questions": [
+    { "id": "q1", "label": "First & Last Name (nombre y apellido)", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" } },
+    { "id": "q2", "label": "Email Address", "type": "text", "options": [], "rule": { "name": "field", "key": "email" } },
+    { "id": "q3", "label": "Zip Code (código postal)", "type": "text", "options": [], "rule": { "name": "field", "key": "zip" } },
+    { "id": "q4", "label": "Phone #", "type": "text", "options": [], "rule": { "name": "field", "key": "phone" } },
+    { "id": "q5", "label": "Family Size (tamaño de la familia)", "type": "number", "options": [], "rule": { "name": "field", "key": "householdSize" }, "note": "The form validates this box as a number." },
+    { "id": "q6", "label": "Ethnicity (Etnia)", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Ethnicity; not in the profile." },
+    { "id": "q7", "label": "Is this your 1st time receiving USDA food this month? (¿Es la primera vez que recibe productos alimenticios del USDA este mes?)", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "none" }, "note": "Whether they already got USDA (TEFAP) food this month; not in the profile." }
+  ]
+}
