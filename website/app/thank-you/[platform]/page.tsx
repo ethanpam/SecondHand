@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ExternalIcon } from '../../icons';
 import { downloads } from '../../release';
@@ -72,7 +73,8 @@ export default async function ThankYou({ params }: Props) {
           <li>
             <strong>Add the Chrome extension.</strong> In the app, choose Chrome
             extension, then Prepare Chrome extension, and load that folder at{' '}
-            <code>chrome://extensions</code> with Developer mode on.
+            <code>chrome://extensions</code> with Developer mode on.{' '}
+            <Link href="/chrome-extension">See each step with pictures</Link>.
           </li>
         </ol>
         {platform !== 'windows' && (
@@ -88,7 +90,7 @@ export default async function ThankYou({ params }: Props) {
         )}
         <p>
           Need more detail? Read the <a href="/#setup">full setup guide</a>, the{' '}
-          <a href="/#faq">common questions</a>, or our{' '}
+          <a href="/faq">common questions</a>, or our{' '}
           <a href="/privacy">privacy policy</a>.
         </p>
       </main>

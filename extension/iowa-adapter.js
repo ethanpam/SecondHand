@@ -703,11 +703,17 @@
     return result;
   }
 
-  // The words on Iowa's information-only screens, for the applicant's translated view. Only these
-  // static screens: any other screen's text can hold a household member's name or an answer.
-  function instructions(doc, rawUrl) {
+  // Which of Iowa's information-only screens this is, or '' for any other. Only these static screens'
+  // words are read, for the translated view and the summary: any other screen's text can hold a
+  // household member's name or an answer.
+  const INFO_PAGE_KEYS = Object.freeze(Object.values(infoScreens).map(screen => screen.pageKey));
+  function informationScreen(doc, rawUrl) {
     const { pageKey } = probePage(doc, rawUrl);
-    if (!Object.values(infoScreens).some(screen => screen.pageKey === pageKey)) return [];
+    return INFO_PAGE_KEYS.includes(pageKey) ? pageKey : '';
+  }
+  // The words on Iowa's information-only screens, for the applicant's translated view.
+  function instructions(doc, rawUrl) {
+    if (!informationScreen(doc, rawUrl)) return [];
     const blocks = 'h1, h2, h3, h4, p, li, dt, dd';
     const texts = [];
     for (const element of (doc.querySelector('main') || doc.body).querySelectorAll(blocks)) {
@@ -806,7 +812,7 @@
   // The worker uses only this union's keys for its explicit desktop grant. Each
   // page still uses its own exact selectors and recipient checks internally.
   const supportedDefinitions = Object.freeze({ ...definitions, birthDate: Object.freeze({ label: 'Date of birth' }) });
-  const api = Object.freeze({ PORTAL, definitions: supportedDefinitions, isSupportedUrl, rendered, visible, scan, fill, formatValue, focusField, probePage, instructions, continuePage, profileRequest, pageValues, captureNavigation, advance });
+  const api = Object.freeze({ PORTAL, definitions: supportedDefinitions, isSupportedUrl, rendered, visible, scan, fill, formatValue, focusField, probePage, INFO_PAGE_KEYS, informationScreen, instructions, continuePage, profileRequest, pageValues, captureNavigation, advance });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandIowa = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

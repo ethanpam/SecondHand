@@ -8,3 +8,5 @@ uv run --project ~/Projects/LayaStudio python -m unittest discover -s ML_model/e
 ```
 
 Models load in the precision they were trained in (from their `laya_finetune.json`). laya-mlx's float16 default overflows on bfloat16-trained models.
+
+`runtime_fixtures.py` writes the Python reference outputs that the desktop app's JavaScript Laya runtime (#38) is tested against: token ids, prompts, and int8 ONNX probabilities for a fixed sample of rows (`tests/fixtures/laya/`). Its docstring has the commands.

@@ -16,7 +16,7 @@ const PANEL_URL = 'chrome-extension://testextension/panel.html';
 const SITE_URL = 'https://pantry.example.org/intake?step=1';
 const ORIGIN = 'https://pantry.example.org';
 const SCRIPT_ID = 'site-pantry.example.org';
-const SITE_SCRIPT = { id: SCRIPT_ID, matches: [`${ORIGIN}/*`], js: ['generic-adapter.js', 'generic-content.js'], allFrames: true, runAt: 'document_idle', persistAcrossSessions: true };
+const SITE_SCRIPT = { id: SCRIPT_ID, matches: [`${ORIGIN}/*`], js: ['generic-adapter.js', 'page-text.js', 'generic-content.js'], allFrames: true, runAt: 'document_idle', persistAcrossSessions: true };
 
 // Stand-in for generic-adapter.js's pure helpers; the real engine has its own tests.
 const { GENERIC_KEYS } = require('../extension/generic-adapter.js');
@@ -85,7 +85,7 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
   };
 }
 
-function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, desktop = {}, fields = pantryFields(), next, duringGetFields, duringStatus, frames = [], plan, keepAccess = false, discoveryError = false, topError, framesReply } = {}) {
+function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, desktop = {}, fields = pantryFields(), next, duringGetFields, duringStatus, frames = [], plan, keepAccess = false, discoveryError = false, topError, framesReply, pageText = { lang: 'en', text: '' } } = {}) {
   const tab = { id: 7, active: true, url };
   const log = [], native = [], content = [], injected = [], opened = [];
   const permissions = new Set(granted ? [`${ORIGIN}/*`] : []);
@@ -122,6 +122,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
         }
         if (message.type === 'secondhand:generic:focus') return { focused: model.focus(message.id) };
         if (message.type === 'secondhand:generic:questions') return model.questions();
+        if (message.type === 'secondhand:generic:pageText') return structuredClone(frame ? frame.pageText || { lang: '', text: '' } : pageText);
         throw new Error(`Unexpected content message ${message.type}`);
       },
       onActivated: event('activated'), onRemoved: event('removed'), onUpdated: event('updated')
@@ -165,6 +166,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
     runtime: {
       id: 'testextension', getURL: file => `chrome-extension://testextension/${file}`,
       onMessage: { addListener: callback => { listener = callback; } },
+      onInstalled: event('installed'),
       connectNative: () => {
         let onMessage, onDisconnect;
         return {
@@ -227,7 +229,7 @@ test('turning a site on checks Chrome access, asks the desktop, then registers a
   assert.equal(w.log.includes('permissions.request'), false);
   assert.deepEqual(w.native.map(({ type, url }) => ({ type, url })), [{ type: 'trustSite', url: `${ORIGIN}/intake` }]);
   assert.deepEqual(w.registered.get(SCRIPT_ID), SITE_SCRIPT);
-  assert.deepEqual(w.injected, [{ target: { tabId: 7, frameIds: [0] }, files: ['generic-adapter.js', 'generic-content.js'] }]);
+  assert.deepEqual(w.injected, [{ target: { tabId: 7, frameIds: [0] }, files: SITE_SCRIPT.js }]);
   assert.deepEqual(w.contentTypes(), []);
 
   const again = await w.panel({ type: 'ui:enableSite', confirmed: true });
@@ -649,6 +651,7 @@ function siteContent(t, { url = SITE_URL, engine = true, settled = null } = {}) 
       focusField: (doc, id) => { calls.push(`focus:${id}`); if (id !== 'sh-2') return false; doc.getElementById('day').focus(); return true; }
     };
   }
+  window.eval(source('page-text.js'));
   window.eval(source('generic-content.js'));
   return { window, frames, calls,
     host: () => window.document.querySelector('[data-secondhand-assistant]'),
@@ -671,7 +674,7 @@ test('on approved sites the widget is a closed, full-size extension iframe in th
   // Chrome's on-device AI (Prompt API) is blocked in a cross-origin iframe unless the embedder delegates it.
   assert.equal(page.frames[0].getAttribute('allow'), 'language-model; language-detector', 'the widget may use Chrome’s on-device AI and language detector');
   assert.equal(host.getAttribute('data-secondhand-size'), 'full');
-  assert.equal(host.style.height, '70px');
+  assert.equal(host.style.height, '46px');
   assert.equal(host.style.position, 'fixed');
   page.window.eval(source('generic-content.js'));
   assert.equal(page.frames.length, 1, 'injecting again keeps one widget');
@@ -1030,4 +1033,86 @@ test('a site frame answers the question request with its declared language and e
   assert.equal(visibility, 'hidden', 'the widget is hidden while the engine reads the page');
   assert.doesNotMatch(JSON.stringify(reply), /Synthetic private/);
   assert.equal(page.request({ type: 'secondhand:generic:questions' }, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
+});
+
+// "What this page says" on a site that is on: the page's own words and those of each embedded form that is on.
+const sitePoints = { language: 'en', points: ['Bring a photo ID.'], english: false };
+
+test('a site’s page text is its own words, then each embedded form’s that is on; a form that is off is never read', async () => {
+  const w = siteWorker({ enabled: true, pageText: { lang: 'en-US', text: 'Riverbend pantry sign-up.\nBring a photo ID.' }, frames: [
+    { origin: FRAME_ORIGIN, frameId: 4, enabled: true, pageText: { lang: 'en', text: 'Pickup is on Fridays.' } },
+    { origin: 'https://other.example.org', frameId: 5, pageText: { lang: 'en', text: 'Synthetic words that are never read.' } }] });
+  const reply = await w.panel({ type: 'ui:pageText' });
+  assert.equal(reply.ok, true, reply.error);
+  const id = reply.data.pages[0]?.id;
+  assert.deepEqual(plain(reply.data), { pages: [{ id, pageKey: 'general', lang: 'en-US', current: true, text: 'Riverbend pantry sign-up.\nBring a photo ID.\nPickup is on Fridays.', unread: false, summary: null }] });
+  assert.deepEqual(w.content.filter(call => call.type === 'secondhand:generic:pageText').map(call => call.frameId), [0, 4]);
+  assert.deepEqual(w.native, [], 'reading a page never reaches the desktop');
+  assert.deepEqual(plain((await w.panel({ type: 'ui:keepSummary', id, summary: sitePoints })).data), { kept: true });
+  assert.deepEqual(plain((await w.launcher({ type: 'ui:pageState' })).data.summary), { language: 'en', point: 'Bring a photo ID.', english: false });
+  assert.deepEqual(plain((await w.panel({ type: 'ui:pageText' })).data.pages[0].summary), sitePoints, 'the same words at the same address keep their points');
+  const off = await siteWorker({ pageText: { lang: 'en', text: 'Synthetic words.' } }).panel({ type: 'ui:pageText' });
+  assert.equal(off.ok, false, 'a site that is not on is never read');
+  assert.equal(off.errorKey, 'worker.turnOnSiteFirst');
+});
+
+test('a site’s page text stops at the most one page sends, and a reply that is not text fails loudly', async () => {
+  const long = siteWorker({ enabled: true, pageText: { lang: 'en', text: `${'A'.repeat(9000)}\n${'B'.repeat(6000)}` }, frames: [
+    { origin: FRAME_ORIGIN, frameId: 4, enabled: true, pageText: { lang: 'en', text: `${'C'.repeat(500)}\n${'D'.repeat(2000)}` } }] });
+  const text = (await long.panel({ type: 'ui:pageText' })).data.pages[0].text;
+  assert.equal(text, `${'A'.repeat(9000)}\n${'B'.repeat(6000)}\n${'C'.repeat(500)}`, 'whole lines while they fit');
+  const odd = await siteWorker({ enabled: true, pageText: { lang: 'en', text: 7 } }).panel({ type: 'ui:pageText' });
+  assert.equal(odd.errorKey, 'worker.pageTextUnreadable');
+  const empty = await siteWorker({ enabled: true }).panel({ type: 'ui:pageText' });
+  assert.deepEqual(plain(empty.data), { pages: [] }, 'a page without words has nothing to summarize');
+});
+
+test('after an update, site registrations from an older version load the page reader too', async () => {
+  const w = siteWorker({ enabled: true, frames: [{ origin: FRAME_ORIGIN, frameId: 4, enabled: true }] });
+  for (const script of w.registered.values()) script.js = ['generic-adapter.js', 'generic-content.js'];
+  w.events.installed({ reason: 'chrome_update' }); await settle();
+  assert.equal(w.log.includes('scripting.updateContentScripts'), false, 'only SecondHand’s own update refreshes them');
+  w.events.installed({ reason: 'update' }); await settle();
+  assert.deepEqual([...w.registered.values()].map(script => [script.id, script.js]), [[SCRIPT_ID, SITE_SCRIPT.js], ['frame-pantry.example.org--form.jotform.com', SITE_SCRIPT.js]]);
+  const log = w.log.length;
+  w.events.installed({ reason: 'update' }); await settle();
+  assert.equal(w.log.slice(log).includes('scripting.updateContentScripts'), false, 'current registrations are left alone');
+});
+
+test('the site widget grows by one row while it shows a message, when the worker asks for our extension', t => {
+  const page = siteContent(t);
+  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: true })), { sized: true });
+  assert.equal(page.host().style.height, '86px');
+  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: false })), { sized: true });
+  assert.equal(page.host().style.height, '46px');
+  assert.equal(page.request({ type: 'secondhand:widgetSize', line: true }, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
+  assert.equal(page.host().style.height, '46px');
+});
+
+test('the site widget frame is as wide as the widget measured itself, never past 272px', t => {
+  const page = siteContent(t);
+  assert.match(page.host().style.width, /^min\(272px/);
+  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: false, width: 152 })), { sized: true });
+  assert.match(page.host().style.width, /^min\(152px, 272px/, 'never wider than the full card');
+  page.request({ type: 'secondhand:widgetSize', line: true, width: 231 });
+  assert.match(page.host().style.width, /^min\(231px/, 'a line keeps the widget’s width');
+  assert.equal(page.host().style.height, '86px');
+  page.request({ type: 'secondhand:widgetSize', line: false });
+  assert.match(page.host().style.width, /^min\(272px/, 'a widget that could not measure itself gets the full card');
+  for (const width of [0, 1.5, '152', 5000]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: false, width }), undefined, `width ${width}`);
+  assert.match(page.host().style.width, /^min\(272px/);
+});
+
+test('a site frame answers the page-text request with its declared language and its words, never an answer, for our extension only', t => {
+  const page = siteContent(t);
+  const doc = page.window.document;
+  doc.documentElement.lang = 'en';
+  doc.body.insertAdjacentHTML('afterbegin', '<p>Bring a photo ID to pickup.</p>');
+  doc.getElementById('name').value = 'Synthetic private name';
+  const box = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 };
+  for (const node of doc.querySelectorAll('*')) { node.getBoundingClientRect = () => box; node.getClientRects = () => [box]; }
+  assert.deepEqual(plain(page.request({ type: 'secondhand:generic:pageText' })), { lang: 'en', text: 'Bring a photo ID to pickup.\nYour name\nPickup day' });
+  assert.equal(page.request({ type: 'secondhand:generic:pageText' }, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
+  delete page.window.SecondHandPageText;
+  assert.equal(page.request({ type: 'secondhand:generic:pageText' }).ok, false, 'without its page reader the frame says so');
 });

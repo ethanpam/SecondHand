@@ -86,7 +86,7 @@ async function main() {
     let widget = await launcherFrame();
     await expect(widget.locator('#autofill')).toHaveText(es('widget.autofill'), { timeout: 20000 });
     await expect(widget.locator('#widget-text')).toHaveText(es('widget.iowaReady'));
-    await expect(widget.locator('#details')).toHaveText(es('widget.details'));
+    await expect(widget.locator('#details')).toHaveAttribute('aria-label', es('widget.detailsTitle'));
     await expect(widget.locator('#translate-offer')).toBeVisible({ timeout: 20000 });
     await expect(widget.locator('#translate-offer')).toHaveText(es('widget.offer'));
     assert.deepEqual((await widget.evaluate(shownWords)).filter(text => englishOnly.includes(text)), []);

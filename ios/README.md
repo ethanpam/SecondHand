@@ -22,6 +22,10 @@ Saved information and reminders work offline. Opening the Iowa website, signing 
 
 ## Application assistance scope
 
+[Watch the iPhone autofill QA video](docs/qa/iphone-autofill-demo.mp4) · [What it verifies and how to reproduce it](docs/qa/README.md)
+
+The recording shows a fictional saved profile filling ten fields in an offline replica of Iowa's applicant form, using the real encrypted sharing snapshot and production autofill code. It runs in iPhone Simulator; it does not demonstrate live Iowa filing or Safari native messaging.
+
 **This is a guided auto-apply prototype, not a verified end-to-end Iowa integration.** The app shares the laptop implementation's inspected primary-applicant schema and verified Continue/required-question checks. Real Safari native messaging, live application submission, and an authenticated SNAP renewal flow remain unverified. Automated tests use synthetic local forms and never send an application to Iowa.
 
 The assistant automatically matches first/middle/last name, explicit home/mobile phone numbers, and home address on the [inspected applicant page](../docs/iowa-portal.md). For other eligible text/select fields, the user must explicitly choose which saved answer belongs there. These mappings apply only to the current page; the assistant does not guess household, eligibility, or financial semantics.
