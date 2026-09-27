@@ -136,23 +136,40 @@ if (nativeOrigin) {
     if (!LAYA_STATES.includes(state)) throw new Error(`Laya reported an unknown state: ${String(state)}`);
     return { state };
   }
-  // One prompt for every answer that needed a sensitive fact, naming the saved details behind them.
-  async function confirmSensitiveAnswers(origin, { fields, count }) {
-    if (fieldRequestPending) throw publicError('Another request is waiting for your approval.');
+  // One approval before saved information reaches a website: getFields' values, or the answers
+  // Laya picked from them. Without Always allow, or for another extension ID, it asks with Cancel,
+  // Allow once, and Always allow; `sensitive` details always ask, with Cancel and Allow once.
+  // `generation` is the access revision the information was read under. False when cancelled.
+  async function approveRelease({ context, iowa, origin, generation, message, items, sensitive = null }) {
+    if (autofillWithoutAsking && extensionId === context.extensionId && !sensitive) return true;
+    if (fieldRequestPending) throw publicError('Another field request is waiting for your approval.');
     fieldRequestPending = true;
     try {
       mainWindow.show(); mainWindow.focus();
-      const answer = await dialog.showMessageBox(mainWindow, {
-        type: 'warning', title: 'Share sensitive details?',
-        message: `Answer ${count === 1 ? '1 question' : `${count} questions`} on ${origin} using sensitive details?`,
-        detail: `${fields.map(field => FIELD_LABELS[field]).join(', ')}\n\nLaya, SecondHand’s AI on this computer, needed these saved details to pick ${count === 1 ? 'this answer' : 'these answers'}. The details stay on this computer; only the chosen ${count === 1 ? 'option is' : 'options are'} filled into the form on ${origin}. Cancel keeps your other answers and leaves ${count === 1 ? 'this question' : 'these questions'} for you.`,
+      const answer = await dialog.showMessageBox(mainWindow, sensitive ? {
+        type: 'warning', title: 'Share sensitive details?', message: sensitive.message, detail: sensitive.detail,
         buttons: ['Cancel', 'Allow once'], defaultId: 0, cancelId: 0, noLink: true
+      } : {
+        type: 'question', title: 'Let Chrome fill this form?', message,
+        detail: `Website: ${iowa ? PORTAL_URL : origin}\n\n${items}\n\nChoose “Always allow” to let the SecondHand extension fill without asking whenever this app is unlocked. You can turn it off on the Chrome extension page. The website may save entered information. Review every answer before continuing.${iowa ? "\n\nOn the verified initial applicant page, SecondHand may click ordinary Save and Continue after checking completeness. On the supported home-address confirmation page, it will automatically select Iowa's first possible home-address suggestion and choose Save and Continue. This applies to home-address suggestions only. These actions send entered answers to Iowa, which may save them immediately. Review the chosen home address before final submission. Other question pages require manual Next. This approval does not authorize consent, signatures, or submitting your application." : ''}`,
+        buttons: ['Cancel', 'Allow once', 'Always allow on this computer'], defaultId: 1, cancelId: 0, noLink: true
       });
-      return answer.response === 1;
+      if (answer.response !== 1 && answer.response !== 2) return false;
+      requireUnlocked();
+      if (generation !== accessRevision || extensionId !== context.extensionId) throw publicError('SecondHand access changed. Click Autofill again.');
+      if (answer.response === 2 && !sensitive) {
+        autofillWithoutAsking = true;
+        const approvedRevision = ++accessRevision;
+        await saveSettings();
+        requireUnlocked();
+        if (approvedRevision !== accessRevision || extensionId !== context.extensionId) throw publicError('SecondHand access changed. Click Autofill again.');
+      }
+      return true;
     } finally { fieldRequestPending = false; }
   }
   // suggestFields and answerFields: question labels and options in, a saved-field key or an
-  // option's text out. The facts sheet never leaves this app.
+  // option's text out, within the time the click has left. The facts sheet never leaves this app.
+  // Matching needs no approval: its keys' values come through getFields, which asks.
   async function layaRequest(request, context) {
     if (layaStatus().state !== 'ready') throw layaNotReady();
     const iowa = isPortalUrl(request.url);
@@ -161,18 +178,27 @@ if (nativeOrigin) {
     requireUnlocked();
     try {
       if (request.type === 'suggestFields') {
-        const suggestions = await fieldSuggestions.suggest(request.fields);
+        const suggestions = await fieldSuggestions.suggest(request.fields, { budgetMs: request.budgetMs });
         touch();
         return { suggestions };
       }
       const generation = accessRevision;
-      // Iowa's portal keeps its existing rule: no extra prompt.
-      const answers = await fieldAnswers.answer({ questions: request.questions, profile: vault.getData().profile,
-        confirmSensitive: iowa ? async () => true : details => confirmSensitiveAnswers(origin, details) });
+      const { answers, sensitive, sensitiveFields } = await fieldAnswers.answer({ questions: request.questions, profile: vault.getData().profile, budgetMs: request.budgetMs });
       requireUnlocked();
-      if (generation !== accessRevision || extensionId !== context.extensionId) throw publicError('SecondHand access changed. Click Autofill again.');
+      if (generation !== accessRevision) throw publicError('SecondHand access changed. Click Autofill again.');
+      const chosen = request.questions.filter(question => Object.hasOwn(answers, question.id));
+      if (!chosen.length) return { answers: {}, accessRevision };
+      // Answers are profile information: they follow getFields' approval, each question listed
+      // with the option that would be filled. Iowa's portal keeps its rule of no sensitive prompt.
+      const count = chosen.length;
+      const lines = chosen.map(question => `“${question.label}”: ${answers[question.id]}`).join('\n');
+      const approved = await approveRelease({ context, iowa, origin, generation,
+        message: `Fill ${count === 1 ? 'this answer' : 'these answers'} into ${iowa ? 'Iowa’s application' : origin}?`,
+        items: `Laya, SecondHand’s AI on this computer, picked ${count === 1 ? 'this answer' : 'these answers'} from your saved information:\n${lines}`,
+        sensitive: !iowa && sensitive.length ? { message: `Fill ${count === 1 ? 'an answer' : 'answers'} on ${origin} that ${sensitive.length === 1 ? 'uses' : 'use'} sensitive details?`,
+          detail: `${sensitiveFields.map(field => FIELD_LABELS[field]).join(', ')}\n\nLaya, SecondHand’s AI on this computer, used these saved details to pick ${sensitive.length === 1 ? 'an answer' : 'answers'} below. The details stay on this computer. Only allow this if you meant to give these answers to ${origin}:\n${lines}` } : null });
       touch();
-      return { answers, accessRevision };
+      return { answers: approved ? answers : {}, accessRevision };
     } catch (error) {
       if (error.publicMessage) throw error;
       if (error.code === 'LAYA_NOT_READY') throw layaNotReady();
@@ -221,37 +247,12 @@ if (nativeOrigin) {
       const origin = siteOrigin(request.url);
       if (!iowa && !trustedSites.includes(origin)) throw publicError('This site isn’t trusted. Turn on SecondHand for it first.');
       const sensitive = iowa ? [] : request.fields.filter(field => SENSITIVE_FIELDS.includes(field));
-      const trusted = autofillWithoutAsking && extensionId === context.extensionId && !sensitive.length;
-      if (!trusted) {
-        if (fieldRequestPending) throw publicError('Another field request is waiting for your approval.');
-        fieldRequestPending = true;
-        const generation = accessRevision;
-        try {
-          mainWindow.show(); mainWindow.focus();
-          const site = iowa ? 'Iowa’s application' : origin;
-          const answer = await dialog.showMessageBox(mainWindow, sensitive.length ? {
-            type: 'warning', title: 'Share sensitive details?',
-            message: `Fill sensitive details on ${origin}?`,
-            detail: `${sensitive.map(field => FIELD_LABELS[field]).join(', ')}\n\nOnly allow this if you meant to give these details to ${origin}. Other fields: ${request.fields.filter(field => !sensitive.includes(field)).map(field => FIELD_LABELS[field]).join(', ') || 'none'}.`,
-            buttons: ['Cancel', 'Allow once'], defaultId: 0, cancelId: 0, noLink: true
-          } : {
-            type: 'question', title: 'Let Chrome fill this form?',
-            message: navigationOnly ? 'Continue this verified Iowa step?' : `Fill these saved answers into ${site}?`,
-            detail: `Website: ${iowa ? PORTAL_URL : origin}\n\n${navigationOnly ? 'No saved profile fields will be read for this step.' : request.fields.map(field => FIELD_LABELS[field]).join(', ')}\n\nChoose “Always allow” to let the SecondHand extension fill without asking whenever this app is unlocked. You can turn it off on the Chrome extension page. The website may save entered information. Review every answer before continuing.${iowa ? "\n\nOn the verified initial applicant page, SecondHand may click ordinary Save and Continue after checking completeness. On the supported home-address confirmation page, it will automatically select Iowa's first possible home-address suggestion and choose Save and Continue. This applies to home-address suggestions only. These actions send entered answers to Iowa, which may save them immediately. Review the chosen home address before final submission. Other question pages require manual Next. This approval does not authorize consent, signatures, or submitting your application." : ''}`,
-            buttons: ['Cancel', 'Allow once', 'Always allow on this computer'], defaultId: 1, cancelId: 0, noLink: true
-          });
-          if (answer.response !== 1 && answer.response !== 2) throw publicError('You cancelled this field request.');
-          requireUnlocked();
-          if (generation !== accessRevision || extensionId !== context.extensionId) throw publicError('SecondHand access changed. Click Autofill again.');
-          if (answer.response === 2 && !sensitive.length) {
-            autofillWithoutAsking = true;
-            const approvedRevision = ++accessRevision;
-            await saveSettings();
-            requireUnlocked();
-            if (approvedRevision !== accessRevision || extensionId !== context.extensionId) throw publicError('SecondHand access changed. Click Autofill again.');
-          }
-        } finally { fieldRequestPending = false; }
-      }
+      const approved = await approveRelease({ context, iowa, origin, generation: accessRevision,
+        message: navigationOnly ? 'Continue this verified Iowa step?' : `Fill these saved answers into ${iowa ? 'Iowa’s application' : origin}?`,
+        items: navigationOnly ? 'No saved profile fields will be read for this step.' : request.fields.map(field => FIELD_LABELS[field]).join(', '),
+        sensitive: sensitive.length ? { message: `Fill sensitive details on ${origin}?`,
+          detail: `${sensitive.map(field => FIELD_LABELS[field]).join(', ')}\n\nOnly allow this if you meant to give these details to ${origin}. Other fields: ${request.fields.filter(field => !sensitive.includes(field)).map(field => FIELD_LABELS[field]).join(', ') || 'none'}.` } : null });
+      if (!approved) throw publicError('You cancelled this field request.');
       if (navigationOnly) { touch(); return { values: {}, accessRevision }; }
       const profile = vault.getData().profile;
       const values = {};

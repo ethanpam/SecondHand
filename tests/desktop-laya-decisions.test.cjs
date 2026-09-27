@@ -42,12 +42,23 @@ test('scores come from one batch per decision with the trained question, and any
   await assert.rejects(score({ decideBatch: async () => { throw notReady; } }, [{ question: 'Q', candidate: 'A' }]), error => error === notReady);
 });
 
-test('a request’s time budget runs out after three seconds', () => {
+test('a request’s time budget is what the click has left, never more than three seconds', () => {
   let clock = 1000;
-  const more = budget(() => clock);
+  const more = budget(BUDGET_MS, () => clock);
   assert.equal(more(), true);
   clock += BUDGET_MS - 1;
   assert.equal(more(), true);
   clock += 1;
   assert.equal(more(), false);
+  clock = 0;
+  const left = budget(1200, () => clock);
+  clock = 1199;
+  assert.equal(left(), true);
+  clock = 1200;
+  assert.equal(left(), false);
+  clock = 0;
+  const capped = budget(60000, () => clock);
+  clock = BUDGET_MS;
+  assert.equal(capped(), false);
+  for (const budgetMs of [0, -5, 2.5, '1000', undefined, NaN]) assert.throws(() => budget(budgetMs, () => 0), /budget/, String(budgetMs));
 });

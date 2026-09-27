@@ -47,8 +47,9 @@ const AI_KEYS = Object.freeze(SecondHandGeneric.GENERIC_KEYS.filter(key => !SENS
 // Laya, the desktop app's local AI: it matches text boxes to saved fields (#39) and answers choice
 // questions from the saved profile (#42). It gets question labels, types, and options only, within
 // the bridge's limits. Chrome's on-device AI runs only when Laya isn't ready.
+// Each Autofill click gives Laya `budgetMs` in all; every request carries what the click has left.
 const LAYA = Object.freeze({ textTypes: Object.freeze(['text', 'textarea', 'number', 'date', 'email', 'tel']), choiceTypes: Object.freeze(['radio', 'select', 'checkbox']),
-  fields: 40, questions: 30, label: 200, options: 30, option: 100, bytes: 48 * 1024 });
+  fields: 40, questions: 30, label: 200, options: 30, option: 100, bytes: 48 * 1024, budgetMs: 3000 });
 const LAYA_NOT_READY = 'LAYA_NOT_READY';
 const LAYA_STATES = Object.freeze(['off', 'unavailable', 'not-downloaded', 'downloading', 'ready', 'error']);
 
@@ -608,9 +609,22 @@ function layaQuestions(frames, prefix) {
   }
   return { boxes, choices };
 }
+// One click's time for Laya. Only time spent waiting on Laya counts, never the applicant's time in
+// an approval prompt. `use(ask)` asks with the milliseconds left, or asks nothing once they are spent.
+function layaBudget() {
+  let left = LAYA.budgetMs;
+  return {
+    async use(ask) {
+      const budgetMs = Math.floor(left);
+      if (budgetMs < 1) return undefined;
+      const started = Date.now();
+      try { return await ask(budgetMs); } finally { left -= Date.now() - started; }
+    }
+  };
+}
 // As many questions as one request may carry: the bridge's count, within the native message size.
-function layaPayload(type, url, list, questions, max) {
-  const payload = { url: safeUrl(url), [list]: [] };
+function layaPayload(type, url, list, questions, max, budgetMs) {
+  const payload = { url: safeUrl(url), [list]: [], budgetMs };
   for (const question of questions.slice(0, max)) {
     payload[list].push(question);
     // The request as nativeRequest sends it; its id is a 36-character UUID.
@@ -627,8 +641,8 @@ async function askLaya(type, payload) {
   }
 }
 // [id, savedFieldKey] pairs for text boxes (#39). Any id outside the request or any key a guess may not use refuses them all.
-async function layaSuggestions(url, boxes) {
-  const payload = layaPayload('suggestFields', url, 'fields', boxes, LAYA.fields);
+async function layaSuggestions(url, boxes, budgetMs) {
+  const payload = layaPayload('suggestFields', url, 'fields', boxes, LAYA.fields, budgetMs);
   const reply = await askLaya('suggestFields', payload);
   if (reply === null) return null;
   const sent = new Set(payload.fields.map(field => field.id));
@@ -637,8 +651,8 @@ async function layaSuggestions(url, boxes) {
   return entries;
 }
 // [id, optionText] pairs for choice questions (#42), with the access receipt they were made under.
-async function layaAnswers(url, choices) {
-  const payload = layaPayload('answerFields', url, 'questions', choices, LAYA.questions);
+async function layaAnswers(url, choices, budgetMs) {
+  const payload = layaPayload('answerFields', url, 'questions', choices, LAYA.questions, budgetMs);
   const reply = await askLaya('answerFields', payload);
   if (reply === null) return null;
   const sent = new Map(payload.questions.map(question => [question.id, question.options]));
@@ -652,7 +666,7 @@ async function layaAnswers(url, choices) {
 // filled too. Each pass plans the page again. Never continues, submits, or navigates.
 // Laya is asked unless this click already found it not ready (`laya: false`): its text-box matches
 // join the one request for saved values; its answers to choice questions come after that request,
-// so an approval given in between can't outdate them.
+// so an approval given in between can't outdate them. Both share the click's time budget.
 async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, laya = null } = {}) {
   let revision = null;
   let values = null;
@@ -668,11 +682,12 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
     };
     // Once Laya says it isn't ready, it isn't asked again in this click.
     let layaOn = laya !== false;
+    const budget = layaBudget();
     if (open.boxes.length) {
-      const suggestions = await layaSuggestions(url, open.boxes);
+      const suggestions = await budget.use(budgetMs => layaSuggestions(url, open.boxes, budgetMs));
       guard();
       if (suggestions === null) layaOn = false;
-      else for (const [id, key] of suggestions) addLaya(id, { key });
+      else for (const [id, key] of suggestions || []) addLaya(id, { key });
     }
     const keys = [...new Set(SecondHandGeneric.requestKeys(initial.flatMap(frame => frame.planned.filter(item => item.key !== undefined).map(item => item.key))))];
     if (keys.some(key => typeof key !== 'string' || !KEY.test(key))) throw fault('worker.fieldRequestFailed');
@@ -686,9 +701,9 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       values = SecondHandGeneric.deriveValues(response.values);
     }
     if (layaOn && open.choices.length) {
-      const answers = await layaAnswers(url, open.choices);
+      const answers = await budget.use(budgetMs => layaAnswers(url, open.choices, budgetMs));
       guard();
-      if (answers !== null) {
+      if (answers) {
         if (revision !== null && answers.revision !== revision) throw fault('worker.accessChanged');
         revision = answers.revision;
         for (const [id, option] of answers.entries) addLaya(id, { option });

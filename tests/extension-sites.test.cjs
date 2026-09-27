@@ -87,7 +87,7 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
   };
 }
 
-function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, desktop = {}, fields = pantryFields(), next, duringGetFields, duringStatus, frames = [], plan, keepAccess = false, discoveryError = false, topError, framesReply } = {}) {
+function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, desktop = {}, fields = pantryFields(), next, duringGetFields, duringStatus, frames = [], plan, keepAccess = false, discoveryError = false, topError, framesReply, clock } = {}) {
   const tab = { id: 7, active: true, url };
   const log = [], native = [], content = [], injected = [], opened = [];
   const permissions = new Set(granted ? [`${ORIGIN}/*`] : []);
@@ -204,8 +204,10 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
       }
     }
   };
+  // A test may run the worker's clock itself: `clock.now` is what Date.now() returns.
   vm.runInNewContext(source('background.js'),
-    { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console });
+    { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console,
+      ...(clock ? { Date: { now: () => clock.now } } : {}) });
   const send = (message, sender) => new Promise(resolve => { if (!listener(message, sender, resolve)) resolve(undefined); });
   return {
     tab, page, vault, log, native, content, injected, tallies, opened, permissions, registered, events, send,
@@ -1071,8 +1073,8 @@ test('with Laya ready, the widget’s plan says so, and its match fills a text b
   assert.deepEqual(w.nativeTypes(), ['status'], 'planning only checks whether Laya is ready');
   const reach = idOf(w, 'reach');
   const result = plain((await w.launcher({ type: 'ui:autofill', confirmed: true, guesses: {} })).data);
-  assert.deepEqual(suggestRequest, { id: suggestRequest.id, type: 'suggestFields', url: `${ORIGIN}/intake`, fields: [{ id: reach, label: 'Where can we reach you?', type: 'email', options: [] }] },
-    'the text box’s label, type, and options only');
+  assert.deepEqual(suggestRequest, { id: suggestRequest.id, type: 'suggestFields', url: `${ORIGIN}/intake`, fields: [{ id: reach, label: 'Where can we reach you?', type: 'email', options: [] }], budgetMs: 3000 },
+    'the text box’s label, type, and options only, and the click’s time for Laya');
   assert.deepEqual(w.native.find(call => call.type === 'getFields').fields, ['firstName', 'lastName', 'email'], 'Laya’s match joins the one vault request');
   assert.deepEqual(w.content.find(call => call.type === 'secondhand:generic:fill').assignments,
     [{ id: 'sh-1-0', key: 'fullName', guessed: false }, { id: reach.split(':')[1], key: 'email', guessed: true }]);
@@ -1092,7 +1094,8 @@ test('Laya answers a choice question from the saved profile: the option is picke
   const result = plain((await autofill(w)).data);
   assert.deepEqual(answerRequest.questions, [
     { id: 'f0:sh-1-1', label: SIXTY.label, type: 'radio', options: ['Yes', 'No'] }, { id: 'f0:sh-1-2', label: PET.label, type: 'radio', options: ['Yes', 'No'] }]);
-  assert.deepEqual(Object.keys(answerRequest).sort(), ['id', 'questions', 'type', 'url']);
+  assert.deepEqual(Object.keys(answerRequest).sort(), ['budgetMs', 'id', 'questions', 'type', 'url']);
+  assert.equal(answerRequest.budgetMs, 3000);
   assert.deepEqual(w.content.find(call => call.type === 'secondhand:generic:fill').assignments,
     [{ id: 'sh-1-0', key: 'fullName', guessed: false }, { id: 'sh-1-1', option: 'No', guessed: true }]);
   assert.deepEqual(w.page.answered(), ['name', 'sixty']);
@@ -1223,4 +1226,29 @@ test('the side panel learns whether Laya is ready from the desktop status', asyn
   assert.deepEqual(plain((await siteWorker({ desktop: { reachable: false } }).panel({ type: 'ui:desktopStatus' })).data), { connected: false, unlocked: false, laya: 'unavailable' });
   const odd = siteWorker({ desktop: { layaState: 'thinking' } });
   assert.equal((await odd.panel({ type: 'ui:desktopStatus' })).ok, false, 'a state SecondHand doesn’t know is an error, not a guess');
+});
+
+test('Laya gets one three-second budget per click: each request carries what is left, the applicant’s approval time never counts, and nothing is asked once it is spent', async () => {
+  const run = async ({ suggestMs, approvalMs = 0 }) => {
+    const clock = { now: 50000 };
+    const budgets = [];
+    const w = siteWorker({ enabled: true, clock, fields: [{ name: 'name', key: 'fullName' }, { ...REACH }, { ...SIXTY }], duringGetFields: () => { clock.now += approvalMs; }, desktop: layaDesktop({
+      suggestFields: request => { budgets.push(['suggestFields', request.budgetMs]); clock.now += suggestMs; return { suggestions: { [request.fields[0].id]: 'email' } }; },
+      answerFields: (request, vault) => { budgets.push(['answerFields', request.budgetMs]); return { answers: { [request.questions[0].id]: 'No' }, accessRevision: vault.accessRevision }; } }) });
+    return { w, budgets, result: plain((await autofill(w)).data) };
+  };
+  const quick = await run({ suggestMs: 1200, approvalMs: 20000 });
+  assert.deepEqual(quick.budgets, [['suggestFields', 3000], ['answerFields', 1800]], 'the match took 1.2 seconds; a 20-second approval in between is the applicant’s time');
+  assert.deepEqual(quick.w.page.answered(), ['name', 'reach', 'sixty']);
+
+  const spent = await run({ suggestMs: 3000 });
+  assert.deepEqual(spent.budgets, [['suggestFields', 3000]], 'no time is left to answer');
+  assert.deepEqual(spent.w.page.answered(), ['name', 'reach']);
+  assert.deepEqual(spent.result.needYou, [idOf(spent.w, 'sixty')], 'the choice question stays with the applicant');
+
+  // A new click starts a new budget.
+  const again = siteWorker({ enabled: true, clock: { now: 0 }, fields: [{ ...SIXTY }], desktop: layaDesktop() });
+  await autofill(again);
+  await autofill(again);
+  assert.deepEqual(layaCalls(again).map(call => call.budgetMs), [3000, 3000]);
 });

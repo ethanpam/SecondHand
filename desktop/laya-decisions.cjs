@@ -12,7 +12,8 @@ const MATCH_THRESHOLD = 0.95;
 // The best candidate must beat the runner-up by at least this much; two likely answers mean
 // the model isn't sure which, and the question goes to the applicant.
 const MIN_LEAD = 0.5;
-// Each request's time budget. Questions left when it runs out go to "need you".
+// Laya's time budget per Autofill click. The extension sends what its click has left with each
+// request; questions left when it runs out go to "need you".
 const BUDGET_MS = 3000;
 
 // The probability Laya gives each candidate of one decision, from one batch.
@@ -37,9 +38,10 @@ function pick(scores, threshold) {
   return best.probability >= threshold && best.probability > abstain && best.probability - runnerUp.probability >= MIN_LEAD ? best.index : -1;
 }
 
-// True until the request's time budget is spent.
-function budget(now = Date.now, ms = BUDGET_MS) {
-  const end = now() + ms;
+// True until the click's time budget is spent: what the click has left, never more than BUDGET_MS.
+function budget(budgetMs, now = Date.now) {
+  if (!Number.isInteger(budgetMs) || budgetMs < 1) throw new TypeError('A Laya request needs its time budget in whole milliseconds.');
+  const end = now() + Math.min(budgetMs, BUDGET_MS);
   return () => now() < end;
 }
 const timedOut = error => error?.code === 'LAYA_TIMEOUT';

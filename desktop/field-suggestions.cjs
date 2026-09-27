@@ -6,10 +6,11 @@ const { MATCH_THRESHOLD, score, pick, budget, timedOut } = require('./laya-decis
 
 function createFieldSuggestions({ laya, now = Date.now } = {}) {
   if (typeof laya?.decideBatch !== 'function') throw new TypeError('Field suggestions need a Laya runtime.');
-  // Fields in page order: { id, label, type, options }. Returns { [id]: savedFieldKey } for the
-  // fields the model matched with confidence; the rest go to the applicant.
-  async function suggest(fields) {
-    const more = budget(now);
+  // Fields in page order: { id, label, type, options }, and the milliseconds the click has left.
+  // Returns { [id]: savedFieldKey } for the fields the model matched with confidence before the
+  // deadline; the rest go to the applicant.
+  async function suggest(fields, { budgetMs } = {}) {
+    const more = budget(budgetMs, now);
     const suggestions = {};
     for (const field of fields) {
       if (unsafeQuestion(field)) continue;
@@ -20,6 +21,8 @@ function createFieldSuggestions({ laya, now = Date.now } = {}) {
         if (timedOut(error)) break;
         throw error;
       }
+      // A decision that came after the deadline is dropped.
+      if (!more()) break;
       const best = pick(scores, MATCH_THRESHOLD);
       if (best >= 0) suggestions[field.id] = MATCH_CANDIDATES[best];
     }

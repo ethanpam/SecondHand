@@ -36,9 +36,10 @@ const pages = {
   [HOUSEHOLD]: pantryPage('Pantry intake: household', `<label for="name">Full name</label><input id="name" name="name">${radios('sixty', 'Is anyone in your household 60 or older?')}${radios('pet', 'Do you have a pet?')}`)
 };
 
-// The desktop app with Laya, as the worker sees it over native messaging. Laya's decisions here
-// stand in for the model: the email box is the saved email address, and a household of one with no
-// seniors answers "No" to 60 or older. "Do you have a pet?" is something the facts never say.
+// The desktop app with Laya, as the worker sees it over native messaging, with Always allow on. Laya's
+// decisions here stand in for the model: the email box is the saved email address, and a household of
+// one with no seniors answers "No" to 60 or older. "Do you have a pet?" is something the facts never say.
+// Each Laya request must carry the milliseconds its click has left, as the bridge requires.
 async function installDesktop(worker, profile) {
   await worker.evaluate(profile => {
     globalThis.__desktop = { laya: 'ready', calls: [], profile };
@@ -50,6 +51,7 @@ async function installDesktop(worker, profile) {
       if (type === 'trustSite') return { trusted: true, origin: new URL(payload.url).origin };
       if (type === 'getFields') return { accessRevision: 0, values: Object.fromEntries(payload.fields.filter(field => desktop.profile[field]).map(field => [field, desktop.profile[field]])) };
       if (type === 'suggestFields' || type === 'answerFields') {
+        if (!Number.isInteger(payload.budgetMs) || payload.budgetMs < 1 || payload.budgetMs > 3000) throw new Error('Invalid time budget for Laya.');
         if (desktop.laya !== 'ready') throw Object.assign(new Error('Laya isn’t ready on this computer.'), { code: 'LAYA_NOT_READY' });
         if (type === 'suggestFields') return { suggestions: Object.fromEntries(payload.fields.filter(field => /reach you/i.test(field.label) && field.type === 'email').map(field => [field.id, 'email'])) };
         const noSeniors = desktop.profile.householdSize === '1' && desktop.profile.householdSeniors === '0';
@@ -155,7 +157,8 @@ async function main() {
     // No saved value ever reaches Laya: its requests carry labels, types, and options only.
     for (const call of await calls()) {
       if (!['suggestFields', 'answerFields'].includes(call.type)) continue;
-      assert.deepEqual(Object.keys(call).sort(), call.type === 'suggestFields' ? ['fields', 'type', 'url'] : ['questions', 'type', 'url']);
+      assert.deepEqual(Object.keys(call).sort(), call.type === 'suggestFields' ? ['budgetMs', 'fields', 'type', 'url'] : ['budgetMs', 'questions', 'type', 'url']);
+      assert.ok(call.budgetMs >= 1 && call.budgetMs <= 3000, 'each request carries the time its click has left');
       for (const value of savedValues) assert.equal(JSON.stringify(call).includes(value), false, `${call.type} carried a saved value`);
     }
 

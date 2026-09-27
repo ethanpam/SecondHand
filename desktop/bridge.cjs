@@ -26,6 +26,8 @@ const QUESTION_ID = /^(f\d{1,6}:)?[A-Za-z][A-Za-z0-9_-]{0,59}$/;
 const MAX_LABEL = 200;
 const MAX_OPTIONS = 30;
 const MAX_OPTION = 100;
+// Laya's time per Autofill click: each request carries what its click has left.
+const MAX_BUDGET_MS = 3000;
 // Refusals the extension acts on. Only these codes travel back with an error.
 const PUBLIC_CODES = Object.freeze(['LAYA_NOT_READY']);
 
@@ -128,7 +130,7 @@ function validateRequest(request) {
   else if (request.type === 'getFields') allowed = ['id', 'type', 'url', 'fields'];
   else if (request.type === 'trustSite') allowed = ['id', 'type', 'url'];
   else if (request.type === 'recordProgress') allowed = ['id', 'type', 'url', 'filledCount'];
-  else if (Object.hasOwn(LAYA_REQUESTS, request.type)) allowed = ['id', 'type', 'url', LAYA_REQUESTS[request.type].list];
+  else if (Object.hasOwn(LAYA_REQUESTS, request.type)) allowed = ['id', 'type', 'url', LAYA_REQUESTS[request.type].list, 'budgetMs'];
   else throw new Error('Unsupported bridge request.');
   if (Object.keys(request).some(key => !allowed.includes(key))) throw new Error('Unexpected request field.');
   // Field requests, site trust, and Laya may name any HTTPS site; the desktop decides whether it is trusted.
@@ -136,7 +138,10 @@ function validateRequest(request) {
     if (!isHttpsSiteUrl(request.url)) throw new Error('Only an https site without credentials or a custom port is allowed.');
   } else if (request.type !== 'status' && request.type !== 'showApp' && !isPortalUrl(request.url)) throw new Error('Only the supported Iowa portal is allowed.');
   if (request.type === 'getFields' && !isIowaNavigationAuthorization(request)) validateFieldScope(request.fields);
-  if (Object.hasOwn(LAYA_REQUESTS, request.type)) validateQuestions(request[LAYA_REQUESTS[request.type].list], LAYA_REQUESTS[request.type]);
+  if (Object.hasOwn(LAYA_REQUESTS, request.type)) {
+    validateQuestions(request[LAYA_REQUESTS[request.type].list], LAYA_REQUESTS[request.type]);
+    if (!Number.isInteger(request.budgetMs) || request.budgetMs < 1 || request.budgetMs > MAX_BUDGET_MS) throw new Error('Invalid time budget for Laya.');
+  }
   if (request.type === 'recordProgress' && (!Number.isInteger(request.filledCount) || request.filledCount < 1 || request.filledCount > 100)) {
     throw new Error('Invalid filled field count.');
   }

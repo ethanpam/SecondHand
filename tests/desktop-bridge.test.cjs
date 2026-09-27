@@ -129,8 +129,8 @@ test('site trust requests carry only an https site URL; the desktop decides whic
 const LAYA_SITE = 'https://pantry.example.org/intake?step=2';
 const box = (extra = {}) => ({ id: 'f0:sh-1-2', label: 'Where can we email you?', type: 'email', options: [], ...extra });
 const choice = (extra = {}) => ({ id: 'f4:sh-2-0', label: 'Is anyone in your household 60 or older?', type: 'radio', options: ['Yes', 'No'], ...extra });
-const suggest = (fields, extra = {}) => ({ id: 'laya-1', type: 'suggestFields', url: LAYA_SITE, fields, ...extra });
-const answer = (questions, extra = {}) => ({ id: 'laya-2', type: 'answerFields', url: LAYA_SITE, questions, ...extra });
+const suggest = (fields, extra = {}) => ({ id: 'laya-1', type: 'suggestFields', url: LAYA_SITE, fields, budgetMs: 3000, ...extra });
+const answer = (questions, extra = {}) => ({ id: 'laya-2', type: 'answerFields', url: LAYA_SITE, questions, budgetMs: 2400, ...extra });
 const many = (count, make) => Array.from({ length: count }, (_, index) => make({ id: `sh-1-${index}` }));
 
 test('suggestFields carries up to 40 text-box labels, types, and options; answerFields up to 30 choice questions', () => {
@@ -166,6 +166,20 @@ test('Laya requests outside the limits, with the wrong question type, or with an
     assert.throws(() => validateRequest(answer([choice()], extra)), /Unexpected request field/, JSON.stringify(extra));
   }
   assert.throws(() => validateRequest(suggest([box()], { questions: [choice()] })), /Unexpected request field/);
+});
+
+test('each Laya request carries the milliseconds its Autofill click has left: a whole number from 1 to 3000', () => {
+  for (const budgetMs of [1, 1500, 3000]) {
+    assert.equal(validateRequest(suggest([box()], { budgetMs })).budgetMs, budgetMs);
+    assert.equal(validateRequest(answer([choice()], { budgetMs })).budgetMs, budgetMs);
+  }
+  for (const budgetMs of [0, -1, 3001, 1.5, '3000', null, undefined, NaN]) {
+    assert.throws(() => validateRequest(suggest([box()], { budgetMs })), /time budget/, String(budgetMs));
+    assert.throws(() => validateRequest(answer([choice()], { budgetMs })), /time budget/, String(budgetMs));
+  }
+  const { budgetMs, ...without } = suggest([box()]);
+  assert.equal(budgetMs, 3000);
+  assert.throws(() => validateRequest(without), /time budget/);
 });
 
 test('Laya requests name an https site or Iowa’s portal; the desktop checks that the site is trusted', () => {
