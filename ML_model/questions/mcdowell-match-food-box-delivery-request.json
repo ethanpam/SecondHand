@@ -1,0 +1,25 @@
+{
+  "source": {
+    "url": "https://docs.google.com/forms/d/e/1FAIpQLSeV12W0tjxQDkMbHa_TowJDH11UlnfJhQmp4tvGxjf9GF_v5A/viewform",
+    "title": "Food Box Delivery Request Form",
+    "kind": "google-form",
+    "retrieved": "2026-09-26",
+    "region": "Marion, NC",
+    "holdout": true
+  },
+  "questions": [
+    { "id": "q1", "label": "First and Last Name", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" }, "note": "The page shows \"First and Last Name Required\"; the trailing word marks a required field." },
+    { "id": "q2", "label": "Contact Number", "type": "text", "options": [], "rule": { "name": "field", "key": "phone" } },
+    { "id": "q3", "label": "Delivery Address", "type": "text", "options": [], "rule": { "name": "field", "key": "addressLine1" } },
+    { "id": "q4", "label": "City and Zip Code", "type": "text", "options": [], "rule": { "name": "none" }, "note": "One box for city and ZIP together; no single saved field holds both." },
+    { "id": "q5", "label": "Number in Household", "type": "text", "options": [], "rule": { "name": "field", "key": "householdSize" } },
+    { "id": "q6", "label": "The Food Box Delivery program was created for community members whose transportation barriers prevent them from attending a food distribution in community. Do you have reliable transportation?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "none" }, "note": "Transportation; not in the profile." },
+    { "id": "q7", "label": "What other types of support would you like to learn more about?", "type": "checkbox", "options": ["Access to Health Care-Medicaid/Medicare/ Health Insurance", "Medication Assistance", "Mental Health Resources", "Substance Use Disorder/Recovery Resources", "Emergency Assistance", "Vision/Dental Resources", "Harm Reduction/ Hep C info", "NONE"], "rule": { "name": "none" }, "note": "Other support wanted. The page also has an \"Other:\" free-text option, left out here." },
+    { "id": "q8", "label": "I receive SNAP Benefits", "type": "checkbox", "options": ["Yes", "No", "I would like help signing up!"], "rule": { "name": "none" }, "note": "Whether they already get SNAP; the profile only knows what the applicant is applying for." },
+    { "id": "q9", "label": "Type of Health Care Coverage", "type": "checkbox", "options": ["Medicaid", "Medicare", "Private Insurance", "Uninsured"], "rule": { "name": "none" }, "note": "Coverage type; a check-all list, not the household Medicare yes/no fact." },
+    { "id": "q10", "label": "Are you submitting this form on someone else's behalf?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "none" }, "note": "Who is filling in the form; not in the profile." },
+    { "id": "q11", "label": "If yes, please provide your name and phone number so that we can confirm the delivery.", "type": "text", "options": [], "rule": { "name": "none" }, "note": "The helper's name and phone, not the applicant's." },
+    { "id": "q12", "label": "Is your house number clearly displayed?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "none" }, "note": "Delivery detail; not in the profile." },
+    { "id": "q13", "label": "If not, please provide landmarks or other instructions to ensure delivery.", "type": "textarea", "options": [], "rule": { "name": "none" }, "note": "Delivery instructions." }
+  ]
+}

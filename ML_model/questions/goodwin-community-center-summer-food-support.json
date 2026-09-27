@@ -1,0 +1,24 @@
+{
+  "source": {
+    "url": "https://docs.google.com/forms/d/e/1FAIpQLSe8lFuiqch7GpTFO_erSxrlT3OUXLZVsdOoOxsstM1XLCXmBg/viewform",
+    "title": "Summer Food Support Opportunity",
+    "kind": "google-form",
+    "retrieved": "2026-09-26",
+    "region": "Indianapolis, IN",
+    "holdout": true
+  },
+  "questions": [
+    { "id": "q1", "label": "Parent/Guardian Name", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" } },
+    { "id": "q2", "label": "Phone #", "type": "text", "options": [], "rule": { "name": "field", "key": "phone" } },
+    { "id": "q3", "label": "Email Address", "type": "text", "options": [], "rule": { "name": "field", "key": "email" } },
+    { "id": "q4", "label": "Student(s) Name", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Specific student names." },
+    { "id": "q5", "label": "Student(s) Grade for the 2026-2027 School Year", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Specific student grades." },
+    { "id": "q6", "label": "Does you child attend Stephen Decatur Elementary or Lynwood Elementary?  Note: This program is limited to families with students attending Stephen Decatur Elementary or Lynwood Elementary.", "type": "radio", "options": ["Yes, Stephen Decatur", "Yes, Lynwood", "No"], "rule": { "name": "none" }, "note": "School enrollment." },
+    { "id": "q7", "label": "How many children in your household attend Stephen Decatur or Lynwood?", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Count of children at specific schools." },
+    { "id": "q8", "label": "Are there any food allergies we should be aware of?", "type": "radio", "options": ["None", "Yes"], "rule": { "name": "none" }, "note": "Allergies." },
+    { "id": "q9", "label": "If you answered \"Yes\" to food allergies, please list allergies.", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Allergies details." },
+    { "id": "q10", "label": "I understand that competing this form does not guarantee a food pack.  Food packs will be distributed to the first 30 eligible families who complete the form each week.", "type": "checkbox", "options": ["I understand"], "rule": { "name": "never" }, "note": "Terms acknowledgment." },
+    { "id": "q11", "label": "I understand that I will be contacted if my family is selected to receive a food pack next week.  PLEASE DO NOT CALL US TO SEE IF YOU WERE SELECTED.  WE WILL REACH OUT TO YOU.", "type": "checkbox", "options": ["I understand"], "rule": { "name": "never" }, "note": "Terms acknowledgment." },
+    { "id": "q12", "label": "I would like to be notified about future food assistance opportunities at Goodwin Community Center.", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "none" }, "note": "Notification preference." }
+  ]
+}

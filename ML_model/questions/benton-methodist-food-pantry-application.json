@@ -1,0 +1,24 @@
+{
+  "source": {
+    "url": "https://form.jotform.com/223413858312049",
+    "title": "Benton Methodist Food Pantry Application",
+    "kind": "jotform",
+    "retrieved": "2026-09-26",
+    "region": "Benton, LA",
+    "holdout": true
+  },
+  "questions": [
+    { "id": "q1", "label": "Name", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" }, "note": "Jotform name box with First Name and Last Name parts." },
+    { "id": "q2", "label": "Address", "type": "text", "options": [], "rule": { "name": "field", "key": "addressLine1" }, "note": "Jotform address box; its first line is the street address." },
+    { "id": "q3", "label": "Preferred Phone", "type": "tel", "options": [], "rule": { "name": "field", "key": "phone" } },
+    { "id": "q4", "label": "Email", "type": "email", "options": [], "rule": { "name": "field", "key": "email" } },
+    { "id": "q5", "label": "Date of Birth", "type": "date", "options": [], "rule": { "name": "field", "key": "birthDate" } },
+    { "id": "q6", "label": "Driver's License/ID State", "type": "select", "options": ["Lousiana", "Other"], "rule": { "name": "none" }, "note": "Which state issued the ID; not in the profile. \"Lousiana\" is spelled that way on the page." },
+    { "id": "q7", "label": "Driver's License / ID Card Number", "type": "text", "options": [], "rule": { "name": "none" }, "note": "ID number; not in the profile." },
+    { "id": "q8", "label": "How do you qualify? (if you do not have SNAP, SSI or no income, select income and we will determine your eligibility based on income)", "type": "checkbox", "options": ["SNAP (Food Stamps)", "SSI", "Homeless/Not Working", "Income", "Other"], "rule": { "name": "none" }, "note": "Check-all mixing benefits already received with income; no single fact decides it." },
+    { "id": "q9", "label": "If you selected income, please enter the total household monthly income.", "type": "text", "options": [], "rule": { "name": "field", "key": "totalMonthlyIncome" } },
+    { "id": "q10", "label": "Name", "type": "text", "options": [], "rule": { "name": "none" }, "note": "A family member's name. The page repeats this section for eight family members; only the first is kept." },
+    { "id": "q11", "label": "Date of Birth", "type": "date", "options": [], "rule": { "name": "none" }, "note": "A family member's birth date; not in the profile." },
+    { "id": "q12", "label": "Family Member Relationship", "type": "select", "options": ["Husband", "Wife", "Son (& by marriage)", "Daughter (& by marriage)", "Other"], "rule": { "name": "none" }, "note": "A family member's relationship; not in the profile." }
+  ]
+}
