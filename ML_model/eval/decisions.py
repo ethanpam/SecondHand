@@ -7,6 +7,8 @@ the applicant. What matters is how often an answer it fills is right (precision)
 answerable questions it fills (coverage), and how often it fills one it should have left.
 
     uv run --project ~/Projects/LayaStudio python ML_model/eval/decisions.py --model <run>/model
+    uv run --project ~/Projects/LayaStudio python ML_model/eval/decisions.py --runtime onnx --onnx <export> \
+        --reference-probs mlx=<an MLX report>.probs.json
 """
 
 import argparse
@@ -44,6 +46,36 @@ def holdout_forms(questions_dir):
     if not urls:
         raise ValueError(f"No form in {questions_dir} is marked holdout.")
     return urls
+
+
+def probabilities(decisions):
+    """Each row's p, per task and decision: {task: {decision: [p, ...]}}."""
+    return {task: {key: [row["p"] for row in rows] for key, rows in groups.items()} for task, groups in decisions.items()}
+
+
+def agreement(reference, other, atol=0.05):
+    """How far two scorings of the same rows ({decision: [p, ...]}) are apart, row by row."""
+    if set(reference) != set(other):
+        raise ValueError(f"The two scorings cover different decisions ({len(reference)} vs {len(other)})")
+    diffs = []
+    for key, probs in reference.items():
+        if len(probs) != len(other[key]):
+            raise ValueError(f"Decision {key!r} has {len(probs)} rows in one scoring and {len(other[key])} in the other")
+        diffs.extend(abs(a - b) for a, b in zip(probs, other[key]))
+    return {
+        "rows": len(diffs),
+        "share_diff_gt_atol": sum(d > atol for d in diffs) / len(diffs) if diffs else None,
+        "max_abs_diff": round(max(diffs), 4) if diffs else None,
+        "atol": atol,
+    }
+
+
+def named_reference(text):
+    """--reference-probs NAME=PATH, e.g. mlx=reports/mlx-test.probs.json."""
+    name, _, path = text.partition("=")
+    if not name or not path:
+        raise ValueError(f"Expected NAME=PATH, got {text!r}")
+    return name, Path(path)
 
 
 def load(model_dir):
@@ -93,9 +125,28 @@ def metrics(decisions, threshold):
     return result
 
 
+def load_decisions(source, split, holdout, limit):
+    decisions = {"answer": defaultdict(list), "match": defaultdict(list)}
+    with open(Path(source) / "rows.jsonl") as handle:
+        for line in handle:
+            row = json.loads(line)
+            if row["split"] == split:
+                decisions[row["task"]][row["decision"]].append(row)
+    if holdout:
+        urls = holdout_forms(ROOT / "questions")
+        decisions = {task: {key: rows for key, rows in groups.items() if key.split("#")[0] in urls} for task, groups in decisions.items()}
+    if limit:
+        decisions = {task: dict(list(groups.items())[:limit]) for task, groups in decisions.items()}
+    return decisions
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--model", required=True, help="a trained checkpoint folder, e.g. <LayaStudio>/workspace/runs/<run>/model")
+    parser.add_argument("--model", help="a trained checkpoint folder, e.g. <LayaStudio>/workspace/runs/<run>/model")
+    parser.add_argument("--runtime", choices=("mlx", "onnx"), default="mlx")
+    parser.add_argument("--onnx", help="an ONNX export folder (model.onnx, tokenizer/, rl_agent_config.json)")
+    parser.add_argument("--batch-size", type=int, default=16, help="rows per onnxruntime call")
+    parser.add_argument("--threads", type=int, default=0, help="onnxruntime intra-op threads (0 = its default)")
     parser.add_argument("--dataset", default=str(ROOT / "dataset" / "out"))
     parser.add_argument("--split", default="test")
     parser.add_argument("--holdout", action="store_true", help="evaluate only the forms marked holdout in questions/")
@@ -103,30 +154,48 @@ def main():
     parser.add_argument("--report", help="write the JSON report here")
     parser.add_argument("--errors", help="write every wrong fill at --error-threshold here (JSON lines)")
     parser.add_argument("--error-threshold", type=float, default=0.9)
+    parser.add_argument("--reference-probs", action="append", default=[], metavar="NAME=PATH",
+                        help="another scoring's .probs.json to compare with row by row (repeatable)")
     args = parser.parse_args()
+    references = [named_reference(text) for text in args.reference_probs]
+
+    if args.runtime == "onnx":
+        if not args.onnx:
+            parser.error("--runtime onnx requires --onnx <export-dir>")
+        model_label = args.onnx
+    else:
+        if not args.model:
+            parser.error("--runtime mlx requires --model <checkpoint>")
+        model_label = args.model
 
     source = Path(args.dataset)
     questions = json.loads((source / "questions.json").read_text())
-    decisions = {"answer": defaultdict(list), "match": defaultdict(list)}
-    with open(source / "rows.jsonl") as handle:
-        for line in handle:
-            row = json.loads(line)
-            if row["split"] == args.split:
-                decisions[row["task"]][row["decision"]].append(row)
-    if args.holdout:
-        urls = holdout_forms(ROOT / "questions")
-        decisions = {task: {key: rows for key, rows in groups.items() if key.split("#")[0] in urls} for task, groups in decisions.items()}
-    if args.limit:
-        decisions = {task: dict(list(groups.items())[: args.limit]) for task, groups in decisions.items()}
+    decisions = load_decisions(source, args.split, args.holdout, args.limit)
+    if args.runtime == "onnx":
+        from onnx_score import OnnxScorer
+
+        scorer = OnnxScorer(args.onnx, batch_size=args.batch_size, threads=args.threads)
     for task, groups in decisions.items():
         print(f"{task}: {len(groups)} decisions, {sum(len(rows) for rows in groups.values())} rows", flush=True)
-        score(groups, Path(args.model), questions)
+        if args.runtime == "onnx":
+            scorer.score_rows([row for rows in groups.values() for row in rows], questions, progress_every=500)
+        else:
+            score(groups, Path(args.model), questions)
     report = {
-        "model": args.model,
+        "model": model_label,
+        "runtime": args.runtime,
         "split": args.split,
         "holdout": args.holdout,
         "tasks": {task: {str(t): metrics(groups, t) for t in THRESHOLDS} for task, groups in decisions.items()},
     }
+    if args.runtime == "onnx":
+        report["onnx"] = {"batch_size": args.batch_size, "threads": args.threads or "onnxruntime default"}
+    scored = probabilities(decisions)
+    if references:
+        report["agreement"] = {}
+        for name, path in references:
+            reference = json.loads(path.read_text())
+            report["agreement"][name] = {task: agreement(reference[task], probs) for task, probs in scored.items()}
     if args.errors:
         with open(args.errors, "w") as handle:
             for task, groups in decisions.items():
@@ -142,6 +211,8 @@ def main():
     if args.report:
         Path(args.report).parent.mkdir(parents=True, exist_ok=True)
         Path(args.report).write_text(text + "\n")
+        # Every row's probability, so another runtime's scoring can be compared without rescoring this one.
+        Path(args.report).with_suffix(".probs.json").write_text(json.dumps(scored) + "\n")
 
 
 if __name__ == "__main__":
