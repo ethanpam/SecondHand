@@ -7,71 +7,751 @@
     "region": "Kansas"
   },
   "questions": [
-    {"id":"q1","label":"If you are not registered to vote where you live now, would you like to apply to register to vote here today?","type":"radio","options":["Yes","No"],"rule":{"name":"never"},"note":"Registering to vote is the applicant's own decision."},
-    {"id":"q2","label":"Are you homeless?","type":"radio","options":["Yes","No"],"rule":{"name":"homeless"}},
-    {"id":"q3","label":"Name: First Name, Middle Initial, Last Name","type":"text","options":[],"rule":{"name":"field","key":"fullName"}},
-    {"id":"q4","label":"Signature:","type":"text","options":[],"rule":{"name":"never"}},
-    {"id":"q5","label":"Street Address:","type":"text","options":[],"rule":{"name":"field","key":"addressLine1"}},
-    {"id":"q6","label":"City:","type":"text","options":[],"rule":{"name":"field","key":"city"}},
-    {"id":"q7","label":"County:","type":"text","options":[],"rule":{"name":"field","key":"county"}},
-    {"id":"q8","label":"Zip:","type":"text","options":[],"rule":{"name":"field","key":"zip"}},
-    {"id":"q9","label":"Mailing Address:","type":"text","options":[],"rule":{"name":"none"},"note":"The profile saves a mailing address, but mailing fields are not SecondHand field keys."},
-    {"id":"q10","label":"Mailing Address: City:","type":"text","options":[],"rule":{"name":"none"},"note":"The page labels this box \"City:\" in the mailing address row; the row name is added."},
-    {"id":"q11","label":"Mailing Address: County:","type":"text","options":[],"rule":{"name":"none"},"note":"The page labels this box \"County:\" in the mailing address row."},
-    {"id":"q12","label":"Mailing Address: Zip:","type":"text","options":[],"rule":{"name":"none"},"note":"The page labels this box \"Zip:\" in the mailing address row."},
-    {"id":"q13","label":"Home Phone:","type":"tel","options":[],"rule":{"name":"none"},"note":"The profile saves homePhone and mobilePhone separately, but only phone is a field key. Proposed: add homePhone and mobilePhone keys."},
-    {"id":"q14","label":"Cell:","type":"tel","options":[],"rule":{"name":"none"},"note":"A mobile number; see the note on Home Phone."},
-    {"id":"q15","label":"E-mail:","type":"email","options":[],"rule":{"name":"field","key":"email"}},
-    {"id":"q16","label":"Will your household’s gross income (before taxes deducted) for the month be less than $150?","type":"radio","options":["Yes","No"],"rule":{"name":"incomeBelow","amount":150,"period":"month"}},
-    {"id":"q17","label":"Does your household have less than $100 in cash, checking and savings?","type":"radio","options":["Yes","No"],"rule":{"name":"none"},"note":"Proposed rule: assetsBelow with amount (reads assetsOnHand)."},
-    {"id":"q18","label":"Is anyone in your household a migrant or seasonal farm worker?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q19","label":"Enter your current monthly rent/mortgage amount","type":"number","options":[],"rule":{"name":"field","key":"monthlyRent"}},
-    {"id":"q20","label":"Do you pay for heating or cooling costs?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q21","label":"If no, check the following utilities you are responsible to pay","type":"checkbox","options":["Water","Sewer","Trash","Telephone","None","Electricity/gas for cooking or lights","Other"],"rule":{"name":"none"}},
-    {"id":"q22","label":"If no, check the following utilities you are responsible to pay and enter the total amount (if none enter zero)","type":"number","options":[],"rule":{"name":"none"},"note":"The total of only the utilities checked above, and only when there is no heating or cooling cost; the saved monthlyUtilities may include heating."},
-    {"id":"q23","label":"Enter your household’s gross income (before taxes deducted) expected this month","type":"number","options":[],"rule":{"name":"field","key":"totalMonthlyIncome"}},
-    {"id":"q24","label":"Enter your household’s total money in cash, checking and savings","type":"number","options":[],"rule":{"name":"field","key":"assetsOnHand"}},
-    {"id":"q25","label":"Name – First, MI, Last","type":"text","options":[],"rule":{"name":"field","key":"fullName"},"note":"Person 1 (Self) column of section D; Persons 2-4 repeat these rows."},
-    {"id":"q26","label":"Sex","type":"radio","options":["M","F"],"rule":{"name":"none"},"note":"Person 1 (Self) column of section D; Persons 2-4 repeat these rows."},
-    {"id":"q27","label":"Date of Birth (mm/dd/yyyy)","type":"date","options":[],"rule":{"name":"field","key":"birthDate"},"note":"Person 1 (Self) column of section D; Persons 2-4 repeat these rows."},
-    {"id":"q28","label":"SSN","type":"text","options":[],"rule":{"name":"never"},"note":"Person 1 (Self) column of section D; Persons 2-4 repeat these rows."},
-    {"id":"q29","label":"Are you a US citizen?","type":"radio","options":["Yes","No"],"rule":{"name":"none"},"note":"Person 1 (Self) column of section D; Persons 2-4 repeat these rows. The profile only knows whether everyone is a citizen. Proposed rule: applicantCitizen."},
-    {"id":"q30","label":"Are you Hispanic/Latino?","type":"radio","options":["Yes","No"],"rule":{"name":"none"},"note":"Person 1 (Self) column of section D; Persons 2-4 repeat these rows."},
-    {"id":"q31","label":"Race – Use key below","type":"text","options":[],"rule":{"name":"none"},"note":"Person 1 (Self) column of section D; Persons 2-4 repeat these rows. Answered with race key numbers."},
-    {"id":"q32","label":"Does this person live in your household with you?","type":"radio","options":["Yes","No"],"rule":{"name":"none"},"note":"Person 1 (Self) column of section D; Persons 2-4 repeat these rows."},
-    {"id":"q33","label":"Do you buy and cook food with this person?","type":"radio","options":["Yes","No"],"rule":{"name":"none"},"note":"Person 1 (Self) column of section D; Persons 2-4 repeat these rows."},
-    {"id":"q34","label":"Is anyone in your household fleeing from felony prosecution or jail?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q35","label":"If yes, list name(s):","type":"text","options":[],"rule":{"name":"none"},"note":"One of several identical follow-up boxes that come after these yes/no questions; the rest are left out."},
-    {"id":"q36","label":"Is anyone in your household in violation of probation or parole?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q37","label":"Has anyone in your household been convicted of trading food assistance benefits for drugs after Sept. 22, 1996?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q38","label":"Has anyone in your household been convicted of buying or selling food assistance benefits over $500 after Sept. 22, 1996?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q39","label":"Has anyone in your household been convicted of fraudulently getting duplicate food assistance benefits in any state after Sept. 22, 1996?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q40","label":"Has anyone in your household been convicted of trading food assistance benefits for guns, ammunitions or explosives after Sept. 22, 1996?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q41","label":"Does anyone in your household have a felony drug related conviction on or after August 22, 1996?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q42","label":"Has anyone in your household been convicted of one of more of the following crimes after February 7, 2014?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q43","label":"Are they in compliance with the terms of their sentence?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q44","label":"Do you want to have someone help you?","type":"radio","options":["Yes","No"],"rule":{"name":"none"},"note":"Choosing an authorized representative."},
-    {"id":"q45","label":"Do you have a primary language other than English?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q46","label":"Spoken Language","type":"text","options":[],"rule":{"name":"none"}},
-    {"id":"q47","label":"Written Language","type":"text","options":[],"rule":{"name":"none"}},
-    {"id":"q48","label":"Other needs","type":"text","options":[],"rule":{"name":"none"}},
-    {"id":"q49","label":"Is anyone in your household self-employed or working at a job?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q50","label":"Has anyone in your household lost or quit a job in the last 60 days?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q51","label":"Does anyone in your household, including children, get other income - such as child support, alimony, Social Security, SSI, VA, workers compensation, unemployment benefits, other pension/retirement, money from others, or any other income?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q52","label":"Has anyone applied for other income or benefits?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q53","label":"Does anyone in your household own or have their name on any resources? For example: cash, checking/savings/credit union accounts, property or any other resources?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q54","label":"Have any resources been transferred in the last 90 days?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q55","label":"Does anyone in your household own a vehicle (this includes cars, trucks, motorcycles, boats, personal watercraft, recreational vehicles, all-terrain vehicles or other vehicles)?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q56","label":"Do you rent your home?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q57","label":"Do you own or are you buying your home?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q58","label":"Do you pay child or dependent care?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q59","label":"Do you pay child support?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q60","label":"If you are 60 or older, or disabled, do you have any medical expenses?","type":"radio","options":["Yes","No"],"rule":{"name":"none"},"note":"The profile saves monthly medical expenses but not whether they belong to someone 60+ or disabled."},
-    {"id":"q61","label":"Have you or anyone at your residence received Low Income Energy Assistance (LIEAP) in the last 12 months?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q62","label":"Does anyone help you pay any of the above household expenses?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q63","label":"Your Signature (required)","type":"text","options":[],"rule":{"name":"never"},"note":"Signs the \"I certify under penalty of perjury\" statement."},
-    {"id":"q64","label":"Date","type":"date","options":[],"rule":{"name":"never"},"note":"The date next to the signature."},
-    {"id":"q65","label":"Your Spouse’s Signature or Another Adult in Your Home (not required)","type":"text","options":[],"rule":{"name":"never"}},
-    {"id":"q66","label":"Signature of First Witness (required if you cannot sign your name)","type":"text","options":[],"rule":{"name":"never"}}
+    {
+      "id": "q1",
+      "label": "If you are not registered to vote where you live now, would you like to apply to register to vote here today?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "never"
+      },
+      "note": "Registering to vote is the applicant's own decision."
+    },
+    {
+      "id": "q2",
+      "label": "Are you homeless?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "homeless"
+      }
+    },
+    {
+      "id": "q3",
+      "label": "Name: First Name, Middle Initial, Last Name",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "fullName"
+      }
+    },
+    {
+      "id": "q4",
+      "label": "Signature:",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "never"
+      }
+    },
+    {
+      "id": "q5",
+      "label": "Street Address:",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "addressLine1"
+      }
+    },
+    {
+      "id": "q6",
+      "label": "City:",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "city"
+      }
+    },
+    {
+      "id": "q7",
+      "label": "County:",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "county"
+      }
+    },
+    {
+      "id": "q8",
+      "label": "Zip:",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "zip"
+      }
+    },
+    {
+      "id": "q9",
+      "label": "Mailing Address:",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "The profile saves a mailing address, but mailing fields are not SecondHand field keys."
+    },
+    {
+      "id": "q10",
+      "label": "Mailing Address: City:",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "The page labels this box \"City:\" in the mailing address row; the row name is added."
+    },
+    {
+      "id": "q11",
+      "label": "Mailing Address: County:",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "The page labels this box \"County:\" in the mailing address row."
+    },
+    {
+      "id": "q12",
+      "label": "Mailing Address: Zip:",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "The page labels this box \"Zip:\" in the mailing address row."
+    },
+    {
+      "id": "q13",
+      "label": "Home Phone:",
+      "type": "tel",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "The profile saves homePhone and mobilePhone separately, but only phone is a field key. Proposed: add homePhone and mobilePhone keys."
+    },
+    {
+      "id": "q14",
+      "label": "Cell:",
+      "type": "tel",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "A mobile number; see the note on Home Phone."
+    },
+    {
+      "id": "q15",
+      "label": "E-mail:",
+      "type": "email",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "email"
+      }
+    },
+    {
+      "id": "q16",
+      "label": "Will your household’s gross income (before taxes deducted) for the month be less than $150?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "incomeBelow",
+        "amount": 150,
+        "period": "month"
+      }
+    },
+    {
+      "id": "q17",
+      "label": "Does your household have less than $100 in cash, checking and savings?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      },
+      "note": "Proposed rule: assetsBelow with amount (reads assetsOnHand)."
+    },
+    {
+      "id": "q18",
+      "label": "Is anyone in your household a migrant or seasonal farm worker?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q19",
+      "label": "Enter your current monthly rent/mortgage amount",
+      "type": "number",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "monthlyRent"
+      }
+    },
+    {
+      "id": "q20",
+      "label": "Do you pay for heating or cooling costs?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q21",
+      "label": "If no, check the following utilities you are responsible to pay",
+      "type": "checkbox",
+      "options": [
+        "Water",
+        "Sewer",
+        "Trash",
+        "Telephone",
+        "None",
+        "Electricity/gas for cooking or lights",
+        "Other"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q22",
+      "label": "If no, check the following utilities you are responsible to pay and enter the total amount (if none enter zero)",
+      "type": "number",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "The total of only the utilities checked above, and only when there is no heating or cooling cost; the saved monthlyUtilities may include heating."
+    },
+    {
+      "id": "q23",
+      "label": "Enter your household’s gross income (before taxes deducted) expected this month",
+      "type": "number",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "totalMonthlyIncome"
+      }
+    },
+    {
+      "id": "q24",
+      "label": "Enter your household’s total money in cash, checking and savings",
+      "type": "number",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "assetsOnHand"
+      }
+    },
+    {
+      "id": "q25",
+      "label": "Name – First, MI, Last",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "fullName"
+      },
+      "note": "Person 1 (Self) column of section D; Persons 2-4 repeat these rows."
+    },
+    {
+      "id": "q26",
+      "label": "Sex",
+      "type": "radio",
+      "options": [
+        "M",
+        "F"
+      ],
+      "rule": {
+        "name": "none"
+      },
+      "note": "Person 1 (Self) column of section D; Persons 2-4 repeat these rows."
+    },
+    {
+      "id": "q27",
+      "label": "Date of Birth (mm/dd/yyyy)",
+      "type": "date",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "birthDate"
+      },
+      "note": "Person 1 (Self) column of section D; Persons 2-4 repeat these rows."
+    },
+    {
+      "id": "q28",
+      "label": "SSN",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "never"
+      },
+      "note": "Person 1 (Self) column of section D; Persons 2-4 repeat these rows."
+    },
+    {
+      "id": "q29",
+      "label": "Are you a US citizen?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "applicantCitizen"
+      },
+      "note": "Person 1 (Self) column; \"Yes\" is certain when everyone in the household is a citizen."
+    },
+    {
+      "id": "q30",
+      "label": "Are you Hispanic/Latino?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      },
+      "note": "Person 1 (Self) column of section D; Persons 2-4 repeat these rows."
+    },
+    {
+      "id": "q31",
+      "label": "Race – Use key below",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "Person 1 (Self) column of section D; Persons 2-4 repeat these rows. Answered with race key numbers."
+    },
+    {
+      "id": "q32",
+      "label": "Does this person live in your household with you?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      },
+      "note": "Person 1 (Self) column of section D; Persons 2-4 repeat these rows."
+    },
+    {
+      "id": "q33",
+      "label": "Do you buy and cook food with this person?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      },
+      "note": "Person 1 (Self) column of section D; Persons 2-4 repeat these rows."
+    },
+    {
+      "id": "q34",
+      "label": "Is anyone in your household fleeing from felony prosecution or jail?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q35",
+      "label": "If yes, list name(s):",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "One of several identical follow-up boxes that come after these yes/no questions; the rest are left out."
+    },
+    {
+      "id": "q36",
+      "label": "Is anyone in your household in violation of probation or parole?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q37",
+      "label": "Has anyone in your household been convicted of trading food assistance benefits for drugs after Sept. 22, 1996?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q38",
+      "label": "Has anyone in your household been convicted of buying or selling food assistance benefits over $500 after Sept. 22, 1996?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q39",
+      "label": "Has anyone in your household been convicted of fraudulently getting duplicate food assistance benefits in any state after Sept. 22, 1996?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q40",
+      "label": "Has anyone in your household been convicted of trading food assistance benefits for guns, ammunitions or explosives after Sept. 22, 1996?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q41",
+      "label": "Does anyone in your household have a felony drug related conviction on or after August 22, 1996?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q42",
+      "label": "Has anyone in your household been convicted of one of more of the following crimes after February 7, 2014?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q43",
+      "label": "Are they in compliance with the terms of their sentence?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q44",
+      "label": "Do you want to have someone help you?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      },
+      "note": "Choosing an authorized representative."
+    },
+    {
+      "id": "q45",
+      "label": "Do you have a primary language other than English?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q46",
+      "label": "Spoken Language",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q47",
+      "label": "Written Language",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q48",
+      "label": "Other needs",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q49",
+      "label": "Is anyone in your household self-employed or working at a job?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q50",
+      "label": "Has anyone in your household lost or quit a job in the last 60 days?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q51",
+      "label": "Does anyone in your household, including children, get other income - such as child support, alimony, Social Security, SSI, VA, workers compensation, unemployment benefits, other pension/retirement, money from others, or any other income?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q52",
+      "label": "Has anyone applied for other income or benefits?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q53",
+      "label": "Does anyone in your household own or have their name on any resources? For example: cash, checking/savings/credit union accounts, property or any other resources?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q54",
+      "label": "Have any resources been transferred in the last 90 days?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q55",
+      "label": "Does anyone in your household own a vehicle (this includes cars, trucks, motorcycles, boats, personal watercraft, recreational vehicles, all-terrain vehicles or other vehicles)?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q56",
+      "label": "Do you rent your home?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q57",
+      "label": "Do you own or are you buying your home?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q58",
+      "label": "Do you pay child or dependent care?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q59",
+      "label": "Do you pay child support?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q60",
+      "label": "If you are 60 or older, or disabled, do you have any medical expenses?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      },
+      "note": "The profile saves monthly medical expenses but not whether they belong to someone 60+ or disabled."
+    },
+    {
+      "id": "q61",
+      "label": "Have you or anyone at your residence received Low Income Energy Assistance (LIEAP) in the last 12 months?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q62",
+      "label": "Does anyone help you pay any of the above household expenses?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q63",
+      "label": "Your Signature (required)",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "never"
+      },
+      "note": "Signs the \"I certify under penalty of perjury\" statement."
+    },
+    {
+      "id": "q64",
+      "label": "Date",
+      "type": "date",
+      "options": [],
+      "rule": {
+        "name": "never"
+      },
+      "note": "The date next to the signature."
+    },
+    {
+      "id": "q65",
+      "label": "Your Spouse’s Signature or Another Adult in Your Home (not required)",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "never"
+      }
+    },
+    {
+      "id": "q66",
+      "label": "Signature of First Witness (required if you cannot sign your name)",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "never"
+      }
+    }
   ]
 }

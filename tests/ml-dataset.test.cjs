@@ -157,3 +157,18 @@ test('synthetic rewordings only ever train, never test', () => {
   assert.ok(rows.length > 0 && rows.every(row => row.split !== 'test'));
   assert.ok(rows.every(row => row.group.startsWith('synthetic:seniors.json#')));
 });
+
+test('applicant-only and narrower questions are answered only where the household facts make it certain', () => {
+  assert.equal(pickFor({ name: 'applicantVeteran' }, yesNo), 'No', 'nobody in the household is a veteran');
+  assert.equal(pickFor({ name: 'applicantVeteran' }, yesNo, { householdVeteran: 'yes' }), ABSTAIN, 'someone is, but maybe not the applicant');
+  assert.equal(pickFor({ name: 'applicantDisability' }, yesNo, { householdDisability: 'no' }), 'No');
+  assert.equal(pickFor({ name: 'applicantDisability' }, yesNo, { householdDisability: 'yes' }), ABSTAIN);
+  assert.equal(pickFor({ name: 'applicantCitizen' }, yesNo, { householdAllCitizens: 'yes' }), 'Yes');
+  assert.equal(pickFor({ name: 'applicantCitizen' }, yesNo, { householdAllCitizens: 'no' }), ABSTAIN);
+  assert.equal(pickFor({ name: 'anyChildrenUnder', age: 8 }, yesNo, { householdChildren: '0' }), 'No');
+  assert.equal(pickFor({ name: 'anyChildrenUnder', age: 8 }, yesNo), ABSTAIN, 'the child’s age is unknown');
+  assert.equal(pickFor({ name: 'anyChildrenUnder', age: 18 }, yesNo), 'Yes');
+  assert.equal(pickFor({ name: 'noIncome' }, yesNo, { monthlyEarnedIncome: '0', monthlyOtherIncome: '0' }), 'Yes');
+  assert.equal(pickFor({ name: 'noIncome' }, yesNo), 'No');
+  assert.equal(pickFor({ name: 'noIncome' }, yesNo, { monthlyEarnedIncome: '0' }), ABSTAIN);
+});

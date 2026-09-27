@@ -7,52 +7,488 @@
     "region": "Iowa"
   },
   "questions": [
-    {"id":"q1","label":"Check the box next to the program(s) you want to apply for:","type":"checkbox","options":["SNAP","Family Investment Program (FIP)","Refugee Cash Assistance (RCA)"],"rule":{"name":"none"},"note":"No single rule fits a list of programs. Proposed rule: programsApplying (check SNAP when applyingSnap, FIP when applyingFip; RCA is not in the profile)."},
-    {"id":"q2","label":"Name","type":"text","options":[],"rule":{"name":"field","key":"fullName"}},
-    {"id":"q3","label":"Social Security Number","type":"text","options":[],"rule":{"name":"never"}},
-    {"id":"q4","label":"Date of Birth","type":"date","options":[],"rule":{"name":"field","key":"birthDate"}},
-    {"id":"q5","label":"Phone Number","type":"tel","options":[],"rule":{"name":"field","key":"phone"}},
-    {"id":"q6","label":"We will call you to do an interview by phone. What is the best time to reach you to have the interview?","type":"text","options":[],"rule":{"name":"none"},"note":"The profile saves bestContactTime, but it is not a SecondHand field key. Proposed: add bestContactTime to the field keys."},
-    {"id":"q7","label":"Street Address","type":"text","options":[],"rule":{"name":"field","key":"addressLine1"}},
-    {"id":"q8","label":"City","type":"text","options":[],"rule":{"name":"field","key":"city"}},
-    {"id":"q9","label":"State","type":"text","options":[],"rule":{"name":"field","key":"state"}},
-    {"id":"q10","label":"ZIP Code","type":"text","options":[],"rule":{"name":"field","key":"zip"}},
-    {"id":"q11","label":"Mailing Address (if different)","type":"text","options":[],"rule":{"name":"none"},"note":"The profile saves a mailing address, but mailing fields are not SecondHand field keys. Proposed: add mailingAddressLine1, mailingCity, mailingState, mailingZip."},
-    {"id":"q12","label":"Mailing Address (if different): City","type":"text","options":[],"rule":{"name":"none"},"note":"The page labels this box \"City\" in the mailing address row; the row name is added so it is not confused with the home city."},
-    {"id":"q13","label":"Mailing Address (if different): State","type":"text","options":[],"rule":{"name":"none"},"note":"The page labels this box \"State\" in the mailing address row."},
-    {"id":"q14","label":"Mailing Address (if different): ZIP Code","type":"text","options":[],"rule":{"name":"none"},"note":"The page labels this box \"ZIP Code\" in the mailing address row."},
-    {"id":"q15","label":"County You Live In","type":"text","options":[],"rule":{"name":"field","key":"county"}},
-    {"id":"q16","label":"Email Address","type":"email","options":[],"rule":{"name":"field","key":"email"}},
-    {"id":"q17","label":"Do you need an interpreter? If yes, which language?","type":"text","options":[],"rule":{"name":"none"}},
-    {"id":"q18","label":"Your Signature or Mark","type":"text","options":[],"rule":{"name":"never"},"note":"Signs the \"I certify, under penalty of perjury\" statement."},
-    {"id":"q19","label":"Today’s Date","type":"date","options":[],"rule":{"name":"never"},"note":"The date next to the signature."},
-    {"id":"q20","label":"Signature of Person, If Any, Who Helped Complete the Form","type":"text","options":[],"rule":{"name":"never"}},
-    {"id":"q21","label":"Print Name of Person Who Helped Complete Form","type":"text","options":[],"rule":{"name":"none"},"note":"A helper, not the applicant."},
-    {"id":"q22","label":"Person Who Helped Complete Form: Phone Number","type":"tel","options":[],"rule":{"name":"none"},"note":"The page labels this box \"Phone Number\" in the helper row; the row name is added so it is not confused with the applicant's phone."},
-    {"id":"q23","label":"Mailing Address of Person Who Helped Complete Form","type":"text","options":[],"rule":{"name":"none"}},
-    {"id":"q24","label":"Mailing Address of Person Who Helped Complete Form: City","type":"text","options":[],"rule":{"name":"none"},"note":"The page labels this box \"City\" in the helper row."},
-    {"id":"q25","label":"Mailing Address of Person Who Helped Complete Form: State","type":"text","options":[],"rule":{"name":"none"},"note":"The page labels this box \"State\" in the helper row."},
-    {"id":"q26","label":"Mailing Address of Person Who Helped Complete Form: ZIP Code","type":"text","options":[],"rule":{"name":"none"},"note":"The page labels this box \"ZIP Code\" in the helper row."},
-    {"id":"q27","label":"Apply for?","type":"radio","options":["Yes","No"],"rule":{"name":"none"},"note":"Self row of the \"People in Your Home\" table; the other rows repeat these columns for each household member. The profile saves isApplicant, but no rule reads it."},
-    {"id":"q28","label":"Name (First, MI, Last)","type":"text","options":[],"rule":{"name":"field","key":"fullName"},"note":"Self row of the \"People in Your Home\" table; the other rows repeat these columns for each household member."},
-    {"id":"q29","label":"Birth Date","type":"date","options":[],"rule":{"name":"field","key":"birthDate"},"note":"Self row of the \"People in Your Home\" table; the other rows repeat these columns for each household member."},
-    {"id":"q30","label":"SSN","type":"text","options":[],"rule":{"name":"never"},"note":"Self row of the \"People in Your Home\" table; the other rows repeat these columns for each household member."},
-    {"id":"q31","label":"Citizen","type":"radio","options":["Yes","No"],"rule":{"name":"none"},"note":"Self row of the \"People in Your Home\" table; the other rows repeat these columns for each household member. The profile only knows whether everyone is a citizen. Proposed rule: applicantCitizen."},
-    {"id":"q32","label":"If Not a Citizen, What is Your Alien Status","type":"text","options":[],"rule":{"name":"none"},"note":"Self row of the \"People in Your Home\" table; the other rows repeat these columns for each household member."},
-    {"id":"q33","label":"Birth State","type":"text","options":[],"rule":{"name":"none"},"note":"Self row of the \"People in Your Home\" table; the other rows repeat these columns for each household member. Only required for FIP."},
-    {"id":"q34","label":"Last Grade in School","type":"text","options":[],"rule":{"name":"none"},"note":"Self row of the \"People in Your Home\" table; the other rows repeat these columns for each household member. Only required for FIP."},
-    {"id":"q35","label":"Ethnicity","type":"text","options":[],"rule":{"name":"none"},"note":"Self row of the \"People in Your Home\" table; the other rows repeat these columns for each household member. Answered with a code (H or N)."},
-    {"id":"q36","label":"Race","type":"text","options":[],"rule":{"name":"none"},"note":"Self row of the \"People in Your Home\" table; the other rows repeat these columns for each household member. Answered with codes (W, B, A, I, N)."},
-    {"id":"q37","label":"List anyone in your home who is disabled:","type":"text","options":[],"rule":{"name":"none"},"note":"Asks for names, not yes or no."},
-    {"id":"q38","label":"List anyone age 18 or over who is in college or trade school:","type":"text","options":[],"rule":{"name":"none"}},
-    {"id":"q39","label":"List anyone getting benefits from another state:","type":"text","options":[],"rule":{"name":"none"}},
-    {"id":"q40","label":"Which state?","type":"text","options":[],"rule":{"name":"none"},"note":"The state paying benefits to someone listed in the question before."},
-    {"id":"q41","label":"List anyone who is on strike or gets regular meals instead of paying rent:","type":"text","options":[],"rule":{"name":"none"}},
-    {"id":"q42","label":"List anyone who is in the military, a veteran, or a spouse of a veteran:","type":"text","options":[],"rule":{"name":"none"},"note":"Asks for names, and also covers spouses of veterans."},
-    {"id":"q43","label":"List anyone in your home who is pregnant:","type":"text","options":[],"rule":{"name":"none"},"note":"Asks for names, not yes or no."},
-    {"id":"q44","label":"Is anyone fleeing to avoid prosecution, custody, or jail for a felony crime?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q45","label":"Is anyone violating a condition of probation or parole?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q46","label":"Is anyone in or expecting to go to jail or prison?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
-    {"id":"q47","label":"Has anyone been disqualified from SNAP in any state for fraud or a program violation?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}}
+    {
+      "id": "q1",
+      "label": "Check the box next to the program(s) you want to apply for:",
+      "type": "checkbox",
+      "options": [
+        "SNAP",
+        "Family Investment Program (FIP)",
+        "Refugee Cash Assistance (RCA)"
+      ],
+      "rule": {
+        "name": "none"
+      },
+      "note": "No single rule fits a list of programs. Proposed rule: programsApplying (check SNAP when applyingSnap, FIP when applyingFip; RCA is not in the profile)."
+    },
+    {
+      "id": "q2",
+      "label": "Name",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "fullName"
+      }
+    },
+    {
+      "id": "q3",
+      "label": "Social Security Number",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "never"
+      }
+    },
+    {
+      "id": "q4",
+      "label": "Date of Birth",
+      "type": "date",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "birthDate"
+      }
+    },
+    {
+      "id": "q5",
+      "label": "Phone Number",
+      "type": "tel",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "phone"
+      }
+    },
+    {
+      "id": "q6",
+      "label": "We will call you to do an interview by phone. What is the best time to reach you to have the interview?",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "The profile saves bestContactTime, but it is not a SecondHand field key. Proposed: add bestContactTime to the field keys."
+    },
+    {
+      "id": "q7",
+      "label": "Street Address",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "addressLine1"
+      }
+    },
+    {
+      "id": "q8",
+      "label": "City",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "city"
+      }
+    },
+    {
+      "id": "q9",
+      "label": "State",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "state"
+      }
+    },
+    {
+      "id": "q10",
+      "label": "ZIP Code",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "zip"
+      }
+    },
+    {
+      "id": "q11",
+      "label": "Mailing Address (if different)",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "The profile saves a mailing address, but mailing fields are not SecondHand field keys. Proposed: add mailingAddressLine1, mailingCity, mailingState, mailingZip."
+    },
+    {
+      "id": "q12",
+      "label": "Mailing Address (if different): City",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "The page labels this box \"City\" in the mailing address row; the row name is added so it is not confused with the home city."
+    },
+    {
+      "id": "q13",
+      "label": "Mailing Address (if different): State",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "The page labels this box \"State\" in the mailing address row."
+    },
+    {
+      "id": "q14",
+      "label": "Mailing Address (if different): ZIP Code",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "The page labels this box \"ZIP Code\" in the mailing address row."
+    },
+    {
+      "id": "q15",
+      "label": "County You Live In",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "county"
+      }
+    },
+    {
+      "id": "q16",
+      "label": "Email Address",
+      "type": "email",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "email"
+      }
+    },
+    {
+      "id": "q17",
+      "label": "Do you need an interpreter? If yes, which language?",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q18",
+      "label": "Your Signature or Mark",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "never"
+      },
+      "note": "Signs the \"I certify, under penalty of perjury\" statement."
+    },
+    {
+      "id": "q19",
+      "label": "Today’s Date",
+      "type": "date",
+      "options": [],
+      "rule": {
+        "name": "never"
+      },
+      "note": "The date next to the signature."
+    },
+    {
+      "id": "q20",
+      "label": "Signature of Person, If Any, Who Helped Complete the Form",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "never"
+      }
+    },
+    {
+      "id": "q21",
+      "label": "Print Name of Person Who Helped Complete Form",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "A helper, not the applicant."
+    },
+    {
+      "id": "q22",
+      "label": "Person Who Helped Complete Form: Phone Number",
+      "type": "tel",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "The page labels this box \"Phone Number\" in the helper row; the row name is added so it is not confused with the applicant's phone."
+    },
+    {
+      "id": "q23",
+      "label": "Mailing Address of Person Who Helped Complete Form",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q24",
+      "label": "Mailing Address of Person Who Helped Complete Form: City",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "The page labels this box \"City\" in the helper row."
+    },
+    {
+      "id": "q25",
+      "label": "Mailing Address of Person Who Helped Complete Form: State",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "The page labels this box \"State\" in the helper row."
+    },
+    {
+      "id": "q26",
+      "label": "Mailing Address of Person Who Helped Complete Form: ZIP Code",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "The page labels this box \"ZIP Code\" in the helper row."
+    },
+    {
+      "id": "q27",
+      "label": "Apply for?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      },
+      "note": "Self row of the \"People in Your Home\" table; the other rows repeat these columns for each household member. The profile saves isApplicant, but no rule reads it."
+    },
+    {
+      "id": "q28",
+      "label": "Name (First, MI, Last)",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "fullName"
+      },
+      "note": "Self row of the \"People in Your Home\" table; the other rows repeat these columns for each household member."
+    },
+    {
+      "id": "q29",
+      "label": "Birth Date",
+      "type": "date",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "birthDate"
+      },
+      "note": "Self row of the \"People in Your Home\" table; the other rows repeat these columns for each household member."
+    },
+    {
+      "id": "q30",
+      "label": "SSN",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "never"
+      },
+      "note": "Self row of the \"People in Your Home\" table; the other rows repeat these columns for each household member."
+    },
+    {
+      "id": "q31",
+      "label": "Citizen",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "applicantCitizen"
+      },
+      "note": "Self row; \"Yes\" is certain when everyone in the household is a citizen."
+    },
+    {
+      "id": "q32",
+      "label": "If Not a Citizen, What is Your Alien Status",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "Self row of the \"People in Your Home\" table; the other rows repeat these columns for each household member."
+    },
+    {
+      "id": "q33",
+      "label": "Birth State",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "Self row of the \"People in Your Home\" table; the other rows repeat these columns for each household member. Only required for FIP."
+    },
+    {
+      "id": "q34",
+      "label": "Last Grade in School",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "Self row of the \"People in Your Home\" table; the other rows repeat these columns for each household member. Only required for FIP."
+    },
+    {
+      "id": "q35",
+      "label": "Ethnicity",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "Self row of the \"People in Your Home\" table; the other rows repeat these columns for each household member. Answered with a code (H or N)."
+    },
+    {
+      "id": "q36",
+      "label": "Race",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "Self row of the \"People in Your Home\" table; the other rows repeat these columns for each household member. Answered with codes (W, B, A, I, N)."
+    },
+    {
+      "id": "q37",
+      "label": "List anyone in your home who is disabled:",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "Asks for names, not yes or no."
+    },
+    {
+      "id": "q38",
+      "label": "List anyone age 18 or over who is in college or trade school:",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q39",
+      "label": "List anyone getting benefits from another state:",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q40",
+      "label": "Which state?",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "The state paying benefits to someone listed in the question before."
+    },
+    {
+      "id": "q41",
+      "label": "List anyone who is on strike or gets regular meals instead of paying rent:",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q42",
+      "label": "List anyone who is in the military, a veteran, or a spouse of a veteran:",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "Asks for names, and also covers spouses of veterans."
+    },
+    {
+      "id": "q43",
+      "label": "List anyone in your home who is pregnant:",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "Asks for names, not yes or no."
+    },
+    {
+      "id": "q44",
+      "label": "Is anyone fleeing to avoid prosecution, custody, or jail for a felony crime?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q45",
+      "label": "Is anyone violating a condition of probation or parole?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q46",
+      "label": "Is anyone in or expecting to go to jail or prison?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q47",
+      "label": "Has anyone been disqualified from SNAP in any state for fraud or a program violation?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    }
   ]
 }

@@ -29,6 +29,13 @@ const RULES = Object.freeze({
   medicare: { about: 'Does anyone in the household get Medicare?', types: YES_NO, params: {} },
   allCitizens: { about: 'Is everyone in the household a US citizen?', types: YES_NO, params: {} },
   homeless: { about: 'Is the applicant without a home address or experiencing homelessness?', types: YES_NO, params: {} },
+  // About the applicant alone, or a narrower group: only answered where the household facts make it certain.
+  applicantVeteran: { about: 'Is the applicant (not the household) a veteran? Only "No" is certain, when nobody in the household is.', types: YES_NO, params: {} },
+  applicantDisability: { about: 'Does the applicant (not the household) have a disability? Only "No" is certain, when nobody in the household does.', types: YES_NO, params: {} },
+  applicantCitizen: { about: 'Is the applicant a US citizen? Only "Yes" is certain, when everyone in the household is.', types: YES_NO, params: {} },
+  anyChildrenUnder: { about: 'Are there children under `age` (18 or younger) in the household? "No" is certain when there are no children.', types: YES_NO,
+    params: { age: { type: 'number', required: true } } },
+  noIncome: { about: 'Does the household have no income at all?', types: YES_NO, params: {} },
   livesInState: { about: 'Does the applicant live in `state` (full name, e.g. "Iowa")?', types: YES_NO, params: { state: { type: 'string', required: true } } },
   livesInCounty: { about: 'Does the applicant live in `county` (e.g. "Polk County")?', types: YES_NO, params: { county: { type: 'string', required: true } } },
   incomeBelow: { about: 'Is total household income below `amount` per `period`? Set `orEqual` when the question says "at or below".', types: YES_NO,

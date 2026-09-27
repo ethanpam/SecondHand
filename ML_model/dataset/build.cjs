@@ -83,6 +83,18 @@ function decide(rule, profile, age) {
     case 'medicare': return yes(profile, 'householdMedicare');
     case 'allCitizens': return yes(profile, 'householdAllCitizens');
     case 'homeless': { const home = yes(profile, 'hasHomeAddress'); return home === null ? null : !home; }
+    // Household facts only settle one answer about the applicant alone.
+    case 'applicantVeteran': return yes(profile, 'householdVeteran') === false ? false : null;
+    case 'applicantDisability': return yes(profile, 'householdDisability') === false ? false : null;
+    case 'applicantCitizen': return yes(profile, 'householdAllCitizens') === true ? true : null;
+    case 'anyChildrenUnder':
+      if (children === null) return null;
+      if (children === 0) return false;
+      return rule.age >= 18 ? true : null;
+    case 'noIncome': {
+      const earned = dollars(profile, 'monthlyEarnedIncome'), other = dollars(profile, 'monthlyOtherIncome');
+      return earned === null || other === null ? null : earned + other === 0;
+    }
     case 'livesInState': return present(profile.state) ? stateMatches(profile.state.toUpperCase(), rule.state) : null;
     case 'livesInCounty': return present(profile.county) ? place(profile.county) === place(rule.county) : null;
     case 'incomeBelow': {
