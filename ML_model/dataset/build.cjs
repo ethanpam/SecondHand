@@ -7,10 +7,17 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { buildFacts, factsText, ageOf, STATE_NAMES } = require('../../shared/facts.cjs');
+const { KEY_ABOUT } = require('../../extension/ai-mapper.js');
 
 const ABSTAIN = 'None of these, or the facts don’t say';
 const DECISION = Object.freeze({ type: 'noul', instructions: 'Given the facts about the household, is the candidate the correct answer to the form question?' });
 const CHOICE_TYPES = ['radio', 'select', 'checkbox'];
+const TEXT_TYPES = ['text', 'textarea', 'number', 'date', 'email', 'tel'];
+// Saved values a text box can hold: the matching task's candidates. Yes/no and choice-only keys are left out.
+const MATCH_KEYS = Object.freeze(['firstName', 'middleName', 'lastName', 'fullName', 'suffix', 'birthDate', 'ssn', 'email', 'phone', 'addressLine1', 'addressLine2',
+  'city', 'state', 'zip', 'county', 'householdSize', 'householdAdults', 'householdChildren', 'householdSeniors', 'totalMonthlyIncome', 'annualIncome', 'monthlyRent',
+  'monthlyUtilities', 'assetsOnHand', 'monthlyMedicalExpenses']);
+const matchCandidate = key => `Saved answer: ${KEY_ABOUT[key]}`;
 const NUMBER_WORDS = { none: 0, zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
 
 const present = value => typeof value === 'string' && value.trim() !== '';
@@ -159,15 +166,37 @@ function buildRows(bank, households, { today, perQuestion = Infinity } = {}) {
   return rows;
 }
 
+// Text boxes: which saved value, if any, belongs in the box. One row per candidate field plus abstain.
+function buildMatchRows(bank) {
+  const rows = [];
+  for (const file of bank) {
+    const split = splitFor(file.source.url);
+    for (const question of file.questions.filter(item => TEXT_TYPES.includes(item.type))) {
+      if (question.rule.name === 'field' && !MATCH_KEYS.includes(question.rule.key)) throw new Error(`${question.id}: field key ${question.rule.key} isn't a text-box candidate.`);
+      const correct = question.rule.name === 'field' ? matchCandidate(question.rule.key) : ABSTAIN;
+      for (const candidate of [...MATCH_KEYS.map(matchCandidate), ABSTAIN]) {
+        rows.push({ state: { question: question.label, candidate }, answers: { correct: candidate === correct }, split, group: `${file.source.url}#${question.id}` });
+      }
+    }
+  }
+  return rows;
+}
+
+function summarize(rows) {
+  const decisions = new Set(rows.map(row => row.group)).size;
+  const abstained = new Set(rows.filter(row => row.answers.correct && row.state.candidate === ABSTAIN).map(row => row.group)).size;
+  return { rows: rows.length, decisions, abstainShare: decisions ? abstained / decisions : 0,
+    bySplit: Object.fromEntries(['train', 'val', 'test'].map(split => [split, rows.filter(row => row.split === split).length])) };
+}
+
 function writeDataset(outDir, bank, households, options = {}) {
-  const rows = buildRows(bank, households, options);
+  const answer = buildRows(bank, households, options);
+  const match = buildMatchRows(bank);
+  const rows = [...answer, ...match];
   fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, 'questions.json'), `${JSON.stringify({ correct: DECISION }, null, 2)}\n`);
   fs.writeFileSync(path.join(outDir, 'rows.jsonl'), rows.map(({ state, answers, split }) => JSON.stringify({ state, answers, split })).join('\n') + '\n');
-  const bySplit = Object.fromEntries(['train', 'val', 'test'].map(split => [split, rows.filter(row => row.split === split).length]));
-  const decisions = new Set(rows.map(row => row.group)).size;
-  const abstained = new Set(rows.filter(row => row.answers.correct && row.state.candidate === ABSTAIN).map(row => row.group)).size;
-  return { rows: rows.length, decisions, bySplit, abstainShare: decisions ? abstained / decisions : 0 };
+  return { ...summarize(rows), tasks: { answer: summarize(answer), match: summarize(match) } };
 }
 
 if (require.main === module) {
@@ -180,4 +209,4 @@ if (require.main === module) {
   console.log(JSON.stringify(summary, null, 2));
 }
 
-module.exports = { correctOption, buildRows, splitFor, writeDataset, range, ABSTAIN, DECISION };
+module.exports = { correctOption, buildRows, buildMatchRows, splitFor, writeDataset, range, ABSTAIN, DECISION, MATCH_KEYS };

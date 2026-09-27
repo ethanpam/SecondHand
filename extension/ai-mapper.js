@@ -221,7 +221,9 @@
     }
   }
 
-  const api = Object.freeze({ ALLOWED_KEYS, buildPrompt, parseMapping, mapWithChromeAI });
+  // What each saved field means, shared with the local model's training data so both describe fields the same way.
+  const KEY_ABOUT = Object.freeze(Object.fromEntries(Object.entries(KEYS).map(([key, rule]) => [key, rule.about])));
+  const api = Object.freeze({ ALLOWED_KEYS, KEY_ABOUT, buildPrompt, parseMapping, mapWithChromeAI });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandAI = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

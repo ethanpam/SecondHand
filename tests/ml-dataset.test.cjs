@@ -107,3 +107,35 @@ test('the dataset is written in LayaStudio\'s format', () => {
     assert.equal(summary.rows, 3);
   } finally { fs.rmSync(out, { recursive: true, force: true }); }
 });
+
+test('text boxes become matching rows: one per saved field that fits a box, plus abstain, exactly one correct', () => {
+  const { buildMatchRows, MATCH_KEYS } = require('../ML_model/dataset/build.cjs');
+  const { KEY_ABOUT } = require('../extension/ai-mapper.js');
+  const bank = [{ source: { url: 'https://pantry.example.org/b', title: 'B' }, questions: [
+    { id: 't1', label: 'Phone Number', type: 'tel', options: [], rule: { name: 'field', key: 'phone' } },
+    { id: 't2', label: 'Student ID', type: 'text', options: [], rule: { name: 'none' } },
+    { id: 'c1', label: 'Any children?', type: 'radio', options: ['Yes', 'No'], rule: { name: 'anyChildren' } }
+  ] }];
+  const rows = buildMatchRows(bank);
+  assert.equal(rows.length, 2 * (MATCH_KEYS.length + 1), 'choice questions belong to the answering task');
+  assert.ok(MATCH_KEYS.includes('phone') && MATCH_KEYS.includes('fullName') && !MATCH_KEYS.includes('householdVeteran') && !MATCH_KEYS.includes('ageRange'),
+    'only saved values a text box can hold are candidates');
+  for (const id of ['t1', 't2']) assert.equal(rows.filter(row => row.group.endsWith(`#${id}`) && row.answers.correct).length, 1, id);
+  const phone = rows.find(row => row.state.question === 'Phone Number' && row.answers.correct);
+  assert.equal(phone.state.candidate, `Saved answer: ${KEY_ABOUT.phone}`);
+  assert.equal(rows.find(row => row.state.question === 'Student ID' && row.answers.correct).state.candidate, ABSTAIN);
+  assert.deepEqual(Object.keys(phone.state), ['question', 'candidate'], 'matching needs no facts about the household');
+});
+
+test('the written dataset holds both tasks and reports them separately', () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'sh-dataset-'));
+  try {
+    const bank = [{ source: { url: 'https://pantry.example.org/c', title: 'C' }, questions: [
+      q({ name: 'anyChildren' }, yesNo), { id: 't1', label: 'Email', type: 'email', options: [], rule: { name: 'field', key: 'email' } }] }];
+    const summary = writeDataset(out, bank, [family], { today: TODAY });
+    assert.deepEqual(Object.keys(summary.tasks), ['answer', 'match']);
+    assert.equal(summary.tasks.answer.rows, 3);
+    assert.ok(summary.tasks.match.rows > 20);
+    assert.equal(fs.readFileSync(path.join(out, 'rows.jsonl'), 'utf8').trim().split('\n').length, summary.rows);
+  } finally { fs.rmSync(out, { recursive: true, force: true }); }
+});
