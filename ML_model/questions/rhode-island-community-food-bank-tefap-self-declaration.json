@@ -1,0 +1,21 @@
+{
+  "source": {
+    "url": "https://rifoodbank.org/wp-content/uploads/2025/03/USDA-2024-2025-TEFAP-Self-Declaration-Form-English-Feb-2025.pdf",
+    "title": "The Emergency Food Assistance Program (TEFAP) Application/Self-Declaration of Eligibility Form",
+    "kind": "pdf",
+    "retrieved": "2026-09-26",
+    "region": "Providence, RI"
+  },
+  "questions": [
+    { "id": "q1", "label": "Date", "type": "date", "options": [], "rule": { "name": "none" }, "note": "The day the form is filled in; not a saved fact." },
+    { "id": "q2", "label": "Name", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" } },
+    { "id": "q3", "label": "Do you currently live in RI?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "livesInState", "state": "Rhode Island" } },
+    { "id": "q4", "label": "Number of People in Household", "type": "number", "options": [], "rule": { "name": "field", "key": "householdSize" } },
+    { "id": "q5", "label": "You are automatically eligible if you, or anyone in your household receives any of the following:", "type": "checkbox",
+      "options": ["Child Care Assistance", "Medicaid", "SSI or SSDI", "Energy Assistance (LIHEAP)", "RIWorks", "Temporary Disability", "General Public Assistance", "SNAP (Food Stamps)", "Unemployment", "Refugee Cash Assistance"],
+      "rule": { "name": "none" }, "note": "Programs the household already receives; the profile only knows what the applicant is applying for." },
+    { "id": "q6", "label": "Signature", "type": "text", "options": [], "rule": { "name": "never" },
+      "note": "Certifies income at or below the table (or program enrollment) and living in the area served." },
+    { "id": "q7", "label": "Date", "type": "date", "options": [], "rule": { "name": "never" }, "note": "Date written beside the signature." }
+  ]
+}

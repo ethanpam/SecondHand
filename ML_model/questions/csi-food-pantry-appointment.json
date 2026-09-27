@@ -1,0 +1,24 @@
+{
+  "source": {
+    "url": "https://docs.google.com/forms/d/e/1FAIpQLSePpl2_E4U4RduWCqiB5M6h5rH3LVFPFKGsgNc2mLdwDOLT7Q/viewform",
+    "title": "CSI Food Pantry Appointment Form",
+    "kind": "google-form",
+    "retrieved": "2026-09-26",
+    "region": "Staten Island, NY"
+  },
+  "questions": [
+    { "id": "q1", "label": "Email", "type": "email", "options": [], "rule": { "name": "field", "key": "email" } },
+    { "id": "q2", "label": "Please make 1 appointment for the week of pick up. Do not make appointments for future weeks.", "type": "select",
+      "options": ["Tuesday, September 29, 2026", "Wednesday, September 30, 2026"], "rule": { "name": "none" } },
+    { "id": "q3", "label": "Full Name (First and Last Name)", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" } },
+    { "id": "q4", "label": "EMPLID #", "type": "text", "options": [], "rule": { "name": "none" }, "note": "A college student ID; not in the profile." },
+    { "id": "q5", "label": "Telephone Number", "type": "text", "options": [], "rule": { "name": "field", "key": "phone" } },
+    { "id": "q6", "label": "CSI Student Status:", "type": "radio", "options": ["Undergraduate Student", "Graduate Student"], "rule": { "name": "none" } },
+    { "id": "q7", "label": "Do You Reside in Dolphin Cove", "type": "select", "options": ["Yes", "No"], "rule": { "name": "none" },
+      "note": "Dolphin Cove is campus housing; the profile only knows the home address." },
+    { "id": "q8", "label": "Number of Family / Household Members (Number of people living where you are currently residing.)", "type": "radio",
+      "options": ["One (Myself)", "Two", "Three", "Four", "Five or more"], "rule": { "name": "householdSize" } },
+    { "id": "q9", "label": "Pick Up Time", "type": "select",
+      "options": ["10:00am", "10:30am", "11:00am", "11:30am", "12:00pm", "12:30pm", "1:00pm", "1:30pm", "2:00pm"], "rule": { "name": "none" } }
+  ]
+}

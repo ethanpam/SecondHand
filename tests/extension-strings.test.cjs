@@ -174,7 +174,9 @@ test('panel.html has no text of its own: every visible word, title, and label co
     stray.push(node.textContent.trim());
   }
   assert.deepEqual(stray, []);
-  for (const attribute of ['title', 'aria-label', 'placeholder', 'alt']) assert.equal(document.querySelectorAll(`[${attribute}]`).length, 0, attribute);
+  for (const attribute of ['title', 'aria-label', 'placeholder']) assert.equal(document.querySelectorAll(`[${attribute}]`).length, 0, attribute);
+  // Decorative images (the logo) carry an empty alt, which is no text; any other alt would be untranslated English.
+  assert.deepEqual([...document.querySelectorAll('img')].map(image => image.getAttribute('alt')).filter(alt => alt !== ''), [], 'alt');
   const used = [...document.querySelectorAll('[data-i18n], [data-i18n-title], [data-i18n-aria-label]')]
     .flatMap(element => [element.dataset.i18n, element.dataset.i18nTitle, element.dataset.i18nAriaLabel].filter(Boolean));
   assert.ok(used.length > 15);

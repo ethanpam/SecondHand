@@ -35,6 +35,7 @@
     "productName": "secondHand",
     "artifactName": "secondHand-${version}-${os}-${arch}.${ext}",
     "directories": { "output": "release" },
+    "icon": "desktop/icon.png",
     "files": ["desktop/**/*", "renderer/**/*", "shared/**/*", "package.json"],
     "extraResources": [{ "from": "extension", "to": "extension" }],
     "win": {

@@ -19,7 +19,7 @@ async function inspectLayout(page) {
   }
   await expect(page.locator('.brand').first()).toHaveAccessibleName('SecondHand home');
   await expect(page.locator('.brand').first()).toHaveText('SecondHand');
-  await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', '/brand/secondhand-mascot.png');
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', '/brand/secondhand-icon.png');
   assert.equal(await page.locator('.brand-mark').first().evaluate(image => image.complete && image.naturalWidth > 0), true, 'The mascot must load');
   assert.equal(await page.evaluate(width => document.documentElement.scrollWidth > width + 1, page.viewportSize().width), false, 'Page must not overflow horizontally');
 }
@@ -210,6 +210,20 @@ async function main() {
     await inspectHeroLayout(staticPage);
     await inspectLayout(staticPage);
     await expect(staticPage.getByRole('link', { name: 'Download for Windows' })).toBeAttached();
+    await staticPage.route('**/download/**', route => route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="test-installer.txt"' },
+      body: 'Synthetic installer fixture',
+    }));
+    await staticPage.goto(`${site}/thank-you/windows`);
+    await expect(staticPage.locator('meta[http-equiv="refresh"]')).toHaveCount(0);
+    await expect(staticPage.getByRole('heading', { level: 1 })).toHaveText('Thanks for downloading SecondHand');
+    const [manualDownload] = await Promise.all([
+      staticPage.waitForEvent('download'),
+      staticPage.getByRole('link', { name: 'download it directly' }).click(),
+    ]);
+    assert.match(manualDownload.url(), /\/download\/secondHand-.*-win-x64\.exe$/);
+    await expect(staticPage).toHaveURL(`${site}/thank-you/windows`);
     assert.deepEqual(errors, [], 'No browser runtime errors');
     assert.deepEqual([...externalRequests], [], 'Fonts and shaders must stay self-hosted');
     console.log('Website smoke passed: shader animation, pause, reduced motion, offscreen suspension, context loss, WebGL fallback, responsive layouts, keyboard tabs, downloads, FAQ, privacy, and 404.');

@@ -1,0 +1,23 @@
+{
+  "source": {
+    "url": "https://docs.google.com/forms/d/e/1FAIpQLSddMHaBS3jztkQfXlhVpct36e9ihI9MihzeASolvnaJJmfz1w/viewform",
+    "title": "Monthly Pre-packed Grocery Boxed",
+    "kind": "google-form",
+    "retrieved": "2026-09-26",
+    "region": "Seaside, CA"
+  },
+  "questions": [
+    { "id": "q1", "label": "Email", "type": "email", "options": [], "rule": { "name": "field", "key": "email" }, "note": "The form's own email box (Google's collect-email setting), shown above the questions." },
+    { "id": "q2", "label": "What is your full name?", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" } },
+    { "id": "q3", "label": "What is your email address?", "type": "text", "options": [], "rule": { "name": "field", "key": "email" } },
+    { "id": "q4", "label": "What is your Otter ID?", "type": "text", "options": [], "rule": { "name": "none" }, "note": "CSUMB student ID (Otter ID); not in the profile." },
+    { "id": "q5", "label": "Address", "type": "text", "options": [], "rule": { "name": "field", "key": "addressLine1" } },
+    { "id": "q6", "label": "Would you like to sign up for the FREE Basic Needs Grocery Boxes?", "type": "radio", "options": ["Yes, please sign me up", "No thank you"], "rule": { "name": "none" }, "note": "Program opt-in; the applicant's choice, not a saved fact." },
+    { "id": "q7", "label": "Please select a pick-up/delivery option", "type": "radio", "options": ["Main Campus Hub pickup", "East Campus Delivery", "Specific Arrangement (I would like to meet with an intern to set up a monthly box that works for my dietary restrictions/preferences)"], "rule": { "name": "none" }, "note": "Pickup or delivery preference. The page also has an \"Other:\" free-text option, left out here." },
+    { "id": "q8", "label": "Please select from the options below", "type": "checkbox", "options": ["Please add additional fresh produce if available", "Please add additional snacks if available", "Please add special requests or items based on dietary needs"], "rule": { "name": "none" }, "note": "Box add-on requests. The page also has an \"Other:\" free-text option, left out here." },
+    { "id": "q9", "label": "Please list any special requests (such as spaghetti and spaghetti sauce, box of Mac & cheese, granola bars or snacks...etc)", "type": "textarea", "options": [], "rule": { "name": "none" }, "note": "Special food requests." },
+    { "id": "q10", "label": "Please list any special requests needed for dietary restrictions (Dairy free milk preference, almond butter, gluten free items, etc...)", "type": "textarea", "options": [], "rule": { "name": "none" }, "note": "Dietary needs." },
+    { "id": "q11", "label": "A Basic Needs CHHS intern may reach out to you to understand your dietary restrictions better and make sure we pack the correct items! Please list your contact number", "type": "text", "options": [], "rule": { "name": "field", "key": "phone" } },
+    { "id": "q12", "label": "Please review the terms listed below and check off each once reviewed.", "type": "checkbox", "options": ["I understand that the Grocery box items are intended for personal use and not for resale", "I understand that I must pick up the Grocery box on 2nd Wednesday of the month if I want fresh produce", "I understand that delivery options are for East Campus residents only", "The Grocery box delivery is my responsibility, deliveries will be a no-contact", "I understand that if I selected perishable items in my delivery, I will make appropriate arrangements"], "rule": { "name": "never" }, "note": "Acknowledgment of program terms. The page also has an \"Other:\" free-text option, left out here." }
+  ]
+}

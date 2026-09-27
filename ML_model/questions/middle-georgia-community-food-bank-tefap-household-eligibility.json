@@ -1,0 +1,29 @@
+{
+  "source": {
+    "url": "https://mgcfb.org/wp-content/uploads/2025/01/TEFAP-832-Household-Eligibilty-Criteria-Form-Effective-12.30.24.pdf",
+    "title": "The Emergency Food Assistance Program (TEFAP) Household Eligibility Criteria Form",
+    "kind": "pdf",
+    "retrieved": "2026-09-26",
+    "region": "Macon, GA"
+  },
+  "questions": [
+    { "id": "q1", "label": "Distribution Agency Site Name", "type": "text", "options": [], "rule": { "name": "none" }, "note": "The pantry's own name; not in the profile." },
+    { "id": "q2", "label": "Distribution Agency Site Address", "type": "text", "options": [], "rule": { "name": "none" }, "note": "The pantry's address, not the applicant's." },
+    { "id": "q3", "label": "Name of Head of Household", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" } },
+    { "id": "q4", "label": "County of Residence", "type": "text", "options": [], "rule": { "name": "field", "key": "county" } },
+    { "id": "q5", "label": "Zip Code", "type": "text", "options": [], "rule": { "name": "field", "key": "zip" } },
+    { "id": "q6", "label": "Contact Number (Optional)", "type": "tel", "options": [], "rule": { "name": "field", "key": "phone" } },
+    { "id": "q7", "label": "Number in the Household", "type": "number", "options": [], "rule": { "name": "field", "key": "householdSize" } },
+    { "id": "q8", "label": "Income of the Household", "type": "text", "options": [], "rule": { "name": "none" },
+      "note": "The applicant circles monthly or weekly beside it, so no single saved amount fits the blank." },
+    { "id": "q9", "label": "Monthly or Weekly (Circle One)", "type": "radio", "options": ["Monthly", "Weekly"], "rule": { "name": "none" },
+      "note": "The period of the income written beside it; the applicant's choice." },
+    { "id": "q10", "label": "Signature of Head of Household", "type": "text", "options": [], "rule": { "name": "never" },
+      "note": "Self-attests income at or below the table and living in the area served." },
+    { "id": "q11", "label": "Date", "type": "date", "options": [], "rule": { "name": "never" }, "note": "Date written beside the signature." },
+    { "id": "q12", "label": "Authorized Representative: I hereby authorize ____ to pick up food for my household.", "type": "text", "options": [], "rule": { "name": "none" },
+      "note": "Someone else who may pick up food; not in the profile." },
+    { "id": "q13", "label": "Signature of Head of Household", "type": "text", "options": [], "rule": { "name": "never" }, "note": "Signs the authorized representative permission." },
+    { "id": "q14", "label": "Date", "type": "date", "options": [], "rule": { "name": "never" }, "note": "Date written beside the signature." }
+  ]
+}

@@ -1,0 +1,279 @@
+{
+  "source": {
+    "url": "https://fallcreektwp.com/pantry-registration/",
+    "title": "Fall Creek Township Pantry Registration Form",
+    "kind": "web",
+    "retrieved": "2026-09-26",
+    "region": "Fishers, IN"
+  },
+  "questions": [
+    {
+      "id": "q1",
+      "label": "First Name",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "firstName"
+      }
+    },
+    {
+      "id": "q2",
+      "label": "Last Name",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "lastName"
+      }
+    },
+    {
+      "id": "q3",
+      "label": "Street Address",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "addressLine1"
+      }
+    },
+    {
+      "id": "q4",
+      "label": "City",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "city"
+      }
+    },
+    {
+      "id": "q5",
+      "label": "State",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "state"
+      }
+    },
+    {
+      "id": "q6",
+      "label": "Zip Code",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "zip"
+      }
+    },
+    {
+      "id": "q7",
+      "label": "Previous Address if Moved in Past Year",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q8",
+      "label": "Phone",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "phone"
+      }
+    },
+    {
+      "id": "q9",
+      "label": "Your Email",
+      "type": "email",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "email"
+      }
+    },
+    {
+      "id": "q10",
+      "label": "Social Security Number",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "never"
+      }
+    },
+    {
+      "id": "q11",
+      "label": "Your Birth Date",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "birthDate"
+      }
+    },
+    {
+      "id": "q12",
+      "label": "Marital Status:",
+      "type": "radio",
+      "options": [
+        "Never Married",
+        "Married",
+        "Seperated",
+        "Divorced",
+        "Widowed"
+      ],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q13",
+      "label": "Home Status:",
+      "type": "radio",
+      "options": [
+        "Own Home",
+        "Renting",
+        "Living Arrangement",
+        "Homeless",
+        "Other Situation"
+      ],
+      "rule": {
+        "name": "none"
+      },
+      "note": "Includes a \"Homeless\" option, but it asks for housing status among five choices; the homeless rule is yes/no."
+    },
+    {
+      "id": "q14",
+      "label": "Years at Current Address?",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q15",
+      "label": "Number in Household?",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "householdSize"
+      }
+    },
+    {
+      "id": "q16",
+      "label": "Number of Children Under 18?",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "field",
+        "key": "householdChildren"
+      }
+    },
+    {
+      "id": "q17",
+      "label": "Current Employment Status",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q18",
+      "label": "Total Household Gross Income (before taxes)",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "Does not say monthly or yearly, so neither totalMonthlyIncome nor annualIncome fits."
+    },
+    {
+      "id": "q19",
+      "label": "Name ALL Sources of Income in Household",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q20",
+      "label": "Do You Receive SNAP (Food Stamps), Yes or No?",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "Asks whether they receive SNAP now."
+    },
+    {
+      "id": "q21",
+      "label": "SNAP Amount Received per Month",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q22",
+      "label": "Any Peanut Allergies?",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q23",
+      "label": "Any Household Disabilities?",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      },
+      "note": "A free-text description of disabilities; the profile only saves yes or no."
+    },
+    {
+      "id": "q24",
+      "label": "Other Food Pantries Used",
+      "type": "text",
+      "options": [],
+      "rule": {
+        "name": "none"
+      }
+    },
+    {
+      "id": "q25",
+      "label": "I would like to receive further information and updates from Fall Creek Township:",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "never"
+      },
+      "note": "Opting in to mailings is the applicant's choice."
+    },
+    {
+      "id": "q26",
+      "label": "I certify that I am a member of the household above and that all information provided regarding my household is true and accurate, and understand that any false statements or misrepresentation will result in forfeiture of assistance.",
+      "type": "checkbox",
+      "options": [
+        "I certify that I am a member of the household above and that all information provided regarding my household is true and accurate"
+      ],
+      "rule": {
+        "name": "never"
+      },
+      "note": "A single checkbox whose text (the certification plus consent to share information) is too long for the bank; label and option keep its opening words."
+    }
+  ]
+}

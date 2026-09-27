@@ -1,0 +1,26 @@
+{
+  "source": {
+    "url": "https://docs.google.com/forms/d/e/1FAIpQLSfwj5yOeQKul1OxQWTlLuuI-ArVvebOnYRqV281RX1uF_nISA/viewform",
+    "title": "Hallie Q. Brown Food Shelf Request Form",
+    "kind": "google-form",
+    "retrieved": "2026-09-26",
+    "region": "St. Paul, MN"
+  },
+  "questions": [
+    { "id": "q1", "label": "Name", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" } },
+    { "id": "q2", "label": "Address", "type": "text", "options": [], "rule": { "name": "field", "key": "addressLine1" } },
+    { "id": "q3", "label": "Phone number", "type": "number", "options": [], "rule": { "name": "field", "key": "phone" }, "note": "The form validates this box as a number." },
+    { "id": "q4", "label": "Email Address", "type": "text", "options": [], "rule": { "name": "field", "key": "email" } },
+    { "id": "q5", "label": "How many children (age 0-17 years) are in your household?", "type": "text", "options": [], "rule": { "name": "field", "key": "householdChildren" } },
+    { "id": "q6", "label": "How many adults (age 18-64 years) are in your household?", "type": "text", "options": [], "rule": { "name": "field", "key": "householdAdults" } },
+    { "id": "q7", "label": "How many seniors (age 65+ years) are in your household?", "type": "text", "options": [], "rule": { "name": "field", "key": "householdSeniors" } },
+    { "id": "q8", "label": "Are you a current HQB Food Shelf Client", "type": "checkbox", "options": ["Current Client", "New Client"], "rule": { "name": "none" }, "note": "Whether they are already a client here; not in the profile." },
+    { "id": "q9", "label": "How would you like to receive your food box? Please select one of the options below and a HQB Staff or Volunteer will contact you to confirm your time?", "type": "checkbox", "options": ["Pick up at the Center", "Curbside Pick Up", "Delivery (priority is given to seniors and anyone with health-related issues)"], "rule": { "name": "none" }, "note": "Pickup or delivery preference." },
+    { "id": "q10", "label": "Please select any food items you DO NOT want/need. All other items will be included and packed in your box. Please note: our food supplies change daily and every item may not be available. We will do our best to accommodate your requests. Remember only check boxes of food you DO NOT want/need.", "type": "checkbox", "options": ["Canned vegetables - variety", "Canned fruit - variety", "Applesauce", "Vegetable soup", "Chicken noodle soup", "Tomato soup", "Broth (beef/chicken/vegetable)", "Soup - variety", "Baked beans", "Canned beans (kidney, black)", "Chili (can/bag)", "Beef ravioli (or similar)", "Tomato sauce/paste", "Diced/canned tomato", "Tuna (or other fish) - can", "Chicken - can", "Sardines - can", "Spam", "Cooking oil", "Almond milk", "Rice milk", "Coconut milk", "Dry milk powder", "Juice/cocoa mix", "Coffee/tea", "Oatmeal", "Cereal", "Peanut butter/jelly", "Flour/sugar", "Baking items", "Ramen", "Spaghetti noodles", "Pasta - other varieties", "Pasta or rice mixes", "Pasta sauce", "Boxed mac and cheese", "White rice/brown rice", "Dry beans (pinto or other)", "Lentils", "Mashed potatoes - bag", "Chips/crackers", "Other snacks", "Granola bars", "Pancake mix", "Syrup", "Milk", "Eggs", "Butter", "Pork", "Beef", "Chicken", "Turkey", "Fish", "Bread", "Fresh fruit", "Fresh vegetables", "Yogurt", "Other dairy items"], "rule": { "name": "none" }, "note": "Food items to leave out. Label cut to the 300-character limit; the page continues: \"Write in any special items not listed in the box below and we will do our best to accommodate that.\"" },
+    { "id": "q11", "label": "Please list any dietary restrictions", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Dietary needs." },
+    { "id": "q12", "label": "List any Household and/or Hygiene items needed here:", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Household and hygiene item requests." },
+    { "id": "q13", "label": "Is there anything else you would like us to know to help serve you?", "type": "textarea", "options": [], "rule": { "name": "none" }, "note": "Open comments." },
+    { "id": "q14", "label": "Prefer for notification:", "type": "checkbox", "options": ["Email", "Phone"], "rule": { "name": "none" }, "note": "Contact preference; not in the profile." },
+    { "id": "q15", "label": "We hope you find this helpful. If you have any other needs or need to be contact with other staff, please feel free to submit comments below or call us at 651-224-4601. We are here to help.", "type": "textarea", "options": [], "rule": { "name": "none" }, "note": "Open comments." }
+  ]
+}

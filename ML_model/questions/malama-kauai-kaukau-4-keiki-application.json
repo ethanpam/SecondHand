@@ -1,0 +1,37 @@
+{
+  "source": {
+    "url": "https://docs.google.com/forms/d/e/1FAIpQLSfWd1PQ9AZtLtaA05PHQiTBMTBje2DcSzHxBVIVzEi_aIjISQ/viewform",
+    "title": "2025 Application: Kaua‘i Kaukau 4 Keiki",
+    "kind": "google-form",
+    "retrieved": "2026-09-26",
+    "region": "Lihue, HI"
+  },
+  "questions": [
+    { "id": "q1", "label": "Email", "type": "email", "options": [], "rule": { "name": "field", "key": "email" }, "note": "The form's own email box (Google's collect-email setting), shown above the questions." },
+    { "id": "q2", "label": "Name of Parent or Guardian (Last, First)", "type": "text", "options": [], "rule": { "name": "none" }, "note": "The applicant's name, but written \"Last, First\"; fullName holds \"First Last\". Proposed: a lastFirstName key built from lastName and firstName." },
+    { "id": "q3", "label": "Telephone Number", "type": "text", "options": [], "rule": { "name": "field", "key": "phone" } },
+    { "id": "q4", "label": "Name of 2nd Parent or Guardian (Last, First)", "type": "text", "options": [], "rule": { "name": "none" }, "note": "A second parent or guardian; not in the profile." },
+    { "id": "q5", "label": "Telephone Number", "type": "text", "options": [], "rule": { "name": "none" }, "note": "The second parent or guardian's phone (it follows their name). Same label as q3 on the page." },
+    { "id": "q6", "label": "Complete Physical Address (including Town/City!)", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Wants the full address including town; the saved addressLine1 is the street only. Proposed: a fullAddress key joining street, city, state and ZIP." },
+    { "id": "q7", "label": "Within the past 30 days, our family had worried whether our food would run out before we got money to buy more.", "type": "radio", "options": ["Often true", "Sometimes true", "Never true"], "rule": { "name": "none" }, "note": "Food security screener; not in the profile." },
+    { "id": "q8", "label": "Within the past 30 days, the food our family bought just didn’t last and we didn’t have money to get more.", "type": "radio", "options": ["Often true", "Sometimes true", "Never true"], "rule": { "name": "none" }, "note": "Food security screener; not in the profile." },
+    { "id": "q9", "label": "I will pick up my family's box(es) at:", "type": "radio", "options": ["Anahola - 3:00-4:00p", "Kapaa - 3:00-4:00p", "Lihue - 4:00-5:00p", "Koloa - 4:30-5:30p", "Eleele - 2:30-3:30p", "Waimea - 2:30-3:30p", "Kekaha - 3:00-4:00p"], "rule": { "name": "none" }, "note": "Pickup site and time." },
+    { "id": "q10", "label": "Do you have any vacations planned where you will be unable to pick up your box on any Monday between Monday, June 3rd - Monday, July 29th?", "type": "textarea", "options": [], "rule": { "name": "none" }, "note": "Vacation plans; not in the profile." },
+    { "id": "q11", "label": "# of Children in Household", "type": "number", "options": [], "rule": { "name": "field", "key": "householdChildren" }, "note": "The form validates a number above 0. Its eligibility text counts keiki 18 and under (22 with a disability), a little wider than the profile's under-18 count." },
+    { "id": "q12", "label": "School(s) Keiki Attended", "type": "textarea", "options": [], "rule": { "name": "none" }, "note": "Children's schools; not in the profile." },
+    { "id": "q13", "label": "Name of 1st Child (Last, First)", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Details of a child in the household; not in the profile." },
+    { "id": "q14", "label": "Birthdate of 1st Child", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Details of a child in the household; not in the profile." },
+    { "id": "q15", "label": "Ethnicity of 1st Child", "type": "radio", "options": ["Hispanic or Latino", "Not Hispanic or Latino"], "rule": { "name": "none" }, "note": "Details of a child in the household; not in the profile." },
+    { "id": "q16", "label": "Race of 1st Child", "type": "checkbox", "options": ["American Indian or Alaskan Native", "Asian", "Black or African American", "Native Hawaiian or Other Pacific Islander", "White"], "rule": { "name": "none" }, "note": "Details of a child in the household; not in the profile." },
+    { "id": "q17", "label": "Name of 2nd Child (Last, First)", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Details of a child in the household; not in the profile." },
+    { "id": "q18", "label": "Birthdate of 2nd Child", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Details of a child in the household; not in the profile." },
+    { "id": "q19", "label": "Ethnicity of 2nd Child", "type": "radio", "options": ["Hispanic or Latino", "Not Hispanic or Latino", "Prefer not to say"], "rule": { "name": "none" }, "note": "Details of a child in the household; not in the profile." },
+    { "id": "q20", "label": "Race of 2nd Child", "type": "checkbox", "options": ["American Indian or Alaskan Native", "Asian", "Black or African American", "Native Hawaiian or Other Pacific Islander", "White", "Prefer not to say"], "rule": { "name": "none" }, "note": "Details of a child in the household; not in the profile." },
+    { "id": "q21", "label": "Name of 3rd Child (Last, First)", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Details of a child in the household; not in the profile." },
+    { "id": "q22", "label": "Birthdate of 3rd Child", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Details of a child in the household; not in the profile." },
+    { "id": "q23", "label": "Ethnicity of 3rd Child", "type": "radio", "options": ["Hispanic or Latino", "Not Hispanic or Latino", "Prefer not to say"], "rule": { "name": "none" }, "note": "Details of a child in the household; not in the profile." },
+    { "id": "q24", "label": "Race of 3rd Child", "type": "checkbox", "options": ["American Indian or Alaskan Native", "Asian", "Black or African American", "Native Hawaiian or Other Pacific Islander", "White", "Prefer not to say"], "rule": { "name": "none" }, "note": "Details of a child in the household; not in the profile." },
+    { "id": "q25", "label": "Additional Children Names, Birthdates, Race & Ethnicity", "type": "textarea", "options": [], "rule": { "name": "none" }, "note": "Details of a child in the household; not in the profile." },
+    { "id": "q26", "label": "By completing this form, you attest that if accepted into the Kaukau 4 Keiki program, you will:", "type": "checkbox", "options": ["Be the primary caretaker for the child(ren) listed in this application for all purposes, and no one else may claim them for this program", "Use the box and its contents to feed your enrolled keiki, using the supplied menus and portion sizes; items cannot be shared with others", "NOT receive summer meals from another USDA Summer Meal program, such as DOE meal sites; this is considered \"double dipping\" and is against USDA rules and regulations"], "rule": { "name": "never" }, "note": "Attestation of program rules." }
+  ]
+}

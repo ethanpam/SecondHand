@@ -9,7 +9,18 @@
     "scripts": ["iowa-adapter.js", "field-mapper.js", "application-assistant.js", "background.js"],
     "persistent": false
   },
+  "icons": {
+    "48": "icon-48.png",
+    "96": "icon-96.png",
+    "128": "icon-128.png",
+    "256": "icon-256.png",
+    "512": "icon-512.png"
+  },
   "action": {
+    "default_icon": {
+      "48": "icon-48.png",
+      "96": "icon-96.png"
+    },
     "default_title": "SecondHand application assistance",
     "default_popup": "popup.html"
   },

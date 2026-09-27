@@ -1,0 +1,21 @@
+{
+  "source": {
+    "url": "https://docs.google.com/forms/d/e/1FAIpQLSe6TL4vm3_jnOeqLo78_hOhDueHiPpHQwj-Pod8Cs_sAM5xyQ/viewform",
+    "title": "Get Food!",
+    "kind": "google-form",
+    "retrieved": "2026-09-26",
+    "region": "Arlington, MA"
+  },
+  "questions": [
+    { "id": "q1", "label": "What is your name?", "type": "textarea", "options": [], "rule": { "name": "field", "key": "fullName" } },
+    { "id": "q2", "label": "Children's Names, Schools and Grades", "type": "textarea", "options": [], "rule": { "name": "none" }, "note": "Children's names, schools and grades; not in the profile." },
+    { "id": "q3", "label": "Please mark the programs that may be helpful for your family:", "type": "checkbox", "options": ["Community Meal- Sit down meal and pop-up food pantry with fresh produce; 2nd Thursday of the month", "Snacks at School-- Snacks served at all Arlington schools for any kid who is hungry", "February and April Vacation Lunch-- Served from 12-1Tues-Friday; often catered by local restaurants and caterers", "Summer Food-- Lunch served from 12-1 Mon-Thurs"], "rule": { "name": "none" }, "note": "Program choices. The page also has an \"Other:\" free-text option, left out here." },
+    { "id": "q4", "label": "Is there other information that would be helpful for us to know?", "type": "textarea", "options": [], "rule": { "name": "none" }, "note": "Open comments." },
+    { "id": "q5", "label": "Special dietary needs, if any (e.g., diabetic, food allergy, kosher)?", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Dietary needs." },
+    { "id": "q6", "label": "Address", "type": "textarea", "options": [], "rule": { "name": "field", "key": "addressLine1" } },
+    { "id": "q7", "label": "Cell phone number (if any)", "type": "text", "options": [], "rule": { "name": "field", "key": "phone" } },
+    { "id": "q8", "label": "Arlington EATS uses Remind.me texts to let families know when food is available. May we enroll your phone number in the program?", "type": "checkbox", "options": ["Yes", "No"], "rule": { "name": "never" }, "note": "Consent to enroll the phone number in Remind text alerts." },
+    { "id": "q9", "label": "Email Address (if any)", "type": "email", "options": [], "rule": { "name": "field", "key": "email" } },
+    { "id": "q10", "label": "If you don't have an email address or cell phone, how would you like us to get in touch with you about food availability?", "type": "textarea", "options": [], "rule": { "name": "none" }, "note": "Fallback contact method; not in the profile." }
+  ]
+}

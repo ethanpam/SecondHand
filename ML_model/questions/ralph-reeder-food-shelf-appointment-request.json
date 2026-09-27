@@ -1,0 +1,32 @@
+{
+  "source": {
+    "url": "https://form.jotform.com/221664071376153",
+    "title": "Food Shelf Appointment Request Form",
+    "kind": "jotform",
+    "retrieved": "2026-09-26",
+    "region": "Mounds View, MN"
+  },
+  "questions": [
+    {"id":"q1","label":"I have children that attend a school in the Mounds View Public School District (District #621)","type":"select","options":["Yes","No"],"rule":{"name":"none"}},
+    {"id":"q2","label":"Have you visited our food shelf before?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
+    {"id":"q3","label":"Client ID","type":"number","options":[],"rule":{"name":"none"},"note":"The food shelf's own client number."},
+    {"id":"q4","label":"First Name","type":"text","options":[],"rule":{"name":"field","key":"firstName"},"note":"First box of \"Head of House\"."},
+    {"id":"q5","label":"Last Name","type":"text","options":[],"rule":{"name":"field","key":"lastName"},"note":"Second box of \"Head of House\"."},
+    {"id":"q6","label":"Birth Date","type":"date","options":[],"rule":{"name":"field","key":"birthDate"},"note":"Three dropdowns on the page (Month, Day, Year)."},
+    {"id":"q7","label":"Street Address","type":"text","options":[],"rule":{"name":"field","key":"addressLine1"},"note":"Part of the \"Address\" field."},
+    {"id":"q8","label":"Apartment Number","type":"text","options":[],"rule":{"name":"field","key":"addressLine2"},"note":"Part of the \"Address\" field."},
+    {"id":"q9","label":"City","type":"text","options":[],"rule":{"name":"field","key":"city"},"note":"Part of the \"Address\" field."},
+    {"id":"q10","label":"State / Province","type":"text","options":[],"rule":{"name":"field","key":"state"},"note":"Part of the \"Address\" field."},
+    {"id":"q11","label":"Postal / Zip Code","type":"text","options":[],"rule":{"name":"field","key":"zip"},"note":"Part of the \"Address\" field."},
+    {"id":"q12","label":"Email Address","type":"email","options":[],"rule":{"name":"field","key":"email"}},
+    {"id":"q13","label":"Phone Number","type":"tel","options":[],"rule":{"name":"field","key":"phone"},"note":"Two boxes on the page (Area Code, Phone Number)."},
+    {"id":"q14","label":"I am in Minnesota and my household income is 300% or less of the Federal Poverty Guidelines according to the following chart:","type":"radio","options":["Yes","No"],"rule":{"name":"none"},"note":"The limit depends on household size (a chart of annual incomes) and also asks about living in Minnesota. Proposed rule: incomeBelowByHouseholdSize with a table, combined with livesInState."},
+    {"id":"q15","label":"I have been shown and have read the USDA Statement and the MN Data Privacy Notice.","type":"radio","options":["Yes","No"],"rule":{"name":"never"},"note":"Confirms reading the USDA statement and privacy notice."},
+    {"id":"q16","label":"Family Member: First Name","type":"text","options":[],"rule":{"name":"none"},"note":"First of six identical \"Family Member\" blocks; the block name is added because the page labels the boxes the same as the head of house's."},
+    {"id":"q17","label":"Family Member: Last Name","type":"text","options":[],"rule":{"name":"none"},"note":"First of six identical \"Family Member\" blocks; the block name is added because the page labels the boxes the same as the head of house's."},
+    {"id":"q18","label":"Family Member: Birthdate","type":"date","options":[],"rule":{"name":"none"},"note":"First of six identical \"Family Member\" blocks; the block name is added because the page labels the boxes the same as the head of house's."},
+    {"id":"q19","label":"Appointment Type Requested - please select more than one time as we are experiencing high volume of need right now.","type":"checkbox","options":["In Person Monday - Monday 12:00 - 1:30PM","In Person Shopping - Tuesdays 12:30 - 2:00 pm","In Person Shopping - Wednesdays 11:00 - 2:00 pm","In Person Shopping - Thursdays 12:30 - 3:00 pm","Curbside Pick Up - Fridays 10:00 - 11:30 am","Curbside Pick Up - Tuesday Evenings 4:45 - 5:45 pm","Any - I need help right away","Other"],"rule":{"name":"none"},"note":"Shown only to clients who have visited before."},
+    {"id":"q20","label":"What days work best for you?","type":"checkbox","options":["Monday","Tuesday","Wednesday","Thursday","Friday"],"rule":{"name":"none"}},
+    {"id":"q21","label":"Special Requests - (diapers, baby food, hygiene, cleaning, etc)","type":"textarea","options":[],"rule":{"name":"none"}}
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "source": {
+    "url": "https://www.jotform.com/251526594376062",
+    "title": "Food Pantry Intake Form",
+    "kind": "jotform",
+    "retrieved": "2026-09-26",
+    "region": "Burnaby, BC"
+  },
+  "questions": [
+    {"id":"q1","label":"I confirm that I have read and understood the Collection Notice.","type":"checkbox","options":["I confirm that I have read and understood the Collection Notice."],"rule":{"name":"never"},"note":"A single required radio button under the Collection Notice, with no question text; stored as a one-option checkbox."},
+    {"id":"q2","label":"First Name","type":"text","options":[],"rule":{"name":"field","key":"firstName"},"note":"First box of the \"Full Name\" field."},
+    {"id":"q3","label":"Last Name","type":"text","options":[],"rule":{"name":"field","key":"lastName"},"note":"Second box of the \"Full Name\" field."},
+    {"id":"q4","label":"Phone Number","type":"number","options":[],"rule":{"name":"field","key":"phone"}},
+    {"id":"q5","label":"Student ID","type":"text","options":[],"rule":{"name":"none"},"note":"A university student ID; not in the profile."},
+    {"id":"q6","label":"Street Address","type":"text","options":[],"rule":{"name":"field","key":"addressLine1"},"note":"Part of the \"Address\" field."},
+    {"id":"q7","label":"Street Address Line 2","type":"text","options":[],"rule":{"name":"field","key":"addressLine2"},"note":"Part of the \"Address\" field."},
+    {"id":"q8","label":"City","type":"text","options":[],"rule":{"name":"field","key":"city"},"note":"Part of the \"Address\" field."},
+    {"id":"q9","label":"State / Province","type":"text","options":[],"rule":{"name":"field","key":"state"},"note":"Part of the \"Address\" field."},
+    {"id":"q10","label":"Postal / Zip Code","type":"text","options":[],"rule":{"name":"field","key":"zip"},"note":"Part of the \"Address\" field."},
+    {"id":"q11","label":"What is your age range?","type":"radio","options":["0-5 yrs","6-12 yrs","13-19 yrs","20-29 yrs","30-64 yrs","65+ yrs","Unknown"],"rule":{"name":"applicantAgeRange"}},
+    {"id":"q12","label":"What is your gender?","type":"radio","options":["Male","Female","Non-binary","Other"],"rule":{"name":"none"}},
+    {"id":"q13","label":"What is your primary language?","type":"text","options":[],"rule":{"name":"none"}},
+    {"id":"q14","label":"Which community do you identify with?","type":"radio","options":["Black","East Asian (e.g. Chinese, Japanese, Korean)","South Asian (e.g. Indian, Pakistani)","Southeast Asian (e.g. Filipino, Vietnamese, Thai)","Indigenous","Latin","Middle Eastern","Unknown","Other"],"rule":{"name":"none"}},
+    {"id":"q15","label":"Which Indigenous identity do you identify with?","type":"radio","options":["First Nations","Inuit","Métis"],"rule":{"name":"none"},"note":"Shown only when \"Indigenous\" is chosen above."},
+    {"id":"q16","label":"Have you attended The Pantry before?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
+    {"id":"q17","label":"I will be visiting the SFU Food Pantry on:","type":"date","options":[],"rule":{"name":"none"},"note":"The day of the pantry visit, not a saved fact."},
+    {"id":"q18","label":"Will you be accessing the SFU Community Free Fridge when you use the SFU Food Pantry?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
+    {"id":"q19","label":"Please select which category best describes you:","type":"radio","options":["Undergraduate student","Graduate student","Staff/past staff","UniverCity resident"],"rule":{"name":"none"}},
+    {"id":"q20","label":"Email Address","type":"email","options":[],"rule":{"name":"none"},"note":"Asks for the SFU email address specifically (\"Please use your SFU email address\"); the saved email may be a different one. Shown to students only."},
+    {"id":"q21","label":"Email Address","type":"email","options":[],"rule":{"name":"field","key":"email"},"note":"Shown to staff and UniverCity residents only."},
+    {"id":"q22","label":"Are you an international student?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
+    {"id":"q23","label":"Do you live in an SFU residence?","type":"radio","options":["Yes","No"],"rule":{"name":"none"}},
+    {"id":"q24","label":"How many people in your household might you share this food with (including yourself)?","type":"number","options":[],"rule":{"name":"field","key":"householdSize"}},
+    {"id":"q25","label":"We know the Pantry will benefit most from student thoughts and perspectives. Can we contact you in the future should we require your opinion?","type":"radio","options":["Yes","No"],"rule":{"name":"never"},"note":"Consent to be contacted later for feedback."}
+  ]
+}
