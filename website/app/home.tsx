@@ -8,6 +8,7 @@ import {
   ExternalIcon,
   LockIcon,
 } from './icons';
+import Link from 'next/link';
 import { GradientBackground } from './gradient-background';
 import { faq } from './faq';
 import { release } from './release';
@@ -314,6 +315,11 @@ export function Home() {
                       address bar. Turn on <strong>Developer mode</strong>,
                       choose <strong>Load unpacked</strong>, and select that
                       folder.
+                    </p>
+                    <p>
+                      <Link href="/chrome-extension">
+                        See each step with pictures
+                      </Link>
                     </p>
                     <details>
                       <summary>Finding the folder on Windows or Mac</summary>
