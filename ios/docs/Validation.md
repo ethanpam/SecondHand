@@ -21,6 +21,18 @@ The JavaScript suites use the inspected applicant schema plus explicitly synthet
 
 Overview and document screenshots in `images/` were captured from the Simulator and visually reviewed. The application approval screenshot is a local browser rendering of the extension popup with mock state, not an installed Safari or Iowa session. The UI test's synthetic profile was removed through the app's deletion flow.
 
+## Installed iPhone Simulator QA — September 27, 2026
+
+Manual QA used the signed app and embedded extension built from commit `120069a` in the isolated **SecondHand AutoApply QA** iPhone Simulator running iOS 26.5. No physical iPhone was connected.
+
+The synthetic **Avery Jordan Example** profile was entered through the app's real UI, including email, home and mobile phone, home address, monthly income of $0, and monthly housing cost of $800. Profile confirmation and saving passed. Backgrounding locked the app; unlocking after returning retained the saved profile. Settings showed the authorized ten-minute sharing countdown at **9:54**. This verifies the native app's sharing authorization, not Safari's receipt of profile data.
+
+In Simulator Safari, **SecondHand for Iowa** was enabled through **Page Menu → Manage Extensions**. The installed extension popup rendered, and **Allow for One Day** granted access to the Iowa site. A fresh direct guest URL redirected to the portal root. The normal **Apply for Assistance → Apply as Guest** path reached **Household Application Information** at `https://hhsservices.iowa.gov/apspssp/ssp.portal/applyForBenefits/guestLogin`.
+
+Selecting **Start application assistance** returned: “Open an Iowa application page in this tab. Sign-in and account pages stay manual.” The current route restriction rejects `guestLogin` before native messaging, so real Safari native data transfer and live filling remain unverified. All website answers remained blank; no save, signature, or submission action was performed. No CAPTCHA was visible at this point, so CAPTCHA handoff was not tested.
+
+[iPhone Safari screenshot of the blank guest page](images/iphone-safari-guest-qa.png).
+
 ## Remaining checks
 
 - Provision both targets with the developer's Apple team and matching App Group/Keychain capabilities.
