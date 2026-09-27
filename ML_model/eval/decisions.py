@@ -23,8 +23,30 @@ ABSTAIN = "None of these, or the facts don’t say"
 THRESHOLDS = [0.5, 0.7, 0.8, 0.9, 0.95]
 
 
+def training_precision(model_dir):
+    """The precision a checkpoint was trained in, from the record LayaStudio saves beside it."""
+    record = Path(model_dir) / "laya_finetune.json"
+    if not record.exists():
+        raise FileNotFoundError(f"{record} is missing, so the model's training precision is unknown.")
+    precision = json.loads(record.read_text()).get("hyperparameters", {}).get("precision")
+    if not precision:
+        raise ValueError(f"{record} does not say which precision the model was trained in.")
+    return precision
+
+
+def load(model_dir):
+    # On Apple silicon, laya-mlx defaults to float16, whose range is too small for models trained
+    # in bfloat16: their outputs overflow. So load in the training precision. LayaStudio's
+    # runtime.load_agent has no precision setting, hence laya_mlx directly.
+    if runtime.backend() == "mlx":
+        import laya_mlx
+
+        return laya_mlx.load(str(model_dir), batch_size=16, dtype=training_precision(model_dir))
+    return runtime.load_agent(model_dir, batch_size=16)
+
+
 def score(decisions, model_dir, questions):
-    agent = runtime.load_agent(model_dir, batch_size=16)
+    agent = load(model_dir)
     started, done = time.time(), 0
     for rows in decisions.values():
         for row in rows:
