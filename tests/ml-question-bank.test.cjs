@@ -68,19 +68,16 @@ test('no synthetic label may leak the answer key by duplicating a held-out or te
   const { loadQuestionBank, loadSyntheticBank } = require('../ML_model/question-bank.cjs');
   const { splitFor } = require('../ML_model/dataset/build.cjs');
   const normalize = text => String(text).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-  
+
   const testLabels = new Set();
   for (const file of loadQuestionBank()) {
     if (file.source.holdout || splitFor(file.source.url) === 'test') {
       for (const q of file.questions) testLabels.add(normalize(q.label));
     }
   }
-  
-  for (const file of loadSyntheticBank()) {
-    for (const q of file.questions) {
-      assert.ok(!testLabels.has(normalize(q.label)), `Leaked label in synthetic data: "${q.label}"`);
-    }
-  }
+
+  const leaked = loadSyntheticBank().flatMap(file => file.questions.filter(q => testLabels.has(normalize(q.label))).map(q => `${file.file} ${q.id}: ${q.label}`));
+  assert.deepEqual(leaked, [], 'synthetic questions must not repeat a test or held-out label');
 });
 
 test('holdout is a yes-or-nothing flag on real forms only', () => {
