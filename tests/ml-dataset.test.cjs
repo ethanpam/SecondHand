@@ -25,6 +25,9 @@ test('yes/no rules pick the form\'s own Yes or No, or abstain when the facts don
   assert.equal(pickFor({ name: 'applyingSnap' }, yesNo), 'Yes');
   assert.equal(pickFor({ name: 'applicantAgeAtLeast', age: 60 }, yesNo), 'No');
   assert.equal(pickFor({ name: 'applicantAgeAtLeast', age: 18 }, yesNo), 'Yes');
+  assert.equal(pickFor({ name: 'householdMoreThanOne' }, yesNo), 'Yes');
+  assert.equal(pickFor({ name: 'householdMoreThanOne' }, yesNo, { ...family, householdSize: '1' }), 'No');
+  assert.equal(pickFor({ name: 'householdMoreThanOne' }, yesNo, { ...family, householdSize: '' }), ABSTAIN);
 });
 
 test('60+ is only known when the saved answers prove it', () => {
@@ -128,7 +131,7 @@ test('text boxes become matching rows: one per saved field that fits a box, plus
   ] }];
   const rows = buildMatchRows(bank);
   assert.equal(rows.length, 2 * (MATCH_KEYS.length + 1), 'choice questions belong to the answering task');
-  assert.ok(MATCH_KEYS.includes('phone') && MATCH_KEYS.includes('fullName') && !MATCH_KEYS.includes('householdVeteran') && !MATCH_KEYS.includes('ageRange'),
+  assert.ok(MATCH_KEYS.includes('phone') && MATCH_KEYS.includes('fullName') && !MATCH_KEYS.includes('householdVeteran') && !MATCH_KEYS.includes('ageRange') && !MATCH_KEYS.includes('ssn'),
     'only saved values a text box can hold are candidates');
   for (const id of ['t1', 't2']) assert.equal(rows.filter(row => row.group.endsWith(`#${id}`) && row.answers.correct).length, 1, id);
   const phone = rows.find(row => row.state.question === 'Phone Number' && row.answers.correct);

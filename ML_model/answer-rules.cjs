@@ -23,6 +23,7 @@ const RULES = Object.freeze({
   anySenior60: { about: 'Is anyone in the household 60 or older? Only known when the applicant is 60+ or someone is 65+.', types: YES_NO, params: {} },
   applicantAgeAtLeast: { about: 'Is the applicant at least `age` years old ("Are you 60 or older?").', types: YES_NO, params: { age: { type: 'number', required: true } } },
   anyChildren: { about: 'Are there children under 18 in the household?', types: YES_NO, params: {} },
+  householdMoreThanOne: { about: 'Are there other members in your household in addition to yourself? "Yes" if household size > 1, "No" if 1.', types: YES_NO, params: {} },
   veteran: { about: 'Is anyone in the household a veteran or in the military?', types: YES_NO, params: {} },
   disability: { about: 'Does anyone in the household have a disability?', types: YES_NO, params: {} },
   pregnant: { about: 'Is anyone in the household pregnant?', types: YES_NO, params: {} },

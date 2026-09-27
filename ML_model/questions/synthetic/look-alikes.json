@@ -1389,7 +1389,7 @@
     },
     {
       "id": "s102",
-      "label": "How did you hear about us?",
+      "label": "How did you hear about us? (synthetic rewording)",
       "type": "radio",
       "options": [
         "Friend or family",
@@ -1693,7 +1693,7 @@
     },
     {
       "id": "s123",
-      "label": "Gender",
+      "label": "Gender (synthetic rewording)",
       "type": "radio",
       "options": [
         "Female",
@@ -1740,7 +1740,7 @@
     },
     {
       "id": "s126",
-      "label": "Highest level of education completed",
+      "label": "Highest level of education completed (synthetic rewording)",
       "type": "select",
       "options": [
         "Less than high school",
@@ -1793,7 +1793,7 @@
     },
     {
       "id": "s130",
-      "label": "Signature",
+      "label": "Signature (synthetic rewording)",
       "type": "text",
       "options": [],
       "rule": {
@@ -1803,7 +1803,7 @@
     },
     {
       "id": "s131",
-      "label": "Date",
+      "label": "Date (synthetic rewording)",
       "type": "date",
       "options": [],
       "rule": {
@@ -1813,7 +1813,7 @@
     },
     {
       "id": "s132",
-      "label": "Social Security Number",
+      "label": "Your Social Security Digits",
       "type": "text",
       "options": [],
       "rule": {

@@ -1,134 +1,1594 @@
 {
-  "source": { "title": "Rewordings: household yes/no questions", "kind": "synthetic", "retrieved": "2026-09-26" },
+  "source": {
+    "title": "Rewordings: household yes/no questions",
+    "kind": "synthetic",
+    "retrieved": "2026-09-26"
+  },
   "questions": [
-    { "id": "s1", "label": "Is anyone in your household age 65 or older?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "anySenior65" } },
-    { "id": "s2", "label": "Does your household include anyone 65 years of age or older?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "anySenior65" } },
-    { "id": "s3", "label": "Are there any household members who are 65+?", "type": "radio", "options": ["Yes", "No", "Prefer not to say"], "rule": { "name": "anySenior65" } },
-    { "id": "s4", "label": "Is any member of the household aged 65 or over?", "type": "select", "options": ["Yes", "No"], "rule": { "name": "anySenior65" } },
-    { "id": "s5", "label": "Anyone in the household 65 years or older?", "type": "radio", "options": ["Yes", "No", "Not sure"], "rule": { "name": "anySenior65" } },
-    { "id": "s6", "label": "Check this box if anyone in your household is 65 or older.", "type": "checkbox", "options": ["Someone in my household is 65 or older"], "rule": { "name": "anySenior65" } },
-    { "id": "s7", "label": "Are there any seniors (age 65 and up) in your household?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "anySenior65" } },
-    { "id": "s8", "label": "Household includes a senior age 65+", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "anySenior65" } },
-    { "id": "s9", "label": "Does your family household include a person who is 65 or older?", "type": "radio", "options": ["yes", "no"], "rule": { "name": "anySenior65" } },
-    { "id": "s10", "label": "Is at least one person in your household 65 years old or older?", "type": "radio", "options": ["No", "Yes"], "rule": { "name": "anySenior65" } },
-    { "id": "s11", "label": "IS ANYONE IN THE HOUSEHOLD 65 OR OVER?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "anySenior65" } },
-    { "id": "s12", "label": "Senior in household (65 or older)?", "type": "select", "options": ["Yes", "No", "Prefer not to answer"], "rule": { "name": "anySenior65" } },
-    { "id": "s13", "label": "Are you, or is anyone you live with, 65 or older?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "anySenior65" } },
-    { "id": "s14", "label": "Is anyone in your household 60 years of age or older?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "anySenior60" } },
-    { "id": "s15", "label": "Are there any household members age 60 or over?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "anySenior60" } },
-    { "id": "s16", "label": "Does your household include someone who is 60+?", "type": "radio", "options": ["Yes", "No", "Prefer not to say"], "rule": { "name": "anySenior60" } },
-    { "id": "s17", "label": "Is at least one member of your household aged 60 or older?", "type": "select", "options": ["Yes", "No"], "rule": { "name": "anySenior60" } },
-    { "id": "s18", "label": "Anyone in your home 60 or older?", "type": "radio", "options": ["Yes", "No", "Don't know"], "rule": { "name": "anySenior60" } },
-    { "id": "s19", "label": "Check if anyone in your household is age 60 or above.", "type": "checkbox", "options": ["At least one person in my household is 60 or older"], "rule": { "name": "anySenior60" } },
-    { "id": "s20", "label": "Are you or anyone in your household 60 or older?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "anySenior60" } },
-    { "id": "s21", "label": "Household member 60 years or older?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "anySenior60" } },
-    { "id": "s22", "label": "Are there any seniors age 60 and up living in your household?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "anySenior60" } },
-    { "id": "s23", "label": "Is anybody in your household age 60 or more?", "type": "radio", "options": ["No", "Yes"], "rule": { "name": "anySenior60" } },
-    { "id": "s24", "label": "SENIOR HOUSEHOLD: Is any household member 60 years old or older?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "anySenior60" } },
-    { "id": "s25", "label": "Is there an older adult (60 or older) in your household?", "type": "radio", "options": ["Yes", "No", "Prefer not to say"], "rule": { "name": "anySenior60" } },
-    { "id": "s26", "label": "Are you 18 years of age or older?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "applicantAgeAtLeast", "age": 18 } },
-    { "id": "s27", "label": "Are you at least 18 years old?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "applicantAgeAtLeast", "age": 18 } },
-    { "id": "s28", "label": "Applicant age 18 or over?", "type": "select", "options": ["Yes", "No"], "rule": { "name": "applicantAgeAtLeast", "age": 18 } },
-    { "id": "s29", "label": "Is the person filling out this form 18 or older?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "applicantAgeAtLeast", "age": 18 } },
-    { "id": "s30", "label": "Are you 55 years of age or older?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "applicantAgeAtLeast", "age": 55 } },
-    { "id": "s31", "label": "Are you age 55 or over?", "type": "radio", "options": ["Yes", "No", "Prefer not to say"], "rule": { "name": "applicantAgeAtLeast", "age": 55 } },
-    { "id": "s32", "label": "Is the applicant at least 55 years old?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "applicantAgeAtLeast", "age": 55 } },
-    { "id": "s33", "label": "Are you 55+?", "type": "select", "options": ["Yes", "No"], "rule": { "name": "applicantAgeAtLeast", "age": 55 } },
-    { "id": "s34", "label": "Are you 60 years or older?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "applicantAgeAtLeast", "age": 60 } },
-    { "id": "s35", "label": "Are you at least 60 years of age?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "applicantAgeAtLeast", "age": 60 } },
-    { "id": "s36", "label": "Check the box if you are age 60 or older.", "type": "checkbox", "options": ["I am 60 or older"], "rule": { "name": "applicantAgeAtLeast", "age": 60 } },
-    { "id": "s37", "label": "Applicant is age 60 or above", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "applicantAgeAtLeast", "age": 60 } },
-    { "id": "s38", "label": "Are you 62 or older?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "applicantAgeAtLeast", "age": 62 } },
-    { "id": "s39", "label": "Are you at least 62 years old?", "type": "radio", "options": ["Yes", "No", "Prefer not to say"], "rule": { "name": "applicantAgeAtLeast", "age": 62 } },
-    { "id": "s40", "label": "Are you age 62 or over?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "applicantAgeAtLeast", "age": 62 } },
-    { "id": "s41", "label": "Is your age 62 or greater?", "type": "select", "options": ["Yes", "No"], "rule": { "name": "applicantAgeAtLeast", "age": 62 } },
-    { "id": "s42", "label": "Are you 65 years of age or older?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "applicantAgeAtLeast", "age": 65 } },
-    { "id": "s43", "label": "Are you age 65 or over?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "applicantAgeAtLeast", "age": 65 } },
-    { "id": "s44", "label": "Check if you are 65 or older.", "type": "checkbox", "options": ["I am 65 or older"], "rule": { "name": "applicantAgeAtLeast", "age": 65 } },
-    { "id": "s45", "label": "Is the applicant aged 65+?", "type": "radio", "options": ["yes", "no"], "rule": { "name": "applicantAgeAtLeast", "age": 65 } },
-    { "id": "s46", "label": "Are there any children under 18 in your household?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "anyChildren" } },
-    { "id": "s47", "label": "Do you have children under the age of 18 living with you?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "anyChildren" } },
-    { "id": "s48", "label": "Does your household include anyone under 18?", "type": "radio", "options": ["Yes", "No", "Prefer not to say"], "rule": { "name": "anyChildren" } },
-    { "id": "s49", "label": "Are there minors (under age 18) living in your home?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "anyChildren" } },
-    { "id": "s50", "label": "Is anyone in your household 17 or younger?", "type": "select", "options": ["Yes", "No"], "rule": { "name": "anyChildren" } },
-    { "id": "s51", "label": "Check if there are children under 18 in your household.", "type": "checkbox", "options": ["There are children under 18 in my household"], "rule": { "name": "anyChildren" } },
-    { "id": "s52", "label": "Children under 18 in the household?", "type": "radio", "options": ["Yes", "No", "Prefer not to answer"], "rule": { "name": "anyChildren" } },
-    { "id": "s53", "label": "Do any children under 18 live in your household?", "type": "radio", "options": ["No", "Yes"], "rule": { "name": "anyChildren" } },
-    { "id": "s54", "label": "DOES YOUR HOUSEHOLD HAVE CHILDREN YOUNGER THAN 18?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "anyChildren" } },
-    { "id": "s55", "label": "Is anyone in your household a child (age 0-17)?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "anyChildren" } },
-    { "id": "s56", "label": "Do you live with any children under 18?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "anyChildren" } },
-    { "id": "s57", "label": "Household has kids under 18", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "anyChildren" } },
-    { "id": "s58", "label": "Is anyone in your household a military veteran?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "veteran" } },
-    { "id": "s59", "label": "Has anyone in your household served in the U.S. armed forces?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "veteran" } },
-    { "id": "s60", "label": "Are there any veterans living in your household?", "type": "radio", "options": ["Yes", "No", "Prefer not to say"], "rule": { "name": "veteran" } },
-    { "id": "s61", "label": "Does your household include a veteran or active-duty service member?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "veteran" } },
-    { "id": "s62", "label": "Check if anyone in your household is a veteran.", "type": "checkbox", "options": ["Someone in my household is a veteran"], "rule": { "name": "veteran" } },
-    { "id": "s63", "label": "Veteran in household?", "type": "select", "options": ["Yes", "No"], "rule": { "name": "veteran" } },
-    { "id": "s64", "label": "Is any household member a veteran of the U.S. military?", "type": "radio", "options": ["Yes", "No", "Don't know"], "rule": { "name": "veteran" } },
-    { "id": "s65", "label": "Do you or anyone you live with have military service (veteran, active duty, Guard, or Reserve)?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "veteran" } },
-    { "id": "s66", "label": "IS ANY MEMBER OF YOUR HOUSEHOLD A VETERAN?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "veteran" } },
-    { "id": "s67", "label": "Has any member of your household ever served in the military?", "type": "radio", "options": ["No", "Yes"], "rule": { "name": "veteran" } },
-    { "id": "s68", "label": "Military veteran in the home?", "type": "radio", "options": ["Yes", "No", "Prefer not to say"], "rule": { "name": "veteran" } },
-    { "id": "s69", "label": "Are you or is anyone in your household a veteran?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "veteran" } },
-    { "id": "s70", "label": "Does anyone in your household have a physical or mental disability?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "disability" } },
-    { "id": "s71", "label": "Is any member of your household disabled?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "disability" } },
-    { "id": "s72", "label": "Is there a person with a disability living in your home?", "type": "radio", "options": ["Yes", "No", "Prefer not to say"], "rule": { "name": "disability" } },
-    { "id": "s73", "label": "Do you or anyone in your household have a disability?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "disability" } },
-    { "id": "s74", "label": "Check if any household member has a disability.", "type": "checkbox", "options": ["Someone in my household has a disability"], "rule": { "name": "disability" } },
-    { "id": "s75", "label": "Household member with a disability?", "type": "select", "options": ["Yes", "No"], "rule": { "name": "disability" } },
-    { "id": "s76", "label": "Are any members of the household living with a disability?", "type": "radio", "options": ["Yes", "No", "Prefer not to answer"], "rule": { "name": "disability" } },
-    { "id": "s77", "label": "Does your household include someone who is disabled?", "type": "radio", "options": ["No", "Yes"], "rule": { "name": "disability" } },
-    { "id": "s78", "label": "DISABILITY: Does any household member have a disability?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "disability" } },
-    { "id": "s79", "label": "Is anyone you live with, including you, a person with a disability?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "disability" } },
-    { "id": "s80", "label": "Does anyone in the home have a disability (physical, mental, or developmental)?", "type": "radio", "options": ["Yes", "No", "Don't know"], "rule": { "name": "disability" } },
-    { "id": "s81", "label": "Any household members with disabilities?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "disability" } },
-    { "id": "s82", "label": "Is anyone in your household currently pregnant?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "pregnant" } },
-    { "id": "s83", "label": "Is any household member expecting a baby (pregnant)?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "pregnant" } },
-    { "id": "s84", "label": "Is there a pregnant woman in your household?", "type": "radio", "options": ["Yes", "No", "Prefer not to say"], "rule": { "name": "pregnant" } },
-    { "id": "s85", "label": "Are you or anyone in your household pregnant?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "pregnant" } },
-    { "id": "s86", "label": "Check if someone in your household is pregnant.", "type": "checkbox", "options": ["Someone in my household is pregnant"], "rule": { "name": "pregnant" } },
-    { "id": "s87", "label": "Pregnant household member?", "type": "select", "options": ["Yes", "No"], "rule": { "name": "pregnant" } },
-    { "id": "s88", "label": "Does your household include a person who is pregnant right now?", "type": "radio", "options": ["Yes", "No", "Prefer not to say"], "rule": { "name": "pregnant" } },
-    { "id": "s89", "label": "Is any household member pregnant at this time?", "type": "radio", "options": ["No", "Yes"], "rule": { "name": "pregnant" } },
-    { "id": "s90", "label": "IS ANYONE IN THE HOME PREGNANT?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "pregnant" } },
-    { "id": "s91", "label": "Is someone in your household pregnant?", "type": "radio", "options": ["Yes", "No", "Don't know"], "rule": { "name": "pregnant" } },
-    { "id": "s92", "label": "Anyone pregnant in the household?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "pregnant" } },
-    { "id": "s93", "label": "Are there any pregnant household members?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "pregnant" } },
-    { "id": "s94", "label": "Does anyone in your household receive Medicare?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "medicare" } },
-    { "id": "s95", "label": "Is any household member enrolled in Medicare?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "medicare" } },
-    { "id": "s96", "label": "Do you or anyone in your household have Medicare?", "type": "radio", "options": ["Yes", "No", "Prefer not to say"], "rule": { "name": "medicare" } },
-    { "id": "s97", "label": "Is anyone in your household covered by Medicare?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "medicare" } },
-    { "id": "s98", "label": "Check if anyone in your household gets Medicare.", "type": "checkbox", "options": ["Someone in my household has Medicare"], "rule": { "name": "medicare" } },
-    { "id": "s99", "label": "Medicare recipient in household?", "type": "select", "options": ["Yes", "No"], "rule": { "name": "medicare" } },
-    { "id": "s100", "label": "Does any member of your household have Medicare health insurance?", "type": "radio", "options": ["Yes", "No", "Don't know"], "rule": { "name": "medicare" } },
-    { "id": "s101", "label": "Are there household members on Medicare?", "type": "radio", "options": ["No", "Yes"], "rule": { "name": "medicare" } },
-    { "id": "s102", "label": "DOES ANYONE IN THE HOUSEHOLD GET MEDICARE?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "medicare" } },
-    { "id": "s103", "label": "Is anyone you live with, including yourself, on Medicare?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "medicare" } },
-    { "id": "s104", "label": "Does your household include a person with Medicare coverage?", "type": "radio", "options": ["Yes", "No", "Prefer not to say"], "rule": { "name": "medicare" } },
-    { "id": "s105", "label": "Any Medicare beneficiaries in your household?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "medicare" } },
-    { "id": "s106", "label": "Is everyone in your household a U.S. citizen?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "allCitizens" } },
-    { "id": "s107", "label": "Are all household members United States citizens?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "allCitizens" } },
-    { "id": "s108", "label": "Are all members of your household U.S. citizens?", "type": "radio", "options": ["Yes", "No", "Prefer not to say"], "rule": { "name": "allCitizens" } },
-    { "id": "s109", "label": "Is every person in your household a citizen of the United States?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "allCitizens" } },
-    { "id": "s110", "label": "Check if all household members are U.S. citizens.", "type": "checkbox", "options": ["Everyone in my household is a U.S. citizen"], "rule": { "name": "allCitizens" } },
-    { "id": "s111", "label": "All household members U.S. citizens?", "type": "select", "options": ["Yes", "No"], "rule": { "name": "allCitizens" } },
-    { "id": "s112", "label": "Are all the people in your home US citizens?", "type": "radio", "options": ["Yes", "No", "Prefer not to answer"], "rule": { "name": "allCitizens" } },
-    { "id": "s113", "label": "Does everyone in your household have U.S. citizenship?", "type": "radio", "options": ["No", "Yes"], "rule": { "name": "allCitizens" } },
-    { "id": "s114", "label": "ARE ALL PERSONS IN THE HOUSEHOLD U.S. CITIZENS?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "allCitizens" } },
-    { "id": "s115", "label": "Is each member of the household a US citizen?", "type": "radio", "options": ["Yes", "No", "Don't know"], "rule": { "name": "allCitizens" } },
-    { "id": "s116", "label": "Are you and everyone you live with U.S. citizens?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "allCitizens" } },
-    { "id": "s117", "label": "Everyone in the household is a U.S. citizen", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "allCitizens" } },
-    { "id": "s118", "label": "Are you currently experiencing homelessness?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "homeless" } },
-    { "id": "s119", "label": "Are you homeless right now?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "homeless" } },
-    { "id": "s120", "label": "Do you currently lack a permanent home address?", "type": "radio", "options": ["Yes", "No", "Prefer not to say"], "rule": { "name": "homeless" } },
-    { "id": "s121", "label": "Are you without a fixed address at this time?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "homeless" } },
-    { "id": "s122", "label": "Check if you are currently homeless.", "type": "checkbox", "options": ["I am currently homeless"], "rule": { "name": "homeless" } },
-    { "id": "s123", "label": "Homeless?", "type": "select", "options": ["Yes", "No"], "rule": { "name": "homeless" } },
-    { "id": "s124", "label": "Are you currently unhoused?", "type": "radio", "options": ["Yes", "No", "Prefer not to say"], "rule": { "name": "homeless" } },
-    { "id": "s125", "label": "Are you living without a home address?", "type": "radio", "options": ["No", "Yes"], "rule": { "name": "homeless" } },
-    { "id": "s126", "label": "IS YOUR HOUSEHOLD CURRENTLY HOMELESS?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "homeless" } },
-    { "id": "s127", "label": "Are you currently without a permanent address?", "type": "radio", "options": ["Yes", "No", "Don't know"], "rule": { "name": "homeless" } },
-    { "id": "s128", "label": "Is the applicant homeless?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "homeless" } },
-    { "id": "s129", "label": "Homelessness: Are you currently without a home?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "homeless" } }
+    {
+      "id": "s1",
+      "label": "Is anyone in your household age 65 or older?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "anySenior65"
+      }
+    },
+    {
+      "id": "s2",
+      "label": "Does your household include anyone 65 years of age or older?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "anySenior65"
+      }
+    },
+    {
+      "id": "s3",
+      "label": "Are there any household members who are 65+?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Prefer not to say"
+      ],
+      "rule": {
+        "name": "anySenior65"
+      }
+    },
+    {
+      "id": "s4",
+      "label": "Is any member of the household aged 65 or over?",
+      "type": "select",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "anySenior65"
+      }
+    },
+    {
+      "id": "s5",
+      "label": "Anyone in the household 65 years or older?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Not sure"
+      ],
+      "rule": {
+        "name": "anySenior65"
+      }
+    },
+    {
+      "id": "s6",
+      "label": "Check this box if anyone in your household is 65 or older.",
+      "type": "checkbox",
+      "options": [
+        "Someone in my household is 65 or older"
+      ],
+      "rule": {
+        "name": "anySenior65"
+      }
+    },
+    {
+      "id": "s7",
+      "label": "Are there any seniors (age 65 and up) in your household?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "anySenior65"
+      }
+    },
+    {
+      "id": "s8",
+      "label": "Household includes a senior age 65+",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "anySenior65"
+      }
+    },
+    {
+      "id": "s9",
+      "label": "Does your family household include a person who is 65 or older?",
+      "type": "radio",
+      "options": [
+        "yes",
+        "no"
+      ],
+      "rule": {
+        "name": "anySenior65"
+      }
+    },
+    {
+      "id": "s10",
+      "label": "Is at least one person in your household 65 years old or older?",
+      "type": "radio",
+      "options": [
+        "No",
+        "Yes"
+      ],
+      "rule": {
+        "name": "anySenior65"
+      }
+    },
+    {
+      "id": "s11",
+      "label": "IS ANYONE IN THE HOUSEHOLD 65 OR OVER?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "anySenior65"
+      }
+    },
+    {
+      "id": "s12",
+      "label": "Senior in household (65 or older)?",
+      "type": "select",
+      "options": [
+        "Yes",
+        "No",
+        "Prefer not to answer"
+      ],
+      "rule": {
+        "name": "anySenior65"
+      }
+    },
+    {
+      "id": "s13",
+      "label": "Are you, or is anyone you live with, 65 or older?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "anySenior65"
+      }
+    },
+    {
+      "id": "s14",
+      "label": "Is anyone in your household 60 years of age or older?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "anySenior60"
+      }
+    },
+    {
+      "id": "s15",
+      "label": "Are there any household members age 60 or over?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "anySenior60"
+      }
+    },
+    {
+      "id": "s16",
+      "label": "Does your household include someone who is 60+?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Prefer not to say"
+      ],
+      "rule": {
+        "name": "anySenior60"
+      }
+    },
+    {
+      "id": "s17",
+      "label": "Is at least one member of your household aged 60 or older?",
+      "type": "select",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "anySenior60"
+      }
+    },
+    {
+      "id": "s18",
+      "label": "Anyone in your home 60 or older?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Don't know"
+      ],
+      "rule": {
+        "name": "anySenior60"
+      }
+    },
+    {
+      "id": "s19",
+      "label": "Check if anyone in your household is age 60 or above.",
+      "type": "checkbox",
+      "options": [
+        "At least one person in my household is 60 or older"
+      ],
+      "rule": {
+        "name": "anySenior60"
+      }
+    },
+    {
+      "id": "s20",
+      "label": "Are you or anyone in your household 60 or older?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "anySenior60"
+      }
+    },
+    {
+      "id": "s21",
+      "label": "Household member 60 years or older?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "anySenior60"
+      }
+    },
+    {
+      "id": "s22",
+      "label": "Are there any seniors age 60 and up living in your household?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "anySenior60"
+      }
+    },
+    {
+      "id": "s23",
+      "label": "Is anybody in your household age 60 or more?",
+      "type": "radio",
+      "options": [
+        "No",
+        "Yes"
+      ],
+      "rule": {
+        "name": "anySenior60"
+      }
+    },
+    {
+      "id": "s24",
+      "label": "SENIOR HOUSEHOLD: Is any household member 60 years old or older?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "anySenior60"
+      }
+    },
+    {
+      "id": "s25",
+      "label": "Is there an older adult (60 or older) in your household?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Prefer not to say"
+      ],
+      "rule": {
+        "name": "anySenior60"
+      }
+    },
+    {
+      "id": "s26",
+      "label": "Are you 18 years of age or older?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "applicantAgeAtLeast",
+        "age": 18
+      }
+    },
+    {
+      "id": "s27",
+      "label": "Are you at least 18 years old?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "applicantAgeAtLeast",
+        "age": 18
+      }
+    },
+    {
+      "id": "s28",
+      "label": "Applicant age 18 or over?",
+      "type": "select",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "applicantAgeAtLeast",
+        "age": 18
+      }
+    },
+    {
+      "id": "s29",
+      "label": "Is the person filling out this form 18 or older?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "applicantAgeAtLeast",
+        "age": 18
+      }
+    },
+    {
+      "id": "s30",
+      "label": "Are you 55 years of age or older?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "applicantAgeAtLeast",
+        "age": 55
+      }
+    },
+    {
+      "id": "s31",
+      "label": "Are you age 55 or over?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Prefer not to say"
+      ],
+      "rule": {
+        "name": "applicantAgeAtLeast",
+        "age": 55
+      }
+    },
+    {
+      "id": "s32",
+      "label": "Is the applicant at least 55 years old?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "applicantAgeAtLeast",
+        "age": 55
+      }
+    },
+    {
+      "id": "s33",
+      "label": "Are you 55+?",
+      "type": "select",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "applicantAgeAtLeast",
+        "age": 55
+      }
+    },
+    {
+      "id": "s34",
+      "label": "Are you 60 years or older?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "applicantAgeAtLeast",
+        "age": 60
+      }
+    },
+    {
+      "id": "s35",
+      "label": "Are you at least 60 years of age?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "applicantAgeAtLeast",
+        "age": 60
+      }
+    },
+    {
+      "id": "s36",
+      "label": "Check the box if you are age 60 or older.",
+      "type": "checkbox",
+      "options": [
+        "I am 60 or older"
+      ],
+      "rule": {
+        "name": "applicantAgeAtLeast",
+        "age": 60
+      }
+    },
+    {
+      "id": "s37",
+      "label": "Applicant is age 60 or above",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "applicantAgeAtLeast",
+        "age": 60
+      }
+    },
+    {
+      "id": "s38",
+      "label": "Are you 62 or older?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "applicantAgeAtLeast",
+        "age": 62
+      }
+    },
+    {
+      "id": "s39",
+      "label": "Are you at least 62 years old?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Prefer not to say"
+      ],
+      "rule": {
+        "name": "applicantAgeAtLeast",
+        "age": 62
+      }
+    },
+    {
+      "id": "s40",
+      "label": "Are you age 62 or over?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "applicantAgeAtLeast",
+        "age": 62
+      }
+    },
+    {
+      "id": "s41",
+      "label": "Is your age 62 or greater?",
+      "type": "select",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "applicantAgeAtLeast",
+        "age": 62
+      }
+    },
+    {
+      "id": "s42",
+      "label": "Are you 65 years of age or older?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "applicantAgeAtLeast",
+        "age": 65
+      }
+    },
+    {
+      "id": "s43",
+      "label": "Are you age 65 or over?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "applicantAgeAtLeast",
+        "age": 65
+      }
+    },
+    {
+      "id": "s44",
+      "label": "Check if you are 65 or older.",
+      "type": "checkbox",
+      "options": [
+        "I am 65 or older"
+      ],
+      "rule": {
+        "name": "applicantAgeAtLeast",
+        "age": 65
+      }
+    },
+    {
+      "id": "s45",
+      "label": "Is the applicant aged 65+?",
+      "type": "radio",
+      "options": [
+        "yes",
+        "no"
+      ],
+      "rule": {
+        "name": "applicantAgeAtLeast",
+        "age": 65
+      }
+    },
+    {
+      "id": "s46",
+      "label": "Are there any children under 18 in your household?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "anyChildren"
+      }
+    },
+    {
+      "id": "s47",
+      "label": "Do you have children under the age of 18 living with you?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "anyChildren"
+      }
+    },
+    {
+      "id": "s48",
+      "label": "Does your household include anyone under 18?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Prefer not to say"
+      ],
+      "rule": {
+        "name": "anyChildren"
+      }
+    },
+    {
+      "id": "s49",
+      "label": "Are there minors (under age 18) living in your home?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "anyChildren"
+      }
+    },
+    {
+      "id": "s50",
+      "label": "Is anyone in your household 17 or younger?",
+      "type": "select",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "anyChildren"
+      }
+    },
+    {
+      "id": "s51",
+      "label": "Check if there are children under 18 in your household.",
+      "type": "checkbox",
+      "options": [
+        "There are children under 18 in my household"
+      ],
+      "rule": {
+        "name": "anyChildren"
+      }
+    },
+    {
+      "id": "s52",
+      "label": "Children under 18 in the household?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Prefer not to answer"
+      ],
+      "rule": {
+        "name": "anyChildren"
+      }
+    },
+    {
+      "id": "s53",
+      "label": "Do any children under 18 live in your household?",
+      "type": "radio",
+      "options": [
+        "No",
+        "Yes"
+      ],
+      "rule": {
+        "name": "anyChildren"
+      }
+    },
+    {
+      "id": "s54",
+      "label": "DOES YOUR HOUSEHOLD HAVE CHILDREN YOUNGER THAN 18?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "anyChildren"
+      }
+    },
+    {
+      "id": "s55",
+      "label": "Is anyone in your household a child (age 0-17)?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "anyChildren"
+      }
+    },
+    {
+      "id": "s56",
+      "label": "Do you live with any children under 18?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "anyChildren"
+      }
+    },
+    {
+      "id": "s57",
+      "label": "Household has kids under 18",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "anyChildren"
+      }
+    },
+    {
+      "id": "s58",
+      "label": "Is anyone in your household a military veteran?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "veteran"
+      }
+    },
+    {
+      "id": "s59",
+      "label": "Has anyone in your household served in the U.S. armed forces?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "veteran"
+      }
+    },
+    {
+      "id": "s60",
+      "label": "Are there any veterans living in your household?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Prefer not to say"
+      ],
+      "rule": {
+        "name": "veteran"
+      }
+    },
+    {
+      "id": "s61",
+      "label": "Does your household include a veteran or active-duty service member?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "veteran"
+      }
+    },
+    {
+      "id": "s62",
+      "label": "Check if anyone in your household is a veteran.",
+      "type": "checkbox",
+      "options": [
+        "Someone in my household is a veteran"
+      ],
+      "rule": {
+        "name": "veteran"
+      }
+    },
+    {
+      "id": "s63",
+      "label": "Veteran in household?",
+      "type": "select",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "veteran"
+      }
+    },
+    {
+      "id": "s64",
+      "label": "Is any household member a veteran of the U.S. military?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Don't know"
+      ],
+      "rule": {
+        "name": "veteran"
+      }
+    },
+    {
+      "id": "s65",
+      "label": "Do you or anyone you live with have military service (veteran, active duty, Guard, or Reserve)?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "veteran"
+      }
+    },
+    {
+      "id": "s66",
+      "label": "IS ANY MEMBER OF YOUR HOUSEHOLD A VETERAN?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "veteran"
+      }
+    },
+    {
+      "id": "s67",
+      "label": "Has any member of your household ever served in the military?",
+      "type": "radio",
+      "options": [
+        "No",
+        "Yes"
+      ],
+      "rule": {
+        "name": "veteran"
+      }
+    },
+    {
+      "id": "s68",
+      "label": "Military veteran in the home?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Prefer not to say"
+      ],
+      "rule": {
+        "name": "veteran"
+      }
+    },
+    {
+      "id": "s69",
+      "label": "Are you or is anyone in your household a veteran?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "veteran"
+      }
+    },
+    {
+      "id": "s70",
+      "label": "Does anyone in your household have a physical or mental disability?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "disability"
+      }
+    },
+    {
+      "id": "s71",
+      "label": "Is any member of your household disabled?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "disability"
+      }
+    },
+    {
+      "id": "s72",
+      "label": "Is there a person with a disability living in your home?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Prefer not to say"
+      ],
+      "rule": {
+        "name": "disability"
+      }
+    },
+    {
+      "id": "s73",
+      "label": "Do you or anyone in your household have a disability?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "disability"
+      }
+    },
+    {
+      "id": "s74",
+      "label": "Check if any household member has a disability.",
+      "type": "checkbox",
+      "options": [
+        "Someone in my household has a disability"
+      ],
+      "rule": {
+        "name": "disability"
+      }
+    },
+    {
+      "id": "s75",
+      "label": "Household member with a disability?",
+      "type": "select",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "disability"
+      }
+    },
+    {
+      "id": "s76",
+      "label": "Are any members of the household living with a disability?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Prefer not to answer"
+      ],
+      "rule": {
+        "name": "disability"
+      }
+    },
+    {
+      "id": "s77",
+      "label": "Does your household include someone who is disabled?",
+      "type": "radio",
+      "options": [
+        "No",
+        "Yes"
+      ],
+      "rule": {
+        "name": "disability"
+      }
+    },
+    {
+      "id": "s78",
+      "label": "DISABILITY: Does any household member have a disability?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "disability"
+      }
+    },
+    {
+      "id": "s79",
+      "label": "Is anyone you live with, including you, a person with a disability?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "disability"
+      }
+    },
+    {
+      "id": "s80",
+      "label": "Does anyone in the home have a disability (physical, mental, or developmental)?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Don't know"
+      ],
+      "rule": {
+        "name": "disability"
+      }
+    },
+    {
+      "id": "s81",
+      "label": "Any household members with disabilities?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "disability"
+      }
+    },
+    {
+      "id": "s82",
+      "label": "Is anyone in your household currently pregnant?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "pregnant"
+      }
+    },
+    {
+      "id": "s83",
+      "label": "Is any household member expecting a baby (pregnant)?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "pregnant"
+      }
+    },
+    {
+      "id": "s84",
+      "label": "Is there a pregnant woman in your household?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Prefer not to say"
+      ],
+      "rule": {
+        "name": "pregnant"
+      }
+    },
+    {
+      "id": "s85",
+      "label": "Are you or anyone in your household pregnant?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "pregnant"
+      }
+    },
+    {
+      "id": "s86",
+      "label": "Check if someone in your household is pregnant.",
+      "type": "checkbox",
+      "options": [
+        "Someone in my household is pregnant"
+      ],
+      "rule": {
+        "name": "pregnant"
+      }
+    },
+    {
+      "id": "s87",
+      "label": "Pregnant household member?",
+      "type": "select",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "pregnant"
+      }
+    },
+    {
+      "id": "s88",
+      "label": "Does your household include a person who is pregnant right now?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Prefer not to say"
+      ],
+      "rule": {
+        "name": "pregnant"
+      }
+    },
+    {
+      "id": "s89",
+      "label": "Is any household member pregnant at this time?",
+      "type": "radio",
+      "options": [
+        "No",
+        "Yes"
+      ],
+      "rule": {
+        "name": "pregnant"
+      }
+    },
+    {
+      "id": "s90",
+      "label": "IS ANYONE IN THE HOME PREGNANT?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "pregnant"
+      }
+    },
+    {
+      "id": "s91",
+      "label": "Is someone in your household pregnant?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Don't know"
+      ],
+      "rule": {
+        "name": "pregnant"
+      }
+    },
+    {
+      "id": "s92",
+      "label": "Anyone pregnant in the household?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "pregnant"
+      }
+    },
+    {
+      "id": "s93",
+      "label": "Are there any pregnant household members?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "pregnant"
+      }
+    },
+    {
+      "id": "s94",
+      "label": "Does anyone in your household receive Medicare?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "medicare"
+      }
+    },
+    {
+      "id": "s95",
+      "label": "Is any household member enrolled in Medicare?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "medicare"
+      }
+    },
+    {
+      "id": "s96",
+      "label": "Do you or anyone in your household have Medicare?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Prefer not to say"
+      ],
+      "rule": {
+        "name": "medicare"
+      }
+    },
+    {
+      "id": "s97",
+      "label": "Is anyone in your household covered by Medicare?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "medicare"
+      }
+    },
+    {
+      "id": "s98",
+      "label": "Check if anyone in your household gets Medicare.",
+      "type": "checkbox",
+      "options": [
+        "Someone in my household has Medicare"
+      ],
+      "rule": {
+        "name": "medicare"
+      }
+    },
+    {
+      "id": "s99",
+      "label": "Medicare recipient in household?",
+      "type": "select",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "medicare"
+      }
+    },
+    {
+      "id": "s100",
+      "label": "Does any member of your household have Medicare health insurance?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Don't know"
+      ],
+      "rule": {
+        "name": "medicare"
+      }
+    },
+    {
+      "id": "s101",
+      "label": "Are there household members on Medicare?",
+      "type": "radio",
+      "options": [
+        "No",
+        "Yes"
+      ],
+      "rule": {
+        "name": "medicare"
+      }
+    },
+    {
+      "id": "s102",
+      "label": "DOES ANYONE IN THE HOUSEHOLD GET MEDICARE?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "medicare"
+      }
+    },
+    {
+      "id": "s103",
+      "label": "Is anyone you live with, including yourself, on Medicare?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "medicare"
+      }
+    },
+    {
+      "id": "s104",
+      "label": "Does your household include a person with Medicare coverage?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Prefer not to say"
+      ],
+      "rule": {
+        "name": "medicare"
+      }
+    },
+    {
+      "id": "s105",
+      "label": "Any Medicare beneficiaries in your household?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "medicare"
+      }
+    },
+    {
+      "id": "s106",
+      "label": "Is everyone in your household a U.S. citizen?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "allCitizens"
+      }
+    },
+    {
+      "id": "s107",
+      "label": "Are all household members United States citizens?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "allCitizens"
+      }
+    },
+    {
+      "id": "s108",
+      "label": "Are all members of your household U.S. citizens?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Prefer not to say"
+      ],
+      "rule": {
+        "name": "allCitizens"
+      }
+    },
+    {
+      "id": "s109",
+      "label": "Is every person in your household a citizen of the United States?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "allCitizens"
+      }
+    },
+    {
+      "id": "s110",
+      "label": "Check if all household members are U.S. citizens.",
+      "type": "checkbox",
+      "options": [
+        "Everyone in my household is a U.S. citizen"
+      ],
+      "rule": {
+        "name": "allCitizens"
+      }
+    },
+    {
+      "id": "s111",
+      "label": "All household members U.S. citizens?",
+      "type": "select",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "allCitizens"
+      }
+    },
+    {
+      "id": "s112",
+      "label": "Are all the people in your home US citizens?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Prefer not to answer"
+      ],
+      "rule": {
+        "name": "allCitizens"
+      }
+    },
+    {
+      "id": "s113",
+      "label": "Does everyone in your household have U.S. citizenship?",
+      "type": "radio",
+      "options": [
+        "No",
+        "Yes"
+      ],
+      "rule": {
+        "name": "allCitizens"
+      }
+    },
+    {
+      "id": "s114",
+      "label": "ARE ALL PERSONS IN THE HOUSEHOLD U.S. CITIZENS?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "allCitizens"
+      }
+    },
+    {
+      "id": "s115",
+      "label": "Is each member of the household a US citizen?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Don't know"
+      ],
+      "rule": {
+        "name": "allCitizens"
+      }
+    },
+    {
+      "id": "s116",
+      "label": "Are you and everyone you live with U.S. citizens?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "allCitizens"
+      }
+    },
+    {
+      "id": "s117",
+      "label": "Everyone in the household is a U.S. citizen",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "allCitizens"
+      }
+    },
+    {
+      "id": "s118",
+      "label": "Are you currently experiencing homelessness?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "homeless"
+      }
+    },
+    {
+      "id": "s119",
+      "label": "Are you homeless right now?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "homeless"
+      }
+    },
+    {
+      "id": "s120",
+      "label": "Do you currently lack a permanent home address?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Prefer not to say"
+      ],
+      "rule": {
+        "name": "homeless"
+      }
+    },
+    {
+      "id": "s121",
+      "label": "Are you without a fixed address at this time?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "homeless"
+      }
+    },
+    {
+      "id": "s122",
+      "label": "Check if you are currently homeless.",
+      "type": "checkbox",
+      "options": [
+        "I am currently homeless"
+      ],
+      "rule": {
+        "name": "homeless"
+      }
+    },
+    {
+      "id": "s123",
+      "label": "Homeless? (synthetic rewording)",
+      "type": "select",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "homeless"
+      }
+    },
+    {
+      "id": "s124",
+      "label": "Are you currently unhoused?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Prefer not to say"
+      ],
+      "rule": {
+        "name": "homeless"
+      }
+    },
+    {
+      "id": "s125",
+      "label": "Are you living without a home address?",
+      "type": "radio",
+      "options": [
+        "No",
+        "Yes"
+      ],
+      "rule": {
+        "name": "homeless"
+      }
+    },
+    {
+      "id": "s126",
+      "label": "IS YOUR HOUSEHOLD CURRENTLY HOMELESS?",
+      "type": "radio",
+      "options": [
+        "YES",
+        "NO"
+      ],
+      "rule": {
+        "name": "homeless"
+      }
+    },
+    {
+      "id": "s127",
+      "label": "Are you currently without a permanent address?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No",
+        "Don't know"
+      ],
+      "rule": {
+        "name": "homeless"
+      }
+    },
+    {
+      "id": "s128",
+      "label": "Is the applicant homeless?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "homeless"
+      }
+    },
+    {
+      "id": "s129",
+      "label": "Homelessness: Are you currently without a home?",
+      "type": "radio",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "rule": {
+        "name": "homeless"
+      }
+    }
   ]
 }
