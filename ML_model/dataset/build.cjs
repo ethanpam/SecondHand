@@ -130,11 +130,13 @@ function correctOption(question, profile, { today } = {}) {
   }
 }
 
-// Forms land in one split for good: about 70% train, 10% validation, 20% test.
+const unit = text => crypto.createHash('sha256').update(text).digest().readUInt32BE(0) / 2 ** 32;
+// Test forms are held out whole (about 20%), so the model is judged on forms it never saw.
 function splitFor(url) {
-  const value = crypto.createHash('sha256').update(url).digest().readUInt32BE(0) / 2 ** 32;
-  return value < 0.7 ? 'train' : value < 0.8 ? 'val' : 'test';
+  return unit(url) < 0.8 ? 'train' : 'test';
 }
+// Validation (for early stopping and calibration) takes about 10% of the training forms' decisions.
+const decisionSplit = (formSplit, group) => formSplit === 'test' ? 'test' : unit(`val:${group}`) < 0.1 ? 'val' : 'train';
 
 // One row per candidate answer for every choice question and household. With `perQuestion`,
 // households are taken round-robin across the correct answers so every answer is represented.
@@ -157,8 +159,8 @@ function buildRows(bank, households, { today, perQuestion = Infinity } = {}) {
       }
       for (const index of chosen.sort((a, b) => a - b)) {
         for (const candidate of [...question.options, ABSTAIN]) {
-          rows.push({ state: { facts: sheets[index], question: question.label, candidate }, answers: { correct: candidate === answers[index] }, split,
-            group: `${file.source.url}#${question.id}#${index}` });
+          const group = `${file.source.url}#${question.id}#${index}`;
+          rows.push({ state: { facts: sheets[index], question: question.label, candidate }, answers: { correct: candidate === answers[index] }, split: decisionSplit(split, group), group });
         }
       }
     }
@@ -175,7 +177,8 @@ function buildMatchRows(bank) {
       if (question.rule.name === 'field' && !MATCH_KEYS.includes(question.rule.key)) throw new Error(`${question.id}: field key ${question.rule.key} isn't a text-box candidate.`);
       const correct = question.rule.name === 'field' ? matchCandidate(question.rule.key) : ABSTAIN;
       for (const candidate of [...MATCH_KEYS.map(matchCandidate), ABSTAIN]) {
-        rows.push({ state: { question: question.label, candidate }, answers: { correct: candidate === correct }, split, group: `${file.source.url}#${question.id}` });
+        const group = `${file.source.url}#${question.id}`;
+        rows.push({ state: { question: question.label, candidate }, answers: { correct: candidate === correct }, split: decisionSplit(split, group), group });
       }
     }
   }

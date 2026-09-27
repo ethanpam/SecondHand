@@ -4,7 +4,7 @@ Imports ML_model/dataset/out into LayaStudio with our by-form splits pinned, rep
 token budget, then fine-tunes and evaluates against the base model. Run it with
 LayaStudio's environment:
 
-    uv run --project ~/Projects/LayaStudio python ML_model/train/run.py --sample 2000 --epochs 1
+    uv run --project ~/Projects/LayaStudio python ML_model/train/run.py --epochs 3
 """
 
 import argparse
@@ -20,31 +20,41 @@ from layastudio import engine
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def sample_rows(rows, size, seed):
-    """Keep the split and correct/incorrect mix of the full dataset in a smaller sample."""
-    if not size or size >= len(rows):
+ABSTAIN = "None of these, or the facts don\u2019t say"
+
+
+def balance(rows, abstain_ratio, seed):
+    """Keep every decision with a real answer, and at most `abstain_ratio` abstain decisions per
+    answerable one in each task and split, so "leave it for the applicant" can't swamp training."""
+    if not abstain_ratio:
         return rows
-    rng = random.Random(seed)
-    strata = {}
+    decisions = {}
     for row in rows:
-        strata.setdefault((row["split"], row["answers"]["correct"]), []).append(row)
-    picked = []
-    for group in strata.values():
-        rng.shuffle(group)
-        picked += group[: max(1, round(size * len(group) / len(rows)))]
-    rng.shuffle(picked)
-    return picked
+        decisions.setdefault((row["task"], row["split"], row["decision"]), []).append(row)
+    rng = random.Random(seed)
+    kept = []
+    for task, split in {(task, split) for task, split, _ in decisions}:
+        groups = [group for (t, s, _), group in decisions.items() if t == task and s == split]
+        answerable = [g for g in groups if any(r["answers"]["correct"] and r["state"]["candidate"] != ABSTAIN for r in g)]
+        abstain = [g for g in groups if g not in answerable]
+        rng.shuffle(abstain)
+        keep_abstain = abstain if split == "test" else abstain[: max(1, round(abstain_ratio * len(answerable)))]
+        for group in answerable + keep_abstain:
+            kept += group
+    rng.shuffle(kept)
+    return kept
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dataset", default=str(ROOT / "dataset" / "out"), help="folder with questions.json and rows.jsonl")
-    parser.add_argument("--sample", type=int, default=0, help="train on this many rows (0 = all)")
+    parser.add_argument("--abstain-ratio", type=float, default=1.0, help="abstain decisions kept per answerable one in train/val (0 = keep all)")
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--base", default="aac6fef/laya-mlx", help="Hugging Face repo of the base Laya checkpoint")
     parser.add_argument("--epochs", type=int, default=4)
     parser.add_argument("--method", default="lora", choices=["lora", "head", "full"])
     parser.add_argument("--objective", default="proper", choices=["proper", "rlcd", "ce"])
+    parser.add_argument("--class-weighting", default="balanced", choices=["balanced", "none"])
     parser.add_argument("--name", default="secondhand")
     args = parser.parse_args()
 
@@ -52,7 +62,7 @@ def main():
     questions = json.loads((source / "questions.json").read_text())
     with open(source / "rows.jsonl") as handle:
         rows = [json.loads(line) for line in handle if line.strip()]
-    rows = sample_rows(rows, args.sample, args.seed)
+    rows = balance(rows, args.abstain_ratio, args.seed)
     counts = {split: sum(row["split"] == split for row in rows) for split in ("train", "val", "test")}
     print(f"rows: {len(rows)} {counts}", flush=True)
 
@@ -74,7 +84,7 @@ def main():
         "run_id": run_id,
         "base_model": f"hub:{args.base}",
         "dataset": meta["id"],
-        "hyperparameters": {"epochs": args.epochs, "method": args.method, "objective": args.objective},
+        "hyperparameters": {"epochs": args.epochs, "method": args.method, "objective": args.objective, "class_weighting": args.class_weighting},
         "baseline": True,
     }
     started = time.time()

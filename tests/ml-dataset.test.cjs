@@ -82,16 +82,24 @@ test('each choice question and household becomes one row per candidate, with exa
   assert.ok(first.state.facts.includes('The household has 1 child under 18.'));
   assert.equal(rows.find(row => row.state.candidate === 'Yes' && row.state.facts.includes('1 child')).answers.correct, true);
   assert.equal(rows.find(row => row.state.facts === '' && row.state.candidate === ABSTAIN).answers.correct, true, 'an empty profile abstains');
-  assert.ok(rows.every(row => row.split === splitFor('https://pantry.example.org/a')));
+  assert.ok(rows.every(row => (row.split === 'test') === (splitFor('https://pantry.example.org/a') === 'test')));
 });
 
-test('splits go by form, so test forms are never seen in training', () => {
+test('test forms are held out whole; validation comes from decisions of the training forms', () => {
   const splits = Array.from({ length: 400 }, (_, i) => splitFor(`https://pantry.example.org/form-${i}`));
   const share = name => splits.filter(split => split === name).length / splits.length;
-  assert.ok(share('train') > 0.6 && share('train') < 0.8, `train ${share('train')}`);
-  assert.ok(share('val') > 0.05 && share('val') < 0.2, `val ${share('val')}`);
-  assert.ok(share('test') > 0.1 && share('test') < 0.3, `test ${share('test')}`);
+  assert.ok(share('test') > 0.12 && share('test') < 0.3, `test ${share('test')}`);
+  assert.equal(share('train') + share('test'), 1, 'a form is either a test form or a training form');
   assert.equal(splitFor('https://pantry.example.org/form-1'), splitFor('https://pantry.example.org/form-1'));
+  const trainForm = Array.from({ length: 50 }, (_, i) => `https://pantry.example.org/form-${i}`).find(url => splitFor(url) === 'train');
+  const testForm = Array.from({ length: 50 }, (_, i) => `https://pantry.example.org/form-${i}`).find(url => splitFor(url) === 'test');
+  const questions = Array.from({ length: 60 }, (_, i) => q({ name: 'anyChildren' }, yesNo, 'radio', `Question ${i}`)).map((item, i) => ({ ...item, id: `q${i}` }));
+  const rows = buildRows([{ source: { url: trainForm, title: 'T' }, questions }, { source: { url: testForm, title: 'X' }, questions }], [family], { today: TODAY });
+  const trainRows = rows.filter(row => row.group.startsWith(trainForm));
+  const valShare = new Set(trainRows.filter(row => row.split === 'val').map(row => row.group)).size / new Set(trainRows.map(row => row.group)).size;
+  assert.ok(valShare > 0.02 && valShare < 0.25, `val share ${valShare}`);
+  assert.ok(rows.filter(row => row.group.startsWith(testForm)).every(row => row.split === 'test'), 'test forms never feed validation');
+  for (const group of new Set(rows.map(row => row.group))) assert.equal(new Set(rows.filter(row => row.group === group).map(row => row.split)).size, 1, 'a decision stays in one split');
 });
 
 test('the dataset is written in LayaStudio\'s format', () => {
