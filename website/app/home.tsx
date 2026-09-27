@@ -124,7 +124,6 @@ export function Home() {
               aria-labelledby="download-heading"
             >
               <div className="intro-copy">
-                <p className="eyebrow">01 / On your computer</p>
                 <h2 id="download-heading">
                   Your details,
                   <br />
@@ -246,7 +245,6 @@ export function Home() {
             <section id="setup" className="setup-section">
               <div className="section-heading">
                 <div>
-                  <p className="eyebrow">02 / A one-time setup</p>
                   <h2>
                     A few steps.
                     <br />

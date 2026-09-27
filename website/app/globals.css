@@ -92,15 +92,6 @@ svg {
   margin-inline: auto;
   padding-inline: 64px;
 }
-.eyebrow {
-  font:
-    500 11px/1.5 'Geist',
-    sans-serif;
-  text-transform: uppercase;
-  letter-spacing: 1.8px;
-  margin-bottom: 28px;
-  color: var(--muted-foreground);
-}
 .soft-text {
   color: var(--muted-foreground);
 }
