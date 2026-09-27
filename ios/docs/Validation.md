@@ -33,6 +33,12 @@ Selecting **Start application assistance** returned: “Open an Iowa application
 
 [iPhone Safari screenshot of the blank guest page](images/iphone-safari-guest-qa.png).
 
+## Offline iPhone autofill video — September 27, 2026
+
+[Recorded iPhone QA video and reproduction instructions](qa/README.md). The Debug Simulator QA view read the actual encrypted sharing snapshot and ran the unchanged production JavaScript against a bundled reconstructed applicant form. The recording shows five name/phone fields filled, a manual local home-address choice, and five address fields filled: **10 total, zero skipped**. Asserted manual controls remained blank. No network or submission was available in this fixture. This adds native-vault/WebKit integration evidence; Safari native messaging and live filing remain unverified.
+
+Signed Debug and Release Simulator builds passed, the generated fixture check passed, and the existing iOS JavaScript suite passed **82/82**. The exported H.264 MP4 was decoded and its representative frames visually checked. The extra QA screen is Debug Simulator only and requires `--offline-qa`.
+
 ## Remaining checks
 
 - Provision both targets with the developer's Apple team and matching App Group/Keychain capabilities.
