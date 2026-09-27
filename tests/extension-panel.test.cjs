@@ -151,7 +151,7 @@ test('widget host is a full bar on fillable pages and a small pill elsewhere', t
   const page = content(t);
   const host = page.window.document.querySelector('[data-secondhand-assistant]');
   assert.equal(host.getAttribute('data-secondhand-size'), 'full');
-  assert.equal(host.style.height, '70px');
+  assert.equal(host.style.height, '46px');
   page.setKind('manual');
   page.window.dispatchEvent(new page.window.Event('popstate'));
   assert.equal(host.getAttribute('data-secondhand-size'), 'pill');
@@ -225,7 +225,7 @@ test('the widget grows to full size once the general engine finds fields on an u
   assert.deepEqual(seen, ['hidden'], 'the widget is hidden while the engine reads the page');
   assert.equal(host.style.visibility, '');
   assert.equal(host.getAttribute('data-secondhand-size'), 'full');
-  assert.equal(host.style.height, '70px');
+  assert.equal(host.style.height, '46px');
   page.window.dispatchEvent(new page.window.Event('popstate'));
   assert.equal(host.getAttribute('data-secondhand-size'), 'full', 'stays full on the same page');
 
@@ -239,7 +239,7 @@ test('foreign extension messages cannot scan or focus, and the launcher cannot e
   const page = content(t);
   const host = page.window.document.querySelector('[data-secondhand-assistant]');
   assert.equal(page.request({ type: 'secondhand:pageState' }, { id: 'b'.repeat(32) }), undefined);
-  assert.equal(host.style.height, '70px');
+  assert.equal(host.style.height, '46px');
   assert.equal(page.request({ type: 'secondhand:focusField', key: 'firstName' }, { id: 'b'.repeat(32) }), undefined);
   assert.equal(page.request({ type: 'secondhand:focusField', key: 'firstName' }).focused, true);
   assert.equal(page.window.document.activeElement.id, 'firstName');
@@ -451,6 +451,10 @@ test('widget on a fillable page offers one-click Autofill and cycles through wha
   assert.equal(view.get('widget').hidden, false);
   assert.equal(view.get('pill').hidden, true);
   assert.equal(view.get('need-you').hidden, true);
+  assert.equal(view.get('summary-line'), null, 'the key-points line is gone');
+  assert.equal(view.get('details').textContent.trim(), '', 'the logo is the details button and has no words');
+  assert.equal(view.get('details').getAttribute('aria-label'), EN['widget.detailsTitle']);
+  assert.equal(view.get('widget-text').classList.contains('visually-hidden'), true, 'the ready line is read to screen readers, not shown');
   view.get('autofill').click(); await tick();
   assert.equal(view.types().includes('ui:autofill'), false);
   await view.userClick('autofill');
@@ -459,11 +463,36 @@ test('widget on a fillable page offers one-click Autofill and cycles through wha
   assert.equal(view.get('widget-text').textContent, 'Filled 3');
   assert.equal(view.get('need-you').hidden, false);
   assert.equal(view.get('need-you').textContent, '2 need you');
+  assert.equal(view.get('widget-text').classList.contains('visually-hidden'), true, 'the yellow link says what is left; no line is added');
+  assert.equal(view.types().includes('ui:widgetSize'), false, 'the widget stays one row');
   for (let i = 0; i < 3; i++) await view.userClick('need-you');
   assert.deepEqual(view.requests.filter(request => request.type === 'ui:focusField').map(request => request.key), ['firstName', 'lastName', 'firstName']);
   assert.ok(view.requests.filter(request => request.type === 'ui:focusField').every(request => request.confirmed === true && !('tabId' in request)));
   await view.userClick('details');
   assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'ui:openPanel', confirmed: true });
+});
+
+test('widget frame fits the logo and its buttons, grows for the yellow link, and asks again only when that changes', async t => {
+  const view = await panel(t, { launcher: true });
+  // jsdom lays nothing out, so the widget reports the width Chrome would.
+  view.get('widget').getBoundingClientRect = () => ({ width: view.get('need-you').hidden ? 151.2 : 214.6 });
+  const sizes = () => plainRequests(view.requests.filter(request => request.type === 'ui:widgetSize'));
+  await view.userClick('autofill');
+  assert.deepEqual(sizes(), [{ type: 'ui:widgetSize', line: false, width: 152 }, { type: 'ui:widgetSize', line: false, width: 215 }]);
+  await view.userClick('autofill');
+  assert.equal(sizes().length, 2, 'the same width is not asked for again');
+});
+
+test('widget frame is a row taller for a line and stays as wide as the widget with it', async t => {
+  const view = await panel(t, { launcher: true, autofill: { state: 'locked', filled: 0, needYou: [], message: 'Unlock SecondHand to autofill.', pageKey: 'iowa-personal-information' } });
+  view.get('widget').getBoundingClientRect = () => ({ width: view.get('widget-text').classList.contains('visually-hidden') ? 180.4 : 231.8 });
+  const sizes = () => plainRequests(view.requests.filter(request => request.type === 'ui:widgetSize'));
+  await view.userClick('autofill');
+  assert.deepEqual(sizes(), [{ type: 'ui:widgetSize', line: false, width: 181 }]);
+  await view.userClick('unlock');
+  assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: true, width: 232 });
+  await view.userClick('autofill');
+  assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: false, width: 181 });
 });
 
 test('widget is a pill off the applicant page and opens the side panel from it', async t => {
@@ -479,10 +508,12 @@ test('widget shows Unlock when the vault is locked and returns to Autofill after
   await view.userClick('autofill');
   assert.equal(view.get('unlock').hidden, false);
   assert.equal(view.get('autofill').hidden, true);
+  assert.equal(view.get('widget-text').classList.contains('visually-hidden'), true, 'the Unlock button says it all');
   await view.userClick('unlock');
-  assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'ui:showApp', confirmed: true });
+  assert.deepEqual(plainRequests(view.requests.slice(-2)), [{ type: 'ui:showApp', confirmed: true }, { type: 'ui:widgetSize', line: true }]);
   assert.equal(view.get('autofill').hidden, false);
   assert.match(view.get('widget-text').textContent, /Unlock SecondHand, then click Autofill/);
+  assert.equal(view.get('widget-text').classList.contains('visually-hidden'), false);
 });
 
 test('widget reports an unreachable desktop and restores an earlier result after reloading', async t => {
@@ -1071,7 +1102,7 @@ test('the widget offers the Spanish view when the page is in English, and the of
   const detector = detectorStub();
   const view = await panel(t, { launcher: true, language: 'es-ES', Translator: translatorStub().Translator, LanguageDetector: detector.LanguageDetector, questions: pageQuestions });
   await settle();
-  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:ping' }, { type: 'ui:pageState' }, { type: 'ui:questions' }]);
+  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:ping' }, { type: 'ui:pageState' }, { type: 'ui:questions' }, { type: 'ui:widgetSize', line: true }], 'the offer gets a row');
   assert.equal(view.get('translate-offer').hidden, false);
   assert.equal(view.get('translate-offer').textContent, spanish('widget.offer'));
   assert.equal(view.get('translate-offer').title, spanish('widget.offerTitle'));
@@ -1287,39 +1318,40 @@ test('a summary that fails, or a worker reply that is not pages, says why in one
   assert.equal(odd.get('summary-note').classList.contains('error'), true);
 });
 
-test('the widget shows the page’s first key point as one line, opens the side panel from it, and waits for points in its own language', async t => {
-  const withLine = summary => state => ({ ...structuredClone(state), summary });
-  const view = await panel(t, { launcher: true, pageState: withLine({ language: 'en', point: 'Have your documents ready.', english: false }) });
-  assert.equal(view.get('summary-line').hidden, false);
-  assert.equal(view.get('summary-line').textContent, 'This page says: Have your documents ready.');
-  assert.equal(view.get('summary-line').title, EN['summary.widgetTitle']);
-  assert.match(view.get('widget-text').textContent, /first home address suggestion/, 'the address disclosure stays in view');
-  assert.deepEqual(plainRequests(view.requests.filter(request => request.type === 'ui:widgetSize')), [{ type: 'ui:widgetSize', line: true }], 'the widget asks its tab for room for the line, once');
-  view.get('summary-line').click(); await tick();
-  assert.equal(view.types().includes('ui:openPanel'), false);
-  view.clickNow('summary-line');
-  assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'ui:openPanel', confirmed: true });
-  const other = await panel(t, { launcher: true, language: 'es-ES', pageState: withLine({ language: 'en', point: 'Have your documents ready.', english: false }) });
-  assert.equal(other.get('summary-line').hidden, true, 'points written for another language wait for the side panel');
-  assert.equal(other.types().includes('ui:widgetSize'), false, 'no room is asked for a line that is not shown');
-  const english = await panel(t, { launcher: true, language: 'vi-VN', pageState: withLine({ language: 'vi', point: 'Have your documents ready.', english: true }) });
-  assert.equal(english.get('summary-line').textContent, strings.text('vi', 'summary.widgetLineEnglish', { point: 'Have your documents ready.' }));
-  assert.equal((await panel(t, { launcher: true })).get('summary-line').hidden, true);
-});
-
-test('the Iowa widget grows by one row while it shows a line of key points, when the worker asks for our extension', t => {
+test('the Iowa widget grows by one row while it shows a message, when the worker asks for our extension', t => {
   const page = content(t);
   const host = page.host();
   assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: true })), { sized: true });
   assert.equal(host.style.height, '86px');
   page.window.dispatchEvent(new page.window.Event('popstate'));
-  assert.equal(host.style.height, '86px', 'the room stays while the line is shown');
+  assert.equal(host.style.height, '86px', 'the room stays while the message is shown');
   page.setKind('manual');
   page.window.dispatchEvent(new page.window.Event('popstate'));
-  assert.equal(host.style.height, '46px', 'a pill has no line');
+  assert.equal(host.style.height, '46px', 'a pill has no message');
   page.setKind('fillable');
   assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: false })), { sized: true });
-  assert.equal(host.style.height, '70px');
+  assert.equal(host.style.height, '46px');
   assert.equal(page.request({ type: 'secondhand:widgetSize', line: true }, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
-  assert.equal(host.style.height, '70px');
+  assert.equal(host.style.height, '46px');
+});
+
+test('the Iowa widget frame is as wide as the widget measured itself, never past 272px', t => {
+  const page = content(t);
+  const host = page.host();
+  assert.match(host.style.width, /^min\(272px/);
+  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: false, width: 152 })), { sized: true });
+  assert.match(host.style.width, /^min\(152px, 272px/, 'never wider than the full card');
+  page.window.dispatchEvent(new page.window.Event('popstate'));
+  assert.match(host.style.width, /^min\(152px/, 'the width stays across page changes');
+  page.setKind('manual');
+  page.window.dispatchEvent(new page.window.Event('popstate'));
+  assert.equal(host.style.width, '46px', 'a pill');
+  page.setKind('fillable');
+  page.request({ type: 'secondhand:widgetSize', line: true, width: 231 });
+  assert.match(host.style.width, /^min\(231px/, 'a line keeps the widget’s width');
+  assert.equal(host.style.height, '86px');
+  page.request({ type: 'secondhand:widgetSize', line: false });
+  assert.match(host.style.width, /^min\(272px/, 'a widget that could not measure itself gets the full card');
+  for (const width of [0, 1.5, '152', 5000]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: false, width }), undefined, `width ${width}`);
+  assert.match(host.style.width, /^min\(272px/);
 });

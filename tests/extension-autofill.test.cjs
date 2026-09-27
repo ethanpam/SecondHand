@@ -731,5 +731,8 @@ test('the widget’s request for room for its line goes to its own tab’s conte
   assert.deepEqual(w.calls.pageTabs.at(-1), 7);
   assert.equal(await w.panel({ type: 'ui:widgetSize', line: true }), undefined, 'the side panel has no widget to size');
   assert.equal(await w.launcher({ type: 'ui:widgetSize', line: 'yes' }), undefined);
+  assert.deepEqual(plain((await w.launcher({ type: 'ui:widgetSize', line: false, width: 152 })).data), { sized: true });
+  assert.deepEqual(plain(w.calls.content.at(-1)), { type: 'secondhand:widgetSize', line: false, width: 152 }, 'the widget’s measured width goes along');
+  for (const width of [0, -5, 1.5, '152', 5000, null]) assert.equal(await w.launcher({ type: 'ui:widgetSize', line: false, width }), undefined, `width ${width}`);
   assert.deepEqual(w.calls.native, []);
 });

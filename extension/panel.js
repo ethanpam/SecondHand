@@ -87,10 +87,9 @@
     let pageLanguage = '';
     let languageChecked = false;
     let languageTrouble = null;
-    // The first key point the side panel wrote for this page, as the worker keeps it for the tab, and
-    // whether the page's content script has made the widget a row taller for it.
-    let summaryLine = null;
-    let lineRoom = false;
+    // The frame the page's content script was last asked for: a row taller for a message,
+    // and as wide as the widget (0 until it has measured itself).
+    let frame = { line: false, width: 0 };
     const AI_TIMEOUT_MS = 8000;
     // An outdated worker keeps its reload steps on screen and is not polled again.
     const trouble = error => { if (error.outdated) outdated = true; return problem(error); };
@@ -123,6 +122,7 @@
       $('autofill').hidden = autopilot || locked;
       $('unlock').hidden = autopilot || !locked;
       $('autofill').disabled = working;
+      // Answers still to give show as a yellow link that finds each one in the form.
       const needYou = ['done', 'waiting'].includes(result?.state) ? fieldKeys(result.needYou) : [];
       $('need-you').hidden = outdated || !needYou.length;
       $('need-you').textContent = t('widget.needYou', { count: needYou.length });
@@ -130,21 +130,27 @@
       $('autofill').title = site ? t('widget.autofillSiteTitle') : t('widget.autofillIowaTitle');
       const details = [hasMessage(result) ? words(fromResult(result)) : '', ai.note ? words(ai.note) : '', ai.reason, fixedText(languageTrouble?.message, 160)];
       $('widget-text').title = outdated ? t('panel.outdated') : fixedText(details.filter(Boolean).join(' '), 240);
-      $('translate-offer').hidden = outdated || !known || !pageLanguage || pageLanguage === language;
-      // One line of the page's key points, once the side panel has written them in this language.
-      const line = !outdated && summaryLine?.language === language ? summaryLine : null;
-      $('summary-line').hidden = !line;
-      $('summary-line').textContent = line ? t(line.english ? 'summary.widgetLineEnglish' : 'summary.widgetLine', { point: fixedText(line.point, 200) }) : '';
-      if (Boolean(line) !== lineRoom) makeRoom(Boolean(line));
+      // The status is always read to screen readers, but shown as a line only when the reader
+      // must act and the need-you link doesn't already say so: a problem, an unlock or CAPTCHA
+      // step, a fill that found nothing, or an outdated extension. The Autofill button's title
+      // keeps the Iowa address disclosure.
+      const waiting = ['waiting', 'done'].includes(result?.state) && !needYou.length;
+      const unfinished = waiting && (result.state === 'waiting' || Boolean(result.todo || result.todoKey) || !(Number(result.filled) > 0));
+      const message = outdated || Boolean(note) || ['error', 'offline'].includes(result?.state) || unfinished;
+      $('widget-text').classList.toggle('visually-hidden', !message);
+      $('translate-offer').hidden = outdated || message || !known || !pageLanguage || pageLanguage === language;
+      // The widget is as wide as what it shows, up to 272px (see panel.css). An outdated worker
+      // is not asked for anything more; its steps fill the frame the widget already has.
+      const room = message || !$('translate-offer').hidden;
+      const width = outdated || $('widget').hidden ? frame.width : Math.ceil($('widget').getBoundingClientRect().width);
+      if (!outdated && (room !== frame.line || width !== frame.width)) fitFrame(room, width);
     }
-    // The widget can't size its own frame: the worker asks this tab's content script for the row.
-    async function makeRoom(line) {
-      lineRoom = line;
-      try { await send({ type: 'ui:widgetSize', line }); }
+    // The widget can't size its own frame: the worker asks this tab's content script for it.
+    async function fitFrame(line, width) {
+      frame = { line, width };
+      try { await send({ type: 'ui:widgetSize', line, ...(width ? { width } : {}) }); }
       catch (error) { note = trouble(error); render(); }
     }
-    const lineOf = value => value && strings.LANGUAGES.includes(value.language) && typeof value.point === 'string' && value.point.trim()
-      ? { language: value.language, point: value.point, english: value.english === true } : null;
     async function poll() {
       clearTimeout(pollTimer);
       if (outdated) return;
@@ -158,7 +164,6 @@
           // While autofill runs, the worker moves ahead between polls. Otherwise keep
           // this widget's own result and adopt the worker's only after a reload.
           if (autopilot || !result) result = state?.result || result;
-          summaryLine = lineOf(state?.summary);
           note = null;
         } catch (error) { note = trouble(error); }
         render();
@@ -233,8 +238,9 @@
       } catch (error) { note = trouble(error); }
       render();
     }));
-    // Send immediately inside the trusted click: Chrome needs the user gesture to open the panel.
-    for (const id of ['details', 'pill', 'summary-line']) {
+    // The logo, like the pill, opens the side panel. Send immediately inside the trusted click:
+    // Chrome needs the user gesture to open the panel.
+    for (const id of ['details', 'pill']) {
       $(id).addEventListener('click', trusted(() => {
         send({ type: 'ui:openPanel', confirmed: true }).catch(error => { note = trouble(error); render(); });
       }));

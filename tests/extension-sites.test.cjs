@@ -674,7 +674,7 @@ test('on approved sites the widget is a closed, full-size extension iframe in th
   // Chrome's on-device AI (Prompt API) is blocked in a cross-origin iframe unless the embedder delegates it.
   assert.equal(page.frames[0].getAttribute('allow'), 'language-model; language-detector', 'the widget may use Chrome’s on-device AI and language detector');
   assert.equal(host.getAttribute('data-secondhand-size'), 'full');
-  assert.equal(host.style.height, '70px');
+  assert.equal(host.style.height, '46px');
   assert.equal(host.style.position, 'fixed');
   page.window.eval(source('generic-content.js'));
   assert.equal(page.frames.length, 1, 'injecting again keeps one widget');
@@ -1079,14 +1079,28 @@ test('after an update, site registrations from an older version load the page re
   assert.equal(w.log.slice(log).includes('scripting.updateContentScripts'), false, 'current registrations are left alone');
 });
 
-test('the site widget grows by one row while it shows a line of key points, when the worker asks for our extension', t => {
+test('the site widget grows by one row while it shows a message, when the worker asks for our extension', t => {
   const page = siteContent(t);
   assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: true })), { sized: true });
   assert.equal(page.host().style.height, '86px');
   assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: false })), { sized: true });
-  assert.equal(page.host().style.height, '70px');
+  assert.equal(page.host().style.height, '46px');
   assert.equal(page.request({ type: 'secondhand:widgetSize', line: true }, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
-  assert.equal(page.host().style.height, '70px');
+  assert.equal(page.host().style.height, '46px');
+});
+
+test('the site widget frame is as wide as the widget measured itself, never past 272px', t => {
+  const page = siteContent(t);
+  assert.match(page.host().style.width, /^min\(272px/);
+  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: false, width: 152 })), { sized: true });
+  assert.match(page.host().style.width, /^min\(152px, 272px/, 'never wider than the full card');
+  page.request({ type: 'secondhand:widgetSize', line: true, width: 231 });
+  assert.match(page.host().style.width, /^min\(231px/, 'a line keeps the widget’s width');
+  assert.equal(page.host().style.height, '86px');
+  page.request({ type: 'secondhand:widgetSize', line: false });
+  assert.match(page.host().style.width, /^min\(272px/, 'a widget that could not measure itself gets the full card');
+  for (const width of [0, 1.5, '152', 5000]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: false, width }), undefined, `width ${width}`);
+  assert.match(page.host().style.width, /^min\(272px/);
 });
 
 test('a site frame answers the page-text request with its declared language and its words, never an answer, for our extension only', t => {
