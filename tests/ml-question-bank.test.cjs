@@ -53,3 +53,13 @@ test('mistakes that would poison training data are rejected with the question id
   bad([yesNo], { kind: 'mystery' }, /kind/i);
   bad([], undefined, /at least one question/i);
 });
+
+test('synthetic rewordings are marked as such, need no URL, and live apart from real forms', () => {
+  const { loadSyntheticBank } = require('../ML_model/question-bank.cjs');
+  const synthetic = { source: { title: 'Rewordings: household seniors', kind: 'synthetic', retrieved: '2026-09-26' }, questions: [yesNo] };
+  assert.doesNotThrow(() => validateQuestionFile(synthetic));
+  assert.throws(() => validateQuestionFile({ ...synthetic, source: { ...synthetic.source, url: 'https://pantry.example.org/a' } }), /synthetic.*url/i);
+  assert.throws(() => validateQuestionFile({ ...synthetic, source: { ...synthetic.source, kind: 'web' } }), /https/i, 'a real form still needs its URL');
+  for (const file of loadSyntheticBank()) assert.equal(file.source.kind, 'synthetic');
+  for (const file of loadQuestionBank()) assert.notEqual(file.source.kind, 'synthetic', 'real forms and rewordings are never mixed');
+});

@@ -131,6 +131,9 @@ function correctOption(question, profile, { today } = {}) {
 }
 
 const unit = text => crypto.createHash('sha256').update(text).digest().readUInt32BE(0) / 2 ** 32;
+// Where a form's decisions come from: its URL, or its file for training-only rewordings.
+const formKey = file => file.source.kind === 'synthetic' ? `synthetic:${file.file}` : file.source.url;
+const formSplit = file => file.source.kind === 'synthetic' ? 'train' : splitFor(file.source.url);
 // Test forms are held out whole (about 20%), so the model is judged on forms it never saw.
 function splitFor(url) {
   return unit(url) < 0.8 ? 'train' : 'test';
@@ -144,7 +147,7 @@ function buildRows(bank, households, { today, perQuestion = Infinity } = {}) {
   const rows = [];
   const sheets = households.map(profile => factsText(buildFacts(profile, { today })));
   for (const file of bank) {
-    const split = splitFor(file.source.url);
+    const split = formSplit(file);
     for (const question of file.questions.filter(item => CHOICE_TYPES.includes(item.type))) {
       const answers = households.map(profile => correctOption(question, profile, { today }));
       const byAnswer = new Map();
@@ -159,7 +162,7 @@ function buildRows(bank, households, { today, perQuestion = Infinity } = {}) {
       }
       for (const index of chosen.sort((a, b) => a - b)) {
         for (const candidate of [...question.options, ABSTAIN]) {
-          const group = `${file.source.url}#${question.id}#${index}`;
+          const group = `${formKey(file)}#${question.id}#${index}`;
           rows.push({ state: { facts: sheets[index], question: question.label, candidate }, answers: { correct: candidate === answers[index] }, split: decisionSplit(split, group), group });
         }
       }
@@ -172,12 +175,12 @@ function buildRows(bank, households, { today, perQuestion = Infinity } = {}) {
 function buildMatchRows(bank) {
   const rows = [];
   for (const file of bank) {
-    const split = splitFor(file.source.url);
+    const split = formSplit(file);
     for (const question of file.questions.filter(item => TEXT_TYPES.includes(item.type))) {
       if (question.rule.name === 'field' && !MATCH_KEYS.includes(question.rule.key)) throw new Error(`${question.id}: field key ${question.rule.key} isn't a text-box candidate.`);
       const correct = question.rule.name === 'field' ? matchCandidate(question.rule.key) : ABSTAIN;
       for (const candidate of [...MATCH_KEYS.map(matchCandidate), ABSTAIN]) {
-        const group = `${file.source.url}#${question.id}`;
+        const group = `${formKey(file)}#${question.id}`;
         rows.push({ state: { question: question.label, candidate }, answers: { correct: candidate === correct }, split: decisionSplit(split, group), group });
       }
     }
@@ -204,12 +207,12 @@ function writeDataset(outDir, bank, households, options = {}) {
 }
 
 if (require.main === module) {
-  const { loadQuestionBank } = require('../question-bank.cjs');
+  const { loadQuestionBank, loadSyntheticBank } = require('../question-bank.cjs');
   const { generateHouseholds } = require('../profiles/generate.cjs');
   const arg = (name, fallback) => { const index = process.argv.indexOf(`--${name}`); return index > 0 ? process.argv[index + 1] : fallback; };
   const today = arg('today', new Date().toISOString().slice(0, 10));
   const households = generateHouseholds({ count: Number(arg('households', '2000')), seed: Number(arg('seed', '7')), today });
-  const summary = writeDataset(path.resolve(arg('out', path.join(__dirname, 'out'))), loadQuestionBank(), households, { today, perQuestion: Number(arg('per-question', '24')) });
+  const summary = writeDataset(path.resolve(arg('out', path.join(__dirname, 'out'))), [...loadQuestionBank(), ...loadSyntheticBank()], households, { today, perQuestion: Number(arg('per-question', '24')) });
   console.log(JSON.stringify(summary, null, 2));
 }
 

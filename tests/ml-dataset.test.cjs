@@ -149,3 +149,11 @@ test('the written dataset holds both tasks and reports them separately', () => {
     assert.equal(fs.readFileSync(path.join(out, 'rows.jsonl'), 'utf8').trim().split('\n').length, summary.rows);
   } finally { fs.rmSync(out, { recursive: true, force: true }); }
 });
+
+test('synthetic rewordings only ever train, never test', () => {
+  const bank = [{ source: { title: 'Rewordings', kind: 'synthetic', retrieved: '2026-09-26' }, file: 'seniors.json',
+    questions: Array.from({ length: 40 }, (_, i) => ({ ...q({ name: 'anyChildren' }, yesNo, 'radio', `Children? ${i}`), id: `s${i}` })) }];
+  const rows = buildRows(bank, [family], { today: TODAY });
+  assert.ok(rows.length > 0 && rows.every(row => row.split !== 'test'));
+  assert.ok(rows.every(row => row.group.startsWith('synthetic:seniors.json#')));
+});

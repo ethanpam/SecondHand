@@ -6,8 +6,9 @@ const path = require('node:path');
 const { RULES } = require('./answer-rules.cjs');
 
 const QUESTION_TYPES = ['radio', 'select', 'checkbox', 'text', 'textarea', 'number', 'date', 'email', 'tel'];
-const KINDS = ['google-form', 'jotform', 'pdf', 'web', 'iowa-portal'];
+const KINDS = ['google-form', 'jotform', 'pdf', 'web', 'iowa-portal', 'synthetic'];
 const QUESTIONS_DIR = path.join(__dirname, 'questions');
+const SYNTHETIC_DIR = path.join(QUESTIONS_DIR, 'synthetic');
 const text = (value, max) => typeof value === 'string' && value.trim() !== '' && value.length <= max;
 
 function checkRule(where, question) {
@@ -38,11 +39,16 @@ function validateQuestionFile(file, where = 'form') {
   if (!file || typeof file !== 'object' || Array.isArray(file)) throw new Error(`${where}: must be an object with source and questions.`);
   const { source, questions } = file;
   if (!source || typeof source !== 'object') throw new Error(`${where}: source is required.`);
-  let url;
-  try { url = new URL(source.url); } catch { throw new Error(`${where}: source.url must be an https URL.`); }
-  if (url.protocol !== 'https:') throw new Error(`${where}: source.url must be an https URL.`);
-  if (!text(source.title, 200)) throw new Error(`${where}: source.title is required.`);
   if (!KINDS.includes(source.kind)) throw new Error(`${where}: source.kind must be one of ${KINDS.join(', ')}.`);
+  if (source.kind === 'synthetic') {
+    // Rewordings written for training only: they have no page of their own and never reach the test set.
+    if (source.url !== undefined) throw new Error(`${where}: synthetic rewordings have no url.`);
+  } else {
+    let url;
+    try { url = new URL(source.url); } catch { throw new Error(`${where}: source.url must be an https URL.`); }
+    if (url.protocol !== 'https:') throw new Error(`${where}: source.url must be an https URL.`);
+  }
+  if (!text(source.title, 200)) throw new Error(`${where}: source.title is required.`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(source.retrieved || '')) throw new Error(`${where}: source.retrieved must be a YYYY-MM-DD date.`);
   if (!Array.isArray(questions) || !questions.length) throw new Error(`${where}: needs at least one question.`);
   const seen = new Set();
@@ -64,9 +70,24 @@ function validateQuestionFile(file, where = 'form') {
   return file;
 }
 
+const readFiles = directory => fs.readdirSync(directory).filter(name => name.endsWith('.json')).sort()
+  .map(name => ({ ...validateQuestionFile(JSON.parse(fs.readFileSync(path.join(directory, name), 'utf8')), name), file: name }));
+
+// Real public forms only.
 function loadQuestionBank(directory = QUESTIONS_DIR) {
-  return fs.readdirSync(directory).filter(name => name.endsWith('.json')).sort()
-    .map(name => validateQuestionFile(JSON.parse(fs.readFileSync(path.join(directory, name), 'utf8')), name));
+  const files = readFiles(directory);
+  const mixed = files.find(file => file.source.kind === 'synthetic');
+  if (mixed) throw new Error(`${mixed.file}: synthetic rewordings belong in questions/synthetic/.`);
+  return files;
 }
 
-module.exports = { validateQuestionFile, loadQuestionBank, QUESTION_TYPES, KINDS };
+// Training-only rewordings.
+function loadSyntheticBank(directory = SYNTHETIC_DIR) {
+  if (!fs.existsSync(directory)) return [];
+  const files = readFiles(directory);
+  const real = files.find(file => file.source.kind !== 'synthetic');
+  if (real) throw new Error(`${real.file}: only synthetic rewordings belong in questions/synthetic/.`);
+  return files;
+}
+
+module.exports = { validateQuestionFile, loadQuestionBank, loadSyntheticBank, QUESTION_TYPES, KINDS };
