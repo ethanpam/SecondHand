@@ -1,0 +1,18 @@
+{
+  "source": {
+    "url": "https://docs.google.com/forms/d/e/1FAIpQLSfp3aV9_k_gYAfXknDOrO2qyzQQvlod6DuRpLDhtTY2dTXxrA/viewform",
+    "title": "Food Pantry Registration Form",
+    "kind": "google-form",
+    "retrieved": "2026-09-26",
+    "region": "New Wilmington, PA"
+  },
+  "questions": [
+    { "id": "q1", "label": "Last Name:", "type": "text", "options": [], "rule": { "name": "field", "key": "lastName" } },
+    { "id": "q2", "label": "First Name:", "type": "text", "options": [], "rule": { "name": "field", "key": "firstName" }, "note": "Help text asks for the first name as on the college ID card, no nicknames." },
+    { "id": "q3", "label": "STUDENT ID#", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Westminster student ID; not in the profile." },
+    { "id": "q4", "label": "Date of Birth", "type": "date", "options": [], "rule": { "name": "field", "key": "birthDate" } },
+    { "id": "q5", "label": "Graduation Year", "type": "radio", "options": ["2027", "2028", "2029", "2030"], "rule": { "name": "none" }, "note": "Graduation year; not in the profile." },
+    { "id": "q6", "label": "Where do you live?", "type": "radio", "options": ["Berlin Village", "Browne Hall", "Eichenauer Hall", "Ferguson Hall", "Galbreath Hall", "Russell Hall", "Shaw Hall", "Thompson House", "Fraternity House", "Off Campus"], "rule": { "name": "none" }, "note": "Campus residence hall; the profile only knows the home address." },
+    { "id": "q7", "label": "Dietary Restrictions (check all that apply)", "type": "checkbox", "options": ["Dairy Allergy", "Nuts Allergy", "Fish Allergy", "Gluten Free", "Vegetarian", "Vegan"], "rule": { "name": "none" }, "note": "Dietary needs. The page also has an \"Other:\" free-text option, left out here." }
+  ]
+}
