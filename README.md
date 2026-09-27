@@ -49,16 +49,12 @@
 
 ```mermaid
 flowchart LR
-  subgraph computer["Your computer"]
-    app["SecondHand app<br/>encrypted profile"]
-  end
-  subgraph chrome["Google Chrome"]
-    ext["SecondHand extension<br/>card and side panel"]
-  end
-  portal["Iowa's application<br/>hhsservices.iowa.gov"]
-  ext -- "asks for this page's answers" --> app
-  app -- "after you approve" --> ext
-  ext -- "fills the fields" --> portal
+  app["<b>SecondHand app</b><br/>your encrypted profile"]
+  ext["<b>Chrome extension</b><br/>card and side panel"]
+  portal["<b>Iowa's application</b><br/>in the same Chrome tab"]
+  ext -- "1 · asks for this page's answers" --> app
+  app -- "2 · sends them after you approve" --> ext
+  ext -- "3 · fills the fields" --> portal
 ```
 
 The desktop app is the only place your details are kept. The Chrome extension talks to it through Chrome's native messaging, a direct connection between the two programs on your computer; nothing goes through a server. For each page, the extension asks only for the answers that page needs, and only while the app is unlocked. Filling a field on Iowa's page shares that answer with Iowa, as typing it would. Read more in [the security design](docs/security.md).
