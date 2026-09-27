@@ -112,6 +112,19 @@ export function Home() {
               <AutofillDemo />
             </section>
 
+            <div className="scope-note">
+              <span className="note-label">What it does today</span>
+              <p>
+                A browser side panel tracks the applicant page with completion
+                checkmarks and missing-field reminders. With your approval, it
+                fills saved applicant details, address and mailing information,
+                and your explicit program choices. It selects Save and Continue
+                when required answers are complete, then checks the next step.
+                Later navigation and questions the helper cannot recognize stay
+                manual.
+              </p>
+            </div>
+
             <section
               className="intro"
               id="downloads"
@@ -221,19 +234,6 @@ export function Home() {
                 </div>
               </div>
             </section>
-
-            <div className="scope-note">
-              <span className="note-label">What it does today</span>
-              <p>
-                A browser side panel tracks the applicant page with completion
-                checkmarks and missing-field reminders. With your approval, it
-                fills saved applicant details, address and mailing information,
-                and your explicit program choices. It selects Save and Continue
-                when required answers are complete, then checks the next step.
-                Later navigation and questions the helper cannot recognize stay
-                manual.
-              </p>
-            </div>
 
             <section id="setup" className="setup-section">
               <div className="section-heading">
