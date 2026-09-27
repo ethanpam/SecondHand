@@ -102,8 +102,9 @@
 
   function setProfileDirty(value) {
     profileDirty = value;
-    $('profile-save-state').textContent = value ? 'Unsaved changes' : 'Saved locally';
-    $('profile-save-state').classList.toggle('unsaved', value);
+    // Shown only while there is something to save.
+    $('profile-save-state').textContent = value ? 'Unsaved changes' : '';
+    $('profile-save-state').hidden = !value;
     $('profile-nav-dot').hidden = !value;
   }
 
@@ -245,7 +246,6 @@
       item.classList.toggle('active', selected);
       if (selected) item.setAttribute('aria-current', 'page'); else item.removeAttribute('aria-current');
     });
-    $('breadcrumb-current').textContent = viewNames[view];
     if (focus) { $('main-content').focus(); window.scrollTo(0, 0); }
     return true;
   }
@@ -307,7 +307,7 @@
       }
       const footer = element('div', 'application-card-footer');
       const edit = element('button', 'text-button', 'View & update'); edit.type = 'button'; edit.append(icon('arrow')); edit.addEventListener('click', () => openApplication(application));
-      footer.append(element('p', '', 'Personal record · Update from your agency notices'), edit); card.append(footer); list.append(card);
+      footer.append(edit); card.append(footer); list.append(card);
     }
     for (const application of sortedApplications().slice(0, 3)) {
       const row = element('button', 'overview-app-row'); row.type = 'button';
@@ -691,6 +691,9 @@
       showError('autofill-trust-error', error);
     }).finally(() => { $('autofill-trust').disabled = false; });
   });
+  $('extension-guide').addEventListener('click', () => pending($('extension-guide'), async () => {
+    try { await api.openExtensionGuide(); } catch (error) { toast(error.message || 'Unable to open the guide.', true); }
+  }));
   $('extension-open-portal').addEventListener('click', () => pending($('extension-open-portal'), async () => {
     try { await api.openPortal(); } catch (error) { toast(error.message || 'Unable to open the Iowa portal.', true); }
   }));

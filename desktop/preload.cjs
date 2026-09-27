@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('secondHand', Object.freeze({
   saveApplication: application => invoke('saveApplication', application),
   deleteApplication: id => invoke('deleteApplication', id),
   openPortal: () => invoke('openPortal'),
+  openExtensionGuide: () => invoke('openExtensionGuide'),
   prepareExtension: () => invoke('prepareExtension'),
   openExtensionFolder: () => invoke('openExtensionFolder'),
   copyExtensionFolderPath: () => invoke('copyExtensionFolderPath'),

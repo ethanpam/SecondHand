@@ -783,6 +783,23 @@ kbd {
   text-decoration: underline;
   text-underline-offset: 4px;
 }
+.guide-page section {
+  margin-top: 56px;
+}
+.guide-media {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 24px 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+}
+.guide-media.guide-card {
+  width: min(100%, 312px);
+  border: 0;
+  background: none;
+}
 .next-steps {
   display: grid;
   gap: 24px;

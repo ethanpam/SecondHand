@@ -6,7 +6,7 @@ const path = require('node:path');
 const fs = require('node:fs/promises');
 const { watch } = require('node:fs');
 const os = require('node:os');
-const { pathToFileURL } = require('node:url');
+const { pathToFileURL, URL } = require('node:url');
 const { Vault, atomicWrite, normalizeRecoveryKey, MAX_VAULT_BYTES } = require('./vault.cjs');
 const { startBridge, runNativeHost, nativeStreams, extensionFromOrigin, EXTENSION_ID, isIowaNavigationAuthorization } = require('./bridge.cjs');
 const { registerHost } = require('./registration.cjs');
@@ -15,6 +15,18 @@ const { testStoragePath } = require('./test-storage-path.cjs');
 const { validateProfile, validateApplication, FIELD_LABELS, PORTAL_URL, isPortalUrl, siteOrigin } = require('../shared/schema.cjs');
 
 app.setName('SecondHand');
+// The step-by-step Chrome setup guide on SecondHand's website. During
+// development, SECONDHAND_WEBSITE_URL can point it at a local website.
+const EXTENSION_GUIDE_URL = 'https://secondhand-download.khoidoan00.chatgpt.site/chrome-extension';
+function extensionGuideUrl() {
+  const local = !app.isPackaged && process.env.SECONDHAND_WEBSITE_URL;
+  if (!local) return EXTENSION_GUIDE_URL;
+  try {
+    const url = new URL('/chrome-extension', local);
+    if (url.protocol === 'http:' || url.protocol === 'https:') return url.href;
+  } catch { /* Fall back to the published guide. */ }
+  return EXTENSION_GUIDE_URL;
+}
 const localAppData = process.platform === 'win32' ?
   (process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')) : app.getPath('appData');
 app.setPath('userData', testStoragePath() || (!app.isPackaged && process.env.SECONDHAND_USER_DATA ?
@@ -346,6 +358,7 @@ if (nativeOrigin) {
       touch(); return status();
     },
     async openPortal() { await shell.openExternal(PORTAL_URL); return true; },
+    async openExtensionGuide() { await shell.openExternal(extensionGuideUrl()); return true; },
     async prepareExtension() {
       if (extensionSetupPending) throw publicError('Extension setup is already running.');
       extensionSetupPending = true;

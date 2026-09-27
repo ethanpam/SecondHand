@@ -21,6 +21,7 @@ Runtime: Electron desktop, plain HTML/CSS/JavaScript renderer, Manifest V3 Chrom
 - `saveApplication(application)` -> saved application (empty/missing id creates UUID)
 - `deleteApplication(id)` -> true
 - `openPortal()` -> true (fixed Iowa URL only)
+- `openExtensionGuide()` -> true (opens SecondHand's fixed `/chrome-extension` guide; in development only, `SECONDHAND_WEBSITE_URL` can point it at a local http(s) website)
 - `prepareExtension()` -> `{ directory, extensionId, version, prepared, manifestPath, folderOpened }`; copies bundled assets into the fixed local extension folder and registers its stable ID; never installs into Chrome
 - `openExtensionFolder()` / `copyExtensionFolderPath()` -> true (fixed prepared folder only)
 - `copyChromeExtensionsUrl()` -> true (copies the fixed `chrome://extensions` address)

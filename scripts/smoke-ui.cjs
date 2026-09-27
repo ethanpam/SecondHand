@@ -105,7 +105,7 @@ async function main() {
       else await control.fill(applicantFixture[field]);
     }
     await page.locator('#save-profile').click();
-    await expect(page.locator('#profile-save-state')).toHaveText('Saved locally');
+    await expect(page.locator('#profile-save-state')).toBeHidden();
     const profile = await page.evaluate(async () => (await window.secondHand.getData()).profile);
     assert.deepEqual(profile, applicantFixture);
     assert.equal(profile.monthlyEarnedIncome, '0');

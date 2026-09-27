@@ -76,6 +76,7 @@ test('profile edits made during a pending save remain visible and unsaved until 
   await tick();
   assert.equal(view.get('firstName').value, 'Newer unsaved edit');
   assert.equal(view.get('profile-save-state').textContent, 'Unsaved changes');
+  assert.equal(view.get('profile-save-state').hidden, false);
   assert.equal(view.get('profile-nav-dot').hidden, false);
   assert.match(view.get('toast').textContent, /newer edits still need to be saved/);
 
@@ -91,7 +92,7 @@ test('profile edits made during a pending save remain visible and unsaved until 
   assert.equal(saves[1].profile.firstName, 'Newer unsaved edit');
   saves[1].completion.resolve(saves[1].profile);
   await tick();
-  assert.equal(view.get('profile-save-state').textContent, 'Saved locally');
+  assert.equal(view.get('profile-save-state').hidden, true, 'Nothing is shown once everything is saved');
   assert.equal(view.get('profile-nav-dot').hidden, true);
   assert.equal(view.get('firstName').value, 'Newer unsaved edit');
 });
