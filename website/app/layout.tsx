@@ -14,7 +14,7 @@ export const metadata: Metadata = {
   description:
     'SecondHand keeps your details encrypted on your computer and fills supported fields in Iowa’s SNAP application after you approve.',
   icons: {
-    icon: { url: '/brand/secondhand-mascot.png', type: 'image/png' },
+    icon: { url: '/brand/secondhand-icon.png', type: 'image/png' },
     apple: '/brand/secondhand-mascot.png',
   },
   openGraph: {

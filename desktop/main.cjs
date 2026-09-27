@@ -392,7 +392,7 @@ if (nativeOrigin) {
 
   function createWindow() {
     mainWindow = new BrowserWindow({ width: 1220, height: 850, minWidth: 860, minHeight: 650,
-      title: 'SecondHand', backgroundColor: '#f5f5ed', show: false,
+      title: 'SecondHand', backgroundColor: '#f5f5ed', show: false, icon: path.join(__dirname, 'icon.png'),
       webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true,
         nodeIntegration: false, sandbox: true, webSecurity: true, spellcheck: false, devTools: !app.isPackaged } });
     mainWindow.setMenuBarVisibility(false);
@@ -417,6 +417,8 @@ if (nativeOrigin) {
 
   app.on('second-instance', () => { if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); } });
   app.whenReady().then(async () => {
+    // Packaged builds get the icon from electron-builder; show it in development too.
+    if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(path.join(__dirname, 'icon.png'));
     await fs.mkdir(userData, { recursive: true, mode: 0o700 });
     try {
       const stat = await fs.stat(configPath);

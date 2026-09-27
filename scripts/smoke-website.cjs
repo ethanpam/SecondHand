@@ -19,7 +19,7 @@ async function inspectLayout(page) {
   }
   await expect(page.locator('.brand').first()).toHaveAccessibleName('SecondHand home');
   await expect(page.locator('.brand').first()).toHaveText('SecondHand');
-  await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', '/brand/secondhand-mascot.png');
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', '/brand/secondhand-icon.png');
   assert.equal(await page.locator('.brand-mark').first().evaluate(image => image.complete && image.naturalWidth > 0), true, 'The mascot must load');
   assert.equal(await page.evaluate(width => document.documentElement.scrollWidth > width + 1, page.viewportSize().width), false, 'Page must not overflow horizontally');
 }
