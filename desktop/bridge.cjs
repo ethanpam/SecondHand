@@ -10,11 +10,24 @@ const crypto = require('node:crypto');
 const { EventEmitter } = require('node:events');
 const { atomicWrite } = require('./vault.cjs');
 const { PROFILE_FIELDS, PORTAL_URL, isPortalUrl, isHttpsSiteUrl } = require('../shared/schema.cjs');
+const { TEXT_TYPES, CHOICE_TYPES } = require('../shared/laya-prompts.cjs');
 
 const HOST_NAME = 'org.secondhand.bridge';
 const MAX_MESSAGE_BYTES = 64 * 1024;
 const EXTENSION_ID = /^[a-p]{32}$/;
 const IOWA_NAVIGATION_URLS = new Set(['enterPersonalInfo', 'addressValidation'].map(page => `${PORTAL_URL}/applyForBenefits/${page}`));
+// Questions for Laya, the desktop's local AI: text boxes to match to a saved field (#39) and
+// choice questions to answer from the saved profile (#42). Labels, types, and options only.
+const LAYA_REQUESTS = Object.freeze({
+  suggestFields: Object.freeze({ list: 'fields', max: 40, types: TEXT_TYPES, choices: false }),
+  answerFields: Object.freeze({ list: 'questions', max: 30, types: CHOICE_TYPES, choices: true })
+});
+const QUESTION_ID = /^(f\d{1,6}:)?[A-Za-z][A-Za-z0-9_-]{0,59}$/;
+const MAX_LABEL = 200;
+const MAX_OPTIONS = 30;
+const MAX_OPTION = 100;
+// Refusals the extension acts on. Only these codes travel back with an error.
+const PUBLIC_CODES = Object.freeze(['LAYA_NOT_READY']);
 
 function isIowaNavigationAuthorization(request) {
   return request?.type === 'getFields' && Array.isArray(request.fields) && request.fields.length === 0 && IOWA_NAVIGATION_URLS.has(request.url);
@@ -90,6 +103,23 @@ function validateFieldScope(fields) {
   return fields;
 }
 
+const questionText = (value, max) => typeof value === 'string' && value.trim() !== '' && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
+function validateQuestions(items, { max, types, choices }) {
+  if (!Array.isArray(items) || !items.length || items.length > max) throw new Error('Invalid questions for Laya.');
+  const ids = new Set();
+  for (const item of items) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('Invalid question for Laya.');
+    if (Object.keys(item).some(key => !['id', 'label', 'type', 'options'].includes(key))) throw new Error('Unexpected question field.');
+    if (typeof item.id !== 'string' || !QUESTION_ID.test(item.id) || ids.has(item.id)) throw new Error('Invalid question id.');
+    ids.add(item.id);
+    if (!questionText(item.label, MAX_LABEL)) throw new Error('Invalid question label.');
+    if (!types.includes(item.type)) throw new Error('Unsupported question type for Laya.');
+    if (!Array.isArray(item.options) || item.options.length > MAX_OPTIONS || item.options.some(option => !questionText(option, MAX_OPTION)) ||
+        new Set(item.options).size !== item.options.length || (choices && !item.options.length)) throw new Error('Invalid question options.');
+  }
+  return items;
+}
+
 function validateRequest(request) {
   if (!request || typeof request !== 'object' || Array.isArray(request) ||
       typeof request.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(request.id)) throw new Error('Invalid request identifier.');
@@ -98,21 +128,23 @@ function validateRequest(request) {
   else if (request.type === 'getFields') allowed = ['id', 'type', 'url', 'fields'];
   else if (request.type === 'trustSite') allowed = ['id', 'type', 'url'];
   else if (request.type === 'recordProgress') allowed = ['id', 'type', 'url', 'filledCount'];
+  else if (Object.hasOwn(LAYA_REQUESTS, request.type)) allowed = ['id', 'type', 'url', LAYA_REQUESTS[request.type].list];
   else throw new Error('Unsupported bridge request.');
   if (Object.keys(request).some(key => !allowed.includes(key))) throw new Error('Unexpected request field.');
-  // Field requests and site trust may name any HTTPS site; the desktop decides whether it is trusted.
-  if (request.type === 'getFields' || request.type === 'trustSite') {
+  // Field requests, site trust, and Laya may name any HTTPS site; the desktop decides whether it is trusted.
+  if (request.type === 'getFields' || request.type === 'trustSite' || Object.hasOwn(LAYA_REQUESTS, request.type)) {
     if (!isHttpsSiteUrl(request.url)) throw new Error('Only an https site without credentials or a custom port is allowed.');
   } else if (request.type !== 'status' && request.type !== 'showApp' && !isPortalUrl(request.url)) throw new Error('Only the supported Iowa portal is allowed.');
   if (request.type === 'getFields' && !isIowaNavigationAuthorization(request)) validateFieldScope(request.fields);
+  if (Object.hasOwn(LAYA_REQUESTS, request.type)) validateQuestions(request[LAYA_REQUESTS[request.type].list], LAYA_REQUESTS[request.type]);
   if (request.type === 'recordProgress' && (!Number.isInteger(request.filledCount) || request.filledCount < 1 || request.filledCount > 100)) {
     throw new Error('Invalid filled field count.');
   }
   return request;
 }
 
-function failure(id, message) {
-  return { id: typeof id === 'string' && id.length <= 64 ? id : '', ok: false, error: message };
+function failure(id, message, code) {
+  return { id: typeof id === 'string' && id.length <= 64 ? id : '', ok: false, error: message, ...(PUBLIC_CODES.includes(code) ? { code } : {}) };
 }
 
 async function startBridge(userData, getExtensionId, handleRequest) {
@@ -145,7 +177,8 @@ async function startBridge(userData, getExtensionId, handleRequest) {
         const data = await handleRequest(request, Object.freeze({ extensionId: envelope.extensionId }));
         if (!socket.destroyed) socket.end(frame({ id: request.id, ok: true, data }));
       } catch (error) {
-        if (!socket.destroyed) socket.end(frame(failure(envelope?.request?.id, error.publicMessage || 'The request could not be completed. Check the desktop app.')));
+        if (!socket.destroyed) socket.end(frame(error.publicMessage ? failure(envelope?.request?.id, error.publicMessage, error.publicCode)
+          : failure(envelope?.request?.id, 'The request could not be completed. Check the desktop app.')));
       }
     });
     socket.on('data', chunk => reader.push(chunk));
@@ -227,5 +260,5 @@ function runNativeHost(userData, extensionId, input = process.stdin, output = pr
   });
 }
 
-module.exports = { HOST_NAME, EXTENSION_ID, MAX_MESSAGE_BYTES, extensionFromOrigin, frame, FrameReader, nativeStreams, isIowaNavigationAuthorization,
+module.exports = { HOST_NAME, EXTENSION_ID, MAX_MESSAGE_BYTES, LAYA_REQUESTS, extensionFromOrigin, frame, FrameReader, nativeStreams, isIowaNavigationAuthorization,
   validateRequest, startBridge, relayRequest, runNativeHost };

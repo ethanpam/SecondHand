@@ -12,6 +12,9 @@ const { startBridge, runNativeHost, nativeStreams, extensionFromOrigin, EXTENSIO
 const { registerHost } = require('./registration.cjs');
 const { getExtensionSetup, prepareBundledExtension } = require('./extension-setup.cjs');
 const { testStoragePath } = require('./test-storage-path.cjs');
+const { createLayaRuntime } = require('./laya-runtime.cjs');
+const { createFieldSuggestions } = require('./field-suggestions.cjs');
+const { createFieldAnswers } = require('./field-answers.cjs');
 const { validateProfile, validateApplication, FIELD_LABELS, PORTAL_URL, isPortalUrl, siteOrigin } = require('../shared/schema.cjs');
 
 app.setName('SecondHand');
@@ -59,6 +62,13 @@ if (nativeOrigin) {
   const rendererUrl = pathToFileURL(rendererPath).href;
   const AUTO_LOCK_MS = 10 * 60 * 1000;
   const publicError = message => Object.assign(new Error(message), { publicMessage: message });
+  // Laya, the local AI that matches text boxes (#39) and answers choice questions (#42).
+  // Without a runtime, or while it is off or not downloaded, its requests answer "not ready".
+  const laya = createLayaRuntime({ userData });
+  const fieldSuggestions = laya ? createFieldSuggestions({ laya }) : null;
+  const fieldAnswers = laya ? createFieldAnswers({ laya }) : null;
+  const LAYA_STATES = ['off', 'unavailable', 'not-downloaded', 'downloading', 'ready', 'error'];
+  const layaNotReady = () => Object.assign(publicError('Laya isn’t ready on this computer.'), { publicCode: 'LAYA_NOT_READY' });
   const validated = (validator, ...values) => {
     try { return validator(...values); } catch (error) { throw publicError(error.message); }
   };
@@ -119,12 +129,63 @@ if (nativeOrigin) {
     await saveSettings();
     return registration;
   }
+  // Laya's state for the extension's side panel. Nothing else about the model leaves the app.
+  function layaStatus() {
+    if (!laya) return { state: 'unavailable' };
+    const { state } = laya.status();
+    if (!LAYA_STATES.includes(state)) throw new Error(`Laya reported an unknown state: ${String(state)}`);
+    return { state };
+  }
+  // One prompt for every answer that needed a sensitive fact, naming the saved details behind them.
+  async function confirmSensitiveAnswers(origin, { fields, count }) {
+    if (fieldRequestPending) throw publicError('Another request is waiting for your approval.');
+    fieldRequestPending = true;
+    try {
+      mainWindow.show(); mainWindow.focus();
+      const answer = await dialog.showMessageBox(mainWindow, {
+        type: 'warning', title: 'Share sensitive details?',
+        message: `Answer ${count === 1 ? '1 question' : `${count} questions`} on ${origin} using sensitive details?`,
+        detail: `${fields.map(field => FIELD_LABELS[field]).join(', ')}\n\nLaya, SecondHand’s AI on this computer, needed these saved details to pick ${count === 1 ? 'this answer' : 'these answers'}. The details stay on this computer; only the chosen ${count === 1 ? 'option is' : 'options are'} filled into the form on ${origin}. Cancel keeps your other answers and leaves ${count === 1 ? 'this question' : 'these questions'} for you.`,
+        buttons: ['Cancel', 'Allow once'], defaultId: 0, cancelId: 0, noLink: true
+      });
+      return answer.response === 1;
+    } finally { fieldRequestPending = false; }
+  }
+  // suggestFields and answerFields: question labels and options in, a saved-field key or an
+  // option's text out. The facts sheet never leaves this app.
+  async function layaRequest(request, context) {
+    if (layaStatus().state !== 'ready') throw layaNotReady();
+    const iowa = isPortalUrl(request.url);
+    const origin = siteOrigin(request.url);
+    if (!iowa && !trustedSites.includes(origin)) throw publicError('This site isn’t trusted. Turn on SecondHand for it first.');
+    requireUnlocked();
+    try {
+      if (request.type === 'suggestFields') {
+        const suggestions = await fieldSuggestions.suggest(request.fields);
+        touch();
+        return { suggestions };
+      }
+      const generation = accessRevision;
+      // Iowa's portal keeps its existing rule: no extra prompt.
+      const answers = await fieldAnswers.answer({ questions: request.questions, profile: vault.getData().profile,
+        confirmSensitive: iowa ? async () => true : details => confirmSensitiveAnswers(origin, details) });
+      requireUnlocked();
+      if (generation !== accessRevision || extensionId !== context.extensionId) throw publicError('SecondHand access changed. Click Autofill again.');
+      touch();
+      return { answers, accessRevision };
+    } catch (error) {
+      if (error.publicMessage) throw error;
+      if (error.code === 'LAYA_NOT_READY') throw layaNotReady();
+      throw Object.assign(publicError('Laya couldn’t check this form. Fill the remaining questions yourself.'), { cause: error });
+    }
+  }
   async function bridgeRequest(request, context) {
-    if (request.type === 'status') return { unlocked: vault.unlocked, applicationCount: vault.unlocked ? vault.getData().applications.length : 0, accessRevision };
+    if (request.type === 'status') return { unlocked: vault.unlocked, applicationCount: vault.unlocked ? vault.getData().applications.length : 0, accessRevision, laya: layaStatus() };
     if (request.type === 'showApp') {
       if (mainWindow) { if (mainWindow.isMinimized?.()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); }
       return { shown: true };
     }
+    if (request.type === 'suggestFields' || request.type === 'answerFields') return layaRequest(request, context);
     requireUnlocked();
     if (request.type === 'trustSite') {
       const origin = siteOrigin(request.url);

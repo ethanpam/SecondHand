@@ -125,3 +125,68 @@ test('site trust requests carry only an https site URL; the desktop decides whic
   assert.deepEqual(validateRequest({ id: 'x', type: 'getFields', url: site, fields: ['firstName'] }).fields, ['firstName']);
   assert.throws(() => validateRequest({ id: 'x', type: 'recordProgress', url: site, filledCount: 1 }), /Iowa portal/);
 });
+
+const LAYA_SITE = 'https://pantry.example.org/intake?step=2';
+const box = (extra = {}) => ({ id: 'f0:sh-1-2', label: 'Where can we email you?', type: 'email', options: [], ...extra });
+const choice = (extra = {}) => ({ id: 'f4:sh-2-0', label: 'Is anyone in your household 60 or older?', type: 'radio', options: ['Yes', 'No'], ...extra });
+const suggest = (fields, extra = {}) => ({ id: 'laya-1', type: 'suggestFields', url: LAYA_SITE, fields, ...extra });
+const answer = (questions, extra = {}) => ({ id: 'laya-2', type: 'answerFields', url: LAYA_SITE, questions, ...extra });
+const many = (count, make) => Array.from({ length: count }, (_, index) => make({ id: `sh-1-${index}` }));
+
+test('suggestFields carries up to 40 text-box labels, types, and options; answerFields up to 30 choice questions', () => {
+  assert.deepEqual(validateRequest(suggest([box()])), suggest([box()]));
+  assert.deepEqual(validateRequest(answer([choice()])), answer([choice()]));
+  assert.equal(validateRequest(suggest(many(40, box))).fields.length, 40);
+  assert.throws(() => validateRequest(suggest(many(41, box))), /questions/);
+  assert.equal(validateRequest(answer(many(30, choice))).questions.length, 30);
+  assert.throws(() => validateRequest(answer(many(31, choice))), /questions/);
+  for (const type of ['text', 'textarea', 'number', 'date', 'email', 'tel']) assert.equal(validateRequest(suggest([box({ type })])).fields[0].type, type);
+  for (const type of ['radio', 'select', 'checkbox']) assert.equal(validateRequest(answer([choice({ type })])).questions[0].type, type);
+  assert.equal(validateRequest(suggest([box({ id: 'sh-1-2' })])).fields[0].id, 'sh-1-2', 'Iowa’s general engine ids have no frame prefix');
+  assert.equal(validateRequest(suggest([box({ label: 'L'.repeat(200) })])).fields.length, 1);
+  assert.equal(validateRequest(answer([choice({ options: Array.from({ length: 30 }, (_, index) => `${String(index).padStart(2, '0')}${'O'.repeat(98)}`) })])).questions.length, 1);
+});
+
+test('Laya requests outside the limits, with the wrong question type, or with anything but labels and options are refused', () => {
+  const refused = [
+    suggest([]), answer([]), suggest('email'), answer([null]),
+    suggest([box({ label: 'L'.repeat(201) })]), suggest([box({ label: '   ' })]), suggest([box({ label: 'Email\u0000' })]),
+    answer([choice({ options: [...many(31, () => 'x').map((_, index) => `Option ${index}`)] })]), answer([choice({ options: ['Yes', 'N'.repeat(101)] })]),
+    answer([choice({ options: [] })]), answer([choice({ options: ['Yes', 'Yes'] })]), answer([choice({ options: ['Yes', ''] })]), answer([choice({ options: 'Yes' })]),
+    suggest([box({ type: 'radio' })]), suggest([box({ type: 'password' })]), answer([choice({ type: 'text' })]), answer([choice({ type: 'listbox' })]),
+    suggest([box(), box()]), suggest([box({ id: 'input[type=password]' })]), suggest([box({ id: 'f1234567:sh-1' })]), suggest([box({ id: 7 })])
+  ];
+  for (const request of refused) assert.throws(() => validateRequest(request), /question/i, JSON.stringify(request).slice(0, 160));
+  // A saved answer can never ride along: not on a question, and not on the request.
+  for (const extra of [{ value: 'Synthetic private' }, { key: 'email' }, { values: {} }, { facts: 'The applicant is 41 years old.' }, { required: true }]) {
+    assert.throws(() => validateRequest(suggest([box(extra)])), /Unexpected question field/, JSON.stringify(extra));
+    assert.throws(() => validateRequest(answer([choice(extra)])), /Unexpected question field/, JSON.stringify(extra));
+  }
+  for (const extra of [{ values: { email: 'synthetic@example.org' } }, { profile: {} }, { fields: [box()] }, { facts: 'x' }]) {
+    assert.throws(() => validateRequest(answer([choice()], extra)), /Unexpected request field/, JSON.stringify(extra));
+  }
+  assert.throws(() => validateRequest(suggest([box()], { questions: [choice()] })), /Unexpected request field/);
+});
+
+test('Laya requests name an https site or Iowa’s portal; the desktop checks that the site is trusted', () => {
+  assert.equal(validateRequest(answer([choice()], { url: `${PORTAL_URL}/applyForBenefits/financialInfo` })).url, `${PORTAL_URL}/applyForBenefits/financialInfo`);
+  for (const url of ['http://pantry.example.org/', 'https://a:b@pantry.example.org/', 'https://pantry.example.org:8443/', 'javascript:alert(1)', 'not a url', undefined]) {
+    assert.throws(() => validateRequest(suggest([box()], { url })), /https site/, String(url));
+    assert.throws(() => validateRequest(answer([choice()], { url })), /https site/, String(url));
+  }
+});
+
+test('a "Laya not ready" refusal keeps its code through the local bridge; other failures carry no code', async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-bridge-laya-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const bridge = await startBridge(directory, () => EXTENSION, async request => {
+    if (request.type === 'suggestFields') throw Object.assign(new Error('Laya isn’t ready on this computer.'), { publicMessage: 'Laya isn’t ready on this computer.', publicCode: 'LAYA_NOT_READY' });
+    if (request.type === 'answerFields') throw Object.assign(new Error('internal'), { publicCode: 'LAYA_NOT_READY' });
+    throw Object.assign(new Error('Unlock SecondHand first.'), { publicMessage: 'Unlock SecondHand first.', publicCode: 'SOMETHING_ELSE' });
+  });
+  t.after(() => bridge.close());
+  assert.deepEqual(await relayRequest(directory, EXTENSION, suggest([box()])), { id: 'laya-1', ok: false, error: 'Laya isn’t ready on this computer.', code: 'LAYA_NOT_READY' });
+  assert.deepEqual(await relayRequest(directory, EXTENSION, answer([choice()])), { id: 'laya-2', ok: false, error: 'The request could not be completed. Check the desktop app.' },
+    'only a public refusal carries a code');
+  assert.deepEqual(await relayRequest(directory, EXTENSION, { id: 'status-1', type: 'status' }), { id: 'status-1', ok: false, error: 'Unlock SecondHand first.' });
+});

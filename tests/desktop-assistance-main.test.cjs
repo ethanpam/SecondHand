@@ -58,7 +58,9 @@ async function desktop(options = {}) {
     './bridge.cjs': { ...require('../desktop/bridge.cjs'), startBridge: async (_directory, _getId, handler) => { bridge = handler; return { close: async () => {} }; } },
     './extension-setup.cjs': { getExtensionSetup: async () => ({ prepared: true }) },
     './registration.cjs': { registerHost: async () => ({}) },
-    './test-storage-path.cjs': { testStoragePath: () => null }
+    './test-storage-path.cjs': { testStoragePath: () => null },
+    // The one place the desktop gets its Laya runtime. Without an override, this build's real module answers.
+    ...(options.laya ? { './laya-runtime.cjs': { createLayaRuntime: () => options.laya } } : {})
   };
   vm.runInNewContext(source, {
     require: name => Object.hasOwn(overrides, name) ? overrides[name] : require(name.startsWith('.') ? path.join(root, 'desktop', name) : name),
@@ -307,4 +309,112 @@ test('removing a trusted site stops field release; a locked vault cannot trust s
   await assert.rejects(app.request({ type: 'trustSite', url: PANTRY }), /Unlock/);
   const stored = await desktop({ settings: { extensionId, trustedSites: ['https://ok.example.org', 'http://bad.example.org', 'javascript:1', 42] } });
   assert.deepEqual(plain((await stored.invoke('status')).trustedSites), ['https://ok.example.org']);
+});
+
+// A stand-in for the Laya runtime (#38) with its exact interface. `scores(state)` plays the model.
+function stubLaya(scores = () => 0.01, state = 'ready') {
+  const batches = [];
+  return { batches, status: () => ({ state }), decide: async () => { throw new Error('the desktop scores in batches'); },
+    decideBatch: async items => { batches.push(items); return items.map(item => ({ answers: { correct: { noul: scores(item.state) } } })); } };
+}
+const box = { id: 'f0:sh-1-2', label: 'Where can we reach you by email?', type: 'email', options: [] };
+const sixty = { id: 'f0:sh-1-3', label: 'Is anyone in your household 60 or older?', type: 'radio', options: ['Yes', 'No'] };
+const veteran = { id: 'f0:sh-1-4', label: 'Is anyone in your household a veteran?', type: 'radio', options: ['Yes', 'No'] };
+const layaRequests = [{ type: 'suggestFields', url: PANTRY, fields: [box] }, { type: 'answerFields', url: PANTRY, questions: [sixty] }];
+// Only the applicant's age (a sensitive fact) settles 60+ for a household of one.
+const sixtyFromAge = state => {
+  if (state.question === sixty.label) return state.facts.includes('years old') ? (state.candidate === 'No' ? 0.97 : 0.01) : (state.candidate.startsWith('None') ? 0.95 : 0.01);
+  if (state.question === veteran.label) return state.candidate === 'No' ? 0.98 : 0.01;
+  return state.candidate === 'Saved answer: email address' ? 0.99 : 0.01;
+};
+const household = { birthDate: '1985-04-12', householdSize: '1', householdAdults: '1', householdChildren: '0', householdSeniors: '0', householdVeteran: 'no', county: 'Polk' };
+
+test('this build has no Laya runtime: both Laya requests answer "not ready" and status says Laya is unavailable', async () => {
+  const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'] } });
+  assert.deepEqual(plain((await app.request({ type: 'status' })).laya), { state: 'unavailable' });
+  const reads = app.dataReads;
+  for (const request of [...layaRequests, { type: 'answerFields', url: 'https://untrusted.example.org/', questions: [sixty] }]) {
+    await assert.rejects(app.request(request), error => error.publicCode === 'LAYA_NOT_READY' && /Laya isn’t ready/.test(error.publicMessage), request.type);
+  }
+  assert.equal(app.dataReads, reads, 'the vault is never read');
+  assert.equal(app.prompts.length, 0);
+});
+
+test('a Laya that is off, downloading, or failing answers "not ready" the same way; its state shows in status', async () => {
+  for (const state of ['off', 'not-downloaded', 'downloading', 'error', 'unavailable']) {
+    const app = await desktop({ laya: stubLaya(() => 0.99, state), settings: { extensionId, trustedSites: ['https://pantry.example.org'] } });
+    assert.deepEqual(plain((await app.request({ type: 'status' })).laya), { state });
+    for (const request of layaRequests) await assert.rejects(app.request(request), error => error.publicCode === 'LAYA_NOT_READY', `${state} ${request.type}`);
+  }
+  const switchedOff = stubLaya();
+  switchedOff.decideBatch = async () => { throw Object.assign(new Error('Laya was turned off.'), { code: 'LAYA_NOT_READY' }); };
+  const app = await desktop({ laya: switchedOff, settings: { extensionId, trustedSites: ['https://pantry.example.org'] } });
+  await app.invoke('saveProfile', household);
+  for (const request of layaRequests) await assert.rejects(app.request(request), error => error.publicCode === 'LAYA_NOT_READY', request.type);
+  const confused = await desktop({ laya: stubLaya(() => 0.99, 'thinking') });
+  await assert.rejects(confused.request({ type: 'status' }), /unknown state/);
+  const crashed = stubLaya();
+  crashed.decideBatch = async () => { throw new Error('model crashed'); };
+  const failing = await desktop({ laya: crashed, settings: { extensionId, trustedSites: ['https://pantry.example.org'] } });
+  await assert.rejects(failing.request(layaRequests[0]), error => /Laya couldn’t check this form/.test(error.publicMessage) && !error.publicCode);
+});
+
+test('with Laya ready, text boxes are matched for trusted sites and Iowa’s portal only, without reading the vault', async () => {
+  const laya = stubLaya(sixtyFromAge);
+  const app = await desktop({ laya, settings: { extensionId, trustedSites: ['https://pantry.example.org'] } });
+  assert.deepEqual(plain(await app.request(layaRequests[0])), { suggestions: { 'f0:sh-1-2': 'email' } });
+  assert.deepEqual(plain(await app.request({ type: 'suggestFields', url: `${PORTAL_URL}/applyForBenefits/financialInfo`, fields: [{ ...box, id: 'sh-1-2' }] })), { suggestions: { 'sh-1-2': 'email' } });
+  assert.equal(app.dataReads, 0, 'matching reads no saved answers');
+  assert.equal(app.prompts.length, 0);
+  await assert.rejects(app.request({ ...layaRequests[0], url: 'https://other.example.org/form' }), /isn’t trusted/);
+  await assert.rejects(app.request({ ...layaRequests[1], url: 'https://hhsservices.iowa.gov/other' }), /isn’t trusted/);
+  await app.invoke('lock');
+  for (const request of layaRequests) await assert.rejects(app.request(request), /Unlock/);
+});
+
+test('answers from everyday facts need no prompt; answers that needed sensitive facts wait for one "Share sensitive details?" prompt', async () => {
+  const app = await desktop({ laya: stubLaya(sixtyFromAge), settings: { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'] } });
+  await app.invoke('saveProfile', household);
+  const everyday = await app.request({ type: 'answerFields', url: PANTRY, questions: [veteran] });
+  assert.deepEqual(plain(everyday.answers), { 'f0:sh-1-4': 'No' });
+  assert.equal(everyday.accessRevision, (await app.request({ type: 'status' })).accessRevision, 'answers carry the access receipt they were made under');
+  assert.equal(app.prompts.length, 0);
+
+  app.answer(async () => ({ response: 1 }));
+  const allowed = await app.request({ type: 'answerFields', url: PANTRY, questions: [sixty, veteran] });
+  assert.deepEqual(plain(allowed.answers), { 'f0:sh-1-3': 'No', 'f0:sh-1-4': 'No' });
+  assert.equal(app.prompts.length, 1, 'one prompt');
+  const [prompt] = app.prompts;
+  assert.equal(prompt.title, 'Share sensitive details?');
+  assert.deepEqual(plain(prompt.buttons), ['Cancel', 'Allow once']);
+  assert.equal(prompt.cancelId, 0);
+  assert.match(prompt.message, /pantry\.example\.org/);
+  assert.match(prompt.detail, /Date of birth/);
+  assert.doesNotMatch(`${prompt.message} ${prompt.detail}`, /60 or older|1985/, 'the prompt names categories, never the page’s words or saved values');
+
+  app.answer(async () => ({ response: 0 }));
+  const cancelled = await app.request({ type: 'answerFields', url: PANTRY, questions: [sixty, veteran] });
+  assert.deepEqual(plain(cancelled.answers), { 'f0:sh-1-4': 'No' }, 'cancelling drops only the sensitive answer');
+});
+
+test('on Iowa’s portal, answers that needed sensitive facts follow Iowa’s existing rule: no extra prompt', async () => {
+  const app = await desktop({ laya: stubLaya(sixtyFromAge), settings: { extensionId, autofillWithoutAsking: true } });
+  await app.invoke('saveProfile', household);
+  const { answers } = await app.request({ type: 'answerFields', url: `${PORTAL_URL}/applyForBenefits/financialInfo`, questions: [sixty, veteran] });
+  assert.deepEqual(plain(answers), { 'f0:sh-1-3': 'No', 'f0:sh-1-4': 'No' });
+  assert.equal(app.prompts.length, 0);
+});
+
+test('a sensitive prompt cannot release answers after a profile edit, and waits for no other approval', async () => {
+  const app = await desktop({ laya: stubLaya(sixtyFromAge), settings: { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'] } });
+  await app.invoke('saveProfile', household);
+  let resolve;
+  app.answer(() => new Promise(done => { resolve = done; }));
+  const pending = app.request({ type: 'answerFields', url: PANTRY, questions: [sixty] });
+  for (let i = 0; !resolve && i < 50; i++) await tick();
+  assert.equal(typeof resolve, 'function', 'the prompt is showing');
+  await assert.rejects(app.request({ type: 'answerFields', url: PANTRY, questions: [sixty] }), /waiting for your approval/);
+  await app.invoke('saveProfile', { ...household, householdVeteran: 'yes' });
+  resolve({ response: 1 });
+  await assert.rejects(pending, /changed/);
 });

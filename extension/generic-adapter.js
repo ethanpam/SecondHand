@@ -106,6 +106,11 @@
     return text;
   }
   const ruleFor = text => RULES.find(([pattern]) => pattern.test(question(text)))?.[1] || null;
+  // Questions only the applicant answers: AI never suggests or picks an answer for consent,
+  // signatures, attestations, agreements, terms, Social Security numbers, or secrets.
+  // shared/laya-prompts.cjs keeps an identical copy for the desktop app.
+  const UNSAFE_QUESTION = /^social security$|\b(consent\w*|sign|signs|signed|signing|signature\w*|initials|attest\w*|certif\w*|agree|agrees|agreed|agreement\w*|terms|acknowledg\w*|authoriz\w*|permission|perjury|i understand|i confirm|i have read|true and (correct|accurate|complete)|privacy|social security (number|no|num|card)|ss number|ssn|itin|password|passcode|pin|cvv|cvc|card number|credit card|debit card|security code|captcha|verification code|one time)\b/;
+  const unsafeQuestion = field => [field?.label, ...(Array.isArray(field?.options) ? field.options : [])].some(text => UNSAFE_QUESTION.test(normal(text)));
   // Whether a guess (the AI step) may offer a key for a question. A birth date only goes to a
   // whole-date question about birth, never to "Date ordered", a month box, or a child's birthday.
   function canSuggest(key, field) {
@@ -452,6 +457,30 @@
     }
     return false;
   }
+  // An answer Laya picked from the saved profile (#42): the option with exactly this text, and
+  // only where it is the only option with that text. Only ever picks or checks; never unchecks.
+  function fillOption(entry, option) {
+    const options = optionsOf(entry);
+    const index = options.indexOf(option);
+    if (index < 0 || options.lastIndexOf(option) !== index) return false;
+    const first = entry.elements[0];
+    if (entry.kind === 'select') {
+      const target = Array.from(first.options).filter(item => item.value)[index];
+      return Boolean(target) && setValue(first, target.value);
+    }
+    if (entry.kind === 'radio' || (entry.kind === 'checkbox' && entry.elements.length > 1)) {
+      const choice = entry.elements[index];
+      if (choice.checked) return false;
+      choice.click();
+      return choice.checked;
+    }
+    if (entry.kind === 'ariaRadio') {
+      const choice = entry.elements[index];
+      choice.click();
+      return choice.getAttribute('aria-checked') === 'true' || { pending: choice };
+    }
+    return false;
+  }
   function ensureStyle(doc) {
     if (doc.getElementById('secondhand-filled-style')) return;
     const style = doc.createElement('style');
@@ -478,12 +507,17 @@
       const entry = current.map.get(assignment?.id);
       const key = assignment?.key;
       const value = values?.[key];
+      const usable = entry && !answered(entry) && entry.elements.every(element => element.isConnected && (ARIA_TYPES[entry.kind] ? ariaUsable(element) : eligible(element)));
+      // An option Laya picked from the saved profile is always a guess, and never for a question only the applicant answers.
+      const option = assignment?.option;
+      const answering = typeof option === 'string' && key === undefined;
       // A key the rules did not choose for this question is a guess and must be one a guess may offer.
       const allowed = entry && (match(entry).key === key || canSuggest(key, { label: entry.labels[0] || '' }));
-      const placed = entry && GENERIC_KEYS.includes(key) && allowed && typeof value === 'string' && value && !answered(entry) &&
-        entry.elements.every(element => element.isConnected && (ARIA_TYPES[entry.kind] ? ariaUsable(element) : eligible(element))) && compatible(key, entry) && fillEntry(entry, key, value);
+      const placed = !usable ? false
+        : answering ? !unsafeQuestion({ label: entry.labels.join(' '), options: optionsOf(entry) }) && fillOption(entry, option)
+        : option === undefined && GENERIC_KEYS.includes(key) && allowed && typeof value === 'string' && value && compatible(key, entry) && fillEntry(entry, key, value);
       if (!placed) { skipped.push(assignment?.id); continue; }
-      const guess = assignment.guessed || GUESS_KEYS.includes(key);
+      const guess = answering || assignment.guessed || GUESS_KEYS.includes(key);
       if (placed.pending) { current.pending.set(assignment.id, { option: placed.pending, entry, guess }); pending.push(assignment.id); continue; }
       entry.elements[0].dispatchEvent(new entry.elements[0].ownerDocument.defaultView.Event('blur'));
       if (rejectedByPage(entry)) {
@@ -542,7 +576,7 @@
   }
   const elementFor = id => current?.map.get(id)?.elements[0] || null;
 
-  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, GUESS_KEYS, plan, questions, requestKeys, deriveValues, fillFields, settle, focusField, elementFor, canSuggest });
+  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, GUESS_KEYS, UNSAFE_QUESTION, plan, questions, requestKeys, deriveValues, fillFields, settle, focusField, elementFor, canSuggest, unsafeQuestion });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandGeneric = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
