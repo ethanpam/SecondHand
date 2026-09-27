@@ -12,3 +12,10 @@ playwright-report/
 *.pem
 .env*
 !.env.example
+
+# ML_model outputs (datasets, runs, model files)
+ML_model/dataset/out/
+ML_model/train/runs/
+ML_model/**/*.onnx
+ML_model/**/*.safetensors
+ML_model/**/*.mlpackage
