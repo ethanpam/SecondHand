@@ -629,8 +629,7 @@ kbd {
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  padding: 56px 0 var(--space-section);
-  border-top: 1px solid var(--border);
+  padding-bottom: 72px;
 }
 .faq-callout h2 {
   font-size: clamp(30px, 3vw, 40px);
