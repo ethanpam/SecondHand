@@ -707,7 +707,9 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     run = () => focusField(tabId, message.key, route);
   } else if (panel && message.type === 'ui:enableSite' && message.confirmed === true) run = () => enableSite(tabId);
   else if (panel && message.type === 'ui:enableFrames' && message.confirmed === true) run = () => enableFrames(tabId);
-  else if (panel && message.type === 'ui:disableSite' && message.confirmed === true) run = () => disableSite(tabId);
+  else if (message.type === "ui:allQuestions") run = () => allQuestions(tabId, route);
+  else if (message.type === "ui:pageText") run = () => pageText(tabId, route);
+  else if (panel && message.type === "ui:disableSite" && message.confirmed === true) run = () => disableSite(tabId);
   else return;
   // A widget on another site is honored only while that site is turned on.
   const work = route === 'site' ? requireSite(siteOrigin(sender.tab.url)).then(run) : run();
@@ -733,3 +735,43 @@ chrome.tabs.onUpdated?.addListener((tabId, change) => {
 });
 // Chrome's native panel persists alongside navigation; it never opens itself.
 chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+
+// Added for translation #34
+async function allQuestions(tabId, route) {
+  const tab = await chrome.tabs.get(tabId);
+  const questions = [];
+  if (route !== 'site' && SecondHandIowa.isSupportedUrl(tab.url)) {
+    const state = await iowaPageState(tabId);
+    if (state.page.heading) questions.push({ id: 'heading', label: state.page.heading });
+    if (state.page.todo) questions.push({ id: 'todo', label: state.page.todo });
+    if (state.page.reason) questions.push({ id: 'reason', label: state.page.reason });
+    if (state.scan && state.scan.fields) {
+      for (const f of state.scan.fields) {
+        questions.push({ id: f.key, label: f.label });
+      }
+    }
+    return { questions };
+  } else {
+    const origin = siteOrigin(tab.url);
+    await requireSite(origin);
+    const { frames } = await siteFramePlans(tabId, tab.url);
+    for (const { frameId, plan } of frames) {
+      for (const f of plan.matched) questions.push({ id: `f${frameId}:${f.id}`, label: f.label || '', options: f.options || [] });
+      for (const f of plan.unmatched) questions.push({ id: `f${frameId}:${f.id}`, label: f.label || '', options: f.options || [] });
+    }
+    return { questions };
+  }
+}
+
+async function pageText(tabId, route) {
+  const tab = await chrome.tabs.get(tabId);
+  try {
+    if (route !== 'site' && SecondHandIowa.isSupportedUrl(tab.url)) {
+      return await chrome.tabs.sendMessage(tabId, { type: 'secondhand:iowa:pageText' }, { frameId: 0 });
+    } else {
+      return await topSiteMessage(tabId, { type: 'secondhand:generic:pageText' });
+    }
+  } catch (e) {
+    return { lang: '', text: '' };
+  }
+}

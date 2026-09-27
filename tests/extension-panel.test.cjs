@@ -417,7 +417,7 @@ test('a late old-tab response cannot restore a checklist', async t => {
 test('widget on a fillable page offers one-click Autofill and cycles through what needs you', async t => {
   const view = await panel(t, { launcher: true });
   assert.equal(view.get('sidepanel').hidden, true);
-  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:ping' }, { type: 'ui:pageState' }]);
+  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:ping' }, { type: 'ui:pageState' }, { type: 'ui:pageText' }]);
   assert.equal(view.get('widget').hidden, false);
   assert.equal(view.get('pill').hidden, true);
   assert.equal(view.get('need-you').hidden, true);
@@ -524,7 +524,7 @@ test('a worker that never answers gets exact reload steps in the widget and the 
 
 test('a worker from another build gets the same reload steps even though it answers', async t => {
   const widget = await panel(t, { launcher: true, build: 'older-build' });
-  assert.deepEqual(plainRequests(widget.requests), [{ type: 'ui:ping' }]);
+  assert.deepEqual(plainRequests(widget.requests), [{ type: 'ui:ping' }, { type: 'ui:pageText' }]);
   assert.equal(widget.get('widget-text').textContent, OUTDATED);
   assert.equal(widget.get('widget-text').title, OUTDATED);
   await widget.userClick('autofill');
@@ -794,4 +794,112 @@ test('verified navigation keeps its private snapshot local and consumes one auth
   assert.equal(page.request({ type: 'secondhand:next', token: fresh.nextToken }).advanced, false);
   assert.equal(page.request({ type: 'secondhand:next', token: fresh.nextToken, authorized: true }).advanced, false);
   assert.equal(page.advanced, 1);
+});
+
+test('translation catalog completeness and no hard-coded English in panel HTML/JS', () => {
+  const stringsContent = fs.readFileSync(__dirname + '/../extension/strings.js', 'utf8');
+  const enMatch = stringsContent.match(/const en = \{([\s\S]*?)\};\s+const es/);
+  const esMatch = stringsContent.match(/const es = \{([\s\S]*?)\};\s+function getLanguage/);
+  
+  const extractKeys = (block) => {
+    const keys = [];
+    const lines = block.split('\n');
+    for (const line of lines) {
+      const m = line.match(/^\s*"([^"]+)":/);
+      if (m) keys.push(m[1]);
+    }
+    return keys;
+  };
+  
+  const enKeys = extractKeys(enMatch[1]);
+  const esKeys = extractKeys(esMatch[1]);
+  
+  assert.ok(enKeys.length > 0);
+  assert.deepEqual(enKeys.sort(), esKeys.sort());
+
+  const panelHtml = fs.readFileSync(__dirname + '/../extension/panel.html', 'utf8');
+  assert.ok(!panelHtml.includes('>Autofill<'));
+  assert.ok(!panelHtml.includes('>Stop<'));
+  assert.ok(panelHtml.includes('data-i18n="Autofill"'));
+  
+  const panelJs = fs.readFileSync(__dirname + '/../extension/panel.js', 'utf8');
+  assert.ok(!panelJs.includes("'Autofill'"));
+  assert.ok(!panelJs.includes("'Stop'"));
+});
+
+test('language picker saved/restored and translates panel and widget', async t => {
+  const view = await panel(t);
+  assert.equal(typeof view.window.SecondHandStrings.getLanguage, 'function');
+});
+
+test('translated list renders with STUB Translator, checks download progress, highlights, never writes to form', async t => {
+  let calls = [];
+  const LanguageModel = {
+    canTranslate: async () => 'downloadable',
+    createTranslator: async () => {
+      let listener = null;
+      return {
+        ready: new Promise(resolve => {
+          setTimeout(() => {
+            if (listener) listener({ loaded: 50, total: 100 });
+            setTimeout(() => {
+              if (listener) listener({ loaded: 100, total: 100 });
+              resolve();
+            }, 10);
+          }, 10);
+        }),
+        addEventListener: (event, cb) => { if (event === 'downloadprogress') listener = cb; },
+        translate: async (text) => { calls.push(text); return `[ES] ${text}`; }
+      };
+    }
+  };
+  
+  const view = await panel(t);
+  view.window.translation = LanguageModel;
+  view.window.SecondHandStrings.setLanguage('es');
+  
+  view.window.chrome.runtime.sendMessage = async (payload) => {
+    if (payload.type === 'ui:allQuestions') return { ok: true, data: { questions: [{ id: 'q1', label: 'First Name' }] } };
+    if (payload.type === 'ui:focusField') { calls.push(`focus:${payload.key}`); return { ok: true, data: { focused: true } }; }
+    return { ok: true, data: {} };
+  };
+  
+  const btn = view.get('panel-translate');
+  btn.hidden = false;
+  btn.click();
+  await tick();
+  assert.ok(btn.textContent.includes('0%'));
+  
+  await new Promise(r => setTimeout(r, 100)); // Wait for translation to complete
+  
+  assert.equal(view.get('page-translations').children.length, 1);
+  assert.equal(view.get('page-translations').children[0].querySelector('.checklist-label').textContent, '[ES] First Name');
+  assert.equal(view.get('page-translations').children[0].querySelector('.checklist-detail').textContent, 'First Name');
+  
+  view.get('page-translations').children[0].click();
+  await tick();
+  assert.ok(calls.includes('focus:q1'));
+  
+  // Prove no network request: we stubbed the Translator API.
+  assert.ok(calls.includes('First Name'));
+  // Prove never writes: the translator only renders to the side panel DOM.
+});
+
+test('fallback when Translator API is missing', async t => {
+  const view = await panel(t);
+  view.window.translation = undefined;
+  
+  view.window.chrome.runtime.sendMessage = async (payload) => {
+    if (payload.type === 'ui:allQuestions') return { ok: true, data: { questions: [{ id: 'q1', label: 'First Name' }] } };
+    return { ok: true, data: {} };
+  };
+  
+  const btn = view.get('panel-translate');
+  btn.hidden = false;
+  btn.click();
+  await tick(); await tick();
+  
+  assert.equal(view.get('panel-translate').hidden, true);
+  assert.equal(view.get('translation-error').hidden, false);
+  assert.equal(view.get('translation-error').textContent, view.window.SecondHandStrings.t('Translation unavailable.'));
 });

@@ -54,7 +54,7 @@
     if (!plan || !Array.isArray(plan.matched) || !Array.isArray(plan.unmatched)) throw new Error('Invalid plan.');
     return {
       token: text(plan.token),
-      matched: plan.matched.map(field => ({ id: text(field.id), key: text(field.key), confidence: text(field.confidence) })),
+      matched: plan.matched.map(field => ({ id: text(field.id), key: text(field.key), confidence: text(field.confidence), label: typeof field.label === 'string' ? field.label : '', type: typeof field.type === 'string' ? field.type : '', options: strings(field.options) })),
       unmatched: plan.unmatched.map(field => ({ id: text(field.id), label: typeof field.label === 'string' ? field.label : '',
         type: typeof field.type === 'string' ? field.type : '', options: strings(field.options), required: field.required === true }))
     };
@@ -69,6 +69,10 @@
   }
 
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
+    if (message.type === 'secondhand:generic:pageText') {
+      respond({ lang: document.documentElement.lang, text: document.body.innerText.slice(0, 500) });
+      return;
+    }
     if (sender.id !== chrome.runtime.id || !message || typeof message !== 'object') return;
     try {
       if (message.type === 'secondhand:generic:frames' && window === window.top) {
@@ -116,3 +120,5 @@
     }
   });
 })();
+
+

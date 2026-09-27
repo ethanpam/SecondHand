@@ -142,6 +142,10 @@
   window.addEventListener('pagehide', () => { clearInterval(watch); observer.disconnect(); pending = null; navigation = null; }, { once: true });
 
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
+    if (message.type === 'secondhand:iowa:pageText') {
+      respond({ lang: document.documentElement.lang, text: document.body.innerText.slice(0, 500) });
+      return;
+    }
     if (sender.id !== chrome.runtime.id || !message || window !== window.top || !adapter.isSupportedUrl(location.href)) return;
     try {
       if (message.type === 'secondhand:pageState') {
@@ -185,3 +189,5 @@
     }
   });
 })();
+
+
