@@ -289,7 +289,7 @@
       }
       const footer = element('div', 'application-card-footer');
       const edit = element('button', 'text-button', 'View & update'); edit.type = 'button'; edit.append(icon('arrow')); edit.addEventListener('click', () => openApplication(application));
-      footer.append(element('p', '', 'Personal record · Update from your agency notices'), edit); card.append(footer); list.append(card);
+      footer.append(edit); card.append(footer); list.append(card);
     }
     for (const application of sortedApplications().slice(0, 3)) {
       const row = element('button', 'overview-app-row'); row.type = 'button';
