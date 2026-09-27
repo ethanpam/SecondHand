@@ -34,6 +34,18 @@ def training_precision(model_dir):
     return precision
 
 
+def holdout_forms(questions_dir):
+    """URLs of the real forms kept out of training for good (source.holdout)."""
+    urls = set()
+    for path in Path(questions_dir).glob("*.json"):
+        source = json.loads(path.read_text())["source"]
+        if source.get("holdout"):
+            urls.add(source["url"])
+    if not urls:
+        raise ValueError(f"No form in {questions_dir} is marked holdout.")
+    return urls
+
+
 def load(model_dir):
     # On Apple silicon, laya-mlx defaults to float16, whose range is too small for models trained
     # in bfloat16: their outputs overflow. So load in the training precision. LayaStudio's
@@ -86,6 +98,7 @@ def main():
     parser.add_argument("--model", required=True, help="a trained checkpoint folder, e.g. <LayaStudio>/workspace/runs/<run>/model")
     parser.add_argument("--dataset", default=str(ROOT / "dataset" / "out"))
     parser.add_argument("--split", default="test")
+    parser.add_argument("--holdout", action="store_true", help="evaluate only the forms marked holdout in questions/")
     parser.add_argument("--limit", type=int, default=0, help="evaluate this many decisions per task (0 = all)")
     parser.add_argument("--report", help="write the JSON report here")
     parser.add_argument("--errors", help="write every wrong fill at --error-threshold here (JSON lines)")
@@ -100,6 +113,9 @@ def main():
             row = json.loads(line)
             if row["split"] == args.split:
                 decisions[row["task"]][row["decision"]].append(row)
+    if args.holdout:
+        urls = holdout_forms(ROOT / "questions")
+        decisions = {task: {key: rows for key, rows in groups.items() if key.split("#")[0] in urls} for task, groups in decisions.items()}
     if args.limit:
         decisions = {task: dict(list(groups.items())[: args.limit]) for task, groups in decisions.items()}
     for task, groups in decisions.items():
@@ -108,6 +124,7 @@ def main():
     report = {
         "model": args.model,
         "split": args.split,
+        "holdout": args.holdout,
         "tasks": {task: {str(t): metrics(groups, t) for t in THRESHOLDS} for task, groups in decisions.items()},
     }
     if args.errors:

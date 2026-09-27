@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from decisions import training_precision
+from decisions import holdout_forms, training_precision
 
 
 class TrainingPrecision(unittest.TestCase):
@@ -26,6 +26,23 @@ class TrainingPrecision(unittest.TestCase):
     def test_a_training_record_without_a_precision_is_refused(self):
         with self.assertRaisesRegex(ValueError, "precision"):
             training_precision(self.folder({"hyperparameters": {}}))
+
+
+class HoldoutForms(unittest.TestCase):
+    def bank(self, forms):
+        folder = Path(tempfile.mkdtemp())
+        for name, source in forms.items():
+            (folder / f"{name}.json").write_text(json.dumps({"source": source, "questions": []}))
+        (folder / "synthetic").mkdir()
+        return folder
+
+    def test_only_forms_marked_holdout_count(self):
+        folder = self.bank({"kept": {"url": "https://a.example/form", "holdout": True}, "trained": {"url": "https://b.example/form"}})
+        self.assertEqual(holdout_forms(folder), {"https://a.example/form"})
+
+    def test_a_bank_without_holdout_forms_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "holdout"):
+            holdout_forms(self.bank({"trained": {"url": "https://b.example/form"}}))
 
 
 if __name__ == "__main__":
