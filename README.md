@@ -77,6 +77,7 @@ Build installers locally with `npm run dist:win` on Windows or `npm run dist:mac
 - The desktop app is the sole persistent owner of applicant data. Chrome extension storage and Chrome Sync are not used for applicant information.
 - Filling a field shares it with Iowa's website. The website can read or autosave values before you click Submit, and ordinary **Save and Continue** saves page answers. Desktop approval occurs **before filling**, unless you chose **Always allow on this computer**. That setting lets the extension fill Iowa's supported page while the vault is unlocked. It never clicks Next and does not cover consent, signatures, or final submission.
 - The extension is restricted to Iowa's supported HTTPS portal, requests only recognized fields on the current page, and never fills passwords, verification codes, signatures, or unknown household members.
+- The optional Laya model (off by default, about 429 MB) is downloaded once when you turn it on in the Chrome extension view and runs on this computer. No profile data is sent anywhere. See [Local AI with Laya](docs/security.md#local-ai-with-laya).
 - An encrypted backup is the portable copy of your information. A backup opens with the password or recovery key it was saved with. Keep backups off cloud-synced folders if you want all copies offline.
 - This does not protect an unlocked computer from malware, malicious same-user processes, browser extensions reading Iowa's page, OS backups/crash dumps, or government-side storage. Read [the security design](docs/security.md).
 
