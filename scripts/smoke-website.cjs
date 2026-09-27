@@ -36,7 +36,7 @@ async function inspectHeroLayout(page) {
   assert.equal(background.width, page.viewportSize().width, 'Shader must span the viewport');
   assert.ok(header.y + header.height < content.y, 'Navigation must not overlap hero copy');
   assert.notEqual(await page.locator('.gradient-background').evaluate(element => getComputedStyle(element).maskImage), 'none', 'Shader must fade out before its bottom edge');
-  for (const selector of ['.site-header', '.site-header nav', '.intro']) {
+  for (const selector of ['.site-header', '.site-header nav', '.demo-section']) {
     assert.equal(await page.locator(selector).evaluate(element => {
       const style = getComputedStyle(element);
       return parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
@@ -47,12 +47,8 @@ async function inspectHeroLayout(page) {
 async function inspectWordmark(page) {
   await page.goto(site, { waitUntil: 'networkidle' });
   await expect(page.locator('.variable-wordmark')).toHaveText('SecondHand');
-  await page.getByRole('button', { name: 'Pause animations' }).click();
   const letter = page.locator('.variable-wordmark [data-letter]').nth(4);
-  await letter.hover();
   const weight = () => letter.evaluate(element => getComputedStyle(element).fontVariationSettings);
-  assert.equal(await weight(), '"wght" 450', 'Paused wordmark must remain still');
-  await page.getByRole('button', { name: 'Play animations' }).click();
   await letter.hover();
   await expect.poll(weight).not.toBe('"wght" 450');
   await page.mouse.move(0, 0);
@@ -60,14 +56,13 @@ async function inspectWordmark(page) {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await letter.hover();
   assert.equal(await weight(), '"wght" 450', 'Reduced motion must disable proximity animation');
-  await expect(page.locator('.motion-toggle')).toHaveCount(0);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.mouse.move(0, 0);
-  console.log('React Bits wordmark, shared pause, reduced motion, and branding passed.');
+  console.log('React Bits wordmark, reduced motion, and branding passed.');
 }
 
 async function inspectStaticDemo(page) {
-  await expect(page.locator('#closing-heading')).toHaveAccessibleName('Ready for less typing?');
+  await expect(page.locator('#demo-heading')).toHaveAccessibleName('Ready for less typing?');
   await expect(page.locator('.text-type__content')).toHaveText('Ready for less typing?');
   await expect(page.locator('.text-type')).toHaveAttribute('data-running', 'false');
   await expect(page.locator('.text-type__cursor')).toBeHidden();
@@ -78,13 +73,15 @@ async function inspectStaticDemo(page) {
   await expect(page.locator('.autofill-demo input, .autofill-demo form')).toHaveCount(0);
 }
 
-async function inspectClosingMotion(page) {
+async function inspectDemoMotion(page) {
   await page.goto(site, { waitUntil: 'networkidle' });
-  const heading = page.locator('#closing-heading');
+  // The demo sits under the hero, so it starts from the footer, where the demo is off screen.
+  const footer = page.locator('.site-footer');
+  await footer.evaluate(element => element.scrollIntoView({ behavior: 'instant', block: 'end' }));
+  const heading = page.locator('#demo-heading');
   const text = page.locator('.text-type');
   const content = page.locator('.text-type__content');
   const demo = page.locator('.autofill-demo');
-  const replay = page.getByRole('button', { name: 'Replay demo' });
   await expect(text).toHaveAttribute('data-running', 'false');
   await expect(demo).toHaveAttribute('data-running', 'false');
   await demo.evaluate(element => {
@@ -98,7 +95,7 @@ async function inspectClosingMotion(page) {
     record();
     element.motionProbe = { samples, observer };
   });
-  await page.locator('.closing-section').evaluate(element => element.scrollIntoView({ behavior: 'instant', block: 'start' }));
+  await page.locator('.demo-section').evaluate(element => element.scrollIntoView({ behavior: 'instant', block: 'start' }));
   await expect(text).toHaveAttribute('data-running', 'true');
   await expect(demo).toHaveAttribute('data-running', 'true');
   await expect(heading).toHaveAccessibleName('Ready for less typing?');
@@ -117,19 +114,8 @@ async function inspectClosingMotion(page) {
   assert.deepEqual(await heading.boundingBox(), headingSize, 'Typing and deleting must not shift the heading layout');
   await expect(heading).toHaveAccessibleName('Ready for less typing?');
   await expect(demo).toHaveAttribute('data-phase', 'approach');
-
-  await page.getByRole('button', { name: 'Pause all animations' }).click();
-  await inspectStaticDemo(page);
-  await expect(replay).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'Play animations', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  await page.screenshot({ path: path.join(artifacts, 'text-type-desktop.png') });
-  await page.getByRole('button', { name: 'Play all animations' }).click();
-  await replay.focus();
-  await replay.press('Enter');
-  await expect(replay).toBeFocused();
-  await expect(demo).toHaveAttribute('data-phase', 'approach');
-  await expect(page.locator('.autofill-field[data-filled="true"]')).toHaveCount(0);
   await expect(demo).toHaveAttribute('data-phase', 'complete');
+  await page.screenshot({ path: path.join(artifacts, 'text-type-desktop.png') });
 
   async function assertSuspended() {
     await expect(text).toHaveAttribute('data-running', 'false');
@@ -152,13 +138,12 @@ async function inspectClosingMotion(page) {
     document.dispatchEvent(new Event('visibilitychange'));
   });
   await expect(text).toHaveAttribute('data-running', 'true');
-  await page.locator('.hero').evaluate(element => element.scrollIntoView({ behavior: 'instant' }));
+  await footer.evaluate(element => element.scrollIntoView({ behavior: 'instant', block: 'end' }));
   await assertSuspended();
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await inspectStaticDemo(page);
-  await expect(replay).toHaveCount(0);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  console.log('Text Type and click-to-autofill: typing/deleting, stable layout, field sequence, replay, shared pause, reduced motion, and visibility suspension passed.');
+  console.log('Text Type and click-to-autofill: typing/deleting, stable layout, field sequence, reduced motion, and visibility suspension passed.');
 }
 
 async function main() {
@@ -186,20 +171,15 @@ async function main() {
     await inspectHeroLayout(page);
     const structuredData = JSON.parse(await page.locator('script[type="application/ld+json"]').textContent());
     assert.equal(structuredData.find(entry => entry['@type'] === 'SoftwareApplication').name, 'SecondHand');
+    assert.equal(structuredData.some(entry => entry['@type'] === 'FAQPage'), false, 'The questions are described on their own page');
     const shaderFrame = () => page.locator('.gradient-canvas[data-paper-shader]').evaluate(element => element.paperShaderMount.getCurrentFrame());
     const initialFrame = await shaderFrame();
     await expect.poll(shaderFrame).toBeGreaterThan(initialFrame);
-    await page.getByRole('button', { name: 'Pause animations' }).click();
-    await expect(page.getByRole('button', { name: 'Play animations' })).toBeVisible();
-    const pausedFrame = await shaderFrame();
-    await page.waitForTimeout(200);
-    assert.equal(await shaderFrame(), pausedFrame, 'Pause must stop drawing new frames');
+    // Animations always play: there is no pause, play, or replay button.
+    await expect(page.getByRole('button', { name: /animations|replay/i })).toHaveCount(0);
     await page.screenshot({ path: path.join(artifacts, 'desktop.png'), fullPage: true });
-    await page.getByRole('button', { name: 'Play animations' }).click();
-    await expect.poll(shaderFrame).toBeGreaterThan(pausedFrame);
 
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    await expect(page.locator('.motion-toggle')).toHaveCount(0);
     const reducedFrame = await shaderFrame();
     await page.waitForTimeout(200);
     assert.equal(await shaderFrame(), reducedFrame, 'Reduced motion must stop animation');
@@ -207,9 +187,9 @@ async function main() {
     await expect.poll(shaderFrame).toBeGreaterThan(reducedFrame);
     await page.locator('#setup').evaluate(element => element.scrollIntoView({ behavior: 'instant', block: 'start' }));
     await expect.poll(() => page.locator('.gradient-canvas[data-paper-shader]').evaluate(element => element.paperShaderMount.currentSpeed)).toBe(0);
-    console.log('Shader rendering, pause/play, reduced motion, and offscreen suspension passed.');
+    console.log('Shader rendering, reduced motion, and offscreen suspension passed.');
     await inspectWordmark(page);
-    await inspectClosingMotion(page);
+    await inspectDemoMotion(page);
 
     await page.getByRole('tab', { name: 'Windows', exact: true }).click();
     await page.getByRole('tab', { name: 'Windows', exact: true }).press('ArrowRight');
@@ -245,12 +225,22 @@ async function main() {
     }
     console.log('Keyboard tabs and all three installer routes passed.');
 
+    // The common questions live on their own page, linked from the bottom of the home page.
     await page.goto(site, { waitUntil: 'networkidle' });
+    await page.getByRole('link', { name: 'Read the common questions' }).click();
+    await expect(page).toHaveURL(`${site}/faq`);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Common questions');
+    await inspectLayout(page);
+    const faqData = JSON.parse(await page.locator('script[type="application/ld+json"]').textContent());
+    assert.equal(faqData['@type'], 'FAQPage');
+    assert.equal(faqData.mainEntity.length, await page.locator('.faq-list details').count(), 'Every question on the page is described for search engines');
+    await page.screenshot({ path: path.join(artifacts, '-faq.png'), fullPage: true });
     const question = page.getByText('Does SecondHand cost anything?', { exact: true });
     await question.click();
     await expect(page.getByText('No. The download is free, and there is no account or subscription.', { exact: true })).toBeVisible();
     await question.press('Enter');
     await expect(page.getByText('No. The download is free, and there is no account or subscription.', { exact: true })).toBeHidden();
+    await page.goto(site, { waitUntil: 'networkidle' });
     await page.getByText('If your computer shows a warning', { exact: true }).click();
     await expect(page.getByRole('link', { name: 'Apple’s guidance on opening apps' })).toBeVisible();
 
@@ -284,7 +274,6 @@ async function main() {
     await page.goto(site, { waitUntil: 'networkidle' });
     await page.locator('canvas').evaluate(canvas => canvas.getContext('webgl2').getExtension('WEBGL_lose_context').loseContext());
     await expect(page.locator('.gradient-background canvas')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Pause animations' })).toBeVisible();
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
 
     const fallback = await context.newPage();
@@ -296,7 +285,6 @@ async function main() {
     });
     await fallback.goto(site, { waitUntil: 'networkidle' });
     await expect(fallback.locator('canvas')).toHaveCount(0);
-    await expect(fallback.getByRole('button', { name: 'Pause animations' })).toBeVisible();
     await expect(fallback.getByRole('heading', { level: 1 })).toBeVisible();
     await fallback.getByRole('tab', { name: 'Mac', exact: true }).click();
     await expect(fallback.getByRole('link', { name: 'Apple Silicon' })).toBeVisible();
@@ -324,7 +312,7 @@ async function main() {
     await expect(staticPage).toHaveURL(`${site}/thank-you/windows`);
     assert.deepEqual(errors, [], 'No browser runtime errors');
     assert.deepEqual([...externalRequests], [], 'Fonts and shaders must stay self-hosted');
-    console.log('Website smoke passed: shader animation, pause, reduced motion, offscreen suspension, context loss, WebGL fallback, responsive layouts, keyboard tabs, downloads, FAQ, privacy, and 404.');
+    console.log('Website smoke passed: shader animation, reduced motion, offscreen suspension, context loss, WebGL fallback, responsive layouts, keyboard tabs, downloads, FAQ, privacy, and 404.');
   } finally {
     await browser.close();
   }

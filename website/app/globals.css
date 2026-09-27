@@ -92,15 +92,6 @@ svg {
   margin-inline: auto;
   padding-inline: 64px;
 }
-.eyebrow {
-  font:
-    500 11px/1.5 'Geist',
-    sans-serif;
-  text-transform: uppercase;
-  letter-spacing: 1.8px;
-  margin-bottom: 28px;
-  color: var(--muted-foreground);
-}
 .soft-text {
   color: var(--muted-foreground);
 }
@@ -159,13 +150,10 @@ nav a:hover {
   font-weight: 500;
 }
 .header-download svg,
-.text-link svg,
-.secondary-link span,
 .primary-link svg {
   transition: transform 180ms ease;
 }
 .header-download:hover svg,
-.text-link:hover svg,
 .primary-link:hover svg {
   transform: translateX(4px);
 }
@@ -267,45 +255,15 @@ nav a:hover {
 .secondary-link {
   padding-block: 16px;
 }
-.secondary-link:hover span {
-  transform: translate(2px, -2px);
+.secondary-link,
+.text-link {
+  text-decoration: underline;
+  text-underline-offset: 6px;
 }
 .hero-note {
   font-size: 11px;
   color: #415d4c;
   margin: 22px 0 0;
-}
-.hero-caption {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  padding-top: 24px;
-  padding-bottom: 28px;
-  margin-top: auto;
-  font-size: 11px;
-  color: #415d4c;
-}
-.hero-caption-end {
-  display: flex;
-  align-items: center;
-  gap: 28px;
-}
-.hero-caption a {
-  display: inline-flex;
-  align-items: center;
-  gap: 18px;
-}
-.motion-toggle {
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
-  min-height: 40px;
-  padding: 8px 0;
-  background: none;
-  border: 0;
-  color: var(--foreground);
-  font-size: 11px;
 }
 .intro {
   display: grid;
@@ -323,19 +281,34 @@ nav a:hover {
   max-width: 445px;
   line-height: 1.85;
 }
-.trust-line {
+.promise-list {
+  display: grid;
+  gap: 12px;
+  max-width: 445px;
+  margin: 28px 0 16px;
+  padding: 0;
+  list-style: none;
+}
+.promise-list li {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  color: #415d4c;
-  font-size: 11px;
-  margin: 28px 0 24px;
+  align-items: start;
+  gap: 12px;
+  color: #364c3f;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.promise-list svg {
+  flex: none;
+  margin-top: 4px;
+  color: var(--primary);
+}
+.promise-note {
+  max-width: 445px;
+  margin: 0 0 24px;
 }
 .text-link {
   display: inline-flex;
   align-items: center;
-  gap: 24px;
   font-size: 13px;
   font-weight: 500;
 }
@@ -612,79 +585,20 @@ kbd {
   text-decoration: underline;
   text-underline-offset: 6px;
 }
-.privacy-section {
-  display: grid;
-  grid-template-columns: 1fr 1.12fr;
-  gap: 88px;
-  padding: 64px;
-  background: #164c38;
-  color: #fff;
-  border-radius: 8px;
-}
-.privacy-section .eyebrow {
-  color: #d7e6cf;
-}
-.privacy-section h2 {
-  font-size: clamp(34px, 3.5vw, 48px);
-  letter-spacing: -1.7px;
-}
-.privacy-mark {
-  margin-top: 44px;
-  font-family: var(--display);
-  font-size: clamp(70px, 8vw, 112px);
-  line-height: 1;
-  letter-spacing: -5px;
-  color: #d7e6cf;
-}
-.privacy-copy > p {
-  color: #edf3e9;
-  font-size: 14px;
-  line-height: 1.9;
-}
-.privacy-copy ul {
-  display: grid;
-  gap: 20px;
-  list-style: none;
-  padding: 26px 0;
-  margin: 24px 0;
-  border-block: 1px solid #52745e;
-}
-.privacy-copy li {
-  display: flex;
-  align-items: start;
-  gap: 12px;
-  color: #fff;
-  font-size: 12px;
-}
-.privacy-copy li svg {
-  color: #d7e6cf;
-  margin-top: 3px;
-}
-.privacy-copy > p.small-note {
-  font-size: 11px;
-  color: #d7e6cf;
-  margin: 0;
-}
 .small-note a {
   text-decoration: underline;
   text-underline-offset: 4px;
 }
-.privacy-section a:focus-visible {
-  outline-color: #fff;
+.faq-callout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 72px;
 }
-.faq-section {
-  display: grid;
-  grid-template-columns: 0.9fr 1.1fr;
-  gap: 96px;
-  padding: var(--space-section) 0;
-}
-.faq-section h2 {
-  font-size: clamp(36px, 3.8vw, 52px);
-}
-.section-description {
-  color: var(--muted-foreground);
-  font-size: 14px;
-  margin-top: 24px;
+.faq-callout h2 {
+  font-size: clamp(30px, 3vw, 40px);
 }
 .faq-list details {
   margin: 0;
@@ -723,19 +637,28 @@ kbd {
   line-height: 1.85;
   margin: 16px 0 0;
 }
-.closing-section {
-  text-align: center;
-  padding: 80px 24px 112px;
-  border-top: 1px solid var(--border);
+/* The common questions page: the same list, in the document's larger type. */
+.faq-page .faq-list summary {
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--foreground);
+  cursor: pointer;
 }
-.closing-section h2 {
+.faq-page .faq-list details p {
+  font-size: 15px;
+}
+.faq-page .faq-more {
+  margin-top: 48px;
+}
+.demo-section {
+  text-align: center;
+  padding: var(--space-section) 24px 72px;
+}
+.demo-section h2 {
   font-size: clamp(64px, 7.5vw, 106px);
   line-height: 0.98;
   letter-spacing: -4px;
   margin-bottom: 36px;
-}
-.closing-section .micro {
-  margin-top: 24px;
 }
 .screen-reader-only {
   position: absolute;
@@ -891,35 +814,6 @@ kbd {
   margin-top: 14px;
   color: var(--muted-foreground);
   font-size: 11px;
-}
-.autofill-controls {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 28px;
-  margin-top: 6px;
-}
-.replay-demo {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 40px;
-  padding: 8px 0;
-  border: 0;
-  background: none;
-  color: var(--foreground);
-  font-size: 11px;
-  text-underline-offset: 4px;
-}
-.replay-demo:hover:enabled {
-  text-decoration: underline;
-}
-.replay-demo:disabled {
-  color: var(--muted-foreground);
-  cursor: default;
-}
-.replay-demo span {
-  font-size: 18px;
 }
 @keyframes autofill-approach {
   from {
@@ -1118,13 +1012,6 @@ footer p {
   .setup-section {
     gap: 56px;
   }
-  .privacy-section {
-    padding: 44px;
-    gap: 48px;
-  }
-  .faq-section {
-    gap: 56px;
-  }
 }
 @media (max-width: 800px) {
   :root {
@@ -1181,17 +1068,6 @@ footer p {
   .hero-note {
     font-size: 11px;
   }
-  .hero-caption {
-    align-items: start;
-    flex-direction: column;
-    gap: 12px;
-    font-size: 10px;
-  }
-  .hero-caption-end {
-    width: 100%;
-    justify-content: space-between;
-    gap: 20px;
-  }
   .gradient-background::after {
     background: radial-gradient(
       ellipse at 25% 25%,
@@ -1241,25 +1117,10 @@ footer p {
     gap: 28px;
     padding: 28px;
   }
-  .privacy-section {
-    grid-template-columns: 1fr;
-    padding: 36px;
-    gap: 32px;
+  .demo-section {
+    padding: 64px 0;
   }
-  .privacy-section h2 {
-    font-size: 42px;
-  }
-  .privacy-mark {
-    display: none;
-  }
-  .faq-section {
-    grid-template-columns: 1fr;
-    gap: 40px;
-  }
-  .closing-section {
-    padding: 64px 0 80px;
-  }
-  .closing-section h2 {
+  .demo-section h2 {
     font-size: clamp(58px, 11vw, 90px);
     letter-spacing: -2.5px;
   }
@@ -1342,13 +1203,6 @@ footer p {
   }
   .step-number {
     font-size: 34px;
-  }
-  .privacy-section {
-    padding: 28px;
-  }
-  .privacy-section h2 {
-    font-size: 34px;
-    letter-spacing: -1px;
   }
   .footer-bottom {
     flex-direction: column;
