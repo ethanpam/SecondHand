@@ -22,7 +22,7 @@ from layastudio import runtime
 
 ROOT = Path(__file__).resolve().parents[1]
 ABSTAIN = "None of these, or the facts don’t say"
-THRESHOLDS = [0.5, 0.7, 0.8, 0.9, 0.95]
+THRESHOLDS = [0.5, 0.7, 0.8, 0.9, 0.95, 0.98, 0.99, 0.995]
 
 
 def training_precision(model_dir):
@@ -53,21 +53,45 @@ def probabilities(decisions):
     return {task: {key: [row["p"] for row in rows] for key, rows in groups.items()} for task, groups in decisions.items()}
 
 
-def agreement(reference, other, atol=0.05):
-    """How far two scorings of the same rows ({decision: [p, ...]}) are apart, row by row."""
+def same_rows(reference, other):
+    """Refuse two {decision: [...]} maps that do not hold the same decisions and row counts."""
     if set(reference) != set(other):
         raise ValueError(f"The two scorings cover different decisions ({len(reference)} vs {len(other)})")
-    diffs = []
-    for key, probs in reference.items():
-        if len(probs) != len(other[key]):
-            raise ValueError(f"Decision {key!r} has {len(probs)} rows in one scoring and {len(other[key])} in the other")
-        diffs.extend(abs(a - b) for a, b in zip(probs, other[key]))
+    for key, rows in reference.items():
+        if len(rows) != len(other[key]):
+            raise ValueError(f"Decision {key!r} has {len(rows)} rows in one scoring and {len(other[key])} in the other")
+
+
+def fill(probs, threshold):
+    """The candidate a decision fills, or None. The last probability is the abstain candidate's."""
+    best = max(range(len(probs) - 1), key=lambda i: probs[i])
+    return best if probs[best] >= threshold and probs[best] > probs[-1] else None
+
+
+def agreement(reference, other, atol=0.05, thresholds=THRESHOLDS):
+    """How far two scorings of the same rows ({decision: [p, ...]}) are apart, row by row, and
+    how many decisions they would fill differently at each threshold."""
+    same_rows(reference, other)
+    diffs = [abs(a - b) for key, probs in reference.items() for a, b in zip(probs, other[key])]
     return {
         "rows": len(diffs),
         "share_diff_gt_atol": sum(d > atol for d in diffs) / len(diffs) if diffs else None,
         "max_abs_diff": round(max(diffs), 4) if diffs else None,
         "atol": atol,
+        "decisions": len(reference),
+        "decisions_with_different_fill": {
+            str(t): sum(fill(probs, t) != fill(other[key], t) for key, probs in reference.items()) for t in thresholds
+        },
     }
+
+
+def apply_probabilities(decisions, saved):
+    """Set each row's p from a saved .probs.json of the same rows instead of scoring again."""
+    for task, groups in decisions.items():
+        same_rows(groups, saved[task])
+        for key, rows in groups.items():
+            for row, p in zip(rows, saved[task][key]):
+                row["p"] = p
 
 
 def named_reference(text):
@@ -107,15 +131,14 @@ def metrics(decisions, threshold):
         if rows[-1]["state"]["candidate"] != ABSTAIN:
             raise ValueError("Every decision must end with the abstain candidate.")
         gold = next(row["state"]["candidate"] for row in rows if row["answers"]["correct"])
-        best = max(rows[:-1], key=lambda row: row["p"])
-        accepted = best["p"] >= threshold and best["p"] > rows[-1]["p"]
+        chosen = fill([row["p"] for row in rows], threshold)
         answerable = gold != ABSTAIN
         result["decisions"] += 1
         result["answerable"] += answerable
         result["unanswerable"] += not answerable
-        if accepted:
+        if chosen is not None:
             result["accepted"] += 1
-            if best["state"]["candidate"] == gold:
+            if rows[chosen]["state"]["candidate"] == gold:
                 result["right"] += 1
             else:
                 result["wrong_fill"] += 1
@@ -156,6 +179,7 @@ def main():
     parser.add_argument("--error-threshold", type=float, default=0.9)
     parser.add_argument("--reference-probs", action="append", default=[], metavar="NAME=PATH",
                         help="another scoring's .probs.json to compare with row by row (repeatable)")
+    parser.add_argument("--probs", help="take each row's probability from this model's saved .probs.json instead of scoring again")
     args = parser.parse_args()
     references = [named_reference(text) for text in args.reference_probs]
 
@@ -171,12 +195,16 @@ def main():
     source = Path(args.dataset)
     questions = json.loads((source / "questions.json").read_text())
     decisions = load_decisions(source, args.split, args.holdout, args.limit)
-    if args.runtime == "onnx":
+    if args.probs:
+        apply_probabilities(decisions, json.loads(Path(args.probs).read_text()))
+    elif args.runtime == "onnx":
         from onnx_score import OnnxScorer
 
         scorer = OnnxScorer(args.onnx, batch_size=args.batch_size, threads=args.threads)
     for task, groups in decisions.items():
         print(f"{task}: {len(groups)} decisions, {sum(len(rows) for rows in groups.values())} rows", flush=True)
+        if args.probs:
+            continue
         if args.runtime == "onnx":
             scorer.score_rows([row for rows in groups.values() for row in rows], questions, progress_every=500)
         else:
@@ -190,6 +218,8 @@ def main():
     }
     if args.runtime == "onnx":
         report["onnx"] = {"batch_size": args.batch_size, "threads": args.threads or "onnxruntime default"}
+    if args.probs:
+        report["probs_from"] = args.probs
     scored = probabilities(decisions)
     if references:
         report["agreement"] = {}
@@ -200,9 +230,10 @@ def main():
         with open(args.errors, "w") as handle:
             for task, groups in decisions.items():
                 for rows in groups.values():
-                    best = max(rows[:-1], key=lambda row: row["p"])
+                    chosen = fill([row["p"] for row in rows], args.error_threshold)
+                    best = rows[chosen] if chosen is not None else None
                     gold = next(row["state"]["candidate"] for row in rows if row["answers"]["correct"])
-                    if best["p"] >= args.error_threshold and best["p"] > rows[-1]["p"] and best["state"]["candidate"] != gold:
+                    if best and best["state"]["candidate"] != gold:
                         handle.write(json.dumps({"task": task, "decision": rows[0]["decision"], "question": rows[0]["state"]["question"],
                                                  "chosen": best["state"]["candidate"], "p": round(best["p"], 4), "gold": gold,
                                                  "facts": rows[0]["state"].get("facts", "")}, ensure_ascii=False) + "\n")
