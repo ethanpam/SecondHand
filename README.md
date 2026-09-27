@@ -1,38 +1,120 @@
-# secondHand
+<p align="center">
+  <img src="website/public/brand/secondhand-icon.png" width="96" alt="">
+</p>
 
-A desktop benefits companion and Chrome extension for Iowa SNAP. Your saved profile and application tracker live in an encrypted vault on your computer. On Iowa's Self-Service Portal, one **Autofill** click works through the application for you, through a local Chrome Native Messaging connection. It fills the questions it knows and continues past information-only screens. It stops with a plain instruction wherever you're needed: CAPTCHA, consent, missing answers, and unsupported steps. A Chrome side panel shows what still needs you.
+<h1 align="center">SecondHand</h1>
 
-**This is an early assisted-application release.** The initial applicant page has verified filling for names and suffix, phone/contact preferences, home and mailing addresses, and explicitly saved yes/no and program choices. One click also fills fields that your saved answers reveal, such as a mailing address. On the verified initial applicant page it chooses Save and Continue once required answers are complete. It also selects the first suggested home address on the verified home-only address screen and continues. Review the chosen address and every answer before submitting. On other pages, the general form engine may fill recognizable saved fields, but later navigation, unsupported questions, consent, signatures, and final submission stay manual. Only the government can confirm eligibility or approval. See [Iowa portal coverage](docs/iowa-portal.md) for the exact scope.
+<p align="center">
+  <strong>A little help. A lot less typing.</strong><br>
+  Save your details once, on your own computer. When you say yes, SecondHand fills in Iowa's SNAP application for you.
+</p>
 
-![SecondHand desktop app and Chrome extension autofilling an Iowa SNAP test page, a Jotform, an embedded Jotform, and a Google Form](docs/media/secondhand-demo.gif)
+<p align="center">
+  <a href="https://secondhand-download.khoidoan00.chatgpt.site"><strong>Download for Windows or Mac</strong></a>
+  &nbsp;·&nbsp; <a href="docs/setup.md">Setup guide</a>
+  &nbsp;·&nbsp; <a href="docs/iowa-portal.md">What it covers</a>
+  &nbsp;·&nbsp; <a href="docs/security.md">Security</a>
+  &nbsp;·&nbsp; <a href="#develop">Develop</a>
+</p>
 
-The demo uses the fictional test profile and a synthetic copy of Iowa's applicant page; nothing is submitted.
+<p align="center">
+  <img src="docs/media/autofill.gif" width="880" alt="The SecondHand card in the corner of Iowa's application. A click on Autofill fills the saved answers, a yellow '1 need you' link appears, and clicking it jumps to the empty First Name field, where Daniel is typed.">
+  <br>
+  <sub>A fictional applicant on a synthetic copy of Iowa's form. Nothing is sent anywhere.</sub>
+</p>
 
-## iPhone app
+> [!IMPORTANT]
+> SecondHand is an early pilot. It is independent software, not part of Iowa HHS, and it does not decide who qualifies. It fills in and checks answers; you review them, sign, and submit.
 
-A native SwiftUI iOS companion and Safari extension are in [`ios/`](ios/README.md). Open [`ios/SecondHand.xcodeproj`](ios/SecondHand.xcodeproj) in Xcode. It provides encrypted on-device storage, renewal reminders, and a guided application assistant with saved-answer filling, explicit page continuation, separately approved submission, and user-reported confirmation capture. This is a prototype; live Iowa filing and authenticated renewal remain unverified. The iPhone and desktop vaults are independent; there is no cross-device synchronization. See the [iOS setup guide](ios/README.md) and [application pipeline](ios/docs/Application-assistant.md).
+## What it does
 
-## Android app
+- **Keeps your details on your computer.** Your profile and application notes are saved in an encrypted file that only your password or recovery key opens. There is no account, no cloud copy, and no analytics.
+- **Fills Iowa's application in one click.** Click **Autofill** in the corner of Iowa's portal. SecondHand fills the questions it knows, moves past screens that only give information, and stops wherever you're needed.
+- **Shows what still needs you.** A yellow **1 need you** link jumps to each missing answer. Click the SecondHand logo on the card to open Chrome's side panel, which marks every question on the page as **Done**, **Needs you**, **Optional**, or **Do it yourself**.
+- **Leaves the decisions to you.** The app asks before sharing anything, unless you choose **Always allow**. CAPTCHA, consent, signatures, and final submission are always yours.
+- **Speaks your language.** The side panel works in English, Spanish, Vietnamese, Chinese, French, and Arabic. It can show Iowa's questions in your language and sum up long pages, using Chrome's built-in translator and summarizer on your computer.
+- **Helps with other food-assistance forms.** Turn SecondHand on for a food pantry's form site and it fills what it recognizes, one click at a time. It never navigates or submits on those sites.
 
-A matching Kotlin/Jetpack Compose app is in [`android/`](android/README.md). Open that folder in Android Studio. It includes encrypted offline profiles and documents, notice-based reminders, and an in-app Iowa assistant with explicit page and submission approval. It reuses the laptop and iOS form engines; supported WebViews run them in an isolated JavaScript world, with manual browsing on older providers. Live Iowa filing and authenticated renewal remain unverified. See the [Android setup guide](android/README.md) and [validation record](android/docs/Validation.md).
+## See it
 
-## Install on Windows or Mac
+| Your saved details, in the desktop app | The overview |
+| --- | --- |
+| <img src="docs/media/desktop-my-information.png" alt="The My information page of the SecondHand desktop app, with the fictional applicant Daniel Ceaser's name, date of birth, and program choices" width="100%"> | <img src="docs/media/desktop-overview.png" alt="The SecondHand desktop app's Overview: a Prepare my application button, three next steps, and one Iowa SNAP application in progress" width="100%"> |
 
-Download the Windows `.exe` installer or the Mac `.dmg` for your processor from the [secondHand download website](https://secondhand-download.khoidoan00.chatgpt.site). On Mac, drag SecondHand into Applications and launch it there before setting up Chrome. These pilot builds are unsigned and Mac builds are not notarized, so your operating system may warn or block them.
+**On Iowa's portal, with Chrome's side panel open.** The card in the corner says one answer still needs you; the side panel shows which one.
 
-1. Open SecondHand and create a password. Save the recovery key it shows you somewhere safe, away from the computer. If you forget your password, choose **Forgot password?** and use that key, or reset it on the same computer if you left **Let this computer reset my password** on. If you have neither, choose **Start over** on that screen to erase the saved information and create a new password; you can save a locked copy first.
-2. In **Chrome extension**, choose **Prepare Chrome extension**. The app prepares a permanent folder and registers its local connection automatically.
-3. In Chrome, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select that folder. Use the app's **Copy folder path** button to locate it. No extension ID copying or command line is needed.
-4. Save your profile, keep the app unlocked, and open [Iowa's portal](https://hhsservices.iowa.gov/apspssp/ssp.portal) in Chrome. Use Chrome 116 or newer. Start a guest application and click **Autofill** in the bottom-right corner. It stays on for that tab until you click **Stop**, lock SecondHand, leave Iowa's site, or reach a screen it doesn't know yet. The first time, the desktop app asks: choose **Allow once**, or **Always allow on this computer** to skip the pop-up whenever the app is unlocked. You can turn that off in the app's **Chrome extension** page.
-5. The widget shows how many fields it filled and how many **need you**. Click that link to jump to each missing field. **Details** opens the side panel checklist (**Done**, **Needs you**, **Optional**, **Do it yourself**). The verified applicant and home-address screens can continue automatically; other Next buttons stay manual. Review every answer and the selected home address before submitting. Complete consent, signatures, and final submission yourself, and save the official confirmation in your local tracker. Locking the vault stops autofill.
+<img src="docs/media/side-panel.png" alt="Iowa's Enter Personal Information page with Last Name filled and First Name empty, the SecondHand card showing Stop and 1 need you, and the side panel checklist marking First name as Needs you and Last name as Done" width="100%">
 
-Chrome installation still requires the manual Load unpacked step; the app does not silently install extensions. See [the complete setup and troubleshooting guide](docs/setup.md) for Mac folder selection, updates, and custom builds.
+## How it works
 
-**Upgrading to 0.4:** install the new desktop app, choose **Refresh extension files**, click **Reload** for SecondHand at `chrome://extensions`, and reload your Iowa tab. If Chrome asks, review the updated permissions for the browser side panel and restricted Iowa site access. Avoid reloading an application containing unsaved answers—save or finish your current work first.
+```mermaid
+flowchart LR
+  app["<b>SecondHand app</b><br/>your encrypted profile"]
+  ext["<b>Chrome extension</b><br/>card and side panel"]
+  portal["<b>Iowa's application</b><br/>in the same Chrome tab"]
+  ext -- "1 · asks for this page's answers" --> app
+  app -- "2 · sends them after you approve" --> ext
+  ext -- "3 · fills the fields" --> portal
+```
+
+The desktop app is the only place your details are kept. The Chrome extension talks to it through Chrome's native messaging, a direct connection between the two programs on your computer; nothing goes through a server. For each page, the extension asks only for the answers that page needs, and only while the app is unlocked. Filling a field on Iowa's page shares that answer with Iowa, as typing it would. Read more in [the security design](docs/security.md).
+
+## Get started
+
+1. **Install.** [Download](https://secondhand-download.khoidoan00.chatgpt.site) the Windows `.exe` or the Mac `.dmg` for your chip. On a Mac, drag SecondHand into Applications and open it from there. These pilot builds are unsigned, so your computer may show a warning first.
+2. **Create a password.** Save the recovery key the app shows you somewhere safe, away from the computer. If you ever forget your password, choose **Forgot password?** and use that key, or reset it on the same computer if you left that option on. With neither, **Start over** erases the saved information so you can make a new password.
+3. **Add the extension to Chrome.** In the app, open **Chrome extension** and click **Prepare Chrome extension**. In Chrome, go to `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and choose the folder the app prepared (**Copy folder path** helps you find it). You only do this once.
+4. **Apply.** Keep SecondHand unlocked and open [Iowa's portal](https://hhsservices.iowa.gov/apspssp/ssp.portal) in Chrome 116 or newer. Start your application and click **Autofill** in the bottom-right corner. The first time, the app asks: choose **Allow once**, or **Always allow on this computer**.
+5. **Finish it yourself.** Click **need you** to jump to anything missing. Review every answer, including the home address SecondHand picked. Then do the consent, signatures, and submission, and save Iowa's confirmation number under **Applications** in the app.
+
+The [setup guide](docs/setup.md) covers each step in detail, including how to find the folder on a Mac and what to do when something goes wrong.
+
+<details>
+<summary><strong>Updating from an earlier version</strong></summary>
+
+Install the new app, open **Chrome extension**, and click **Refresh extension files**. Then click **Reload** for SecondHand at `chrome://extensions` and reload your Iowa tab. If Chrome asks, review the updated permissions. Save or finish the page you're on first, so reloading doesn't lose unsaved answers.
+
+</details>
+
+## What it covers today
+
+Autofill works screen by screen and stays on for the tab until you click **Stop**, lock SecondHand, leave Iowa's site, or reach a screen it doesn't know. It also stops after 15 automatic steps so you can check where you are.
+
+| Iowa screen | What SecondHand does |
+| --- | --- |
+| Household Application Information | Picks **Yes** when one of your saved programs is a clear yes. You solve the CAPTCHA and continue. |
+| Before You Start, Important Information, Instructions | Clicks Continue for you. These screens send no answers. |
+| Let's get started, About you | Waits for you to accept Iowa's consent or click Continue. |
+| **Enter Personal Information** | Fills your saved names, phones, home and mailing addresses, and program choices. Waits for missing required answers, then clicks Save and Continue. |
+| Select Address (verified home-only layout) | Picks Iowa's first suggested home address and continues. Check it before you submit. |
+| Tell Us More | Fills your saved date of birth. Everything else stays with you. |
+| Other Iowa pages | May fill matching saved answers after you approve. You continue. |
+| CAPTCHA, consent, signatures, final Submit | Never touched. |
+
+The Select Address and Tell Us More steps are in this code but not yet in the public 0.4 downloads. SecondHand never guesses an answer from your other facts and never changes an answer already on the page. [Portal coverage](docs/iowa-portal.md) has the exact field list.
+
+## Privacy and safety
+
+- **Your details stay in the desktop app.** Chrome's extension storage and Chrome Sync never hold applicant information.
+- **Nothing is filled without your yes.** The app asks before filling unless you chose **Always allow on this computer**, which you can turn off on its **Chrome extension** page. Locking the app, by hand or after 10 idle minutes, stops autofill.
+- **The extension stays in its lane.** It only runs on Iowa's secure portal and on sites you turn on, asks only for fields it recognizes on the current page, and never fills passwords, verification codes, signatures, or unknown household members.
+- **Iowa sees what's on its form.** Iowa's site can read or save answers as they're entered, and Save and Continue sends the page's answers to Iowa.
+- **Backups are yours to keep.** An encrypted backup opens with the password or recovery key it was saved with. Keep it out of cloud-synced folders if you want every copy offline.
+- **An unlocked computer is still a computer.** SecondHand can't protect against malware, other programs running as you, other browser extensions reading Iowa's page, or system backups. See [the security design](docs/security.md).
+
+## Other platforms
+
+| | Folder | Status |
+| --- | --- | --- |
+| **iPhone app and Safari extension** | [`ios/`](ios/README.md) | Prototype. Encrypted storage on the phone, renewal reminders, and a guided application assistant with separate approval to submit. |
+| **Android app** | [`android/`](android/README.md) | Prototype. Encrypted profiles and documents, notice-based reminders, and an in-app Iowa assistant. |
+| **Local AI model** | [`ML_model/`](ML_model/README.md) | In training. A small model that answers form questions from saved facts. It is trained locally and will run on the applicant's own computer. |
+
+The phone apps keep their own encrypted data; nothing syncs between devices. Live Iowa filing from the phone apps is not yet verified.
 
 ## Develop
 
-Requires Node.js 22.12+ (Node 24 recommended) and npm. Packaged downloads target Windows and macOS (Apple silicon and Intel). The Windows build also uses the .NET Framework 4.x compiler included with supported Windows installations to compile the small native-messaging host from source.
+Requires Node.js 22.12 or newer (24 recommended) and npm. No server, database, API keys, or SecondHand account is involved.
 
 ```sh
 npm ci
@@ -41,65 +123,74 @@ npm test
 npm start
 ```
 
-For live reloading, run `npm run dev` (needs `npx playwright install chromium` once). It starts the desktop app and a separate Chromium window with the repository's `extension/` loaded. Edits to `renderer/` reload the app window, and edits to `desktop/` or `shared/` restart the app. Edits to `panel` files reload the widget and side panel in place. Other `extension/` edits reload the extension; refresh the Iowa tab yourself for content-script changes. The dev browser uses its own profile and copies Chrome's native bridge registration after you choose Prepare Chrome extension.
+For live reloading, run `npm run dev` (run `npx playwright install chromium` once first). It opens the desktop app and a separate Chromium with this repository's `extension/` loaded:
 
-On macOS/Linux, use the desktop's Prepare Chrome extension button; it registers a development native-host launcher automatically. You can also load the repository's `extension/` directory directly: its manifest key pins the same ID. On Windows, build/install the `.exe` before connecting, because Chrome needs the packaged native relay. The desktop UI itself runs with `npm start` on either platform.
+- edits to `renderer/` reload the app window;
+- edits to `desktop/` or `shared/` restart the app;
+- edits to the `panel` files reload the card and side panel in place;
+- other `extension/` edits reload the extension. Refresh the Iowa tab yourself for content-script changes.
 
-```sh
-npm run test:ui       # Real Electron UI smoke test; needs a desktop session
-npm run test:extension # Isolated Chromium with synthetic Iowa fixtures; install via npx playwright install chromium
-npm run test:extension:video # Record a fictional-applicant walkthrough of the extension and native sidebar
-npm run test:summary  # Isolated Chromium: page text for "What this page says" and its one-line reason without a summary model
-npm run test:native   # Native protocol test (on Windows set SECONDHAND_PACKAGED_EXE to the built native host)
-npm run extension:zip
-npm run dist:win      # Run on Windows to build the NSIS .exe installer
-npm run dist:mac      # Unsigned DMGs for Apple silicon and Intel Macs
-swift scripts/generate-icons.swift # On a Mac: rebuild every app icon from website/public/brand/secondhand-mascot.png
-```
+| Command | What it does |
+| --- | --- |
+| `npm start` | Runs the desktop app. |
+| `npm run dev` | Runs the app and a Chromium with the extension, reloading on edits. |
+| `npm test` | Unit tests: encryption, messaging, schema, portal adapters, and the extension's panels. |
+| `npm run check` | Syntax checks and the extension's permission rules. |
+| `npm run test:ui` | Drives the real Electron app end to end. Needs a desktop session. |
+| `npm run test:extension` | Runs the extension in an isolated Chromium against synthetic Iowa pages. |
+| `npm run test:translation` | Checks the language picker, translated questions, and right-to-left Arabic. |
+| `npm run test:summary` | Checks the side panel's "What this page says". |
+| `npm run test:extension:video` | Records a walkthrough with a fictional applicant. |
+| `npm run test:native` | Tests the native messaging protocol. On Windows, set `SECONDHAND_PACKAGED_EXE` to the built host. |
+| `npm run extension:zip` | Packages the extension. |
+| `npm run dist:win` / `npm run dist:mac` | Builds the Windows installer or the Mac DMGs (Apple silicon and Intel). |
+| `npm run release:checksums` | Writes SHA-256 checksums for the installers and extension zip in `release/`. |
 
-Fictional QA data is in [`tests/fixtures/applicant-profile.json`](tests/fixtures/applicant-profile.json). Automated tests use it only in isolated browsers with all Iowa requests intercepted. The separately authorized manual live inspection is documented in [the journey record](docs/iowa-live-journey.md); it stopped at E-Signature without signing or submitting.
-See [extension QA and recording](docs/extension-qa.md) for the walkthrough, test coverage, and simulated components.
+<details>
+<summary><strong>Connecting Chrome while developing</strong></summary>
 
-This development branch also supports the observed home-only **Select Address** step: autofill chooses Iowa's first possible home-address match, then Save and Continue. Review that choice before submitting. Separate mailing confirmation, county questions, and later navigation remain manual. The general form engine can fill recognizable fields on other pages; this does not establish verified coverage of those pages. See [address confirmation coverage](docs/address-automation.md). The branch also fills the primary applicant’s saved birth date on the verified **Tell Us More** page; its other answers and Next stay manual. Public 0.4 downloads do not yet include these changes.
+On macOS and Linux, click **Prepare Chrome extension** in the app; it registers a development launcher for the native connection. You can also load this repository's `extension/` folder directly, since its manifest key pins the same extension ID. On Windows, build and install the `.exe` first: Chrome needs the packaged native relay, which is compiled with the .NET Framework 4.x compiler that ships with Windows.
 
-No application server, database service, API keys, or applicant account with secondHand is required.
+To rebuild every app icon from `website/public/brand/secondhand-mascot.png`, run `swift scripts/generate-icons.swift` on a Mac.
 
-## Local validation and releases
+</details>
 
-GitHub Actions CI workflows have been removed to avoid hosted-runner usage. Pull requests, pushes, and tags do not automatically run project checks, build installers, or create releases.
+Tests only use the fictional profile in [`tests/fixtures/applicant-profile.json`](tests/fixtures/applicant-profile.json), in isolated browsers with every Iowa request blocked. A separately authorized check on the live portal is written up in [the journey record](docs/iowa-live-journey.md); it stopped at E-Signature without signing or submitting. [Extension QA](docs/extension-qa.md) explains the recorded walkthrough and what is simulated.
 
-Run the local test and build commands in [Develop](#develop) before sharing changes. The [website](website/README.md), [iOS](ios/README.md), and [Android](android/README.md) guides retain their platform-specific validation instructions. Dependency audits can also be run locally with `npm audit` in the repository root and in `website/`.
+### Releases
 
-Build installers locally with `npm run dist:win` on Windows or `npm run dist:mac` on macOS. Releases and installer uploads are manual. Publishing to the public download website uses a temporary upload token; see [`website/README.md`](website/README.md).
-
-## Data boundaries
-
-- The encrypted vault holds the profile, application notes, receipts entered as text, and deadlines. No cloud account, analytics, telemetry, remote fonts, or AI service is used by this code.
-- The desktop app is the sole persistent owner of applicant data. Chrome extension storage and Chrome Sync are not used for applicant information.
-- Filling a field shares it with Iowa's website. The website can read or autosave values before you click Submit, and ordinary **Save and Continue** saves page answers. Desktop approval occurs **before filling**, unless you chose **Always allow on this computer**. That setting lets the extension fill Iowa's supported page while the vault is unlocked. It never clicks Next and does not cover consent, signatures, or final submission.
-- The extension is restricted to Iowa's supported HTTPS portal, requests only recognized fields on the current page, and never fills passwords, verification codes, signatures, or unknown household members.
-- An encrypted backup is the portable copy of your information. A backup opens with the password or recovery key it was saved with. Keep backups off cloud-synced folders if you want all copies offline.
-- This does not protect an unlocked computer from malware, malicious same-user processes, browser extensions reading Iowa's page, OS backups/crash dumps, or government-side storage. Read [the security design](docs/security.md).
+There is no hosted CI: pull requests and tags don't run checks or build installers. Run the commands above before sharing changes, and `npm audit` in the root and in `website/` for dependency audits. Installers are built locally with `npm run dist:win` on Windows or `npm run dist:mac` on a Mac, and uploaded by hand. The [download website](website/README.md) explains publishing, which uses a temporary upload token that never ships in the app.
 
 ## Project layout
 
-| Directory | Purpose |
+| Folder | What's inside |
 | --- | --- |
-| `desktop/` | Electron main/preload, encrypted vault, native host, local IPC, registration |
-| `renderer/` | Local desktop interface |
-| `extension/` | Manifest V3 browser side panel, launcher, worker, and conservative Iowa adapter |
-| `shared/` | Validated profile/application schema and portal allowlist |
-| `tests/` | Crypto, protocol, schema, and portal-adapter regression tests |
-| `scripts/` | Validation, real UI smoke test, extension packaging |
-| `website/` | Public installer download site, setup guide, and authenticated release publishing |
-| `ios/` | Native iPhone app, Safari extension, Xcode project, and iOS tests |
+| `desktop/` | Electron main process, encrypted storage, native messaging host, and Chrome registration |
+| `renderer/` | The desktop app's interface |
+| `extension/` | The Chrome extension: on-page card, side panel, background worker, and Iowa adapter |
+| `shared/` | Profile and application schema, and the portal allowlist |
+| `tests/` | Unit tests and fictional fixtures |
+| `scripts/` | Checks, smoke tests, recordings, and packaging |
+| `website/` | The download website and its release publishing |
+| `docs/` | Setup, coverage, security, and design notes |
+| `ios/`, `android/` | Phone app prototypes |
+| `ML_model/` | Training and evaluation for the local AI model |
 
-## Download website
+## Documentation
 
-The [public download website](https://secondhand-download.khoidoan00.chatgpt.site) serves Windows and Mac installers without requiring GitHub access. Its source is in [`website/`](website/README.md). Only software installers are hosted online; applicant information remains in the desktop vault. Website publishing credentials are never included in the app or browser bundles.
+- [Set up SecondHand](docs/setup.md): installing, adding the extension, applying, and troubleshooting
+- [Iowa portal coverage](docs/iowa-portal.md): exactly which fields and screens are supported
+- [Home-address confirmation](docs/address-automation.md): how the Select Address step works
+- [Security and privacy design](docs/security.md): encryption, the native connection, and limits
+- [Extension QA](docs/extension-qa.md): test coverage and the recorded walkthrough
+- [Iowa guest-draft journey](docs/iowa-live-journey.md): the authorized live-portal check
+- [Implementation contract](docs/implementation-contract.md): internal rules the code keeps
+- [Mascot](docs/secondhand-mascot.md) and [website design notes](docs/react-bits-design-research.md)
 
-## Before broader distribution
+## Before wider release
 
-Validate each supported page against the current live portal with a consenting applicant, then expand mappings with sanitized fixtures and regression tests. Review [portal coverage](docs/iowa-portal.md) before using real data. Test the installed native host on Windows with Chrome, obtain a code-signing certificate, and complete a security review. The bundled unpacked extension has a stable development ID. Publishing to the Chrome Web Store still requires a developer account, store package/identity coordination, and review; loading unpacked is the pilot path.
+Each supported page still needs checking against the live portal with a consenting applicant, with new mappings backed by sanitized fixtures and tests. The Windows native host needs testing with Chrome on real installs, the builds need a code-signing certificate, and the project needs a security review. Loading the extension unpacked is the pilot path; the Chrome Web Store needs a developer account, store packaging, and review.
 
-Official resources: [Iowa SNAP application instructions](https://hhs.iowa.gov/assistance-programs/food-assistance/snap/apply-snap), [Iowa Self-Service Portal](https://hhsservices.iowa.gov/apspssp/ssp.portal), [Chrome Native Messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging).
+---
+
+<sub>Independent software, not affiliated with Iowa HHS. Using SecondHand does not determine eligibility. Official resources: [How to apply for Iowa SNAP](https://hhs.iowa.gov/assistance-programs/food-assistance/snap/apply-snap) · [Iowa's Self-Service Portal](https://hhsservices.iowa.gov/apspssp/ssp.portal) · [Chrome native messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging)</sub>
