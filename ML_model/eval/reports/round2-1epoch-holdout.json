@@ -1,0 +1,121 @@
+{
+  "model": "<LayaStudio>/workspace/runs/round2-lora-proper-1790530553/model",
+  "split": "test",
+  "holdout": true,
+  "tasks": {
+    "answer": {
+      "0.5": {
+        "decisions": 368,
+        "answerable": 17,
+        "accepted": 23,
+        "right": 13,
+        "wrong_fill": 10,
+        "wrong_fill_on_unanswerable": 10,
+        "unanswerable": 351,
+        "precision": 0.5652173913043478,
+        "coverage": 0.7647058823529411
+      },
+      "0.7": {
+        "decisions": 368,
+        "answerable": 17,
+        "accepted": 23,
+        "right": 13,
+        "wrong_fill": 10,
+        "wrong_fill_on_unanswerable": 10,
+        "unanswerable": 351,
+        "precision": 0.5652173913043478,
+        "coverage": 0.7647058823529411
+      },
+      "0.8": {
+        "decisions": 368,
+        "answerable": 17,
+        "accepted": 23,
+        "right": 13,
+        "wrong_fill": 10,
+        "wrong_fill_on_unanswerable": 10,
+        "unanswerable": 351,
+        "precision": 0.5652173913043478,
+        "coverage": 0.7647058823529411
+      },
+      "0.9": {
+        "decisions": 368,
+        "answerable": 17,
+        "accepted": 23,
+        "right": 13,
+        "wrong_fill": 10,
+        "wrong_fill_on_unanswerable": 10,
+        "unanswerable": 351,
+        "precision": 0.5652173913043478,
+        "coverage": 0.7647058823529411
+      },
+      "0.95": {
+        "decisions": 368,
+        "answerable": 17,
+        "accepted": 22,
+        "right": 12,
+        "wrong_fill": 10,
+        "wrong_fill_on_unanswerable": 10,
+        "unanswerable": 351,
+        "precision": 0.5454545454545454,
+        "coverage": 0.7058823529411765
+      }
+    },
+    "match": {
+      "0.5": {
+        "decisions": 78,
+        "answerable": 47,
+        "accepted": 50,
+        "right": 42,
+        "wrong_fill": 8,
+        "wrong_fill_on_unanswerable": 8,
+        "unanswerable": 31,
+        "precision": 0.84,
+        "coverage": 0.8936170212765957
+      },
+      "0.7": {
+        "decisions": 78,
+        "answerable": 47,
+        "accepted": 49,
+        "right": 42,
+        "wrong_fill": 7,
+        "wrong_fill_on_unanswerable": 7,
+        "unanswerable": 31,
+        "precision": 0.8571428571428571,
+        "coverage": 0.8936170212765957
+      },
+      "0.8": {
+        "decisions": 78,
+        "answerable": 47,
+        "accepted": 49,
+        "right": 42,
+        "wrong_fill": 7,
+        "wrong_fill_on_unanswerable": 7,
+        "unanswerable": 31,
+        "precision": 0.8571428571428571,
+        "coverage": 0.8936170212765957
+      },
+      "0.9": {
+        "decisions": 78,
+        "answerable": 47,
+        "accepted": 45,
+        "right": 39,
+        "wrong_fill": 6,
+        "wrong_fill_on_unanswerable": 6,
+        "unanswerable": 31,
+        "precision": 0.8666666666666667,
+        "coverage": 0.8297872340425532
+      },
+      "0.95": {
+        "decisions": 78,
+        "answerable": 47,
+        "accepted": 41,
+        "right": 37,
+        "wrong_fill": 4,
+        "wrong_fill_on_unanswerable": 4,
+        "unanswerable": 31,
+        "precision": 0.9024390243902439,
+        "coverage": 0.7872340425531915
+      }
+    }
+  }
+}

@@ -64,6 +64,22 @@ test('synthetic rewordings are marked as such, need no URL, and live apart from 
   for (const file of loadQuestionBank()) assert.notEqual(file.source.kind, 'synthetic', 'real forms and rewordings are never mixed');
 });
 
+test('no synthetic label may leak the answer key by duplicating a held-out or test label', () => {
+  const { loadQuestionBank, loadSyntheticBank } = require('../ML_model/question-bank.cjs');
+  const { splitFor } = require('../ML_model/dataset/build.cjs');
+  const normalize = text => String(text).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+  const testLabels = new Set();
+  for (const file of loadQuestionBank()) {
+    if (file.source.holdout || splitFor(file.source.url) === 'test') {
+      for (const q of file.questions) testLabels.add(normalize(q.label));
+    }
+  }
+
+  const leaked = loadSyntheticBank().flatMap(file => file.questions.filter(q => testLabels.has(normalize(q.label))).map(q => `${file.file} ${q.id}: ${q.label}`));
+  assert.deepEqual(leaked, [], 'synthetic questions must not repeat a test or held-out label');
+});
+
 test('holdout is a yes-or-nothing flag on real forms only', () => {
   assert.doesNotThrow(() => validateQuestionFile(form([yesNo], { holdout: true })));
   assert.throws(() => validateQuestionFile(form([yesNo], { holdout: 'yes' })), /holdout/i);
