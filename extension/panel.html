@@ -4,9 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
-  <title data-i18n="SecondHand · Iowa SNAP assistant"></title>
+  <title data-i18n="app.title"></title>
   <link rel="stylesheet" href="panel.css">
-  <script src="strings.js"></script>
+  <script src="strings.js" defer></script>
+  <script src="translation.js" defer></script>
   <script src="ai-mapper.js" defer></script>
   <script src="panel.js" defer></script>
 </head>
@@ -16,45 +17,49 @@
       <span class="brand" aria-hidden="true">s.</span>
       <div class="widget-body">
         <div class="widget-row">
-          <button id="autofill" class="widget-primary" type="button" data-i18n-title="On Iowa’s verified steps, Autofill continues verified information screens and complete applicant pages, then selects the first suggested home address and continues. Review that address before submitting. Tell Us More and unsupported steps still need your answers and Continue." data-i18n="Autofill"></button>
-          <button id="unlock" class="widget-primary" type="button" data-i18n="Unlock SecondHand" hidden></button>
-          <button id="stop" class="widget-primary" type="button" data-i18n="Stop" hidden></button>
-          <button id="details" class="widget-link" type="button" data-i18n-title="Details" data-i18n="Details"></button>
+          <button id="autofill" class="widget-primary" type="button" data-i18n="widget.autofill" data-i18n-title="widget.autofillIowaTitle"></button>
+          <button id="unlock" class="widget-primary" type="button" data-i18n="widget.unlock" hidden></button>
+          <button id="stop" class="widget-primary" type="button" data-i18n="widget.stop" hidden></button>
+          <button id="details" class="widget-link" type="button" data-i18n="widget.details" data-i18n-title="widget.detailsTitle"></button>
         </div>
         <div class="widget-row">
-          <span id="widget-text" role="status" aria-live="polite" data-i18n="Iowa · uses first home address suggestion"></span>
+          <span id="widget-text" role="status" aria-live="polite" data-i18n="widget.iowaReady"></span>
           <button id="need-you" class="widget-link" type="button" hidden></button>
-          <button id="widget-translate" class="widget-link" type="button" hidden></button>
+          <button id="translate-offer" class="widget-link" type="button" data-i18n="widget.offer" data-i18n-title="widget.offerTitle" hidden></button>
         </div>
       </div>
     </div>
-    <button id="pill" class="pill" type="button" data-i18n-title="Nothing to fill on this page. Continue in Iowa’s form." hidden><span class="brand" aria-hidden="true">s.</span></button>
+    <button id="pill" class="pill" type="button" data-i18n-title="widget.pillTitle" hidden><span class="brand" aria-hidden="true">s.</span></button>
   </section>
   <div id="sidepanel" hidden>
     <header class="panel-header">
       <span class="brand" aria-hidden="true">s.</span>
-      <div class="header-copy"><strong data-i18n="SecondHand"></strong><span data-i18n="IOWA SNAP"></span></div>
-      <select id="language-picker" aria-label="Language" class="language-picker"><option value="en">English</option><option value="es">Español</option></select>
+      <div class="header-copy"><strong data-i18n="brand.name"></strong><span data-i18n="brand.region"></span></div>
+      <select id="language" class="language-picker" data-i18n-aria-label="language.label">
+        <option value="en" data-i18n="language.en"></option>
+        <option value="es" data-i18n="language.es"></option>
+      </select>
     </header>
     <main id="panel-body">
-      <div class="desktop-row"><span id="desktop-status" data-i18n="Checking SecondHand…"></span><button id="desktop-action" class="text-button" type="button" data-i18n="Unlock" hidden></button></div>
-      <button id="frames-enable" class="button primary full" type="button" data-i18n="Also turn on the embedded form" hidden></button>
-      <button id="site-enable" class="button primary full" type="button" data-i18n="Turn on SecondHand for this site" hidden></button>
-      <p id="iowa-policy" class="status" data-i18n="On Iowa’s verified steps, Autofill continues verified information screens and complete applicant pages, then selects the first suggested home address and continues. Review that address before submitting. Tell Us More and unsupported steps still need your answers and Continue."></p>
-      <button id="panel-autofill" class="button primary full" type="button" data-i18n="Autofill this page" disabled></button>
-      <div id="status" class="status" role="status" aria-live="polite" data-i18n="Checking the application in your active tab…"></div>
-      <button id="site-disable" class="text-button site-off" type="button" data-i18n="Turn off SecondHand for this site" hidden></button>
-      <button id="panel-translate" class="button full" style="margin-bottom: 12px; background: transparent; border: 1px solid #c7dfd1;" type="button" hidden></button>
-      <div id="translation-error" class="status error" hidden></div>
-      <section id="translation-section" class="checklist-section" hidden aria-labelledby="translation-title">
-        <div class="fields-heading"><h2 id="translation-title" data-i18n="Language"></h2></div>
-        <div id="page-translations" class="page-checklist"></div>
+      <div class="desktop-row"><span id="desktop-status" data-i18n="panel.checkingDesktop"></span><button id="desktop-action" class="text-button" type="button" data-i18n="panel.unlock" hidden></button></div>
+      <button id="frames-enable" class="button primary full" type="button" data-i18n="panel.framesEnable" hidden></button>
+      <button id="site-enable" class="button primary full" type="button" data-i18n="panel.siteEnable" hidden></button>
+      <p id="iowa-policy" class="status" data-i18n="panel.iowaPolicy"></p>
+      <button id="panel-autofill" class="button primary full" type="button" data-i18n="panel.autofill" disabled></button>
+      <div id="status" class="status" role="status" aria-live="polite" data-i18n="panel.checkingTab"></div>
+      <button id="site-disable" class="text-button site-off" type="button" data-i18n="panel.siteDisable" hidden></button>
+      <button id="questions-show" class="button secondary full" type="button" data-i18n="questions.show" hidden></button>
+      <p id="questions-note" class="status" role="status" aria-live="polite" hidden></p>
+      <section id="questions" class="checklist-section" hidden aria-labelledby="questions-title">
+        <div class="fields-heading"><h2 id="questions-title" data-i18n="questions.title"></h2><span id="questions-summary"></span></div>
+        <p id="questions-pending" class="status questions-pending" data-i18n="questions.pendingFrames" hidden></p>
+        <div id="questions-list" class="page-checklist"></div>
       </section>
       <section id="checklist-section" class="checklist-section" hidden aria-labelledby="checklist-title">
-        <div class="fields-heading"><h2 id="checklist-title" data-i18n="On this page"></h2><span id="checklist-summary"></span></div>
+        <div class="fields-heading"><h2 id="checklist-title" data-i18n="panel.onThisPage"></h2><span id="checklist-summary"></span></div>
         <div id="page-checklist" class="page-checklist"></div>
       </section>
-      <footer><p data-i18n="Review every answer. Signatures, consent, and final submission stay with you."></p></footer>
+      <footer><p data-i18n="panel.footer"></p></footer>
     </main>
   </div>
 </body>

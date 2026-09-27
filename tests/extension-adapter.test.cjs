@@ -677,3 +677,14 @@ test('address checklist focus selects nothing and only verified first-suggestion
   assert.deepEqual(doc.__addressQa.selectionClicks, []);
   assert.equal(adapter.focusField(doc, addressFixture.URL, 'homeAddressIndex1'), false);
 });
+
+test('the words on Iowa’s information-only screens are listed for the translated view; screens with questions list none', () => {
+  const instructions = screen('instructions');
+  assert.deepEqual(adapter.instructions(instructions, instructions.location.href), ['Instructions', 'You\'ll see some questions with a star next to them.',
+    'Check this box next to the item you want to select.', 'Check this button next to the item you want to select.', 'OK. Let\'s start the application.']);
+  const hidden = screen('importantInfo', doc => { doc.querySelector('p').hidden = true; });
+  assert.deepEqual(adapter.instructions(hidden, hidden.location.href), ['Important Information when applying and what to expect.'], 'hidden text is not listed');
+  const household = screen('household');
+  assert.deepEqual(adapter.instructions(household, household.location.href), [], 'a screen with questions can hold answers, so its text is never listed');
+  assert.deepEqual(adapter.instructions(page(), URL), []);
+});

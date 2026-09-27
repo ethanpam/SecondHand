@@ -25,13 +25,9 @@ main{flex:1;overflow:auto;padding:16px 18px 0;scrollbar-width:thin;scrollbar-col
 .checklist-copy{flex:1;min-width:0}.checklist-label{display:block;font-size:13px;line-height:1.45;color:#49663c}.checklist-detail{display:block;font-size:10px;color:#9aa98b;margin-top:2px}.checklist-item.missing .checklist-detail,.checklist-item.manual .checklist-detail{color:#a68a48}.checklist-item.optional .checklist-label{color:#86977a}
 footer{border-top:1px solid #e6ebde;padding:12px 0 14px}footer p{font-size:10px;line-height:1.6;color:#97a38a}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
-.language-picker {
-  margin-left: auto;
-  border: none;
-  background: transparent;
-  font-family: inherit;
-  font-size: 13px;
-  color: #173422;
-  cursor: pointer;
-  padding: 4px;
-}
+/* The applicant's language and the page's questions in it. */
+.language-picker{margin-left:auto;max-width:96px;font:inherit;font-size:11px;color:#f7f9ed;background:#1f4533;border:1px solid #4d7760;border-radius:6px;padding:4px 6px;cursor:pointer}.language-picker:focus-visible{outline:3px solid #d5b668;outline-offset:2px}
+#translate-offer{color:#f2d58d}
+.secondary{background:#fff;color:#285c45;border-color:#c7d6bd}.secondary:hover:enabled{background:#f5f8ee}
+.questions-pending{margin:0 0 8px}
+.checklist-item.info{cursor:default}

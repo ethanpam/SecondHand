@@ -40,7 +40,7 @@
       frame.src = chrome.runtime.getURL('panel.html?surface=launcher');
       frame.title = 'SecondHand autofill';
       frame.setAttribute('sandbox', 'allow-scripts allow-same-origin');
-      frame.setAttribute('allow', 'language-model'); // lets the widget use Chrome's on-device AI
+      frame.setAttribute('allow', 'language-model; language-detector'); // lets the widget use Chrome's on-device AI and language detector
       frame.referrerPolicy = 'no-referrer';
       for (const [property, value] of Object.entries({ width: '100%', height: '100%', display: 'block', border: '0', margin: '0', padding: '0', 'border-radius': '14px', background: 'transparent' })) frame.style.setProperty(property, value, 'important');
       shadow.append(frame);
@@ -54,7 +54,7 @@
     if (!plan || !Array.isArray(plan.matched) || !Array.isArray(plan.unmatched)) throw new Error('Invalid plan.');
     return {
       token: text(plan.token),
-      matched: plan.matched.map(field => ({ id: text(field.id), key: text(field.key), confidence: text(field.confidence), label: typeof field.label === 'string' ? field.label : '', type: typeof field.type === 'string' ? field.type : '', options: strings(field.options) })),
+      matched: plan.matched.map(field => ({ id: text(field.id), key: text(field.key), confidence: text(field.confidence) })),
       unmatched: plan.unmatched.map(field => ({ id: text(field.id), label: typeof field.label === 'string' ? field.label : '',
         type: typeof field.type === 'string' ? field.type : '', options: strings(field.options), required: field.required === true }))
     };
@@ -69,10 +69,6 @@
   }
 
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
-    if (message.type === 'secondhand:generic:pageText') {
-      respond({ lang: document.documentElement.lang, text: document.body.innerText.slice(0, 500) });
-      return;
-    }
     if (sender.id !== chrome.runtime.id || !message || typeof message !== 'object') return;
     try {
       if (message.type === 'secondhand:generic:frames' && window === window.top) {
@@ -112,6 +108,10 @@
           },
           () => respond({ ok: false, error: 'This page could not be checked safely. Review it manually.' }));
         return true;
+      } else if (message.type === 'secondhand:generic:questions') {
+        // Every question's label for the applicant's translated list, and the language this document declares.
+        const listed = withOwnPanelHidden(() => engine.questions(document));
+        respond({ lang: document.documentElement.lang || '', questions: listed.map(({ id, label }) => ({ id, label })) });
       } else if (message.type === 'secondhand:generic:focus' && typeof message.id === 'string') {
         respond({ focused: Boolean(withOwnPanelHidden(() => engine.focusField(document, message.id))) });
       }
@@ -120,5 +120,3 @@
     }
   });
 })();
-
-

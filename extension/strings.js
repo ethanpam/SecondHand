@@ -1,274 +1,539 @@
-(function(root) {
+/* SecondHand's own words in each language it ships. No network or storage of its own:
+   the applicant's language choice lives in the extension pages' localStorage. */
+(function (root) {
   'use strict';
-  
-  const en = {
-    // panel.html
-    "Autofill": "Autofill",
-    "Unlock SecondHand": "Unlock SecondHand",
-    "Stop": "Stop",
-    "Details": "Details",
-    "Iowa · uses first home address suggestion": "Iowa · uses first home address suggestion",
-    "SecondHand": "SecondHand",
-    "IOWA SNAP": "IOWA SNAP",
-    "Checking SecondHand…": "Checking SecondHand…",
-    "Unlock": "Unlock",
-    "Also turn on the embedded form": "Also turn on the embedded form",
-    "Turn on SecondHand for this site": "Turn on SecondHand for this site",
-    "On Iowa’s verified steps, Autofill continues verified information screens and complete applicant pages, then selects the first suggested home address and continues. Review that address before submitting. Tell Us More and unsupported steps still need your answers and Continue.": "On Iowa’s verified steps, Autofill continues verified information screens and complete applicant pages, then selects the first suggested home address and continues. Review that address before submitting. Tell Us More and unsupported steps still need your answers and Continue.",
-    "Autofill this page": "Autofill this page",
-    "Checking the application in your active tab…": "Checking the application in your active tab…",
-    "Turn off SecondHand for this site": "Turn off SecondHand for this site",
-    "On this page": "On this page",
-    "Review every answer. Signatures, consent, and final submission stay with you.": "Review every answer. Signatures, consent, and final submission stay with you.",
-    "SecondHand · Iowa SNAP assistant": "SecondHand · Iowa SNAP assistant",
+  const STORAGE_KEY = 'secondhand.language';
+  const LANGUAGES = Object.freeze(['en', 'es']);
 
-    // panel.js
-    "SecondHand was updated. Open chrome://extensions and click the reload arrow on SecondHand, then reload this page.": "SecondHand was updated. Open chrome://extensions and click the reload arrow on SecondHand, then reload this page.",
-    "The assistant is unavailable. Reload the extension and this page.": "The assistant is unavailable. Reload the extension and this page.",
-    "Working…": "Working…",
-    "On-device AI unavailable. Rule matches only.": "On-device AI unavailable. Rule matches only.",
-    "Find it in the form.": "Find it in the form.",
-    "Find it in Iowa’s form.": "Find it in Iowa’s form.",
-    "Unlock SecondHand, then click Autofill.": "Unlock SecondHand, then click Autofill.",
-    "Done": "Done",
-    "Needs you": "Needs you",
-    "Optional": "Optional",
-    "Do it yourself": "Do it yourself",
-    "Stop autofill": "Stop autofill",
-    "Waiting for the page to finish loading…": "Waiting for the page to finish loading…",
-    "Reload this page so SecondHand can read it.": "Reload this page so SecondHand can read it.",
-    "Click Autofill. SecondHand fills what it recognizes and lists what needs you. It never submits.": "Click Autofill. SecondHand fills what it recognizes and lists what needs you. It never submits.",
-    "Click Autofill. SecondHand fills what it can and tells you what it needs.": "Click Autofill. SecondHand fills what it can and tells you what it needs.",
-    "Nothing to fill on this page. Continue in Iowa’s form.": "Nothing to fill on this page. Continue in Iowa’s form.",
-    "Open Iowa’s SNAP application in this tab. Your checklist appears here automatically. On another food-assistance form, click the SecondHand toolbar icon.": "Open Iowa’s SNAP application in this tab. Your checklist appears here automatically. On another food-assistance form, click the SecondHand toolbar icon.",
-    "SecondHand isn’t running. Open the app on this computer.": "SecondHand isn’t running. Open the app on this computer.",
-    "SecondHand is unlocked.": "SecondHand is unlocked.",
-    "SecondHand is locked.": "SecondHand is locked.",
-    "Stopping autofill…": "Stopping autofill…",
-    "Filling your saved answers…": "Filling your saved answers…",
-    "Chrome couldn’t ask for access to this site.": "Chrome couldn’t ask for access to this site.",
-    "Chrome didn’t allow SecondHand on this site. Nothing changed.": "Chrome didn’t allow SecondHand on this site. Nothing changed.",
-    "Approve this site in the SecondHand app…": "Approve this site in the SecondHand app…",
-    "Chrome couldn’t ask for access to the embedded form.": "Chrome couldn’t ask for access to the embedded form.",
-    "Chrome didn’t allow SecondHand on the embedded form. Nothing changed.": "Chrome didn’t allow SecondHand on the embedded form. Nothing changed.",
-    "Approve the embedded form in the SecondHand app…": "Approve the embedded form in the SecondHand app…",
-    "SecondHand is on for the embedded form. Click Autofill.": "SecondHand is on for the embedded form. Click Autofill.",
-    "Turning SecondHand off for this site…": "Turning SecondHand off for this site…",
-    "SecondHand is off for this site. Reload the page to remove its button.": "SecondHand is off for this site. Reload the page to remove its button.",
-    
-    // new translation feature
-    "Language": "Language",
-    "Show questions in Español": "Show questions in Español",
-    "Show questions in English": "Show questions in English",
-    "Ver preguntas en español": "Ver preguntas en español",
-    "View questions in English": "View questions in English",
-    "Downloading translation model": "Downloading translation model",
-    "Translation unavailable.": "Translation unavailable."
-  };
+  // Keys never change meaning. A value is a string, or { one, other } chosen by params.count.
+  // Iowa's own buttons keep their English names in other languages: the portal shows them in English.
+  const en = Object.freeze({
+    'app.title': 'SecondHand · Iowa SNAP assistant',
+    'brand.name': 'SecondHand',
+    'brand.region': 'IOWA SNAP',
+    'language.label': 'Language',
+    'language.en': 'English',
+    'language.es': 'Español',
+    // Text from outside SecondHand (Chrome or the desktop app), shown as it arrived.
+    'detail': '{detail}',
 
-  const es = {
-    "Autofill": "Autocompletar",
-    "Unlock SecondHand": "Desbloquear SecondHand",
-    "Stop": "Detener",
-    "Details": "Detalles",
-    "Iowa · uses first home address suggestion": "Iowa · usa la primera sugerencia de domicilio",
-    "SecondHand": "SecondHand",
-    "IOWA SNAP": "IOWA SNAP",
-    "Checking SecondHand…": "Comprobando SecondHand…",
-    "Unlock": "Desbloquear",
-    "Also turn on the embedded form": "También activa el formulario integrado",
-    "Turn on SecondHand for this site": "Activa SecondHand para este sitio",
-    "On Iowa’s verified steps, Autofill continues verified information screens and complete applicant pages, then selects the first suggested home address and continues. Review that address before submitting. Tell Us More and unsupported steps still need your answers and Continue.": "En los pasos verificados de Iowa, Autocompletar continúa las pantallas de información verificada y páginas completas de solicitantes, luego selecciona el primer domicilio sugerido y continúa. Revisa esa dirección antes de enviar. 'Cuéntanos más' y los pasos no compatibles aún necesitan tus respuestas y que presiones Continuar.",
-    "Autofill this page": "Autocompletar esta página",
-    "Checking the application in your active tab…": "Comprobando la solicitud en tu pestaña activa…",
-    "Turn off SecondHand for this site": "Desactiva SecondHand para este sitio",
-    "On this page": "En esta página",
-    "Review every answer. Signatures, consent, and final submission stay with you.": "Revisa cada respuesta. Firmas, consentimiento y el envío final son tu responsabilidad.",
-    "SecondHand · Iowa SNAP assistant": "SecondHand · Asistente de SNAP de Iowa",
+    'widget.autofill': 'Autofill',
+    'widget.autofillIowaTitle': 'Autofill continues verified information screens and complete applicant pages, then selects the first suggested home address and continues. Review the selected address before submitting.',
+    'widget.autofillSiteTitle': 'Fill supported fields on this site once. Review every answer.',
+    'widget.unlock': 'Unlock SecondHand',
+    'widget.stop': 'Stop',
+    'widget.details': 'Details',
+    'widget.detailsTitle': 'Open details in Chrome’s side panel',
+    'widget.iowaReady': 'Iowa · uses first home address suggestion',
+    'widget.siteReady': '{host} · ready',
+    'widget.pillTitle': 'Nothing to fill on this page. Open SecondHand’s side panel.',
+    'widget.working': 'Working…',
+    'widget.aiUnavailable': 'On-device AI unavailable. Rule matches only.',
+    'widget.filled': 'Filled {count}',
+    'widget.filledGuessed': 'Filled {count} · {guessed} guessed',
+    'widget.nothingMatches': 'Nothing here matches your saved profile.',
+    'widget.needYou': { one: '{count} need you', other: '{count} need you' },
+    'widget.findInForm': 'Find it in the form.',
+    'widget.findInIowa': 'Find it in Iowa’s form.',
+    'widget.offer': 'View in English',
+    'widget.offerTitle': 'Show this page’s questions in English in SecondHand’s side panel',
+    'widget.languageCheckFailed': 'SecondHand couldn’t check this page’s language.',
 
-    "SecondHand was updated. Open chrome://extensions and click the reload arrow on SecondHand, then reload this page.": "SecondHand se actualizó. Abre chrome://extensions y haz clic en la flecha de recargar en SecondHand, luego recarga esta página.",
-    "The assistant is unavailable. Reload the extension and this page.": "El asistente no está disponible. Recarga la extensión y esta página.",
-    "Working…": "Trabajando…",
-    "On-device AI unavailable. Rule matches only.": "IA en dispositivo no disponible. Solo coincidencias por reglas.",
-    "Find it in the form.": "Encuéntralo en el formulario.",
-    "Find it in Iowa’s form.": "Encuéntralo en el formulario de Iowa.",
-    "Unlock SecondHand, then click Autofill.": "Desbloquea SecondHand, luego haz clic en Autocompletar.",
-    "Done": "Completado",
-    "Needs you": "Te necesita",
-    "Optional": "Opcional",
-    "Do it yourself": "Hazlo tú mismo",
-    "Stop autofill": "Detener autocompletar",
-    "Waiting for the page to finish loading…": "Esperando a que la página termine de cargar…",
-    "Reload this page so SecondHand can read it.": "Recarga esta página para que SecondHand pueda leerla.",
-    "Click Autofill. SecondHand fills what it recognizes and lists what needs you. It never submits.": "Haz clic en Autocompletar. SecondHand completa lo que reconoce y lista lo que te necesita. Nunca envía el formulario.",
-    "Click Autofill. SecondHand fills what it can and tells you what it needs.": "Haz clic en Autocompletar. SecondHand completa lo que puede y te dice lo que necesita.",
-    "Nothing to fill on this page. Continue in Iowa’s form.": "Nada para completar en esta página. Continúa en el formulario de Iowa.",
-    "Open Iowa’s SNAP application in this tab. Your checklist appears here automatically. On another food-assistance form, click the SecondHand toolbar icon.": "Abre la solicitud SNAP de Iowa en esta pestaña. Tu lista de verificación aparece aquí automáticamente. En otro formulario de asistencia alimentaria, haz clic en el icono de SecondHand.",
-    "SecondHand isn’t running. Open the app on this computer.": "SecondHand no se está ejecutando. Abre la aplicación en esta computadora.",
-    "SecondHand is unlocked.": "SecondHand está desbloqueado.",
-    "SecondHand is locked.": "SecondHand está bloqueado.",
-    "Stopping autofill…": "Deteniendo autocompletar…",
-    "Filling your saved answers…": "Completando tus respuestas guardadas…",
-    "Chrome couldn’t ask for access to this site.": "Chrome no pudo pedir acceso a este sitio.",
-    "Chrome didn’t allow SecondHand on this site. Nothing changed.": "Chrome no permitió SecondHand en este sitio. No cambió nada.",
-    "Approve this site in the SecondHand app…": "Aprueba este sitio en la aplicación SecondHand…",
-    "Chrome couldn’t ask for access to the embedded form.": "Chrome no pudo pedir acceso al formulario integrado.",
-    "Chrome didn’t allow SecondHand on the embedded form. Nothing changed.": "Chrome no permitió SecondHand en el formulario integrado. No cambió nada.",
-    "Approve the embedded form in the SecondHand app…": "Aprueba el formulario integrado en la aplicación SecondHand…",
-    "SecondHand is on for the embedded form. Click Autofill.": "SecondHand está activo para el formulario integrado. Haz clic en Autocompletar.",
-    "Turning SecondHand off for this site…": "Desactivando SecondHand para este sitio…",
-    "SecondHand is off for this site. Reload the page to remove its button.": "SecondHand está desactivado para este sitio. Recarga la página para quitar su botón.",
-    
-    "Language": "Idioma",
-    "Show questions in Español": "Mostrar preguntas en Español",
-    "Show questions in English": "Mostrar preguntas en Inglés",
-    "Ver preguntas en español": "Ver preguntas en español",
-    "View questions in English": "Ver preguntas en Inglés",
-    "Downloading translation model": "Descargando modelo de traducción",
-    "Translation unavailable.": "Traducción no disponible."
-  };
+    'panel.outdated': 'SecondHand was updated. Open chrome://extensions and click the reload arrow on SecondHand, then reload this page.',
+    'panel.assistantUnavailable': 'The assistant is unavailable. Reload the extension and this page.',
+    'panel.checkingDesktop': 'Checking SecondHand…',
+    'panel.unlock': 'Unlock',
+    'panel.framesEnable': 'Also turn on the embedded form',
+    'panel.framesEnableHosts': 'Also turn on the embedded form ({hosts})',
+    'panel.siteEnable': 'Turn on SecondHand for this site',
+    'panel.iowaPolicy': 'On Iowa’s verified steps, Autofill continues verified information screens and complete applicant pages, then selects the first suggested home address and continues. Review that address before submitting. Tell Us More and unsupported steps still need your answers and Continue.',
+    'panel.autofill': 'Autofill this page',
+    'panel.stopAutofill': 'Stop autofill',
+    'panel.checkingTab': 'Checking the application in your active tab…',
+    'panel.siteDisable': 'Turn off SecondHand for this site',
+    'panel.onThisPage': 'On this page',
+    'panel.footer': 'Review every answer. Signatures, consent, and final submission stay with you.',
+    'panel.pageUnreadable': 'The page state could not be read. Reload Iowa’s page.',
+    'panel.waitingLoad': 'Waiting for the page to finish loading…',
+    'panel.reloadToRead': 'Reload this page so SecondHand can read it.',
+    'panel.siteOff': 'SecondHand can fill forms on {host} after you turn it on here and approve it in the SecondHand app.',
+    'panel.siteHint': 'Click Autofill. SecondHand fills what it recognizes and lists what needs you. It never submits.',
+    'panel.iowaHint': 'Click Autofill. SecondHand fills what it can and tells you what it needs.',
+    'panel.nothingToFill': 'Nothing to fill on this page. Continue in Iowa’s form.',
+    'panel.openIowa': 'Open Iowa’s SNAP application in this tab. Your checklist appears here automatically. On another food-assistance form, click the SecondHand toolbar icon.',
+    'panel.stopping': 'Stopping autofill…',
+    'panel.filling': 'Filling your saved answers…',
+    'panel.fieldOffScreen': 'That field isn’t on screen right now. Find it in Iowa’s form.',
+    'panel.chromeCouldntAskSite': 'Chrome couldn’t ask for access to this site.',
+    'panel.chromeDeclinedSite': 'Chrome didn’t allow SecondHand on this site. Nothing changed.',
+    'panel.approveSite': 'Approve this site in the SecondHand app…',
+    'panel.siteOn': 'SecondHand is on for {host}. Click Autofill.',
+    'panel.chromeCouldntAskFrames': 'Chrome couldn’t ask for access to the embedded form.',
+    'panel.chromeDeclinedFrames': 'Chrome didn’t allow SecondHand on the embedded form. Nothing changed.',
+    'panel.approveFrames': 'Approve the embedded form in the SecondHand app…',
+    'panel.framesOn': 'SecondHand is on for the embedded form. Click Autofill.',
+    'panel.turningOff': 'Turning SecondHand off for this site…',
+    'panel.siteOffDone': 'SecondHand is off for this site. Reload the page to remove its button.',
 
-  function getLanguage() {
-    try {
-      const stored = localStorage.getItem('secondhand-lang');
-      if (stored === 'es' || stored === 'en') return stored;
-    } catch {}
-    return navigator.language.startsWith('es') ? 'es' : 'en';
+    'desktop.notRunning': 'SecondHand isn’t running. Open the app on this computer.',
+    'desktop.unlocked': 'SecondHand is unlocked.',
+    'desktop.locked': 'SecondHand is locked.',
+    'desktop.unlockThenAutofill': 'Unlock SecondHand, then click Autofill.',
+
+    'checklist.complete': 'Done',
+    'checklist.missing': 'Needs you',
+    'checklist.optional': 'Optional',
+    'checklist.manual': 'Do it yourself',
+    'checklist.summary': '{done} of {total} done',
+    'checklist.rowLabel': '{label}: {status}. Find it in Iowa’s form.',
+
+    'questions.show': 'Show questions in English',
+    'questions.refresh': 'Update the question list',
+    'questions.title': 'Questions on this page',
+    'questions.count': { one: '{count} question', other: '{count} questions' },
+    'questions.reading': 'Reading this page’s questions…',
+    'questions.none': 'SecondHand didn’t find any questions on this page.',
+    'questions.pendingFrames': 'Turn on the embedded form to list its questions too.',
+    'questions.sameLanguage': 'These questions are already in {language}.',
+    'questions.unknownLanguage': 'SecondHand couldn’t tell which language this page is in, so Chrome can’t translate it.',
+    'translate.missing': 'Translation isn’t available in this Chrome.',
+    'translate.unavailable': 'Chrome can’t translate {source} into {target} on this computer.',
+    'translate.needsDownload': 'Chrome needs to download {language} once to translate these questions.',
+    'translate.download': 'Download the {language} translation',
+    'translate.downloading': 'Chrome is downloading {language}… {percent}%',
+    'translate.stalled': 'Chrome hasn’t started downloading {language}. Check your internet connection. The questions stay in {source} until it does.',
+    'translate.translating': 'Chrome is translating these questions on this computer…',
+    'translate.done': 'Translated by Chrome on this computer. Nothing left your computer.',
+    'translate.failed': 'Chrome couldn’t translate these questions: {detail}',
+
+    'worker.desktopTimedOut': 'Desktop approval timed out. Click Autofill again.',
+    'worker.desktopUnexpected': 'Unexpected desktop response. Nothing further was done.',
+    'worker.desktopDeclined': 'The desktop declined this request.',
+    'worker.desktopOffline': 'Cannot reach SecondHand. Open the app and prepare its Chrome extension.',
+    'worker.openIowaPortal': 'Open the official Iowa portal in the active tab, then try again.',
+    'worker.pageLoading': 'The page changed. Wait for it to finish loading.',
+    'worker.openAppThenAutofill': 'Open the SecondHand app, then click Autofill again.',
+    'worker.unlockToAutofill': 'Unlock SecondHand to autofill.',
+    'worker.cancelled': 'Cancelled. Nothing was filled.',
+    'worker.autofillFailed': 'Autofill failed. Fill this page yourself.',
+    'worker.authorizationOutdated': 'Update and reopen SecondHand, then reload this extension. Its authorization response is outdated.',
+    'worker.accessChanged': 'Desktop access changed. Review the page, then click Autofill again.',
+    'worker.pilotStopped': 'Autofill stopped. Nothing further will be filled or advanced.',
+    'worker.noProfileFields': 'The desktop did not return supported profile fields.',
+    'worker.pageChangedAutofill': 'The page changed. Click Autofill again.',
+    'worker.pageUnsafe': 'This page couldn’t be filled safely. Fill it yourself.',
+    'worker.pageChangedCheck': 'The page changed. Check it before continuing.',
+    'worker.invalidNavigation': 'The desktop returned an invalid navigation authorization.',
+    'worker.pageChangedReview': 'The page changed. Review it before continuing.',
+    'worker.pageChangedBeforeNext': 'The page changed before navigation. Review it.',
+    'worker.reviewContinueIowa': 'Review this page and continue in Iowa’s form.',
+    'worker.selectedSaveContinue': 'Selected Save and Continue once. Waiting for Iowa’s next step.',
+    'worker.stoppedAfterSteps': 'Stopped after {steps} steps. Check this page, then click Autofill to keep going.',
+    'worker.continuing': 'Continuing…',
+    'worker.unknownPage': 'SecondHand doesn’t know this page yet. Fill it in, then continue.',
+    'worker.autofillStopped': 'Autofill stopped.',
+    'worker.checkThenContinue': 'Check your answers, then click Continue.',
+    'worker.turnOnSiteFirst': 'Turn on SecondHand for this site in the side panel first.',
+    'worker.openFormActiveTab': 'Open the form in the active tab, then try again.',
+    'worker.chromeNotAllowedSite': 'Chrome hasn’t allowed SecondHand on this site. Click Turn on again and allow it.',
+    'worker.appDidNotApproveSite': 'The SecondHand app did not approve this site.',
+    'worker.reloadThenAutofill': 'Reload this page, then click Autofill.',
+    'worker.frameUnsafe': 'Part of this form couldn’t be filled safely. Fill it yourself.',
+    'worker.chromeKeptAccess': 'Chrome kept SecondHand’s access to this site. Remove it on Chrome’s extension page.',
+    'worker.chromeNotAllowedFrames': 'Chrome hasn’t allowed SecondHand on the embedded form. Click Also turn on again and allow it.',
+    'worker.appDidNotApproveFrames': 'The SecondHand app did not approve this embedded form.',
+    'worker.pageChangedTryAgain': 'The page changed. Try again.',
+    'worker.pageCheckUnsafe': 'This page couldn’t be checked safely. Fill it yourself.',
+    'worker.aiMatchesUnusable': 'SecondHand couldn’t use the on-device AI’s matches. Nothing was filled.',
+    'worker.fieldRequestFailed': 'SecondHand could not prepare the field request.',
+    'worker.formInsideFrames': 'This form is inside {hosts}. Click “Also turn on the embedded form” in the SecondHand side panel.',
+    'worker.iowaRulesOnly': 'Iowa’s form is filled by its own rules only.',
+    'worker.fieldNotOnPage': 'That field isn’t on this page.',
+    'worker.turnOnFrameFirst': 'Turn on SecondHand for this embedded form first.',
+    'worker.useToolbarIcon': 'Use the SecondHand toolbar icon to open the side panel.',
+    'worker.requestFailed': 'SecondHand could not complete the request.',
+    'worker.stoppedTabChanged': 'Autofill stopped because the active tab changed.',
+    'worker.questionsUnreadable': 'SecondHand couldn’t read this page’s questions. Reload the page, then try again.',
+    'worker.navigationExpired': 'The page changed or its navigation preview expired. Check it again.',
+
+    'result.filled': 'Filled {count}.',
+    'result.filledNeedYou': 'Filled {count} · {needYou} need you.',
+    'result.needYouNotSaved': '{count} need you. They aren’t in your saved profile.',
+    'result.nothingNew': 'Nothing new to fill.',
+    'result.thenTodo': '{summary} {todo}',
+    'result.siteFilled': 'Filled {count}. Check your answers before you submit.',
+    'result.siteFilledGuessed': 'Filled {count} · {guessed} guessed. Check your answers before you submit.',
+    'result.siteFilledNeedYou': 'Filled {count} · {needYou} need you. Check your answers before you submit.',
+    'result.siteFilledGuessedNeedYou': 'Filled {count} · {guessed} guessed · {needYou} need you. Check your answers before you submit.',
+    'result.nothingMatchesNeedYou': 'Nothing here matches your saved profile. {count} need you.',
+    'result.nothingToFillNext': 'Nothing to fill here. Click Next, then Autofill again.',
+    'result.nothingToFill': 'Nothing to fill here.',
+
+    // The Iowa adapter's labels, instructions, and reasons, word for word.
+    'iowa.firstName': 'First name',
+    'iowa.middleName': 'Middle name',
+    'iowa.lastName': 'Last name',
+    'iowa.suffix': 'Suffix',
+    'iowa.maidenName': 'Maiden name',
+    'iowa.homePhone': 'Home phone number',
+    'iowa.mobilePhone': 'Mobile phone number',
+    'iowa.hasHomeAddress': 'Do you have a home address?',
+    'iowa.addressLine1': 'Home street address',
+    'iowa.addressLine2': 'Home apartment / unit',
+    'iowa.city': 'Home city',
+    'iowa.state': 'Home state',
+    'iowa.zip': 'Home ZIP code',
+    'iowa.mailingSameAsHome': 'Is your mailing address the same as home?',
+    'iowa.mailingAddressLine1': 'Mailing street address',
+    'iowa.mailingAddressLine2': 'Mailing apartment / unit',
+    'iowa.mailingCity': 'Mailing city',
+    'iowa.mailingState': 'Mailing state',
+    'iowa.mailingZip': 'Mailing ZIP code',
+    'iowa.isApplicant': 'Are you applying for benefits?',
+    'iowa.programMedicaid': 'Health coverage (Medicaid / CHIP)',
+    'iowa.programSnap': 'SNAP',
+    'iowa.programFip': 'FIP or Refugee Cash Assistance',
+    'iowa.helpPayMedicalBills': 'Help with medical bills from the last three months?',
+    'iowa.bestContactTime': 'Best time to call',
+    'iowa.householdApplyProg': 'Is anyone applying for SNAP, FIP, or health coverage?',
+    'iowa.birthDate': 'Date of birth',
+    'iowa.reviewDependent': '{label}: review existing dependent answers',
+    'iowa.choosePrograms': 'Choose at least one program',
+    'iowa.manualReview': 'Review unrecognized controls or portal errors',
+    'iowa.solveCaptcha': 'Solve the CAPTCHA, then click Continue.',
+    'iowa.acceptConsent': 'Read and accept Iowa’s consent, then click Continue.',
+    'iowa.signIn': 'Sign in or verify in Iowa’s form, then continue.',
+    'iowa.answerPopup': 'Answer Iowa’s pop-up, then continue.',
+    'iowa.signYourself': 'Sign or submit in Iowa’s form yourself.',
+    'iowa.openPortal': 'Open the official Iowa benefits portal.',
+    'iowa.manualStep': 'Complete this step in Iowa’s form. SecondHand has not verified its controls.',
+    'iowa.addressTodo': 'SecondHand selects the first suggested home address and saves this step. Review it before final submission.',
+    'iowa.addressManualTodo': 'Review this address step and continue in Iowa’s form yourself.',
+    'iowa.addressReview': 'First suggested home address',
+    'iowa.addressReason': 'Next selects Iowa’s first suggested home address and saves this step. Review the selected address before final submission.',
+    'iowa.addressManualReason': 'Review this address step in Iowa’s form. The expected home suggestions could not be verified, or another address question or error needs attention.',
+    'iowa.selfDetailsReview': 'Review the remaining questions and continue in Iowa’s form',
+    'iowa.selfDetailsTodo': 'Review the other questions, then click Save and Continue in Iowa’s form yourself.',
+    'iowa.selfDetailsReason': 'SecondHand can fill your saved date of birth on this verified self-information page. Review and answer the other questions, then choose Save and Continue directly in Iowa’s form.',
+    'iowa.selfUnverifiedTodo': 'Review and complete these questions directly in Iowa’s form.',
+    'iowa.selfUnverifiedReason': 'This person or question context is not verified for saved applicant facts.',
+    'iowa.clickContinue': 'Click Continue in Iowa’s form.',
+    'iowa.programIntentReason': 'Answer whether anyone is applying, then solve the CAPTCHA.',
+    'iowa.missingAnswers': 'Complete the missing answers in Iowa’s form. SecondHand will check again before continuing.',
+    'iowa.canSaveContinue': 'SecondHand can save this verified page and continue. Review every answer before final submission.',
+    'iowa.remainingQuestions': 'Answer the remaining questions and correct any errors in Iowa’s form.',
+    'iowa.requiredFields': 'Complete the required applicant fields in Iowa’s form.',
+    'iowa.reviewSaveContinue': 'Review your answers, then click Save and Continue in Iowa’s form.',
+    'iowa.personalUnverifiedTodo': 'Review the applicant fields and continue directly in Iowa’s form.',
+    'iowa.personalUnverifiedReason': 'The expected primary-applicant form could not be verified.',
+    'iowa.infoOnly': 'Information only. SecondHand can continue for you.',
+    'iowa.readThenContinue': 'Read this page, then click Continue in Iowa’s form.',
+    'iowa.chooseAddress': 'Review and choose the correct address in Iowa’s form',
+    'iowa.welcome': 'Choose Apply for Assistance in Iowa’s portal to begin.',
+    'iowa.continued': 'Continued to the next screen.',
+    'iowa.addressAdvanced': 'The first suggested home address was selected and Next was clicked once. Review the address before final submission.',
+    'iowa.advanced': 'Next was clicked once. Check the following page for required questions or errors.',
+    'iowa.needsYou': 'This page needs you. Continue in Iowa’s form.',
+    'iowa.continueUnsafe': 'Continue isn’t safely available. Click it in Iowa’s form.',
+    'iowa.continueNoResponse': 'Iowa’s Continue button didn’t respond. Click it yourself.',
+    'iowa.nextExpired': 'The page changed or the Next preview expired. Check this page again.',
+    'iowa.answerChanged': 'The page or an answer changed. Review it and check again before Next.',
+    'iowa.addressChoiceChanged': 'The address choice changed or is not safely accessible. Check this page again.',
+    'iowa.addressNotSelected': 'The first address suggestion could not be selected. Review Iowa’s form.',
+    'iowa.addressPageChanged': 'The address page changed after selection. Review it before continuing.',
+    'iowa.nextNotActivated': 'Iowa’s Next control could not be activated. Check the page before trying again.',
+    'iowa.nextUnsafe': 'The Next button is not safely accessible. Continue in Iowa’s form.',
+    'iowa.programIntentTodo': 'Answer whether anyone is applying, solve the CAPTCHA, then click Continue.',
+    'iowa.assistanceTodo': 'If nobody is helping you, leave this blank and click Continue.',
+    'iowa.pickAddress': 'Pick the correct address, then click Continue.'
+  });
+
+  // Needs a human Spanish review before release (see the #34 notes).
+  const es = Object.freeze({
+    'app.title': 'SecondHand · Asistente de SNAP de Iowa',
+    'brand.name': 'SecondHand',
+    'brand.region': 'IOWA SNAP',
+    'language.label': 'Idioma',
+    'language.en': 'English',
+    'language.es': 'Español',
+    'detail': '{detail} (mensaje en inglés)',
+
+    'widget.autofill': 'Autocompletar',
+    'widget.autofillIowaTitle': 'Autocompletar avanza por las pantallas de información verificadas y las páginas del solicitante que están completas; luego elige la primera dirección de casa sugerida y continúa. Revise la dirección elegida antes de enviar.',
+    'widget.autofillSiteTitle': 'Llena una vez los campos compatibles de este sitio. Revise cada respuesta.',
+    'widget.unlock': 'Desbloquear SecondHand',
+    'widget.stop': 'Detener',
+    'widget.details': 'Detalles',
+    'widget.detailsTitle': 'Abrir los detalles en el panel lateral de Chrome',
+    'widget.iowaReady': 'Iowa · usa la primera dirección de casa sugerida',
+    'widget.siteReady': '{host} · listo',
+    'widget.pillTitle': 'No hay nada que llenar en esta página. Abra el panel lateral de SecondHand.',
+    'widget.working': 'Trabajando…',
+    'widget.aiUnavailable': 'La IA de este dispositivo no está disponible. Solo se usan las reglas.',
+    'widget.filled': 'Completadas: {count}',
+    'widget.filledGuessed': 'Completadas: {count} · por IA: {guessed}',
+    'widget.nothingMatches': 'Nada aquí coincide con su perfil guardado.',
+    'widget.needYou': { one: 'Falta {count}', other: 'Faltan {count}' },
+    'widget.findInForm': 'Búsquelo en el formulario.',
+    'widget.findInIowa': 'Búsquelo en el formulario de Iowa.',
+    'widget.offer': 'Ver en español',
+    'widget.offerTitle': 'Mostrar las preguntas de esta página en español en el panel lateral de SecondHand',
+    'widget.languageCheckFailed': 'SecondHand no pudo comprobar el idioma de esta página.',
+
+    'panel.outdated': 'SecondHand se actualizó. Abra chrome://extensions, haga clic en la flecha de recargar de SecondHand y luego recargue esta página.',
+    'panel.assistantUnavailable': 'El asistente no está disponible. Recargue la extensión y esta página.',
+    'panel.checkingDesktop': 'Comprobando SecondHand…',
+    'panel.unlock': 'Desbloquear',
+    'panel.framesEnable': 'También activar el formulario integrado',
+    'panel.framesEnableHosts': 'También activar el formulario integrado ({hosts})',
+    'panel.siteEnable': 'Activar SecondHand para este sitio',
+    'panel.iowaPolicy': 'En los pasos verificados de Iowa, Autocompletar avanza por las pantallas de información verificadas y las páginas del solicitante que están completas; luego elige la primera dirección de casa sugerida y continúa. Revise esa dirección antes de enviar. En “Tell Us More” y en los pasos no compatibles, usted todavía tiene que responder y hacer clic en “Continue”.',
+    'panel.autofill': 'Autocompletar esta página',
+    'panel.stopAutofill': 'Detener Autocompletar',
+    'panel.checkingTab': 'Revisando la solicitud en su pestaña activa…',
+    'panel.siteDisable': 'Desactivar SecondHand para este sitio',
+    'panel.onThisPage': 'En esta página',
+    'panel.footer': 'Revise cada respuesta. Las firmas, el consentimiento y el envío final quedan en sus manos.',
+    'panel.pageUnreadable': 'No se pudo leer el estado de la página. Recargue la página de Iowa.',
+    'panel.waitingLoad': 'Esperando a que la página termine de cargar…',
+    'panel.reloadToRead': 'Recargue esta página para que SecondHand pueda leerla.',
+    'panel.siteOff': 'SecondHand puede llenar formularios en {host} después de que lo active aquí y lo apruebe en la aplicación SecondHand.',
+    'panel.siteHint': 'Haga clic en “Autocompletar”. SecondHand llena lo que reconoce y le muestra lo que falta. Nunca envía el formulario.',
+    'panel.iowaHint': 'Haga clic en “Autocompletar”. SecondHand llena lo que puede y le dice lo que necesita.',
+    'panel.nothingToFill': 'No hay nada que llenar en esta página. Continúe en el formulario de Iowa.',
+    'panel.openIowa': 'Abra la solicitud de SNAP de Iowa en esta pestaña. Su lista aparecerá aquí automáticamente. En otro formulario de ayuda alimentaria, haga clic en el ícono de SecondHand en la barra de herramientas.',
+    'panel.stopping': 'Deteniendo Autocompletar…',
+    'panel.filling': 'Llenando sus respuestas guardadas…',
+    'panel.fieldOffScreen': 'Ese campo no está en la pantalla ahora. Búsquelo en el formulario de Iowa.',
+    'panel.chromeCouldntAskSite': 'Chrome no pudo pedir acceso a este sitio.',
+    'panel.chromeDeclinedSite': 'Chrome no permitió SecondHand en este sitio. No cambió nada.',
+    'panel.approveSite': 'Apruebe este sitio en la aplicación SecondHand…',
+    'panel.siteOn': 'SecondHand está activo en {host}. Haga clic en “Autocompletar”.',
+    'panel.chromeCouldntAskFrames': 'Chrome no pudo pedir acceso al formulario integrado.',
+    'panel.chromeDeclinedFrames': 'Chrome no permitió SecondHand en el formulario integrado. No cambió nada.',
+    'panel.approveFrames': 'Apruebe el formulario integrado en la aplicación SecondHand…',
+    'panel.framesOn': 'SecondHand está activo en el formulario integrado. Haga clic en “Autocompletar”.',
+    'panel.turningOff': 'Desactivando SecondHand para este sitio…',
+    'panel.siteOffDone': 'SecondHand está desactivado para este sitio. Recargue la página para quitar su botón.',
+
+    'desktop.notRunning': 'SecondHand no está abierto. Abra la aplicación en esta computadora.',
+    'desktop.unlocked': 'SecondHand está desbloqueado.',
+    'desktop.locked': 'SecondHand está bloqueado.',
+    'desktop.unlockThenAutofill': 'Desbloquee SecondHand y luego haga clic en “Autocompletar”.',
+
+    'checklist.complete': 'Listo',
+    'checklist.missing': 'Falta su respuesta',
+    'checklist.optional': 'Opcional',
+    'checklist.manual': 'Hágalo usted',
+    'checklist.summary': '{done} de {total} listas',
+    'checklist.rowLabel': '{label}: {status}. Búsquelo en el formulario de Iowa.',
+
+    'questions.show': 'Ver las preguntas en español',
+    'questions.refresh': 'Actualizar la lista de preguntas',
+    'questions.title': 'Preguntas de esta página',
+    'questions.count': { one: '{count} pregunta', other: '{count} preguntas' },
+    'questions.reading': 'Leyendo las preguntas de esta página…',
+    'questions.none': 'SecondHand no encontró preguntas en esta página.',
+    'questions.pendingFrames': 'Active el formulario integrado para ver también sus preguntas.',
+    'questions.sameLanguage': 'Estas preguntas ya están en {language}.',
+    'questions.unknownLanguage': 'SecondHand no pudo saber en qué idioma está esta página, así que Chrome no puede traducirla.',
+    'translate.missing': 'La traducción no está disponible en este Chrome.',
+    'translate.unavailable': 'Chrome no puede traducir del {source} al {target} en esta computadora.',
+    'translate.needsDownload': 'Chrome necesita descargar el {language} una vez para traducir estas preguntas.',
+    'translate.download': 'Descargar la traducción al {language}',
+    'translate.downloading': 'Chrome está descargando el {language}… {percent} %',
+    'translate.stalled': 'Chrome no ha empezado a descargar el {language}. Revise su conexión a internet. Mientras tanto, las preguntas siguen en {source}.',
+    'translate.translating': 'Chrome está traduciendo estas preguntas en esta computadora…',
+    'translate.done': 'Traducido por Chrome en esta computadora. Nada salió de su computadora.',
+    'translate.failed': 'Chrome no pudo traducir estas preguntas: {detail}',
+
+    'worker.desktopTimedOut': 'La aprobación en la aplicación de escritorio tardó demasiado. Haga clic en “Autocompletar” otra vez.',
+    'worker.desktopUnexpected': 'Respuesta inesperada de la aplicación de escritorio. No se hizo nada más.',
+    'worker.desktopDeclined': 'La aplicación de escritorio rechazó esta solicitud.',
+    'worker.desktopOffline': 'No se puede conectar con SecondHand. Abra la aplicación y prepare su extensión de Chrome.',
+    'worker.openIowaPortal': 'Abra el portal oficial de Iowa en la pestaña activa y vuelva a intentarlo.',
+    'worker.pageLoading': 'La página cambió. Espere a que termine de cargar.',
+    'worker.openAppThenAutofill': 'Abra la aplicación SecondHand y luego haga clic en “Autocompletar” otra vez.',
+    'worker.unlockToAutofill': 'Desbloquee SecondHand para autocompletar.',
+    'worker.cancelled': 'Cancelado. No se llenó nada.',
+    'worker.autofillFailed': 'No se pudo autocompletar. Llene esta página usted mismo.',
+    'worker.authorizationOutdated': 'Actualice y vuelva a abrir SecondHand, y luego recargue esta extensión. Su respuesta de autorización es de una versión anterior.',
+    'worker.accessChanged': 'El acceso en la aplicación de escritorio cambió. Revise la página y luego haga clic en “Autocompletar” otra vez.',
+    'worker.pilotStopped': 'Autocompletar se detuvo. No se llenará ni se avanzará nada más.',
+    'worker.noProfileFields': 'La aplicación de escritorio no devolvió campos de perfil compatibles.',
+    'worker.pageChangedAutofill': 'La página cambió. Haga clic en “Autocompletar” otra vez.',
+    'worker.pageUnsafe': 'Esta página no se pudo llenar de forma segura. Llénela usted mismo.',
+    'worker.pageChangedCheck': 'La página cambió. Revísela antes de continuar.',
+    'worker.invalidNavigation': 'La aplicación de escritorio devolvió una autorización de navegación no válida.',
+    'worker.pageChangedReview': 'La página cambió. Revísela antes de seguir.',
+    'worker.pageChangedBeforeNext': 'La página cambió antes de avanzar. Revísela.',
+    'worker.reviewContinueIowa': 'Revise esta página y continúe en el formulario de Iowa.',
+    'worker.selectedSaveContinue': 'Se eligió “Save and Continue” una vez. Esperando el siguiente paso de Iowa.',
+    'worker.stoppedAfterSteps': 'Se detuvo después de {steps} pasos. Revise esta página y luego haga clic en “Autocompletar” para seguir.',
+    'worker.continuing': 'Continuando…',
+    'worker.unknownPage': 'SecondHand todavía no conoce esta página. Llénela y luego continúe.',
+    'worker.autofillStopped': 'Autocompletar se detuvo.',
+    'worker.checkThenContinue': 'Revise sus respuestas y luego haga clic en “Continue”.',
+    'worker.turnOnSiteFirst': 'Primero active SecondHand para este sitio en el panel lateral.',
+    'worker.openFormActiveTab': 'Abra el formulario en la pestaña activa y vuelva a intentarlo.',
+    'worker.chromeNotAllowedSite': 'Chrome no ha permitido SecondHand en este sitio. Haga clic en “Activar SecondHand para este sitio” otra vez y permítalo.',
+    'worker.appDidNotApproveSite': 'La aplicación SecondHand no aprobó este sitio.',
+    'worker.reloadThenAutofill': 'Recargue esta página y luego haga clic en “Autocompletar”.',
+    'worker.frameUnsafe': 'Una parte de este formulario no se pudo llenar de forma segura. Llénela usted mismo.',
+    'worker.chromeKeptAccess': 'Chrome mantuvo el acceso de SecondHand a este sitio. Quítelo en la página de extensiones de Chrome.',
+    'worker.chromeNotAllowedFrames': 'Chrome no ha permitido SecondHand en el formulario integrado. Haga clic en “También activar el formulario integrado” otra vez y permítalo.',
+    'worker.appDidNotApproveFrames': 'La aplicación SecondHand no aprobó este formulario integrado.',
+    'worker.pageChangedTryAgain': 'La página cambió. Vuelva a intentarlo.',
+    'worker.pageCheckUnsafe': 'Esta página no se pudo revisar de forma segura. Llénela usted mismo.',
+    'worker.aiMatchesUnusable': 'SecondHand no pudo usar las coincidencias de la IA de este dispositivo. No se llenó nada.',
+    'worker.fieldRequestFailed': 'SecondHand no pudo preparar la solicitud de campos.',
+    'worker.formInsideFrames': 'Este formulario está dentro de {hosts}. Haga clic en “También activar el formulario integrado” en el panel lateral de SecondHand.',
+    'worker.iowaRulesOnly': 'El formulario de Iowa se llena solo con sus propias reglas.',
+    'worker.fieldNotOnPage': 'Ese campo no está en esta página.',
+    'worker.turnOnFrameFirst': 'Primero active SecondHand para este formulario integrado.',
+    'worker.useToolbarIcon': 'Use el ícono de SecondHand en la barra de herramientas para abrir el panel lateral.',
+    'worker.requestFailed': 'SecondHand no pudo completar la solicitud.',
+    'worker.stoppedTabChanged': 'Autocompletar se detuvo porque cambió la pestaña activa.',
+    'worker.questionsUnreadable': 'SecondHand no pudo leer las preguntas de esta página. Recargue la página y vuelva a intentarlo.',
+    'worker.navigationExpired': 'La página cambió o su vista previa de navegación venció. Revísela otra vez.',
+
+    'result.filled': 'Completadas: {count}.',
+    'result.filledNeedYou': 'Completadas: {count} · Faltan: {needYou}.',
+    'result.needYouNotSaved': 'Faltan: {count}. No están en su perfil guardado.',
+    'result.nothingNew': 'No hay nada nuevo que llenar.',
+    'result.thenTodo': '{summary} {todo}',
+    'result.siteFilled': 'Completadas: {count}. Revise sus respuestas antes de enviar.',
+    'result.siteFilledGuessed': 'Completadas: {count} · por IA: {guessed}. Revise sus respuestas antes de enviar.',
+    'result.siteFilledNeedYou': 'Completadas: {count} · Faltan: {needYou}. Revise sus respuestas antes de enviar.',
+    'result.siteFilledGuessedNeedYou': 'Completadas: {count} · por IA: {guessed} · Faltan: {needYou}. Revise sus respuestas antes de enviar.',
+    'result.nothingMatchesNeedYou': 'Nada aquí coincide con su perfil guardado. Faltan: {count}.',
+    'result.nothingToFillNext': 'No hay nada que llenar aquí. Haga clic en “Next” y luego en “Autocompletar” otra vez.',
+    'result.nothingToFill': 'No hay nada que llenar aquí.',
+
+    'iowa.firstName': 'Nombre',
+    'iowa.middleName': 'Segundo nombre',
+    'iowa.lastName': 'Apellido',
+    'iowa.suffix': 'Sufijo',
+    'iowa.maidenName': 'Apellido de soltera',
+    'iowa.homePhone': 'Teléfono de casa',
+    'iowa.mobilePhone': 'Teléfono celular',
+    'iowa.hasHomeAddress': '¿Tiene una dirección de casa?',
+    'iowa.addressLine1': 'Dirección de su casa (calle y número)',
+    'iowa.addressLine2': 'Apartamento o unidad (casa)',
+    'iowa.city': 'Ciudad (casa)',
+    'iowa.state': 'Estado (casa)',
+    'iowa.zip': 'Código postal (casa)',
+    'iowa.mailingSameAsHome': '¿Su dirección postal es la misma que la de su casa?',
+    'iowa.mailingAddressLine1': 'Dirección postal (calle y número)',
+    'iowa.mailingAddressLine2': 'Apartamento o unidad (correo)',
+    'iowa.mailingCity': 'Ciudad (correo)',
+    'iowa.mailingState': 'Estado (correo)',
+    'iowa.mailingZip': 'Código postal (correo)',
+    'iowa.isApplicant': '¿Está solicitando beneficios?',
+    'iowa.programMedicaid': 'Cobertura de salud (Medicaid / CHIP)',
+    'iowa.programSnap': 'SNAP (ayuda para alimentos)',
+    'iowa.programFip': 'FIP o Asistencia en Efectivo para Refugiados',
+    'iowa.helpPayMedicalBills': '¿Ayuda con facturas médicas de los últimos tres meses?',
+    'iowa.bestContactTime': 'Mejor hora para llamarle',
+    'iowa.householdApplyProg': '¿Alguien solicita SNAP, FIP o cobertura de salud?',
+    'iowa.birthDate': 'Fecha de nacimiento',
+    'iowa.reviewDependent': '{label}: revise las respuestas relacionadas que ya están',
+    'iowa.choosePrograms': 'Elija al menos un programa',
+    'iowa.manualReview': 'Revise las preguntas no reconocidas o los errores del portal',
+    'iowa.solveCaptcha': 'Resuelva el CAPTCHA y luego haga clic en “Continue”.',
+    'iowa.acceptConsent': 'Lea y acepte el consentimiento de Iowa y luego haga clic en “Continue”.',
+    'iowa.signIn': 'Inicie sesión o verifique su identidad en el formulario de Iowa y luego continúe.',
+    'iowa.answerPopup': 'Responda la ventana emergente de Iowa y luego continúe.',
+    'iowa.signYourself': 'Firme o envíe el formulario de Iowa usted mismo.',
+    'iowa.openPortal': 'Abra el portal oficial de beneficios de Iowa.',
+    'iowa.manualStep': 'Complete este paso en el formulario de Iowa. SecondHand no ha verificado sus campos.',
+    'iowa.addressTodo': 'SecondHand elige la primera dirección de casa sugerida y guarda este paso. Revísela antes del envío final.',
+    'iowa.addressManualTodo': 'Revise este paso de dirección y continúe usted mismo en el formulario de Iowa.',
+    'iowa.addressReview': 'Primera dirección de casa sugerida',
+    'iowa.addressReason': '“Next” elige la primera dirección de casa que sugiere Iowa y guarda este paso. Revise la dirección elegida antes del envío final.',
+    'iowa.addressManualReason': 'Revise este paso de dirección en el formulario de Iowa. No se pudieron verificar las sugerencias de dirección esperadas, u otra pregunta o error de dirección necesita su atención.',
+    'iowa.selfDetailsReview': 'Revise las preguntas restantes y continúe en el formulario de Iowa',
+    'iowa.selfDetailsTodo': 'Revise las demás preguntas y luego haga clic usted mismo en “Save and Continue” en el formulario de Iowa.',
+    'iowa.selfDetailsReason': 'SecondHand puede llenar su fecha de nacimiento guardada en esta página verificada de información personal. Revise y conteste las demás preguntas y luego elija “Save and Continue” directamente en el formulario de Iowa.',
+    'iowa.selfUnverifiedTodo': 'Revise y complete estas preguntas directamente en el formulario de Iowa.',
+    'iowa.selfUnverifiedReason': 'No se ha verificado esta persona o pregunta para usar los datos guardados del solicitante.',
+    'iowa.clickContinue': 'Haga clic en “Continue” en el formulario de Iowa.',
+    'iowa.programIntentReason': 'Responda si alguien está solicitando y luego resuelva el CAPTCHA.',
+    'iowa.missingAnswers': 'Complete las respuestas que faltan en el formulario de Iowa. SecondHand volverá a revisar antes de continuar.',
+    'iowa.canSaveContinue': 'SecondHand puede guardar esta página verificada y continuar. Revise cada respuesta antes del envío final.',
+    'iowa.remainingQuestions': 'Conteste las preguntas restantes y corrija los errores en el formulario de Iowa.',
+    'iowa.requiredFields': 'Complete los campos obligatorios del solicitante en el formulario de Iowa.',
+    'iowa.reviewSaveContinue': 'Revise sus respuestas y luego haga clic en “Save and Continue” en el formulario de Iowa.',
+    'iowa.personalUnverifiedTodo': 'Revise los campos del solicitante y continúe directamente en el formulario de Iowa.',
+    'iowa.personalUnverifiedReason': 'No se pudo verificar el formulario esperado del solicitante principal.',
+    'iowa.infoOnly': 'Solo información. SecondHand puede continuar por usted.',
+    'iowa.readThenContinue': 'Lea esta página y luego haga clic en “Continue” en el formulario de Iowa.',
+    'iowa.chooseAddress': 'Revise y elija la dirección correcta en el formulario de Iowa',
+    'iowa.welcome': 'Para empezar, elija “Apply for Assistance” en el portal de Iowa.',
+    'iowa.continued': 'Pasó a la siguiente pantalla.',
+    'iowa.addressAdvanced': 'Se eligió la primera dirección de casa sugerida y se hizo clic en “Next” una vez. Revise la dirección antes del envío final.',
+    'iowa.advanced': 'Se hizo clic en “Next” una vez. Revise la siguiente página por si hay preguntas obligatorias o errores.',
+    'iowa.needsYou': 'Esta página necesita su respuesta. Continúe en el formulario de Iowa.',
+    'iowa.continueUnsafe': 'No es seguro usar “Continue” desde aquí. Haga clic en ese botón en el formulario de Iowa.',
+    'iowa.continueNoResponse': 'El botón “Continue” de Iowa no respondió. Haga clic en él usted mismo.',
+    'iowa.nextExpired': 'La página cambió o la vista previa de “Next” venció. Revise esta página otra vez.',
+    'iowa.answerChanged': 'La página o una respuesta cambió. Revísela y compruebe otra vez antes de “Next”.',
+    'iowa.addressChoiceChanged': 'La dirección elegida cambió o no se puede usar de forma segura. Revise esta página otra vez.',
+    'iowa.addressNotSelected': 'No se pudo elegir la primera dirección sugerida. Revise el formulario de Iowa.',
+    'iowa.addressPageChanged': 'La página de dirección cambió después de elegir. Revísela antes de continuar.',
+    'iowa.nextNotActivated': 'No se pudo activar el botón “Next” de Iowa. Revise la página antes de intentarlo otra vez.',
+    'iowa.nextUnsafe': 'No es seguro usar el botón “Next” desde aquí. Continúe en el formulario de Iowa.',
+    'iowa.programIntentTodo': 'Responda si alguien está solicitando, resuelva el CAPTCHA y luego haga clic en “Continue”.',
+    'iowa.assistanceTodo': 'Si nadie le está ayudando, deje esto en blanco y haga clic en “Continue”.',
+    'iowa.pickAddress': 'Elija la dirección correcta y luego haga clic en “Continue”.'
+  });
+  const catalogs = Object.freeze({ en, es });
+
+  // A message is a key and its parameters; a parameter can itself be a message ({ key, params }).
+  function text(language, key, params = {}) {
+    const catalog = catalogs[language];
+    if (!catalog) throw new Error(`SecondHand has no text in ${language}.`);
+    if (!Object.hasOwn(catalog, key)) throw new Error(`SecondHand has no ${language} text for ${key}.`);
+    let entry = catalog[key];
+    if (typeof entry === 'object') {
+      if (!Number.isInteger(params.count)) throw new Error(`${key} needs a whole-number count.`);
+      entry = params.count === 1 ? entry.one : entry.other;
+    }
+    return entry.replace(/\{(\w+)\}/g, (_, name) => {
+      if (!Object.hasOwn(params, name)) throw new Error(`${key} needs {${name}}.`);
+      const value = params[name];
+      return value && typeof value === 'object' ? text(language, value.key, value.params || {}) : String(value);
+    });
+  }
+  const english = (key, params) => text('en', key, params);
+
+  // Fixed English from the Iowa adapter and content scripts, back to its key. Anything
+  // else (Chrome's errors, the desktop app's replies) travels as a detail, shown as sent.
+  const keyOf = new Map(Object.entries(en).filter(([, value]) => typeof value === 'string' && !/\{\w+\}/.test(value)).map(([key, value]) => [value, key]));
+  const DEPENDENT = /^(.+): review existing dependent answers$/;
+  function describeEnglish(value) {
+    if (keyOf.has(value)) return { key: keyOf.get(value), params: {} };
+    const dependent = DEPENDENT.exec(value);
+    if (dependent && keyOf.has(dependent[1])) return { key: 'iowa.reviewDependent', params: { label: describeEnglish(dependent[1]) } };
+    return { key: 'detail', params: { detail: value } };
   }
 
-  function setLanguage(lang) {
-    try {
-      localStorage.setItem('secondhand-lang', lang);
-    } catch {}
+  // The applicant's choice, else the browser's language when SecondHand speaks it, else English.
+  function language(scope = root) {
+    const saved = scope.localStorage.getItem(STORAGE_KEY);
+    if (saved !== null) {
+      if (!LANGUAGES.includes(saved)) throw new Error(`SecondHand has no text in ${saved}.`);
+      return saved;
+    }
+    const browser = String(scope.navigator.language || '').toLowerCase().split('-')[0];
+    return LANGUAGES.includes(browser) ? browser : 'en';
+  }
+  function setLanguage(value, scope = root) {
+    if (!LANGUAGES.includes(value)) throw new Error(`SecondHand has no text in ${value}.`);
+    scope.localStorage.setItem(STORAGE_KEY, value);
   }
 
-  function t(text) {
-    if (!text) return text;
-    const lang = getLanguage();
-    if (lang === 'en') return text; // en is the source
-    
-    // Exact match
-    if (es[text]) return es[text];
-    
-    // Let's also do some basic dynamic matching for background.js strings if they appear in Spanish.
-    // For now, if no match, return original text.
-    let translated = text;
-    
-    // Dynamic matching for "X of Y done"
-    const doneMatch = text.match(/^(\d+) of (\d+) done$/);
-    if (doneMatch) return `${doneMatch[1]} de ${doneMatch[2]} completado`;
-    
-    // Dynamic matching for "X need you"
-    const needYouMatch = text.match(/^(\d+) need you$/);
-    if (needYouMatch) return `${needYouMatch[1]} te necesita`;
-    
-    // Dynamic matching for widgets
-    const filledMatch = text.match(/^Filled (\d+)( · (\d+) guessed)?( · (\d+) need you)?(?:\. (.*))?$/);
-    if (filledMatch) {
-      let msg = `Completado ${filledMatch[1]}`;
-      if (filledMatch[3]) msg += ` · ${filledMatch[3]} supuestos`;
-      if (filledMatch[5]) msg += ` · ${filledMatch[5]} te necesita`;
-      if (filledMatch[6]) msg += `. ${t(filledMatch[6])}`;
-      return msg;
-    }
-
-    const hostMatch = text.match(/^SecondHand can fill forms on (.*) after you turn it on here and approve it in the SecondHand app\.$/);
-    if (hostMatch) return `SecondHand puede autocompletar formularios en ${hostMatch[1]} después de que lo actives aquí y lo apruebes en la aplicación SecondHand.`;
-
-    const hostMatch2 = text.match(/^SecondHand is on for (.*)\. Click Autofill\.$/);
-    if (hostMatch2) return `SecondHand está activo para ${hostMatch2[1]}. Haz clic en Autocompletar.`;
-
-    const alsoTurnOnMatch = text.match(/^Also turn on the embedded form \((.*)\)$/);
-    if (alsoTurnOnMatch) return `También activa el formulario integrado (${alsoTurnOnMatch[1]})`;
-
-    const siteReadyMatch = text.match(/^(.*) · ready$/);
-    if (siteReadyMatch) return `${siteReadyMatch[1]} · listo`;
-
-    // background.js general strings translation
-    const bgMap = {
-      "The desktop declined this request.": "El escritorio rechazó esta solicitud.",
-      "Cannot reach SecondHand. Open the app and prepare its Chrome extension.": "No se puede contactar a SecondHand. Abre la aplicación y prepara su extensión de Chrome.",
-      "Open the official Iowa portal in the active tab, then try again.": "Abre el portal oficial de Iowa en la pestaña activa y vuelve a intentarlo.",
-      "The page changed. Wait for it to finish loading.": "La página cambió. Espera a que termine de cargar.",
-      "Open the SecondHand app, then click Autofill again.": "Abre la aplicación SecondHand y luego haz clic en Autocompletar nuevamente.",
-      "Unlock SecondHand to autofill.": "Desbloquea SecondHand para autocompletar.",
-      "Cancelled. Nothing was filled.": "Cancelado. No se completó nada.",
-      "Autofill failed. Fill this page yourself.": "Autocompletar falló. Completa esta página tú mismo.",
-      "Update and reopen SecondHand, then reload this extension. Its authorization response is outdated.": "Actualiza y vuelve a abrir SecondHand, luego recarga esta extensión. Su respuesta de autorización está desactualizada.",
-      "Desktop access changed. Review the page, then click Autofill again.": "El acceso de escritorio cambió. Revisa la página, luego haz clic en Autocompletar nuevamente.",
-      "Autofill stopped. Nothing further will be filled or advanced.": "Autocompletar detenido. No se completará ni avanzará nada más.",
-      "The desktop did not return supported profile fields.": "El escritorio no devolvió campos de perfil compatibles.",
-      "The page changed. Click Autofill again.": "La página cambió. Haz clic en Autocompletar de nuevo.",
-      "This page couldn’t be filled safely. Fill it yourself.": "Esta página no pudo completarse de manera segura. Complétala tú mismo.",
-      "The page changed. Check it before continuing.": "La página cambió. Revísala antes de continuar.",
-      "Nothing new to fill.": "Nada nuevo para completar.",
-      "The page changed. Review it before continuing.": "La página cambió. Revísala antes de continuar.",
-      "The page changed before navigation. Review it.": "La página cambió antes de la navegación. Revísala.",
-      "Review this page and continue in Iowa’s form.": "Revisa esta página y continúa en el formulario de Iowa.",
-      "Selected Save and Continue once. Waiting for Iowa’s next step.": "Seleccionó Guardar y Continuar una vez. Esperando el próximo paso de Iowa.",
-      "Continuing…": "Continuando…",
-      "Click Continue in Iowa’s form.": "Haz clic en Continuar en el formulario de Iowa.",
-      "SecondHand doesn’t know this page yet. Fill it in, then continue.": "SecondHand aún no conoce esta página. Complétala y luego continúa.",
-      "Autofill stopped.": "Autocompletar detenido.",
-      "Check your answers, then click Continue.": "Revisa tus respuestas y luego haz clic en Continuar.",
-      "Turn on SecondHand for this site in the side panel first.": "Activa SecondHand para este sitio en el panel lateral primero.",
-      "Open the form in the active tab, then try again.": "Abre el formulario en la pestaña activa y vuelve a intentarlo.",
-      "Chrome hasn’t allowed SecondHand on this site. Click Turn on again and allow it.": "Chrome no ha permitido SecondHand en este sitio. Haz clic en Activar de nuevo y permítelo.",
-      "The SecondHand app did not approve this site.": "La aplicación SecondHand no aprobó este sitio.",
-      "Reload this page, then click Autofill.": "Recarga esta página, luego haz clic en Autocompletar.",
-      "Part of this form couldn’t be filled safely. Fill it yourself.": "Parte de este formulario no se pudo completar de forma segura. Complétalo tú mismo.",
-      "Chrome kept SecondHand’s access to this site. Remove it on Chrome’s extension page.": "Chrome mantuvo el acceso de SecondHand a este sitio. Quítalo en la página de extensiones de Chrome.",
-      "Chrome hasn’t allowed SecondHand on the embedded form. Click Also turn on again and allow it.": "Chrome no ha permitido SecondHand en el formulario integrado. Haz clic en También activar de nuevo y permítelo.",
-      "The SecondHand app did not approve this embedded form.": "La aplicación SecondHand no aprobó este formulario integrado.",
-      "The page changed. Try again.": "La página cambió. Inténtalo de nuevo.",
-      "Nothing to fill here. Click Next, then Autofill again.": "Nada para completar aquí. Haz clic en Siguiente, luego en Autocompletar de nuevo.",
-      "Nothing to fill here.": "Nada para completar aquí.",
-      "This page couldn’t be checked safely. Fill it yourself.": "Esta página no se pudo verificar de forma segura. Complétala tú mismo.",
-      "SecondHand couldn’t use the on-device AI’s matches. Nothing was filled.": "SecondHand no pudo usar las coincidencias de la IA en el dispositivo. No se completó nada.",
-      "SecondHand could not prepare the field request.": "SecondHand no pudo preparar la solicitud de campo.",
-      "Iowa’s form is filled by its own rules only.": "El formulario de Iowa se completa solo bajo sus propias reglas.",
-      "That field isn’t on this page.": "Ese campo no está en esta página.",
-      "Turn on SecondHand for this embedded form first.": "Activa SecondHand para este formulario integrado primero.",
-      "Use the SecondHand toolbar icon to open the side panel.": "Usa el ícono de la barra de herramientas de SecondHand para abrir el panel lateral.",
-      "SecondHand could not complete the request.": "SecondHand no pudo completar la solicitud.",
-      "Autofill stopped because the active tab changed.": "Autocompletar se detuvo porque la pestaña activa cambió.",
-      "Complete this step in Iowa’s form. SecondHand has not verified its controls.": "Completa este paso en el formulario de Iowa. SecondHand no ha verificado sus controles.",
-      "SecondHand selects the first suggested home address and saves this step. Review it before final submission.": "SecondHand selecciona el primer domicilio sugerido y guarda este paso. Revísalo antes del envío final.",
-      "Review this address step and continue in Iowa’s form yourself.": "Revisa este paso de dirección y continúa tú mismo en el formulario de Iowa.",
-      "SecondHand can fill your saved date of birth on this verified self-information page. Review and answer the other questions, then choose Save and Continue directly in Iowa’s form.": "SecondHand puede autocompletar tu fecha de nacimiento guardada en esta página de auto-información verificada. Revisa y contesta las otras preguntas, luego selecciona Guardar y Continuar directamente en el formulario de Iowa.",
-      "Complete the missing answers in Iowa’s form. SecondHand will check again before continuing.": "Completa las respuestas faltantes en el formulario de Iowa. SecondHand volverá a verificar antes de continuar.",
-      "SecondHand can save this verified page and continue. Review every answer before final submission.": "SecondHand puede guardar esta página verificada y continuar. Revisa cada respuesta antes del envío final.",
-      "Information only. SecondHand can continue for you.": "Solo información. SecondHand puede continuar por ti.",
-      "Read this page, then click Continue in Iowa’s form.": "Lee esta página, luego haz clic en Continuar en el formulario de Iowa.",
-      "Nothing here matches your saved profile.": "Nada aquí coincide con tu perfil guardado."
-    };
-
-    // check if it's in the background map directly or if it contains a sentence from the background map
-    if (bgMap[text]) return bgMap[text];
-    
-    // If it's a compound string separated by · or space
-    for (const enStr of Object.keys(bgMap)) {
-      if (text.includes(enStr)) {
-        translated = translated.replace(enStr, bgMap[enStr]);
-      }
-    }
-    
-    // Check "Stopped after MAX_STEPS steps."
-    const stoppedMatch = translated.match(/Stopped after (\d+) steps\. (.*)/);
-    if (stoppedMatch) {
-      return `Se detuvo después de ${stoppedMatch[1]} pasos. ${t(stoppedMatch[2])}`;
-    }
-
-    const insideMatch = translated.match(/This form is inside (.*)\. Click “Also turn on the embedded form” in the SecondHand side panel\./);
-    if (insideMatch) return `Este formulario está dentro de ${insideMatch[1]}. Haz clic en "También activa el formulario integrado" en el panel lateral de SecondHand.`;
-
-    const summaryMatch = translated.match(/^(.*)\. Check your answers before you submit\.$/);
-    if (summaryMatch) return `${t(summaryMatch[1])}. Revisa tus respuestas antes de enviarlas.`;
-
-    return translated;
-  }
-
-  const api = Object.freeze({ en, es, getLanguage, setLanguage, t });
+  const api = Object.freeze({ STORAGE_KEY, LANGUAGES, catalogs, text, english, describeEnglish, language, setLanguage });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandStrings = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

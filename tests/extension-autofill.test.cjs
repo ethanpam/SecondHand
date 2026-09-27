@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const { webcrypto } = require('node:crypto');
 const adapter = require('../extension/iowa-adapter.js');
+const strings = require('../extension/strings.js');
 
 // Values created inside the worker's vm context have foreign prototypes.
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -47,7 +48,7 @@ function generalPage(message, plan) {
 
 // A small page model: answering "has home address" reveals a mailing field,
 // the way Iowa's form reveals conditional sections.
-function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noSiteEngine, general = nothingPlanned() } = {}) {
+function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noSiteEngine, general = nothingPlanned(), page = {}, questions } = {}) {
   const model = { kind, filled: [], revealed: false, token: null };
   const vault = { reachable: true, unlocked: true, getFieldsError: null,
     values: { firstName: 'Synthetic private first', hasHomeAddress: 'yes', mailingCity: 'Synthetic private city' }, ...desktop };
@@ -59,7 +60,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
   function pageState() {
     model.token = `preview-${model.filled.length}`;
     return {
-      page: { kind: model.kind, pageKey: model.kind === 'manual' ? 'iowa-manual' : 'iowa-personal-information', checklist: visible().map(key => ({ key, label: key, required: true, status: model.filled.includes(key) ? 'complete' : 'missing' })) },
+      page: { kind: model.kind, pageKey: model.kind === 'manual' ? 'iowa-manual' : 'iowa-personal-information', checklist: visible().map(key => ({ key, label: key, required: true, status: model.filled.includes(key) ? 'complete' : 'missing' })), ...structuredClone(page) },
       scan: { token: model.token, recognizedPage: model.kind === 'fillable', fields: visible().filter(key => !model.filled.includes(key)).map(key => ({ key, label: key })) }
     };
   }
@@ -81,6 +82,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
           return { ok: true, filledCount, skippedCount: message.fields.length - filledCount };
         }
         if (message.type === 'secondhand:focusField') return { focused: true };
+        if (message.type === 'secondhand:questions' && questions) return structuredClone(questions);
         const answer = generalPage(message, general);
         if (answer) return answer;
         throw new Error(`Unexpected content message ${message.type}`);
@@ -121,7 +123,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
     }
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../extension/background.js'), 'utf8'),
-    { chrome, SecondHandIowa: adapter, SecondHandGeneric: engine, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console });
+    { chrome, SecondHandIowa: adapter, SecondHandGeneric: engine, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console });
   const send = (message, sender) => new Promise(resolve => { if (!listener(message, sender, resolve)) resolve(undefined); });
   return {
     calls, tab, events, filled: () => [...model.filled],
@@ -206,7 +208,9 @@ test('an unknown Iowa page gets one general fill, then waits for the applicant t
   const response = await autofill(w);
   assert.equal(response.ok, true, response.error);
   assert.deepEqual(plain(response.data), { state: 'done', filled: 2, needYou: ['sh-1-3', 'sh-1-2'],
-    message: 'Filled 2 · 2 need you. Check your answers, then click Continue.', todo: 'Check your answers, then click Continue.', pageKey: 'iowa-manual' });
+    message: 'Filled 2 · 2 need you. Check your answers, then click Continue.', todo: 'Check your answers, then click Continue.', pageKey: 'iowa-manual',
+    messageKey: 'result.thenTodo', messageParams: { summary: { key: 'result.filledNeedYou', params: { count: 2, needYou: 2 } }, todo: { key: 'worker.checkThenContinue', params: {} } },
+    todoKey: 'worker.checkThenContinue', todoParams: {} });
   assert.deepEqual(w.calls.native.map(call => call.type).filter(type => type !== 'status'), ['getFields']);
   assert.equal(w.calls.native[1].url, `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo`);
   assert.deepEqual(plain(w.calls.native[1].fields), ['householdAdults', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'householdSeniors']);
@@ -409,7 +413,7 @@ function journey({ screens, desktop = {}, continueStays = false, engine = noSite
     }
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../extension/background.js'), 'utf8'),
-    { chrome, SecondHandIowa: adapter, SecondHandGeneric: engine, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, setImmediate, URL, Map, Set, console });
+    { chrome, SecondHandIowa: adapter, SecondHandGeneric: engine, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, setImmediate, URL, Map, Set, console });
   const send = (message, sender = { id: 'testextension', url: PANEL_URL }) => new Promise(resolve => { if (!listener({ tabId: 7, ...message }, sender, resolve)) resolve(undefined); });
   return { calls, vault, events, send, filled: () => [...filled], at: () => current().name,
     userContinues: () => navigate(),
@@ -549,4 +553,93 @@ test('leaving Iowa turns autofill off even when Chrome hides the new URL', async
   await settle();
   assert.equal(w.continues(), 1, 'coming back later does not resume');
   assert.equal((await lastResult(w)).autopilot, false);
+});
+
+// Every message the worker sends names its catalog key, and that key renders the same English.
+function keyed(result, label) {
+  assert.equal(typeof result.messageKey, 'string', `${label}: key`);
+  assert.equal(strings.text('en', result.messageKey, result.messageParams), result.message, `${label}: English`);
+  assert.ok(strings.text('es', result.messageKey, result.messageParams), `${label}: Spanish`);
+  if (result.todo) assert.equal(strings.text('en', result.todoKey, result.todoParams), result.todo, `${label}: instruction`);
+}
+
+test('every autofill result names its catalog key, and the key renders the same English', async () => {
+  keyed((await autofill(worker())).data, 'filled');
+  keyed((await autofill(worker({ kind: 'manual', engine: generalEngine, general: financialPlan(), desktop: { values: financialValues } }))).data, 'general');
+  const locked = (await autofill(worker({ desktop: { unlocked: false } }))).data;
+  keyed(locked, 'locked');
+  assert.equal(locked.messageKey, 'worker.unlockToAutofill');
+  const offline = (await autofill(worker({ desktop: { reachable: false } }))).data;
+  keyed(offline, 'offline');
+  assert.equal(offline.messageKey, 'worker.openAppThenAutofill');
+  // The desktop's own wording is not SecondHand's to translate: it travels as a detail.
+  const refused = (await autofill(worker({ desktop: { getFieldsError: 'Synthetic desktop refusal' } }))).data;
+  keyed(refused, 'desktop reply');
+  assert.deepEqual(plain(refused.messageParams), { detail: 'Synthetic desktop refusal' });
+  const stopped = (await worker().panel({ type: 'ui:stop', confirmed: true })).data;
+  keyed(stopped, 'stopped');
+  assert.equal(stopped.messageKey, 'worker.autofillStopped');
+});
+
+test('an error reply names its catalog key next to the same English', async () => {
+  const refused = await worker().panel({ type: 'ui:autofill', confirmed: true, guesses: { 'f0:sh-1': 'email' } });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.error, 'Iowa’s form is filled by its own rules only.');
+  assert.equal(refused.errorKey, 'worker.iowaRulesOnly');
+  assert.deepEqual(plain(refused.errorParams), {});
+});
+
+test('page state names the catalog key of each instruction, reason, and checklist label the Iowa adapter wrote', async () => {
+  const w = worker({ page: { todo: 'Solve the CAPTCHA, then click Continue.', reason: 'Complete this step in Iowa’s form. SecondHand has not verified its controls.', checklist: [
+    { key: 'firstName', label: 'First name', status: 'missing', required: true },
+    { key: 'hasHomeAddress', label: 'Do you have a home address?: review existing dependent answers', status: 'manual', required: true },
+    { key: 'manualReview', label: 'Synthetic unrecognized text', status: 'manual', required: true }] } });
+  const { page } = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.equal(page.todo, 'Solve the CAPTCHA, then click Continue.', 'the English stays as it was');
+  assert.equal(page.todoKey, 'iowa.solveCaptcha');
+  assert.equal(page.reasonKey, 'iowa.manualStep');
+  assert.deepEqual(page.checklist.map(item => [item.label, item.labelKey, item.labelParams]), [
+    ['First name', 'iowa.firstName', {}],
+    ['Do you have a home address?: review existing dependent answers', 'iowa.reviewDependent', { label: { key: 'iowa.hasHomeAddress', params: {} } }],
+    ['Synthetic unrecognized text', 'detail', { detail: 'Synthetic unrecognized text' }]]);
+});
+
+test('the Iowa question list is the info-screen text, the checklist, and the general engine’s questions: labels only, never values', async () => {
+  const w = worker({ page: { checklist: [{ key: 'firstName', label: 'First name', status: 'complete', required: true }] },
+    questions: { lang: 'en', instructions: ['Have these ready before you start your application.'], questions: [{ id: 'sq-1-0', label: 'Is anyone blind?' }, { id: 'sq-1-1', label: '   ' }] } });
+  const reply = await w.panel({ type: 'ui:questions' });
+  assert.equal(reply.ok, true, reply.error);
+  assert.deepEqual(plain(reply.data), { lang: 'en', pending: 0, questions: [
+    { id: '', label: 'Have these ready before you start your application.' },
+    { id: 'firstName', label: 'First name', labelKey: 'iowa.firstName', labelParams: {} },
+    { id: 'sq-1-0', label: 'Is anyone blind?' }] });
+  assert.deepEqual(w.calls.content.map(message => message.type), ['secondhand:pageState', 'secondhand:questions']);
+  assert.equal(w.calls.content[0].navigationPreview, false, 'listing questions never captures a navigation preview');
+  assert.deepEqual(w.calls.native, [], 'listing questions never reaches the desktop');
+  assert.deepEqual(plain((await w.launcher({ type: 'ui:questions' })).data), plain(reply.data), 'the widget gets the same list for its own tab');
+  // A row click uses the existing focus route: Iowa keys to the adapter, engine ids to the engine.
+  assert.equal((await w.panel({ type: 'ui:focusField', key: 'firstName' })).ok, true);
+  assert.equal((await w.panel({ type: 'ui:focusField', key: 'sq-1-0' })).ok, true);
+  assert.deepEqual(w.calls.content.slice(-2).map(({ type, key, id }) => [type, key || id]), [['secondhand:focusField', 'firstName'], ['secondhand:generic:focus', 'sq-1-0']]);
+});
+
+test('a question reply that is not labels and ids fails loudly instead of showing a partial list', async () => {
+  for (const questions of [{ lang: 'en', instructions: 'not a list', questions: [] }, { lang: 'en', instructions: [], questions: [{ id: 'not an id!', label: 'x' }] },
+    { lang: 'en', instructions: [], questions: [{ id: 'sq-1-0', label: 7 }] }, { ok: false, error: 'This page could not be checked safely. Review it manually, then rescan.' }]) {
+    const reply = await worker({ questions }).panel({ type: 'ui:questions' });
+    assert.equal(reply.ok, false, JSON.stringify(questions));
+    assert.equal(reply.errorKey, 'worker.questionsUnreadable');
+  }
+  const odd = await worker({ questions: { lang: 'en"><script>', instructions: [], questions: [] } }).panel({ type: 'ui:questions' });
+  assert.equal(odd.data.lang, '', 'a language tag that is not one is dropped');
+});
+
+test('the widget’s language offer opens the side panel on the question list, once, for that tab', async () => {
+  const w = worker();
+  assert.equal((await w.launcher({ type: 'ui:openPanel', confirmed: true, questions: true })).ok, true);
+  assert.equal(plain((await w.launcher({ type: 'ui:pageState' })).data).showQuestions, undefined, 'the widget’s own poll does not take it');
+  assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).showQuestions, true);
+  assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).showQuestions, undefined, 'only once');
+  await w.launcher({ type: 'ui:openPanel', confirmed: true });
+  assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).showQuestions, undefined, 'Details alone does not open the list');
 });

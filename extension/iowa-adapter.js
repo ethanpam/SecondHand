@@ -703,6 +703,23 @@
     return result;
   }
 
+  // The words on Iowa's information-only screens, for the applicant's translated view. Only these
+  // static screens: any other screen's text can hold a household member's name or an answer.
+  function instructions(doc, rawUrl) {
+    const { pageKey } = probePage(doc, rawUrl);
+    if (!Object.values(infoScreens).some(screen => screen.pageKey === pageKey)) return [];
+    const blocks = 'h1, h2, h3, h4, p, li, dt, dd';
+    const texts = [];
+    for (const element of (doc.querySelector('main') || doc.body).querySelectorAll(blocks)) {
+      // The innermost block holds the words; buttons and forms are Iowa's controls, not instructions.
+      if (element.querySelector(blocks) || element.closest('button, form, select') || !rendered(element, doc)) continue;
+      const text = element.textContent.replace(/\s+/g, ' ').trim();
+      if (text && !texts.includes(text)) texts.push(text.slice(0, 400));
+      if (texts.length === 60) break;
+    }
+    return texts;
+  }
+
   // Clicks the recorded Continue on an information-only screen, once, after re-verifying it.
   function continuePage(doc, rawUrl) {
     const fail = reason => ({ continued: false, reason });
@@ -789,7 +806,7 @@
   // The worker uses only this union's keys for its explicit desktop grant. Each
   // page still uses its own exact selectors and recipient checks internally.
   const supportedDefinitions = Object.freeze({ ...definitions, birthDate: Object.freeze({ label: 'Date of birth' }) });
-  const api = Object.freeze({ PORTAL, definitions: supportedDefinitions, isSupportedUrl, rendered, visible, scan, fill, formatValue, focusField, probePage, continuePage, profileRequest, pageValues, captureNavigation, advance });
+  const api = Object.freeze({ PORTAL, definitions: supportedDefinitions, isSupportedUrl, rendered, visible, scan, fill, formatValue, focusField, probePage, instructions, continuePage, profileRequest, pageValues, captureNavigation, advance });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandIowa = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
