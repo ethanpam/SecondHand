@@ -81,6 +81,7 @@
     let working = false;
     let outdated = false;
     let ai = { note: null, reason: '' };
+    let cursor = 0;
     let pollTimer;
     // The page's language, checked once per page: the widget offers the translated view when it differs.
     let pageLanguage = '';
@@ -97,19 +98,17 @@
       if (working) return t('widget.working');
       if (note) return words(note, 120);
       if (!result) return languageTrouble ? t('widget.languageCheckFailed') : site ? t('widget.siteReady', { host: hostOf(site.origin) }) : t('widget.iowaReady');
-      // Say how many answers still need the reader; the side panel's checklist lists them.
-      const needs = fieldKeys(result.needYou).length;
-      const needYou = needs ? t('widget.needYou', { count: needs }) : '';
+      // Other sites: the need-you link carries the count, so it isn't repeated here.
       if (result.state === 'done' && result.pageKey === 'general') {
         const filled = Number(result.filled) || 0;
         const guessed = Number(result.guessed) || 0;
-        const summary = filled > 0 ? [guessed > 0 ? t('widget.filledGuessed', { count: filled, guessed }) : t('widget.filled', { count: filled }), needYou].filter(Boolean).join(' · ')
-          : needs ? t('widget.nothingMatches') : words(fromResult(result), 120);
+        const summary = filled > 0 ? (guessed > 0 ? t('widget.filledGuessed', { count: filled, guessed }) : t('widget.filled', { count: filled }))
+          : fieldKeys(result.needYou).length ? t('widget.nothingMatches') : words(fromResult(result), 120);
         return ai.note ? `${summary.replace(/\.$/, '')} · ${words(ai.note)}` : summary;
       }
       if (result.state === 'done') {
         const todo = words({ key: result.todoKey, params: result.todoParams, text: result.todo }, 90);
-        return [t('widget.filled', { count: Number(result.filled) || 0 }), todo || needYou].filter(Boolean).join(' · ');
+        return [t('widget.filled', { count: Number(result.filled) || 0 }), todo].filter(Boolean).join(' · ');
       }
       return words(fromResult(result), 120);
     }
@@ -122,16 +121,21 @@
       $('autofill').hidden = autopilot || locked;
       $('unlock').hidden = autopilot || !locked;
       $('autofill').disabled = working;
+      // Answers still to give show as a yellow link that finds each one in the form.
+      const needYou = ['done', 'waiting'].includes(result?.state) ? fieldKeys(result.needYou) : [];
+      $('need-you').hidden = outdated || !needYou.length;
+      $('need-you').textContent = t('widget.needYou', { count: needYou.length });
       $('widget-text').textContent = statusText();
       $('autofill').title = site ? t('widget.autofillSiteTitle') : t('widget.autofillIowaTitle');
       const details = [hasMessage(result) ? words(fromResult(result)) : '', ai.note ? words(ai.note) : '', ai.reason, fixedText(languageTrouble?.message, 160)];
       $('widget-text').title = outdated ? t('panel.outdated') : fixedText(details.filter(Boolean).join(' '), 240);
-      // The status is always read to screen readers, but shown only when the reader must act:
-      // a problem, an unlock or CAPTCHA step, answers still to give, or an outdated extension.
-      // Otherwise the widget is just the logo and its button; the button's title keeps the
-      // Iowa address disclosure.
-      const unfinished = result?.state === 'done' && (fieldKeys(result.needYou).length > 0 || Boolean(result.todo || result.todoKey) || !(Number(result.filled) > 0));
-      const message = outdated || Boolean(note) || ['error', 'waiting', 'offline'].includes(result?.state) || unfinished;
+      // The status is always read to screen readers, but shown as a line only when the reader
+      // must act and the need-you link doesn't already say so: a problem, an unlock or CAPTCHA
+      // step, a fill that found nothing, or an outdated extension. The Autofill button's title
+      // keeps the Iowa address disclosure.
+      const waiting = ['waiting', 'done'].includes(result?.state) && !needYou.length;
+      const unfinished = waiting && (result.state === 'waiting' || Boolean(result.todo || result.todoKey) || !(Number(result.filled) > 0));
+      const message = outdated || Boolean(note) || ['error', 'offline'].includes(result?.state) || unfinished;
       $('widget-text').classList.toggle('visually-hidden', !message);
       $('translate-offer').hidden = outdated || message || !known || !pageLanguage || pageLanguage === language;
       // An outdated worker is not asked for anything more; its steps fit the compact widget.
@@ -203,6 +207,7 @@
           else if (Object.keys(answer.mapping).length) request.guesses = answer.mapping;
         }
         result = await send(request);
+        cursor = 0;
         autopilot = continuing(result);
       } catch (error) { const shown = trouble(error); result = { state: 'error', message: error.message, messageKey: shown.key, messageParams: shown.params }; autopilot = false; }
       finally { working = false; render(); }
@@ -210,6 +215,17 @@
     $('stop').addEventListener('click', trusted(async () => {
       try { result = await send({ type: 'ui:stop', confirmed: true }); autopilot = false; }
       catch (error) { note = trouble(error); }
+      render();
+    }));
+    $('need-you').addEventListener('click', trusted(async () => {
+      const needYou = fieldKeys(result?.needYou);
+      if (!needYou.length) return;
+      const key = needYou[cursor % needYou.length];
+      cursor++;
+      try {
+        const focused = await send({ type: 'ui:focusField', key, confirmed: true });
+        note = focused?.focused ? null : { key: site ? 'widget.findInForm' : 'widget.findInIowa' };
+      } catch (error) { note = trouble(error); }
       render();
     }));
     $('unlock').addEventListener('click', trusted(async () => {

@@ -307,25 +307,27 @@ async function main() {
     assert.equal(full.sameAddress2, true); assert.equal(full.mailingCity, syntheticProfile.mailingCity);
     assert.equal(full.applicant1, true); assert.equal(full.snap, true);
     assert.equal(full.bestTime, syntheticProfile.bestContactTime);
-    await expect(widget.locator('#widget-text')).toHaveClass(/visually-hidden/);
+    await expect(widget.locator('#need-you')).toBeHidden();
     assert.equal((await calls('getFields')).length, 1, 'One click makes one desktop request.');
     assert.equal((await calls('recordProgress')).length, 1);
     assert.equal(await page.evaluate(() => window.__nextClicks), 1, 'Verified complete applicant continues once.');
     await page.screenshot({ path: path.join(root, 'artifacts/extension-assistant.png') });
     console.log('Widget: one click fills the full applicant page with one desktop request and one verified Next.');
 
-    // A missing saved answer shows a line under Autofill; the applicant answers it in the form.
+    // Missing saved answers become "need you" links that jump to the field.
     widget = await startFixture({ profile: { firstName: '' } });
     await widget.locator('#autofill').click();
-    await expect(widget.locator('#widget-text')).not.toHaveClass(/visually-hidden/, { timeout: 20000 });
+    await expect(widget.locator('#need-you')).toHaveText('1 need you', { timeout: 20000 });
     await expect(page.locator('#lastName')).toHaveValue(syntheticProfile.lastName);
+    await widget.locator('#need-you').click();
+    await expect.poll(() => page.evaluate(() => document.activeElement.id)).toBe('firstName');
     assert.equal(await page.evaluate(() => window.__nextClicks), 0, 'Missing required profile data cannot trigger Next.');
     const beforeManual = (await calls('getFields')).length;
     await page.locator('#firstName').fill(syntheticProfile.firstName);
     await expect.poll(() => page.evaluate(() => window.__nextClicks), { timeout: 20000 }).toBe(1);
     assert.equal((await calls('getFields')).filter(call => call.fields.length).length, beforeManual, 'Manual completion requests no additional saved profile values.');
     assert.deepEqual((await calls('getFields')).at(-1).fields, [], 'Manual completion obtains fresh no-data navigation authorization.');
-    console.log('Widget: missing profile data blocks Next and shows a line; manual completion allows one later Next.');
+    console.log('Widget: missing profile data blocks Next; field focus and manual completion allow one later Next.');
 
     const branches = [
       { name: 'home address with same mailing; optional blanks', profile: { mailingSameAsHome: 'yes', middleName: '', suffix: '', maidenName: '', addressLine2: '', bestContactTime: '' }, check: answers => { assert.equal(answers.sameAddress1, true); assert.equal(answers.mailingAddressLine1, ''); } },
@@ -344,7 +346,7 @@ async function main() {
 
     widget = await startFixture({ profile: { programSnap: 'no', programFip: 'no', programMedicaid: 'no' } });
     await widget.locator('#autofill').click();
-    await expect(widget.locator('#widget-text')).not.toHaveClass(/visually-hidden/, { timeout: 20000 });
+    await expect(widget.locator('#need-you')).toHaveText('1 need you', { timeout: 20000 });
     console.log('Widget: an unanswered required program choice is flagged for the applicant.');
 
     // Manual completion can reveal a saved optional field. Fill that new field
