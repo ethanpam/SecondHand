@@ -130,6 +130,8 @@ svg {
   height: 40px;
   flex-shrink: 0;
   object-fit: contain;
+  /* Rounded like the app icons, never a square tile. */
+  border-radius: 30%;
   margin-right: 10px;
 }
 nav {
