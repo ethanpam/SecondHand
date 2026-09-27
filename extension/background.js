@@ -841,9 +841,11 @@ function keepSummary(tabId, id, summary) {
   entry.summary = { language: summary.language, points: [...summary.points], english: summary.english };
   return { kept: true };
 }
-// The widget can't size its own frame, so its tab's content script makes room for its one line.
-async function widgetSize(tabId, line) {
-  const reply = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:widgetSize', line }, { frameId: 0 });
+// The widget can't size its own frame, so its tab's content script fits the frame to the
+// widget's measured width, one row taller while it shows a line.
+const cardWidth = width => Number.isInteger(width) && width > 0 && width <= 1000; // CSS pixels; the page caps it
+async function widgetSize(tabId, line, width) {
+  const reply = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:widgetSize', line, ...(width === undefined ? {} : { width }) }, { frameId: 0 });
   if (reply?.sized !== true) throw fault('worker.requestFailed');
   return { sized: true };
 }
@@ -899,7 +901,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   else if (message.type === 'ui:questions') run = () => pageQuestions(tabId, route);
   else if (panel && message.type === 'ui:pageText') run = () => pageText(tabId);
   else if (panel && message.type === 'ui:keepSummary' && typeof message.id === 'string') run = async () => keepSummary(tabId, message.id, message.summary);
-  else if (launcher && message.type === 'ui:widgetSize' && typeof message.line === 'boolean') run = () => widgetSize(tabId, message.line);
+  else if (launcher && message.type === 'ui:widgetSize' && typeof message.line === 'boolean' && (message.width === undefined || cardWidth(message.width))) run = () => widgetSize(tabId, message.line, message.width);
   else return;
   // A widget on another site is honored only while that site is turned on.
   const work = route === 'site' ? requireSite(siteOrigin(sender.tab.url)).then(run) : run();

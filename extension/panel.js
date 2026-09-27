@@ -87,8 +87,9 @@
     let pageLanguage = '';
     let languageChecked = false;
     let languageTrouble = null;
-    // Whether the page's content script has made the widget a row taller for a message.
-    let roomy = false;
+    // The frame the page's content script was last asked for: a row taller for a message,
+    // and as wide as the widget (0 until it has measured itself).
+    let frame = { line: false, width: 0 };
     const AI_TIMEOUT_MS = 8000;
     // An outdated worker keeps its reload steps on screen and is not polled again.
     const trouble = error => { if (error.outdated) outdated = true; return problem(error); };
@@ -138,14 +139,16 @@
       const message = outdated || Boolean(note) || ['error', 'offline'].includes(result?.state) || unfinished;
       $('widget-text').classList.toggle('visually-hidden', !message);
       $('translate-offer').hidden = outdated || message || !known || !pageLanguage || pageLanguage === language;
-      // An outdated worker is not asked for anything more; its steps fit the compact widget.
+      // The widget is as wide as what it shows, up to 272px (see panel.css). An outdated worker
+      // is not asked for anything more; its steps fill the frame the widget already has.
       const room = message || !$('translate-offer').hidden;
-      if (!outdated && room !== roomy) makeRoom(room);
+      const width = outdated || $('widget').hidden ? frame.width : Math.ceil($('widget').getBoundingClientRect().width);
+      if (!outdated && (room !== frame.line || width !== frame.width)) fitFrame(room, width);
     }
-    // The widget can't size its own frame: the worker asks this tab's content script for the row.
-    async function makeRoom(line) {
-      roomy = line;
-      try { await send({ type: 'ui:widgetSize', line }); }
+    // The widget can't size its own frame: the worker asks this tab's content script for it.
+    async function fitFrame(line, width) {
+      frame = { line, width };
+      try { await send({ type: 'ui:widgetSize', line, ...(width ? { width } : {}) }); }
       catch (error) { note = trouble(error); render(); }
     }
     async function poll() {

@@ -472,6 +472,29 @@ test('widget on a fillable page offers one-click Autofill and cycles through wha
   assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'ui:openPanel', confirmed: true });
 });
 
+test('widget frame fits the logo and its buttons, grows for the yellow link, and asks again only when that changes', async t => {
+  const view = await panel(t, { launcher: true });
+  // jsdom lays nothing out, so the widget reports the width Chrome would.
+  view.get('widget').getBoundingClientRect = () => ({ width: view.get('need-you').hidden ? 151.2 : 214.6 });
+  const sizes = () => plainRequests(view.requests.filter(request => request.type === 'ui:widgetSize'));
+  await view.userClick('autofill');
+  assert.deepEqual(sizes(), [{ type: 'ui:widgetSize', line: false, width: 152 }, { type: 'ui:widgetSize', line: false, width: 215 }]);
+  await view.userClick('autofill');
+  assert.equal(sizes().length, 2, 'the same width is not asked for again');
+});
+
+test('widget frame is a row taller for a line and stays as wide as the widget with it', async t => {
+  const view = await panel(t, { launcher: true, autofill: { state: 'locked', filled: 0, needYou: [], message: 'Unlock SecondHand to autofill.', pageKey: 'iowa-personal-information' } });
+  view.get('widget').getBoundingClientRect = () => ({ width: view.get('widget-text').classList.contains('visually-hidden') ? 180.4 : 231.8 });
+  const sizes = () => plainRequests(view.requests.filter(request => request.type === 'ui:widgetSize'));
+  await view.userClick('autofill');
+  assert.deepEqual(sizes(), [{ type: 'ui:widgetSize', line: false, width: 181 }]);
+  await view.userClick('unlock');
+  assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: true, width: 232 });
+  await view.userClick('autofill');
+  assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: false, width: 181 });
+});
+
 test('widget is a pill off the applicant page and opens the side panel from it', async t => {
   const view = await panel(t, { launcher: true, kind: 'manual' });
   assert.equal(view.get('widget').hidden, true);
@@ -1310,4 +1333,25 @@ test('the Iowa widget grows by one row while it shows a message, when the worker
   assert.equal(host.style.height, '46px');
   assert.equal(page.request({ type: 'secondhand:widgetSize', line: true }, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
   assert.equal(host.style.height, '46px');
+});
+
+test('the Iowa widget frame is as wide as the widget measured itself, never past 272px', t => {
+  const page = content(t);
+  const host = page.host();
+  assert.match(host.style.width, /^min\(272px/);
+  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: false, width: 152 })), { sized: true });
+  assert.match(host.style.width, /^min\(152px, 272px/, 'never wider than the full card');
+  page.window.dispatchEvent(new page.window.Event('popstate'));
+  assert.match(host.style.width, /^min\(152px/, 'the width stays across page changes');
+  page.setKind('manual');
+  page.window.dispatchEvent(new page.window.Event('popstate'));
+  assert.equal(host.style.width, '46px', 'a pill');
+  page.setKind('fillable');
+  page.request({ type: 'secondhand:widgetSize', line: true, width: 231 });
+  assert.match(host.style.width, /^min\(231px/, 'a line keeps the widget’s width');
+  assert.equal(host.style.height, '86px');
+  page.request({ type: 'secondhand:widgetSize', line: false });
+  assert.match(host.style.width, /^min\(272px/, 'a widget that could not measure itself gets the full card');
+  for (const width of [0, 1.5, '152', 5000]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: false, width }), undefined, `width ${width}`);
+  assert.match(host.style.width, /^min\(272px/);
 });
