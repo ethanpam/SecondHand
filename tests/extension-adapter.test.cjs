@@ -152,7 +152,7 @@ test('automatic detection is confined to Iowa portal top frames and applicant st
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../extension/manifest.json'), 'utf8'));
   assert.deepEqual(manifest.permissions.sort(), ['activeTab', 'nativeMessaging', 'scripting', 'sidePanel']);
   assert.deepEqual(manifest.host_permissions, ['https://hhsservices.iowa.gov/*']);
-  assert.deepEqual(manifest.content_scripts, [{ matches: [adapter.PORTAL, `${adapter.PORTAL}/*`], js: ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'content.js'], run_at: 'document_idle', all_frames: false }]);
+  assert.deepEqual(manifest.content_scripts, [{ matches: [adapter.PORTAL, `${adapter.PORTAL}/*`], js: ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js'], run_at: 'document_idle', all_frames: false }]);
   assert.equal(manifest.externally_connectable, undefined);
   assert.match(manifest.content_security_policy.extension_pages, /connect-src 'none'/);
 });
@@ -687,4 +687,15 @@ test('the words on Iowa’s information-only screens are listed for the translat
   const household = screen('household');
   assert.deepEqual(adapter.instructions(household, household.location.href), [], 'a screen with questions can hold answers, so its text is never listed');
   assert.deepEqual(adapter.instructions(page(), URL), []);
+});
+
+test('Iowa’s information-only screens are named for the side panel’s summary; a screen with questions is not one', () => {
+  for (const [name, pageKey] of [['beforeYouStart', 'iowa-before-start'], ['importantInfo', 'iowa-information'], ['instructions', 'iowa-instructions']]) {
+    const doc = screen(name);
+    assert.equal(adapter.informationScreen(doc, doc.location.href), pageKey, name);
+    assert.ok(adapter.INFO_PAGE_KEYS.includes(pageKey));
+  }
+  assert.deepEqual([...adapter.INFO_PAGE_KEYS], ['iowa-before-start', 'iowa-information', 'iowa-instructions']);
+  for (const name of ['household', 'letsGetStarted']) { const doc = screen(name); assert.equal(adapter.informationScreen(doc, doc.location.href), '', name); }
+  assert.equal(adapter.informationScreen(page(), URL), '');
 });

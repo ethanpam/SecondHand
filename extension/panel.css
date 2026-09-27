@@ -31,3 +31,10 @@ footer{border-top:1px solid #e6ebde;padding:12px 0 14px}footer p{font-size:10px;
 .secondary{background:#fff;color:#285c45;border-color:#c7d6bd}.secondary:hover:enabled{background:#f5f8ee}
 .questions-pending{margin:0 0 8px}
 .checklist-item.info{cursor:default}
+/* What this page says: key points Chrome writes on this computer, and the widget's one line of them. */
+.summary-caveat{font-size:10px;line-height:1.5;color:#8b9b7d;margin:0 0 8px}.summary-english{margin:8px 0 0}
+.summary-card{background:#fff;border:1px solid #e0e7d7;border-radius:9px;padding:2px 12px}
+.summary-group{padding:8px 0;border-bottom:1px solid #edf0e6}.summary-group:last-child{border-bottom:0}
+.summary-group h3{margin:0 0 4px;font-size:11px;font-weight:600;color:#728763}.summary-group ul{margin:0;padding-inline-start:18px}
+.summary-group li{font-size:13px;line-height:1.5;color:#49663c;margin:3px 0}.summary-empty{font-size:12px;line-height:1.5;color:#a68a48}
+.widget-summary{display:block;width:100%;overflow:hidden;text-overflow:ellipsis;text-align:start;color:#f5f8eb;text-decoration:none}.widget-summary:hover{text-decoration:underline}

@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="panel.css">
   <script src="strings.js" defer></script>
   <script src="translation.js" defer></script>
+  <script src="summary.js" defer></script>
   <script src="ai-mapper.js" defer></script>
   <script src="panel.js" defer></script>
 </head>
@@ -27,6 +28,7 @@
           <button id="need-you" class="widget-link" type="button" hidden></button>
           <button id="translate-offer" class="widget-link" type="button" data-i18n="widget.offer" data-i18n-title="widget.offerTitle" hidden></button>
         </div>
+        <button id="summary-line" class="widget-link widget-summary" type="button" data-i18n-title="summary.widgetTitle" hidden></button>
       </div>
     </div>
     <button id="pill" class="pill" type="button" data-i18n-title="widget.pillTitle" hidden><img class="brand" src="icon-128.png" alt=""></button>
@@ -52,6 +54,14 @@
       <button id="panel-autofill" class="button primary full" type="button" data-i18n="panel.autofill" disabled></button>
       <div id="status" class="status" role="status" aria-live="polite" data-i18n="panel.checkingTab"></div>
       <button id="site-disable" class="text-button site-off" type="button" data-i18n="panel.siteDisable" hidden></button>
+      <button id="summary-get" class="button secondary full" type="button" data-i18n="summary.download" hidden></button>
+      <p id="summary-note" class="status" role="status" aria-live="polite" hidden></p>
+      <section id="summary" class="checklist-section" hidden aria-labelledby="summary-title">
+        <div class="fields-heading"><h2 id="summary-title" data-i18n="summary.title"></h2></div>
+        <p id="summary-caveat" class="summary-caveat" data-i18n="summary.caveat"></p>
+        <div id="summary-list" class="summary-card"></div>
+        <p id="summary-english" class="summary-caveat summary-english" data-i18n="summary.inEnglish" hidden></p>
+      </section>
       <button id="questions-show" class="button secondary full" type="button" data-i18n="questions.show" hidden></button>
       <p id="questions-note" class="status" role="status" aria-live="polite" hidden></p>
       <section id="questions" class="checklist-section" hidden aria-labelledby="questions-title">

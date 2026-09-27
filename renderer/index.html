@@ -37,10 +37,25 @@
             <label for="reset-password">New password</label><input id="reset-password" type="password" autocomplete="new-password" required minlength="12" aria-describedby="reset-password-hint"><p id="reset-password-hint" class="field-hint">Use at least 12 characters.</p>
             <label for="reset-confirm">Confirm new password</label><input id="reset-confirm" type="password" autocomplete="new-password" required minlength="12">
           </div>
-          <p id="reset-unavailable" class="info-note" hidden>This information was saved before recovery keys were added, so the password can’t be reset. If you saved a backup and remember its password, you can restore it below.</p>
+          <p id="reset-unavailable" class="info-note" hidden>This information was saved before recovery keys were added, so the password can’t be reset. If you saved a backup and remember its password, you can restore it below. Otherwise, you can start over.</p>
           <p id="reset-error" class="inline-error" role="alert" hidden></p>
           <button id="reset-submit" class="button button-primary button-full" type="submit" data-loader>Reset password</button>
           <button id="reset-cancel" class="text-button forgot-link" type="button">Back to unlock</button>
+          <p class="start-over-prompt">Lost your password and recovery key? <button id="start-over" class="text-button" type="button">Start over</button></p>
+        </form>
+        <form id="start-over-form" hidden>
+          <div class="start-over-warning">
+            <strong>Starting over erases what SecondHand saved on this computer:</strong>
+            <ul><li>Your profile</li><li>Your application records</li><li>The option to reset your password on this computer</li></ul>
+            <p>Your Chrome extension setup stays. This can’t be undone.</p>
+          </div>
+          <p class="start-over-copy">If you might find your password or recovery key later, save a locked copy first. You can restore it with your old password.</p>
+          <button id="start-over-save" class="button button-secondary button-full" type="button" data-loader>Save a locked copy</button>
+          <label for="start-over-confirm" class="start-over-label">Type <strong>start over</strong> to confirm</label>
+          <input id="start-over-confirm" autocomplete="off" spellcheck="false" autocapitalize="off" required>
+          <p id="start-over-error" class="inline-error" role="alert" hidden></p>
+          <button id="start-over-submit" class="button button-danger button-full" type="submit" data-loader disabled>Erase and start over</button>
+          <button id="start-over-cancel" class="text-button forgot-link" type="button">Back to reset password</button>
         </form>
         <p id="recovery-note" class="auth-note">Keep your password somewhere safe. There is no online account, so no one can reset it for you.</p>
         <div class="auth-divider"></div><button id="auth-import" class="text-button" type="button"><svg class="icon"><use href="#i-download"/></svg> Restore an encrypted backup</button>

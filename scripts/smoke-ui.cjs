@@ -14,6 +14,7 @@ const passphrase = 'synthetic-test-vault-passphrase';
 // macOS runner. Bound the whole attempt generously instead of Playwright's 5s default.
 const AUTH_ATTEMPT_TIMEOUT_MS = 30000;
 const resetPassword = 'synthetic-reset-password';
+const startOverPassword = 'synthetic-start-over-password';
 
 async function captureDiagnostic(page, name, options = {}) {
   try {
@@ -194,8 +195,26 @@ async function main() {
     await expect(page.locator('#workspace')).toBeVisible();
     const bytes = await fs.readFile(path.join(userData, 'vault.secondhand'), 'utf8');
     for (const secret of ['Avery', 'Example', applicantFixture.addressLine1, '2025550147', 'SYNTHETIC-RECEIPT-ONLY', passphrase, resetPassword, recoveryKey, recoveryKey.replace(/-/g, '')]) assert.equal(bytes.includes(secret), false);
+
+    // Locked out with no password or recovery key: start over from the reset screen.
+    await page.locator('#lock-button').click();
+    await page.locator('#forgot-password').click();
+    await page.locator('#start-over').click();
+    await expect(page.locator('#start-over-submit')).toBeDisabled();
+    await page.locator('#start-over-confirm').fill('start over');
+    await page.locator('#start-over-submit').click();
+    await expect(page.locator('#confirm-passphrase-field')).toBeVisible();
+    await assert.rejects(fs.access(path.join(userData, 'vault.secondhand')));
+    await page.locator('#passphrase').fill(startOverPassword);
+    await page.locator('#confirm-passphrase').fill(startOverPassword);
+    if (await page.locator('#device-reset-field').isVisible()) await page.locator('#allow-device-reset').uncheck();
+    await page.locator('#auth-submit').click();
+    await page.locator('#recovery-saved').check();
+    await page.locator('#recovery-done').click();
+    await expect(page.locator('#workspace')).toBeVisible();
+    assert.deepEqual((await page.evaluate(() => window.secondHand.getData())).profile, {});
     assert.deepEqual(errors, []);
-    console.log('Electron UI smoke passed: create, save full applicant choices and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence, recovery key password reset.');
+    console.log('Electron UI smoke passed: create, save full applicant choices and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence, recovery key password reset, start over.');
   } catch (error) {
     if (page && !page.isClosed()) {
       const auth = await page.evaluate(() => ({

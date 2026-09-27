@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('secondHand', Object.freeze({
   createVault: request => invoke('createVault', request),
   unlock: passphrase => invoke('unlock', passphrase),
   resetPassword: request => invoke('resetPassword', request),
+  startOver: request => invoke('startOver', request),
   replaceRecoveryKey: () => invoke('replaceRecoveryKey'),
   setDeviceReset: enabled => invoke('setDeviceReset', enabled),
   saveRecoveryKey: recoveryKey => invoke('saveRecoveryKey', recoveryKey),

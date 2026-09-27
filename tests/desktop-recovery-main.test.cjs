@@ -117,3 +117,34 @@ test('the Chrome setup guide opens the published page, or a local website only d
   }
   assert.deepEqual(opened, [published, 'http://localhost:3002/chrome-extension', published, published, published]);
 });
+
+test('starting over erases the locked information and reset secret, keeps settings, and allows a new password', async t => {
+  const app = await desktop(t);
+  const userData = path.dirname(app.secretPath);
+  await app.invoke('createVault', { password: 'synthetic first password', allowDeviceReset: true });
+  const settings = path.join(userData, 'settings.json');
+  await fsp.writeFile(settings, JSON.stringify({ extensionId: '', autofillWithoutAsking: false, trustedSites: [] }));
+  await fsp.writeFile(path.join(userData, 'vault.secondhand.before-import-1-abcd1234'), 'encrypted copy');
+
+  await assert.rejects(app.invoke('startOver', { confirmation: 'start over' }), /Lock SecondHand before starting over/);
+  await app.invoke('lock');
+  for (const request of [undefined, {}, { confirmation: 'erase' }, { confirmation: 'start' }, { confirmation: ['start over'] }]) {
+    await assert.rejects(app.invoke('startOver', request), /Type “start over” to confirm/);
+  }
+  assert.equal((await app.invoke('status')).exists, true, 'Nothing is erased without the phrase');
+
+  const erased = await app.invoke('startOver', { confirmation: '  Start Over ' });
+  assert.equal(erased.exists, false);
+  assert.equal(erased.unlocked, false);
+  assert.equal(erased.deviceReset, false);
+  await assert.rejects(fsp.access(path.join(userData, 'vault.secondhand')));
+  await assert.rejects(fsp.access(path.join(userData, 'vault.secondhand.before-import-1-abcd1234')));
+  await assert.rejects(fsp.access(app.secretPath));
+  await fsp.access(settings);
+
+  const created = await app.invoke('createVault', { password: 'synthetic new password', allowDeviceReset: false });
+  assert.equal(created.status.unlocked, true);
+  assert.deepEqual((await app.invoke('getData')).profile, {});
+  await app.invoke('lock');
+  await assert.rejects(app.invoke('unlock', 'synthetic first password'), /Unable to unlock/);
+});

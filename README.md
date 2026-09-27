@@ -20,7 +20,7 @@ A matching Kotlin/Jetpack Compose app is in [`android/`](android/README.md). Ope
 
 Download the Windows `.exe` installer or the Mac `.dmg` for your processor from the [secondHand download website](https://secondhand-download.khoidoan00.chatgpt.site). On Mac, drag SecondHand into Applications and launch it there before setting up Chrome. These pilot builds are unsigned and Mac builds are not notarized, so your operating system may warn or block them.
 
-1. Open SecondHand and create a password. Save the recovery key it shows you somewhere safe, away from the computer. If you forget your password, choose **Forgot password?** and use that key, or reset it on the same computer if you left **Let this computer reset my password** on.
+1. Open SecondHand and create a password. Save the recovery key it shows you somewhere safe, away from the computer. If you forget your password, choose **Forgot password?** and use that key, or reset it on the same computer if you left **Let this computer reset my password** on. If you have neither, choose **Start over** on that screen to erase the saved information and create a new password; you can save a locked copy first.
 2. In **Chrome extension**, choose **Prepare Chrome extension**. The app prepares a permanent folder and registers its local connection automatically.
 3. In Chrome, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select that folder. Use the app's **Copy folder path** button to locate it. No extension ID copying or command line is needed.
 4. Save your profile, keep the app unlocked, and open [Iowa's portal](https://hhsservices.iowa.gov/apspssp/ssp.portal) in Chrome. Use Chrome 116 or newer. Start a guest application and click **Autofill** in the bottom-right corner. It stays on for that tab until you click **Stop**, lock SecondHand, leave Iowa's site, or reach a screen it doesn't know yet. The first time, the desktop app asks: choose **Allow once**, or **Always allow on this computer** to skip the pop-up whenever the app is unlocked. You can turn that off in the app's **Chrome extension** page.
@@ -49,6 +49,7 @@ On macOS/Linux, use the desktop's Prepare Chrome extension button; it registers 
 npm run test:ui       # Real Electron UI smoke test; needs a desktop session
 npm run test:extension # Isolated Chromium with synthetic Iowa fixtures; install via npx playwright install chromium
 npm run test:extension:video # Record a fictional-applicant walkthrough of the extension and native sidebar
+npm run test:summary  # Isolated Chromium: page text for "What this page says" and its one-line reason without a summary model
 npm run test:native   # Native protocol test (on Windows set SECONDHAND_PACKAGED_EXE to the built native host)
 npm run extension:zip
 npm run dist:win      # Run on Windows to build the NSIS .exe installer
