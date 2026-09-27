@@ -46,6 +46,13 @@ test('preparation copies bundled extension assets to a permanent local folder wi
   assert.equal(refreshed.extensionId, setup.extensionId);
 });
 
+test('every icon the manifest names is copied with the extension', async () => {
+  const manifest = JSON.parse(await fs.readFile(path.join(root, 'extension', 'manifest.json'), 'utf8'));
+  const icons = [...Object.values(manifest.icons || {}), ...Object.values(manifest.action?.default_icon || {})];
+  assert.ok(icons.length > 0);
+  for (const icon of icons) assert.ok(EXTENSION_FILES.includes(icon), `${icon} must be in EXTENSION_FILES`);
+});
+
 test('missing copied files report setup incomplete and preparation repairs the same directory', async t => {
   const { app } = await fixture(t);
   const initial = await prepareBundledExtension(app);
