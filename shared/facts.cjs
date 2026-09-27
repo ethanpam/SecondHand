@@ -143,5 +143,7 @@ function buildFacts(profile, { today } = {}) {
 }
 
 const factsText = facts => facts.map(fact => fact.text).join(' ');
+// The applicant's age in whole years, or null when no birth date is saved.
+const ageOf = (profile, { today } = {}) => applicantAge(profile, localToday(today));
 
-module.exports = { buildFacts, factsText, SENSITIVE_SOURCES };
+module.exports = { buildFacts, factsText, ageOf, SENSITIVE_SOURCES, STATE_NAMES };
