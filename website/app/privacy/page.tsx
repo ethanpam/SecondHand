@@ -14,7 +14,7 @@ export default function PrivacyPolicy() {
       <SiteHeader />
       <main id="main" className="wrap doc-page">
         <h1>Privacy policy</h1>
-        <p className="doc-date">Last updated September 26, 2026</p>
+        <p className="doc-date">Last updated September 27, 2026</p>
         <p className="doc-lead">
           SecondHand helps you prepare an Iowa SNAP application on your own
           computer. We do not collect your benefits information. There are no
@@ -106,6 +106,12 @@ export default function PrivacyPolicy() {
           <code>~/Library/Application Support/SecondHand</code> on a Mac. This
           also removes the password reset secret for this computer. Delete any
           encrypted backups you exported as well.
+        </p>
+        <p>
+          If you forget your password and don’t have your recovery key, choose
+          “Forgot password?” and then “Start over” in the app. This erases your
+          profile, your application records, and the reset secret for this
+          computer, so you can create a new password without reinstalling.
         </p>
         <p>
           Information you already gave Iowa’s website is kept by Iowa HHS. Ask

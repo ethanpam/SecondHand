@@ -172,8 +172,26 @@
     $('auth-description').textContent = device ? 'Choose a new password. Your saved information stays as it is.' : 'Enter your recovery key and choose a new password. Your saved information stays as it is.';
   }
 
+  function startOverConfirmed() {
+    return $('start-over-confirm').value.trim().toLowerCase() === 'start over';
+  }
+
+  // For someone who has lost both their password and recovery key.
+  function setStartOverMode(active) {
+    $('start-over-form').reset();
+    clearError('start-over-error');
+    $('start-over-submit').disabled = true;
+    $('start-over-form').hidden = !active;
+    if (!active) return;
+    $('reset-form').hidden = true;
+    $('auth-title').textContent = 'Start over';
+    $('auth-description').textContent = 'If you can’t reset your password, you can erase your saved information and create a new password.';
+    $('start-over-confirm').focus();
+  }
+
   function setResetMode(active) {
     const available = Boolean(vaultStatus.recoveryKey || vaultStatus.deviceReset);
+    setStartOverMode(false);
     $('reset-form').reset();
     clearError('reset-error'); clearError('auth-error');
     $('auth-form').hidden = active;
@@ -434,6 +452,31 @@
 
   $('forgot-password').addEventListener('click', () => setResetMode(true));
   $('reset-cancel').addEventListener('click', () => showLocked(vaultStatus, { refresh: true }));
+  $('start-over').addEventListener('click', () => setStartOverMode(true));
+  $('start-over-cancel').addEventListener('click', () => setResetMode(true));
+  $('start-over-confirm').addEventListener('input', () => { $('start-over-submit').disabled = !startOverConfirmed(); });
+  $('start-over-save').addEventListener('click', () => {
+    if (!api) return;
+    pending($('start-over-save'), async () => {
+      clearError('start-over-error');
+      try {
+        const result = await api.exportBackup();
+        if (!result.cancelled) toast('Locked copy saved. You can restore it with your old password.');
+      } catch (error) { showError('start-over-error', error); }
+    });
+  });
+  $('start-over-form').addEventListener('submit', (event) => {
+    event.preventDefault(); clearError('start-over-error');
+    if (!api || !startOverConfirmed()) return;
+    pending($('start-over-submit'), async () => {
+      try {
+        const status = await api.startOver({ confirmation: $('start-over-confirm').value });
+        // Erasing changes whether a vault exists without a lock transition.
+        showLocked(status, { refresh: true });
+        toast('Your saved information was erased. Create a new password to start again.');
+      } catch (error) { showError('start-over-error', error); }
+    });
+  });
   $('reset-form').addEventListener('submit', (event) => {
     event.preventDefault(); clearError('reset-error');
     if (!api) return;

@@ -10,7 +10,7 @@ export const faq = [
   },
   {
     question: 'What if I forget my password?',
-    answer: 'When you create your password, the app shows a recovery key. Choose “Forgot password?” on the unlock screen and enter that key to set a new password. If you left “Let this computer reset my password” on, you can also reset it on the same computer without the key. There is no online account, so no one else can reset it for you.',
+    answer: 'When you create your password, the app shows a recovery key. Choose “Forgot password?” on the unlock screen and enter that key to set a new password. If you left “Let this computer reset my password” on, you can also reset it on the same computer without the key. If you have neither, choose “Start over” on the reset screen to erase your saved information and create a new password; you can save a locked copy first. There is no online account, so no one else can reset it for you.',
   },
   {
     question: 'Is SecondHand part of Iowa HHS?',

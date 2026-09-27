@@ -842,3 +842,63 @@ test('a lock notification arriving after the lock response cannot clear an unloc
   assert.match(view.get('auth-error').textContent, /Unable to unlock/);
   assert.equal(view.get('workspace').hidden, true);
 });
+
+test('start over is offered on the reset screen, needs the typed phrase, and returns to creating a password', async t => {
+  let status = { exists: true, unlocked: false, recoveryKey: true, deviceReset: false, lockRevision: 0 };
+  const calls = [];
+  const view = await renderer(t, {
+    status: async () => status,
+    exportBackup: async () => { calls.push('export'); return { cancelled: false }; },
+    startOver: async request => { calls.push(request); status = { exists: false, unlocked: false, lockRevision: 0 }; return status; }
+  });
+  assert.equal(view.get('start-over-form').hidden, true);
+  view.get('forgot-password').click();
+  assert.equal(view.get('reset-form').hidden, false);
+  view.get('start-over').click();
+  assert.equal(view.get('start-over-form').hidden, false);
+  assert.equal(view.get('reset-form').hidden, true);
+  assert.equal(view.get('auth-title').textContent, 'Start over');
+  assert.equal(view.get('start-over-submit').disabled, true);
+
+  view.edit('start-over-confirm', 'start');
+  assert.equal(view.get('start-over-submit').disabled, true);
+  view.submit('start-over-form');
+  await tick();
+  assert.deepEqual(calls, [], 'Nothing is erased until the phrase is typed');
+
+  view.get('start-over-save').click();
+  await tick();
+  assert.deepEqual(calls, ['export']);
+
+  view.edit('start-over-confirm', ' Start Over ');
+  assert.equal(view.get('start-over-submit').disabled, false);
+  view.submit('start-over-form');
+  await tick(); await tick();
+  assert.equal(calls[1].confirmation, ' Start Over ');
+  assert.equal(view.get('start-over-form').hidden, true);
+  assert.equal(view.get('confirm-passphrase-field').hidden, false);
+  assert.match(view.get('auth-submit').textContent, /Create password/);
+  assert.equal(view.get('forgot-password').hidden, true);
+});
+
+test('going back from start over returns to the reset screen, and a failed erase shows why', async t => {
+  const view = await renderer(t, {
+    status: async () => ({ exists: true, unlocked: false, recoveryKey: false, deviceReset: false, lockRevision: 0 }),
+    startOver: async () => { throw new Error('Could not erase your saved information. Please try again.'); }
+  });
+  view.get('forgot-password').click();
+  assert.equal(view.get('reset-unavailable').hidden, false, 'Older saves without a reset option still see Start over');
+  view.get('start-over').click();
+  view.edit('start-over-confirm', 'start over');
+  view.submit('start-over-form');
+  await tick(); await tick();
+  assert.equal(view.get('start-over-error').hidden, false);
+  assert.match(view.get('start-over-error').textContent, /Could not erase/);
+  assert.equal(view.get('start-over-form').hidden, false);
+
+  view.get('start-over-cancel').click();
+  assert.equal(view.get('start-over-form').hidden, true);
+  assert.equal(view.get('reset-form').hidden, false);
+  assert.equal(view.get('auth-title').textContent, 'Reset your password');
+  assert.equal(view.get('start-over-confirm').value, '', 'Leaving start over clears the typed phrase');
+});
