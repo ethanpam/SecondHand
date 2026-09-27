@@ -1,0 +1,23 @@
+{
+  "source": {
+    "url": "https://hhs.iowa.gov/media/5929/download",
+    "title": "The Emergency Food Assistance Program (TEFAP) Eligibility Application",
+    "kind": "pdf",
+    "retrieved": "2026-09-26",
+    "region": "Des Moines, IA"
+  },
+  "questions": [
+    { "id": "q1", "label": "Name", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" } },
+    { "id": "q2", "label": "How many people in your household", "type": "number", "options": [], "rule": { "name": "field", "key": "householdSize" } },
+    { "id": "q3", "label": "My household lives in the state of Iowa", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "livesInState", "state": "Iowa" } },
+    { "id": "q4", "label": "My household meets income eligibility based on the table above", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "none" },
+      "note": "income table by household size" },
+    { "id": "q5", "label": "My household receives", "type": "checkbox", "options": ["SNAP", "Free or Reduced Lunches"], "rule": { "name": "none" },
+      "note": "Programs the household already receives; the profile only knows what the applicant is applying for." },
+    { "id": "q6", "label": "Recipient Signature", "type": "text", "options": [], "rule": { "name": "never" },
+      "note": "Certifies the information and the duty to report income changes." },
+    { "id": "q7", "label": "Date", "type": "date", "options": [], "rule": { "name": "never" }, "note": "Date written beside the signature." },
+    { "id": "q8", "label": "Proxy Signature", "type": "text", "options": [], "rule": { "name": "never" } },
+    { "id": "q9", "label": "Date", "type": "date", "options": [], "rule": { "name": "never" }, "note": "Date written beside the signature." }
+  ]
+}
