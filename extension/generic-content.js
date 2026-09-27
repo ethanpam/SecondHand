@@ -9,6 +9,9 @@
 
   let panelHost = null;
   const strings = value => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
+  // The widget's frame is as wide as the widget measured itself, never past 272px or the screen.
+  const fits = width => Number.isInteger(width) && width > 0 && width <= 1000;
+  const frameWidth = width => `min(${width || 272}px, 272px, calc(100vw - 24px))`;
 
   function withOwnPanelHidden(work) {
     if (!panelHost) return work();
@@ -30,7 +33,7 @@
       panelHost.setAttribute('data-secondhand-size', 'full');
       for (const [property, value] of Object.entries({
         all: 'initial', position: 'fixed', right: '12px', bottom: '16px', display: 'block',
-        width: 'min(272px, calc(100vw - 24px))', height: '70px',
+        width: frameWidth(0), height: '46px',
         'z-index': '2147483647', margin: '0', padding: '0', border: '0',
         'border-radius': '14px', 'box-shadow': '0 12px 42px #17342235',
         'color-scheme': 'light', isolation: 'isolate'
@@ -112,6 +115,18 @@
         // Every question's label for the applicant's translated list, and the language this document declares.
         const listed = withOwnPanelHidden(() => engine.questions(document));
         respond({ lang: document.documentElement.lang || '', questions: listed.map(({ id, label }) => ({ id, label })) });
+      } else if (message.type === 'secondhand:widgetSize' && typeof message.line === 'boolean' && (message.width === undefined || fits(message.width)) && window === window.top) {
+        // As wide as the widget, and one row taller while it shows a line the reader must act on.
+        if (panelHost) {
+          panelHost.style.setProperty('width', frameWidth(message.width), 'important');
+          panelHost.style.setProperty('height', message.line ? '86px' : '46px', 'important');
+        }
+        respond({ sized: Boolean(panelHost) });
+      } else if (message.type === 'secondhand:generic:pageText') {
+        // This frame's own words for the side panel's summary, and the language it declares. Never form values.
+        const reader = globalThis.SecondHandPageText;
+        if (!reader) { respond({ ok: false, error: 'SecondHand could not load its page reader. Reload the page.' }); return; }
+        respond({ lang: document.documentElement.lang || '', text: reader.read(document) });
       } else if (message.type === 'secondhand:generic:focus' && typeof message.id === 'string') {
         respond({ focused: Boolean(withOwnPanelHidden(() => engine.focusField(document, message.id))) });
       }

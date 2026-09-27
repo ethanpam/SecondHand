@@ -8,26 +8,24 @@
   <link rel="stylesheet" href="panel.css">
   <script src="strings.js" defer></script>
   <script src="translation.js" defer></script>
+  <script src="summary.js" defer></script>
   <script src="ai-mapper.js" defer></script>
   <script src="panel.js" defer></script>
 </head>
 <body>
   <section id="launcher" hidden>
+    <!-- The logo (which opens the side panel), one button, and a yellow need-you link when answers remain.
+         A line appears below only when the reader must act. -->
     <div id="widget" class="widget">
-      <img class="brand" src="icon-128.png" alt="">
-      <div class="widget-body">
-        <div class="widget-row">
-          <button id="autofill" class="widget-primary" type="button" data-i18n="widget.autofill" data-i18n-title="widget.autofillIowaTitle"></button>
-          <button id="unlock" class="widget-primary" type="button" data-i18n="widget.unlock" hidden></button>
-          <button id="stop" class="widget-primary" type="button" data-i18n="widget.stop" hidden></button>
-          <button id="details" class="widget-link" type="button" data-i18n="widget.details" data-i18n-title="widget.detailsTitle"></button>
-        </div>
-        <div class="widget-row">
-          <span id="widget-text" role="status" aria-live="polite" data-i18n="widget.iowaReady"></span>
-          <button id="need-you" class="widget-link" type="button" hidden></button>
-          <button id="translate-offer" class="widget-link" type="button" data-i18n="widget.offer" data-i18n-title="widget.offerTitle" hidden></button>
-        </div>
+      <div class="widget-row">
+        <button id="details" class="widget-logo" type="button" data-i18n-title="widget.detailsTitle" data-i18n-aria-label="widget.detailsTitle"><img class="brand" src="icon-128.png" alt=""></button>
+        <button id="autofill" class="widget-primary" type="button" data-i18n="widget.autofill" data-i18n-title="widget.autofillIowaTitle"></button>
+        <button id="unlock" class="widget-primary" type="button" data-i18n="widget.unlock" hidden></button>
+        <button id="stop" class="widget-primary" type="button" data-i18n="widget.stop" hidden></button>
+        <button id="need-you" class="widget-link" type="button" hidden></button>
       </div>
+      <p id="widget-text" class="visually-hidden" role="status" aria-live="polite" data-i18n="widget.iowaReady"></p>
+      <button id="translate-offer" class="widget-link" type="button" data-i18n="widget.offer" data-i18n-title="widget.offerTitle" hidden></button>
     </div>
     <button id="pill" class="pill" type="button" data-i18n-title="widget.pillTitle" hidden><img class="brand" src="icon-128.png" alt=""></button>
   </section>
@@ -52,6 +50,14 @@
       <button id="panel-autofill" class="button primary full" type="button" data-i18n="panel.autofill" disabled></button>
       <div id="status" class="status" role="status" aria-live="polite" data-i18n="panel.checkingTab"></div>
       <button id="site-disable" class="text-button site-off" type="button" data-i18n="panel.siteDisable" hidden></button>
+      <button id="summary-get" class="button secondary full" type="button" data-i18n="summary.download" hidden></button>
+      <p id="summary-note" class="status" role="status" aria-live="polite" hidden></p>
+      <section id="summary" class="checklist-section" hidden aria-labelledby="summary-title">
+        <div class="fields-heading"><h2 id="summary-title" data-i18n="summary.title"></h2></div>
+        <p id="summary-caveat" class="summary-caveat" data-i18n="summary.caveat"></p>
+        <div id="summary-list" class="summary-card"></div>
+        <p id="summary-english" class="summary-caveat summary-english" data-i18n="summary.inEnglish" hidden></p>
+      </section>
       <button id="questions-show" class="button secondary full" type="button" data-i18n="questions.show" hidden></button>
       <p id="questions-note" class="status" role="status" aria-live="polite" hidden></p>
       <section id="questions" class="checklist-section" hidden aria-labelledby="questions-title">

@@ -6,7 +6,7 @@ const path = require('node:path');
 const fs = require('node:fs/promises');
 const { watch } = require('node:fs');
 const os = require('node:os');
-const { pathToFileURL } = require('node:url');
+const { pathToFileURL, URL } = require('node:url');
 const { Vault, atomicWrite, normalizeRecoveryKey, MAX_VAULT_BYTES } = require('./vault.cjs');
 const { startBridge, runNativeHost, nativeStreams, extensionFromOrigin, EXTENSION_ID, isIowaNavigationAuthorization } = require('./bridge.cjs');
 const { registerHost } = require('./registration.cjs');
@@ -16,6 +16,18 @@ const { createLaya } = require('./laya.cjs');
 const { validateProfile, validateApplication, FIELD_LABELS, PORTAL_URL, isPortalUrl, siteOrigin } = require('../shared/schema.cjs');
 
 app.setName('SecondHand');
+// The step-by-step Chrome setup guide on SecondHand's website. During
+// development, SECONDHAND_WEBSITE_URL can point it at a local website.
+const EXTENSION_GUIDE_URL = 'https://secondhand-download.khoidoan00.chatgpt.site/chrome-extension';
+function extensionGuideUrl() {
+  const local = !app.isPackaged && process.env.SECONDHAND_WEBSITE_URL;
+  if (!local) return EXTENSION_GUIDE_URL;
+  try {
+    const url = new URL('/chrome-extension', local);
+    if (url.protocol === 'http:' || url.protocol === 'https:') return url.href;
+  } catch { /* Fall back to the published guide. */ }
+  return EXTENSION_GUIDE_URL;
+}
 const localAppData = process.platform === 'win32' ?
   (process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')) : app.getPath('appData');
 app.setPath('userData', testStoragePath() || (!app.isPackaged && process.env.SECONDHAND_USER_DATA ?
@@ -255,6 +267,20 @@ if (nativeOrigin) {
       catch (error) { throw publicError(/password|recovery key|already unlocked/.test(error.message) ? error.message : 'Could not reset your password. Please try again.'); }
       touch(); return status();
     },
+    // For someone who has lost both their password and recovery key: erase the
+    // saved information and the reset secret so a new password can be created.
+    // Chrome extension settings stay. The person must type the phrase.
+    async startOver(request) {
+      if (vault.unlocked) throw publicError('Lock SecondHand before starting over.');
+      if (typeof request?.confirmation !== 'string' || request.confirmation.trim().toLowerCase() !== 'start over') throw publicError('Type “start over” to confirm.');
+      accessRevision++;
+      try {
+        await vault.erase();
+        await fs.rm(deviceSecretPath, { force: true });
+      } catch { throw publicError('Could not erase your saved information. Please try again.'); }
+      finally { accessRevision++; }
+      return status();
+    },
     async replaceRecoveryKey() {
       requireUnlocked();
       let recoveryKey;
@@ -361,6 +387,7 @@ if (nativeOrigin) {
     async cancelLayaDownload() { requireUnlocked(); await laya.cancelDownload(); touch(); return layaStatus(); },
     async removeLaya() { requireUnlocked(); await laya.remove(); touch(); return layaStatus(); },
     async openPortal() { await shell.openExternal(PORTAL_URL); return true; },
+    async openExtensionGuide() { await shell.openExternal(extensionGuideUrl()); return true; },
     async prepareExtension() {
       if (extensionSetupPending) throw publicError('Extension setup is already running.');
       extensionSetupPending = true;

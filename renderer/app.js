@@ -104,8 +104,9 @@
 
   function setProfileDirty(value) {
     profileDirty = value;
-    $('profile-save-state').textContent = value ? 'Unsaved changes' : 'Saved locally';
-    $('profile-save-state').classList.toggle('unsaved', value);
+    // Shown only while there is something to save.
+    $('profile-save-state').textContent = value ? 'Unsaved changes' : '';
+    $('profile-save-state').hidden = !value;
     $('profile-nav-dot').hidden = !value;
   }
 
@@ -175,8 +176,26 @@
     $('auth-description').textContent = device ? 'Choose a new password. Your saved information stays as it is.' : 'Enter your recovery key and choose a new password. Your saved information stays as it is.';
   }
 
+  function startOverConfirmed() {
+    return $('start-over-confirm').value.trim().toLowerCase() === 'start over';
+  }
+
+  // For someone who has lost both their password and recovery key.
+  function setStartOverMode(active) {
+    $('start-over-form').reset();
+    clearError('start-over-error');
+    $('start-over-submit').disabled = true;
+    $('start-over-form').hidden = !active;
+    if (!active) return;
+    $('reset-form').hidden = true;
+    $('auth-title').textContent = 'Start over';
+    $('auth-description').textContent = 'If you can’t reset your password, you can erase your saved information and create a new password.';
+    $('start-over-confirm').focus();
+  }
+
   function setResetMode(active) {
     const available = Boolean(vaultStatus.recoveryKey || vaultStatus.deviceReset);
+    setStartOverMode(false);
     $('reset-form').reset();
     clearError('reset-error'); clearError('auth-error');
     $('auth-form').hidden = active;
@@ -230,7 +249,6 @@
       item.classList.toggle('active', selected);
       if (selected) item.setAttribute('aria-current', 'page'); else item.removeAttribute('aria-current');
     });
-    $('breadcrumb-current').textContent = viewNames[view];
     if (focus) { $('main-content').focus(); window.scrollTo(0, 0); }
     return true;
   }
@@ -292,7 +310,7 @@
       }
       const footer = element('div', 'application-card-footer');
       const edit = element('button', 'text-button', 'View & update'); edit.type = 'button'; edit.append(icon('arrow')); edit.addEventListener('click', () => openApplication(application));
-      footer.append(element('p', '', 'Personal record · Update from your agency notices'), edit); card.append(footer); list.append(card);
+      footer.append(edit); card.append(footer); list.append(card);
     }
     for (const application of sortedApplications().slice(0, 3)) {
       const row = element('button', 'overview-app-row'); row.type = 'button';
@@ -478,6 +496,31 @@
 
   $('forgot-password').addEventListener('click', () => setResetMode(true));
   $('reset-cancel').addEventListener('click', () => showLocked(vaultStatus, { refresh: true }));
+  $('start-over').addEventListener('click', () => setStartOverMode(true));
+  $('start-over-cancel').addEventListener('click', () => setResetMode(true));
+  $('start-over-confirm').addEventListener('input', () => { $('start-over-submit').disabled = !startOverConfirmed(); });
+  $('start-over-save').addEventListener('click', () => {
+    if (!api) return;
+    pending($('start-over-save'), async () => {
+      clearError('start-over-error');
+      try {
+        const result = await api.exportBackup();
+        if (!result.cancelled) toast('Locked copy saved. You can restore it with your old password.');
+      } catch (error) { showError('start-over-error', error); }
+    });
+  });
+  $('start-over-form').addEventListener('submit', (event) => {
+    event.preventDefault(); clearError('start-over-error');
+    if (!api || !startOverConfirmed()) return;
+    pending($('start-over-submit'), async () => {
+      try {
+        const status = await api.startOver({ confirmation: $('start-over-confirm').value });
+        // Erasing changes whether a vault exists without a lock transition.
+        showLocked(status, { refresh: true });
+        toast('Your saved information was erased. Create a new password to start again.');
+      } catch (error) { showError('start-over-error', error); }
+    });
+  });
   $('reset-form').addEventListener('submit', (event) => {
     event.preventDefault(); clearError('reset-error');
     if (!api) return;
@@ -726,6 +769,9 @@
       });
     });
   }
+  $('extension-guide').addEventListener('click', () => pending($('extension-guide'), async () => {
+    try { await api.openExtensionGuide(); } catch (error) { toast(error.message || 'Unable to open the guide.', true); }
+  }));
   $('extension-open-portal').addEventListener('click', () => pending($('extension-open-portal'), async () => {
     try { await api.openPortal(); } catch (error) { toast(error.message || 'Unable to open the Iowa portal.', true); }
   }));

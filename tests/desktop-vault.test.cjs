@@ -136,6 +136,31 @@ test('import rejects malformed envelopes and preserves encrypted rollback before
   await vault.lock();
 });
 
+test('erasing while locked deletes the vault and its restore copies, keeps other files, and allows a new password', async t => {
+  const { directory, file } = await fixture(t);
+  const vault = new Vault(file);
+  await vault.create(PASSPHRASE);
+  await vault.update(data => { data.profile.firstName = 'Forgotten'; });
+  await assert.rejects(vault.erase(), /Lock/);
+  assert.equal(await vault.exists(), true, 'An unlocked vault is never erased');
+  await vault.lock();
+  // A copy kept by an earlier restore, an interrupted write, and files that are not the vault's.
+  await fs.writeFile(`${file}.before-import-1-abcd1234`, 'encrypted copy');
+  await fs.writeFile(`${file}.0123456789abcdef01234567.tmp`, 'partial write');
+  await fs.writeFile(path.join(directory, 'settings.json'), '{}');
+  await fs.writeFile(path.join(directory, 'other.secondhand'), 'unrelated');
+  await vault.erase();
+  assert.equal(await vault.exists(), false);
+  assert.deepEqual((await fs.readdir(directory)).sort(), ['other.secondhand', 'settings.json']);
+  await assert.rejects(vault.unlock(PASSPHRASE));
+  await vault.create('a brand new password');
+  assert.deepEqual(vault.getData().profile, {});
+  await vault.lock();
+  await vault.unlock('a brand new password');
+  await vault.lock();
+  await new Vault(path.join(directory, 'missing', 'vault.secondhand')).erase();
+});
+
 test('untrusted vault KDF parameters and malformed base64 are rejected before key derivation', async t => {
   const { file } = await fixture(t);
   const vault = new Vault(file);
