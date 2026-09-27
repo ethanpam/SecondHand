@@ -171,6 +171,16 @@ async function main() {
     await expect(widget.locator('#autofill')).toHaveText(es('widget.autofill'), { timeout: 10000 });
     console.log('Picker: English persists over the Spanish browser across reloads of the panel and the page; both surfaces follow.');
 
+    // Arabic turns the panel right to left; Vietnamese turns it back. The widget follows each choice.
+    for (const [code, dir] of [['ar', 'rtl'], ['vi', 'ltr']]) {
+      await choose(code);
+      await expect.poll(() => panel.text('#panel-autofill')).toBe(strings.text(code, 'panel.autofill'));
+      await expect(widget.locator('#autofill')).toHaveText(strings.text(code, 'widget.autofill'), { timeout: 10000 });
+      assert.deepEqual(await panel.evaluate(() => [document.documentElement.lang, document.documentElement.dir]), [code, dir]);
+      assert.equal(await widget.evaluate(() => document.documentElement.dir), dir);
+    }
+    console.log('Picker: Arabic lays both surfaces out right to left; Vietnamese lays them out left to right.');
+
     // Nothing left the computer: every request was SecondHand's own page or a local fixture.
     const outside = requests.filter(url => !url.startsWith(`chrome-extension://${extensionId}/`) && !url.startsWith('https://hhsservices.iowa.gov/') && url !== 'about:blank');
     assert.deepEqual(outside, []);

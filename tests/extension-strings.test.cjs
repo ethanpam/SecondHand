@@ -96,7 +96,7 @@ test('text fills parameters, nests messages, picks plural forms, and refuses a m
   assert.equal(strings.text('en', 'widget.needYou', { count: 2 }), '2 need you');
   assert.throws(() => strings.text('es', 'no.such.key'), /no\.such\.key/);
   assert.throws(() => strings.text('en', 'worker.stoppedAfterSteps', {}), /steps/);
-  assert.throws(() => strings.text('fr', 'widget.autofill'), /fr/);
+  assert.throws(() => strings.text('de', 'widget.autofill'), /de/);
   assert.throws(() => strings.text('en', 'widget.needYou', {}), /count/);
 });
 
@@ -105,12 +105,12 @@ test('the language is the saved choice, otherwise the browser language, and a ch
   const spanish = { localStorage: storage(), navigator: { language: 'es-MX' } };
   assert.equal(strings.language(spanish), 'es');
   assert.equal(strings.language({ localStorage: storage(), navigator: { language: 'en-US' } }), 'en');
-  assert.equal(strings.language({ localStorage: storage(), navigator: { language: 'fr-FR' } }), 'en', 'languages without a catalog use English');
+  assert.equal(strings.language({ localStorage: storage(), navigator: { language: 'de-DE' } }), 'en', 'languages without a catalog use English');
   strings.setLanguage('en', spanish);
   assert.equal(strings.STORAGE_KEY, 'secondhand.language');
   assert.equal(spanish.localStorage.items.get('secondhand.language'), 'en');
   assert.equal(strings.language(spanish), 'en', 'the saved choice wins over the browser');
-  assert.throws(() => strings.setLanguage('fr', spanish), /fr/);
+  assert.throws(() => strings.setLanguage('de', spanish), /de/);
   spanish.localStorage.setItem('secondhand.language', 'klingon');
   assert.throws(() => strings.language(spanish), /klingon/, 'a setting SecondHand never writes is an error, not a silent default');
 });
@@ -180,4 +180,44 @@ test('panel.html has no text of its own: every visible word, title, and label co
   assert.ok(used.length > 15);
   assert.deepEqual(used.filter(key => !isKey(key)), []);
   assert.ok(document.querySelector('title[data-i18n]'));
+});
+
+test('SecondHand speaks Spanish, Vietnamese, Chinese, French, and Arabic, each with every English message', () => {
+  assert.deepEqual([...strings.LANGUAGES], ['en', 'es', 'vi', 'zh', 'fr', 'ar']);
+  for (const code of strings.LANGUAGES) {
+    const catalog = strings.catalogs[code];
+    assert.ok(catalog, code);
+    assert.deepEqual(Object.keys(catalog).sort(), Object.keys(en).sort(), `${code} has exactly the English keys`);
+    for (const [key, value] of Object.entries(en)) {
+      assert.equal(typeof catalog[key], typeof value, `${code} ${key}`);
+      assert.deepEqual(placeholders(catalog[key]), placeholders(value), `${code} ${key} keeps its placeholders`);
+      if (typeof value === 'object') assert.deepEqual(Object.keys(catalog[key]).sort(), ['one', 'other'], `${code} ${key}`);
+      if (code !== 'en' && typeof value === 'string' && key.startsWith('widget.') && !/^\{/.test(value)) {
+        assert.ok(catalog[key].trim(), `${code} ${key} is not empty`);
+      }
+    }
+  }
+});
+
+test('every language is named in its own words in every catalog and offered in the picker', () => {
+  const natives = { en: 'English', es: 'Español', vi: 'Tiếng Việt', zh: '中文（简体）', fr: 'Français', ar: 'العربية' };
+  for (const code of strings.LANGUAGES) for (const [name, native] of Object.entries(natives)) assert.equal(strings.catalogs[code][`language.${name}`], native, `${code} language.${name}`);
+  const html = source('panel.html');
+  for (const code of strings.LANGUAGES) assert.match(html, new RegExp(`<option value="${code}" data-i18n="language\\.${code}"></option>`));
+});
+
+test('Arabic reads right to left; the others left to right', () => {
+  assert.equal(strings.direction('ar'), 'rtl');
+  for (const code of ['en', 'es', 'vi', 'zh', 'fr']) assert.equal(strings.direction(code), 'ltr');
+  assert.throws(() => strings.direction('xx'), /no text in xx/);
+  assert.match(source('panel.js'), /documentElement\.dir = strings\.direction\(language\)/);
+  assert.doesNotMatch(source('panel.css'), /text-align:left|margin-left:auto/, 'the panel lays out by reading direction, not by left and right');
+});
+
+test('regional browser languages pick their catalog; Traditional Chinese stays English until it has its own', () => {
+  const scope = browser => ({ localStorage: { getItem: () => null }, navigator: { language: browser } });
+  for (const [browser, expected] of [['vi-VN', 'vi'], ['zh-CN', 'zh'], ['zh-Hans-CN', 'zh'], ['zh', 'zh'], ['fr-CA', 'fr'], ['ar-EG', 'ar'], ['es-MX', 'es'],
+    ['zh-TW', 'en'], ['zh-HK', 'en'], ['zh-Hant', 'en'], ['de-DE', 'en']]) {
+    assert.equal(strings.language(scope(browser)), expected, browser);
+  }
 });
