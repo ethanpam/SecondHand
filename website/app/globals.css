@@ -723,19 +723,15 @@ kbd {
   line-height: 1.85;
   margin: 16px 0 0;
 }
-.closing-section {
+.demo-section {
   text-align: center;
-  padding: 80px 24px 112px;
-  border-top: 1px solid var(--border);
+  padding: var(--space-section) 24px 72px;
 }
-.closing-section h2 {
+.demo-section h2 {
   font-size: clamp(64px, 7.5vw, 106px);
   line-height: 0.98;
   letter-spacing: -4px;
   margin-bottom: 36px;
-}
-.closing-section .micro {
-  margin-top: 24px;
 }
 .screen-reader-only {
   position: absolute;
@@ -1256,10 +1252,10 @@ footer p {
     grid-template-columns: 1fr;
     gap: 40px;
   }
-  .closing-section {
-    padding: 64px 0 80px;
+  .demo-section {
+    padding: 64px 0;
   }
-  .closing-section h2 {
+  .demo-section h2 {
     font-size: clamp(58px, 11vw, 90px);
     letter-spacing: -2.5px;
   }

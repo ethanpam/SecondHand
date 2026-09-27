@@ -93,7 +93,7 @@ export function Home() {
               <span>Built for Iowa SNAP. Built around you.</span>
               <span className="hero-caption-end">
                 <MotionToggle />
-                <a href="#downloads">
+                <a href="#demo">
                   Meet your helping hand <span aria-hidden="true">↓</span>
                 </a>
               </span>
@@ -101,6 +101,17 @@ export function Home() {
           </section>
 
           <div className="wrap page-content">
+            <section
+              id="demo"
+              className="demo-section"
+              aria-labelledby="demo-heading"
+            >
+              <h2 id="demo-heading">
+                <TextType text={'Ready for\nless typing?'} />
+              </h2>
+              <AutofillDemo />
+            </section>
+
             <section
               className="intro"
               id="downloads"
@@ -448,19 +459,6 @@ export function Home() {
                   </details>
                 ))}
               </div>
-            </section>
-            <section
-              className="closing-section"
-              aria-labelledby="closing-heading"
-            >
-              <h2 id="closing-heading">
-                <TextType text={'Ready for\nless typing?'} />
-              </h2>
-              <AutofillDemo />
-              <a className="primary-link" href="#downloads">
-                Download SecondHand <ArrowIcon />
-              </a>
-              <p className="micro">Free to use. Made to help.</p>
             </section>
           </div>
         </main>

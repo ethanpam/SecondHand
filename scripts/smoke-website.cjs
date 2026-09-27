@@ -36,7 +36,7 @@ async function inspectHeroLayout(page) {
   assert.equal(background.width, page.viewportSize().width, 'Shader must span the viewport');
   assert.ok(header.y + header.height < content.y, 'Navigation must not overlap hero copy');
   assert.notEqual(await page.locator('.gradient-background').evaluate(element => getComputedStyle(element).maskImage), 'none', 'Shader must fade out before its bottom edge');
-  for (const selector of ['.site-header', '.site-header nav', '.intro']) {
+  for (const selector of ['.site-header', '.site-header nav', '.demo-section']) {
     assert.equal(await page.locator(selector).evaluate(element => {
       const style = getComputedStyle(element);
       return parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
@@ -67,7 +67,7 @@ async function inspectWordmark(page) {
 }
 
 async function inspectStaticDemo(page) {
-  await expect(page.locator('#closing-heading')).toHaveAccessibleName('Ready for less typing?');
+  await expect(page.locator('#demo-heading')).toHaveAccessibleName('Ready for less typing?');
   await expect(page.locator('.text-type__content')).toHaveText('Ready for less typing?');
   await expect(page.locator('.text-type')).toHaveAttribute('data-running', 'false');
   await expect(page.locator('.text-type__cursor')).toBeHidden();
@@ -78,9 +78,12 @@ async function inspectStaticDemo(page) {
   await expect(page.locator('.autofill-demo input, .autofill-demo form')).toHaveCount(0);
 }
 
-async function inspectClosingMotion(page) {
+async function inspectDemoMotion(page) {
   await page.goto(site, { waitUntil: 'networkidle' });
-  const heading = page.locator('#closing-heading');
+  // The demo sits under the hero, so it starts from the footer, where the demo is off screen.
+  const footer = page.locator('.site-footer');
+  await footer.evaluate(element => element.scrollIntoView({ behavior: 'instant', block: 'end' }));
+  const heading = page.locator('#demo-heading');
   const text = page.locator('.text-type');
   const content = page.locator('.text-type__content');
   const demo = page.locator('.autofill-demo');
@@ -98,7 +101,7 @@ async function inspectClosingMotion(page) {
     record();
     element.motionProbe = { samples, observer };
   });
-  await page.locator('.closing-section').evaluate(element => element.scrollIntoView({ behavior: 'instant', block: 'start' }));
+  await page.locator('.demo-section').evaluate(element => element.scrollIntoView({ behavior: 'instant', block: 'start' }));
   await expect(text).toHaveAttribute('data-running', 'true');
   await expect(demo).toHaveAttribute('data-running', 'true');
   await expect(heading).toHaveAccessibleName('Ready for less typing?');
@@ -152,7 +155,7 @@ async function inspectClosingMotion(page) {
     document.dispatchEvent(new Event('visibilitychange'));
   });
   await expect(text).toHaveAttribute('data-running', 'true');
-  await page.locator('.hero').evaluate(element => element.scrollIntoView({ behavior: 'instant' }));
+  await footer.evaluate(element => element.scrollIntoView({ behavior: 'instant', block: 'end' }));
   await assertSuspended();
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await inspectStaticDemo(page);
@@ -209,7 +212,7 @@ async function main() {
     await expect.poll(() => page.locator('.gradient-canvas[data-paper-shader]').evaluate(element => element.paperShaderMount.currentSpeed)).toBe(0);
     console.log('Shader rendering, pause/play, reduced motion, and offscreen suspension passed.');
     await inspectWordmark(page);
-    await inspectClosingMotion(page);
+    await inspectDemoMotion(page);
 
     await page.getByRole('tab', { name: 'Windows', exact: true }).click();
     await page.getByRole('tab', { name: 'Windows', exact: true }).press('ArrowRight');
