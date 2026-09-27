@@ -1070,7 +1070,7 @@ test('the desktop’s Laya can only match text boxes to saved fields the worker 
 
 test('with Laya ready, the widget’s plan says so, and its match fills a text box as a guess from the one vault request', async () => {
   let suggestRequest;
-  const w = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...REACH }, { ...PET }], desktop: layaDesktop({
+  const w = siteWorker({ enabled: true, clock: { now: 0 }, fields: [{ name: 'name', key: 'fullName' }, { ...REACH }, { ...PET }], desktop: layaDesktop({
     suggestFields: request => { suggestRequest = request; return { suggestions: { [request.fields[0].id]: 'email' } }; } }) });
   const planned = await plan(w);
   assert.equal(planned.laya, true, 'Chrome’s on-device AI stays off');
@@ -1107,8 +1107,8 @@ test('Laya answers a choice question from the saved profile: the option is picke
   assert.deepEqual(result.needYou, [idOf(w, 'pet')], '"Do you have a pet?" stays under need you');
   assert.equal(result.guessed, 1);
   assert.equal(result.message, 'Filled 2 · 1 guessed · 1 need you. Check your answers before you submit. Guesses were suggested by Laya on this computer.');
-  assert.deepEqual(w.nativeTypes().filter(type => type !== 'status'), ['warmLaya', 'getFields', 'answerFields'],
-    'Laya is readied, and answers are asked after the saved values, so an approval in between can’t outdate them');
+  assert.deepEqual(w.nativeTypes().filter(type => type !== 'status'), ['warmLaya', 'answerFields', 'getFields'],
+    'Laya is readied, answers the choice questions first, and the saved values follow');
   assert.doesNotMatch(JSON.stringify(layaCalls(w)), /Synthetic private|synthetic\.private|50309/, 'no saved value is ever sent to Laya');
 });
 
@@ -1159,7 +1159,8 @@ test('Laya never sees consent or SSN questions, over-long questions, or more tha
     { name: 'listbox', label: 'County', type: 'listbox', options: ['Polk'] }, { name: 'twice', label: 'Pick one', type: 'radio', options: ['Yes', 'Yes'] }];
   const w = siteWorker({ enabled: true, fields: [...skipped, ...boxes, ...choices], desktop: layaDesktop() });
   await autofill(w);
-  const [suggest, answer] = layaCalls(w);
+  const suggest = layaCalls(w).find(call => call.type === 'suggestFields');
+  const answer = layaCalls(w).find(call => call.type === 'answerFields');
   assert.equal(suggest.fields.length, 40);
   assert.equal(answer.questions.length, 30);
   assert.deepEqual(suggest.fields.map(field => field.label), boxes.slice(0, 40).map(field => field.label));
@@ -1216,7 +1217,7 @@ test('Laya’s match and answer land in the embedded form they came from', async
     suggestFields: request => ({ suggestions: { [request.fields[0].id]: 'email' } }),
     answerFields: (request, vault) => ({ answers: { [request.questions[0].id]: 'No' }, accessRevision: vault.accessRevision }) }) });
   const result = plain((await autofill(w)).data);
-  assert.deepEqual(layaCalls(w).map(call => (call.fields || call.questions).map(item => item.id)), [['f4:sh-1-0'], ['f4:sh-1-1']]);
+  assert.deepEqual(layaCalls(w).map(call => [call.type, (call.fields || call.questions).map(item => item.id)]), [['answerFields', ['f4:sh-1-1']], ['suggestFields', ['f4:sh-1-0']]]);
   assert.deepEqual(child.page.answered(), ['reach', 'sixty']);
   assert.equal(result.guessed, 2);
   assert.equal(w.content.find(call => call.type === 'secondhand:generic:fill').frameId, 4);
@@ -1232,32 +1233,59 @@ test('the side panel learns whether Laya is ready from the desktop status', asyn
   assert.equal((await odd.panel({ type: 'ui:desktopStatus' })).ok, false, 'a state SecondHand doesn’t know is an error, not a guess');
 });
 
-test('Laya gets one three-second budget per click: each request carries what is left, the applicant’s approval time never counts, and nothing is asked once it is spent', async () => {
-  const run = async ({ suggestMs, approvalMs = 0, loadMs = 0 }) => {
-    const clock = { now: 50000 };
-    const budgets = [];
-    const w = siteWorker({ enabled: true, clock, fields: [{ name: 'name', key: 'fullName' }, { ...REACH }, { ...SIXTY }], duringGetFields: () => { clock.now += approvalMs; }, desktop: layaDesktop({
-      warming: () => { clock.now += loadMs; },
-      suggestFields: request => { budgets.push(['suggestFields', request.budgetMs]); clock.now += suggestMs; return { suggestions: { [request.fields[0].id]: 'email' } }; },
-      answerFields: (request, vault) => { budgets.push(['answerFields', request.budgetMs]); return { answers: { [request.questions[0].id]: 'No' }, accessRevision: vault.accessRevision }; } }) });
-    return { w, budgets, result: plain((await autofill(w)).data) };
-  };
-  const quick = await run({ suggestMs: 1200, approvalMs: 20000, loadMs: 6000 });
-  assert.deepEqual(quick.budgets, [['suggestFields', 3000], ['answerFields', 1800]],
-    'loading the model first (6 seconds) and a 20-second approval in between are not Laya’s answering time; the match took 1.2 seconds');
-  assert.deepEqual(quick.w.nativeTypes().slice(0, 2), ['warmLaya', 'suggestFields'], 'Laya is warmed before the click’s budget starts');
-  assert.deepEqual(quick.w.page.answered(), ['name', 'reach', 'sixty']);
+// A click whose Laya takes `answerMs` for the choice questions and `suggestMs` for the text boxes, on a clock the test runs.
+async function timedClick({ answerMs = 0, suggestMs = 0, approvalMs = 0, loadMs = 0 } = {}) {
+  const clock = { now: 50000 };
+  const budgets = [];
+  const w = siteWorker({ enabled: true, clock, fields: [{ name: 'name', key: 'fullName' }, { ...REACH }, { ...SIXTY }], duringGetFields: () => { clock.now += approvalMs; }, desktop: layaDesktop({
+    warming: () => { clock.now += loadMs; },
+    answerFields: (request, vault) => { budgets.push(['answerFields', request.budgetMs]); clock.now += answerMs; return { answers: { [request.questions[0].id]: 'No' }, accessRevision: vault.accessRevision }; },
+    suggestFields: request => { budgets.push(['suggestFields', request.budgetMs]); clock.now += suggestMs; return { suggestions: { [request.fields[0].id]: 'email' } }; } }) });
+  return { w, budgets, result: plain((await autofill(w)).data) };
+}
 
-  const spent = await run({ suggestMs: 3000 });
-  assert.deepEqual(spent.budgets, [['suggestFields', 3000]], 'no time is left to answer');
-  assert.deepEqual(spent.w.page.answered(), ['name', 'reach']);
-  assert.deepEqual(spent.result.needYou, [idOf(spent.w, 'sixty')], 'the choice question stays with the applicant');
+test('with a slow Laya, the choice questions are answered first and the text boxes get only what is left of the click’s budget', async () => {
+  const slow = await timedClick({ answerMs: 2200 });
+  assert.deepEqual(slow.budgets, [['answerFields', 3000], ['suggestFields', 800]], 'the text boxes get the 0.8 seconds the answers left');
+  assert.deepEqual(slow.w.page.answered(), ['name', 'reach', 'sixty']);
+
+  const spent = await timedClick({ answerMs: 3000 });
+  assert.deepEqual(spent.budgets, [['answerFields', 3000]], 'no time is left to match the text boxes');
+  assert.deepEqual(spent.w.page.answered(), ['name', 'sixty'], 'the choice question is still answered');
+  assert.deepEqual(spent.result.needYou, [idOf(spent.w, 'reach')], 'the text box stays with the applicant');
+  assert.equal(spent.w.nativeTypes().includes('suggestFields'), false);
+});
+
+test('Laya gets one three-second budget per click: each request carries what is left, and loading the model and the applicant’s approval time never count', async () => {
+  const quick = await timedClick({ answerMs: 1200, approvalMs: 20000, loadMs: 6000 });
+  assert.deepEqual(quick.budgets, [['answerFields', 3000], ['suggestFields', 1800]],
+    'loading the model first (6 seconds) and a 20-second approval are not Laya’s answering time; the answers took 1.2 seconds');
+  assert.deepEqual(quick.w.nativeTypes().slice(0, 3), ['warmLaya', 'answerFields', 'suggestFields'], 'Laya is warmed before the click’s budget starts');
+  assert.deepEqual(quick.w.page.answered(), ['name', 'reach', 'sixty']);
 
   // A new click starts a new budget.
   const again = siteWorker({ enabled: true, clock: { now: 0 }, fields: [{ ...SIXTY }], desktop: layaDesktop() });
   await autofill(again);
   await autofill(again);
   assert.deepEqual(layaCalls(again).map(call => call.budgetMs), [3000, 3000]);
+});
+
+test('answers made before getFields’ approval: an Always allow there outdates them, so they aren’t filled; an empty answer changes nothing', async () => {
+  const fields = [{ name: 'name', key: 'fullName' }, { ...SIXTY }];
+  // Always allow in getFields' prompt moves the access receipt on after Laya answered.
+  const bump = vault => { vault.accessRevision++; };
+  const outdated = siteWorker({ enabled: true, fields, duringGetFields: () => bump(outdated.vault),
+    desktop: layaDesktop({ answerFields: (request, vault) => ({ answers: { [request.questions[0].id]: 'No' }, accessRevision: vault.accessRevision }) }) });
+  const refused = plain((await autofill(outdated)).data);
+  assert.equal(refused.state, 'error');
+  assert.equal(refused.messageKey, 'worker.accessChanged');
+  assert.deepEqual(outdated.page.answered(), [], 'nothing is filled from an outdated receipt');
+
+  const nothing = siteWorker({ enabled: true, fields, duringGetFields: () => bump(nothing.vault),
+    desktop: layaDesktop({ answerFields: (request, vault) => ({ answers: {}, accessRevision: vault.accessRevision }) }) });
+  const filled = plain((await autofill(nothing)).data);
+  assert.equal(filled.state, 'done', 'with no answers to fill, their receipt doesn’t matter');
+  assert.deepEqual(nothing.page.answered(), ['name']);
 });
 
 // "What this page says" on a site that is on: the page's own words and those of each embedded form that is on.

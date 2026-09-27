@@ -673,9 +673,10 @@ async function layaAnswers(url, choices, budgetMs) {
 // Fills from a general-engine plan: one desktop request for the keys planned first (the rules'
 // matches and any AI guesses), then up to four fill passes so questions revealed by an answer are
 // filled too. Each pass plans the page again. Never continues, submits, or navigates.
-// Laya is asked unless this click already found it not ready (`laya: false`): its text-box matches
-// join the one request for saved values; its answers to choice questions come after that request,
-// so an approval given in between can't outdate them. Both share the click's time budget.
+// Laya is asked unless this click already found it not ready (`laya: false`). Both of its requests
+// share the click's time budget: choice questions first (about 3 candidates each), then text boxes
+// (about 20 each) with what is left, so the cheaper questions aren't starved. Its text-box matches
+// join the one request for saved values.
 async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, laya = null } = {}) {
   let revision = null;
   let values = null;
@@ -697,11 +698,17 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       guard();
     }
     const budget = layaBudget();
+    // null: Laya isn't ready; undefined: the budget was spent before this request.
+    let answers;
+    if (layaOn && open.choices.length) {
+      answers = await budget.use(budgetMs => layaAnswers(url, open.choices, budgetMs));
+      guard();
+      if (answers === null) layaOn = false;
+    }
     if (layaOn && open.boxes.length) {
       const suggestions = await budget.use(budgetMs => layaSuggestions(url, open.boxes, budgetMs));
       guard();
-      if (suggestions === null) layaOn = false;
-      else for (const [id, key] of suggestions || []) addLaya(id, { key });
+      if (suggestions) for (const [id, key] of suggestions) addLaya(id, { key });
     }
     const keys = [...new Set(SecondHandGeneric.requestKeys(initial.flatMap(frame => frame.planned.filter(item => item.key !== undefined).map(item => item.key))))];
     if (keys.some(key => typeof key !== 'string' || !KEY.test(key))) throw fault('worker.fieldRequestFailed');
@@ -714,14 +721,12 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       revision = receiptRevision(response);
       values = SecondHandGeneric.deriveValues(response.values);
     }
-    if (layaOn && open.choices.length) {
-      const answers = await budget.use(budgetMs => layaAnswers(url, open.choices, budgetMs));
-      guard();
-      if (answers) {
-        if (revision !== null && answers.revision !== revision) throw fault('worker.accessChanged');
-        revision = answers.revision;
-        for (const [id, option] of answers.entries) addLaya(id, { option });
-      }
+    // The answers came before getFields: an Always allow in its prompt outdates their receipt, and
+    // outdated answers are never filled. Without answers to fill, their receipt doesn't matter.
+    if (answers?.entries.length) {
+      if (revision !== null && answers.revision !== revision) throw fault('worker.accessChanged');
+      revision = answers.revision;
+      for (const [id, option] of answers.entries) addLaya(id, { option });
     }
     let filled = 0, placedByLaya = 0;
     const needYou = [];
