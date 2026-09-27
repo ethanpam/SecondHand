@@ -88,3 +88,21 @@ test('packaged test storage requires both explicit test mode and a temporary des
     assert.throws(() => testStoragePath({ SECONDHAND_TEST_MODE: '1', SECONDHAND_TEST_USER_DATA: value }, temporaryRoot), /temporary directory/);
   }
 });
+
+test('every file the extension loads ships with the prepared extension', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const { EXTENSION_FILES } = require('../desktop/extension-setup.cjs');
+  const dir = path.join(__dirname, '..', 'extension');
+  const read = file => fs.readFileSync(path.join(dir, file), 'utf8');
+  const manifest = JSON.parse(read('manifest.json'));
+  const loaded = new Set([manifest.background.service_worker, manifest.side_panel?.default_path,
+    ...manifest.content_scripts.flatMap(script => script.js || [])]);
+  for (const page of ['panel.html']) for (const [, src] of read(page).matchAll(/<(?:script|link)[^>]+(?:src|href)="([^"]+)"/g)) loaded.add(src);
+  for (const [, list] of read('background.js').matchAll(/importScripts\(([^)]*)\)/g)) for (const [, file] of list.matchAll(/'([^']+)'/g)) loaded.add(file);
+  for (const [, list] of read('background.js').matchAll(/js: \[([^\]]*)\]/g)) for (const [, file] of list.matchAll(/'([^']+)'/g)) loaded.add(file);
+  for (const [, list] of read('background.js').matchAll(/files: \[([^\]]*)\]/g)) for (const [, file] of list.matchAll(/'([^']+)'/g)) loaded.add(file);
+  loaded.delete(undefined);
+  const missing = [...loaded].filter(file => !EXTENSION_FILES.includes(file.split('?')[0]));
+  assert.deepEqual(missing, [], 'a file the extension loads is missing from EXTENSION_FILES, so prepared extensions would break');
+});
