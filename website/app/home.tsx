@@ -1,13 +1,7 @@
 'use client';
 
 import { useState, useSyncExternalStore, type KeyboardEvent } from 'react';
-import {
-  ArrowIcon,
-  CheckIcon,
-  DownloadIcon,
-  ExternalIcon,
-  LockIcon,
-} from './icons';
+import { ArrowIcon, CheckIcon, DownloadIcon, ExternalIcon } from './icons';
 import Link from 'next/link';
 import { GradientBackground } from './gradient-background';
 import { faq } from './faq';
@@ -142,10 +136,25 @@ export function Home() {
                   After you approve, its Chrome extension fills the supported
                   fields in Iowa’s SNAP application.
                 </p>
-                <div className="trust-line">
-                  <LockIcon size={15} /> Encrypted on your device{' '}
-                  <span aria-hidden="true">·</span> No account needed
-                </div>
+                <ul className="promise-list">
+                  <li>
+                    <CheckIcon size={16} /> Encrypted on your computer. No
+                    account, cloud sync or analytics.
+                  </li>
+                  <li>
+                    <CheckIcon size={16} /> The app asks before filling, unless
+                    you choose Always allow.
+                  </li>
+                  <li>
+                    <CheckIcon size={16} /> It never submits your application.
+                    You handle CAPTCHA, consent, signatures and submission.
+                  </li>
+                </ul>
+                <p className="small-note promise-note">
+                  What you enter in Iowa’s portal goes to Iowa. This website
+                  only hosts the installers. Read the full{' '}
+                  <a href="/privacy">privacy policy</a>.
+                </p>
                 <a className="text-link" href="#setup">
                   How to get set up <ArrowIcon size={16} />
                 </a>
@@ -393,48 +402,6 @@ export function Home() {
               </div>
             </section>
 
-            <section id="privacy" className="privacy-section">
-              <div>
-                <p className="eyebrow">03 / Private by design</p>
-                <h2>
-                  Your information.
-                  <br />
-                  Your computer.
-                </h2>
-                <div className="privacy-mark" aria-hidden="true">
-                  Yours.
-                </div>
-              </div>
-              <div className="privacy-copy">
-                <p>
-                  Your profile and application history are encrypted on your
-                  device. SecondHand has no account system, cloud sync or
-                  analytics. This website hosts the installers; it does not
-                  collect your benefits information.
-                </p>
-                <ul>
-                  <li>
-                    <CheckIcon /> The desktop asks before filling, unless you
-                    choose Always allow. SecondHand never submits your
-                    application.
-                  </li>
-                  <li>
-                    <CheckIcon /> Information you put into Iowa’s portal goes to
-                    Iowa.
-                  </li>
-                  <li>
-                    <CheckIcon /> You handle CAPTCHA, consent, signatures and
-                    submission.
-                  </li>
-                </ul>
-                <p className="small-note">
-                  Like other websites, the hosting provider may process
-                  connection logs. Your browser and the Iowa portal have their
-                  own privacy practices. Read the full{' '}
-                  <a href="/privacy">privacy policy</a>.
-                </p>
-              </div>
-            </section>
             <section
               id="faq"
               className="faq-section"

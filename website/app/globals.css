@@ -323,14 +323,30 @@ nav a:hover {
   max-width: 445px;
   line-height: 1.85;
 }
-.trust-line {
+.promise-list {
+  display: grid;
+  gap: 12px;
+  max-width: 445px;
+  margin: 28px 0 16px;
+  padding: 0;
+  list-style: none;
+}
+.promise-list li {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  color: #415d4c;
-  font-size: 11px;
-  margin: 28px 0 24px;
+  align-items: start;
+  gap: 12px;
+  color: #364c3f;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.promise-list svg {
+  flex: none;
+  margin-top: 4px;
+  color: var(--primary);
+}
+.promise-note {
+  max-width: 445px;
+  margin: 0 0 24px;
 }
 .text-link {
   display: inline-flex;
@@ -612,65 +628,9 @@ kbd {
   text-decoration: underline;
   text-underline-offset: 6px;
 }
-.privacy-section {
-  display: grid;
-  grid-template-columns: 1fr 1.12fr;
-  gap: 88px;
-  padding: 64px;
-  background: #164c38;
-  color: #fff;
-  border-radius: 8px;
-}
-.privacy-section .eyebrow {
-  color: #d7e6cf;
-}
-.privacy-section h2 {
-  font-size: clamp(34px, 3.5vw, 48px);
-  letter-spacing: -1.7px;
-}
-.privacy-mark {
-  margin-top: 44px;
-  font-family: var(--display);
-  font-size: clamp(70px, 8vw, 112px);
-  line-height: 1;
-  letter-spacing: -5px;
-  color: #d7e6cf;
-}
-.privacy-copy > p {
-  color: #edf3e9;
-  font-size: 14px;
-  line-height: 1.9;
-}
-.privacy-copy ul {
-  display: grid;
-  gap: 20px;
-  list-style: none;
-  padding: 26px 0;
-  margin: 24px 0;
-  border-block: 1px solid #52745e;
-}
-.privacy-copy li {
-  display: flex;
-  align-items: start;
-  gap: 12px;
-  color: #fff;
-  font-size: 12px;
-}
-.privacy-copy li svg {
-  color: #d7e6cf;
-  margin-top: 3px;
-}
-.privacy-copy > p.small-note {
-  font-size: 11px;
-  color: #d7e6cf;
-  margin: 0;
-}
 .small-note a {
   text-decoration: underline;
   text-underline-offset: 4px;
-}
-.privacy-section a:focus-visible {
-  outline-color: #fff;
 }
 .faq-section {
   display: grid;
@@ -1114,10 +1074,6 @@ footer p {
   .setup-section {
     gap: 56px;
   }
-  .privacy-section {
-    padding: 44px;
-    gap: 48px;
-  }
   .faq-section {
     gap: 56px;
   }
@@ -1237,17 +1193,6 @@ footer p {
     gap: 28px;
     padding: 28px;
   }
-  .privacy-section {
-    grid-template-columns: 1fr;
-    padding: 36px;
-    gap: 32px;
-  }
-  .privacy-section h2 {
-    font-size: 42px;
-  }
-  .privacy-mark {
-    display: none;
-  }
   .faq-section {
     grid-template-columns: 1fr;
     gap: 40px;
@@ -1338,13 +1283,6 @@ footer p {
   }
   .step-number {
     font-size: 34px;
-  }
-  .privacy-section {
-    padding: 28px;
-  }
-  .privacy-section h2 {
-    font-size: 34px;
-    letter-spacing: -1px;
   }
   .footer-bottom {
     flex-direction: column;
