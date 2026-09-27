@@ -102,8 +102,9 @@
 
   function setProfileDirty(value) {
     profileDirty = value;
-    $('profile-save-state').textContent = value ? 'Unsaved changes' : 'Saved locally';
-    $('profile-save-state').classList.toggle('unsaved', value);
+    // Shown only while there is something to save.
+    $('profile-save-state').textContent = value ? 'Unsaved changes' : '';
+    $('profile-save-state').hidden = !value;
     $('profile-nav-dot').hidden = !value;
   }
 
