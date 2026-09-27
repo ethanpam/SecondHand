@@ -66,6 +66,8 @@ def main():
     parser.add_argument("--split", default="test")
     parser.add_argument("--limit", type=int, default=0, help="evaluate this many decisions per task (0 = all)")
     parser.add_argument("--report", help="write the JSON report here")
+    parser.add_argument("--errors", help="write every wrong fill at --error-threshold here (JSON lines)")
+    parser.add_argument("--error-threshold", type=float, default=0.9)
     args = parser.parse_args()
 
     source = Path(args.dataset)
@@ -86,6 +88,16 @@ def main():
         "split": args.split,
         "tasks": {task: {str(t): metrics(groups, t) for t in THRESHOLDS} for task, groups in decisions.items()},
     }
+    if args.errors:
+        with open(args.errors, "w") as handle:
+            for task, groups in decisions.items():
+                for rows in groups.values():
+                    best = max(rows[:-1], key=lambda row: row["p"])
+                    gold = next(row["state"]["candidate"] for row in rows if row["answers"]["correct"])
+                    if best["p"] >= args.error_threshold and best["p"] > rows[-1]["p"] and best["state"]["candidate"] != gold:
+                        handle.write(json.dumps({"task": task, "decision": rows[0]["decision"], "question": rows[0]["state"]["question"],
+                                                 "chosen": best["state"]["candidate"], "p": round(best["p"], 4), "gold": gold,
+                                                 "facts": rows[0]["state"].get("facts", "")}, ensure_ascii=False) + "\n")
     text = json.dumps(report, indent=2)
     print(text)
     if args.report:

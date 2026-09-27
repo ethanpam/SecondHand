@@ -1,0 +1,120 @@
+{
+  "model": "/Users/jacobdang/Projects/LayaStudio/workspace/runs/balanced-lora-proper-1790469836/model",
+  "split": "test",
+  "tasks": {
+    "answer": {
+      "0.5": {
+        "decisions": 912,
+        "answerable": 112,
+        "accepted": 115,
+        "right": 71,
+        "wrong_fill": 44,
+        "wrong_fill_on_unanswerable": 44,
+        "unanswerable": 800,
+        "precision": 0.6173913043478261,
+        "coverage": 0.6339285714285714
+      },
+      "0.7": {
+        "decisions": 912,
+        "answerable": 112,
+        "accepted": 114,
+        "right": 71,
+        "wrong_fill": 43,
+        "wrong_fill_on_unanswerable": 43,
+        "unanswerable": 800,
+        "precision": 0.6228070175438597,
+        "coverage": 0.6339285714285714
+      },
+      "0.8": {
+        "decisions": 912,
+        "answerable": 112,
+        "accepted": 114,
+        "right": 71,
+        "wrong_fill": 43,
+        "wrong_fill_on_unanswerable": 43,
+        "unanswerable": 800,
+        "precision": 0.6228070175438597,
+        "coverage": 0.6339285714285714
+      },
+      "0.9": {
+        "decisions": 912,
+        "answerable": 112,
+        "accepted": 111,
+        "right": 71,
+        "wrong_fill": 40,
+        "wrong_fill_on_unanswerable": 40,
+        "unanswerable": 800,
+        "precision": 0.6396396396396397,
+        "coverage": 0.6339285714285714
+      },
+      "0.95": {
+        "decisions": 912,
+        "answerable": 112,
+        "accepted": 104,
+        "right": 71,
+        "wrong_fill": 33,
+        "wrong_fill_on_unanswerable": 33,
+        "unanswerable": 800,
+        "precision": 0.6826923076923077,
+        "coverage": 0.6339285714285714
+      }
+    },
+    "match": {
+      "0.5": {
+        "decisions": 91,
+        "answerable": 35,
+        "accepted": 40,
+        "right": 32,
+        "wrong_fill": 8,
+        "wrong_fill_on_unanswerable": 7,
+        "unanswerable": 56,
+        "precision": 0.8,
+        "coverage": 0.9142857142857143
+      },
+      "0.7": {
+        "decisions": 91,
+        "answerable": 35,
+        "accepted": 39,
+        "right": 32,
+        "wrong_fill": 7,
+        "wrong_fill_on_unanswerable": 6,
+        "unanswerable": 56,
+        "precision": 0.8205128205128205,
+        "coverage": 0.9142857142857143
+      },
+      "0.8": {
+        "decisions": 91,
+        "answerable": 35,
+        "accepted": 39,
+        "right": 32,
+        "wrong_fill": 7,
+        "wrong_fill_on_unanswerable": 6,
+        "unanswerable": 56,
+        "precision": 0.8205128205128205,
+        "coverage": 0.9142857142857143
+      },
+      "0.9": {
+        "decisions": 91,
+        "answerable": 35,
+        "accepted": 36,
+        "right": 30,
+        "wrong_fill": 6,
+        "wrong_fill_on_unanswerable": 6,
+        "unanswerable": 56,
+        "precision": 0.8333333333333334,
+        "coverage": 0.8571428571428571
+      },
+      "0.95": {
+        "decisions": 91,
+        "answerable": 35,
+        "accepted": 32,
+        "right": 28,
+        "wrong_fill": 4,
+        "wrong_fill_on_unanswerable": 4,
+        "unanswerable": 56,
+        "precision": 0.875,
+        "coverage": 0.8
+      }
+    }
+  }
+}
