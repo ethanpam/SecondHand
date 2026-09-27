@@ -48,7 +48,7 @@ function generalPage(message, plan) {
 
 // A small page model: answering "has home address" reveals a mailing field,
 // the way Iowa's form reveals conditional sections.
-function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noSiteEngine, general = nothingPlanned(), page = {}, questions } = {}) {
+function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noSiteEngine, general = nothingPlanned(), page = {}, questions, pageText } = {}) {
   const model = { kind, filled: [], revealed: false, token: null };
   const vault = { reachable: true, unlocked: true, getFieldsError: null,
     values: { firstName: 'Synthetic private first', hasHomeAddress: 'yes', mailingCity: 'Synthetic private city' }, ...desktop };
@@ -83,6 +83,8 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
         }
         if (message.type === 'secondhand:focusField') return { focused: true };
         if (message.type === 'secondhand:questions' && questions) return structuredClone(questions);
+        if (message.type === 'secondhand:pageText' && pageText) return structuredClone(pageText);
+        if (message.type === 'secondhand:widgetSize') return { sized: true };
         const answer = generalPage(message, general);
         if (answer) return answer;
         throw new Error(`Unexpected content message ${message.type}`);
@@ -150,7 +152,7 @@ test('one click makes one status and one getFields request, fills revealed field
   assert.match(result.message, /Filled 3 · 1 need you/);
   assert.doesNotMatch(JSON.stringify(response), /Synthetic private/);
   assert.equal(w.calls.content.some(message => message.type.startsWith('secondhand:generic:')), false, 'verified pages never use the general engine');
-  assert.deepEqual(w.calls.injected[0], { target: { tabId: 7, frameIds: [0] }, files: ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'content.js'] });
+  assert.deepEqual(w.calls.injected[0], { target: { tabId: 7, frameIds: [0] }, files: ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js'] });
 });
 
 test('locked and unreachable desktops map to widget states without filling', async () => {
@@ -381,6 +383,8 @@ function journey({ screens, desktop = {}, continueStays = false, engine = noSite
         calls.content.push(message.type);
         if (message.type === 'secondhand:pageState') return state();
         if (message.type === 'secondhand:continue') { if (!continueStays) navigate(); return { continued: true, reason: 'Continued to the next screen.' }; }
+        // An information screen's own words, when the walk gives it some; a screen with questions has none to read.
+        if (message.type === 'secondhand:pageText') return current().text === undefined ? { lang: 'en', pageKey: '', text: '' } : { lang: 'en', pageKey: current().page.pageKey, text: current().text };
         if (message.type === 'secondhand:fill') {
           const keys = message.fields.filter(key => message.values[key]);
           keys.forEach(key => filled.add(key));
@@ -642,4 +646,90 @@ test('the widget’s language offer opens the side panel on the question list, o
   assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).showQuestions, undefined, 'only once');
   await w.launcher({ type: 'ui:openPanel', confirmed: true });
   assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).showQuestions, undefined, 'Details alone does not open the list');
+});
+
+// "What this page says": the words of Iowa's information-only screens, and the key points the side panel wrote for them.
+const IMPORTANT = 'Important Information when applying and what to expect.\nWhat you need to do.';
+const keyPoints = { language: 'en', points: ['Have your documents ready.', 'Answer every question with a star.'], english: false };
+
+test('the side panel reads an Iowa information screen’s own words, keeps its key points for the tab, and the widget gets the first one', async () => {
+  const w = worker({ pageText: { lang: 'en-US', pageKey: 'iowa-information', text: IMPORTANT } });
+  w.tab.url = `${adapter.PORTAL}/applyForBenefits/importantInfo`;
+  const reply = await w.panel({ type: 'ui:pageText' });
+  assert.equal(reply.ok, true, reply.error);
+  const id = reply.data.pages[0]?.id;
+  assert.equal(typeof id, 'string');
+  assert.deepEqual(plain(reply.data), { pages: [{ id, pageKey: 'iowa-information', lang: 'en-US', current: true, text: IMPORTANT, unread: false, summary: null }] });
+  assert.deepEqual(w.calls.content.map(message => message.type), ['secondhand:pageText']);
+  assert.deepEqual(w.calls.injected.at(-1).files, ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js']);
+  assert.deepEqual(w.calls.native, [], 'reading a page never reaches the desktop');
+  assert.equal(plain((await w.launcher({ type: 'ui:pageState' })).data).summary, undefined, 'no line before the side panel wrote the points');
+
+  assert.deepEqual(plain((await w.panel({ type: 'ui:keepSummary', id, summary: keyPoints })).data), { kept: true });
+  assert.deepEqual(plain((await w.launcher({ type: 'ui:pageState' })).data).summary, { language: 'en', point: 'Have your documents ready.', english: false });
+  assert.deepEqual(plain((await w.panel({ type: 'ui:pageText' })).data.pages), [{ id, pageKey: 'iowa-information', lang: 'en-US', current: true, text: IMPORTANT, unread: false, summary: keyPoints }],
+    'the same words keep their points');
+  for (const summary of [{ ...keyPoints, language: 'de' }, { ...keyPoints, points: 'Have your documents ready.' }, { ...keyPoints, points: Array(6).fill('A point.') },
+    { ...keyPoints, points: [7] }, { ...keyPoints, points: ['x'.repeat(401)] }, { ...keyPoints, english: 'no' }, null]) {
+    assert.equal((await w.panel({ type: 'ui:keepSummary', id, summary })).ok, false, JSON.stringify(summary));
+  }
+  assert.deepEqual(plain((await w.panel({ type: 'ui:keepSummary', id: 'older-words', summary: keyPoints })).data), { kept: false }, 'points for words that have changed are not kept');
+  // Only the side panel reads pages and keeps points.
+  assert.equal(await w.launcher({ type: 'ui:pageText' }), undefined);
+  assert.equal(await w.launcher({ type: 'ui:keepSummary', id, summary: keyPoints }), undefined);
+  assert.equal(await w.send({ tabId: 7, type: 'ui:pageText' }, { id: 'otherextension', url: PANEL_URL }), undefined);
+});
+
+test('a screen with questions is never read, and a reply that is not a page’s words fails loudly', async () => {
+  const questions = worker({ pageText: { lang: 'en', pageKey: '', text: '' } });
+  assert.deepEqual(plain((await questions.panel({ type: 'ui:pageText' })).data), { pages: [] });
+  for (const pageText of [{ lang: 'en', pageKey: 'iowa-information', text: 7 }, { lang: 'en', pageKey: 'iowa-personal-information', text: 'Synthetic words' },
+    { lang: 'en', pageKey: '', text: 'Words on a screen with questions' }, { lang: 'en', pageKey: 'iowa-information', text: 'x'.repeat(16001) },
+    { ok: false, error: 'This page could not be checked safely. Review it manually, then rescan.' }]) {
+    const reply = await worker({ pageText }).panel({ type: 'ui:pageText' });
+    assert.equal(reply.ok, false, JSON.stringify(pageText));
+    assert.equal(reply.errorKey, 'worker.pageTextUnreadable');
+  }
+  const odd = await worker({ pageText: { lang: 'en"><script>', pageKey: 'iowa-information', text: IMPORTANT } }).panel({ type: 'ui:pageText' });
+  assert.equal(odd.data.pages[0].lang, '', 'a language tag that is not one is dropped');
+});
+
+test('autofill keeps each information screen’s words before it continues, and the side panel lists them until the tab leaves Iowa', async () => {
+  const screens = walk().map(screen => screen.page.kind === 'info' ? { ...screen, text: `${screen.name}: synthetic instructions.` } : screen);
+  const w = journey({ screens });
+  await w.send({ type: 'ui:autofill', confirmed: true });
+  w.userContinues(); await settle();            // applicant solved the CAPTCHA
+  w.userContinues(); await settle();            // applicant accepted consent
+  assert.equal(w.at(), 'applicant');
+  const reads = w.calls.content.map((type, index) => type === 'secondhand:continue' ? w.calls.content[index - 1] : null).filter(Boolean);
+  assert.deepEqual(reads, ['secondhand:pageText', 'secondhand:pageText', 'secondhand:pageText'], 'each screen is read just before its Continue');
+  const kept = plain((await w.send({ type: 'ui:pageText' })).data.pages);
+  assert.deepEqual(kept.map(page => [page.pageKey, page.text, page.current, page.unread]), [
+    ['iowa-instructions', 'instructions: synthetic instructions.', false, false],
+    ['iowa-information', 'importantInfo: synthetic instructions.', false, false],
+    ['iowa-before-start', 'beforeYouStart: synthetic instructions.', false, false]], 'the latest screen first');
+  assert.deepEqual(w.calls.native.filter(call => call.type === 'getFields').length, 2, 'reading screens asks the desktop for nothing');
+
+  w.returnTo('/applyForBenefits/enterPersonalInfo'); await settle();
+  assert.equal((await w.send({ type: 'ui:pageText' })).data.pages.length, 3, 'moving within Iowa keeps them');
+  w.leave('https://pantry.example.org/'); await settle();
+  w.returnTo('/applyForBenefits/enterPersonalInfo'); await settle();
+  assert.deepEqual(plain((await w.send({ type: 'ui:pageText' })).data), { pages: [] }, 'leaving Iowa forgets them');
+});
+
+test('an information screen that can’t be read is kept as unread, and autofill still continues', async () => {
+  const w = journey({ screens: [info('importantInfo', '/applyForBenefits/importantInfo', 'iowa-information'), { name: 'members', path: '/applyForBenefits/householdMembers', page: { kind: 'manual', pageKey: 'iowa-manual', checklist: [] } }] });
+  await w.send({ type: 'ui:autofill', confirmed: true }); await settle();
+  assert.equal(w.continues(), 1);
+  assert.deepEqual(plain((await w.send({ type: 'ui:pageText' })).data.pages).map(page => [page.pageKey, page.text, page.unread]), [['iowa-information', '', true]]);
+});
+
+test('the widget’s request for room for its line goes to its own tab’s content script only', async () => {
+  const w = worker();
+  assert.deepEqual(plain((await w.launcher({ type: 'ui:widgetSize', line: true })).data), { sized: true });
+  assert.deepEqual(plain(w.calls.content.at(-1)), { type: 'secondhand:widgetSize', line: true });
+  assert.deepEqual(w.calls.pageTabs.at(-1), 7);
+  assert.equal(await w.panel({ type: 'ui:widgetSize', line: true }), undefined, 'the side panel has no widget to size');
+  assert.equal(await w.launcher({ type: 'ui:widgetSize', line: 'yes' }), undefined);
+  assert.deepEqual(w.calls.native, []);
 });
