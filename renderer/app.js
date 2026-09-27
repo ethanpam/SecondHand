@@ -227,7 +227,6 @@
       item.classList.toggle('active', selected);
       if (selected) item.setAttribute('aria-current', 'page'); else item.removeAttribute('aria-current');
     });
-    $('breadcrumb-current').textContent = viewNames[view];
     if (focus) { $('main-content').focus(); window.scrollTo(0, 0); }
     return true;
   }
