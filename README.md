@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="website/public/brand/secondhand-mascot.png" width="88" alt="">
+  <img src="website/public/brand/secondhand-icon.png" width="96" alt="">
 </p>
 
 <h1 align="center">SecondHand</h1>
