@@ -291,8 +291,9 @@ export function Home() {
                     </p>
                     <p className="small-note">
                       Forgot your password? Use the recovery key, or reset it on
-                      the same computer if you left that option on. There’s no
-                      online account. You can also export an encrypted backup
+                      the same computer if you left that option on. If you have
+                      neither, you can start over with a new password. There’s
+                      no online account. You can also export an encrypted backup
                       from the app.
                     </p>
                   </div>
