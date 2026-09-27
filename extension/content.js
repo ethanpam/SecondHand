@@ -12,7 +12,12 @@
   let panelHost = null;
   let panelFrame = null;
   let generalUrl = ''; // the unverified page where the general engine found fields
+  let messageRow = false; // the widget shows a line the reader must act on, one row taller
+  let cardWidth = 0; // the widget's measured width; 0 until it measures
   const strings = value => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
+  // The widget's frame is as wide as the widget measured itself, never past 272px or the screen.
+  const fits = width => Number.isInteger(width) && width > 0 && width <= 1000;
+  const frameWidth = width => `min(${width || 272}px, 272px, calc(100vw - 24px))`;
 
   function withOwnPanelHidden(work) {
     if (!panelHost) return work();
@@ -34,8 +39,8 @@
       full = page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo) || generalUrl === location.href;
     } catch { full = false; }
     panelHost.setAttribute('data-secondhand-size', full ? 'full' : 'pill');
-    panelHost.style.setProperty('width', full ? 'min(272px, calc(100vw - 24px))' : '46px', 'important');
-    panelHost.style.setProperty('height', full ? '70px' : '46px', 'important');
+    panelHost.style.setProperty('width', full ? frameWidth(cardWidth) : '46px', 'important');
+    panelHost.style.setProperty('height', full ? (messageRow ? '86px' : '46px') : '46px', 'important');
   }
 
   function ensurePanel() {
@@ -118,6 +123,13 @@
     return { lang: document.documentElement.lang || '', instructions: adapter.instructions(document, location.href),
       questions: engine && unverified() ? engine.questions(document).map(({ id, label }) => ({ id, label })) : [] };
   }
+  // For the side panel's summary: the words of Iowa's information-only screens only, never form values.
+  function pageText() {
+    const reader = globalThis.SecondHandPageText;
+    if (!reader) throw new Error('SecondHand could not load its page reader.');
+    const pageKey = adapter.informationScreen(document, location.href);
+    return { lang: document.documentElement.lang || '', pageKey, text: pageKey ? reader.read(document) : '' };
+  }
   function general(message) {
     if (!engine) return { ok: false, error: 'SecondHand could not load its form engine. Reinstall the extension.' };
     if (!unverified()) return { ok: false, error: 'SecondHand fills this page with its Iowa rules.' };
@@ -184,6 +196,13 @@
         return true;
       } else if (message.type === 'secondhand:questions') {
         respond(withOwnPanelHidden(questions));
+      } else if (message.type === 'secondhand:pageText') {
+        respond(withOwnPanelHidden(pageText));
+      } else if (message.type === 'secondhand:widgetSize' && typeof message.line === 'boolean' && (message.width === undefined || fits(message.width))) {
+        messageRow = message.line;
+        cardWidth = message.width || 0;
+        if (panelHost) sizePanel();
+        respond({ sized: Boolean(panelHost) });
       } else if (message.type === 'secondhand:generic:focus' && typeof message.id === 'string' && engine) {
         respond({ focused: Boolean(withOwnPanelHidden(() => engine.focusField(document, message.id))) });
       }

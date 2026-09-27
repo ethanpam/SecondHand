@@ -6,14 +6,14 @@ const { ABSTAIN, QUESTIONS, answerState } = require('../shared/laya-prompts.cjs'
 const { buildFacts, factsText } = require('../shared/facts.cjs');
 
 const TODAY = '2026-09-26';
-// A stand-in for the Laya runtime (#38) with its exact interface. `scores(state)` plays the model.
+// A stand-in for desktop/laya.cjs (#38) with its exact decision interface. `scores(state)` plays the model.
 function stubLaya(scores = () => 0.01) {
   const batches = [];
   return {
     batches,
-    status: () => ({ state: 'ready' }),
+    status: async () => ({ state: 'ready', enabled: true, sizeBytes: 1 }),
     decide: async () => { throw new Error('field answers score in batches'); },
-    decideBatch: async items => { batches.push(items); return items.map(({ state }) => ({ answers: { correct: { noul: scores(state) } } })); }
+    decideBatch: async items => { batches.push(items); return items.map(({ state }) => { const noul = scores(state); return { answers: { correct: { type: 'noul', noul, confidence: Math.max(noul, 1 - noul) } } }; }); }
   };
 }
 const answerer = (laya, options = {}) => createFieldAnswers({ laya, today: TODAY, ...options });
@@ -98,7 +98,7 @@ test('without sensitive facts there is no second pass; without any facts nothing
 
 test('Laya not ready fails loudly with its code; a timeout or the click’s budget stops scoring, and a decision past the deadline is dropped', async () => {
   const notReady = Object.assign(new Error('Laya is off.'), { code: 'LAYA_NOT_READY' });
-  const off = { status: () => ({ state: 'off' }), decide: async () => { throw notReady; }, decideBatch: async () => { throw notReady; } };
+  const off = { status: async () => ({ state: 'off', enabled: false }), decide: async () => { throw notReady; }, decideBatch: async () => { throw notReady; } };
   await assert.rejects(answerer(off).answer({ questions: [question('vet', 'Veteran?')], profile, budgetMs }), error => error.code === 'LAYA_NOT_READY');
 
   const vet = state => state.candidate === 'No' ? 0.98 : 0.01;

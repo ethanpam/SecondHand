@@ -11,6 +11,7 @@ Runtime: Electron desktop, plain HTML/CSS/JavaScript renderer, Manifest V3 Chrom
 - `createVault({ password, allowDeviceReset })` -> `{ status, recoveryKey, deviceResetFailed }`; the recovery key is returned once and never stored
 - `unlock(password)` -> status
 - `resetPassword({ recoveryKey, password } | { method: 'device', password })` -> status (unlocked with the new password)
+- `startOver({ confirmation })` -> status (locked only; `confirmation` must be the typed phrase `start over`). Erases the encrypted file, copies kept by earlier restores, and the reset secret for this computer; Chrome extension settings stay. `status.exists` is then false, so a new password can be created
 - `replaceRecoveryKey()` -> `{ recoveryKey }` (unlocked only; retires the previous key)
 - `setDeviceReset(enabled)` -> status (unlocked only)
 - `saveRecoveryKey(recoveryKey)` -> `{ cancelled }` / `copyRecoveryKey(recoveryKey)` -> true
@@ -20,6 +21,7 @@ Runtime: Electron desktop, plain HTML/CSS/JavaScript renderer, Manifest V3 Chrom
 - `saveApplication(application)` -> saved application (empty/missing id creates UUID)
 - `deleteApplication(id)` -> true
 - `openPortal()` -> true (fixed Iowa URL only)
+- `openExtensionGuide()` -> true (opens SecondHand's fixed `/chrome-extension` guide; in development only, `SECONDHAND_WEBSITE_URL` can point it at a local http(s) website)
 - `prepareExtension()` -> `{ directory, extensionId, version, prepared, manifestPath, folderOpened }`; copies bundled assets into the fixed local extension folder and registers its stable ID; never installs into Chrome
 - `openExtensionFolder()` / `copyExtensionFolderPath()` -> true (fixed prepared folder only)
 - `copyChromeExtensionsUrl()` -> true (copies the fixed `chrome://extensions` address)

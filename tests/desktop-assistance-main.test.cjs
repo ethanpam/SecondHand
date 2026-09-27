@@ -59,8 +59,8 @@ async function desktop(options = {}) {
     './extension-setup.cjs': { getExtensionSetup: async () => ({ prepared: true }) },
     './registration.cjs': { registerHost: async () => ({}) },
     './test-storage-path.cjs': { testStoragePath: () => null },
-    // The one place the desktop gets its Laya runtime. Without an override, this build's real module answers.
-    ...(options.laya ? { './laya-runtime.cjs': { createLayaRuntime: () => options.laya } } : {})
+    // The app's one Laya runtime (#38). Without an override it is the real one: this build ships no model.
+    ...(options.laya ? { './laya.cjs': { ...require('../desktop/laya.cjs'), createLaya: () => options.laya } } : {})
   };
   vm.runInNewContext(source, {
     require: name => Object.hasOwn(overrides, name) ? overrides[name] : require(name.startsWith('.') ? path.join(root, 'desktop', name) : name),
@@ -120,7 +120,7 @@ test('untrusted autofill asks once per click with Allow once, Always allow, and 
   app.answer(async () => ({ response: 2 }));
   await app.request({ type: 'getFields', fields: ['firstName'] });
   assert.equal((await app.invoke('status')).autofillWithoutAsking, true);
-  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: true, trustedSites: [] });
+  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: true, trustedSites: [], layaEnabled: false });
   await app.request({ type: 'getFields', fields: ['firstName'] });
   assert.equal(app.prompts.length, 3, 'no dialog after Always allow');
 });
@@ -225,11 +225,11 @@ test('a late approval after lock and unlock is rejected', async () => {
 test('the trust switch round-trips through the renderer and resets for a new extension ID', async () => {
   const app = await desktop();
   assert.equal((await app.invoke('setAutofillTrust', true)).autofillWithoutAsking, true);
-  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: true, trustedSites: [] });
+  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: true, trustedSites: [], layaEnabled: false });
   await assert.rejects(app.invoke('setAutofillTrust', 'yes'), /Invalid setting/);
   await app.invoke('connectExtension', 'b'.repeat(32));
   assert.equal((await app.invoke('status')).autofillWithoutAsking, false);
-  assert.deepEqual(app.writes.at(-1).json, { extensionId: 'b'.repeat(32), autofillWithoutAsking: false, trustedSites: [] });
+  assert.deepEqual(app.writes.at(-1).json, { extensionId: 'b'.repeat(32), autofillWithoutAsking: false, trustedSites: [], layaEnabled: false });
   const untrusted = await desktop({ settings: { extensionId: 'c'.repeat(32), autofillWithoutAsking: true } });
   await assert.rejects(untrusted.request({ type: 'getFields', fields: ['firstName'] }), /changed/);
   assert.equal(untrusted.prompts.length, 1, 'trust only applies to the stored extension ID');
@@ -311,15 +311,17 @@ test('removing a trusted site stops field release; a locked vault cannot trust s
   assert.deepEqual(plain((await stored.invoke('status')).trustedSites), ['https://ok.example.org']);
 });
 
-// A stand-in for the Laya runtime (#38) with its exact interface. `scores(state)` plays the model.
+// A stand-in for desktop/laya.cjs (#38) with its exact interface. `scores(state)` plays the model.
 function stubLaya(scores = () => 0.01, state = 'ready', delayMs = 0) {
   const batches = [];
-  return { batches, status: () => ({ state }), decide: async () => { throw new Error('the desktop scores in batches'); },
+  const warms = [];
+  return { batches, warms, status: async () => ({ state, enabled: state !== 'off', sizeBytes: 1 }), decide: async () => { throw new Error('the desktop scores in batches'); },
     decideBatch: async items => {
       batches.push(items);
       if (delayMs) await new Promise(resolve => setTimeout(resolve, delayMs));
-      return items.map(item => ({ answers: { correct: { noul: scores(item.state) } } }));
-    } };
+      return items.map(item => { const noul = scores(item.state); return { answers: { correct: { type: 'noul', noul, confidence: Math.max(noul, 1 - noul) } } }; });
+    },
+    warm: async () => { warms.push(Date.now()); }, setEnabled: async () => {}, startDownload: async () => {}, cancelDownload: async () => {}, remove: async () => {}, close: async () => {} };
 }
 const box = { id: 'f0:sh-1-2', label: 'Where can we reach you by email?', type: 'email', options: [] };
 const sixty = { id: 'f0:sh-1-3', label: 'Is anyone in your household 60 or older?', type: 'radio', options: ['Yes', 'No'] };
@@ -414,7 +416,7 @@ test('Always allow on the answers prompt works like getFields’: it saves the s
   const allowed = await app.request(answerRequest([veteran]));
   assert.deepEqual(plain(allowed.answers), { 'f0:sh-1-4': 'No' });
   assert.equal((await app.invoke('status')).autofillWithoutAsking, true);
-  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'] });
+  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'], layaEnabled: false });
   assert.ok(allowed.accessRevision > before, 'earlier receipts are outdated');
   assert.equal(allowed.accessRevision, (await app.request({ type: 'status' })).accessRevision, 'the answers carry the new receipt');
   await app.request(answerRequest([veteran]));

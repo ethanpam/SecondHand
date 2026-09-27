@@ -6,18 +6,30 @@ const path = require('node:path');
 const fs = require('node:fs/promises');
 const { watch } = require('node:fs');
 const os = require('node:os');
-const { pathToFileURL } = require('node:url');
+const { pathToFileURL, URL } = require('node:url');
 const { Vault, atomicWrite, normalizeRecoveryKey, MAX_VAULT_BYTES } = require('./vault.cjs');
 const { startBridge, runNativeHost, nativeStreams, extensionFromOrigin, EXTENSION_ID, isIowaNavigationAuthorization } = require('./bridge.cjs');
 const { registerHost } = require('./registration.cjs');
 const { getExtensionSetup, prepareBundledExtension } = require('./extension-setup.cjs');
 const { testStoragePath } = require('./test-storage-path.cjs');
-const { createLayaRuntime } = require('./laya-runtime.cjs');
+const { createLaya } = require('./laya.cjs');
 const { createFieldSuggestions } = require('./field-suggestions.cjs');
 const { createFieldAnswers } = require('./field-answers.cjs');
 const { validateProfile, validateApplication, FIELD_LABELS, PORTAL_URL, isPortalUrl, siteOrigin } = require('../shared/schema.cjs');
 
 app.setName('SecondHand');
+// The step-by-step Chrome setup guide on SecondHand's website. During
+// development, SECONDHAND_WEBSITE_URL can point it at a local website.
+const EXTENSION_GUIDE_URL = 'https://secondhand-download.khoidoan00.chatgpt.site/chrome-extension';
+function extensionGuideUrl() {
+  const local = !app.isPackaged && process.env.SECONDHAND_WEBSITE_URL;
+  if (!local) return EXTENSION_GUIDE_URL;
+  try {
+    const url = new URL('/chrome-extension', local);
+    if (url.protocol === 'http:' || url.protocol === 'https:') return url.href;
+  } catch { /* Fall back to the published guide. */ }
+  return EXTENSION_GUIDE_URL;
+}
 const localAppData = process.platform === 'win32' ?
   (process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')) : app.getPath('appData');
 app.setPath('userData', testStoragePath() || (!app.isPackaged && process.env.SECONDHAND_USER_DATA ?
@@ -47,6 +59,7 @@ if (nativeOrigin) {
   let extensionSetupPending = false;
   let autofillWithoutAsking = false;
   let trustedSites = [];
+  let layaEnabled = false;
   // Released only after a named confirmation on sites other than Iowa's portal.
   const SENSITIVE_FIELDS = ['ssn', 'birthDate', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'assetsOnHand', 'monthlyMedicalExpenses'];
   const MAX_TRUSTED_SITES = 50;
@@ -54,6 +67,16 @@ if (nativeOrigin) {
   // access receipt matching a new process; six bytes leave ample safe-integer headroom.
   let accessRevision = crypto.randomBytes(6).readUIntBE(0, 6);
   const userData = app.getPath('userData');
+  // The app's one Laya runtime. Nothing is read, downloaded, or loaded until the person turns it
+  // on and a decision is asked for; desktop request handlers call laya.decide / laya.decideBatch.
+  const laya = createLaya({ userDataDir: userData, manifest: require('./laya-model.json'),
+    // A local export skips the SHA-256 pin, so only development builds accept one.
+    modelDir: !app.isPackaged && process.env.SECONDHAND_LAYA_MODEL_DIR ? path.resolve(process.env.SECONDHAND_LAYA_MODEL_DIR) : undefined });
+  // An unreadable Laya status is shown as an error; it must not keep the app from opening.
+  const layaStatus = () => laya.status().catch(error => ({ state: 'error', enabled: layaEnabled, message: `Laya’s status couldn’t be read (${error.message}).` }));
+  // The extension's uses of that runtime: matching text boxes (#39) and answering choice questions (#42).
+  const fieldSuggestions = createFieldSuggestions({ laya });
+  const fieldAnswers = createFieldAnswers({ laya });
   const vault = new Vault(path.join(userData, 'vault.secondhand'));
   const configPath = path.join(userData, 'settings.json');
   const deviceSecretPath = path.join(userData, 'device-reset.bin');
@@ -62,11 +85,7 @@ if (nativeOrigin) {
   const rendererUrl = pathToFileURL(rendererPath).href;
   const AUTO_LOCK_MS = 10 * 60 * 1000;
   const publicError = message => Object.assign(new Error(message), { publicMessage: message });
-  // Laya, the local AI that matches text boxes (#39) and answers choice questions (#42).
-  // Without a runtime, or while it is off or not downloaded, its requests answer "not ready".
-  const laya = createLayaRuntime({ userData });
-  const fieldSuggestions = laya ? createFieldSuggestions({ laya }) : null;
-  const fieldAnswers = laya ? createFieldAnswers({ laya }) : null;
+  // While Laya is off, not downloaded, or failing, the extension's Laya requests answer "not ready".
   const LAYA_STATES = ['off', 'unavailable', 'not-downloaded', 'downloading', 'ready', 'error'];
   const layaNotReady = () => Object.assign(publicError('Laya isn’t ready on this computer.'), { publicCode: 'LAYA_NOT_READY' });
   const validated = (validator, ...values) => {
@@ -95,7 +114,7 @@ if (nativeOrigin) {
     const details = await vault.inspect().catch(() => null);
     return { exists: await vault.exists(), unlocked: vault.unlocked, lockRevision, recoveryKey: Boolean(details?.recoveryKey),
       deviceReset: Boolean(details?.deviceReset) && await hasDeviceSecret(), deviceResetSupported, extensionId, autofillWithoutAsking, trustedSites: [...trustedSites],
-      bridgeRunning: Boolean(bridge), platform: process.platform,
+      bridgeRunning: Boolean(bridge), platform: process.platform, laya: await layaStatus(),
       extensionSetup: await getExtensionSetup(app).catch(() => ({ prepared: false, available: false })) };
   }
   function touch() {
@@ -115,7 +134,7 @@ if (nativeOrigin) {
     if (!vault.unlocked) throw publicError('Unlock SecondHand first.');
   }
   async function saveSettings() {
-    await atomicWrite(configPath, Buffer.from(JSON.stringify({ extensionId, autofillWithoutAsking, trustedSites })));
+    await atomicWrite(configPath, Buffer.from(JSON.stringify({ extensionId, autofillWithoutAsking, trustedSites, layaEnabled })));
   }
   async function saveExtensionRegistration(id) {
     accessRevision++;
@@ -129,10 +148,9 @@ if (nativeOrigin) {
     await saveSettings();
     return registration;
   }
-  // Laya's state for the extension's side panel. Nothing else about the model leaves the app.
-  function layaStatus() {
-    if (!laya) return { state: 'unavailable' };
-    const { state } = laya.status();
+  // Laya's state for the extension. Nothing else about the model leaves the app.
+  async function extensionLayaState() {
+    const { state } = await layaStatus();
     if (!LAYA_STATES.includes(state)) throw new Error(`Laya reported an unknown state: ${String(state)}`);
     return { state };
   }
@@ -171,7 +189,7 @@ if (nativeOrigin) {
   // option's text out, within the time the click has left. The facts sheet never leaves this app.
   // Matching needs no approval: its keys' values come through getFields, which asks.
   async function layaRequest(request, context) {
-    if (layaStatus().state !== 'ready') throw layaNotReady();
+    if ((await extensionLayaState()).state !== 'ready') throw layaNotReady();
     const iowa = isPortalUrl(request.url);
     const origin = siteOrigin(request.url);
     if (!iowa && !trustedSites.includes(origin)) throw publicError('This site isn’t trusted. Turn on SecondHand for it first.');
@@ -206,7 +224,7 @@ if (nativeOrigin) {
     }
   }
   async function bridgeRequest(request, context) {
-    if (request.type === 'status') return { unlocked: vault.unlocked, applicationCount: vault.unlocked ? vault.getData().applications.length : 0, accessRevision, laya: layaStatus() };
+    if (request.type === 'status') return { unlocked: vault.unlocked, applicationCount: vault.unlocked ? vault.getData().applications.length : 0, accessRevision, laya: await extensionLayaState() };
     if (request.type === 'showApp') {
       if (mainWindow) { if (mainWindow.isMinimized?.()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); }
       return { shown: true };
@@ -308,6 +326,20 @@ if (nativeOrigin) {
       catch (error) { throw publicError(/password|recovery key|already unlocked/.test(error.message) ? error.message : 'Could not reset your password. Please try again.'); }
       touch(); return status();
     },
+    // For someone who has lost both their password and recovery key: erase the
+    // saved information and the reset secret so a new password can be created.
+    // Chrome extension settings stay. The person must type the phrase.
+    async startOver(request) {
+      if (vault.unlocked) throw publicError('Lock SecondHand before starting over.');
+      if (typeof request?.confirmation !== 'string' || request.confirmation.trim().toLowerCase() !== 'start over') throw publicError('Type “start over” to confirm.');
+      accessRevision++;
+      try {
+        await vault.erase();
+        await fs.rm(deviceSecretPath, { force: true });
+      } catch { throw publicError('Could not erase your saved information. Please try again.'); }
+      finally { accessRevision++; }
+      return status();
+    },
     async replaceRecoveryKey() {
       requireUnlocked();
       let recoveryKey;
@@ -393,7 +425,28 @@ if (nativeOrigin) {
       await saveSettings();
       touch(); return status();
     },
+    layaStatus,
+    async setLayaEnabled(enabled) {
+      requireUnlocked();
+      if (typeof enabled !== 'boolean') throw publicError('Invalid setting.');
+      const current = await laya.status();
+      if (enabled && current.state === 'unavailable') throw publicError(current.message);
+      layaEnabled = enabled;
+      await laya.setEnabled(enabled);
+      await saveSettings();
+      // One click: turning Laya on starts its download. Progress and failures show in its status.
+      if (enabled && (await laya.status()).state === 'not-downloaded') laya.startDownload();
+      touch(); return layaStatus();
+    },
+    async downloadLaya() {
+      requireUnlocked();
+      try { laya.startDownload(); } catch (error) { throw publicError(error.message); }
+      touch(); return layaStatus();
+    },
+    async cancelLayaDownload() { requireUnlocked(); await laya.cancelDownload(); touch(); return layaStatus(); },
+    async removeLaya() { requireUnlocked(); await laya.remove(); touch(); return layaStatus(); },
     async openPortal() { await shell.openExternal(PORTAL_URL); return true; },
+    async openExtensionGuide() { await shell.openExternal(extensionGuideUrl()); return true; },
     async prepareExtension() {
       if (extensionSetupPending) throw publicError('Extension setup is already running.');
       extensionSetupPending = true;
@@ -485,8 +538,10 @@ if (nativeOrigin) {
     try {
       const stat = await fs.stat(configPath);
       if (stat.size <= 4096) { const config = JSON.parse(await fs.readFile(configPath, 'utf8')); if (EXTENSION_ID.test(config.extensionId || '')) { extensionId = config.extensionId; autofillWithoutAsking = config.autofillWithoutAsking === true; }
-      if (Array.isArray(config.trustedSites)) trustedSites = [...new Set(config.trustedSites.filter(origin => typeof origin === 'string' && siteOrigin(origin) === origin))].slice(0, MAX_TRUSTED_SITES); }
+      if (Array.isArray(config.trustedSites)) trustedSites = [...new Set(config.trustedSites.filter(origin => typeof origin === 'string' && siteOrigin(origin) === origin))].slice(0, MAX_TRUSTED_SITES);
+      layaEnabled = config.layaEnabled === true; }
     } catch { /* Missing or invalid non-sensitive setup settings are reset. */ }
+    await laya.setEnabled(layaEnabled);
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     session.defaultSession.setPermissionCheckHandler(() => false);
     session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (_details, callback) => callback({ cancel: true }));
@@ -508,6 +563,6 @@ if (nativeOrigin) {
     if (quitting) return;
     event.preventDefault(); quitting = true;
     clearTimeout(lockTimer);
-    Promise.allSettled([vault.lock(), bridge?.close()]).then(() => app.quit());
+    Promise.allSettled([vault.lock(), bridge?.close(), laya.close()]).then(() => app.quit());
   });
 }

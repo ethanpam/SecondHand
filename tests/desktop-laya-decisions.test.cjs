@@ -31,10 +31,11 @@ test('the best candidate is used only when it clears the bar, beats "the facts d
 
 test('scores come from one batch per decision with the trained question, and anything unreadable fails loudly', async () => {
   const calls = [];
-  const laya = { decideBatch: async items => { calls.push(items); return items.map((_, index) => ({ answers: { correct: { noul: index / 10 } } })); } };
+  const laya = { decideBatch: async items => { calls.push(items); return items.map((_, index) => ({ answers: { correct: { type: 'noul', noul: index / 10, confidence: Math.max(index / 10, 1 - index / 10) } } })); } };
   assert.deepEqual(await score(laya, [{ question: 'Q', candidate: 'A' }, { question: 'Q', candidate: 'B' }]), [0, 0.1]);
   assert.deepEqual(calls, [[{ state: { question: 'Q', candidate: 'A' }, questions: QUESTIONS }, { state: { question: 'Q', candidate: 'B' }, questions: QUESTIONS }]]);
-  for (const reply of [[], [{ answers: { correct: { noul: 1.2 } } }], [{ answers: { correct: { noul: 'high' } } }], [{ answers: {} }], [null], 'no']) {
+  for (const reply of [[], [{ answers: { correct: { type: 'noul', noul: 1.2, confidence: 1.2 } } }], [{ answers: { correct: { type: 'noul', noul: 'high' } } }],
+    [{ answers: { correct: { type: 'choice', choice: 'yes', probabilities: { yes: 0.9, no: 0.1 }, confidence: 0.5 } } }], [{ answers: {} }], [null], 'no']) {
     const broken = { decideBatch: async () => reply };
     await assert.rejects(score(broken, [{ question: 'Q', candidate: 'A' }]), /Laya/, JSON.stringify(reply));
   }

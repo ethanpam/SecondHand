@@ -66,6 +66,101 @@ async function inspectWordmark(page) {
   console.log('React Bits wordmark, shared pause, reduced motion, and branding passed.');
 }
 
+async function inspectStaticDemo(page) {
+  await expect(page.locator('#closing-heading')).toHaveAccessibleName('Ready for less typing?');
+  await expect(page.locator('.text-type__content')).toHaveText('Ready for less typing?');
+  await expect(page.locator('.text-type')).toHaveAttribute('data-running', 'false');
+  await expect(page.locator('.text-type__cursor')).toBeHidden();
+  await expect(page.locator('.autofill-demo')).toHaveAttribute('data-phase', 'complete');
+  await expect(page.locator('.autofill-demo')).toHaveAttribute('data-running', 'false');
+  await expect(page.locator('.autofill-field[data-filled="true"]')).toHaveCount(3);
+  await expect(page.locator('.autofill-cursor')).toBeHidden();
+  await expect(page.locator('.autofill-demo input, .autofill-demo form')).toHaveCount(0);
+}
+
+async function inspectClosingMotion(page) {
+  await page.goto(site, { waitUntil: 'networkidle' });
+  const heading = page.locator('#closing-heading');
+  const text = page.locator('.text-type');
+  const content = page.locator('.text-type__content');
+  const demo = page.locator('.autofill-demo');
+  const replay = page.getByRole('button', { name: 'Replay demo' });
+  await expect(text).toHaveAttribute('data-running', 'false');
+  await expect(demo).toHaveAttribute('data-running', 'false');
+  await demo.evaluate(element => {
+    const samples = [];
+    function record() {
+      const phase = element.dataset.phase;
+      if (samples.at(-1)?.[0] !== phase) samples.push([phase, element.querySelectorAll('[data-filled="true"]').length]);
+    }
+    const observer = new MutationObserver(record);
+    observer.observe(element, { attributes: true, subtree: true });
+    record();
+    element.motionProbe = { samples, observer };
+  });
+  await page.locator('.closing-section').evaluate(element => element.scrollIntoView({ behavior: 'instant', block: 'start' }));
+  await expect(text).toHaveAttribute('data-running', 'true');
+  await expect(demo).toHaveAttribute('data-running', 'true');
+  await expect(heading).toHaveAccessibleName('Ready for less typing?');
+  const headingSize = await heading.boundingBox();
+  await expect.poll(async () => (await content.innerText()).length).toBeGreaterThan(0);
+  assert.ok((await content.innerText()).length < 'Ready for\nless typing?'.length, 'The heading must type, not appear in one frame');
+  await expect(demo).toHaveAttribute('data-phase', 'complete');
+  const stages = await demo.evaluate(element => {
+    element.motionProbe.observer.disconnect();
+    return element.motionProbe.samples;
+  });
+  assert.deepEqual(stages, [['approach', 0], ['click', 0], ['name', 1], ['email', 2], ['city', 3], ['complete', 3]], 'Approval must precede fields filling one at a time');
+  await expect(content).toHaveText('Ready for less typing?');
+  await expect(text).toHaveAttribute('data-deleting', 'true');
+  await expect.poll(async () => (await content.innerText()).length).toBeLessThan('Ready for\nless typing?'.length);
+  assert.deepEqual(await heading.boundingBox(), headingSize, 'Typing and deleting must not shift the heading layout');
+  await expect(heading).toHaveAccessibleName('Ready for less typing?');
+  await expect(demo).toHaveAttribute('data-phase', 'approach');
+
+  await page.getByRole('button', { name: 'Pause all animations' }).click();
+  await inspectStaticDemo(page);
+  await expect(replay).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Play animations', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.screenshot({ path: path.join(artifacts, 'text-type-desktop.png') });
+  await page.getByRole('button', { name: 'Play all animations' }).click();
+  await replay.focus();
+  await replay.press('Enter');
+  await expect(replay).toBeFocused();
+  await expect(demo).toHaveAttribute('data-phase', 'approach');
+  await expect(page.locator('.autofill-field[data-filled="true"]')).toHaveCount(0);
+  await expect(demo).toHaveAttribute('data-phase', 'complete');
+
+  async function assertSuspended() {
+    await expect(text).toHaveAttribute('data-running', 'false');
+    await expect(demo).toHaveAttribute('data-running', 'false');
+    const previousText = await content.innerText();
+    const previousPhase = await demo.getAttribute('data-phase');
+    assert.equal(await page.locator('.text-type__cursor').evaluate(element => getComputedStyle(element).animationPlayState), 'paused');
+    await page.waitForTimeout(500);
+    assert.equal(await content.innerText(), previousText);
+    assert.equal(await demo.getAttribute('data-phase'), previousPhase);
+  }
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await assertSuspended();
+  await page.evaluate(() => {
+    delete document.visibilityState;
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect(text).toHaveAttribute('data-running', 'true');
+  await page.locator('.hero').evaluate(element => element.scrollIntoView({ behavior: 'instant' }));
+  await assertSuspended();
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await inspectStaticDemo(page);
+  await expect(replay).toHaveCount(0);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  console.log('Text Type and click-to-autofill: typing/deleting, stable layout, field sequence, replay, shared pause, reduced motion, and visibility suspension passed.');
+}
+
 async function main() {
   await fs.mkdir(artifacts, { recursive: true });
   const browser = await chromium.launch({ channel: process.env.SECONDHAND_BROWSER_CHANNEL || undefined });
@@ -114,6 +209,7 @@ async function main() {
     await expect.poll(() => page.locator('.gradient-canvas[data-paper-shader]').evaluate(element => element.paperShaderMount.currentSpeed)).toBe(0);
     console.log('Shader rendering, pause/play, reduced motion, and offscreen suspension passed.');
     await inspectWordmark(page);
+    await inspectClosingMotion(page);
 
     await page.getByRole('tab', { name: 'Windows', exact: true }).click();
     await page.getByRole('tab', { name: 'Windows', exact: true }).press('ArrowRight');
@@ -175,6 +271,7 @@ async function main() {
       await mobile.setViewportSize({ width, height: 844 });
       await inspectLayout(mobile);
       await inspectHeroLayout(mobile);
+      await inspectStaticDemo(mobile);
     }
     await mobile.setViewportSize({ width: 390, height: 844 });
     await mobile.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Privacy', exact: true }).click();
@@ -209,6 +306,7 @@ async function main() {
     await expect(staticPage.getByRole('heading', { level: 1 })).toBeVisible();
     await inspectHeroLayout(staticPage);
     await inspectLayout(staticPage);
+    await inspectStaticDemo(staticPage);
     await expect(staticPage.getByRole('link', { name: 'Download for Windows' })).toBeAttached();
     await staticPage.route('**/download/**', route => route.fulfill({
       status: 200,

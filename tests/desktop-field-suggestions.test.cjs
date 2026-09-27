@@ -4,17 +4,17 @@ const assert = require('node:assert/strict');
 const { createFieldSuggestions } = require('../desktop/field-suggestions.cjs');
 const { ABSTAIN, QUESTIONS, MATCH_CANDIDATES, NEVER_SUGGESTED, matchState } = require('../shared/laya-prompts.cjs');
 
-// A stand-in for the Laya runtime (#38) with its exact interface. `scores(question, candidate)`
+// A stand-in for desktop/laya.cjs (#38) with its exact decision interface. `scores(question, candidate)`
 // plays the model; every batch it is asked is recorded.
 function stubLaya(scores = () => 0.01) {
   const batches = [];
   return {
     batches,
-    status: () => ({ state: 'ready' }),
+    status: async () => ({ state: 'ready', enabled: true, sizeBytes: 1 }),
     decide: async () => { throw new Error('field suggestions score in batches'); },
     decideBatch: async items => {
       batches.push(items);
-      return items.map(({ state }) => ({ answers: { correct: { noul: scores(state.question, state.candidate) } } }));
+      return items.map(({ state }) => { const noul = scores(state.question, state.candidate); return { answers: { correct: { type: 'noul', noul, confidence: Math.max(noul, 1 - noul) } } }; });
     }
   };
 }
@@ -60,7 +60,7 @@ test('sensitive saved fields are never candidates, and consent, signature, and S
 
 test('Laya not ready fails the whole request with its code; a timeout or the three-second budget leaves the rest to the applicant', async () => {
   const notReady = Object.assign(new Error('Laya is off.'), { code: 'LAYA_NOT_READY' });
-  const off = { status: () => ({ state: 'off' }), decide: async () => { throw notReady; }, decideBatch: async () => { throw notReady; } };
+  const off = { status: async () => ({ state: 'off', enabled: false }), decide: async () => { throw notReady; }, decideBatch: async () => { throw notReady; } };
   await assert.rejects(createFieldSuggestions({ laya: off }).suggest([field('a', 'Email')], BUDGET), error => error.code === 'LAYA_NOT_READY');
 
   let calls = 0;

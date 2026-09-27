@@ -20,9 +20,11 @@ const BUDGET_MS = 3000;
 async function score(laya, states) {
   const results = await laya.decideBatch(states.map(state => ({ state, questions: QUESTIONS })));
   if (!Array.isArray(results) || results.length !== states.length) throw new Error('Laya returned the wrong number of answers.');
+  // Each answer is desktop/laya.cjs's { type: 'noul', noul, confidence }; noul is the probability.
   return results.map(result => {
-    const probability = result?.answers?.correct?.noul;
-    if (typeof probability !== 'number' || !Number.isFinite(probability) || probability < 0 || probability > 1) throw new Error('Laya returned an unreadable score.');
+    const answer = result?.answers?.correct;
+    const probability = answer?.noul;
+    if (answer?.type !== 'noul' || typeof probability !== 'number' || !Number.isFinite(probability) || probability < 0 || probability > 1) throw new Error('Laya returned an unreadable score.');
     return probability;
   });
 }

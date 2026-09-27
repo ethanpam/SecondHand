@@ -8,11 +8,14 @@ import {
   ExternalIcon,
   LockIcon,
 } from './icons';
+import Link from 'next/link';
 import { GradientBackground } from './gradient-background';
 import { faq } from './faq';
 import { release } from './release';
 import { SiteFooter, SiteHeader } from './site-chrome';
 import { MotionProvider, MotionToggle } from './site-motion';
+import { TextType } from './text-type';
+import { AutofillDemo } from './autofill-demo';
 
 const platforms = [
   { id: 'windows', label: 'Windows' },
@@ -291,8 +294,9 @@ export function Home() {
                     </p>
                     <p className="small-note">
                       Forgot your password? Use the recovery key, or reset it on
-                      the same computer if you left that option on. There’s no
-                      online account. You can also export an encrypted backup
+                      the same computer if you left that option on. If you have
+                      neither, you can start over with a new password. There’s
+                      no online account. You can also export an encrypted backup
                       from the app.
                     </p>
                   </div>
@@ -314,6 +318,11 @@ export function Home() {
                       address bar. Turn on <strong>Developer mode</strong>,
                       choose <strong>Load unpacked</strong>, and select that
                       folder.
+                    </p>
+                    <p>
+                      <Link href="/chrome-extension">
+                        See each step with pictures
+                      </Link>
                     </p>
                     <details>
                       <summary>Finding the folder on Windows or Mac</summary>
@@ -445,10 +454,9 @@ export function Home() {
               aria-labelledby="closing-heading"
             >
               <h2 id="closing-heading">
-                Ready for
-                <br />
-                less typing?
+                <TextType text={'Ready for\nless typing?'} />
               </h2>
+              <AutofillDemo />
               <a className="primary-link" href="#downloads">
                 Download SecondHand <ArrowIcon />
               </a>
