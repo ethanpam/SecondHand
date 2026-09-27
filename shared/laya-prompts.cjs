@@ -15,13 +15,13 @@ const TEXT_TYPES = Object.freeze(['text', 'textarea', 'number', 'date', 'email',
 const CHOICE_TYPES = Object.freeze(['radio', 'select', 'checkbox']);
 
 // Saved values a text box can hold: the matching task's candidates, in training order.
-const MATCH_KEYS = Object.freeze(['firstName', 'middleName', 'lastName', 'fullName', 'suffix', 'birthDate', 'ssn', 'email', 'phone', 'addressLine1', 'addressLine2',
+const MATCH_KEYS = Object.freeze(['firstName', 'middleName', 'lastName', 'fullName', 'suffix', 'birthDate', 'email', 'phone', 'addressLine1', 'addressLine2',
   'city', 'state', 'zip', 'county', 'householdSize', 'householdAdults', 'householdChildren', 'householdSeniors', 'totalMonthlyIncome', 'annualIncome', 'monthlyRent',
   'monthlyUtilities', 'assetsOnHand', 'monthlyMedicalExpenses']);
 // How each candidate is described to the model: extension/ai-mapper.js's words for the key.
 const KEY_ABOUT = Object.freeze({
   firstName: 'first (given) name', middleName: 'middle name or initial', lastName: 'last (family) name', fullName: 'whole name in one box',
-  suffix: 'name suffix such as Jr. or III', birthDate: 'date of birth', ssn: 'Social Security number', email: 'email address', phone: 'phone number',
+  suffix: 'name suffix such as Jr. or III', birthDate: 'date of birth', email: 'email address', phone: 'phone number',
   addressLine1: 'street address', addressLine2: 'apartment, unit, or suite', city: 'city or town', state: 'state', zip: 'ZIP or postal code', county: 'county',
   householdSize: 'number of people in the household', householdAdults: 'number of adults in the household', householdChildren: 'number of children in the household',
   householdSeniors: 'number of seniors (65 or older) in the household', totalMonthlyIncome: 'total household income per month', annualIncome: 'total household income per year',
