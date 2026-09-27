@@ -81,16 +81,13 @@
     let working = false;
     let outdated = false;
     let ai = { note: null, reason: '' };
-    let cursor = 0;
     let pollTimer;
     // The page's language, checked once per page: the widget offers the translated view when it differs.
     let pageLanguage = '';
     let languageChecked = false;
     let languageTrouble = null;
-    // The first key point the side panel wrote for this page, as the worker keeps it for the tab, and
-    // whether the page's content script has made the widget a row taller for it.
-    let summaryLine = null;
-    let lineRoom = false;
+    // Whether the page's content script has made the widget a row taller for a message.
+    let roomy = false;
     const AI_TIMEOUT_MS = 8000;
     // An outdated worker keeps its reload steps on screen and is not polled again.
     const trouble = error => { if (error.outdated) outdated = true; return problem(error); };
@@ -100,17 +97,19 @@
       if (working) return t('widget.working');
       if (note) return words(note, 120);
       if (!result) return languageTrouble ? t('widget.languageCheckFailed') : site ? t('widget.siteReady', { host: hostOf(site.origin) }) : t('widget.iowaReady');
-      // Other sites: the need-you link carries the count, so it isn't repeated here.
+      // Say how many answers still need the reader; the side panel's checklist lists them.
+      const needs = fieldKeys(result.needYou).length;
+      const needYou = needs ? t('widget.needYou', { count: needs }) : '';
       if (result.state === 'done' && result.pageKey === 'general') {
         const filled = Number(result.filled) || 0;
         const guessed = Number(result.guessed) || 0;
-        const summary = filled > 0 ? (guessed > 0 ? t('widget.filledGuessed', { count: filled, guessed }) : t('widget.filled', { count: filled }))
-          : fieldKeys(result.needYou).length ? t('widget.nothingMatches') : words(fromResult(result), 120);
+        const summary = filled > 0 ? [guessed > 0 ? t('widget.filledGuessed', { count: filled, guessed }) : t('widget.filled', { count: filled }), needYou].filter(Boolean).join(' · ')
+          : needs ? t('widget.nothingMatches') : words(fromResult(result), 120);
         return ai.note ? `${summary.replace(/\.$/, '')} · ${words(ai.note)}` : summary;
       }
       if (result.state === 'done') {
         const todo = words({ key: result.todoKey, params: result.todoParams, text: result.todo }, 90);
-        return [t('widget.filled', { count: Number(result.filled) || 0 }), todo].filter(Boolean).join(' · ');
+        return [t('widget.filled', { count: Number(result.filled) || 0 }), todo || needYou].filter(Boolean).join(' · ');
       }
       return words(fromResult(result), 120);
     }
@@ -123,28 +122,28 @@
       $('autofill').hidden = autopilot || locked;
       $('unlock').hidden = autopilot || !locked;
       $('autofill').disabled = working;
-      const needYou = ['done', 'waiting'].includes(result?.state) ? fieldKeys(result.needYou) : [];
-      $('need-you').hidden = outdated || !needYou.length;
-      $('need-you').textContent = t('widget.needYou', { count: needYou.length });
       $('widget-text').textContent = statusText();
       $('autofill').title = site ? t('widget.autofillSiteTitle') : t('widget.autofillIowaTitle');
       const details = [hasMessage(result) ? words(fromResult(result)) : '', ai.note ? words(ai.note) : '', ai.reason, fixedText(languageTrouble?.message, 160)];
       $('widget-text').title = outdated ? t('panel.outdated') : fixedText(details.filter(Boolean).join(' '), 240);
-      $('translate-offer').hidden = outdated || !known || !pageLanguage || pageLanguage === language;
-      // One line of the page's key points, once the side panel has written them in this language.
-      const line = !outdated && summaryLine?.language === language ? summaryLine : null;
-      $('summary-line').hidden = !line;
-      $('summary-line').textContent = line ? t(line.english ? 'summary.widgetLineEnglish' : 'summary.widgetLine', { point: fixedText(line.point, 200) }) : '';
-      if (Boolean(line) !== lineRoom) makeRoom(Boolean(line));
+      // The status is always read to screen readers, but shown only when the reader must act:
+      // a problem, an unlock or CAPTCHA step, answers still to give, or an outdated extension.
+      // Otherwise the widget is just the logo and its button; the button's title keeps the
+      // Iowa address disclosure.
+      const unfinished = result?.state === 'done' && (fieldKeys(result.needYou).length > 0 || Boolean(result.todo || result.todoKey) || !(Number(result.filled) > 0));
+      const message = outdated || Boolean(note) || ['error', 'waiting', 'offline'].includes(result?.state) || unfinished;
+      $('widget-text').classList.toggle('visually-hidden', !message);
+      $('translate-offer').hidden = outdated || message || !known || !pageLanguage || pageLanguage === language;
+      // An outdated worker is not asked for anything more; its steps fit the compact widget.
+      const room = message || !$('translate-offer').hidden;
+      if (!outdated && room !== roomy) makeRoom(room);
     }
     // The widget can't size its own frame: the worker asks this tab's content script for the row.
     async function makeRoom(line) {
-      lineRoom = line;
+      roomy = line;
       try { await send({ type: 'ui:widgetSize', line }); }
       catch (error) { note = trouble(error); render(); }
     }
-    const lineOf = value => value && strings.LANGUAGES.includes(value.language) && typeof value.point === 'string' && value.point.trim()
-      ? { language: value.language, point: value.point, english: value.english === true } : null;
     async function poll() {
       clearTimeout(pollTimer);
       if (outdated) return;
@@ -158,7 +157,6 @@
           // While autofill runs, the worker moves ahead between polls. Otherwise keep
           // this widget's own result and adopt the worker's only after a reload.
           if (autopilot || !result) result = state?.result || result;
-          summaryLine = lineOf(state?.summary);
           note = null;
         } catch (error) { note = trouble(error); }
         render();
@@ -205,7 +203,6 @@
           else if (Object.keys(answer.mapping).length) request.guesses = answer.mapping;
         }
         result = await send(request);
-        cursor = 0;
         autopilot = continuing(result);
       } catch (error) { const shown = trouble(error); result = { state: 'error', message: error.message, messageKey: shown.key, messageParams: shown.params }; autopilot = false; }
       finally { working = false; render(); }
@@ -215,17 +212,6 @@
       catch (error) { note = trouble(error); }
       render();
     }));
-    $('need-you').addEventListener('click', trusted(async () => {
-      const needYou = fieldKeys(result?.needYou);
-      if (!needYou.length) return;
-      const key = needYou[cursor % needYou.length];
-      cursor++;
-      try {
-        const focused = await send({ type: 'ui:focusField', key, confirmed: true });
-        note = focused?.focused ? null : { key: site ? 'widget.findInForm' : 'widget.findInIowa' };
-      } catch (error) { note = trouble(error); }
-      render();
-    }));
     $('unlock').addEventListener('click', trusted(async () => {
       try {
         await send({ type: 'ui:showApp', confirmed: true });
@@ -233,8 +219,9 @@
       } catch (error) { note = trouble(error); }
       render();
     }));
-    // Send immediately inside the trusted click: Chrome needs the user gesture to open the panel.
-    for (const id of ['details', 'pill', 'summary-line']) {
+    // The logo, like the pill, opens the side panel. Send immediately inside the trusted click:
+    // Chrome needs the user gesture to open the panel.
+    for (const id of ['details', 'pill']) {
       $(id).addEventListener('click', trusted(() => {
         send({ type: 'ui:openPanel', confirmed: true }).catch(error => { note = trouble(error); render(); });
       }));

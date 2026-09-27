@@ -30,7 +30,7 @@
       panelHost.setAttribute('data-secondhand-size', 'full');
       for (const [property, value] of Object.entries({
         all: 'initial', position: 'fixed', right: '12px', bottom: '16px', display: 'block',
-        width: 'min(272px, calc(100vw - 24px))', height: '70px',
+        width: 'min(272px, calc(100vw - 24px))', height: '46px',
         'z-index': '2147483647', margin: '0', padding: '0', border: '0',
         'border-radius': '14px', 'box-shadow': '0 12px 42px #17342235',
         'color-scheme': 'light', isolation: 'isolate'
@@ -114,7 +114,7 @@
         respond({ lang: document.documentElement.lang || '', questions: listed.map(({ id, label }) => ({ id, label })) });
       } else if (message.type === 'secondhand:widgetSize' && typeof message.line === 'boolean' && window === window.top) {
         // One row taller while the widget shows a line of the page's key points.
-        if (panelHost) panelHost.style.setProperty('height', message.line ? '86px' : '70px', 'important');
+        if (panelHost) panelHost.style.setProperty('height', message.line ? '86px' : '46px', 'important');
         respond({ sized: Boolean(panelHost) });
       } else if (message.type === 'secondhand:generic:pageText') {
         // This frame's own words for the side panel's summary, and the language it declares. Never form values.

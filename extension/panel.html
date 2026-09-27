@@ -14,22 +14,16 @@
 </head>
 <body>
   <section id="launcher" hidden>
+    <!-- The logo (which opens the side panel) and one button. A line appears below only when the reader must act. -->
     <div id="widget" class="widget">
-      <img class="brand" src="icon-128.png" alt="">
-      <div class="widget-body">
-        <div class="widget-row">
-          <button id="autofill" class="widget-primary" type="button" data-i18n="widget.autofill" data-i18n-title="widget.autofillIowaTitle"></button>
-          <button id="unlock" class="widget-primary" type="button" data-i18n="widget.unlock" hidden></button>
-          <button id="stop" class="widget-primary" type="button" data-i18n="widget.stop" hidden></button>
-          <button id="details" class="widget-link" type="button" data-i18n="widget.details" data-i18n-title="widget.detailsTitle"></button>
-        </div>
-        <div class="widget-row">
-          <span id="widget-text" role="status" aria-live="polite" data-i18n="widget.iowaReady"></span>
-          <button id="need-you" class="widget-link" type="button" hidden></button>
-          <button id="translate-offer" class="widget-link" type="button" data-i18n="widget.offer" data-i18n-title="widget.offerTitle" hidden></button>
-        </div>
-        <button id="summary-line" class="widget-link widget-summary" type="button" data-i18n-title="summary.widgetTitle" hidden></button>
+      <div class="widget-row">
+        <button id="details" class="widget-logo" type="button" data-i18n-title="widget.detailsTitle" data-i18n-aria-label="widget.detailsTitle"><img class="brand" src="icon-128.png" alt=""></button>
+        <button id="autofill" class="widget-primary" type="button" data-i18n="widget.autofill" data-i18n-title="widget.autofillIowaTitle"></button>
+        <button id="unlock" class="widget-primary" type="button" data-i18n="widget.unlock" hidden></button>
+        <button id="stop" class="widget-primary" type="button" data-i18n="widget.stop" hidden></button>
       </div>
+      <p id="widget-text" class="visually-hidden" role="status" aria-live="polite" data-i18n="widget.iowaReady"></p>
+      <button id="translate-offer" class="widget-link" type="button" data-i18n="widget.offer" data-i18n-title="widget.offerTitle" hidden></button>
     </div>
     <button id="pill" class="pill" type="button" data-i18n-title="widget.pillTitle" hidden><img class="brand" src="icon-128.png" alt=""></button>
   </section>

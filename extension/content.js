@@ -12,7 +12,7 @@
   let panelHost = null;
   let panelFrame = null;
   let generalUrl = ''; // the unverified page where the general engine found fields
-  let summaryRow = false; // the widget shows a line of the page's key points, one row taller
+  let messageRow = false; // the widget shows a line the reader must act on, one row taller
   const strings = value => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
 
   function withOwnPanelHidden(work) {
@@ -36,7 +36,7 @@
     } catch { full = false; }
     panelHost.setAttribute('data-secondhand-size', full ? 'full' : 'pill');
     panelHost.style.setProperty('width', full ? 'min(272px, calc(100vw - 24px))' : '46px', 'important');
-    panelHost.style.setProperty('height', full ? (summaryRow ? '86px' : '70px') : '46px', 'important');
+    panelHost.style.setProperty('height', full ? (messageRow ? '86px' : '46px') : '46px', 'important');
   }
 
   function ensurePanel() {
@@ -195,7 +195,7 @@
       } else if (message.type === 'secondhand:pageText') {
         respond(withOwnPanelHidden(pageText));
       } else if (message.type === 'secondhand:widgetSize' && typeof message.line === 'boolean') {
-        summaryRow = message.line;
+        messageRow = message.line;
         if (panelHost) sizePanel();
         respond({ sized: Boolean(panelHost) });
       } else if (message.type === 'secondhand:generic:focus' && typeof message.id === 'string' && engine) {
