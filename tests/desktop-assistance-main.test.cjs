@@ -118,7 +118,7 @@ test('untrusted autofill asks once per click with Allow once, Always allow, and 
   app.answer(async () => ({ response: 2 }));
   await app.request({ type: 'getFields', fields: ['firstName'] });
   assert.equal((await app.invoke('status')).autofillWithoutAsking, true);
-  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: true, trustedSites: [] });
+  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: true, trustedSites: [], layaEnabled: false });
   await app.request({ type: 'getFields', fields: ['firstName'] });
   assert.equal(app.prompts.length, 3, 'no dialog after Always allow');
 });
@@ -223,11 +223,11 @@ test('a late approval after lock and unlock is rejected', async () => {
 test('the trust switch round-trips through the renderer and resets for a new extension ID', async () => {
   const app = await desktop();
   assert.equal((await app.invoke('setAutofillTrust', true)).autofillWithoutAsking, true);
-  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: true, trustedSites: [] });
+  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: true, trustedSites: [], layaEnabled: false });
   await assert.rejects(app.invoke('setAutofillTrust', 'yes'), /Invalid setting/);
   await app.invoke('connectExtension', 'b'.repeat(32));
   assert.equal((await app.invoke('status')).autofillWithoutAsking, false);
-  assert.deepEqual(app.writes.at(-1).json, { extensionId: 'b'.repeat(32), autofillWithoutAsking: false, trustedSites: [] });
+  assert.deepEqual(app.writes.at(-1).json, { extensionId: 'b'.repeat(32), autofillWithoutAsking: false, trustedSites: [], layaEnabled: false });
   const untrusted = await desktop({ settings: { extensionId: 'c'.repeat(32), autofillWithoutAsking: true } });
   await assert.rejects(untrusted.request({ type: 'getFields', fields: ['firstName'] }), /changed/);
   assert.equal(untrusted.prompts.length, 1, 'trust only applies to the stored extension ID');
