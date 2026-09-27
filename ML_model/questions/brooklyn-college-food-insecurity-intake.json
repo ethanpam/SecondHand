@@ -1,0 +1,28 @@
+{
+  "source": {
+    "url": "https://form.jotform.com/220655704608052",
+    "title": "Food Insecurity Intake Form",
+    "kind": "jotform",
+    "retrieved": "2026-09-26",
+    "region": "Brooklyn, NY"
+  },
+  "questions": [
+    {"id":"q1","label":"First Name","type":"text","options":[],"rule":{"name":"field","key":"firstName"},"note":"First box of \"Enter your first and last name as it appears in CUNYFirst\"."},
+    {"id":"q2","label":"Last Name","type":"text","options":[],"rule":{"name":"field","key":"lastName"},"note":"Second box of \"Enter your first and last name as it appears in CUNYFirst\"."},
+    {"id":"q3","label":"EMPLID","type":"number","options":[],"rule":{"name":"none"},"note":"A CUNY student ID; not in the profile."},
+    {"id":"q4","label":"Email","type":"email","options":[],"rule":{"name":"field","key":"email"}},
+    {"id":"q5","label":"Phone","type":"tel","options":[],"rule":{"name":"field","key":"phone"}},
+    {"id":"q6","label":"Preferred Contact Method","type":"select","options":["Email","Phone"],"rule":{"name":"none"}},
+    {"id":"q7","label":"# of Adults","type":"text","options":[],"rule":{"name":"none"},"note":"Adults of any age; the profile counts adults 18-64 and seniors 65+ separately. Proposed rule: adultsAll (18 and older)."},
+    {"id":"q8","label":"How many are Brooklyn College students?","type":"text","options":[],"rule":{"name":"none"}},
+    {"id":"q9","label":"# of Children 0-5 years old","type":"text","options":[],"rule":{"name":"none"},"note":"The profile counts children under 18, not ages 0-5."},
+    {"id":"q10","label":"# of Children 6-18 years old","type":"text","options":[],"rule":{"name":"none"},"note":"Ages 6-18 is not a band the profile counts."},
+    {"id":"q11","label":"Student Status:","type":"radio","options":["Undergraduate","Graduate","Feirstein Graduate"],"rule":{"name":"none"}},
+    {"id":"q12","label":"Assistance/Information Needed:","type":"checkbox","options":["Fresh Food: periodic produce offerings","Food Pantry: a wide variety of fruit, veggies, grains, proteins, and toiletries (pickup available twice a month)","Food Vouchers: $10 vouchers, based on availability at BK Campus Eats, Ovi's Place, Jupioca, or Brooklyn's Best Eats","External Food: grocery store gift cards to Key Food, Food Emporium, Food Universe, SuperFresh, Food Dynasty (pickup based on availability)","Social Services: meet with a social worker for help with housing, health insurance, and other resources"],"rule":{"name":"none"}},
+    {"id":"q13","label":"Current Source of Income/Resources:","type":"checkbox","options":["Financial Aid","Family Support","On-Campus Job","Off-Campus Job","Other Support"],"rule":{"name":"none"}},
+    {"id":"q14","label":"Do you or anyone in your family receive Cash Assistance through NYC Human Resources Administration (HRA)? (This information will only be shared with CUNY EDGE, an office in 1163 Boylan Hall that provides additional support to students with active Cash Assistance cases.)","type":"radio","options":["Yes","No","I don't know"],"rule":{"name":"none"},"note":"Asks about current cash assistance, not an application."},
+    {"id":"q15","label":"How did you hear about the Brooklyn College food assistance program? If you were referred, please list the name of the person or campus department that made the referral.","type":"textarea","options":[],"rule":{"name":"none"}},
+    {"id":"q16","label":"Signature","type":"text","options":[],"rule":{"name":"never"},"note":"Signature pad."},
+    {"id":"q17","label":"Date","type":"date","options":[],"rule":{"name":"never"},"note":"The date next to the signature."}
+  ]
+}

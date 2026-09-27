@@ -1,0 +1,34 @@
+{
+  "source": {
+    "url": "https://form.jotform.com/252648663520157",
+    "title": "2026 Food Pantry Pick-Up Request Form (New Client)",
+    "kind": "jotform",
+    "retrieved": "2026-09-26",
+    "region": "Wichita, KS"
+  },
+  "questions": [
+    {"id":"q1","label":"Are You a New Client of the Food Pantry?","type":"radio","options":["YES","NO"],"rule":{"name":"none"}},
+    {"id":"q2","label":"First Name","type":"text","options":[],"rule":{"name":"field","key":"firstName"},"note":"First box of \"Name (Primary)\"."},
+    {"id":"q3","label":"Last Name","type":"text","options":[],"rule":{"name":"field","key":"lastName"},"note":"Second box of \"Name (Primary)\"."},
+    {"id":"q4","label":"Date of Birth (Primary)","type":"date","options":[],"rule":{"name":"field","key":"birthDate"}},
+    {"id":"q5","label":"Phone Number (Primary)","type":"tel","options":[],"rule":{"name":"field","key":"phone"}},
+    {"id":"q6","label":"Additional Phone Number (Primary)","type":"tel","options":[],"rule":{"name":"none"},"note":"A second phone number; the profile saves one phone."},
+    {"id":"q7","label":"Email (Primary)","type":"email","options":[],"rule":{"name":"field","key":"email"}},
+    {"id":"q8","label":"Zip Code","type":"text","options":[],"rule":{"name":"field","key":"zip"}},
+    {"id":"q9","label":"County","type":"text","options":[],"rule":{"name":"field","key":"county"}},
+    {"id":"q10","label":"Preferred Language (Primary)","type":"select","options":["English","Spanish","Vietnamese","Other"],"rule":{"name":"none"}},
+    {"id":"q11","label":"Ethnicity (Primary)","type":"select","options":["Asian","African American or Black","Caucasian or White","Native American or American Indian","Native Hawaiian or Pacific Islander","Other or Mixed"],"rule":{"name":"none"}},
+    {"id":"q12","label":"Gender (Primary)","type":"select","options":["Male","Female","Transgender Male (F to M)","Transgender Female (M to F)","Other","Choose not to disclose"],"rule":{"name":"none"}},
+    {"id":"q13","label":"Total Number of People in Household","type":"number","options":[],"rule":{"name":"field","key":"householdSize"}},
+    {"id":"q14","label":"Are there any military veterans in the household?","type":"radio","options":["YES","NO"],"rule":{"name":"veteran"}},
+    {"id":"q15","label":"Name (Other in Household 1): First Name","type":"text","options":[],"rule":{"name":"none"},"note":"First of eight identical blocks for other household members; blocks 2-8 are left out."},
+    {"id":"q16","label":"Name (Other in Household 1): Last Name","type":"text","options":[],"rule":{"name":"none"},"note":"First of eight identical blocks for other household members; blocks 2-8 are left out."},
+    {"id":"q17","label":"Date of Birth (Other in Household 1)","type":"date","options":[],"rule":{"name":"none"},"note":"First of eight identical blocks for other household members; blocks 2-8 are left out."},
+    {"id":"q18","label":"Ethnicity (Other in Household 1)","type":"select","options":["Asian","African American or Black","Caucasian or White","Native American or American Indian","Native Hawaiian or Pacific Islander","Latino or Hispanic","Other or Mixed"],"rule":{"name":"none"},"note":"First of eight identical blocks for other household members; blocks 2-8 are left out."},
+    {"id":"q19","label":"Gender (Other in Household 1)","type":"select","options":["Male","Female","Transgender Male (F to M)","Transgender Female (M to F)","Other","Choose not to disclose"],"rule":{"name":"none"},"note":"First of eight identical blocks for other household members; blocks 2-8 are left out."},
+    {"id":"q20","label":"Relationship to Applicant (Other in Household 1)","type":"text","options":[],"rule":{"name":"none"},"note":"First of eight identical blocks for other household members; blocks 2-8 are left out."},
+    {"id":"q21","label":"Appointment","type":"date","options":[],"rule":{"name":"none"},"note":"An appointment slot picker."},
+    {"id":"q22","label":"Dogs/Cats? (optional)","type":"checkbox","options":["Dog Food","Cat Food","Cat Litter"],"rule":{"name":"none"}},
+    {"id":"q23","label":"Picking up with another family?","type":"text","options":[],"rule":{"name":"none"}}
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "source": {
+    "url": "https://garfieldcopublichealthwa.gov/healthy-families/women-infants-children/wic-prescreening-tool/",
+    "title": "WIC Prescreening Questionnaire",
+    "kind": "web",
+    "retrieved": "2026-09-26",
+    "region": "Pomeroy, WA"
+  },
+  "questions": [
+    {"id":"q1","label":"Do any of the following describe you, someone who lives in your household, or anyone in your care?","type":"checkbox","options":["Is pregnant","Has had a baby (or been pregnant) within the last 6 months","Is currently breastfeeding a baby that is less than 12 months old","Is a baby, child or foster child under the age of 5","None of the above"],"rule":{"name":"none"},"note":"Several WIC categories in one list; the pregnant rule covers only the first. Proposed rule: wicCategories."},
+    {"id":"q2","label":"Are you a Washington Resident?","type":"radio","options":["Yes","No"],"rule":{"name":"livesInState","state":"Washington"}},
+    {"id":"q3","label":"Including you, is anyone in your household currently enrolled in any of the following programs?","type":"checkbox","options":["Basic Food, SNAP","Children’s Medicaid","Medicaid","Temporary Assistance for Needy Families (TANF)","Food Distribution Program on Indian Reservations (FDPIR)","None of these programs apply"],"rule":{"name":"none"},"note":"Asks about current enrollment, not applications."},
+    {"id":"q4","label":"How many people are in your household?","type":"number","options":[],"rule":{"name":"field","key":"householdSize"}},
+    {"id":"q5","label":"My household has no income","type":"checkbox","options":["My household has no income"],"rule":{"name":"none"},"note":"Under \"Do you or anyone in your household receive the following?\". No rule checks for zero income. Proposed rule: noIncome."},
+    {"id":"q6","label":"Income Type","type":"select","options":["Wages, Tips and Commission (before tax and deductions)","Income from Self-Employment","Child Support and Alimony","Social Security Benefits (SS, SSI, Survivors, and Disability/SSDI)","Unemployment Benefits","Worker’s Compensation","Veterans’ Benefits","Retirement Payments or Benefits, Including Pensions and Annuities","Other Income"],"rule":{"name":"none"},"note":"One row per income source; the profile saves totals, not sources."},
+    {"id":"q7","label":"Dollar Amount","type":"number","options":[],"rule":{"name":"none"},"note":"The amount of one income source."},
+    {"id":"q8","label":"Payment Frequency","type":"select","options":["Weekly","Bi-Weekly","Twice-Monthly","Monthly","Annually"],"rule":{"name":"none"}}
+  ]
+}
