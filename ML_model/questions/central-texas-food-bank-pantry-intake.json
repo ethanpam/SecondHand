@@ -1,0 +1,30 @@
+{
+  "source": {
+    "url": "https://www.centraltexasfoodbank.org/media/331/download",
+    "title": "Pantry Intake Form: Household Application for USDA Foods",
+    "kind": "pdf",
+    "retrieved": "2026-09-26",
+    "region": "Austin, TX"
+  },
+  "questions": [
+    { "id": "q1", "label": "Name of Household Member", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" } },
+    { "id": "q2", "label": "Number of People in Household", "type": "number", "options": [], "rule": { "name": "field", "key": "householdSize" } },
+    { "id": "q3", "label": "Date of Birth", "type": "date", "options": [], "rule": { "name": "field", "key": "birthDate" } },
+    { "id": "q4", "label": "Address", "type": "text", "options": [], "rule": { "name": "field", "key": "addressLine1" } },
+    { "id": "q5", "label": "City", "type": "text", "options": [], "rule": { "name": "field", "key": "city" } },
+    { "id": "q6", "label": "Zip", "type": "text", "options": [], "rule": { "name": "field", "key": "zip" } },
+    { "id": "q7", "label": "Phone Number", "type": "tel", "options": [], "rule": { "name": "field", "key": "phone" } },
+    { "id": "q8", "label": "Name of Proxy (if applicable)", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Someone else who may pick up food; not in the profile." },
+    { "id": "q9", "label": "Address of Proxy", "type": "text", "options": [], "rule": { "name": "none" }, "note": "The proxy's address, not the applicant's." },
+    { "id": "q10", "label": "Address of Proxy: City", "type": "text", "options": [], "rule": { "name": "none" }, "note": "The proxy's city, not the applicant's." },
+    { "id": "q11", "label": "Address of Proxy: Zip", "type": "text", "options": [], "rule": { "name": "none" }, "note": "The proxy's ZIP, not the applicant's." },
+    { "id": "q12", "label": "If the household receives other assistance, mark the appropriate choice(s) below and skip the “Total Household Income” and crisis situation sections.", "type": "checkbox",
+      "options": ["Supplemental Nutrition Assistance Program (SNAP)", "Supplemental Security Income (SSI)", "Temporary Assistance for Needy Families (TANF)", "Medicaid", "National School Lunch Program (NSLP) (free or reduced-price meals)"],
+      "rule": { "name": "none" }, "note": "Programs the household already receives; the profile only knows what the applicant is applying for." },
+    { "id": "q13", "label": "Total Household Income", "type": "text", "options": [], "rule": { "name": "none" },
+      "note": "The applicant writes the period (\"per ___\") beside the amount, so no single saved amount fits the blank." },
+    { "id": "q14", "label": "ANSWER ONLY if your household does not receive the government assistance listed above AND your income does not fall within the USDA income guidelines above: Was there a crisis situation that caused you to need food?",
+      "type": "radio", "options": ["Yes", "No"], "rule": { "name": "none" } },
+    { "id": "q15", "label": "If yes, please state the situation", "type": "text", "options": [], "rule": { "name": "none" } }
+  ]
+}
