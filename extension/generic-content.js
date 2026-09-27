@@ -112,6 +112,15 @@
         // Every question's label for the applicant's translated list, and the language this document declares.
         const listed = withOwnPanelHidden(() => engine.questions(document));
         respond({ lang: document.documentElement.lang || '', questions: listed.map(({ id, label }) => ({ id, label })) });
+      } else if (message.type === 'secondhand:widgetSize' && typeof message.line === 'boolean' && window === window.top) {
+        // One row taller while the widget shows a line of the page's key points.
+        if (panelHost) panelHost.style.setProperty('height', message.line ? '86px' : '70px', 'important');
+        respond({ sized: Boolean(panelHost) });
+      } else if (message.type === 'secondhand:generic:pageText') {
+        // This frame's own words for the side panel's summary, and the language it declares. Never form values.
+        const reader = globalThis.SecondHandPageText;
+        if (!reader) { respond({ ok: false, error: 'SecondHand could not load its page reader. Reload the page.' }); return; }
+        respond({ lang: document.documentElement.lang || '', text: reader.read(document) });
       } else if (message.type === 'secondhand:generic:focus' && typeof message.id === 'string') {
         respond({ focused: Boolean(withOwnPanelHidden(() => engine.focusField(document, message.id))) });
       }

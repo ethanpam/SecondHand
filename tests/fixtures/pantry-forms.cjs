@@ -100,4 +100,28 @@ ${iowaYesNo('medicare', 'Is anyone in the household enrolled in Medicare?')}
 ${iowaYesNo('healthHelp', 'Do you want to find out if you or your family can get help paying for health insurance?')}
 <button type="button" class="btn btn-primary saveButton">Continue</button></form></main>`;
 
-module.exports = { plainPantry, googleStyle, jotformStyle, numberedGoogle, googleDates, googleChoices, iowaFinancial };
+// A fictional pantry sign-up whose long instructions come before the form: what to bring, who can
+// come, and pickup rules, between a site header and footer, with hidden notes and page scripts.
+const pantryInstructions = `<header><nav><a href="/">Home</a> <a href="/donate">Donate</a></nav><p>Riverbend Community Pantry</p></header>
+<main><h1>Food pantry sign-up</h1>
+<section><h2>Before you visit</h2>
+<p>Bring a photo ID for the adult picking up food. On your first visit, also bring a utility bill or lease that shows your address.</p>
+<p>Anyone who lives in Polk or Story County can visit once a month. Emergency boxes have no income limit.</p>
+<ul><li>Pickup is on Tuesdays and Fridays from 3 to 6 p.m.</li><li>Bring your own bags if you can.</li>
+<li>If you can’t come, a neighbor can pick up for you with a signed note.</li></ul>
+<p hidden>Staff note: hidden text is never read.</p>
+<div style="display:none">Hidden promotion that is not part of the page.</div>
+</section>
+<form id="intake">
+<label for="p-name">Full name *</label><input id="p-name" name="name">
+<label for="p-zip">ZIP code</label><input id="p-zip" name="zip">
+<label for="p-size">How many people live in your household?</label><input id="p-size" name="size" type="number">
+<fieldset><legend>Preferred pickup day</legend><label><input type="radio" name="day" value="tue"> Tuesday</label><label><input type="radio" name="day" value="fri"> Friday</label></fieldset>
+<label for="p-county">County</label><select id="p-county" name="county"><option value="">Choose one</option><option>Polk</option><option>Story</option></select>
+<label for="p-notes">Anything we should know?</label><textarea id="p-notes" name="notes"></textarea>
+<button type="submit">Sign up</button></form>
+<script>window.pantryReady = true;</script><style>.pantry { color: green; }</style>
+</main>
+<footer><p>© Riverbend Community Pantry · Privacy</p></footer>`;
+
+module.exports = { plainPantry, googleStyle, jotformStyle, numberedGoogle, googleDates, googleChoices, iowaFinancial, pantryInstructions };

@@ -49,6 +49,7 @@ On macOS/Linux, use the desktop's Prepare Chrome extension button; it registers 
 npm run test:ui       # Real Electron UI smoke test; needs a desktop session
 npm run test:extension # Isolated Chromium with synthetic Iowa fixtures; install via npx playwright install chromium
 npm run test:extension:video # Record a fictional-applicant walkthrough of the extension and native sidebar
+npm run test:summary  # Isolated Chromium: page text for "What this page says" and its one-line reason without a summary model
 npm run test:native   # Native protocol test (on Windows set SECONDHAND_PACKAGED_EXE to the built native host)
 npm run extension:zip
 npm run dist:win      # Run on Windows to build the NSIS .exe installer

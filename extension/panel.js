@@ -4,9 +4,10 @@
   const $ = id => document.getElementById(id);
   const strings = globalThis.SecondHandStrings;
   const translation = globalThis.SecondHandTranslation;
+  const summary = globalThis.SecondHandSummary;
   // Must match BUILD in background.js: change both together. Chrome loads these pages
   // from disk right away but keeps running the old worker until SecondHand is reloaded.
-  const BUILD = '2026-09-26.4';
+  const BUILD = '2026-09-27.1';
   // The applicant's language: the choice saved in this extension's storage, else the browser's.
   let language = strings.language();
   const t = (key, params = {}) => strings.text(language, key, params);
@@ -86,6 +87,10 @@
     let pageLanguage = '';
     let languageChecked = false;
     let languageTrouble = null;
+    // The first key point the side panel wrote for this page, as the worker keeps it for the tab, and
+    // whether the page's content script has made the widget a row taller for it.
+    let summaryLine = null;
+    let lineRoom = false;
     const AI_TIMEOUT_MS = 8000;
     // An outdated worker keeps its reload steps on screen and is not polled again.
     const trouble = error => { if (error.outdated) outdated = true; return problem(error); };
@@ -126,7 +131,20 @@
       const details = [hasMessage(result) ? words(fromResult(result)) : '', ai.note ? words(ai.note) : '', ai.reason, fixedText(languageTrouble?.message, 160)];
       $('widget-text').title = outdated ? t('panel.outdated') : fixedText(details.filter(Boolean).join(' '), 240);
       $('translate-offer').hidden = outdated || !known || !pageLanguage || pageLanguage === language;
+      // One line of the page's key points, once the side panel has written them in this language.
+      const line = !outdated && summaryLine?.language === language ? summaryLine : null;
+      $('summary-line').hidden = !line;
+      $('summary-line').textContent = line ? t(line.english ? 'summary.widgetLineEnglish' : 'summary.widgetLine', { point: fixedText(line.point, 200) }) : '';
+      if (Boolean(line) !== lineRoom) makeRoom(Boolean(line));
     }
+    // The widget can't size its own frame: the worker asks this tab's content script for the row.
+    async function makeRoom(line) {
+      lineRoom = line;
+      try { await send({ type: 'ui:widgetSize', line }); }
+      catch (error) { note = trouble(error); render(); }
+    }
+    const lineOf = value => value && strings.LANGUAGES.includes(value.language) && typeof value.point === 'string' && value.point.trim()
+      ? { language: value.language, point: value.point, english: value.english === true } : null;
     async function poll() {
       clearTimeout(pollTimer);
       if (outdated) return;
@@ -140,6 +158,7 @@
           // While autofill runs, the worker moves ahead between polls. Otherwise keep
           // this widget's own result and adopt the worker's only after a reload.
           if (autopilot || !result) result = state?.result || result;
+          summaryLine = lineOf(state?.summary);
           note = null;
         } catch (error) { note = trouble(error); }
         render();
@@ -215,7 +234,7 @@
       render();
     }));
     // Send immediately inside the trusted click: Chrome needs the user gesture to open the panel.
-    for (const id of ['details', 'pill']) {
+    for (const id of ['details', 'pill', 'summary-line']) {
       $(id).addEventListener('click', trusted(() => {
         send({ type: 'ui:openPanel', confirmed: true }).catch(error => { note = trouble(error); render(); });
       }));
@@ -257,6 +276,16 @@
     let needsDownload = false;
     let questionBusy = false;
     let questionRun = 0;
+    // "What this page says": the pages the worker read for this tab, with the key points written for
+    // them; a note under the section; and whether Chrome's model waits for a click to download.
+    const summaries = summary.create();
+    let summaryPages = null;
+    let summaryNote = null;
+    let summaryDownload = false;
+    let summaryBusy = false;
+    let summaryStarted = false;
+    let summaryRun = 0;
+    const SCREENS = { 'iowa-before-start': 'summary.iowaBeforeStart', 'iowa-information': 'summary.iowaInformation', 'iowa-instructions': 'summary.iowaInstructions' };
     const STATUS = { complete: 'checklist.complete', missing: 'checklist.missing', optional: 'checklist.optional', manual: 'checklist.manual' };
     const MARKS = { complete: '✓', manual: '!', missing: '○', optional: '○' };
     const show = (message, error = false) => { status = { message, error }; renderStatus(); };
@@ -295,12 +324,14 @@
       $('panel-autofill').disabled = !target || (!fillable && !autopilot) || working;
       document.querySelectorAll('.checklist-item').forEach(button => { button.disabled = working || !target; });
       renderQuestionControls();
+      renderSummary();
     }
     function clearPage() {
       fillable = false; autopilot = false; site = null; page = null; checklistSignature = '';
       $('page-checklist').replaceChildren();
       $('checklist-section').hidden = true;
       resetQuestions();
+      resetSummary();
     }
     function invalidateTarget() {
       if (stopped) return;
@@ -352,6 +383,7 @@
       controls();
       // The widget's language offer opened this panel: show the questions without another click.
       if (state.showQuestions === true) showQuestions(false);
+      startSummary();
     }
     async function refresh() {
       if (stopped) return;
@@ -539,6 +571,117 @@
       }
     }
 
+    // What this page says: up to five key points Chrome's Summarizer writes on this computer from the
+    // page's own words (Iowa's information-only screens, or a site that is on). They are labelled as
+    // automatic, kept by the worker for the tab, and never sent toward the page.
+    function summarizable() {
+      return Boolean(target && page) && (site ? site.enabled && site.ready : supportedUrl(target.url));
+    }
+    function resetSummary() {
+      summaryRun++;
+      summaryPages = null; summaryNote = null; summaryDownload = false; summaryBusy = false; summaryStarted = false;
+      renderSummary();
+    }
+    function startSummary() { if (!summaryStarted && summarizable()) summarize(false); }
+    function renderSummary() {
+      const readable = summarizable();
+      // Without Chrome's Summarizer the section is hidden behind one plain line.
+      const note = !readable ? null : summaries.supported() ? summaryNote : { message: { key: 'summary.missing' }, error: false };
+      $('summary-note').hidden = !note;
+      $('summary-note').textContent = note ? words(note.message) : '';
+      $('summary-note').classList.toggle('error', Boolean(note?.error));
+      $('summary-get').hidden = !readable || !summaryDownload || summaryBusy;
+      $('summary-get').disabled = working || summaryBusy;
+      const shown = readable && summaryPages ? summaryPages.filter(item => item.unread || item.summary?.language === language) : [];
+      $('summary').hidden = !shown.length;
+      $('summary-title').textContent = t(shown.some(item => item.current) ? 'summary.title' : 'summary.earlier');
+      $('summary-list').replaceChildren(...shown.map(summaryGroup));
+      $('summary-english').hidden = !shown.some(item => item.summary?.english);
+    }
+    function summaryGroup(item) {
+      const group = document.createElement('div'); group.className = 'summary-group';
+      // Iowa's screens are named, so points kept from an earlier one are not taken for this page's.
+      if (Object.hasOwn(SCREENS, item.pageKey)) {
+        const name = document.createElement('h3'); name.textContent = t(SCREENS[item.pageKey]);
+        group.append(name);
+      }
+      if (item.unread || !item.summary.points.length) {
+        const empty = document.createElement('p'); empty.className = 'summary-empty';
+        empty.textContent = t(item.unread ? 'summary.unread' : 'summary.nothing');
+        group.append(empty);
+      } else {
+        const list = document.createElement('ul');
+        // Points can be in English inside a right-to-left panel: each reads in its own direction.
+        for (const point of item.summary.points) { const entry = document.createElement('li'); entry.dir = 'auto'; entry.textContent = fixedText(point, 400); list.append(entry); }
+        group.append(list);
+      }
+      return group;
+    }
+    function listedPages(reply) {
+      const written = value => value === null || (value && strings.LANGUAGES.includes(value.language) && typeof value.english === 'boolean' &&
+        Array.isArray(value.points) && value.points.every(point => typeof point === 'string'));
+      const valid = reply && Array.isArray(reply.pages) && reply.pages.every(item => item && typeof item.id === 'string' && typeof item.pageKey === 'string' &&
+        typeof item.lang === 'string' && typeof item.text === 'string' && typeof item.current === 'boolean' && typeof item.unread === 'boolean' && written(item.summary));
+      if (!valid) throw keyedError('worker.pageTextUnreadable');
+      return reply.pages;
+    }
+    // Points Chrome wrote in English, in the applicant's language when Chrome's translator is ready;
+    // otherwise they stay in English and the section says so.
+    async function inLanguage(points, chosen) {
+      if (!points.length) return { points, english: false };
+      if (!service.supported() || await service.availability('en', chosen) !== 'available') return { points, english: true };
+      const translated = await service.translate(await service.translator('en', chosen), 'en', chosen, points);
+      return { points: points.map(point => translated.get(point)), english: false };
+    }
+    async function summarize(click) {
+      if (summaryBusy || !summarizable() || !summaries.supported()) return;
+      const run = ++summaryRun;
+      const revision = contextRevision;
+      const chosen = language;
+      const tabId = target.id;
+      const current = () => run === summaryRun && revision === contextRevision && chosen === language && !stopped;
+      const say = (message, error = false) => { if (current()) { summaryNote = message ? { message, error } : null; renderSummary(); } };
+      summaryStarted = true; summaryBusy = true; summaryDownload = false;
+      renderSummary();
+      let untranslated = null;
+      try {
+        const pages = listedPages(await send({ type: 'ui:pageText', tabId }));
+        if (!current()) return;
+        summaryPages = pages;
+        renderSummary();
+        for (const item of pages.filter(entry => !entry.unread && entry.summary?.language !== chosen)) {
+          const input = translation.primary(item.lang);
+          const output = await summaries.outputLanguage(chosen, input);
+          const availability = await summaries.availability(output, input);
+          if (!current()) return;
+          if (availability === 'unavailable') return say({ key: 'summary.unavailable' });
+          // Chrome downloads its model only from the applicant's click.
+          if (availability !== 'available' && !click) { summaryDownload = true; return say({ key: 'summary.needsDownload' }); }
+          const downloading = percent => say({ key: 'summary.downloading', params: { percent } });
+          if (availability === 'available') say({ key: 'summary.reading' }); else downloading(0);
+          const summarizer = await summaries.summarizer(output, input, {
+            onProgress: loaded => downloading(Math.round(loaded * 100)),
+            onStall: () => say({ key: 'summary.stalled' }, true)
+          });
+          if (!current()) return;
+          say({ key: 'summary.reading' });
+          const points = await summaries.points(summarizer, item.text);
+          // A translation that fails leaves the points in English, and the note says why.
+          const shown = output === chosen ? { points, english: false } : await inLanguage(points, chosen).catch(error => { untranslated = error; return { points, english: true }; });
+          item.summary = { language: chosen, ...shown };
+          // Kept for the tab even if the applicant moved on: the worker matches them to these words.
+          await send({ type: 'ui:keepSummary', tabId, id: item.id, summary: item.summary });
+          if (!current()) return;
+          renderSummary();
+        }
+        say(untranslated ? { key: 'summary.translateFailed', params: { detail: fixedText(untranslated.message, 200) } } : null, Boolean(untranslated));
+      } catch (error) {
+        say(error.messageKey ? problem(error) : { key: 'summary.failed', params: { detail: fixedText(error.message, 200) } }, true);
+      } finally {
+        if (run === summaryRun) { summaryBusy = false; renderSummary(); }
+      }
+    }
+
     $('panel-autofill').addEventListener('click', trusted(async () => {
       if ($('panel-autofill').disabled) return;
       const stopping = autopilot;
@@ -585,6 +728,7 @@
       renderDesktop();
     }));
     $('questions-show').addEventListener('click', trusted(() => { if (!$('questions-show').disabled) showQuestions(true); }));
+    $('summary-get').addEventListener('click', trusted(() => { if (!$('summary-get').disabled) summarize(true); }));
     // The choice is saved in this extension's storage; the widget follows through the storage event.
     function relabel() {
       applyStatic();
@@ -593,7 +737,9 @@
       renderStatus();
       renderDesktop();
       resetQuestions();
+      resetSummary();
       controls();
+      startSummary();
     }
     $('language').value = language;
     $('language').addEventListener('change', () => {

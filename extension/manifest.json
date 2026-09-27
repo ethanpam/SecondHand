@@ -46,6 +46,7 @@
         "address-policy.js",
         "iowa-adapter.js",
         "generic-adapter.js",
+        "page-text.js",
         "content.js"
       ],
       "run_at": "document_idle",
