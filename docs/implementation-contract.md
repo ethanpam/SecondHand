@@ -48,9 +48,9 @@ Applications: `{ id, program: 'Iowa SNAP', status, createdAt, updatedAt, confirm
 
 ## Native bridge protocol (extension ↔ host)
 
-Host name `org.secondhand.bridge`. Each request `{ id: string, type, ...payload }`. Response `{ id, ok: true, data }` or `{ id, ok: false, error: string }`.
+Host name `org.secondhand.bridge`. Each request `{ id: string, type, ...payload }`. Response `{ id, ok: true, data }` or `{ id, ok: false, error: string, code? }`. The only `code` is `LAYA_NOT_READY`.
 
-- `status` -> `{ unlocked, applicationCount, accessRevision }` (no profile values)
+- `status` -> `{ unlocked, applicationCount, accessRevision, laya: { state } }` (no profile values). `state` is `off`, `unavailable`, `not-downloaded`, `downloading`, `ready`, or `error`.
 - `showApp` -> `{ shown: true }`. Shows and focuses the desktop window so the user can unlock. Works while locked and returns no profile data.
 - `getFields` `{ url, fields: string[] }` -> `{ values: { field: value }, accessRevision }`. Requires an unlocked vault and the approved extension ID. Iowa requests use the exact HTTPS origin and portal path. Other HTTPS sites additionally require an explicitly trusted origin. Fields are strictly allowlisted, and only requested nonblank values are returned.
   - When `autofillWithoutAsking` is on and the caller's extension ID matches the stored one, nonsensitive eligible requests return without a dialog; the other-site sensitive-field exception below still applies.
@@ -61,6 +61,9 @@ Host name `org.secondhand.bridge`. Each request `{ id: string, type, ...payload 
   - An empty `fields: []` is accepted only for the exact observed Iowa `enterPersonalInfo` or `addressValidation` URL, with no query, fragment, or trailing slash. It authorizes the disclosed verified applicant continuation or first-home-suggestion action under the same unlocked/trust checks and returns `{ values: {}, accessRevision }` without reading the saved profile.
 - `trustSite` `{ url }` -> `{ trusted: true, origin }`; a native desktop prompt approves a non-Iowa HTTPS origin before adding it to the local trusted-site list.
 - `recordProgress` `{ url, filledCount: integer }` -> `{ recorded: true }`. Updates a draft/in_progress Iowa application, no page HTML, no profile values, no inferred submitted/approved status. Requires unlocked vault.
+- `suggestFields` `{ url, fields: [{ id, label, type, options }] }` -> `{ suggestions: { [id]: key } }` (#39). Laya matches text boxes to saved fields. Up to 40 fields of type `text`, `textarea`, `number`, `date`, `email`, or `tel`; labels up to 200 characters; up to 30 options of up to 100 characters. Questions carry labels and options only, never saved answers. Keys are never SSN or another saved answer AI may not guess.
+- `answerFields` `{ url, questions: [{ id, label, type, options }] }` -> `{ answers: { [id]: optionText }, accessRevision }` (#42). Laya answers `radio`, `select`, and `checkbox` questions from a facts sheet built from the saved profile inside the desktop app; the sheet never leaves it. Up to 30 questions, same label and option limits. Answers that needed a sensitive fact wait for one "Share sensitive details?" prompt on sites other than Iowa's portal; Cancel drops only those answers.
+  - Both need Laya ready (otherwise they fail with `code: 'LAYA_NOT_READY'` and the extension fills as it does without Laya), a trusted HTTPS site or Iowa's portal, and an unlocked vault. Consent, signature, attestation, agreement, terms, and SSN questions are never scored. The confidence bars (0.9 to answer, 0.95 to match, and a clear lead over the runner-up) are in `desktop/laya-decisions.cjs`; each request has a 3-second budget, and what is left goes to "need you".
 
 Iowa portal URL: `https://hhsservices.iowa.gov/apspssp/ssp.portal`. Exact origin `https://hhsservices.iowa.gov`; path must be `/apspssp/ssp.portal` or descendants, no username/password/other ports.
 

@@ -6,7 +6,7 @@
   const translation = globalThis.SecondHandTranslation;
   // Must match BUILD in background.js: change both together. Chrome loads these pages
   // from disk right away but keeps running the old worker until SecondHand is reloaded.
-  const BUILD = '2026-09-26.4';
+  const BUILD = '2026-09-27.1';
   // The applicant's language: the choice saved in this extension's storage, else the browser's.
   let language = strings.language();
   const t = (key, params = {}) => strings.text(language, key, params);
@@ -101,7 +101,8 @@
         const guessed = Number(result.guessed) || 0;
         const summary = filled > 0 ? (guessed > 0 ? t('widget.filledGuessed', { count: filled, guessed }) : t('widget.filled', { count: filled }))
           : fieldKeys(result.needYou).length ? t('widget.nothingMatches') : words(fromResult(result), 120);
-        return ai.note ? `${summary.replace(/\.$/, '')} · ${words(ai.note)}` : summary;
+        const notes = [ai.note ? words(ai.note) : '', Number(result.laya) > 0 ? t('widget.suggestedByLaya') : ''].filter(Boolean);
+        return notes.length ? [summary.replace(/\.$/, ''), ...notes].join(' · ') : summary;
       }
       if (result.state === 'done') {
         const todo = words({ key: result.todoKey, params: result.todoParams, text: result.todo }, 90);
@@ -163,11 +164,10 @@
       render();
     }
 
-    // Chrome's on-device AI runs only in extension pages like this one, not in the worker.
-    // It sees the labels and options of the questions the rules left open, never values,
-    // and gets one try per click within its time limit.
-    async function aiGuesses() {
-      const plan = await send({ type: 'ui:plan', confirmed: true });
+    // Chrome's on-device AI runs only in extension pages like this one, not in the worker, and
+    // only when the desktop's Laya isn't ready. It sees the labels and options of the questions
+    // the rules left open, never values, and gets one try per click within its time limit.
+    async function aiGuesses(plan) {
       const fields = (Array.isArray(plan?.unmatched) ? plan.unmatched : []).filter(field => typeof field?.label === 'string' && field.label.trim());
       if (!fields.length) return { status: 'mapped', mapping: {} };
       try { return await SecondHandAI.mapWithChromeAI(fields, { allowedKeys: plan.allowedKeys, timeoutMs: AI_TIMEOUT_MS }); }
@@ -179,11 +179,16 @@
       working = true; note = null; ai = { note: null, reason: '' }; render();
       try {
         const request = { type: 'ui:autofill', confirmed: true };
-        // Iowa's form is filled by its own rules; other sites also get the AI's guesses.
+        // Iowa's form is filled by its own rules; other sites also get an AI's guesses. When Laya is
+        // ready it answers in the worker for the plan it just made, and Chrome's AI stays off.
         if (site) {
-          const answer = await aiGuesses();
-          if (answer?.status !== 'mapped') ai = { note: { key: 'widget.aiUnavailable' }, reason: fixedText(answer?.reason, 160) };
-          else if (Object.keys(answer.mapping).length) request.guesses = answer.mapping;
+          const plan = await send({ type: 'ui:plan', confirmed: true });
+          if (plan?.laya === true) request.guesses = {};
+          else {
+            const answer = await aiGuesses(plan);
+            if (answer?.status !== 'mapped') ai = { note: { key: 'widget.aiUnavailable' }, reason: fixedText(answer?.reason, 160) };
+            else if (Object.keys(answer.mapping).length) request.guesses = answer.mapping;
+          }
         }
         result = await send(request);
         cursor = 0;
@@ -250,6 +255,10 @@
     let stopped = false;
     let status = { message: { key: 'panel.checkingTab' }, error: false };
     let desktopLine = null;
+    // Whether Laya, the desktop's local AI, is ready: shown only while the desktop app answers.
+    let layaLine = null;
+    const LAYA_LINES = { ready: 'desktop.layaReady', off: 'desktop.layaOff', downloading: 'desktop.layaDownloading',
+      'not-downloaded': 'desktop.layaNotReady', error: 'desktop.layaNotReady', unavailable: 'desktop.layaNotReady' };
     // The question list for the page on screen: the worker's items, and Chrome's translations of their words.
     let questions = null;
     let translated = new Map();
@@ -264,7 +273,11 @@
       $('status').textContent = words(status.message, 650);
       $('status').classList.toggle('error', status.error);
     }
-    function renderDesktop() { if (desktopLine) $('desktop-status').textContent = words(desktopLine); }
+    function renderDesktop() {
+      if (desktopLine) $('desktop-status').textContent = words(desktopLine);
+      $('laya-status').hidden = !layaLine;
+      $('laya-status').textContent = layaLine ? words(layaLine) : '';
+    }
     function supportedUrl(raw) {
       try {
         const url = new URL(raw);
@@ -395,10 +408,12 @@
         const desktop = await send({ type: 'ui:desktopStatus' });
         const ready = desktop?.connected && desktop.unlocked;
         desktopLine = { key: !desktop?.connected ? 'desktop.notRunning' : desktop.unlocked ? 'desktop.unlocked' : 'desktop.locked' };
+        layaLine = desktop?.connected && Object.hasOwn(LAYA_LINES, desktop.laya) ? { key: LAYA_LINES[desktop.laya] } : null;
         $('desktop-action').hidden = !desktop?.connected || desktop.unlocked;
         $('desktop-status').parentElement.classList.toggle('error', !ready);
       } catch (error) {
         desktopLine = problem(error);
+        layaLine = null;
         $('desktop-action').hidden = true;
         $('desktop-status').parentElement.classList.add('error');
       }

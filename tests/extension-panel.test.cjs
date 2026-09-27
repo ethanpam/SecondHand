@@ -1092,3 +1092,49 @@ test('when the widget’s offer opened the side panel, the panel shows the list 
   assert.equal(english.get('questions').hidden, false);
   assert.equal(english.get('questions-list').children[2].querySelector('.checklist-label').textContent, '[en] Preferred pickup day');
 });
+
+// Laya, the desktop's local AI (#39, #42): when it is ready, Chrome's on-device AI stays off.
+const layaDone = { state: 'done', filled: 2, guessed: 1, laya: 1, needYou: ['f0:sh-1-1'], pageKey: 'general',
+  message: 'Filled 2 · 1 guessed · 1 need you. Check your answers before you submit. Guesses were suggested by Laya on this computer.',
+  messageKey: 'result.suggestedByLaya', messageParams: { summary: { key: 'result.siteFilledGuessedNeedYou', params: { count: 2, guessed: 1, needYou: 1 } } } };
+
+test('with Laya ready, the widget leaves Chrome’s on-device AI off, fills the plan Laya answers for, and says who suggested the guesses', async t => {
+  const ai = languageModel();
+  const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true }, LanguageModel: ai.LanguageModel, autofill: layaDone });
+  await view.userClick('autofill');
+  assert.deepEqual(plainRequests(view.requests.slice(-2)), [{ type: 'ui:plan', confirmed: true }, { type: 'ui:autofill', confirmed: true, guesses: {} }]);
+  assert.equal(ai.calls.availability, 0, 'Chrome’s on-device AI is never asked');
+  assert.equal(view.get('widget-text').textContent, 'Filled 2 · 1 guessed · suggested by Laya');
+  assert.equal(view.get('widget-text').title, layaDone.message);
+  assert.equal(view.get('need-you').textContent, '1 need you');
+
+  const spanishView = await panel(t, { launcher: true, language: 'es-ES', tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true }, autofill: layaDone });
+  await spanishView.userClick('autofill');
+  assert.equal(spanishView.get('widget-text').textContent, `${strings.text('es', 'widget.filledGuessed', { count: 2, guessed: 1 })} · ${spanish('widget.suggestedByLaya')}`);
+  assert.deepEqual(shownText(spanishView).filter(text => englishOnly.has(text)), []);
+});
+
+test('with Laya not ready, the widget asks Chrome’s on-device AI exactly as before', async t => {
+  const ai = languageModel();
+  const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: false }, LanguageModel: ai.LanguageModel, autofill: siteDone });
+  await view.userClick('autofill');
+  assert.deepEqual(plainRequests(view.requests.slice(-2)), [{ type: 'ui:plan', confirmed: true }, { type: 'ui:autofill', confirmed: true, guesses: { 'f4:sh-1-2': 'email' } }]);
+  assert.equal(ai.calls.prompt.length, 1);
+  assert.equal(view.get('widget-text').textContent, 'Filled 2');
+});
+
+test('the side panel shows whether Laya is ready, in the applicant’s language, and nothing when the app is closed', async t => {
+  const lines = { ready: 'desktop.layaReady', off: 'desktop.layaOff', downloading: 'desktop.layaDownloading', 'not-downloaded': 'desktop.layaNotReady', error: 'desktop.layaNotReady', unavailable: 'desktop.layaNotReady' };
+  for (const [laya, key] of Object.entries(lines)) {
+    const view = await panel(t, { desktop: { laya } });
+    assert.equal(view.get('laya-status').hidden, false, laya);
+    assert.equal(view.get('laya-status').textContent, strings.text('en', key), laya);
+  }
+  const closed = await panel(t, { desktop: { connected: false, unlocked: false, laya: 'unavailable' } });
+  assert.equal(closed.get('laya-status').hidden, true);
+  const older = await panel(t);
+  assert.equal(older.get('laya-status').hidden, true, 'a worker that reports no Laya state shows no line');
+  const spanishView = await panel(t, { language: 'es-ES', pageState: keyedChecklist, desktop: { laya: 'ready' } });
+  assert.equal(spanishView.get('laya-status').textContent, spanish('desktop.layaReady'));
+  assert.deepEqual(shownText(spanishView).filter(text => englishOnly.has(text)), []);
+});
