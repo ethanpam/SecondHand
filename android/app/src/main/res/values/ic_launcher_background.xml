@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches the mascot artwork's background. -->
+    <color name="ic_launcher_background">#D0E3C9</color>
+</resources>
