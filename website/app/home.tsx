@@ -79,14 +79,6 @@ export function Home() {
               </p>
             </div>
           </div>
-          <div className="hero-caption wrap">
-            <span>Built for Iowa SNAP. Built around you.</span>
-            <span className="hero-caption-end">
-              <a href="#demo">
-                Meet your helping hand <span aria-hidden="true">↓</span>
-              </a>
-            </span>
-          </div>
         </section>
 
         <div className="wrap page-content">
