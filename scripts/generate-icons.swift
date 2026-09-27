@@ -61,6 +61,12 @@ let outputs: [(String, Data)] = [
     ("extension/icon-128.png", icon(size: 128, radius: bubbly)),
     // Mac and Windows app icon, on Apple's 824 px icon grid with its shadow.
     ("desktop/icon.png", icon(size: 1024, tile: 824 / 1024, radius: 0.225, shadow: true)),
+    // Safari extension icons on iPhone (Settings and Safari's extension menu).
+    ("ios/SafariExtension/Resources/icon-48.png", icon(size: 48, radius: bubbly)),
+    ("ios/SafariExtension/Resources/icon-96.png", icon(size: 96, radius: bubbly)),
+    ("ios/SafariExtension/Resources/icon-128.png", icon(size: 128, radius: bubbly)),
+    ("ios/SafariExtension/Resources/icon-256.png", icon(size: 256, radius: bubbly)),
+    ("ios/SafariExtension/Resources/icon-512.png", icon(size: 512, radius: bubbly)),
     // iOS masks its own corners and requires an opaque, full-bleed image.
     ("ios/SecondHand/Assets.xcassets/AppIcon.appiconset/AppIcon.png", icon(size: 1024, opaque: true)),
     // Android adaptive icon foreground: 108 dp canvas. Launchers show the center
