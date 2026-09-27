@@ -1,0 +1,26 @@
+{
+  "source": {
+    "url": "https://form.jotform.com/233116891859063",
+    "title": "CSL Family Food Connection Food Pantry 2026",
+    "kind": "jotform",
+    "retrieved": "2026-09-26",
+    "region": "Independence, MO"
+  },
+  "questions": [
+    {"id":"q1","label":"First Name","type":"text","options":[],"rule":{"name":"field","key":"firstName"},"note":"First box of the \"Name\" field."},
+    {"id":"q2","label":"Last Name","type":"text","options":[],"rule":{"name":"field","key":"lastName"},"note":"Second box of the \"Name\" field."},
+    {"id":"q3","label":"County","type":"text","options":[],"rule":{"name":"field","key":"county"}},
+    {"id":"q4","label":"Zip Code","type":"text","options":[],"rule":{"name":"field","key":"zip"}},
+    {"id":"q5","label":"Do you receive Public Assistance (PA) or Non Public Assistance (NPA)?","type":"radio","options":["PA","NPA"],"rule":{"name":"none"},"note":"Asks whether the household gets public assistance now."},
+    {"id":"q6","label":"Email","type":"email","options":[],"rule":{"name":"field","key":"email"}},
+    {"id":"q7","label":"Phone","type":"tel","options":[],"rule":{"name":"field","key":"phone"}},
+    {"id":"q8","label":"How old are you?","type":"number","options":[],"rule":{"name":"none"},"note":"Age in years; no rule or field key gives the applicant's age as a number. Proposed rule: applicantAge."},
+    {"id":"q9","label":"What is your gender?","type":"select","options":["Male","Female","Transgender","None of these"],"rule":{"name":"none"}},
+    {"id":"q10","label":"What is your race?","type":"select","options":["White","Hispanic/Latino/Spanish","Black/African American","Asian","American Indian/Alaska Native","Middle Eastern/North African","Native Hawaiian/Other Pacific Islander","Other race or Ethnicity","Don’t know","Prefer not to answer"],"rule":{"name":"none"}},
+    {"id":"q11","label":"How many children (18 and younger) are in your household? Please fill in 0 if not applicable.","type":"number","options":[],"rule":{"name":"none"},"note":"Counts children 18 and younger; the profile counts children under 18."},
+    {"id":"q12","label":"How many adults (18-65 years old) are in your household? Please fill in 0 if not applicable.","type":"number","options":[],"rule":{"name":"none"},"note":"Counts adults 18-65; the profile counts adults 18-64 and seniors 65+."},
+    {"id":"q13","label":"How many senior adults (65 and older) are in your household? Please fill in 0 if not applicable.","type":"number","options":[],"rule":{"name":"field","key":"householdSeniors"}},
+    {"id":"q14","label":"Appointment Day/Time","type":"date","options":[],"rule":{"name":"none"},"note":"An appointment slot picker."},
+    {"id":"q15","label":"By signing up, you confirm that you have reviewed and agree to the terms outlined in the “Application for Receipt of USDA Foods – FD-15A-Part 1.”","type":"checkbox","options":["I AGREE"],"rule":{"name":"never"},"note":"A single required radio button (\"I AGREE\"); stored as a one-option checkbox."}
+  ]
+}
