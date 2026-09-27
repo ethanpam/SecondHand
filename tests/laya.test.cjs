@@ -184,12 +184,18 @@ test('a request that takes longer than the timeout is rejected with LAYA_TIMEOUT
   let release;
   const runner = stubRunner({ run: () => new Promise(resolve => { release = resolve; }) });
   const laya = createLaya({ modelDir: modelDirectory(t), manifest: { version: 1, model: null }, runner, enabled: true, timeoutMs: 50 });
-  const error = await laya.decideBatch(Array.from({ length: 20 }, () => ({ state: rowState('3'), questions: { correct: DECISION } }))).catch(caught => caught);
+  // The clock only moves once the first batch is running, so a slow machine can't time out the request before it starts.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const pending = laya.decideBatch(Array.from({ length: 20 }, () => ({ state: rowState('3'), questions: { correct: DECISION } }))).catch(caught => caught);
+  while (runner.runs.length === 0) await tick();
+  t.mock.timers.tick(50);
+  const error = await pending;
   assert.equal(error.code, LAYA_TIMEOUT);
   assert.match(error.message, /took too long/);
   release();
   await tick();
   assert.equal(runner.runs.length, 1, 'the rest of a timed-out request is not run');
+  t.mock.timers.reset();
   const later = createLaya({ modelDir: modelDirectory(t), manifest: { version: 1, model: null }, runner: stubRunner(), enabled: true, timeoutMs: 5000 });
   assert.equal((await later.decide(rowState('3'), { correct: DECISION })).answers.correct.type, 'noul');
 });

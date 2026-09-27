@@ -1,4 +1,4 @@
-// Shared by the FAQ section and its structured data, so both always match.
+// Shared by the FAQ page and its structured data, so both always match.
 export const faq = [
   {
     question: 'Does SecondHand cost anything?',

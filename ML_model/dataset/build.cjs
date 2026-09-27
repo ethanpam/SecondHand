@@ -14,7 +14,7 @@ const DECISION = Object.freeze({ type: 'noul', instructions: 'Given the facts ab
 const CHOICE_TYPES = ['radio', 'select', 'checkbox'];
 const TEXT_TYPES = ['text', 'textarea', 'number', 'date', 'email', 'tel'];
 // Saved values a text box can hold: the matching task's candidates. Yes/no and choice-only keys are left out.
-const MATCH_KEYS = Object.freeze(['firstName', 'middleName', 'lastName', 'fullName', 'suffix', 'birthDate', 'ssn', 'email', 'phone', 'addressLine1', 'addressLine2',
+const MATCH_KEYS = Object.freeze(['firstName', 'middleName', 'lastName', 'fullName', 'suffix', 'birthDate', 'email', 'phone', 'addressLine1', 'addressLine2',
   'city', 'state', 'zip', 'county', 'householdSize', 'householdAdults', 'householdChildren', 'householdSeniors', 'totalMonthlyIncome', 'annualIncome', 'monthlyRent',
   'monthlyUtilities', 'assetsOnHand', 'monthlyMedicalExpenses']);
 const matchCandidate = key => `Saved answer: ${KEY_ABOUT[key]}`;
@@ -77,6 +77,7 @@ function decide(rule, profile, age) {
       return age !== null && count(profile, 'householdSize') === 1 ? false : null;
     case 'applicantAgeAtLeast': return age === null ? null : age >= rule.age;
     case 'anyChildren': return children === null ? null : children > 0;
+    case 'householdMoreThanOne': { const size = count(profile, 'householdSize'); return size === null ? null : size > 1; }
     case 'veteran': return yes(profile, 'householdVeteran');
     case 'disability': return yes(profile, 'householdDisability');
     case 'pregnant': return yes(profile, 'householdPregnant');

@@ -25,6 +25,11 @@ struct AppRootView: View {
                     ProfileView().tabItem { Label("Profile", systemImage: "person.crop.circle") }
                     DocumentsView().tabItem { Label("Documents", systemImage: "doc.on.doc") }
                     SettingsView().tabItem { Label("Settings", systemImage: "gearshape") }
+                    #if DEBUG && targetEnvironment(simulator)
+                    if ProcessInfo.processInfo.arguments.contains("--offline-qa") {
+                        OfflineApplicantQAView().tabItem { Label("QA demo", systemImage: "testtube.2") }
+                    }
+                    #endif
                 }
                 .privacySensitive()
             } else {
@@ -41,6 +46,19 @@ struct AppRootView: View {
                 .accessibilityHidden(true)
             }
         }
+        #if DEBUG && targetEnvironment(simulator)
+        .padding(.top, ProcessInfo.processInfo.arguments.contains("--offline-qa") ? 28 : 0)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if ProcessInfo.processInfo.arguments.contains("--offline-qa") {
+                Text("OFFLINE QA · FICTIONAL PROFILE · IPHONE SIMULATOR")
+                    .font(.system(size: 10, weight: .bold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(Color(red: 1, green: 0.92, blue: 0.70))
+                    .foregroundStyle(Color(red: 0.25, green: 0.20, blue: 0.10))
+            }
+        }
+        #endif
         .background(PrivacyShield().frame(width: 0, height: 0))
         .task { await store.unlock() }
         .onChange(of: scenePhase) { _, phase in

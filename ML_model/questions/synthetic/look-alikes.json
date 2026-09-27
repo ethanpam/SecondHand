@@ -1388,23 +1388,6 @@
       "note": "Visit history is not in the profile."
     },
     {
-      "id": "s102",
-      "label": "How did you hear about us?",
-      "type": "radio",
-      "options": [
-        "Friend or family",
-        "Social media",
-        "Church",
-        "School",
-        "211",
-        "Other"
-      ],
-      "rule": {
-        "name": "none"
-      },
-      "note": "How they heard about the pantry."
-    },
-    {
       "id": "s103",
       "label": "Would you like your food delivered?",
       "type": "radio",
@@ -1692,21 +1675,6 @@
       "note": "Years in the US are not in the profile."
     },
     {
-      "id": "s123",
-      "label": "Gender",
-      "type": "radio",
-      "options": [
-        "Female",
-        "Male",
-        "Non-binary",
-        "Prefer not to say"
-      ],
-      "rule": {
-        "name": "none"
-      },
-      "note": "Gender is not in the profile."
-    },
-    {
       "id": "s124",
       "label": "Race (check all that apply)",
       "type": "checkbox",
@@ -1737,21 +1705,6 @@
         "name": "none"
       },
       "note": "Marital status is not in the profile."
-    },
-    {
-      "id": "s126",
-      "label": "Highest level of education completed",
-      "type": "select",
-      "options": [
-        "Less than high school",
-        "High school or GED",
-        "Some college",
-        "College degree"
-      ],
-      "rule": {
-        "name": "none"
-      },
-      "note": "Education is not in the profile."
     },
     {
       "id": "s127",
@@ -1790,36 +1743,6 @@
         "name": "never"
       },
       "note": "Agreeing to terms is the applicant’s decision."
-    },
-    {
-      "id": "s130",
-      "label": "Signature",
-      "type": "text",
-      "options": [],
-      "rule": {
-        "name": "never"
-      },
-      "note": "The applicant signs."
-    },
-    {
-      "id": "s131",
-      "label": "Date",
-      "type": "date",
-      "options": [],
-      "rule": {
-        "name": "never"
-      },
-      "note": "The date written beside the signature."
-    },
-    {
-      "id": "s132",
-      "label": "Social Security Number",
-      "type": "text",
-      "options": [],
-      "rule": {
-        "name": "never"
-      },
-      "note": "SecondHand never fills in a Social Security number."
     },
     {
       "id": "s133",
