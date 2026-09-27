@@ -71,7 +71,7 @@ export function Home() {
                   Get SecondHand <ArrowIcon size={20} />
                 </a>
                 <a className="secondary-link" href="#setup">
-                  Setup guide <span aria-hidden="true">↗</span>
+                  Setup guide
                 </a>
               </div>
               <p className="hero-note">
@@ -142,7 +142,7 @@ export function Home() {
                 <a href="/privacy">privacy policy</a>.
               </p>
               <a className="text-link" href="#setup">
-                How to get set up <ArrowIcon size={16} />
+                How to get set up
               </a>
             </div>
             <div className="download-panel">
@@ -389,7 +389,7 @@ export function Home() {
           >
             <h2 id="faq-callout-heading">Still have questions?</h2>
             <Link className="text-link" href="/faq">
-              Read the common questions <ArrowIcon size={16} />
+              Read the common questions
             </Link>
           </section>
         </div>

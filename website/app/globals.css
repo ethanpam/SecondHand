@@ -150,13 +150,10 @@ nav a:hover {
   font-weight: 500;
 }
 .header-download svg,
-.text-link svg,
-.secondary-link span,
 .primary-link svg {
   transition: transform 180ms ease;
 }
 .header-download:hover svg,
-.text-link:hover svg,
 .primary-link:hover svg {
   transform: translateX(4px);
 }
@@ -258,8 +255,10 @@ nav a:hover {
 .secondary-link {
   padding-block: 16px;
 }
-.secondary-link:hover span {
-  transform: translate(2px, -2px);
+.secondary-link,
+.text-link {
+  text-decoration: underline;
+  text-underline-offset: 6px;
 }
 .hero-note {
   font-size: 11px;
@@ -310,7 +309,6 @@ nav a:hover {
 .text-link {
   display: inline-flex;
   align-items: center;
-  gap: 24px;
   font-size: 13px;
   font-weight: 500;
 }
