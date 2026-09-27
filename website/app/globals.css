@@ -632,19 +632,17 @@ kbd {
   text-decoration: underline;
   text-underline-offset: 4px;
 }
-.faq-section {
-  display: grid;
-  grid-template-columns: 0.9fr 1.1fr;
-  gap: 96px;
-  padding: var(--space-section) 0;
+.faq-callout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 56px 0 var(--space-section);
+  border-top: 1px solid var(--border);
 }
-.faq-section h2 {
-  font-size: clamp(36px, 3.8vw, 52px);
-}
-.section-description {
-  color: var(--muted-foreground);
-  font-size: 14px;
-  margin-top: 24px;
+.faq-callout h2 {
+  font-size: clamp(30px, 3vw, 40px);
 }
 .faq-list details {
   margin: 0;
@@ -682,6 +680,19 @@ kbd {
   color: var(--muted-foreground);
   line-height: 1.85;
   margin: 16px 0 0;
+}
+/* The common questions page: the same list, in the document's larger type. */
+.faq-page .faq-list summary {
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--foreground);
+  cursor: pointer;
+}
+.faq-page .faq-list details p {
+  font-size: 15px;
+}
+.faq-page .faq-more {
+  margin-top: 48px;
 }
 .demo-section {
   text-align: center;
@@ -1074,9 +1085,6 @@ footer p {
   .setup-section {
     gap: 56px;
   }
-  .faq-section {
-    gap: 56px;
-  }
 }
 @media (max-width: 800px) {
   :root {
@@ -1192,10 +1200,6 @@ footer p {
     align-items: start;
     gap: 28px;
     padding: 28px;
-  }
-  .faq-section {
-    grid-template-columns: 1fr;
-    gap: 40px;
   }
   .demo-section {
     padding: 64px 0;

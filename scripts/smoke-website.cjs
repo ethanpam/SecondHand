@@ -189,6 +189,7 @@ async function main() {
     await inspectHeroLayout(page);
     const structuredData = JSON.parse(await page.locator('script[type="application/ld+json"]').textContent());
     assert.equal(structuredData.find(entry => entry['@type'] === 'SoftwareApplication').name, 'SecondHand');
+    assert.equal(structuredData.some(entry => entry['@type'] === 'FAQPage'), false, 'The questions are described on their own page');
     const shaderFrame = () => page.locator('.gradient-canvas[data-paper-shader]').evaluate(element => element.paperShaderMount.getCurrentFrame());
     const initialFrame = await shaderFrame();
     await expect.poll(shaderFrame).toBeGreaterThan(initialFrame);
@@ -248,12 +249,22 @@ async function main() {
     }
     console.log('Keyboard tabs and all three installer routes passed.');
 
+    // The common questions live on their own page, linked from the bottom of the home page.
     await page.goto(site, { waitUntil: 'networkidle' });
+    await page.getByRole('link', { name: 'Read the common questions' }).click();
+    await expect(page).toHaveURL(`${site}/faq`);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Common questions');
+    await inspectLayout(page);
+    const faqData = JSON.parse(await page.locator('script[type="application/ld+json"]').textContent());
+    assert.equal(faqData['@type'], 'FAQPage');
+    assert.equal(faqData.mainEntity.length, await page.locator('.faq-list details').count(), 'Every question on the page is described for search engines');
+    await page.screenshot({ path: path.join(artifacts, '-faq.png'), fullPage: true });
     const question = page.getByText('Does SecondHand cost anything?', { exact: true });
     await question.click();
     await expect(page.getByText('No. The download is free, and there is no account or subscription.', { exact: true })).toBeVisible();
     await question.press('Enter');
     await expect(page.getByText('No. The download is free, and there is no account or subscription.', { exact: true })).toBeHidden();
+    await page.goto(site, { waitUntil: 'networkidle' });
     await page.getByText('If your computer shows a warning', { exact: true }).click();
     await expect(page.getByRole('link', { name: 'Apple’s guidance on opening apps' })).toBeVisible();
 

@@ -4,7 +4,6 @@ import { useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import { ArrowIcon, CheckIcon, DownloadIcon, ExternalIcon } from './icons';
 import Link from 'next/link';
 import { GradientBackground } from './gradient-background';
-import { faq } from './faq';
 import { release } from './release';
 import { SiteFooter, SiteHeader } from './site-chrome';
 import { MotionProvider, MotionToggle } from './site-motion';
@@ -403,29 +402,13 @@ export function Home() {
             </section>
 
             <section
-              id="faq"
-              className="faq-section"
-              aria-labelledby="faq-heading"
+              className="faq-callout"
+              aria-labelledby="faq-callout-heading"
             >
-              <div>
-                <p className="eyebrow">04 / Good to know</p>
-                <h2 id="faq-heading">
-                  Good questions.
-                  <br />
-                  Straight answers.
-                </h2>
-                <p className="section-description">
-                  A few answers before you begin.
-                </p>
-              </div>
-              <div className="faq-list">
-                {faq.map(({ question, answer }) => (
-                  <details key={question}>
-                    <summary>{question}</summary>
-                    <p>{answer}</p>
-                  </details>
-                ))}
-              </div>
+              <h2 id="faq-callout-heading">Still have questions?</h2>
+              <Link className="text-link" href="/faq">
+                Read the common questions <ArrowIcon size={16} />
+              </Link>
             </section>
           </div>
         </main>

@@ -90,7 +90,7 @@ export default async function ThankYou({ params }: Props) {
         )}
         <p>
           Need more detail? Read the <a href="/#setup">full setup guide</a>, the{' '}
-          <a href="/#faq">common questions</a>, or our{' '}
+          <a href="/faq">common questions</a>, or our{' '}
           <a href="/privacy">privacy policy</a>.
         </p>
       </main>
