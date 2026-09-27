@@ -99,6 +99,7 @@ The Select Address and Tell Us More steps are in this code but not yet in the pu
 - **Nothing is filled without your yes.** The app asks before filling unless you chose **Always allow on this computer**, which you can turn off on its **Chrome extension** page. Locking the app, by hand or after 10 idle minutes, stops autofill.
 - **The extension stays in its lane.** It only runs on Iowa's secure portal and on sites you turn on, asks only for fields it recognizes on the current page, and never fills passwords, verification codes, signatures, or unknown household members.
 - **Iowa sees what's on its form.** Iowa's site can read or save answers as they're entered, and Save and Continue sends the page's answers to Iowa.
+- **Laya runs on this computer.** The optional Laya model (off by default, about 429 MB) is downloaded once when you turn it on in the **Chrome extension** view and runs locally. No profile data is sent anywhere. See [Local AI with Laya](docs/security.md#local-ai-with-laya).
 - **Backups are yours to keep.** An encrypted backup opens with the password or recovery key it was saved with. Keep it out of cloud-synced folders if you want every copy offline.
 - **An unlocked computer is still a computer.** SecondHand can't protect against malware, other programs running as you, other browser extensions reading Iowa's page, or system backups. See [the security design](docs/security.md).
 

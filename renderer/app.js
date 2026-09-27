@@ -23,6 +23,8 @@
   let toastTimer;
   let vaultGeneration = 0;
   let handledLockRevision = -1;
+  let layaPoll;
+  const LAYA_POLL_MS = 500;
 
   function icon(name) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -128,7 +130,8 @@
     $('overview-applications').replaceChildren();
         $('application-count').textContent = '0';
     if ($('application-dialog').open) $('application-dialog').close();
-    for (const id of ['auth-error', 'reset-error', 'profile-error', 'application-error', 'extension-error', 'extension-prepare-error', 'autofill-trust-error']) clearError(id);
+    clearTimeout(layaPoll);
+    for (const id of ['auth-error', 'reset-error', 'profile-error', 'application-error', 'extension-error', 'extension-prepare-error', 'autofill-trust-error', 'laya-error']) clearError(id);
     setProfileDirty(false);
     clearTimeout(toastTimer);
     $('toast').hidden = true;
@@ -323,6 +326,7 @@
     $('extension-id').value = vaultStatus.extensionId || '';
     $('autofill-trust').checked = Boolean(vaultStatus.autofillWithoutAsking);
     renderTrustedSites();
+    renderLaya();
     $('extension-status').textContent = bundled ? (setup.prepared ? 'Ready to load in Chrome' : 'Setup needs refresh') : connected ? 'Custom connection registered' : 'Needs setup';
     $('extension-status').classList.toggle('connected', connected);
     $('extension-prepared').hidden = !setup.prepared;
@@ -332,6 +336,46 @@
       ? 'In Chrome’s folder chooser, press Command + Shift + G, paste the copied folder path, then choose Open and Select.'
       : 'In Chrome’s folder chooser, paste the copied folder path into the address bar, then choose Select Folder.';
     $('extension-step-label').replaceChildren(document.createTextNode(connected ? 'Manage connection ' : 'Set up extension '), icon('arrow'));
+  }
+
+  const megabytes = bytes => `${Math.round(bytes / 1e6)} MB`;
+
+  // Laya's model status in the Chrome extension view: off, unavailable, not downloaded (or
+  // paused), downloading, ready, or error. Progress is polled while a download runs.
+  function renderLaya(laya = vaultStatus.laya || { state: 'off', enabled: false }) {
+    const size = laya.sizeBytes ? megabytes(laya.sizeBytes) : '';
+    const percent = Math.floor((laya.progress || 0) * 100);
+    const text = {
+      off: size ? `Off. The model is a ${size} download that runs on this computer.` : 'Off.',
+      unavailable: laya.message,
+      'not-downloaded': percent > 0 ? `Download paused at ${percent}% of ${size}.` : `Not downloaded (${size}).`,
+      downloading: `Downloading ${percent}% of ${size}…`,
+      ready: size ? `Ready. The model (${size}) is on this computer.` : 'Ready.',
+      error: laya.message
+    }[laya.state];
+    $('laya-toggle').checked = Boolean(laya.enabled);
+    $('laya-toggle').disabled = laya.state === 'unavailable';
+    $('laya-status').textContent = text || '';
+    const paused = laya.state === 'not-downloaded' && percent > 0;
+    $('laya-progress').hidden = !(laya.state === 'downloading' || paused);
+    $('laya-progress').value = percent;
+    $('laya-download').hidden = !['not-downloaded', 'error'].includes(laya.state);
+    $('laya-download').textContent = laya.state === 'error' ? 'Try again' : paused ? 'Resume download' : 'Download model';
+    $('laya-cancel').hidden = laya.state !== 'downloading';
+    $('laya-remove').hidden = !['ready', 'error'].includes(laya.state);
+    clearTimeout(layaPoll);
+    if (laya.state === 'downloading') {
+      const generation = vaultGeneration;
+      layaPoll = setTimeout(() => {
+        api.layaStatus().then(status => { if (generation === vaultGeneration) showLaya(status); },
+          error => { if (generation === vaultGeneration) showError('laya-error', error); });
+      }, LAYA_POLL_MS);
+    }
+  }
+
+  function showLaya(laya) {
+    vaultStatus = { ...vaultStatus, laya };
+    renderLaya(laya);
   }
 
   function renderTrustedSites() {
@@ -691,6 +735,40 @@
       showError('autofill-trust-error', error);
     }).finally(() => { $('autofill-trust').disabled = false; });
   });
+  $('laya-toggle').addEventListener('change', () => {
+    clearError('laya-error');
+    const generation = vaultGeneration;
+    const wanted = $('laya-toggle').checked;
+    $('laya-toggle').disabled = true;
+    api.setLayaEnabled(wanted).then(laya => {
+      if (generation !== vaultGeneration) return;
+      showLaya(laya);
+      toast(wanted ? 'Laya is on. It runs only on this computer.' : 'Laya is off.');
+    }, error => {
+      if (generation !== vaultGeneration) return;
+      $('laya-toggle').checked = !wanted;
+      showError('laya-error', error);
+    }).finally(() => { if (generation === vaultGeneration && vaultStatus.laya?.state !== 'unavailable') $('laya-toggle').disabled = false; });
+  });
+  for (const [buttonId, method, question, message] of [
+    ['laya-download', 'downloadLaya', '', ''],
+    ['laya-cancel', 'cancelLayaDownload', '', ''],
+    ['laya-remove', 'removeLaya', 'Remove the Laya model from this computer? You can download it again later.', 'The Laya model was removed from this computer.']
+  ]) {
+    $(buttonId).addEventListener('click', () => {
+      if (question && !window.confirm(question)) return;
+      clearError('laya-error');
+      const generation = vaultGeneration;
+      pending($(buttonId), async () => {
+        try {
+          const laya = await api[method]();
+          if (generation !== vaultGeneration) return;
+          showLaya(laya);
+          if (message) toast(message);
+        } catch (error) { if (generation === vaultGeneration) showError('laya-error', error); }
+      });
+    });
+  }
   $('extension-guide').addEventListener('click', () => pending($('extension-guide'), async () => {
     try { await api.openExtensionGuide(); } catch (error) { toast(error.message || 'Unable to open the guide.', true); }
   }));

@@ -844,6 +844,99 @@ test('a lock notification arriving after the lock response cannot clear an unloc
   assert.equal(view.get('workspace').hidden, true);
 });
 
+const LAYA_BYTES = 428699034;
+const layaView = view => ({
+  checked: view.get('laya-toggle').checked, disabled: view.get('laya-toggle').disabled, text: view.get('laya-status').textContent,
+  progress: view.get('laya-progress').hidden ? null : Number(view.get('laya-progress').value),
+  buttons: ['laya-download', 'laya-cancel', 'laya-remove'].filter(id => !view.get(id).hidden).map(id => view.get(id).textContent.trim())
+});
+
+test('the Laya toggle shows the model size, and turning it on downloads with visible progress until ready', async t => {
+  const calls = [];
+  let polled = 0;
+  const view = await renderer(t, {
+    status: async () => ({ exists: true, unlocked: true, extensionId: '', bridgeRunning: true, laya: { state: 'off', enabled: false, sizeBytes: LAYA_BYTES } }),
+    setLayaEnabled: async enabled => { calls.push(enabled); return { state: 'downloading', enabled, progress: 0.25, sizeBytes: LAYA_BYTES }; },
+    layaStatus: async () => ++polled === 1 ? { state: 'downloading', enabled: true, progress: 0.5, sizeBytes: LAYA_BYTES } : { state: 'ready', enabled: true, sizeBytes: LAYA_BYTES }
+  });
+  assert.match(view.get('view-extension').textContent, /Find more fields with Laya \(runs on this computer\)/);
+  assert.deepEqual(layaView(view), { checked: false, disabled: false, text: 'Off. The model is a 429 MB download that runs on this computer.', progress: null, buttons: [] });
+  view.get('laya-toggle').checked = true;
+  view.get('laya-toggle').dispatchEvent(new view.window.Event('change'));
+  await tick(); await tick();
+  assert.deepEqual(calls, [true]);
+  assert.deepEqual(layaView(view), { checked: true, disabled: false, text: 'Downloading 25% of 429 MB…', progress: 25, buttons: ['Cancel download'] });
+  await new Promise(resolve => setTimeout(resolve, 600));
+  assert.equal(layaView(view).text, 'Downloading 50% of 429 MB…');
+  await new Promise(resolve => setTimeout(resolve, 600));
+  assert.deepEqual(layaView(view), { checked: true, disabled: false, text: 'Ready. The model (429 MB) is on this computer.', progress: null, buttons: ['Remove model'] });
+  await new Promise(resolve => setTimeout(resolve, 600));
+  assert.equal(polled, 2, 'polling stops once the download is finished');
+});
+
+test('with no Laya model published yet, the toggle is disabled and says so', async t => {
+  const view = await renderer(t, {
+    status: async () => ({ exists: true, unlocked: true, extensionId: '', bridgeRunning: true, laya: { state: 'unavailable', enabled: false, message: 'No Laya model is available to download yet.' } })
+  });
+  assert.deepEqual(layaView(view), { checked: false, disabled: true, text: 'No Laya model is available to download yet.', progress: null, buttons: [] });
+});
+
+test('Laya download controls: cancel pauses, resume continues, and remove asks first', async t => {
+  const calls = [];
+  const view = await renderer(t, {
+    status: async () => ({ exists: true, unlocked: true, extensionId: '', bridgeRunning: true, laya: { state: 'downloading', enabled: true, progress: 0.4, sizeBytes: LAYA_BYTES } }),
+    layaStatus: async () => ({ state: 'downloading', enabled: true, progress: 0.4, sizeBytes: LAYA_BYTES }),
+    cancelLayaDownload: async () => { calls.push('cancel'); return { state: 'not-downloaded', enabled: true, progress: 0.4, sizeBytes: LAYA_BYTES }; },
+    downloadLaya: async () => { calls.push('download'); return { state: 'ready', enabled: true, sizeBytes: LAYA_BYTES }; },
+    removeLaya: async () => { calls.push('remove'); return { state: 'not-downloaded', enabled: true, progress: 0, sizeBytes: LAYA_BYTES }; }
+  });
+  view.get('laya-cancel').click();
+  await tick(); await tick();
+  assert.deepEqual(layaView(view), { checked: true, disabled: false, text: 'Download paused at 40% of 429 MB.', progress: 40, buttons: ['Resume download'] });
+  view.get('laya-download').click();
+  await tick(); await tick();
+  assert.deepEqual(layaView(view).buttons, ['Remove model']);
+  let asked = 0;
+  view.window.confirm = () => { asked++; return false; };
+  view.get('laya-remove').click();
+  await tick();
+  assert.deepEqual(calls, ['cancel', 'download']);
+  view.window.confirm = () => { asked++; return true; };
+  view.get('laya-remove').click();
+  await tick(); await tick();
+  assert.equal(asked, 2);
+  assert.deepEqual(calls, ['cancel', 'download', 'remove']);
+  assert.deepEqual(layaView(view), { checked: true, disabled: false, text: 'Not downloaded (429 MB).', progress: null, buttons: ['Download model'] });
+  assert.match(view.get('toast').textContent, /removed/);
+});
+
+test('a Laya error shows its message with a way to try again, and a failed toggle is restored', async t => {
+  const message = 'The downloaded Laya model didn’t match its expected checksum, so SecondHand deleted it. Try again.';
+  const view = await renderer(t, {
+    status: async () => ({ exists: true, unlocked: true, extensionId: '', bridgeRunning: true, laya: { state: 'error', enabled: true, message, sizeBytes: LAYA_BYTES } }),
+    setLayaEnabled: async () => { throw new Error('Unlock SecondHand first.'); }
+  });
+  assert.deepEqual(layaView(view), { checked: true, disabled: false, text: message, progress: null, buttons: ['Try again', 'Remove model'] });
+  view.get('laya-toggle').checked = false;
+  view.get('laya-toggle').dispatchEvent(new view.window.Event('change'));
+  await tick(); await tick();
+  assert.equal(view.get('laya-toggle').checked, true);
+  assert.equal(view.get('laya-toggle').disabled, false);
+  assert.match(view.get('laya-error').textContent, /Unlock SecondHand first/);
+});
+
+test('turning Laya off says so and stops showing download controls', async t => {
+  const view = await renderer(t, {
+    status: async () => ({ exists: true, unlocked: true, extensionId: '', bridgeRunning: true, laya: { state: 'ready', enabled: true, sizeBytes: LAYA_BYTES } }),
+    setLayaEnabled: async enabled => ({ state: 'off', enabled, sizeBytes: LAYA_BYTES })
+  });
+  view.get('laya-toggle').checked = false;
+  view.get('laya-toggle').dispatchEvent(new view.window.Event('change'));
+  await tick(); await tick();
+  assert.deepEqual(layaView(view), { checked: false, disabled: false, text: 'Off. The model is a 429 MB download that runs on this computer.', progress: null, buttons: [] });
+  assert.match(view.get('toast').textContent, /Laya is off/);
+});
+
 test('start over is offered on the reset screen, needs the typed phrase, and returns to creating a password', async t => {
   let status = { exists: true, unlocked: false, recoveryKey: true, deviceReset: false, lockRevision: 0 };
   const calls = [];

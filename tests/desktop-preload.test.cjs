@@ -33,3 +33,22 @@ test('preload forwards only valid lock revisions and treats malformed or legacy 
   assert.equal(removed.channel, 'secondhand:locked');
   assert.equal(removed.callback, listener);
 });
+
+test('preload exposes the Laya settings actions as named desktop calls and nothing that runs the model', () => {
+  let api;
+  const calls = [];
+  vm.runInNewContext(fs.readFileSync(require.resolve('../desktop/preload.cjs'), 'utf8'), {
+    require: () => ({
+      contextBridge: { exposeInMainWorld(_name, value) { api = value; } },
+      ipcRenderer: { invoke: (...args) => { calls.push(args); return Promise.resolve(); }, on() {}, removeListener() {} }
+    })
+  });
+  api.layaStatus();
+  api.setLayaEnabled(true);
+  api.downloadLaya();
+  api.cancelLayaDownload();
+  api.removeLaya();
+  assert.deepEqual(calls, [['secondhand:invoke', 'layaStatus'], ['secondhand:invoke', 'setLayaEnabled', true], ['secondhand:invoke', 'downloadLaya'],
+    ['secondhand:invoke', 'cancelLayaDownload'], ['secondhand:invoke', 'removeLaya']]);
+  assert.equal(Object.keys(api).some(name => /decide/i.test(name)), false, 'the renderer cannot ask Laya for decisions');
+});
