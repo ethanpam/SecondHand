@@ -9,9 +9,9 @@ tests can check the port id for id and probability for probability.
     # A weightless graph with the export's inputs and output, for the ONNX runner tests:
     uv run --project ~/Projects/LayaStudio python ML_model/eval/runtime_fixtures.py tiny
 
-    # The real model: token ids, prompts and probabilities for a fixed sample of rows
-    # (tested when SECONDHAND_LAYA_MODEL_DIR points at the export):
-    node ML_model/dataset/build.cjs --format noul-v1 --today 2026-09-26 --households 50 --seed 3 --per-question 2 --out <dir>
+    # The real model: token ids, prompts and probabilities for a fixed sample of rows, built in
+    # the model's format (tested when SECONDHAND_LAYA_MODEL_DIR points at the export):
+    node ML_model/dataset/build.cjs --format <format> --today 2026-09-26 --households 50 --seed 3 --per-question 2 --out <dir>
     uv run --project ~/Projects/LayaStudio python ML_model/eval/runtime_fixtures.py parity \
         --export <export dir> --checkpoint <run>/model --rows <dir>/rows.jsonl
 """
@@ -235,15 +235,23 @@ def parity(args):
     from laya_mlx.common import QTYPES, build_sequence
     from laya_mlx.tokenizer import Tokenizer
 
+    from decisions import dataset_format
+
     export = Path(args.export)
     config = json.loads((export / "rl_agent_config.json").read_text())
     tok = Tokenizer(export / "tokenizer")
     rows = [json.loads(line) for line in Path(args.rows).read_text().splitlines() if line.strip()]
+    questions = json.loads((Path(args.rows).parent / "questions.json").read_text())
+    model_format = dataset_format(questions)
     step = len(rows) // args.count
     picked = [rows[i * step] for i in range(args.count)]
-    labels = ["Email address", "First name", "Last name", "Phone number", "Do you have a pet?"]
-    decisions = [{"state": row["state"], "questions": {"correct": DECISION}} for row in picked]
-    decisions += [{"state": {"question": label}, "questions": {"match": MATCH}} for label in labels]
+    if model_format == "noul-v1":
+        labels = ["Email address", "First name", "Last name", "Phone number", "Do you have a pet?"]
+        decisions = [{"state": row["state"], "questions": {"correct": DECISION}} for row in picked]
+        decisions += [{"state": {"question": label}, "questions": {"match": MATCH}} for label in labels]
+    else:
+        # A choice-v1 row's one question, under the name the desktop asks it by (desktop/laya-decisions.cjs).
+        decisions = [{"state": row["state"], "questions": {"choice": questions[next(iter(row["answers"]))]}} for row in picked]
 
     items = []
     for d in decisions:
@@ -276,6 +284,7 @@ def parity(args):
 
     gap = max(abs(a - b) for s, m in zip(single, mlx) for a, b in zip(s, m))
     out = {
+        "format": model_format,
         "export": {
             "files": {
                 name: {"size": (export / name).stat().st_size, "sha256": hashlib.sha256((export / name).read_bytes()).hexdigest()}

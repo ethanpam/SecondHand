@@ -101,7 +101,10 @@ def main():
     started = time.time()
 
     def emit(kind, **fields):
-        if kind in ("phase", "result", "error", "warning") or (kind == "progress" and fields.get("step", 0) % 50 == 0):
+        # Every milestone, every 50th update, and every 500th evaluated row.
+        if (kind in ("phase", "info", "epoch", "log", "calibration", "result", "error", "warning")
+                or (kind == "step" and fields.get("step", 0) % 50 == 0)
+                or (kind == "progress" and fields.get("done", 0) % 500 == 0)):
             print(f"[{time.time() - started:7.1f}s] {kind} {json.dumps(fields, default=str)[:300]}", flush=True)
 
     engine.train(spec, emit)

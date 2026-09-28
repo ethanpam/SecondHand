@@ -5,7 +5,25 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from decisions import ABSTAIN, agreement, apply_probabilities, fill, holdout_forms, metrics, named_reference, probabilities, training_precision
+from decisions import (
+    ABSTAIN,
+    MATCH_ABSTAIN,
+    agreement,
+    apply_probabilities,
+    candidates,
+    dataset_format,
+    fill,
+    holdout_forms,
+    load_decisions,
+    metrics,
+    named_reference,
+    probabilities,
+    training_precision,
+)
+
+YES_NO = {"type": "choice", "instructions": "Which option?", "criteria": ["Yes", "No", ABSTAIN]}
+FIELDS = {"type": "choice", "instructions": "Which saved answer?", "criteria": ["email address", "phone number", MATCH_ABSTAIN]}
+NOUL = {"correct": {"type": "noul", "instructions": "Is the candidate correct?"}}
 
 
 class TrainingPrecision(unittest.TestCase):
@@ -128,6 +146,59 @@ class Metrics(unittest.TestCase):
         self.assertEqual(result["wrong_fill_on_unanswerable"], 1)
         self.assertAlmostEqual(result["precision"], 0.5)
         self.assertAlmostEqual(result["coverage"], 1.0)
+
+
+class Candidates(unittest.TestCase):
+    def test_a_noul_row_is_one_candidate(self):
+        row = {"decision": "d", "task": "answer", "state": {"question": "Q", "candidate": "Yes"}, "answers": {"correct": True}}
+        self.assertEqual(candidates(row, NOUL), [row])
+
+    def test_a_choice_row_is_every_choice_in_order_with_the_abstain_choice_last(self):
+        row = {"decision": "d", "task": "answer", "split": "test", "state": {"facts": "F", "question": "Q"}, "answers": {"yn": "No"}}
+        out = candidates(row, {"yn": YES_NO})
+        self.assertEqual([c["state"]["candidate"] for c in out], ["Yes", "No", ABSTAIN])
+        self.assertEqual([c["answers"]["correct"] for c in out], [False, True, False])
+        self.assertEqual(out[0]["state"], {"facts": "F", "question": "Q", "candidate": "Yes"})
+        self.assertEqual(out[0]["source"], {"qid": "yn", "state": {"facts": "F", "question": "Q"}})
+        self.assertTrue(all(c["decision"] == "d" for c in out))
+
+    def test_a_choice_question_without_an_abstain_choice_last_is_refused(self):
+        row = {"decision": "d", "task": "answer", "state": {"question": "Q"}, "answers": {"q": "a"}}
+        with self.assertRaisesRegex(ValueError, "abstain"):
+            candidates(row, {"q": {"type": "choice", "instructions": "x", "criteria": ["a", "b"]}})
+
+
+class DatasetFormat(unittest.TestCase):
+    def test_names_the_format_from_its_questions(self):
+        self.assertEqual(dataset_format(NOUL), "noul-v1")
+        self.assertEqual(dataset_format({"yn": YES_NO, "fields": FIELDS}), "choice-v1")
+        with self.assertRaisesRegex(ValueError, "format"):
+            dataset_format({"yn": YES_NO, **NOUL})
+
+
+class LoadDecisions(unittest.TestCase):
+    def test_groups_choice_rows_into_their_candidates_by_task(self):
+        folder = Path(tempfile.mkdtemp())
+        rows = [
+            {"state": {"facts": "F", "question": "Q"}, "answers": {"yn": "Yes"}, "split": "test", "task": "answer", "decision": "https://a.example#q1#0"},
+            {"state": {"question": "Email"}, "answers": {"fields": "email address"}, "split": "test", "task": "match", "decision": "https://a.example#q2"},
+            {"state": {"question": "Phone"}, "answers": {"fields": MATCH_ABSTAIN}, "split": "train", "task": "match", "decision": "https://b.example#q3"},
+        ]
+        (folder / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        decisions = load_decisions(folder, {"yn": YES_NO, "fields": FIELDS}, "test", holdout=False, limit=0)
+        self.assertEqual(list(decisions["answer"]), ["https://a.example#q1#0"])
+        self.assertEqual(list(decisions["match"]), ["https://a.example#q2"])
+        self.assertEqual([c["state"]["candidate"] for c in decisions["match"]["https://a.example#q2"]], ["email address", "phone number", MATCH_ABSTAIN])
+
+
+class ChoiceMetrics(unittest.TestCase):
+    def test_a_match_decision_abstains_with_none_of_these(self):
+        row = {"decision": "d", "task": "match", "state": {"question": "Email"}, "answers": {"fields": MATCH_ABSTAIN}}
+        decision = candidates(row, {"fields": FIELDS})
+        for c, p in zip(decision, (0.97, 0.02, 0.01)):
+            c["p"] = p
+        result = metrics({"d": decision}, 0.95)
+        self.assertEqual((result["accepted"], result["wrong_fill"], result["wrong_fill_on_unanswerable"], result["answerable"]), (1, 1, 1, 0))
 
 
 if __name__ == "__main__":
