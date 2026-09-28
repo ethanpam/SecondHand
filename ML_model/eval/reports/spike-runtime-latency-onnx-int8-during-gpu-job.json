@@ -1,0 +1,153 @@
+{
+  "machine": "Apple M4 Max",
+  "cpus": 14,
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "onnxruntime": "1.30.0",
+  "onnx": "<LayaStudio>/workspace/exports/augmented-lora-proper-1790472969-onnx-int8",
+  "form": "https://uticafoodpantry.org/wp-content/uploads/2022/06/ClientIntakeForm.pdf",
+  "household": 0,
+  "questions": 20,
+  "questions_by_task": {
+    "answer": 6,
+    "match": 14
+  },
+  "candidate_rows": 390,
+  "batch_size": 8,
+  "threads": "onnxruntime default",
+  "session_load_ms": 1022.5,
+  "first_page_ms": 34471.8,
+  "first_load_ms": 35494.4,
+  "first_load_load_1m": 1.61,
+  "p50_ms": 16660.2,
+  "p95_ms": 59765.2,
+  "min_ms": 15046.6,
+  "max_ms": 59912.4,
+  "load_1m_range": [
+    4.68,
+    13.65
+  ],
+  "runs": [
+    {
+      "ms": 31477.3,
+      "load_1m": 4.68
+    },
+    {
+      "ms": 32801.1,
+      "load_1m": 6.29
+    },
+    {
+      "ms": 33066.9,
+      "load_1m": 6.93
+    },
+    {
+      "ms": 32170.9,
+      "load_1m": 7.24
+    },
+    {
+      "ms": 42008.9,
+      "load_1m": 8.65
+    },
+    {
+      "ms": 59765.2,
+      "load_1m": 8.53
+    },
+    {
+      "ms": 58718.9,
+      "load_1m": 10.48
+    },
+    {
+      "ms": 59912.4,
+      "load_1m": 10.45
+    },
+    {
+      "ms": 47536.9,
+      "load_1m": 11.56
+    },
+    {
+      "ms": 55853.5,
+      "load_1m": 11.31
+    },
+    {
+      "ms": 17782.4,
+      "load_1m": 10.71
+    },
+    {
+      "ms": 17004.0,
+      "load_1m": 11.15
+    },
+    {
+      "ms": 17116.4,
+      "load_1m": 10.9
+    },
+    {
+      "ms": 16548.7,
+      "load_1m": 10.5
+    },
+    {
+      "ms": 16562.4,
+      "load_1m": 10.84
+    },
+    {
+      "ms": 16544.1,
+      "load_1m": 10.43
+    },
+    {
+      "ms": 16289.8,
+      "load_1m": 10.14
+    },
+    {
+      "ms": 17334.3,
+      "load_1m": 10.11
+    },
+    {
+      "ms": 16898.1,
+      "load_1m": 10.4
+    },
+    {
+      "ms": 16600.2,
+      "load_1m": 10.84
+    },
+    {
+      "ms": 16308.4,
+      "load_1m": 10.5
+    },
+    {
+      "ms": 15125.3,
+      "load_1m": 10.33
+    },
+    {
+      "ms": 15531.5,
+      "load_1m": 9.95
+    },
+    {
+      "ms": 15077.1,
+      "load_1m": 12.21
+    },
+    {
+      "ms": 16660.2,
+      "load_1m": 11.52
+    },
+    {
+      "ms": 15217.0,
+      "load_1m": 13.65
+    },
+    {
+      "ms": 15048.4,
+      "load_1m": 12.77
+    },
+    {
+      "ms": 15117.0,
+      "load_1m": 11.57
+    },
+    {
+      "ms": 15046.6,
+      "load_1m": 10.91
+    },
+    {
+      "ms": 16195.4,
+      "load_1m": 10.48
+    }
+  ],
+  "rss_before_model_mb": 85.2,
+  "peak_rss_mb": 1569.0
+}

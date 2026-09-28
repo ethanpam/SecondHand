@@ -1,0 +1,233 @@
+{
+  "model": "<LayaStudio>/workspace/runs/augmented-lora-proper-1790472969/model",
+  "runtime": "mlx",
+  "split": "test",
+  "holdout": true,
+  "tasks": {
+    "answer": {
+      "0.5": {
+        "decisions": 368,
+        "answerable": 17,
+        "accepted": 25,
+        "right": 16,
+        "wrong_fill": 9,
+        "wrong_fill_on_unanswerable": 9,
+        "unanswerable": 351,
+        "precision": 0.64,
+        "coverage": 0.9411764705882353
+      },
+      "0.7": {
+        "decisions": 368,
+        "answerable": 17,
+        "accepted": 25,
+        "right": 16,
+        "wrong_fill": 9,
+        "wrong_fill_on_unanswerable": 9,
+        "unanswerable": 351,
+        "precision": 0.64,
+        "coverage": 0.9411764705882353
+      },
+      "0.8": {
+        "decisions": 368,
+        "answerable": 17,
+        "accepted": 25,
+        "right": 16,
+        "wrong_fill": 9,
+        "wrong_fill_on_unanswerable": 9,
+        "unanswerable": 351,
+        "precision": 0.64,
+        "coverage": 0.9411764705882353
+      },
+      "0.9": {
+        "decisions": 368,
+        "answerable": 17,
+        "accepted": 24,
+        "right": 16,
+        "wrong_fill": 8,
+        "wrong_fill_on_unanswerable": 8,
+        "unanswerable": 351,
+        "precision": 0.6666666666666666,
+        "coverage": 0.9411764705882353
+      },
+      "0.95": {
+        "decisions": 368,
+        "answerable": 17,
+        "accepted": 24,
+        "right": 16,
+        "wrong_fill": 8,
+        "wrong_fill_on_unanswerable": 8,
+        "unanswerable": 351,
+        "precision": 0.6666666666666666,
+        "coverage": 0.9411764705882353
+      },
+      "0.98": {
+        "decisions": 368,
+        "answerable": 17,
+        "accepted": 21,
+        "right": 16,
+        "wrong_fill": 5,
+        "wrong_fill_on_unanswerable": 5,
+        "unanswerable": 351,
+        "precision": 0.7619047619047619,
+        "coverage": 0.9411764705882353
+      },
+      "0.99": {
+        "decisions": 368,
+        "answerable": 17,
+        "accepted": 13,
+        "right": 12,
+        "wrong_fill": 1,
+        "wrong_fill_on_unanswerable": 1,
+        "unanswerable": 351,
+        "precision": 0.9230769230769231,
+        "coverage": 0.7058823529411765
+      },
+      "0.992": {
+        "decisions": 368,
+        "answerable": 17,
+        "accepted": 9,
+        "right": 9,
+        "wrong_fill": 0,
+        "wrong_fill_on_unanswerable": 0,
+        "unanswerable": 351,
+        "precision": 1.0,
+        "coverage": 0.5294117647058824
+      },
+      "0.995": {
+        "decisions": 368,
+        "answerable": 17,
+        "accepted": 6,
+        "right": 6,
+        "wrong_fill": 0,
+        "wrong_fill_on_unanswerable": 0,
+        "unanswerable": 351,
+        "precision": 1.0,
+        "coverage": 0.35294117647058826
+      },
+      "0.996": {
+        "decisions": 368,
+        "answerable": 17,
+        "accepted": 6,
+        "right": 6,
+        "wrong_fill": 0,
+        "wrong_fill_on_unanswerable": 0,
+        "unanswerable": 351,
+        "precision": 1.0,
+        "coverage": 0.35294117647058826
+      }
+    },
+    "match": {
+      "0.5": {
+        "decisions": 78,
+        "answerable": 47,
+        "accepted": 48,
+        "right": 41,
+        "wrong_fill": 7,
+        "wrong_fill_on_unanswerable": 7,
+        "unanswerable": 31,
+        "precision": 0.8541666666666666,
+        "coverage": 0.8723404255319149
+      },
+      "0.7": {
+        "decisions": 78,
+        "answerable": 47,
+        "accepted": 48,
+        "right": 41,
+        "wrong_fill": 7,
+        "wrong_fill_on_unanswerable": 7,
+        "unanswerable": 31,
+        "precision": 0.8541666666666666,
+        "coverage": 0.8723404255319149
+      },
+      "0.8": {
+        "decisions": 78,
+        "answerable": 47,
+        "accepted": 46,
+        "right": 39,
+        "wrong_fill": 7,
+        "wrong_fill_on_unanswerable": 7,
+        "unanswerable": 31,
+        "precision": 0.8478260869565217,
+        "coverage": 0.8297872340425532
+      },
+      "0.9": {
+        "decisions": 78,
+        "answerable": 47,
+        "accepted": 45,
+        "right": 39,
+        "wrong_fill": 6,
+        "wrong_fill_on_unanswerable": 6,
+        "unanswerable": 31,
+        "precision": 0.8666666666666667,
+        "coverage": 0.8297872340425532
+      },
+      "0.95": {
+        "decisions": 78,
+        "answerable": 47,
+        "accepted": 43,
+        "right": 38,
+        "wrong_fill": 5,
+        "wrong_fill_on_unanswerable": 5,
+        "unanswerable": 31,
+        "precision": 0.8837209302325582,
+        "coverage": 0.8085106382978723
+      },
+      "0.98": {
+        "decisions": 78,
+        "answerable": 47,
+        "accepted": 32,
+        "right": 29,
+        "wrong_fill": 3,
+        "wrong_fill_on_unanswerable": 3,
+        "unanswerable": 31,
+        "precision": 0.90625,
+        "coverage": 0.6170212765957447
+      },
+      "0.99": {
+        "decisions": 78,
+        "answerable": 47,
+        "accepted": 22,
+        "right": 21,
+        "wrong_fill": 1,
+        "wrong_fill_on_unanswerable": 1,
+        "unanswerable": 31,
+        "precision": 0.9545454545454546,
+        "coverage": 0.44680851063829785
+      },
+      "0.992": {
+        "decisions": 78,
+        "answerable": 47,
+        "accepted": 21,
+        "right": 20,
+        "wrong_fill": 1,
+        "wrong_fill_on_unanswerable": 1,
+        "unanswerable": 31,
+        "precision": 0.9523809523809523,
+        "coverage": 0.425531914893617
+      },
+      "0.995": {
+        "decisions": 78,
+        "answerable": 47,
+        "accepted": 18,
+        "right": 18,
+        "wrong_fill": 0,
+        "wrong_fill_on_unanswerable": 0,
+        "unanswerable": 31,
+        "precision": 1.0,
+        "coverage": 0.3829787234042553
+      },
+      "0.996": {
+        "decisions": 78,
+        "answerable": 47,
+        "accepted": 18,
+        "right": 18,
+        "wrong_fill": 0,
+        "wrong_fill_on_unanswerable": 0,
+        "unanswerable": 31,
+        "precision": 1.0,
+        "coverage": 0.3829787234042553
+      }
+    }
+  },
+  "probs_from": "mlx-holdout.probs.json"
+}

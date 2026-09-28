@@ -9,4 +9,18 @@ uv run --project ~/Projects/LayaStudio python -m unittest discover -s ML_model/e
 
 Models load in the precision they were trained in (from their `laya_finetune.json`). laya-mlx's float16 default overflows on bfloat16-trained models.
 
+Every report also writes each row's probability next to it (`<name>.probs.json`). Use it to compare runtimes row by row, or to rebuild a report without scoring again:
+
+```
+# An ONNX export on the CPU, compared with an earlier MLX scoring of the same rows
+uv run --project ~/Projects/LayaStudio python ML_model/eval/decisions.py --runtime onnx --onnx <LayaStudio>/workspace/exports/<export> \
+    --reference-probs mlx=<mlx report>.probs.json --report <name>.json
+# The same report again from its saved probabilities
+uv run --project ~/Projects/LayaStudio python ML_model/eval/decisions.py --runtime onnx --onnx <export> --probs <name>.probs.json --report <name>.json
+# CPU latency and peak memory for one 20-question form page
+uv run --project ~/Projects/LayaStudio python ML_model/eval/latency_onnx.py --onnx <export> --dataset <built dataset> --form <form url> --out <name>.json
+```
+
+The runtime comparison for #37 is in `docs/superpowers/specs/2026-09-27-laya-runtime-spike.md`.
+
 `runtime_fixtures.py` writes the Python reference outputs that the desktop app's JavaScript Laya runtime (#38) is tested against: token ids, prompts, and int8 ONNX probabilities for a fixed sample of rows (`tests/fixtures/laya/`). Its docstring has the commands.
