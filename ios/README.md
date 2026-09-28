@@ -22,7 +22,7 @@ Saved information and reminders work offline. Opening the Iowa website, signing 
 
 ## Application assistance scope
 
-[Watch the live iPhone Safari QA video](docs/qa/iphone-live-safari-demo.mp4) · [QA results and offline demo](docs/qa/README.md)
+[Watch the live iPhone Safari QA video](https://github.com/ethanpam/secondHand/blob/e411cfbbf77f7e0169c3ca0c6afea2fa35da2c4f/ios/docs/qa/iphone-live-safari-demo.mp4) · [QA results and offline demo](docs/qa/README.md)
 
 The live recording shows the installed Safari extension selecting the home-address **Yes** answer and filling **10 fields** from a fictional saved profile on Iowa's applicant form, in one Start action. It runs in iPhone Simulator and verifies native sharing through to the real website. The test stopped before the applicant page's **Save and Continue**, signature, or submission.
 
@@ -30,9 +30,9 @@ The live recording shows the installed Safari extension selecting the home-addre
 
 The assistant automatically matches first/middle/last name, explicit home/mobile phone numbers, and home address on the [inspected applicant page](../docs/iowa-portal.md). For other eligible text/select fields, the user must explicitly choose which saved answer belongs there. These mappings apply only to the current page; the assistant does not guess household, eligibility, or financial semantics.
 
-If the shared native profile has a complete home address confirmed within the past 24 hours, **Start application assistance** can answer **Yes** to the verified, unanswered **Do you have a home address?** question. The assistant uses Iowa's normal choice control, scans the newly revealed fields again, and fills the address during the same Start action. It preserves existing Yes/No answers and refuses a choice that could reset existing home or mailing details. An incomplete address never implies No.
+If you saved a **Yes** or **No** answer to **Do you have a home address?** in your profile, the assistant selects it on the verified, unanswered question. With no saved answer, the question is left for you; the assistant never infers it from your address. It answers whenever it runs on the applicant page: on **Start application assistance**, on **Resume**, and when the page loads after an extension **Continue**. It uses Iowa's normal choice control. After **Yes**, it scans the newly revealed fields again and fills the address in the same run. It preserves existing Yes/No answers and refuses a choice that could reset existing home or mailing details. If it can't select your saved answer, the extension tells you the question was left for you.
 
-Application sharing expires after at most ten minutes. Its approved snapshot can include name, email, typed phone numbers, home address, the derived home-address Yes answer, monthly income, and monthly housing cost. Generic phone, household members, notes, documents, birth dates, SSNs, and passwords are excluded. The user handles login, CAPTCHA/verification, program choices, uploads, consent, and signatures on the website.
+Application sharing expires after at most ten minutes. Its approved snapshot can include name, email, typed phone numbers, home address, your saved Yes/No home-address answer, monthly income, and monthly housing cost. Generic phone, household members, notes, documents, birth dates, SSNs, and passwords are excluded. The user handles login, CAPTCHA/verification, program choices, uploads, consent, and signatures on the website.
 
 Each **Continue** requires a user action. On a recognized **E-Signature** page, the user completes Iowa's signature, checks the extension's approval box, and clicks **Approve and submit application**. The assistant checks that the reviewed page is unchanged, uses the website's normal button once, and does not retry submission automatically. The user must read the result and enter its confirmation number; a click alone never marks the tracker submitted. Unrecognized signing/submission pages remain manual.
 
@@ -110,7 +110,7 @@ After installing the app, enable SecondHand in Safari's extension settings and g
 1. Save and confirm your profile in the app. In **Settings**, choose **Allow application sharing for 10 minutes** and review the sharing confirmation.
 2. Open the official portal in Safari and navigate to the application. Any sign-in here uses your **Iowa benefits-portal account**, not an Apple or Second Hand account. Complete preliminary consent and verification yourself.
 3. Open SecondHand from Safari's extension menu, choose **Start application assistance**, and allow access to the Iowa website. The session is bound to this tab.
-4. Review automatically filled applicant details, including the home-address Yes answer when your confirmed complete address permits it. On an unfamiliar form, choose a saved answer for each field you want filled, then select **Fill selected details**. Leave uncertain matches unselected and answer them on the website.
+4. Review automatically filled applicant details, including your saved Yes or No to **Do you have a home address?**. On an unfamiliar form, choose a saved answer for each field you want filled, then select **Fill selected details**. Leave uncertain matches unselected and answer them on the website.
 5. Finish remaining questions, choose **Check current page** to refresh the review, and use **Continue to next step**. Pause or Stop is available during filling. A paused session resumes only when you choose Resume.
 6. On the final signing page, review the full application and complete its signature on Iowa's website. Then separately approve submission in the extension. If the page is unsupported, use the website directly.
 7. Read Iowa's result. When the assistant recognizes a confirmation page, enter the confirmation number and confirm that Iowa reports submission. Unlock SecondHand to import the encrypted receipt into your tracker. If the receipt page is unrecognized, record the number manually in the app.

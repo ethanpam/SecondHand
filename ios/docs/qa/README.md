@@ -2,7 +2,7 @@
 
 ## Live Safari — September 27, 2026
 
-[Watch/download the live Safari MP4](iphone-live-safari-demo.mp4)
+[Watch/download the live Safari MP4](https://github.com/ethanpam/secondHand/blob/e411cfbbf77f7e0169c3ca0c6afea2fa35da2c4f/ios/docs/qa/iphone-live-safari-demo.mp4)
 
 Duration: **6:33**. Portrait video: **588 × 1280**, H.264, **14.3 MB**, silent. This is an uninterrupted recording of the actual Simulator, including operator pauses; decoded frames were visually inspected.
 

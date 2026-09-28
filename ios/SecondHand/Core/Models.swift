@@ -6,6 +6,19 @@ struct HouseholdMember: Codable, Identifiable, Equatable {
     var relationship = ""
 }
 
+/// The applicant's own answer to Iowa's "Do you have a home address?". Never inferred.
+enum HomeAddressAnswer: String, Codable, CaseIterable, Identifiable {
+    case unanswered = "", yes, no
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .unanswered: "Not answered yet"
+        case .yes: "Yes"
+        case .no: "No"
+        }
+    }
+}
+
 struct PersonalProfile: Codable, Equatable {
     var firstName = ""
     var middleName = ""
@@ -20,6 +33,7 @@ struct PersonalProfile: Codable, Equatable {
     var city = ""
     var state = "IA"
     var postalCode = ""
+    var hasHomeAddress = HomeAddressAnswer.unanswered
     var household: [HouseholdMember] = []
     var monthlyIncome = ""
     var monthlyHousingCost = ""
@@ -30,7 +44,7 @@ struct PersonalProfile: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case firstName, middleName, lastName, email, phone, homePhone, mobilePhone
-        case addressLine1, addressLine2, city, state, postalCode, household
+        case addressLine1, addressLine2, city, state, postalCode, hasHomeAddress, household
         case monthlyIncome, monthlyHousingCost, notes, reviewedAt
     }
 
@@ -48,6 +62,7 @@ struct PersonalProfile: Codable, Equatable {
         city = try values.decodeIfPresent(String.self, forKey: .city) ?? ""
         state = try values.decodeIfPresent(String.self, forKey: .state) ?? "IA"
         postalCode = try values.decodeIfPresent(String.self, forKey: .postalCode) ?? ""
+        hasHomeAddress = try values.decodeIfPresent(HomeAddressAnswer.self, forKey: .hasHomeAddress) ?? .unanswered
         household = try values.decodeIfPresent([HouseholdMember].self, forKey: .household) ?? []
         monthlyIncome = try values.decodeIfPresent(String.self, forKey: .monthlyIncome) ?? ""
         monthlyHousingCost = try values.decodeIfPresent(String.self, forKey: .monthlyHousingCost) ?? ""
@@ -62,22 +77,14 @@ struct PersonalProfile: Codable, Equatable {
          "state": state, "postalCode": postalCode].filter { !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
-    var applicationFields: [String: String] { applicationFields(now: Date()) }
-
-    func applicationFields(now: Date) -> [String: String] {
-        var fields = ["firstName": firstName, "middleName": middleName, "lastName": lastName,
+    /// An unanswered home-address question has an empty value, so it isn't shared.
+    var applicationFields: [String: String] {
+        ["firstName": firstName, "middleName": middleName, "lastName": lastName,
          "email": email, "homePhone": homePhone, "mobilePhone": mobilePhone,
          "addressLine1": addressLine1, "addressLine2": addressLine2,
-         "city": city, "state": state, "postalCode": postalCode,
+         "city": city, "state": state, "postalCode": postalCode, "hasHomeAddress": hasHomeAddress.rawValue,
          "monthlyIncome": monthlyIncome, "monthlyHousingCost": monthlyHousingCost]
             .filter { !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        // This answer is derived only from a complete home address the user has
-        // recently confirmed. Missing information never implies a "No" answer.
-        if let reviewedAt, reviewedAt <= now, now.timeIntervalSince(reviewedAt) < 24 * 60 * 60,
-           IowaApplicationBridge.hasCompleteHomeAddress(in: fields) {
-            fields["hasHomeAddress"] = "yes"
-        }
-        return fields
     }
 }
 
@@ -189,20 +196,6 @@ enum IowaApplicationBridge {
         "addressLine1", "addressLine2", "city", "state", "postalCode", "hasHomeAddress", "monthlyIncome", "monthlyHousingCost"
     ]
 
-    private static let stateCodes: Set<String> = [
-        "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN",
-        "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH",
-        "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT",
-        "VT", "VA", "WA", "WV", "WI", "WY"
-    ]
-
-    static func hasCompleteHomeAddress(in fields: [String: String]) -> Bool {
-        func value(_ key: String) -> String { (fields[key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
-        return !value("addressLine1").isEmpty && !value("city").isEmpty
-            && stateCodes.contains(value("state").uppercased())
-            && value("postalCode").range(of: #"^[0-9]{5}$"#, options: .regularExpression) != nil
-    }
-
     static func allowsApplicationPage(_ string: String) -> Bool {
         guard string.count <= 1_000, let url = URLComponents(string: string),
               url.scheme?.lowercased() == "https", url.host?.lowercased() == "hhsservices.iowa.gov",
@@ -249,7 +242,7 @@ struct AutofillSession: Codable {
     func isValid(now: Date = Date()) -> Bool {
         guard expiresAt > now && expiresAt.timeIntervalSince(now) <= 601 else { return false }
         guard let hasHomeAddress = fields["hasHomeAddress"] else { return true }
-        return hasHomeAddress == "yes" && IowaApplicationBridge.hasCompleteHomeAddress(in: fields)
+        return hasHomeAddress == HomeAddressAnswer.yes.rawValue || hasHomeAddress == HomeAddressAnswer.no.rawValue
     }
 }
 

@@ -20,6 +20,15 @@ final class AppUITests: XCTestCase {
         }
         firstName.typeText("Test Iowa")
         if app.buttons["Done"].exists { app.buttons["Done"].tap() }
+        // The home-address answer is the applicant's explicit choice.
+        let homeAnswer = app.buttons["profile.hasHomeAddress"]
+        for _ in 0..<6 where !homeAnswer.isHittable { app.swipeUp() }
+        XCTAssertTrue(homeAnswer.isHittable)
+        homeAnswer.tap()
+        let yes = app.buttons["Yes"]
+        XCTAssertTrue(yes.waitForExistence(timeout: 5))
+        yes.tap()
+        XCTAssertTrue(homeAnswer.label.contains("Yes"), homeAnswer.label)
         let confirm = app.switches["profile.confirmed"]
         for _ in 0..<8 {
             if confirm.isHittable && confirm.frame.maxY < app.frame.maxY - 70 { break }
@@ -41,6 +50,7 @@ final class AppUITests: XCTestCase {
         app.buttons["profile.save"].tap()
         XCTAssertTrue(app.navigationBars["Review your profile"].waitForNonExistence(timeout: 5))
         XCTAssertTrue(edit.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Do you have a home address?, Yes"].waitForExistence(timeout: 5))
         app.terminate()
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Overview"].waitForExistence(timeout: 10))

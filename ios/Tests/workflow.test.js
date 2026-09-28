@@ -36,11 +36,11 @@ function harness(options = {}) {
         site.token = `token-${++serial}`;
         result = { token: site.token, pageURL: tab.url, kind: site.kind, title: "Application step",
           fields: [...site.fields], actions: [...site.actions], populated: 0, ambiguous: 0,
-          documentID: site.documentID || "document-1", canEnableHomeAddress: site.canEnableHomeAddress === true };
-      } else if (code.includes(".enableHomeAddress(")) {
+          documentID: site.documentID || "document-1", canAnswerHomeAddress: site.canAnswerHomeAddress === true };
+      } else if (code.includes(".answerHomeAddress(")) {
         calls.home.push(input.args);
-        result = { filled: 1 };
-        site.fields.push({ id: "home-city", key: "city", label: "Home city", type: "text" });
+        result = options.homeResult || { filled: 1 };
+        if (result.filled === 1) site.fields.push({ id: "home-city", key: "city", label: "Home city", type: "text" });
         if (options.replaceDocumentAfterChoice) site.documentID = "document-2";
       } else if (code.includes(".fill(")) {
         calls.fill.push(input.args);
@@ -75,7 +75,7 @@ test("start fills known fields and waits for a separate Continue action", async 
 test("Start selects verified home Yes once, then rescans and requests newly visible saved fields", async () => {
   const h = harness({ native: async input => ({ fields: Object.fromEntries(input.keys.map(key =>
     [key, key === "hasHomeAddress" ? "yes" : "Example"])), expiresAt: Date.now() + 600000 }) });
-  h.site.canEnableHomeAddress = true;
+  h.site.canAnswerHomeAddress = true;
   const view = await h.workflow.dispatch({ command: "start" });
   assert.equal(h.calls.home.length, 1); // The fake site deliberately leaves the capability true.
   assert.deepEqual(h.calls.native.map(call => call.keys), [["firstName"], ["hasHomeAddress"], ["firstName", "city"]]);
@@ -85,15 +85,58 @@ test("Start selects verified home Yes once, then rescans and requests newly visi
   assert.equal(view.workflow.filled, 2);
   assert.match(view.message, /Home address Yes selected/);
   assert.equal(view.savedFields.hasHomeAddress, undefined);
-  assert.equal(view.scan.canEnableHomeAddress, undefined);
+  assert.equal(view.scan.canAnswerHomeAddress, undefined);
   assert.equal(h.calls.act.length, 0);
 });
 
-test("missing or false native home eligibility never clicks, but other saved answers still fill", async () => {
-  for (const answer of [undefined, false, "no", "true", "Yes"]) {
+test("Start selects a saved home No once and reports it", async () => {
+  const h = harness({ native: async input => ({ fields: Object.fromEntries(input.keys.map(key =>
+    [key, key === "hasHomeAddress" ? "no" : "Example"])), expiresAt: Date.now() + 600000 }) });
+  h.site.canAnswerHomeAddress = true;
+  const view = await h.workflow.dispatch({ command: "start" });
+  assert.equal(h.calls.home.length, 1);
+  assert.equal(h.calls.home[0][2], "no");
+  assert.match(view.message, /^Home address No selected\. /);
+  assert.equal(view.workflow.phase, "ready");
+});
+
+test("a saved answer that can't be selected tells the applicant the question was left for them", async () => {
+  for (const answer of ["yes", "no"]) {
+    const h = harness({ homeResult: { filled: 0 }, native: async input => ({ fields: Object.fromEntries(input.keys.map(key =>
+      [key, key === "hasHomeAddress" ? answer : "Example"])), expiresAt: Date.now() + 600000 }) });
+    h.site.canAnswerHomeAddress = true;
+    const view = await h.workflow.dispatch({ command: "start" });
+    assert.equal(h.calls.home.length, 1, answer);
+    assert.equal(h.calls.fill.length, 1, answer);
+    assert.match(view.message, /^“Do you have a home address\?” was left for you to answer on Iowa’s website\. 1 fields filled\./, answer);
+    assert.doesNotMatch(view.message, /selected/, answer);
+  }
+});
+
+test("Resume and the page after an extension Continue also answer the home-address question", async () => {
+  const yes = async input => ({ fields: Object.fromEntries(input.keys.map(key =>
+    [key, key === "hasHomeAddress" ? "yes" : "Example"])), expiresAt: Date.now() + 600000 });
+  const resumed = harness({ native: yes });
+  await resumed.workflow.dispatch({ command: "start" });
+  await resumed.workflow.dispatch({ command: "pause" });
+  resumed.site.canAnswerHomeAddress = true;
+  assert.match((await resumed.workflow.dispatch({ command: "resume" })).message, /^Home address Yes selected\. /);
+  assert.equal(resumed.calls.home.length, 1);
+
+  const continued = harness({ native: yes });
+  await continued.workflow.dispatch({ command: "start" });
+  await continued.workflow.dispatch({ command: "act", previewToken: continued.site.token, actionID: "next" });
+  continued.site.canAnswerHomeAddress = true;
+  continued.events.updated(7, { status: "complete" });
+  await continued.workflow.dispatch({ command: "status" });
+  assert.equal(continued.calls.home.length, 1);
+});
+
+test("missing or unsupported native home answers never click, but other saved answers still fill", async () => {
+  for (const answer of [undefined, false, "true", "Yes", "No"]) {
     const h = harness({ native: async input => ({ fields: input.keys.includes("hasHomeAddress")
       ? (answer === undefined ? {} : { hasHomeAddress: answer }) : { firstName: "Example" }, expiresAt: Date.now() + 600000 }) });
-    h.site.canEnableHomeAddress = true;
+    h.site.canAnswerHomeAddress = true;
     const view = await h.workflow.dispatch({ command: "start" });
     assert.equal(h.calls.home.length, 0);
     assert.equal(h.calls.fill.length, 1);
@@ -103,7 +146,7 @@ test("missing or false native home eligibility never clicks, but other saved ans
 
 test("home eligibility never becomes a generic popup mapping or an unknown-page automatic answer", async () => {
   const h = harness();
-  h.site.kind = "mapping"; h.site.canEnableHomeAddress = true;
+  h.site.kind = "mapping"; h.site.canAnswerHomeAddress = true;
   h.site.fields = [{ id: "field-1", key: null, label: "Home question", type: "text" }];
   const view = await h.workflow.dispatch({ command: "start" });
   const result = await h.workflow.dispatch({ command: "fill", previewToken: view.scan.previewToken,
@@ -118,7 +161,7 @@ test("Stop, Pause, tab switch and navigation cancel delayed native home eligibil
     const gate = deferred();
     const h = harness({ native: async input => input.keys.includes("hasHomeAddress") ? gate.promise
       : { fields: { firstName: "Example" }, expiresAt: Date.now() + 600000 } });
-    h.site.canEnableHomeAddress = true;
+    h.site.canAnswerHomeAddress = true;
     const starting = h.workflow.dispatch({ command: "start" });
     while (h.calls.native.length < 2) await new Promise(resolve => setImmediate(resolve));
     let pending;
@@ -138,7 +181,7 @@ test("revoked or expired native home eligibility cannot choose Yes", async () =>
   for (const response of [{ error: "session_expired" }, { fields: { hasHomeAddress: "yes" }, expiresAt: Date.now() - 1 }]) {
     const h = harness({ native: async input => input.keys.includes("hasHomeAddress") ? response
       : { fields: {}, expiresAt: Date.now() + 600000 } });
-    h.site.canEnableHomeAddress = true;
+    h.site.canAnswerHomeAddress = true;
     assert.equal((await h.workflow.dispatch({ command: "start" })).error, "session");
     assert.equal(h.calls.home.length, 0);
     assert.equal(h.calls.fill.length, 0);
@@ -148,7 +191,7 @@ test("revoked or expired native home eligibility cannot choose Yes", async () =>
 test("a replacement document after home choice never receives the next address fill", async () => {
   const h = harness({ replaceDocumentAfterChoice: true, native: async input => ({ fields: input.keys.includes("hasHomeAddress")
     ? { hasHomeAddress: "yes" } : {}, expiresAt: Date.now() + 600000 }) });
-  h.site.canEnableHomeAddress = true;
+  h.site.canAnswerHomeAddress = true;
   const result = await h.workflow.dispatch({ command: "start" });
   assert.equal(result.error, "changed");
   assert.equal(h.calls.home.length, 1);

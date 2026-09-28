@@ -35,11 +35,12 @@ The allowed snapshot fields are:
 - First, middle, and last name.
 - Email and explicitly labeled home/mobile phone numbers.
 - Street address, apartment/unit, city, state, and postal code.
+- The applicant's saved Yes or No answer to **Do you have a home address?**, only when one is saved. It is never inferred from the address.
 - Monthly income and monthly housing cost, used only when the applicant explicitly maps them to website fields.
 
 The snapshot excludes the legacy general phone number, household members, documents, notes, dates of birth, Social Security numbers, and passwords. Expiry prevents future use; an expired encrypted file can remain until it is replaced or explicitly revoked. Expiry and revocation cannot erase information already released to a page or submitted to the website.
 
-The extension operates in one explicitly started tab on supported Iowa application routes, after Safari permission. Known applicant fields use exact form and field checks; other eligible text/select fields require the user's mapping. The extension can scroll rendered controls into view and fill empty fields. It does not handle login, verification codes, documents, eligibility answers, attestations, or signatures. Each Continue is a user action; final submission has a separate review/approval step and uses the website's normal button once.
+The extension operates in one explicitly started tab on supported Iowa application routes, after Safari permission. Known applicant fields use exact form and field checks; other eligible text/select fields require the user's mapping. The extension can scroll rendered controls into view, fill empty fields, and click the saved Yes or No on the unanswered home-address question. It does not answer other questions or handle login, verification codes, documents, eligibility answers, attestations, or signatures. Each Continue is a user action; final submission has a separate review/approval step and uses the website's normal button once.
 
 Extension storage contains only tab ID, expiry, phase, and counts so popup closure or worker suspension does not cause an automatic retry. It contains no answers, URLs, field labels, or approval tokens. Short-lived page snapshots include current form values and markup in isolated-script memory to detect changes to the reviewed application. They are never sent to the native app or persisted by the extension.
 

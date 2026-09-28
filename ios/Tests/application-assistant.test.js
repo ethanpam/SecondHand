@@ -64,25 +64,25 @@ test("known applicant mapping reuses typed laptop fields without exposing existi
   assert.equal(doc.querySelector("#lastName").value, "PRIVATE_EXISTING_VALUE");
 });
 
-const enableHome = (doc, scan, value = "yes", expiresAt = Date.now() + 60_000) =>
-  assistant.enableHomeAddress(doc, doc.location.href, scan.token, value, expiresAt);
+const answerHome = (doc, scan, value = "yes", expiresAt = Date.now() + 60_000) =>
+  assistant.answerHomeAddress(doc, doc.location.href, scan.token, value, expiresAt);
 
 test("verified home Yes uses Iowa's click handler and a fresh preview fills revealed address fields", async () => {
   const doc = page();
   const initial = inspect(doc);
-  assert.equal(initial.canEnableHomeAddress, true);
+  assert.equal(initial.canAnswerHomeAddress, true);
   assert.ok(!initial.fields.some(field => field.key === "hasHomeAddress" || field.key === "city"));
   let clicks = 0;
   doc.querySelector("#hasHome1").addEventListener("click", () => { clicks++; });
-  assert.equal((await enableHome(doc, initial)).filled, 1);
+  assert.equal((await answerHome(doc, initial)).filled, 1);
   assert.equal(clicks, 1);
   assert.equal(doc.querySelector("#hasHome1").checked, true);
   assert.equal(doc.querySelector("#homeAddrDiv").style.display, "block");
-  assert.equal((await enableHome(doc, initial)).error, "preview_expired");
+  assert.equal((await answerHome(doc, initial)).error, "preview_expired");
   const revealed = inspect(doc);
   assert.equal(revealed.documentID, initial.documentID);
   assert.notEqual(revealed.token, initial.token);
-  assert.equal(revealed.canEnableHomeAddress, false);
+  assert.equal(revealed.canAnswerHomeAddress, false);
   const result = await fill(doc, revealed, {
     addressLine1: "123 Test Way", addressLine2: "Unit 4", city: "Des Moines", state: "IA", postalCode: "50309"
   });
@@ -96,16 +96,35 @@ test("verified home Yes uses Iowa's click handler and a fresh preview fills reve
   assert.equal(doc.querySelector("#snap").checked, false);
 });
 
-test("home choice accepts only exact native yes and never a generic mapping", async () => {
-  for (const value of [undefined, false, "no", "true", "Yes", " yes "]) {
+test("verified home No uses Iowa's click handler and leaves the revealed mailing address to the applicant", async () => {
+  const doc = page();
+  // Only the No option is reachable, so the assistant must reveal and click that option.
+  doc.querySelector("#hasHome1").getBoundingClientRect = () => ({ left: 20, right: 220, top: 1000, bottom: 1030, width: 200, height: 30 });
+  let clicks = 0;
+  doc.querySelector("#hasHome2").addEventListener("click", () => { clicks++; });
+  const initial = inspect(doc);
+  assert.equal(initial.canAnswerHomeAddress, true);
+  assert.deepEqual(await answerHome(doc, initial, "no"), { filled: 1 });
+  assert.equal(clicks, 1);
+  assert.equal(doc.querySelector("#hasHome1").checked, false);
+  assert.equal(doc.querySelector("#hasHome2").checked, true);
+  assert.equal(doc.querySelector("#homeAddrDiv").style.display, "none");
+  assert.equal(doc.querySelector("#sameAdd").style.display, "block");
+  const after = inspect(doc);
+  assert.equal(after.canAnswerHomeAddress, false);
+  assert.ok(!after.fields.some(field => ["addressLine1", "addressLine2", "city", "state", "postalCode"].includes(field.key)));
+});
+
+test("home choice accepts only an exact native yes or no and never a generic mapping", async () => {
+  for (const value of [undefined, false, "true", "Yes", " yes ", "No"]) {
     const doc = page();
-    assert.equal((await enableHome(doc, inspect(doc), value === undefined ? null : value)).filled, 0);
+    assert.equal((await answerHome(doc, inspect(doc), value === undefined ? null : value)).error, "invalid_fields");
     assert.equal(doc.querySelector("#hasHome1").checked, false);
     assert.equal(doc.querySelector("#hasHome2").checked, false);
   }
   const generic = page('<h1>Information</h1><form><label>Home answer<input id="home"></label></form>', BASE + "more");
   const scan = inspect(generic);
-  assert.equal(scan.canEnableHomeAddress, false);
+  assert.equal(scan.canAnswerHomeAddress, false);
   assert.equal((await fill(generic, scan, { hasHomeAddress: "yes" }, [{ id: scan.fields[0].id, key: "hasHomeAddress" }])).error, "invalid_fields");
 });
 
@@ -122,23 +141,25 @@ test("home choice rejects changed question schemas and never replaces existing Y
     const doc = page(); mutate(doc);
     const selectedBefore = Array.from(doc.querySelectorAll('input[name="hasHome"]'), element => element.checked);
     const scan = inspect(doc);
-    assert.equal(scan.canEnableHomeAddress, false);
-    assert.equal((await enableHome(doc, scan)).error, "preview_expired");
+    assert.equal(scan.canAnswerHomeAddress, false);
+    assert.equal((await answerHome(doc, scan)).error, "preview_expired");
     assert.deepEqual(Array.from(doc.querySelectorAll('input[name="hasHome"]'), element => element.checked), selectedBefore);
   }
 });
 
-test("home Yes does not run a handler that could erase dependent home or mailing answers", async () => {
-  for (const id of ["addressLine1", "city", "state", "zipcode", "mailingAddressLine1", "mailingCity", "sameAddress1", "sameAddress2"]) {
-    const doc = page(), control = doc.getElementById(id);
-    if (control.type === "radio") control.checked = true;
-    else control.value = control.tagName === "SELECT" ? "IA" : "Existing answer";
-    const before = Array.from(doc.querySelectorAll("input,select"), element => [element.value, element.checked]);
-    let clicks = 0;
-    doc.querySelector("#hasHome1").addEventListener("click", () => { clicks++; });
-    assert.equal((await enableHome(doc, inspect(doc))).filled, 0, id);
-    assert.equal(clicks, 0, id);
-    assert.deepEqual(Array.from(doc.querySelectorAll("input,select"), element => [element.value, element.checked]), before, id);
+test("home Yes or No does not run a handler that could erase dependent home or mailing answers", async () => {
+  for (const [answer, target] of [["yes", "#hasHome1"], ["no", "#hasHome2"]]) {
+    for (const id of ["addressLine1", "city", "state", "zipcode", "mailingAddressLine1", "mailingCity", "sameAddress1", "sameAddress2"]) {
+      const doc = page(), control = doc.getElementById(id);
+      if (control.type === "radio") control.checked = true;
+      else control.value = control.tagName === "SELECT" ? "IA" : "Existing answer";
+      const before = Array.from(doc.querySelectorAll("input,select"), element => [element.value, element.checked]);
+      let clicks = 0;
+      doc.querySelector(target).addEventListener("click", () => { clicks++; });
+      assert.equal((await answerHome(doc, inspect(doc), answer)).filled, 0, `${answer} ${id}`);
+      assert.equal(clicks, 0, `${answer} ${id}`);
+      assert.deepEqual(Array.from(doc.querySelectorAll("input,select"), element => [element.value, element.checked]), before, `${answer} ${id}`);
+    }
   }
 });
 
@@ -154,15 +175,15 @@ test("home choice checks cancellation, expiry, document changes and overlays aft
     target.getBoundingClientRect = () => ({ left: 20, right: 220, top: 1000, bottom: 1030, width: 200, height: 30 });
     target.scrollIntoView = () => { target.getBoundingClientRect = normal; interrupt(doc); };
     const scan = inspect(doc);
-    await enableHome(doc, scan);
+    await answerHome(doc, scan);
     assert.equal(target.checked, false, label);
   }
   const expired = page();
-  assert.equal((await enableHome(expired, inspect(expired), "yes", Date.now() - 1)).error, "session_expired");
+  assert.equal((await answerHome(expired, inspect(expired), "yes", Date.now() - 1)).error, "session_expired");
   assert.equal(expired.querySelector("#hasHome1").checked, false);
   const changed = page(), scan = inspect(changed);
   changed.querySelector("#hasHome1").name = "otherQuestion";
-  assert.equal((await enableHome(changed, scan)).error, "preview_expired");
+  assert.equal((await answerHome(changed, scan)).error, "preview_expired");
 });
 
 test("a native home grant that expires during scrolling cannot click Yes", async () => {
@@ -173,7 +194,7 @@ test("a native home grant that expires during scrolling cannot click Yes", async
   target.scrollIntoView = () => { target.getBoundingClientRect = normal; Date.now = () => expiresAt; };
   const scan = inspect(doc);
   try {
-    assert.equal((await enableHome(doc, scan, "yes", expiresAt)).error, "preview_expired");
+    assert.equal((await answerHome(doc, scan, "yes", expiresAt)).error, "preview_expired");
     assert.equal(target.checked, false);
   } finally { Date.now = originalNow; }
 });
@@ -225,6 +246,34 @@ test("observed Iowa address selection stays manual on mobile, including errors a
     assert.equal(result.error, "approval_required", name);
     assert.equal(doc.__addressQa.nextClicks, 0, name);
     assert.deepEqual(doc.__addressQa.selectionClicks, [], name);
+  }
+});
+
+test("Select Address with the entered address preselected stays manual on mobile, including the mailing case", async () => {
+  // The shared desktop adapter can advance this state; mobile must never click it or touch the county.
+  for (const [name, options] of [["as entered", { selected: "original", renderedCounty: true }],
+    ["as entered with mailing", { selected: "original", renderedCounty: true, mailing: true }]]) {
+    const doc = page(addressFixture.makeHtml(options), addressFixture.URL);
+    addressFixture.attachHandlers(doc);
+    const entered = doc.querySelector("#homeAddressIndex1"), county = doc.getElementById("homeAddressLst1.county");
+    const controls = () => Array.from(doc.querySelectorAll("input,select"), element => [element.id, element.value, element.checked]);
+    const before = controls();
+    assert.equal(entered.checked, true, name);
+    assert.equal(doc.defaultView.getComputedStyle(county.closest("tr")).display, "block", name);
+    const scan = inspect(doc);
+    assert.equal(scan.kind, "manual", name);
+    assert.deepEqual(scan.fields, [], name);
+    assert.deepEqual(scan.actions, [], name);
+    assert.equal(scan.canAnswerHomeAddress, false, name);
+    assert.equal((await act(doc, addressFixture.URL, scan.token, "action-0", false)).error, "approval_required", name);
+    assert.equal((await fill(doc, inspect(doc), { city: "Ames" }, [{ id: "field-0", key: "city" }])).error, "preview_expired", name);
+    assert.equal((await answerHome(doc, inspect(doc))).error, "preview_expired", name);
+    assert.equal(doc.__addressQa.nextClicks, 0, name);
+    assert.deepEqual(doc.__addressQa.selectionClicks, [], name);
+    assert.deepEqual(controls(), before, name);
+    assert.equal(entered.checked, true, name);
+    assert.equal(county.value, "ADAIR", name);
+    assert.equal(doc.defaultView.getComputedStyle(county.closest("tr")).display, "block", name);
   }
 });
 
