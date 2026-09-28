@@ -34,7 +34,7 @@ struct ProfileView: View {
                     }
 
                     AppCard {
-                        SectionLabel(title: "Contact details", subtitle: "You can share your name, email, home and mobile phone, and home address during a Safari application session.")
+                        SectionLabel(title: "Contact details", subtitle: "You can share your name, email, home and mobile phone, home address, and your home-address answer during a Safari application session.")
                         DetailRow(label: "Email", value: profile.email)
                         DetailRow(label: "Home phone", value: profile.homePhone)
                         DetailRow(label: "Mobile phone", value: profile.mobilePhone)
@@ -50,6 +50,7 @@ struct ProfileView: View {
                                     .textSelection(.enabled)
                             }
                         }
+                        DetailRow(label: "Do you have a home address?", value: profile.hasHomeAddress == .unanswered ? "" : profile.hasHomeAddress.title)
                     }
 
                     AppCard {
@@ -120,6 +121,10 @@ struct ProfileEditor: View {
                 }
 
                 Section {
+                    Picker("Do you have a home address?", selection: $draft.hasHomeAddress) {
+                        ForEach(HomeAddressAnswer.allCases) { Text($0.title).tag($0) }
+                    }
+                    .accessibilityIdentifier("profile.hasHomeAddress")
                     TextField("Street address", text: $draft.addressLine1).textContentType(.streetAddressLine1)
                     TextField("Apartment or unit", text: $draft.addressLine2).textContentType(.streetAddressLine2)
                     TextField("City", text: $draft.city).textContentType(.addressCity)
@@ -127,7 +132,7 @@ struct ProfileEditor: View {
                         .textInputAutocapitalization(.characters).autocorrectionDisabled()
                     TextField("ZIP code", text: $draft.postalCode).textContentType(.postalCode).keyboardType(.numbersAndPunctuation)
                 } header: { Text("Home address") } footer: {
-                    Text("Use your home address. Enter a different mailing address directly on the official form.")
+                    Text("Your Yes or No answers this question on Iowa’s form. Leave it unanswered to answer it there yourself. Use your home address. Enter a different mailing address directly on the official form.")
                 }
 
                 Section {

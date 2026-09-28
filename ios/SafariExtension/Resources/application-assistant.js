@@ -259,7 +259,7 @@
     return { token, documentID: state.documentID, pageURL: url, ...page,
       fields: fields.map(({ id, label, key, type }) => ({ id, label, key, type })),
       actions: actions.map(({ id, label, kind }) => ({ id, label, kind })),
-      canEnableHomeAddress: Boolean(homeChoice),
+      canAnswerHomeAddress: Boolean(homeChoice),
       populated: scan.populated, ambiguous: scan.ambiguous };
   }
 
@@ -374,14 +374,14 @@
     return { filled, skipped: skipped + Math.max(0, assignments.length - filled - skipped), needsInput: true };
   }
 
-  async function enableHomeAddress(doc, url, token, value, expiresAt) {
+  async function answerHomeAddress(doc, url, token, value, expiresAt) {
     const plan = take(doc, url, token);
     if (!plan || !plan.homeChoice || plan.kind !== "known") return { error: "preview_expired" };
     if (!Number.isFinite(expiresAt) || expiresAt <= Date.now() || expiresAt > Date.now() + 601_000) return { error: "session_expired" };
-    // Only the native vault's complete, reviewed home address authorizes Yes.
-    // Missing/false/No must never select or reverse an applicant's answer.
-    if (value !== "yes") return { filled: 0 };
-    const target = plan.homeChoice.element;
+    // Only the applicant's explicit saved Yes or No selects a choice. Nothing
+    // else is inferred, and an existing answer is never reversed.
+    if (value !== "yes" && value !== "no") return { error: "invalid_fields" };
+    const target = plan.homeChoice.elements[value === "yes" ? 0 : 1];
     const active = () => !cancelled(doc, plan) && validDocument(doc, url) && Date.now() < expiresAt
       && Date.now() - plan.created <= 120_000;
     if (!await reveal(target, doc, active)) return active() ? { filled: 0 } : { error: "preview_expired" };
@@ -393,7 +393,7 @@
     // Reuse the exact choice click and dependent-answer guard. It refuses a
     // choice that could hide/reset any existing home or mailing answers.
     // The native click runs Iowa's own handler; no direct handler evaluation.
-    const result = iowa.fill(doc, url, [plan.homeChoice], { hasHomeAddress: "yes" });
+    const result = iowa.fill(doc, url, [plan.homeChoice], { hasHomeAddress: value });
     return { filled: result.filled.includes("hasHomeAddress") ? 1 : 0 };
   }
 
@@ -421,7 +421,7 @@
     return { attempted: true, kind: action.kind };
   }
 
-  const api = Object.freeze({ isPortalURL, inspect, fill, enableHomeAddress, act, cancel, formatValue });
+  const api = Object.freeze({ isPortalURL, inspect, fill, answerHomeAddress, act, cancel, formatValue });
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.SecondHandApplication = api;
 })(globalThis);

@@ -10,6 +10,9 @@
     city: "Home city", state: "Home state", postalCode: "Home ZIP code",
     monthlyIncome: "Monthly income", monthlyHousingCost: "Monthly housing cost"
   });
+  // The applicant's explicit saved answer to "Do you have a home address?". Never inferred.
+  const HOME_ANSWERS = Object.freeze({ yes: "Yes", no: "No" });
+  const HOME_LEFT = "“Do you have a home address?” was left for you to answer on Iowa’s website.";
   const PHASES = new Set(["running", "processing", "paused", "suspended", "mapping", "ready", "signature", "navigating", "awaiting_confirmation", "receipt"]);
   const MESSAGES = {
     running: "Ready to check the next application step.", processing: "Filling the supported fields…",
@@ -112,7 +115,7 @@
           || typeof response.fields !== "object" || !Number.isFinite(response.expiresAt)
           || response.expiresAt <= now() || response.expiresAt > now() + 601000) throw problem("session");
         const values = Object.fromEntries(Object.entries(response.fields).filter(([key, value]) =>
-          keys.includes(key) && (Object.hasOwn(SAVED_FIELDS, key) || (key === "hasHomeAddress" && value === "yes"))
+          keys.includes(key) && (Object.hasOwn(SAVED_FIELDS, key) || (key === "hasHomeAddress" && Object.hasOwn(HOME_ANSWERS, value)))
           && typeof value === "string" && value.trim() && value.length <= 500));
         return await use(values, response.expiresAt);
       } finally { response = null; }
@@ -167,23 +170,27 @@
     async function run(version) {
       if (!state || state.phase === "awaiting_confirmation") return view();
       let scan = await inspect(version);
-      let homeAddressSelected = false;
+      let homeAddressMessage = null;
       state.pages += 1;
-      if (scan.kind === "known" && scan.canEnableHomeAddress === true) {
+      if (scan.kind === "known" && scan.canAnswerHomeAddress === true) {
         state.phase = "processing"; message = MESSAGES.processing;
         await persist(); check(version);
         const choiceScan = scan;
         const result = await nativeFields(choiceScan, ["hasHomeAddress"], version, async (values, expiresAt) => {
           check(version);
           if (plan !== choiceScan) throw problem("changed");
-          if (values.hasHomeAddress !== "yes") return null;
-          return script(choiceScan, async (url, token, value, expiry) =>
-            await globalThis.SecondHandApplication.enableHomeAddress(document, url, token, value, expiry),
-          [choiceScan.pageURL, choiceScan.token, values.hasHomeAddress, Math.min(expiresAt, state.expiresAt)]);
+          // With no saved answer, the question stays with the applicant.
+          if (!Object.hasOwn(values, "hasHomeAddress")) return null;
+          const answer = values.hasHomeAddress;
+          const outcome = await script(choiceScan, async (url, token, value, expiry) =>
+            await globalThis.SecondHandApplication.answerHomeAddress(document, url, token, value, expiry),
+          [choiceScan.pageURL, choiceScan.token, answer, Math.min(expiresAt, state.expiresAt)]);
+          return { ...outcome, answer };
         });
         check(version);
         if (result) {
-          homeAddressSelected = result.filled === 1;
+          // A saved answer that couldn't be selected safely is reported, not dropped.
+          homeAddressMessage = result.filled === 1 ? `Home address ${HOME_ANSWERS[result.answer]} selected.` : HOME_LEFT;
           // At most one choice pass, then one text-fill pass. Newly revealed
           // fields require a fresh token in the same document and native grant.
           scan = await inspect(version);
@@ -195,7 +202,7 @@
       } else {
         await present(scan);
       }
-      if (homeAddressSelected) message = `Home address Yes selected. ${message}`;
+      if (homeAddressMessage) message = `${homeAddressMessage} ${message}`;
       return view();
     }
     async function act(input, version) {

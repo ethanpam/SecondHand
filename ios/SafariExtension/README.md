@@ -15,7 +15,7 @@ The iOS extension now supports a user-started application session, explicit fiel
 
 `activeTab`, `scripting`, `nativeMessaging`, and `storage` support the workflow. Optional host access to `https://hhsservices.iowa.gov/*` is requested only when the user starts assistance. All runtime operations additionally require the exact HTTPS origin and a clean `/apspssp/ssp.portal/applyForBenefits/` route. Query strings, fragments, account routes, subframes, and external form targets are unsupported. There are no network fetches, cookie access, external message endpoints, backend, or cloud synchronization.
 
-The native app shares only first/middle/last name, email, explicit home/mobile phone numbers, home address, monthly income, and monthly housing cost after explicit authorization. The extension requests only fields selected for the current operation. Generic phone, household members, documents, notes, SSNs, birth dates, passwords, signatures, and consent are never supplied.
+The native app shares only first/middle/last name, email, explicit home/mobile phone numbers, home address, the saved Yes/No home-address answer (when one is saved), monthly income, and monthly housing cost after explicit authorization. The extension requests only fields selected for the current operation. Generic phone, household members, documents, notes, SSNs, birth dates, passwords, signatures, and consent are never supplied.
 
 The worker persists only tab ID, expiration, phase, page count, and filled count. Answers, page URLs, field labels, mappings, snapshots, and approval tokens are not written to extension storage or logs. The isolated page script keeps its private review snapshot in memory. JavaScript does not guarantee immediate memory zeroization.
 
@@ -31,7 +31,7 @@ Errors are fixed identifiers and never contain saved values, local paths, or und
 
 ## Page operations
 
-Known fields require the inspected form, ID, name, type, labels, and recipient context. First/middle/last name and home/mobile phone mappings come from the [public inspection](../../docs/iowa-portal.md). Home address must remain in `#personalInformation #homeAddrDiv`; the user answers the home-address question before those controls can be filled. Phones must be ten digits or a US country-code variant; ZIP codes must contain five digits.
+Known fields require the inspected form, ID, name, type, labels, and recipient context. First/middle/last name and home/mobile phone mappings come from the [public inspection](../../docs/iowa-portal.md). Home address must remain in `#personalInformation #homeAddrDiv`. If the applicant saved a Yes or No answer, the extension selects it on the verified, unanswered **Do you have a home address?** question; otherwise the applicant answers it. Address controls are filled only after Yes reveals them. Phones must be ten digits or a US country-code variant; ZIP codes must contain five digits.
 
 Unknown labeled text/select fields have no automatic mapping. The user explicitly chooses a saved field. Unsupported, hidden, read-only, disabled, ambiguous, other-person, signature, verification, or sensitive controls remain manual. Existing answers are preserved. Scrolling is allowed only to reveal an already-rendered selected control, followed by another visibility and context check.
 
