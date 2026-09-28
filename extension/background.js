@@ -1,6 +1,7 @@
 'use strict';
 importScripts('address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'strings.js');
-if (typeof globalThis.SecondHandGeneric?.requestKeys !== 'function' || typeof globalThis.SecondHandGeneric.deriveValues !== 'function' || !Array.isArray(globalThis.SecondHandGeneric.GENERIC_KEYS)) {
+if (typeof globalThis.SecondHandGeneric?.requestKeys !== 'function' || typeof globalThis.SecondHandGeneric.deriveValues !== 'function' || !Array.isArray(globalThis.SecondHandGeneric.GENERIC_KEYS) ||
+  typeof globalThis.SecondHandGeneric.unsafeQuestion !== 'function') {
   throw new Error('SecondHand could not load generic-adapter.js. Reinstall the extension.');
 }
 if (typeof globalThis.SecondHandStrings?.english !== 'function' || typeof globalThis.SecondHandStrings.describeEnglish !== 'function') {
@@ -49,6 +50,14 @@ const MAX_GENERAL_PASSES = 4;
 const SENSITIVE_KEYS = Object.freeze(['ssn', 'birthDate', 'ageRange', 'totalMonthlyIncome', 'annualIncome', 'assetsOnHand', 'monthlyMedicalExpenses',
   'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare']);
 const AI_KEYS = Object.freeze(SecondHandGeneric.GENERIC_KEYS.filter(key => !SENSITIVE_KEYS.includes(key)));
+// Laya, the desktop app's local AI: it matches text boxes to saved fields (#39) and answers choice
+// questions from the saved profile (#42). It gets question labels, types, and options only, within
+// the bridge's limits. Chrome's on-device AI runs only when Laya isn't ready.
+// Each Autofill click gives Laya `budgetMs` in all; every request carries what the click has left.
+const LAYA = Object.freeze({ textTypes: Object.freeze(['text', 'textarea', 'number', 'date', 'email', 'tel']), choiceTypes: Object.freeze(['radio', 'select', 'checkbox']),
+  fields: 40, questions: 30, label: 200, options: 30, option: 100, bytes: 48 * 1024, budgetMs: 3000 });
+const LAYA_NOT_READY = 'LAYA_NOT_READY';
+const LAYA_STATES = Object.freeze(['off', 'unavailable', 'not-downloaded', 'downloading', 'ready', 'error']);
 
 function nativeRequest(type, payload = {}) {
   return new Promise((resolve, reject) => {
@@ -67,7 +76,9 @@ function nativeRequest(type, payload = {}) {
       port.onMessage.addListener(message => {
         if (!message || message.id !== id) return finish(fault('worker.desktopUnexpected'));
         // The desktop app's own wording travels as a detail.
-        if (message.ok !== true) return finish(typeof message.error === 'string' ? new Error(message.error.slice(0, 240)) : fault('worker.desktopDeclined'));
+        if (message.ok !== true) {
+          return finish(typeof message.error === 'string' ? new Error(message.error.slice(0, 240)) : fault('worker.desktopDeclined'), undefined, message.code === LAYA_NOT_READY ? LAYA_NOT_READY : undefined);
+        }
         finish(null, message.data);
       });
       port.onDisconnect.addListener(() => {
@@ -264,6 +275,17 @@ function step(tabId) {
           const result = await fillIowaGeneral(tabId, state, plan, () => currentPilot(tabId, pilot));
           currentPilot(tabId, pilot);
           return result.state === 'done' ? remember(tabId, result) : stopAutopilot(tabId, result, pilot);
+        }
+        // The rules found nothing here, but Laya may answer this page's questions.
+        const { boxes, choices } = layaQuestions([{ frameId: 0, plan }], false);
+        if ((boxes.length || choices.length) && await layaReady()) {
+          currentPilot(tabId, pilot);
+          const result = await fillIowaGeneral(tabId, state, plan, () => currentPilot(tabId, pilot), true);
+          currentPilot(tabId, pilot);
+          if (result.state !== 'done' || result.filled) {
+            generalPages.set(tabId, url);
+            return result.state === 'done' ? remember(tabId, result) : stopAutopilot(tabId, result, pilot);
+          }
         }
       }
       return stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], ...say('worker.unknownPage'), pageKey: page.pageKey }, pilot);
@@ -493,13 +515,17 @@ async function tallySite(tabId, frames) {
     return total;
   } catch { throw fault(FRAME_ERROR); }
 }
-function siteSummary(filled, guessed, needYou, next) {
+// A summary that says when Laya suggested the guesses.
+const withLaya = (summary, laya) => laya ? { key: 'result.suggestedByLaya', params: { summary } } : summary;
+function siteSummary(filled, guessed, needYou, next, laya) {
+  let summary;
   if (filled) {
     const key = guessed ? (needYou.length ? 'result.siteFilledGuessedNeedYou' : 'result.siteFilledGuessed') : needYou.length ? 'result.siteFilledNeedYou' : 'result.siteFilled';
-    return say(key, { count: filled, ...(guessed ? { guessed } : {}), ...(needYou.length ? { needYou: needYou.length } : {}) });
-  }
-  if (needYou.length) return say('result.nothingMatchesNeedYou', { count: needYou.length });
-  return say(next ? 'result.nothingToFillNext' : 'result.nothingToFill');
+    summary = { key, params: { count: filled, ...(guessed ? { guessed } : {}), ...(needYou.length ? { needYou: needYou.length } : {}) } };
+  } else if (needYou.length) summary = { key: 'result.nothingMatchesNeedYou', params: { count: needYou.length } };
+  else summary = { key: next ? 'result.nothingToFillNext' : 'result.nothingToFill', params: {} };
+  const shown = withLaya(summary, laya);
+  return say(shown.key, shown.params);
 }
 
 // The general engine's plan for the page: field ids, keys, and labels only.
@@ -545,28 +571,146 @@ async function planSite(tabId) {
   const { tab, origin } = await activeSite(tabId);
   await requireSite(origin);
   const { frames } = await siteFramePlans(tabId, tab.url);
-  sitePlans.set(tabId, { url: tab.url, frames });
-  return { unmatched: frames.flatMap(({ frameId, plan }) => plan.unmatched.map(({ id, label, type, options, required }) => ({ id: `f${frameId}:${id}`, label, type, options, required }))), allowedKeys: AI_KEYS };
+  // Whether Laya will answer this click's open questions. When it will, the widget leaves Chrome's AI off.
+  const { boxes, choices } = layaQuestions(frames, true);
+  const laya = boxes.length || choices.length ? await layaReady() : null;
+  sitePlans.set(tabId, { url: tab.url, frames, laya });
+  return { unmatched: frames.flatMap(({ frameId, plan }) => plan.unmatched.map(({ id, label, type, options, required }) => ({ id: `f${frameId}:${id}`, label, type, options, required }))),
+    allowedKeys: AI_KEYS, laya: laya === true };
 }
 // Guesses name fields of the plan the AI saw; a fresh plan would give the fields other ids.
 function guessAssignments(stored, url, guesses) {
   if (stored?.url !== url) throw fault('worker.pageChangedAutofill');
   const open = new Set(stored.frames.flatMap(({ frameId, plan }) => plan.unmatched.map(field => `f${frameId}:${field.id}`)));
-  const entries = guesses && typeof guesses === 'object' && !Array.isArray(guesses) ? Object.entries(guesses) : null;
-  if (!entries || entries.some(([id, key]) => !SITE_FIELD_ID.test(id) || !open.has(id) || !AI_KEYS.includes(key))) throw fault('worker.aiMatchesUnusable');
+  const entries = plainEntries(guesses);
+  // With Laya ready the widget never runs Chrome's AI, so it has no guesses to send.
+  if (!entries || (stored.laya === true && entries.length) || entries.some(([id, key]) => !SITE_FIELD_ID.test(id) || !open.has(id) || !AI_KEYS.includes(key))) throw fault('worker.aiMatchesUnusable');
   return stored.frames.map(({ frameId, plan }) => ({ frameId, plan, planned: [...ruleAssignments(plan),
     ...entries.filter(([id]) => id.startsWith(`f${frameId}:`)).map(([id, key]) => ({ id: id.split(':')[1], key, guessed: true }))] }));
 }
 
-// Fills from a general-engine plan: one desktop request for the keys planned first (the
-// rules' matches and any AI guesses), then up to four fill passes so questions revealed by
-// an answer are filled too. Each pass plans the page again. Never continues, submits, or navigates.
-async function fillPlan(tabId, url, frames, prefix = false, guard = () => {}) {
-  let revision;
+const plainEntries = value => value && typeof value === 'object' && !Array.isArray(value) ? Object.entries(value) : null;
+const layaText = (value, max) => typeof value === 'string' && value.trim() !== '' && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
+const utf8Length = text => { let bytes = 0; for (const char of text) { const code = char.codePointAt(0); bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4; } return bytes; };
+const knownLayaState = state => { if (!LAYA_STATES.includes(state)) throw fault('worker.desktopUnexpected'); return state; };
+// Laya's state as the desktop's status reports it. A desktop app from before Laya reports none.
+const layaState = status => status?.laya === undefined ? 'unavailable' : knownLayaState(status.laya?.state);
+// Whether Laya can answer in this click, once the desktop has readied its model: the first load
+// after idle takes seconds, and that time must not come out of the click's Laya budget.
+async function layaReady() {
+  try { return knownLayaState((await nativeRequest('warmLaya'))?.state) === 'ready'; }
+  catch (error) {
+    if (error.code === 'offline') return false;
+    throw error;
+  }
+}
+// The open questions Laya may see, in page order: text boxes to match and choice questions to answer.
+// Questions only the applicant answers (consent, signatures, SSN…) and any past the bridge's limits stay need-you.
+function layaQuestions(frames, prefix) {
+  const boxes = [], choices = [];
+  for (const { frameId, plan } of frames) for (const field of plan.unmatched) {
+    const { label, type, options } = field;
+    if (!layaText(label, LAYA.label) || options.length > LAYA.options || options.some(option => !layaText(option, LAYA.option)) ||
+      new Set(options).size !== options.length || SecondHandGeneric.unsafeQuestion(field)) continue;
+    const question = { id: prefix ? `f${frameId}:${field.id}` : field.id, label, type, options: [...options] };
+    if (LAYA.textTypes.includes(type)) boxes.push(question);
+    else if (LAYA.choiceTypes.includes(type) && options.length) choices.push(question);
+  }
+  return { boxes, choices };
+}
+// One click's time for Laya. Only time spent waiting on Laya counts, never the applicant's time in
+// an approval prompt. `use(ask)` asks with the milliseconds left, or asks nothing once they are spent.
+function layaBudget() {
+  let left = LAYA.budgetMs;
+  return {
+    async use(ask) {
+      const budgetMs = Math.floor(left);
+      if (budgetMs < 1) return undefined;
+      const started = Date.now();
+      try { return await ask(budgetMs); } finally { left -= Date.now() - started; }
+    }
+  };
+}
+// As many questions as one request may carry: the bridge's count, within the native message size.
+function layaPayload(type, url, list, questions, max, budgetMs) {
+  const payload = { url: safeUrl(url), [list]: [], budgetMs };
+  for (const question of questions.slice(0, max)) {
+    payload[list].push(question);
+    // The request as nativeRequest sends it; its id is a 36-character UUID.
+    if (utf8Length(JSON.stringify({ id: '0'.repeat(36), type, ...payload })) > LAYA.bytes) { payload[list].pop(); break; }
+  }
+  return payload;
+}
+// One Laya request. Null when Laya isn't ready or the desktop app is closed: the click goes on without Laya.
+async function askLaya(type, payload) {
+  try { return await nativeRequest(type, payload); }
+  catch (error) {
+    if (error.code === LAYA_NOT_READY || error.code === 'offline') return null;
+    throw error;
+  }
+}
+// [id, savedFieldKey] pairs for text boxes (#39). Any id outside the request or any key a guess may not use refuses them all.
+async function layaSuggestions(url, boxes, budgetMs) {
+  const payload = layaPayload('suggestFields', url, 'fields', boxes, LAYA.fields, budgetMs);
+  const reply = await askLaya('suggestFields', payload);
+  if (reply === null) return null;
+  const sent = new Set(payload.fields.map(field => field.id));
+  const entries = plainEntries(reply?.suggestions);
+  if (!entries || entries.some(([id, key]) => !sent.has(id) || !AI_KEYS.includes(key))) throw fault('worker.layaUnusable');
+  return entries;
+}
+// [id, optionText] pairs for choice questions (#42), with the access receipt they were made under.
+async function layaAnswers(url, choices, budgetMs) {
+  const payload = layaPayload('answerFields', url, 'questions', choices, LAYA.questions, budgetMs);
+  const reply = await askLaya('answerFields', payload);
+  if (reply === null) return null;
+  const sent = new Map(payload.questions.map(question => [question.id, question.options]));
+  const entries = plainEntries(reply?.answers);
+  if (!entries || entries.some(([id, option]) => !sent.has(id) || typeof option !== 'string' || !sent.get(id).includes(option))) throw fault('worker.layaUnusable');
+  return { entries, revision: receiptRevision(reply) };
+}
+
+// Fills from a general-engine plan: one desktop request for the keys planned first (the rules'
+// matches and any AI guesses), then up to four fill passes so questions revealed by an answer are
+// filled too. Each pass plans the page again. Never continues, submits, or navigates.
+// Laya is asked unless this click already found it not ready (`laya: false`). Both of its requests
+// share the click's time budget: choice questions first (about 3 candidates each), then text boxes
+// (about 20 each) with what is left, so the cheaper questions aren't starved. Its text-box matches
+// join the one request for saved values.
+async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, laya = null } = {}) {
+  let revision = null;
   let values = null;
   try {
     const initial = frames.map(frame => ({ ...frame, planned: frame.planned || ruleAssignments(frame.plan) }));
-    const keys = [...new Set(SecondHandGeneric.requestKeys(initial.flatMap(frame => frame.planned.map(item => item.key))))];
+    const open = laya === false ? { boxes: [], choices: [] } : layaQuestions(initial, prefix);
+    const fromLaya = new Set();
+    const addLaya = (id, answer) => {
+      const [frameId, own] = prefix ? [Number(id.slice(1, id.indexOf(':'))), id.slice(id.indexOf(':') + 1)] : [0, id];
+      const frame = initial.find(candidate => candidate.frameId === frameId);
+      frame.planned = [...frame.planned, { id: own, ...answer, guessed: true }];
+      fromLaya.add(`${frameId}|${own}`);
+    };
+    // Once Laya says it isn't ready, it isn't asked again in this click. Unless the widget's plan
+    // already readied it, it is readied now, before the click's budget starts.
+    let layaOn = laya !== false;
+    if (laya === null && (open.boxes.length || open.choices.length)) {
+      layaOn = await layaReady();
+      guard();
+    }
+    const budget = layaBudget();
+    // null: Laya isn't ready; undefined: the budget was spent before this request.
+    let answers;
+    if (layaOn && open.choices.length) {
+      answers = await budget.use(budgetMs => layaAnswers(url, open.choices, budgetMs));
+      guard();
+      if (answers === null) layaOn = false;
+    }
+    if (layaOn && open.boxes.length) {
+      const suggestions = await budget.use(budgetMs => layaSuggestions(url, open.boxes, budgetMs));
+      guard();
+      if (suggestions) for (const [id, key] of suggestions) addLaya(id, { key });
+    }
+    const keys = [...new Set(SecondHandGeneric.requestKeys(initial.flatMap(frame => frame.planned.filter(item => item.key !== undefined).map(item => item.key))))];
     if (keys.some(key => typeof key !== 'string' || !KEY.test(key))) throw fault('worker.fieldRequestFailed');
     if (keys.length) {
       const desktop = await nativeRequest('status');
@@ -577,14 +721,22 @@ async function fillPlan(tabId, url, frames, prefix = false, guard = () => {}) {
       revision = receiptRevision(response);
       values = SecondHandGeneric.deriveValues(response.values);
     }
-    let filled = 0;
+    // The answers came before getFields: an Always allow in its prompt outdates their receipt, and
+    // outdated answers are never filled. Without answers to fill, their receipt doesn't matter.
+    if (answers?.entries.length) {
+      if (revision !== null && answers.revision !== revision) throw fault('worker.accessChanged');
+      revision = answers.revision;
+      for (const [id, option] of answers.entries) addLaya(id, { option });
+    }
+    let filled = 0, placedByLaya = 0;
     const needYou = [];
     for (const frame of initial) {
       const { frameId } = frame;
       let { plan, planned } = frame;
-      const refused = new Map(); // Refused keys stay local to this frame.
-      if (values) for (let pass = 1; ; pass++) {
-        const assignments = planned.filter(({ key }) => !refused.has(key) && typeof values[key] === 'string' && values[key]);
+      const refused = new Map(); // Refused answers stay local to this frame.
+      if (revision !== null) for (let pass = 1; ; pass++) {
+        // Laya's answers are the question's own option text; everything else is a saved value.
+        const assignments = planned.filter(item => item.option !== undefined || (values && !refused.has(item.key) && typeof values[item.key] === 'string' && values[item.key]));
         if (!assignments.length) break;
         guard();
         await checkAccess(revision);
@@ -592,7 +744,7 @@ async function fillPlan(tabId, url, frames, prefix = false, guard = () => {}) {
         const current = await chrome.tabs.get(tabId);
         guard();
         if (current.url !== url || !current.active) throw fault('worker.pageChangedAutofill');
-        const placing = Object.fromEntries(assignments.map(({ key }) => [key, values[key]]));
+        const placing = Object.fromEntries(assignments.filter(item => item.key !== undefined).map(({ key }) => [key, values[key]]));
         let result;
         try {
           const message = { type: 'secondhand:generic:fill', token: plan.token, assignments, values: placing };
@@ -604,10 +756,11 @@ async function fillPlan(tabId, url, frames, prefix = false, guard = () => {}) {
           if (!prefix || error.code === 'site-not-ready') throw error;
           throw fault(FRAME_ERROR);
         }
-        for (const { id, key } of assignments) if (result.rejected.includes(id)) refused.set(key, id);
-        const placed = assignments.filter(({ id }) => result.filled.includes(id) && !result.rejected.includes(id)).length;
-        if (!placed) break;
-        filled += placed;
+        for (const { id, key } of assignments) if (result.rejected.includes(id)) refused.set(key ?? `option:${id}`, id);
+        const placed = assignments.filter(({ id }) => result.filled.includes(id) && !result.rejected.includes(id));
+        if (!placed.length) break;
+        filled += placed.length;
+        placedByLaya += placed.filter(({ id }) => fromLaya.has(`${frameId}|${id}`)).length;
         plan = await planGeneral(tabId, frameId, prefix);
         planned = ruleAssignments(plan);
         if (pass === MAX_GENERAL_PASSES) break;
@@ -616,7 +769,7 @@ async function fillPlan(tabId, url, frames, prefix = false, guard = () => {}) {
       for (const [key, id] of refused) if (!missing.includes(id) && !plan.matched.some(field => field.key === key)) missing.push(id);
       needYou.push(...missing.map(id => prefix ? `f${frameId}:${id}` : id));
     }
-    return { filled, needYou };
+    return { filled, needYou, laya: placedByLaya };
   } finally { values = null; }
 }
 
@@ -625,10 +778,14 @@ async function fillSiteOnce(tabId, url, guesses) {
   try {
     const stored = sitePlans.get(tabId);
     sitePlans.delete(tabId);
-    let frames, pending;
-    if (guesses === undefined) ({ frames, pending } = await siteFramePlans(tabId, url, true));
-    else {
+    let frames, pending, laya;
+    if (guesses === undefined) {
+      ({ frames, pending } = await siteFramePlans(tabId, url, true));
+      // The widget's plan in this click already found Laya not ready: it isn't asked again.
+      laya = stored?.url === url && stored.laya === false ? false : null;
+    } else {
       frames = guessAssignments(stored, url, guesses);
+      laya = stored.laya;
       try {
         pending = (await siteFrames(tabId, siteOrigin(url))).filter(frame => !frame.enabled);
         const enabled = await enabledSiteFrames(tabId, siteOrigin(url));
@@ -643,10 +800,10 @@ async function fillSiteOnce(tabId, url, guesses) {
       const hosts = pending.map(frame => new URL(frame.origin).hostname).join(', ');
       return siteResult('waiting', say('worker.formInsideFrames', { hosts }));
     }
-    const { needYou } = await fillPlan(tabId, url, frames, true);
+    const { needYou, laya: suggested } = await fillPlan(tabId, url, frames, { prefix: true, laya });
     const tally = await tallySite(tabId, frames);
     const filled = tally.rule + tally.guess;
-    return siteResult('done', siteSummary(filled, tally.guess, needYou, tally.next), { filled, guessed: tally.guess, needYou });
+    return siteResult('done', siteSummary(filled, tally.guess, needYou, tally.next, suggested), { filled, guessed: tally.guess, needYou, ...(suggested ? { laya: suggested } : {}) });
   } catch (error) {
     const { state, ...message } = failed(error);
     return siteResult(state, message);
@@ -654,12 +811,12 @@ async function fillSiteOnce(tabId, url, guesses) {
 }
 
 // One fill on an Iowa page the Iowa adapter hasn't verified. Iowa's portal needs no site approval.
-async function fillIowaGeneral(tabId, state, plan, guard) {
+async function fillIowaGeneral(tabId, state, plan, guard, laya = null) {
   const { pageKey } = state.page;
   try {
-    const { filled, needYou } = await fillPlan(tabId, state.url, [{ frameId: 0, plan }], false, guard);
-    return { state: 'done', filled, needYou, ...say('result.thenTodo', { summary: filledSummary(filled, needYou), todo: { key: GENERAL_TODO, params: {} } }),
-      todo: english(GENERAL_TODO), todoKey: GENERAL_TODO, todoParams: {}, pageKey };
+    const { filled, needYou, laya: suggested } = await fillPlan(tabId, state.url, [{ frameId: 0, plan }], { guard, laya });
+    return { state: 'done', filled, needYou, ...say('result.thenTodo', { summary: withLaya(filledSummary(filled, needYou), suggested), todo: { key: GENERAL_TODO, params: {} } }),
+      todo: english(GENERAL_TODO), todoKey: GENERAL_TODO, todoParams: {}, pageKey, ...(suggested ? { laya: suggested } : {}) };
   } catch (error) {
     return { ...failed(error), filled: 0, needYou: [], pageKey };
   }
@@ -886,8 +1043,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   let run;
   if (message.type === 'ui:showApp' && message.confirmed === true) run = () => nativeRequest('showApp');
   else if (panel && message.type === 'ui:desktopStatus') {
-    run = () => nativeRequest('status').then(data => ({ connected: true, unlocked: Boolean(data?.unlocked) }),
-      error => { if (error.code === 'offline') return { connected: false, unlocked: false }; throw error; });
+    run = () => nativeRequest('status').then(data => ({ connected: true, unlocked: Boolean(data?.unlocked), laya: layaState(data) }),
+      error => { if (error.code === 'offline') return { connected: false, unlocked: false, laya: 'unavailable' }; throw error; });
   } else if (!Number.isInteger(tabId)) return;
   else if (message.type === 'ui:pageState') run = () => pageState(tabId, route);
   else if (message.type === 'ui:autofill' && message.confirmed === true) run = () => autofill(tabId, route, message.guesses);

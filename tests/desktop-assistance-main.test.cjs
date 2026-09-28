@@ -58,7 +58,9 @@ async function desktop(options = {}) {
     './bridge.cjs': { ...require('../desktop/bridge.cjs'), startBridge: async (_directory, _getId, handler) => { bridge = handler; return { close: async () => {} }; } },
     './extension-setup.cjs': { getExtensionSetup: async () => ({ prepared: true }) },
     './registration.cjs': { registerHost: async () => ({}) },
-    './test-storage-path.cjs': { testStoragePath: () => null }
+    './test-storage-path.cjs': { testStoragePath: () => null },
+    // The app's one Laya runtime (#38). Without an override it is the real one: this build ships no model.
+    ...(options.laya ? { './laya.cjs': { ...require('../desktop/laya.cjs'), createLaya: () => options.laya } } : {})
   };
   vm.runInNewContext(source, {
     require: name => Object.hasOwn(overrides, name) ? overrides[name] : require(name.startsWith('.') ? path.join(root, 'desktop', name) : name),
@@ -307,4 +309,232 @@ test('removing a trusted site stops field release; a locked vault cannot trust s
   await assert.rejects(app.request({ type: 'trustSite', url: PANTRY }), /Unlock/);
   const stored = await desktop({ settings: { extensionId, trustedSites: ['https://ok.example.org', 'http://bad.example.org', 'javascript:1', 42] } });
   assert.deepEqual(plain((await stored.invoke('status')).trustedSites), ['https://ok.example.org']);
+});
+
+// A stand-in for desktop/laya.cjs (#38) with its exact interface. `scores(state)` plays the model.
+function stubLaya(scores = () => 0.01, state = 'ready', delayMs = 0) {
+  const batches = [];
+  const warms = [];
+  return { batches, warms, status: async () => ({ state, enabled: state !== 'off', sizeBytes: 1 }), decide: async () => { throw new Error('the desktop scores in batches'); },
+    decideBatch: async items => {
+      batches.push(items);
+      if (delayMs) await new Promise(resolve => setTimeout(resolve, delayMs));
+      return items.map(item => { const noul = scores(item.state); return { answers: { correct: { type: 'noul', noul, confidence: Math.max(noul, 1 - noul) } } }; });
+    },
+    warm: async () => { warms.push(Date.now()); }, setEnabled: async () => {}, startDownload: async () => {}, cancelDownload: async () => {}, remove: async () => {}, close: async () => {} };
+}
+const box = { id: 'f0:sh-1-2', label: 'Where can we reach you by email?', type: 'email', options: [] };
+const sixty = { id: 'f0:sh-1-3', label: 'Is anyone in your household 60 or older?', type: 'radio', options: ['Yes', 'No'] };
+const veteran = { id: 'f0:sh-1-4', label: 'Is anyone in your household a veteran?', type: 'radio', options: ['Yes', 'No'] };
+const suggest = (fields, extra = {}) => ({ type: 'suggestFields', url: PANTRY, fields, budgetMs: 3000, ...extra });
+const answerRequest = (questions, extra = {}) => ({ type: 'answerFields', url: PANTRY, questions, budgetMs: 3000, ...extra });
+const layaRequests = [suggest([box]), answerRequest([sixty])];
+// Only the applicant's age (a sensitive fact) settles 60+ for a household of one.
+const sixtyFromAge = state => {
+  if (state.question === sixty.label) return state.facts.includes('years old') ? (state.candidate === 'No' ? 0.97 : 0.01) : (state.candidate.startsWith('None') ? 0.95 : 0.01);
+  if (state.question === veteran.label) return state.candidate === 'No' ? 0.98 : 0.01;
+  return state.candidate === 'Saved answer: email address' ? 0.99 : 0.01;
+};
+const household = { birthDate: '1985-04-12', householdSize: '1', householdAdults: '1', householdChildren: '0', householdSeniors: '0', householdVeteran: 'no', county: 'Polk' };
+const trusted = { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'] };
+const asking = { extensionId, trustedSites: ['https://pantry.example.org'] };
+async function answering(settings) {
+  const app = await desktop({ laya: stubLaya(sixtyFromAge), settings });
+  await app.invoke('saveProfile', household);
+  return app;
+}
+
+test('this build has no Laya runtime: both Laya requests answer "not ready" and status says Laya is unavailable', async () => {
+  const app = await desktop({ settings: trusted });
+  assert.deepEqual(plain((await app.request({ type: 'status' })).laya), { state: 'unavailable' });
+  const reads = app.dataReads;
+  for (const request of [...layaRequests, answerRequest([sixty], { url: 'https://untrusted.example.org/' })]) {
+    await assert.rejects(app.request(request), error => error.publicCode === 'LAYA_NOT_READY' && /Laya isn’t ready/.test(error.publicMessage), request.type);
+  }
+  assert.equal(app.dataReads, reads, 'the vault is never read');
+  assert.equal(app.prompts.length, 0);
+});
+
+test('a Laya that is off, downloading, or failing answers "not ready" the same way; its state shows in status', async () => {
+  for (const state of ['off', 'not-downloaded', 'downloading', 'error', 'unavailable']) {
+    const app = await desktop({ laya: stubLaya(() => 0.99, state), settings: asking });
+    assert.deepEqual(plain((await app.request({ type: 'status' })).laya), { state });
+    for (const request of layaRequests) await assert.rejects(app.request(request), error => error.publicCode === 'LAYA_NOT_READY', `${state} ${request.type}`);
+  }
+  const switchedOff = stubLaya();
+  switchedOff.decideBatch = async () => { throw Object.assign(new Error('Laya was turned off.'), { code: 'LAYA_NOT_READY' }); };
+  const app = await desktop({ laya: switchedOff, settings: asking });
+  await app.invoke('saveProfile', household);
+  for (const request of layaRequests) await assert.rejects(app.request(request), error => error.publicCode === 'LAYA_NOT_READY', request.type);
+  const confused = await desktop({ laya: stubLaya(() => 0.99, 'thinking') });
+  await assert.rejects(confused.request({ type: 'status' }), /unknown state/);
+  const crashed = stubLaya();
+  crashed.decideBatch = async () => { throw new Error('model crashed'); };
+  const failing = await desktop({ laya: crashed, settings: asking });
+  await assert.rejects(failing.request(layaRequests[0]), error => /Laya couldn’t check this form/.test(error.publicMessage) && !error.publicCode);
+});
+
+test('suggestFields returns saved-field keys only, never values, so it needs no prompt even without Always allow: the values come through getFields', async () => {
+  const app = await desktop({ laya: stubLaya(sixtyFromAge), settings: asking });
+  const reply = plain(await app.request(layaRequests[0]));
+  assert.deepEqual(reply, { suggestions: { 'f0:sh-1-2': 'email' } });
+  assert.deepEqual(plain(await app.request(suggest([{ ...box, id: 'sh-1-2' }], { url: `${PORTAL_URL}/applyForBenefits/financialInfo` }))), { suggestions: { 'sh-1-2': 'email' } });
+  assert.equal(app.dataReads, 0, 'matching reads no saved answers');
+  assert.equal(app.prompts.length, 0);
+  await assert.rejects(app.request(suggest([box], { url: 'https://other.example.org/form' })), /isn’t trusted/);
+  await assert.rejects(app.request(answerRequest([sixty], { url: 'https://hhsservices.iowa.gov/other' })), /isn’t trusted/);
+  await app.invoke('lock');
+  for (const request of layaRequests) await assert.rejects(app.request(request), /Unlock/);
+});
+
+test('without Always allow, answers wait for one "Let Chrome fill this form?" prompt listing each question and the option that would be filled', async () => {
+  const app = await answering(asking);
+  app.answer(async () => ({ response: 1 }));
+  const once = await app.request(answerRequest([veteran, { ...veteran, id: 'f0:sh-1-9', label: 'Do you have a pet?' }]));
+  assert.deepEqual(plain(once.answers), { 'f0:sh-1-4': 'No' });
+  assert.equal(app.prompts.length, 1);
+  const [prompt] = app.prompts;
+  assert.equal(prompt.title, 'Let Chrome fill this form?');
+  assert.deepEqual(plain(prompt.buttons), ['Cancel', 'Allow once', 'Always allow on this computer']);
+  assert.equal(prompt.cancelId, 0);
+  assert.match(prompt.message, /pantry\.example\.org/);
+  assert.match(prompt.detail, /Website: https:\/\/pantry\.example\.org/);
+  assert.match(prompt.detail, /“Is anyone in your household a veteran\?”: No/);
+  assert.doesNotMatch(prompt.detail, /pet/, 'only questions that would be filled are listed');
+  assert.equal((await app.invoke('status')).autofillWithoutAsking, false, 'Allow once changes no setting');
+
+  app.answer(async () => ({ response: 0 }));
+  const cancelled = await app.request(answerRequest([veteran]));
+  assert.deepEqual(plain(cancelled.answers), {}, 'Cancel returns no answers');
+  assert.equal(app.prompts.length, 2);
+});
+
+test('Always allow on the answers prompt works like getFields’: it saves the setting, moves the access receipt on, and later answers need no prompt', async () => {
+  const app = await answering(asking);
+  const before = (await app.request({ type: 'status' })).accessRevision;
+  app.answer(async () => ({ response: 2 }));
+  const allowed = await app.request(answerRequest([veteran]));
+  assert.deepEqual(plain(allowed.answers), { 'f0:sh-1-4': 'No' });
+  assert.equal((await app.invoke('status')).autofillWithoutAsking, true);
+  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'], layaEnabled: false });
+  assert.ok(allowed.accessRevision > before, 'earlier receipts are outdated');
+  assert.equal(allowed.accessRevision, (await app.request({ type: 'status' })).accessRevision, 'the answers carry the new receipt');
+  await app.request(answerRequest([veteran]));
+  assert.equal(app.prompts.length, 1, 'no prompt after Always allow');
+  const other = await answering({ ...trusted, extensionId: 'c'.repeat(32) });
+  await assert.rejects(other.request(answerRequest([veteran])), /changed/);
+  assert.equal(other.prompts.length, 1, 'Always allow belongs to the stored extension ID: another one is asked, then refused');
+});
+
+test('with Always allow on, everyday answers need no prompt; answers that needed sensitive facts get one "Share sensitive details?" prompt, and Cancel returns none', async () => {
+  const app = await answering(trusted);
+  const everyday = await app.request(answerRequest([veteran]));
+  assert.deepEqual(plain(everyday.answers), { 'f0:sh-1-4': 'No' });
+  assert.equal(everyday.accessRevision, (await app.request({ type: 'status' })).accessRevision, 'answers carry the access receipt they were made under');
+  assert.equal(app.prompts.length, 0);
+
+  app.answer(async () => ({ response: 1 }));
+  const allowed = await app.request(answerRequest([sixty, veteran]));
+  assert.deepEqual(plain(allowed.answers), { 'f0:sh-1-3': 'No', 'f0:sh-1-4': 'No' });
+  assert.equal(app.prompts.length, 1, 'one prompt');
+  const [prompt] = app.prompts;
+  assert.equal(prompt.title, 'Share sensitive details?');
+  assert.deepEqual(plain(prompt.buttons), ['Cancel', 'Allow once']);
+  assert.equal(prompt.cancelId, 0);
+  assert.match(prompt.message, /pantry\.example\.org/);
+  assert.match(prompt.detail, /Date of birth/);
+  assert.match(prompt.detail, /“Is anyone in your household 60 or older\?”: No/);
+  assert.match(prompt.detail, /“Is anyone in your household a veteran\?”: No/);
+  assert.doesNotMatch(`${prompt.message} ${prompt.detail}`, /1985|41 years/, 'saved values and facts never appear');
+
+  app.answer(async () => ({ response: 0 }));
+  const cancelled = await app.request(answerRequest([sixty, veteran]));
+  assert.deepEqual(plain(cancelled.answers), {}, 'Cancel returns no answers');
+});
+
+test('without Always allow, answers that needed sensitive facts fold into the same single "Share sensitive details?" prompt', async () => {
+  const app = await answering(asking);
+  app.answer(async () => ({ response: 1 }));
+  const { answers } = await app.request(answerRequest([sixty, veteran]));
+  assert.deepEqual(plain(answers), { 'f0:sh-1-3': 'No', 'f0:sh-1-4': 'No' });
+  assert.equal(app.prompts.length, 1, 'one prompt, not two');
+  assert.equal(app.prompts[0].title, 'Share sensitive details?');
+  assert.deepEqual(plain(app.prompts[0].buttons), ['Cancel', 'Allow once']);
+  assert.match(app.prompts[0].detail, /Date of birth/);
+  assert.equal((await app.invoke('status')).autofillWithoutAsking, false);
+  app.answer(async () => ({ response: 0 }));
+  assert.deepEqual(plain((await app.request(answerRequest([sixty, veteran]))).answers), {});
+});
+
+test('on Iowa’s portal, answers follow getFields’ Iowa rule: a prompt only without Always allow, and never a sensitive one', async () => {
+  const iowa = answerRequest([sixty, veteran], { url: `${PORTAL_URL}/applyForBenefits/financialInfo` });
+  const allowed = await answering({ extensionId, autofillWithoutAsking: true });
+  assert.deepEqual(plain((await allowed.request(iowa)).answers), { 'f0:sh-1-3': 'No', 'f0:sh-1-4': 'No' });
+  assert.equal(allowed.prompts.length, 0);
+  const asked = await answering({ extensionId });
+  asked.answer(async () => ({ response: 1 }));
+  assert.deepEqual(plain((await asked.request(iowa)).answers), { 'f0:sh-1-3': 'No', 'f0:sh-1-4': 'No' });
+  assert.equal(asked.prompts.length, 1);
+  assert.equal(asked.prompts[0].title, 'Let Chrome fill this form?');
+  assert.deepEqual(plain(asked.prompts[0].buttons), ['Cancel', 'Allow once', 'Always allow on this computer']);
+  assert.match(asked.prompts[0].message, /Iowa’s application/);
+  assert.match(asked.prompts[0].detail, /“Is anyone in your household 60 or older\?”: No/);
+});
+
+test('one approval at a time: answers and saved fields wait for each other’s prompt, and a profile edit during the prompt releases nothing', async () => {
+  const app = await answering(asking);
+  let resolve;
+  app.answer(() => new Promise(done => { resolve = done; }));
+  const pending = app.request(answerRequest([sixty]));
+  for (let i = 0; i < 50 && !resolve; i++) await tick();
+  assert.equal(typeof resolve, 'function', 'the prompt is showing');
+  await assert.rejects(app.request(answerRequest([veteran])), /waiting for your approval/);
+  await assert.rejects(app.request({ type: 'getFields', url: PANTRY, fields: ['firstName'] }), /waiting for your approval/);
+  await assert.rejects(app.request({ type: 'trustSite', url: 'https://wic.example.gov/apply' }), /waiting for your approval/);
+  await app.invoke('saveProfile', { ...household, householdVeteran: 'yes' });
+  resolve({ response: 1 });
+  await assert.rejects(pending, /changed/);
+
+  const other = await answering(asking);
+  let release;
+  other.answer(() => new Promise(done => { release = done; }));
+  const fields = other.request({ type: 'getFields', url: PANTRY, fields: ['firstName'] });
+  for (let i = 0; i < 50 && !release; i++) await tick();
+  await assert.rejects(other.request(answerRequest([veteran])), /waiting for your approval/, 'a getFields prompt holds answers back too');
+  release({ response: 1 });
+  await fields;
+});
+
+test('the desktop stops Laya at the time the click has left, and a decision that comes after it is not returned', async () => {
+  const slow = await desktop({ laya: stubLaya(sixtyFromAge, 'ready', 40), settings: trusted });
+  await slow.invoke('saveProfile', household);
+  assert.deepEqual(plain(await slow.request(suggest([box], { budgetMs: 5 }))), { suggestions: {} });
+  assert.deepEqual(plain((await slow.request(answerRequest([veteran], { budgetMs: 5 }))).answers), {});
+  assert.deepEqual(plain(await slow.request(suggest([box], { budgetMs: 3000 }))), { suggestions: { 'f0:sh-1-2': 'email' } });
+  assert.deepEqual(plain((await slow.request(answerRequest([veteran], { budgetMs: 3000 }))).answers), { 'f0:sh-1-4': 'No' });
+});
+
+test('warmLaya loads Laya’s model before a click’s questions are asked and answers with Laya’s state; it reads no saved answers and needs no unlock', async () => {
+  const laya = stubLaya();
+  const app = await desktop({ laya, settings: asking });
+  await app.invoke('lock');
+  const reads = app.dataReads;
+  assert.deepEqual(plain(await app.request({ type: 'warmLaya' })), { state: 'ready' });
+  assert.equal(laya.warms.length, 1);
+  assert.equal(app.dataReads, reads);
+  assert.equal(app.prompts.length, 0);
+
+  const off = stubLaya(() => 0.5, 'off');
+  const offApp = await desktop({ laya: off });
+  assert.deepEqual(plain(await offApp.request({ type: 'warmLaya' })), { state: 'off' });
+  assert.equal(off.warms.length, 0, 'a Laya that is off is not loaded');
+  assert.deepEqual(plain(await (await desktop()).request({ type: 'warmLaya' })), { state: 'unavailable' }, 'this build ships no model');
+
+  // A model that fails to load reports as an error, as the runtime does, instead of failing the click.
+  let state = 'ready';
+  const broken = { ...stubLaya(), status: async () => ({ state, enabled: true }),
+    warm: async () => { state = 'error'; throw Object.assign(new Error('The Laya model couldn’t be loaded (synthetic).'), { code: 'LAYA_NOT_READY' }); } };
+  assert.deepEqual(plain(await (await desktop({ laya: broken })).request({ type: 'warmLaya' })), { state: 'error' });
+  const crashing = { ...stubLaya(), warm: async () => { throw new Error('synthetic bug'); } };
+  await assert.rejects((await desktop({ laya: crashing })).request({ type: 'warmLaya' }), /synthetic bug/, 'anything else fails loudly');
 });

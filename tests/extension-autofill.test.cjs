@@ -10,12 +10,13 @@ const strings = require('../extension/strings.js');
 // Values created inside the worker's vm context have foreign prototypes.
 const plain = value => JSON.parse(JSON.stringify(value));
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
-const { GENERIC_KEYS } = require('../extension/generic-adapter.js');
+const { GENERIC_KEYS, unsafeQuestion } = require('../extension/generic-adapter.js');
 // Verified Iowa pages never use the general engine; any call there is a bug.
-const noSiteEngine = { GENERIC_KEYS, requestKeys: () => { throw new Error('Iowa used the site engine.'); }, deriveValues: () => { throw new Error('Iowa used the site engine.'); } };
+const noSiteEngine = { GENERIC_KEYS, requestKeys: () => { throw new Error('Iowa used the site engine.'); }, deriveValues: () => { throw new Error('Iowa used the site engine.'); },
+  unsafeQuestion: () => { throw new Error('Iowa used the site engine.'); } };
 // Stand-in for generic-adapter.js's pure helpers on pages the Iowa adapter hasn't verified.
 const generalEngine = {
-  GENERIC_KEYS,
+  GENERIC_KEYS, unsafeQuestion,
   requestKeys: keys => [...new Set(keys.flatMap(key => key === 'totalMonthlyIncome' ? ['monthlyEarnedIncome', 'monthlyOtherIncome'] : [key]))],
   deriveValues: values => ({ ...values, ...(values.monthlyEarnedIncome && values.monthlyOtherIncome ? { totalMonthlyIncome: 'Synthetic private total' } : {}) })
 };
@@ -36,9 +37,12 @@ function generalPage(message, plan) {
   }
   if (message.type === 'secondhand:generic:fill') {
     if (message.token !== plan.token) return { ok: false, filled: [], skipped: [] };
-    const refuses = new Set([...(plan.matched || []), ...(plan.unmatched || [])].filter(field => field.rejects).map(field => field.id));
-    const rejected = message.assignments.filter(item => message.values[item.key] && refuses.has(item.id)).map(item => item.id);
-    const filled = message.assignments.filter(item => message.values[item.key] && !refuses.has(item.id)).map(item => item.id);
+    const fields = [...(plan.matched || []), ...(plan.unmatched || [])];
+    const refuses = new Set(fields.filter(field => field.rejects).map(field => field.id));
+    // Laya's answer (#42) is one of the question's own options; everything else is a saved value.
+    const answerable = item => item.option !== undefined ? (fields.find(field => field.id === item.id)?.options || []).includes(item.option) : message.values[item.key];
+    const rejected = message.assignments.filter(item => answerable(item) && refuses.has(item.id)).map(item => item.id);
+    const filled = message.assignments.filter(item => answerable(item) && !refuses.has(item.id)).map(item => item.id);
     filled.forEach(id => answered.add(id));
     return { ok: true, filled, skipped: message.assignments.map(item => item.id).filter(id => !filled.includes(id) && !rejected.includes(id)), rejected };
   }
@@ -109,9 +113,16 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
               if (!vault.reachable) return onDisconnect();
               const reply = data => onMessage({ id: request.id, ok: true, data });
               const fail = error => onMessage({ id: request.id, ok: false, error });
-              if (request.type === 'status') return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: 0 });
+              if (request.type === 'status') return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: 0, ...(vault.layaState ? { laya: { state: vault.layaState } } : {}) });
               if (request.type === 'showApp') return reply({ shown: true });
               if (request.type === 'recordProgress') return reply({ recorded: true });
+              // Laya (#39, #42): readied before a click's questions; "not ready" unless a test plays it.
+              if (request.type === 'warmLaya') return reply({ state: vault.layaState || 'unavailable' });
+              if (request.type === 'suggestFields' || request.type === 'answerFields') {
+                const play = vault.laya?.[request.type];
+                if (!play) return onMessage({ id: request.id, ok: false, error: 'Laya isn’t ready on this computer.', code: 'LAYA_NOT_READY' });
+                return reply(play(plain(request)));
+              }
               if (request.type === 'getFields') {
                 duringGetFields?.(tab);
                 if (vault.getFieldsError) return fail(vault.getFieldsError);
@@ -192,13 +203,13 @@ test('Iowa never plans for the on-device AI or takes guesses', async () => {
   assert.deepEqual(w.calls.content, []);
 });
 
-test('an unknown page where the general engine matches nothing stops autofill without contacting the desktop', async () => {
-  const w = worker({ kind: 'manual', general: { ...nothingPlanned(), unmatched: financialPlan().unmatched } });
+test('an unknown page where the general engine matches nothing stops autofill; the desktop is only asked whether Laya is ready', async () => {
+  const w = worker({ kind: 'manual', engine: generalEngine, general: { ...nothingPlanned(), unmatched: financialPlan().unmatched } });
   const response = await autofill(w);
   assert.equal(response.ok, true);
   assert.equal(response.data.state, 'stopped');
   assert.match(response.data.message, /doesn’t know this page yet/);
-  assert.equal(w.calls.native.length, 0);
+  assert.deepEqual(w.calls.native.map(call => call.type), ['warmLaya']);
   assert.deepEqual(w.calls.content.map(message => message.type), ['secondhand:pageState', 'secondhand:generic:plan']);
   const state = (await w.panel({ type: 'ui:pageState' })).data;
   assert.equal(state.autopilot, false);
@@ -213,9 +224,9 @@ test('an unknown Iowa page gets one general fill, then waits for the applicant t
     message: 'Filled 2 · 2 need you. Check your answers, then click Continue.', todo: 'Check your answers, then click Continue.', pageKey: 'iowa-manual',
     messageKey: 'result.thenTodo', messageParams: { summary: { key: 'result.filledNeedYou', params: { count: 2, needYou: 2 } }, todo: { key: 'worker.checkThenContinue', params: {} } },
     todoKey: 'worker.checkThenContinue', todoParams: {} });
-  assert.deepEqual(w.calls.native.map(call => call.type).filter(type => type !== 'status'), ['getFields']);
-  assert.equal(w.calls.native[1].url, `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo`);
-  assert.deepEqual(plain(w.calls.native[1].fields), ['householdAdults', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'householdSeniors']);
+  assert.deepEqual(w.calls.native.map(call => call.type).filter(type => type !== 'status'), ['warmLaya', 'getFields'], 'Laya is readied for the open question and isn’t ready');
+  assert.equal(w.calls.native[2].url, `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo`);
+  assert.deepEqual(plain(w.calls.native[2].fields), ['householdAdults', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'householdSeniors']);
   // The second plan finds nothing new it can fill, so the click ends there.
   assert.deepEqual(w.calls.content.map(message => message.type), ['secondhand:pageState', 'secondhand:generic:plan', 'secondhand:generic:fill', 'secondhand:generic:plan']);
   const fill = plain(w.calls.content[2]);
@@ -243,8 +254,8 @@ test('an unknown Iowa page fills questions its answers reveal in the same click,
     { id: 'sh-1-5', key: 'monthlyRent', confidence: 'high', revealedBy: 'sh-1-0' });                        // its key was not requested
   const w = worker({ kind: 'manual', engine: generalEngine, general: plan, desktop: { values: { ...financialValues, monthlyRent: '700' } } });
   const result = plain((await autofill(w)).data);
-  assert.deepEqual(w.calls.native.map(call => call.type).filter(type => type !== 'status'), ['getFields']);
-  assert.deepEqual(plain(w.calls.native[1].fields), ['householdAdults', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'householdSeniors']);
+  assert.deepEqual(w.calls.native.map(call => call.type).filter(type => type !== 'status'), ['warmLaya', 'getFields']);
+  assert.deepEqual(plain(w.calls.native[2].fields), ['householdAdults', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'householdSeniors']);
   assert.deepEqual(w.calls.content.map(message => message.type), ['secondhand:pageState', 'secondhand:generic:plan', 'secondhand:generic:fill',
     'secondhand:generic:plan', 'secondhand:generic:fill', 'secondhand:generic:plan']);
   assert.equal(result.filled, 3);
@@ -293,6 +304,40 @@ test('a locked, cancelled, or unreadable general fill on an unknown Iowa page st
   assert.equal((await locked.panel({ type: 'ui:pageState' })).data.page.todo, 'Check your answers, then click Continue.');
 });
 
+// Laya on Iowa pages the adapter doesn't know (#39, #42). Iowa's portal needs no site approval.
+const blind = financialPlan().unmatched[0];
+const layaAnswers = answers => ({ layaState: 'ready', laya: { answerFields: request => ({ answers: answers(request), accessRevision: 0 }) } });
+
+test('with Laya ready, its answer joins the general fill on an unknown Iowa page as a guess', async () => {
+  const w = worker({ kind: 'manual', engine: generalEngine, general: financialPlan(), desktop: { values: financialValues, ...layaAnswers(() => ({ [blind.id]: 'No' })) } });
+  const result = plain((await autofill(w)).data);
+  const answer = w.calls.native.find(call => call.type === 'answerFields');
+  assert.deepEqual(plain(answer.questions), [{ id: blind.id, label: 'Is anyone blind?', type: 'radio', options: ['Yes', 'No'] }], 'Iowa’s ids carry no frame prefix');
+  assert.equal(answer.url, `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo`);
+  assert.deepEqual(plain(w.calls.content.find(message => message.type === 'secondhand:generic:fill').assignments).at(-1), { id: blind.id, option: 'No', guessed: true });
+  assert.equal(result.filled, 3);
+  assert.equal(result.laya, 1);
+  assert.equal(result.message, 'Filled 3 · 1 need you. Guesses were suggested by Laya on this computer. Check your answers, then click Continue.');
+  assert.doesNotMatch(JSON.stringify(answer), /Synthetic private/);
+});
+
+test('with Laya ready, an unknown Iowa page the rules can’t fill gets Laya’s answers, then waits for the applicant', async () => {
+  const general = { ...nothingPlanned(), unmatched: [blind] };
+  const w = worker({ kind: 'manual', engine: generalEngine, general, desktop: layaAnswers(() => ({ [blind.id]: 'No' })) });
+  const result = plain((await autofill(w)).data);
+  assert.deepEqual(w.calls.native.map(call => call.type), ['warmLaya', 'answerFields', 'status']);
+  assert.equal(result.state, 'done');
+  assert.equal(result.filled, 1);
+  const state = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.equal(state.autopilot, true, 'autofill waits for the applicant to check and continue');
+  assert.equal(state.page.todo, 'Check your answers, then click Continue.');
+
+  const nothing = worker({ kind: 'manual', engine: generalEngine, general, desktop: layaAnswers(() => ({})) });
+  const stopped = plain((await autofill(nothing)).data);
+  assert.equal(stopped.state, 'stopped', 'when Laya can’t answer either, the page is unknown as before');
+  assert.match(stopped.message, /doesn’t know this page yet/);
+});
+
 test('launcher is bound to its own tab, needs confirmed clicks, and cannot use panel-only or unknown types', async () => {
   const w = worker();
   assert.equal(await w.launcher({ type: 'ui:autofill' }), undefined);
@@ -335,7 +380,7 @@ test('the worker answers a build ping from its own pages with the build the pane
 
 test('desktop status, showApp, and focusField pass through; guided and manual-fill messages are gone', async () => {
   const w = worker();
-  assert.deepEqual(plain((await w.panel({ type: 'ui:desktopStatus' })).data), { connected: true, unlocked: true });
+  assert.deepEqual(plain((await w.panel({ type: 'ui:desktopStatus' })).data), { connected: true, unlocked: true, laya: 'unavailable' });
   assert.deepEqual(plain((await w.launcher({ type: 'ui:showApp', confirmed: true })).data), { shown: true });
   assert.deepEqual(plain((await w.launcher({ type: 'ui:focusField', key: 'lastName', confirmed: true })).data), { focused: true });
   assert.equal(await w.launcher({ type: 'ui:focusField', key: 'input[type=password]', confirmed: true }), undefined);
@@ -343,10 +388,10 @@ test('desktop status, showApp, and focusField pass through; guided and manual-fi
     assert.equal(await w.panel({ type, confirmed: true, enabled: true }), undefined, type);
   }
   const offline = worker({ desktop: { reachable: false } });
-  assert.deepEqual(plain((await offline.panel({ type: 'ui:desktopStatus' })).data), { connected: false, unlocked: false });
+  assert.deepEqual(plain((await offline.panel({ type: 'ui:desktopStatus' })).data), { connected: false, unlocked: false, laya: 'unavailable' });
   // The side panel shows desktop state and can bring the app forward on any tab.
   const noTab = { id: 'testextension', url: PANEL_URL };
-  assert.deepEqual(plain((await w.send({ type: 'ui:desktopStatus' }, noTab)).data), { connected: true, unlocked: true });
+  assert.deepEqual(plain((await w.send({ type: 'ui:desktopStatus' }, noTab)).data), { connected: true, unlocked: true, laya: 'unavailable' });
   assert.deepEqual(plain((await w.send({ type: 'ui:showApp', confirmed: true }, noTab)).data), { shown: true });
   assert.equal(await w.send({ type: 'ui:pageState' }, noTab), undefined);
 });
@@ -409,6 +454,8 @@ function journey({ screens, desktop = {}, continueStays = false, engine = noSite
               const reply = data => onMessage({ id: request.id, ok: true, data });
               if (request.type === 'status') return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: 0 });
               if (request.type === 'getFields') return reply({ accessRevision: 0, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])) });
+              if (request.type === 'warmLaya') return reply({ state: 'unavailable' });
+              if (request.type === 'suggestFields' || request.type === 'answerFields') return onMessage({ id: request.id, ok: false, error: 'Laya isn’t ready on this computer.', code: 'LAYA_NOT_READY' });
               return reply({ recorded: true });
             });
           }

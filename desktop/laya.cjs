@@ -225,16 +225,27 @@ function createLaya({ userDataDir, manifest, modelDir, runner = processRunner(),
     return results;
   }
 
+  // When the last request ends, the idle clock starts: the model is released after idleMs.
+  function settle() {
+    if (--active === 0 && loaded) {
+      idleTimer = setTimeout(() => { if (active === 0) release(); }, idleMs);
+      idleTimer.unref?.();
+    }
+  }
+
+  // A first request after idle waits for process start, checksum, and load: seconds, more than a
+  // request's timeout. Warming does that ahead of the request. It refuses like a decision.
+  async function warm() {
+    active++;
+    clearTimeout(idleTimer);
+    try { await ready(); } finally { settle(); }
+  }
+
   async function decideBatch(items) {
     const request = { expired: false };
     active++;
     clearTimeout(idleTimer);
-    const work = decideAll(items, request).finally(() => {
-      if (--active === 0 && loaded) {
-        idleTimer = setTimeout(() => { if (active === 0) release(); }, idleMs);
-        idleTimer.unref?.();
-      }
-    });
+    const work = decideAll(items, request).finally(settle);
     let timer;
     const timeout = new Promise((_, reject) => {
       timer = setTimeout(() => { request.expired = true; reject(failure(LAYA_TIMEOUT, `Laya took too long (over ${timeoutMs} ms).`)); }, timeoutMs);
@@ -247,6 +258,7 @@ function createLaya({ userDataDir, manifest, modelDir, runner = processRunner(),
     status,
     decide: async (state, questions) => (await decideBatch([{ state, questions }]))[0],
     decideBatch,
+    warm,
     // Off stops a download (keeping what arrived) and releases the model.
     async setEnabled(value) {
       on = value === true;

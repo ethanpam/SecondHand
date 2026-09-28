@@ -219,6 +219,38 @@ test('the model is released after 5 idle minutes and loads again on the next dec
   assert.equal(runner.loads.length, 2);
 });
 
+test('warming loads the model ahead of a request, so a first decision after idle isn’t spent loading it', async t => {
+  // Loading the real model takes seconds (process start, checksum, load): longer than a request's timeout.
+  const slowLoad = () => stubRunner({ load: () => new Promise(resolve => setTimeout(resolve, 120)) });
+  const cold = createLaya({ modelDir: modelDirectory(t), manifest: { version: 1, model: null }, runner: slowLoad(), enabled: true, timeoutMs: 60 });
+  assert.equal((await cold.decide(rowState('3'), { correct: DECISION }).catch(error => error)).code, LAYA_TIMEOUT, 'without warming, the load eats the request’s time');
+  const runner = slowLoad();
+  const laya = createLaya({ modelDir: modelDirectory(t), manifest: { version: 1, model: null }, runner, enabled: true, timeoutMs: 60 });
+  await Promise.all([laya.warm(), laya.warm()]);
+  assert.equal(runner.loads.length, 1, 'warms share one load');
+  assert.equal((await laya.decide(rowState('3'), { correct: DECISION })).answers.correct.type, 'noul');
+  await laya.warm();
+  assert.equal(runner.loads.length, 1, 'a warm model is not loaded again');
+  const off = createLaya({ modelDir: modelDirectory(t), manifest: { version: 1, model: null }, runner: stubRunner(), enabled: false });
+  assert.equal((await off.warm().catch(error => error)).code, LAYA_NOT_READY, 'warming is refused like a decision when Laya is off');
+  const broken = createLaya({ modelDir: modelDirectory(t), manifest: { version: 1, model: null }, runner: stubRunner({ load: async () => { throw new Error('synthetic load failure'); } }), enabled: true });
+  assert.equal((await broken.warm().catch(error => error)).code, LAYA_NOT_READY);
+  assert.equal((await broken.status()).state, 'error');
+});
+
+test('a warmed model is released after 5 idle minutes too', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const runner = stubRunner();
+  const laya = createLaya({ modelDir: modelDirectory(t), manifest: { version: 1, model: null }, runner, enabled: true });
+  await laya.warm();
+  t.mock.timers.tick(5 * 60 * 1000 - 1);
+  await tick();
+  assert.equal(runner.releases, 0);
+  t.mock.timers.tick(1);
+  await tick();
+  assert.equal(runner.releases, 1);
+});
+
 test('concurrent first decisions share one model load', async t => {
   const runner = stubRunner();
   const laya = createLaya({ modelDir: modelDirectory(t), manifest: { version: 1, model: null }, runner, enabled: true });
