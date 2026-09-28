@@ -6,6 +6,7 @@
 // .app/Contents/MacOS/secondHand binary. This exercises Chrome's exact entry.
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
+const { realpathSync } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
@@ -67,9 +68,43 @@ else {
 `);
 }
 
+// How long the Windows stand-in stays running after it records its start.
+const STAND_IN_STAYS_MS = 15000;
+
+// An installed Windows app in `directory`: a copy of the relay, and beside it a stand-in secondHand.exe (this
+// Node, which NODE_OPTIONS points at the returned script) that records how it was started, then stays running.
+// Had it kept the relay's handles, Chrome's pipes among them, the relay's output would stay open while it runs.
+async function standInExe(directory, relay, record) {
+  await fs.mkdir(directory);
+  await fs.copyFile(relay, path.join(directory, 'secondHand-native.exe'));
+  await fs.copyFile(process.execPath, path.join(directory, 'secondHand.exe'));
+  const script = path.join(directory, 'record.cjs');
+  await fs.writeFile(script, `'use strict';
+require('node:fs').appendFileSync(${JSON.stringify(record)}, JSON.stringify({ pid: process.pid, args: process.argv.slice(1),
+  executable: process.execPath, folder: process.cwd(), localAppData: process.env.LOCALAPPDATA ?? null,
+  testMode: process.env.SECONDHAND_TEST_MODE ?? null, testUserData: process.env.SECONDHAND_TEST_USER_DATA ?? null }) + '\\n');
+setTimeout(() => process.exit(0), ${STAND_IN_STAYS_MS});
+`);
+  return script;
+}
+
 async function launches(record) {
   try { return (await fs.readFile(record, 'utf8')).trim().split('\n').map(line => JSON.parse(line)); }
   catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+}
+
+// The apps a host started, once the first has run. Their process IDs go in `started` so they are ended.
+async function startedApps(record, started) {
+  const deadline = Date.now() + 20000;
+  while (!(await launches(record)).length) {
+    if (Date.now() > deadline) throw new Error('The host answered launched, but the app it started never ran.');
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  // A second start would have recorded by now; the host starts the app once.
+  await new Promise(resolve => setTimeout(resolve, 2000));
+  const recorded = await launches(record);
+  started.push(...recorded.map(item => item.pid));
+  return recorded;
 }
 
 (async () => {
@@ -111,36 +146,47 @@ async function launches(record) {
     assert.deepEqual(messages, fixtures.map(item => ({ id: item.request.id, ok: true, data: item.answer || item.data })));
     process.stdout.write(`Native messaging subprocess smoke passed (${packaged ? `packaged ${process.platform} native host` : 'development Electron'}): status, showApp, getFields, and openApp with the app running.\n`);
 
-    // With the app closed, openApp starts it. A packaged host would start the real packaged app, and
-    // the Windows relay doesn't start apps, so this runs against development Electron only.
-    if (packaged) {
-      process.stdout.write('Skipped openApp with the app closed: it runs with development Electron only.\n');
+    // With the app closed, openApp starts it. A packaged Mac host would start the real packaged app, so on a
+    // Mac this runs with development Electron; the Windows relay starts a stand-in beside a copy of itself.
+    if (packaged && !windowsRelay) {
+      process.stdout.write('Skipped openApp with the app closed: on a Mac it runs with development Electron only.\n');
       return;
     }
     await bridge.close();
     bridge = null;
-    const standIn = path.join(temporary, 'stand-in');
     const record = path.join(temporary, 'launches.jsonl');
-    await standInApp(standIn, record);
     const closedEnv = { ...env, SECONDHAND_TEST_MODE: '1', SECONDHAND_TEST_USER_DATA: userData };
-    const answers = await runHost(executable, [standIn], closedEnv, [{ id: 'open-1', type: 'openApp' }, { id: 'open-2', type: 'openApp' }]);
-    assert.deepEqual(answers, [{ id: 'open-1', ok: true, data: { opened: 'launched' } }, { id: 'open-2', ok: true, data: { opened: 'launched' } }]);
-    const deadline = Date.now() + 20000;
-    while (!(await launches(record)).length) {
-      if (Date.now() > deadline) throw new Error('The host answered launched, but the app it started never ran.');
-      await new Promise(resolve => setTimeout(resolve, 100));
+    const opens = [{ id: 'open-1', type: 'openApp' }, { id: 'open-2', type: 'openApp' }];
+    const launched = opens.map(({ id }) => ({ id, ok: true, data: { opened: 'launched' } }));
+    if (windowsRelay) {
+      const installed = path.join(temporary, 'installed');
+      const script = await standInExe(installed, executable, record);
+      const began = Date.now();
+      // NODE_OPTIONS reaches the stand-in as part of the relay's own environment; node reads its quoted, escaped path.
+      const answers = await runHost(path.join(installed, 'secondHand-native.exe'), [], { ...closedEnv, NODE_OPTIONS: `--require ${JSON.stringify(script)}` }, opens);
+      assert.deepEqual(answers, launched);
+      assert.ok(Date.now() - began < STAND_IN_STAYS_MS / 2, 'The relay’s output stayed open while the app it started ran: the app kept the relay’s handles.');
+      const recorded = await startedApps(record, started);
+      // Compared as real paths: the temporary folder may be named in its short 8.3 form.
+      const real = file => realpathSync.native(file);
+      assert.deepEqual(recorded.map(({ pid, executable, folder, ...launch }) => ({ ...launch, executable: real(executable), folder: real(folder) })),
+        [{ args: [], localAppData: temporary, testMode: null, testUserData: null, executable: real(path.join(installed, 'secondHand.exe')), folder: real(installed) }]);
+    } else {
+      const standIn = path.join(temporary, 'stand-in');
+      await standInApp(standIn, record);
+      assert.deepEqual(await runHost(executable, [standIn], closedEnv, opens), launched);
+      const recorded = await startedApps(record, started);
+      assert.deepEqual(recorded.map(({ pid, ...launch }) => launch), [{ args: [standIn], userData, testMode: null, testUserData: null }]);
     }
-    // A second start would have recorded by now; the host starts the app once.
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    const recorded = await launches(record);
-    started.push(...recorded.map(item => item.pid));
-    assert.deepEqual(recorded.map(({ pid, ...launch }) => launch), [{ args: [standIn], userData, testMode: null, testUserData: null }]);
-    process.stdout.write('Native messaging subprocess smoke passed: with the app closed, openApp started it once, with the app path and data folder, without Chrome’s origin or test settings.\n');
+    process.stdout.write(windowsRelay
+      ? 'Native messaging subprocess smoke passed: with the app closed, the Windows relay started the secondHand.exe beside it once, with no arguments, without its handles or test settings.\n'
+      : 'Native messaging subprocess smoke passed: with the app closed, openApp started it once, with the app path and data folder, without Chrome’s origin or test settings.\n');
   } finally {
     for (const pid of started) {
       try { process.kill(pid); } catch (error) { if (error.code !== 'ESRCH') throw error; }
     }
     if (bridge) await bridge.close();
-    await fs.rm(temporary, { recursive: true, force: true });
+    // A Windows stand-in just ended may hold its file for a moment.
+    await fs.rm(temporary, { recursive: true, force: true, maxRetries: 10 });
   }
 })().catch(error => { process.stderr.write(`${error.stack || error.message}\n`); process.exitCode = 1; });

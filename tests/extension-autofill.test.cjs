@@ -435,11 +435,14 @@ test('openApp from a confirmed click asks the native host to bring SecondHand fo
   assert.equal(await w.send({ type: 'ui:openApp', confirmed: true }, { id: 'otherextension', url: PANEL_URL }), undefined);
   assert.deepEqual(w.calls.native, []);
   assert.equal((await worker({ desktop: { opened: { opened: 'maybe' } } }).panel({ type: 'ui:openApp', confirmed: true })).errorKey, 'worker.desktopUnexpected');
-  // No host, a host that can't open the app (the Windows relay), or a failed start: the click says so.
+  // No host, a host that can't open the app (a Windows relay from before it could), or a failed start: the click says so.
   assert.equal((await worker({ desktop: { reachable: false } }).panel({ type: 'ui:openApp', confirmed: true })).errorKey, 'worker.desktopOffline');
   assert.equal((await worker({ desktop: { unreachable: UNREACHABLE.windowsRelay } }).panel({ type: 'ui:openApp', confirmed: true })).errorKey, 'worker.desktopOffline');
-  const failed = await worker({ desktop: { openError: 'SecondHand could not be started (ENOENT).' } }).panel({ type: 'ui:openApp', confirmed: true });
-  assert.deepEqual([failed.ok, failed.error], [false, 'SecondHand could not be started (ENOENT).']);
+  // A failed start in the host's words: the macOS/Linux host names Node's error code, the Windows relay the Windows error.
+  for (const words of ['SecondHand could not be started (ENOENT).', 'SecondHand could not be started (Windows error 2).']) {
+    const failed = await worker({ desktop: { openError: words } }).panel({ type: 'ui:openApp', confirmed: true });
+    assert.deepEqual([failed.ok, failed.error], [false, words]);
+  }
 });
 
 // A multi-screen walk: each Continue moves the tab to the next screen and fires
