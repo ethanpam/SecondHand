@@ -11,7 +11,7 @@ tests can check the port id for id and probability for probability.
 
     # The real model: token ids, prompts and probabilities for a fixed sample of rows
     # (tested when SECONDHAND_LAYA_MODEL_DIR points at the export):
-    node ML_model/dataset/build.cjs --today 2026-09-26 --households 50 --seed 3 --per-question 2 --out <dir>
+    node ML_model/dataset/build.cjs --format noul-v1 --today 2026-09-26 --households 50 --seed 3 --per-question 2 --out <dir>
     uv run --project ~/Projects/LayaStudio python ML_model/eval/runtime_fixtures.py parity \
         --export <export dir> --checkpoint <run>/model --rows <dir>/rows.jsonl
 """
