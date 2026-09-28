@@ -5,10 +5,11 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const { watch } = require('node:fs');
+const { spawn } = require('node:child_process');
 const os = require('node:os');
 const { pathToFileURL, URL } = require('node:url');
 const { Vault, atomicWrite, normalizeRecoveryKey, MAX_VAULT_BYTES } = require('./vault.cjs');
-const { startBridge, runNativeHost, nativeStreams, extensionFromOrigin, EXTENSION_ID, isIowaNavigationAuthorization } = require('./bridge.cjs');
+const { startBridge, runNativeHost, nativeStreams, appLaunch, startApp, extensionFromOrigin, EXTENSION_ID, isIowaNavigationAuthorization } = require('./bridge.cjs');
 const { registerHost } = require('./registration.cjs');
 const { getExtensionSetup, prepareBundledExtension } = require('./extension-setup.cjs');
 const { testStoragePath } = require('./test-storage-path.cjs');
@@ -44,7 +45,9 @@ if (nativeOrigin) {
   else {
     app.whenReady().then(() => { if (process.platform === 'darwin') app.dock?.hide(); });
     const { input, output } = nativeStreams();
-    runNativeHost(app.getPath('userData'), extensionId, input, output).then(() => app.exit(0), () => app.exit(1));
+    // Asked to open SecondHand while it isn't running, the host starts this same app on its own.
+    const launch = appLaunch({ execPath: process.execPath, appPath: app.getAppPath(), packaged: app.isPackaged, env: process.env });
+    runNativeHost(app.getPath('userData'), extensionId, input, output, () => startApp(launch, spawn)).then(() => app.exit(0), () => app.exit(1));
   }
 } else if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -240,9 +243,10 @@ if (nativeOrigin) {
   }
   async function bridgeRequest(request, context) {
     if (request.type === 'status') return { unlocked: vault.unlocked, applicationCount: vault.unlocked ? vault.getData().applications.length : 0, accessRevision, laya: await extensionLayaState() };
-    if (request.type === 'showApp') {
+    // On Windows the native relay passes openApp on as it is; the app is running, so it comes forward.
+    if (request.type === 'showApp' || request.type === 'openApp') {
       if (mainWindow) { if (mainWindow.isMinimized?.()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); }
-      return { shown: true };
+      return request.type === 'showApp' ? { shown: true } : { opened: 'shown' };
     }
     if (request.type === 'warmLaya') return warmLaya();
     if (request.type === 'suggestFields' || request.type === 'answerFields') return layaRequest(request, context);

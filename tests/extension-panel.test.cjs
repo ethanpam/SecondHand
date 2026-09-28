@@ -307,7 +307,7 @@ async function panel(t, initial = {}) {
   }, permissions: { request: async permissions => {
     requests.push({ type: 'permissions.request', ...structuredClone(permissions) });
     return initial.grant ?? true;
-  } }, runtime: { sendMessage: async payload => {
+  } }, runtime: { getPlatformInfo: async () => ({ os: initial.os ?? 'mac' }), sendMessage: async payload => {
     requests.push(structuredClone(payload));
     // An outdated worker ignores messages it doesn't know: Chrome resolves with no response.
     if (initial.silent === true || initial.silent?.includes(payload.type)) return undefined;
@@ -327,6 +327,7 @@ async function panel(t, initial = {}) {
     else if (payload.type === 'ui:desktopStatus') data = { ...desktop };
     else if (payload.type === 'ui:focusField') data = { focused: true };
     else if (payload.type === 'ui:showApp') data = { shown: true };
+    else if (payload.type === 'ui:openApp') { if (initial.openApp) return initial.openApp(desktop); data = { opened: 'launched' }; }
     else if (payload.type === 'ui:openPanel') data = { opened: true };
     else if (payload.type === 'ui:enableFrames') { state.site.frames.forEach(frame => { frame.enabled = true; }); data = { enabled: true }; }
     else if (payload.type === 'ui:enableSite' || payload.type === 'ui:disableSite') {
@@ -346,6 +347,11 @@ async function panel(t, initial = {}) {
   Object.defineProperty(window, 'localStorage', { configurable: true, value: {
     getItem: key => storage.has(key) ? storage.get(key) : null, setItem: (key, value) => { storage.set(key, String(value)); }, removeItem: key => { storage.delete(key); } } });
   if (initial.language) Object.defineProperty(window.navigator, 'language', { configurable: true, get: () => initial.language });
+  // Opening SecondHand checks the desktop once a second; `hurry` lets those seconds pass at once.
+  if (initial.hurry) {
+    const wait = window.setTimeout.bind(window);
+    window.setTimeout = (callback, ms, ...args) => wait(callback, ms === 1000 ? 0 : ms, ...args);
+  }
   // Run the page's own scripts, in the order panel.html lists them.
   for (const [, file] of source('panel.html').matchAll(/<script src="([^"]+)"/g)) {
     window.eval(source(file));
@@ -362,7 +368,7 @@ async function panel(t, initial = {}) {
   await tick(); await tick();
   const get = id => window.document.getElementById(id);
   const clickNow = target => clicks.get(typeof target === 'string' ? get(target) : target)({ isTrusted: true });
-  return { window, requests, state, tabs, listeners, get, clickNow, storage,
+  return { window, requests, state, desktop, tabs, listeners, get, clickNow, storage,
     types: () => requests.map(request => request.type),
     row: key => window.document.querySelector(`[data-key="${key}"]`),
     async userClick(target) { clickNow(target); await tick(); await tick(); } };
@@ -423,15 +429,93 @@ test('after Autofill, a question whose answer isn’t saved says so and points t
   assert.equal(malformed.row('firstName').querySelector('.checklist-detail').textContent, 'Needs you');
 });
 
-test('desktop line shows locked with Unlock, and not running without an action', async t => {
+test('desktop line shows locked with Unlock, and not running with Open SecondHand', async t => {
   const locked = await panel(t, { desktop: { unlocked: false } });
   assert.match(locked.get('desktop-status').textContent, /locked/);
   assert.equal(locked.get('desktop-action').hidden, false);
+  assert.equal(locked.get('desktop-action').textContent, 'Unlock');
   await locked.userClick('desktop-action');
   assert.deepEqual(plainRequests(locked.requests.find(request => request.type === 'ui:showApp')), { type: 'ui:showApp', confirmed: true });
   const offline = await panel(t, { desktop: { connected: false, unlocked: false } });
-  assert.match(offline.get('desktop-status').textContent, /isn’t running/);
-  assert.equal(offline.get('desktop-action').hidden, true);
+  assert.equal(offline.get('desktop-status').textContent, 'SecondHand isn’t running. Open the app on this computer.');
+  assert.equal(offline.get('desktop-action').hidden, false);
+  assert.equal(offline.get('desktop-action').textContent, 'Open SecondHand');
+});
+
+// Waits for the panel to reach a state; each open check is about a second apart.
+async function until(check, ms = 4000) {
+  const end = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > end) assert.fail(`timed out waiting for ${check}`);
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+}
+const CLOSED = { connected: false, unlocked: false, laya: 'unavailable' };
+const offlineResult = { state: 'offline', filled: 0, needYou: [], message: 'Open the SecondHand app, then click Autofill again.', messageKey: 'worker.openAppThenAutofill', messageParams: {}, pageKey: 'iowa-personal-information' };
+
+test('Open SecondHand asks the worker to open the app, waits for it, then shows it locked with Unlock', async t => {
+  const view = await panel(t, { desktop: CLOSED });
+  view.get('desktop-action').click(); await tick();
+  assert.equal(view.types().includes('ui:openApp'), false, 'an untrusted click does nothing');
+  await view.userClick('desktop-action');
+  assert.deepEqual(plainRequests(view.requests.filter(request => request.type === 'ui:openApp')), [{ type: 'ui:openApp', confirmed: true }]);
+  assert.equal(view.get('desktop-status').textContent, 'Opening SecondHand…');
+  assert.equal(view.get('desktop-action').hidden, true, 'no second click while it opens');
+  // The app starts locked; the panel's next check finds it.
+  Object.assign(view.desktop, { connected: true, unlocked: false });
+  await until(() => view.get('desktop-status').textContent === 'SecondHand is locked.');
+  assert.equal(view.get('desktop-action').hidden, false);
+  assert.equal(view.get('desktop-action').textContent, 'Unlock');
+  await view.userClick('desktop-action');
+  assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'ui:showApp', confirmed: true });
+  assert.match(view.get('desktop-status').textContent, /Unlock SecondHand, then click Autofill/);
+  assert.equal(view.types().filter(type => type === 'ui:openApp').length, 1);
+});
+
+test('if SecondHand never answers, the panel stops after about 20 seconds with one plain line for this computer', async t => {
+  for (const [os, line] of [['mac', 'SecondHand didn’t open. Open it from your Applications folder.'], ['win', 'SecondHand didn’t open. Open it from the Start menu.'],
+    ['linux', 'SecondHand didn’t open. Open it on this computer.']]) {
+    const view = await panel(t, { os, hurry: true, desktop: CLOSED });
+    await view.userClick('desktop-action');
+    await until(() => view.get('desktop-status').textContent === line);
+    assert.equal(view.types().filter(type => type === 'ui:desktopStatus').length, 1 + 20, `${os}: one check a second for 20 seconds`);
+    assert.equal(view.get('desktop-status').parentElement.classList.contains('error'), true, os);
+    assert.equal(view.get('laya-status').hidden, true, os);
+  }
+});
+
+test('an open the host can’t do (no host, the Windows relay, a failed start) says so at once, without waiting', async t => {
+  const refusals = [{ ok: false, error: 'Cannot reach SecondHand. Open the app and prepare its Chrome extension.', errorKey: 'worker.desktopOffline', errorParams: {} },
+    { ok: false, error: 'SecondHand could not be started (ENOENT).', errorKey: 'detail', errorParams: { detail: 'SecondHand could not be started (ENOENT).' } }];
+  for (const refusal of refusals) {
+    const view = await panel(t, { os: 'win', desktop: CLOSED, openApp: () => refusal });
+    await view.userClick('desktop-action');
+    await until(() => view.get('desktop-status').textContent === 'SecondHand didn’t open. Open it from the Start menu.');
+    assert.equal(view.types().filter(type => type === 'ui:desktopStatus').length, 1, 'no checks for an app that wasn’t opened');
+  }
+});
+
+test('with SecondHand closed, Autofill leaves the one desktop line and its button to say so, with no red repeat under Autofill', async t => {
+  const view = await panel(t, { desktop: CLOSED, autofill: offlineResult });
+  await view.userClick('panel-autofill');
+  await settle();
+  assert.equal(view.get('status').textContent, 'Click Autofill. SecondHand fills what it can and tells you what it needs.');
+  assert.equal(view.get('status').classList.contains('error'), false);
+  assert.equal(view.get('desktop-status').textContent, 'SecondHand isn’t running. Open the app on this computer.');
+  assert.equal(view.get('desktop-action').textContent, 'Open SecondHand');
+  // The worker's remembered result isn't repeated when the panel opens again either.
+  const reopened = await panel(t, { desktop: CLOSED, result: offlineResult });
+  assert.equal(reopened.get('status').textContent, 'Click Autofill. SecondHand fills what it can and tells you what it needs.');
+  assert.equal(shownText(reopened).filter(text => /Open the SecondHand app|isn’t running/.test(text)).length, 1);
+});
+
+test('opening SecondHand speaks the applicant’s language', async t => {
+  const view = await panel(t, { language: 'es-ES', pageState: keyedChecklist, desktop: CLOSED, hurry: true });
+  assert.equal(view.get('desktop-action').textContent, spanish('desktop.open'));
+  await view.userClick('desktop-action');
+  assert.equal(view.get('desktop-status').textContent, spanish('desktop.opening'));
+  await until(() => view.get('desktop-status').textContent === spanish('desktop.didntOpenMac'));
+  assert.deepEqual(shownText(view).filter(text => englishOnly.has(text)), []);
 });
 
 test('pages with nothing to fill disable Autofill and explain the step', async t => {
@@ -537,11 +621,30 @@ test('widget shows Unlock when the vault is locked and returns to Autofill after
   assert.equal(view.get('widget-text').classList.contains('visually-hidden'), false);
 });
 
-test('widget reports an unreachable desktop and restores an earlier result after reloading', async t => {
-  const offline = await panel(t, { launcher: true, autofill: { state: 'offline', filled: 0, needYou: [], message: 'Open the SecondHand app, then click Autofill again.', pageKey: 'iowa-personal-information' } });
+test('widget offers Open SecondHand in Autofill’s place when the app is closed, and restores an earlier result after reloading', async t => {
+  const offline = await panel(t, { launcher: true, autofill: offlineResult });
   await offline.userClick('autofill');
-  assert.match(offline.get('widget-text').textContent, /Open the SecondHand app/);
+  assert.equal(offline.get('autofill').hidden, true);
+  assert.equal(offline.get('unlock').hidden, true);
+  assert.equal(offline.get('open-app').hidden, false);
+  assert.equal(offline.get('open-app').textContent, 'Open SecondHand');
+  assert.match(offline.get('widget-text').textContent, /Open the SecondHand app/, 'screen readers still hear why');
+  assert.equal(offline.get('widget-text').classList.contains('visually-hidden'), true, 'the button says it all: the card grows no row');
+  offline.get('open-app').click(); await tick();
+  assert.equal(offline.types().includes('ui:openApp'), false, 'an untrusted click does nothing');
+  await offline.userClick('open-app');
+  assert.deepEqual(plainRequests(offline.requests.find(request => request.type === 'ui:openApp')), { type: 'ui:openApp', confirmed: true });
+  assert.equal(offline.get('open-app').hidden, true);
   assert.equal(offline.get('autofill').hidden, false);
+  assert.match(offline.get('widget-text').textContent, /Unlock SecondHand, then click Autofill/);
+  // An open that fails says so in one line that stays, and Autofill is back to check again.
+  const failing = await panel(t, { launcher: true, os: 'win', autofill: offlineResult, openApp: () => ({ ok: false, error: 'SecondHand could not be started (ENOENT).' }) });
+  await failing.userClick('autofill');
+  await failing.userClick('open-app');
+  await until(() => failing.get('widget-text').textContent === 'SecondHand didn’t open. Open it from the Start menu.');
+  assert.equal(failing.get('widget-text').classList.contains('visually-hidden'), false);
+  assert.equal(failing.get('open-app').hidden, true);
+  assert.equal(failing.get('autofill').hidden, false);
   const restored = await panel(t, { launcher: true, result: doneResult });
   assert.equal(restored.get('widget-text').textContent, 'Filled 3');
   assert.equal(restored.get('need-you').textContent, '2 need you');

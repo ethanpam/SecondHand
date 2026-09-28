@@ -29,7 +29,9 @@ const MAX_OPTION = 100;
 // Laya's time per Autofill click: each request carries what its click has left.
 const MAX_BUDGET_MS = 3000;
 // Refusals the extension acts on. Only these codes travel back with an error.
-const PUBLIC_CODES = Object.freeze(['LAYA_NOT_READY']);
+const PUBLIC_CODES = Object.freeze(['LAYA_NOT_READY', 'DESKTOP_UNREACHABLE']);
+// The native host's answer when the desktop app isn't running (or can't be reached).
+const UNREACHABLE = 'Open SecondHand, connect this extension, and unlock SecondHand.';
 
 function isIowaNavigationAuthorization(request) {
   return request?.type === 'getFields' && Array.isArray(request.fields) && request.fields.length === 0 && IOWA_NAVIGATION_URLS.has(request.url);
@@ -126,7 +128,7 @@ function validateRequest(request) {
   if (!request || typeof request !== 'object' || Array.isArray(request) ||
       typeof request.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(request.id)) throw new Error('Invalid request identifier.');
   let allowed;
-  if (request.type === 'status' || request.type === 'showApp' || request.type === 'warmLaya') allowed = ['id', 'type'];
+  if (['status', 'showApp', 'openApp', 'warmLaya'].includes(request.type)) allowed = ['id', 'type'];
   else if (request.type === 'getFields') allowed = ['id', 'type', 'url', 'fields'];
   else if (request.type === 'trustSite') allowed = ['id', 'type', 'url'];
   else if (request.type === 'recordProgress') allowed = ['id', 'type', 'url', 'filledCount'];
@@ -136,7 +138,7 @@ function validateRequest(request) {
   // Field requests, site trust, and Laya may name any HTTPS site; the desktop decides whether it is trusted.
   if (request.type === 'getFields' || request.type === 'trustSite' || Object.hasOwn(LAYA_REQUESTS, request.type)) {
     if (!isHttpsSiteUrl(request.url)) throw new Error('Only an https site without credentials or a custom port is allowed.');
-  } else if (!['status', 'showApp', 'warmLaya'].includes(request.type) && !isPortalUrl(request.url)) throw new Error('Only the supported Iowa portal is allowed.');
+  } else if (!['status', 'showApp', 'openApp', 'warmLaya'].includes(request.type) && !isPortalUrl(request.url)) throw new Error('Only the supported Iowa portal is allowed.');
   if (request.type === 'getFields' && !isIowaNavigationAuthorization(request)) validateFieldScope(request.fields);
   if (Object.hasOwn(LAYA_REQUESTS, request.type)) {
     validateQuestions(request[LAYA_REQUESTS[request.type].list], LAYA_REQUESTS[request.type]);
@@ -239,17 +241,50 @@ async function relayRequest(userData, extensionId, request) {
   });
 }
 
-function runNativeHost(userData, extensionId, input = process.stdin, output = process.stdout) {
+// How the native host starts the desktop app: its own executable, detached and with no output.
+// Packaged, with no arguments; in development, with the app path. Never Chrome's origin or anything
+// from the request. The data folder setting carries over; test-only settings don't.
+function appLaunch({ execPath, appPath, packaged, env }) {
+  const { SECONDHAND_TEST_MODE, SECONDHAND_TEST_USER_DATA, ...kept } = env;
+  return { command: execPath, args: packaged ? [] : [appPath], options: { detached: true, stdio: 'ignore', env: kept } };
+}
+
+// Resolves once the app process has started, which then outlives this host; rejects if it can't start.
+function startApp({ command, args, options }, spawn) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, options);
+    child.once('error', reject);
+    child.once('spawn', () => { child.unref(); resolve(); });
+  });
+}
+
+// `launchApp` starts the desktop app (see startApp). Only openApp uses it, at most once per host.
+function runNativeHost(userData, extensionId, input, output, launchApp) {
   const reader = new FrameReader();
   let queue = Promise.resolve();
   let pending = 0;
+  let launch = null;
+  // openApp: bring a running app forward, or start it when it can't be reached.
+  async function openApp(request) {
+    let shown = null;
+    try { shown = await relayRequest(userData, extensionId, { id: request.id, type: 'showApp' }); }
+    catch { /* Not running, or not reachable: start it below. */ }
+    if (shown) return shown.ok ? { id: request.id, ok: true, data: { opened: 'shown' } } : shown;
+    launch ||= launchApp();
+    try { await launch; } catch (error) { return failure(request.id, `SecondHand could not be started${error.code ? ` (${error.code})` : ''}.`); }
+    return { id: request.id, ok: true, data: { opened: 'launched' } };
+  }
+  async function answer(request) {
+    try { validateRequest(request); } catch (error) { return failure(request?.id, error.message); }
+    if (request.type === 'openApp') return openApp(request);
+    try { return await relayRequest(userData, extensionId, request); }
+    catch { return failure(request.id, UNREACHABLE, 'DESKTOP_UNREACHABLE'); }
+  }
   reader.on('invalid', () => { input.destroy(); });
   reader.on('message', request => {
     if (++pending > 8) { input.destroy(); return; }
     queue = queue.then(async () => {
-      let response;
-      try { response = await relayRequest(userData, extensionId, request); }
-      catch { response = failure(request?.id, 'Open SecondHand, connect this extension, and unlock SecondHand.'); }
+      const response = await answer(request);
       if (!output.destroyed) await new Promise((resolve, reject) => {
         output.write(frame(response), error => error ? reject(error) : resolve());
       });
@@ -266,4 +301,4 @@ function runNativeHost(userData, extensionId, input = process.stdin, output = pr
 }
 
 module.exports = { HOST_NAME, EXTENSION_ID, MAX_MESSAGE_BYTES, LAYA_REQUESTS, extensionFromOrigin, frame, FrameReader, nativeStreams, isIowaNavigationAuthorization,
-  validateRequest, startBridge, relayRequest, runNativeHost };
+  validateRequest, startBridge, relayRequest, runNativeHost, appLaunch, startApp };

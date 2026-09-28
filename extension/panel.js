@@ -7,7 +7,7 @@
   const summary = globalThis.SecondHandSummary;
   // Must match BUILD in background.js: change both together. Chrome loads these pages
   // from disk right away but keeps running the old worker until SecondHand is reloaded.
-  const BUILD = '2026-09-27.1';
+  const BUILD = '2026-09-28.1';
   // The applicant's language: the choice saved in this extension's storage, else the browser's.
   let language = strings.language();
   const t = (key, params = {}) => strings.text(language, key, params);
@@ -45,6 +45,9 @@
   const languageName = code => new Intl.DisplayNames([language], { type: 'language' }).of(code);
   // Each question's own words; SecondHand's labels come from its catalog instead.
   const pageWords = items => items.filter(item => !item.labelKey).map(item => item.label);
+  // When SecondHand didn't open: one line saying where to open it on this computer.
+  const DIDNT_OPEN = { mac: 'desktop.didntOpenMac', win: 'desktop.didntOpenWindows' };
+  const didntOpen = async () => ({ key: DIDNT_OPEN[(await chrome.runtime.getPlatformInfo()).os] || 'desktop.didntOpen' });
 
   // Every fixed word on either surface comes from the catalog.
   function applyStatic() {
@@ -118,10 +121,13 @@
       $('widget').hidden = !known && !autopilot && !outdated;
       $('widget').classList.toggle('outdated', outdated);
       $('pill').hidden = known || autopilot || outdated;
+      // A locked app offers Unlock, and a closed one Open SecondHand, in Autofill's place.
       const locked = result?.state === 'locked';
+      const closed = result?.state === 'offline';
       $('stop').hidden = !autopilot;
-      $('autofill').hidden = autopilot || locked;
+      $('autofill').hidden = autopilot || locked || closed;
       $('unlock').hidden = autopilot || !locked;
+      $('open-app').hidden = autopilot || !closed;
       $('autofill').disabled = working;
       // Answers still to give show as a yellow link that finds each one in the form.
       const needYou = ['done', 'waiting'].includes(result?.state) ? fieldKeys(result.needYou) : [];
@@ -132,12 +138,12 @@
       const details = [hasMessage(result) ? words(fromResult(result)) : '', ai.note ? words(ai.note) : '', ai.reason, fixedText(languageTrouble?.message, 160)];
       $('widget-text').title = outdated ? t('panel.outdated') : fixedText(details.filter(Boolean).join(' '), 240);
       // The status is always read to screen readers, but shown as a line only when the reader
-      // must act and the need-you link doesn't already say so: a problem, an unlock or CAPTCHA
-      // step, a fill that found nothing, or an outdated extension. The Autofill button's title
-      // keeps the Iowa address disclosure.
+      // must act and neither the need-you link nor the Unlock or Open SecondHand button already
+      // says so: a problem, an unlock or CAPTCHA step, a fill that found nothing, or an outdated
+      // extension. The Autofill button's title keeps the Iowa address disclosure.
       const waiting = ['waiting', 'done'].includes(result?.state) && !needYou.length;
       const unfinished = waiting && (result.state === 'waiting' || Boolean(result.todo || result.todoKey) || !(Number(result.filled) > 0));
-      const message = outdated || Boolean(note) || ['error', 'offline'].includes(result?.state) || unfinished;
+      const message = outdated || Boolean(note) || result?.state === 'error' || unfinished;
       $('widget-text').classList.toggle('visually-hidden', !message);
       $('translate-offer').hidden = outdated || message || !known || !pageLanguage || pageLanguage === language;
       // The widget is as wide as what it shows, up to 272px (see panel.css). An outdated worker
@@ -243,6 +249,17 @@
       } catch (error) { note = trouble(error); }
       render();
     }));
+    // The native host brings SecondHand forward or starts it; it opens locked.
+    $('open-app').addEventListener('click', trusted(async () => {
+      try {
+        await send({ type: 'ui:openApp', confirmed: true });
+        result = { state: 'waiting', messageKey: 'desktop.unlockThenAutofill', messageParams: {} };
+      } catch (error) {
+        if (error.outdated) note = trouble(error);
+        else result = { state: 'error', messageKey: (await didntOpen()).key, messageParams: {} };
+      }
+      render();
+    }));
     // The logo, like the pill, opens the side panel. Send immediately inside the trusted click:
     // Chrome needs the user gesture to open the panel.
     for (const id of ['details', 'pill']) {
@@ -282,6 +299,14 @@
     let stopped = false;
     let status = { message: { key: 'panel.checkingTab' }, error: false };
     let desktopLine = null;
+    // What the desktop row's button does: open a closed app, or bring a locked one forward to unlock.
+    let desktopAction = null;
+    const ACTIONS = { open: 'desktop.open', unlock: 'panel.unlock' };
+    // While SecondHand opens, the panel checks about once a second for about 20 seconds.
+    let opening = false;
+    let desktopRun = 0;
+    const OPEN_CHECKS = 20;
+    const OPEN_CHECK_MS = 1000;
     // Whether Laya, the desktop's local AI, is ready: shown only while the desktop app answers.
     let layaLine = null;
     const LAYA_LINES = { ready: 'desktop.layaReady', off: 'desktop.layaOff', downloading: 'desktop.layaDownloading',
@@ -306,12 +331,16 @@
     const STATUS = { complete: 'checklist.complete', missing: 'checklist.missing', optional: 'checklist.optional', manual: 'checklist.manual' };
     const MARKS = { complete: '✓', manual: '!', missing: '○', optional: '○' };
     const show = (message, error = false) => { status = { message, error }; renderStatus(); };
+    // A closed app is said once, by the desktop row and its Open SecondHand button, not again under Autofill.
+    const reported = result => hasMessage(result) && result.state !== 'offline';
     function renderStatus() {
       $('status').textContent = words(status.message, 650);
       $('status').classList.toggle('error', status.error);
     }
     function renderDesktop() {
       if (desktopLine) $('desktop-status').textContent = words(desktopLine);
+      $('desktop-action').hidden = !desktopAction;
+      $('desktop-action').textContent = desktopAction ? t(ACTIONS[desktopAction]) : '';
       $('laya-status').hidden = !layaLine;
       $('laya-status').textContent = layaLine ? words(layaLine) : '';
     }
@@ -397,7 +426,7 @@
       renderChecklist();
       const loading = target?.status === 'loading';
       if (site?.enabled && !site.ready) show({ key: loading ? 'panel.waitingLoad' : 'panel.reloadToRead' });
-      else if (hasMessage(result)) show(fromResult(result), result.state === 'error' || result.state === 'offline');
+      else if (reported(result)) show(fromResult(result), result.state === 'error');
       else if (site && !site.enabled) show({ key: 'panel.siteOff', params: { host: hostOf(site.origin) } });
       else if (site) show({ key: 'panel.siteHint' });
       else if (fillable) show({ key: 'panel.iowaHint' });
@@ -445,21 +474,50 @@
         schedulePoll();
       }, 1500);
     }
+    // The desktop row for the status the worker read: closed, locked, or unlocked.
+    function showDesktop(desktop) {
+      desktopLine = { key: !desktop?.connected ? 'desktop.notRunning' : desktop.unlocked ? 'desktop.unlocked' : 'desktop.locked' };
+      layaLine = desktop?.connected && Object.hasOwn(LAYA_LINES, desktop.laya) ? { key: LAYA_LINES[desktop.laya] } : null;
+      desktopAction = !desktop?.connected ? 'open' : desktop.unlocked ? null : 'unlock';
+      $('desktop-status').parentElement.classList.toggle('error', !(desktop?.connected && desktop.unlocked));
+    }
+    function desktopProblem(message) {
+      desktopLine = message; layaLine = null; desktopAction = null;
+      $('desktop-status').parentElement.classList.add('error');
+    }
     async function desktopStatus() {
+      // While SecondHand opens, its own checks keep the row; a reply from before it started is dropped.
+      if (opening) return;
+      const run = ++desktopRun;
       try {
         const desktop = await send({ type: 'ui:desktopStatus' });
-        const ready = desktop?.connected && desktop.unlocked;
-        desktopLine = { key: !desktop?.connected ? 'desktop.notRunning' : desktop.unlocked ? 'desktop.unlocked' : 'desktop.locked' };
-        layaLine = desktop?.connected && Object.hasOwn(LAYA_LINES, desktop.laya) ? { key: LAYA_LINES[desktop.laya] } : null;
-        $('desktop-action').hidden = !desktop?.connected || desktop.unlocked;
-        $('desktop-status').parentElement.classList.toggle('error', !ready);
-      } catch (error) {
-        desktopLine = problem(error);
-        layaLine = null;
-        $('desktop-action').hidden = true;
-        $('desktop-status').parentElement.classList.add('error');
-      }
+        if (run === desktopRun) showDesktop(desktop);
+      } catch (error) { if (run === desktopRun) desktopProblem(problem(error)); }
       renderDesktop();
+    }
+    // Open SecondHand: the native host brings the app forward or starts it, then the panel waits for it
+    // to answer and shows its usual row. If it never does, one plain line says where to open it.
+    async function openApp() {
+      opening = true; desktopRun++;
+      desktopLine = { key: 'desktop.opening' }; layaLine = null; desktopAction = null;
+      $('desktop-status').parentElement.classList.remove('error');
+      renderDesktop();
+      try {
+        const desktop = await openedDesktop();
+        if (desktop) showDesktop(desktop); else desktopProblem(await didntOpen());
+      } catch (error) { desktopProblem(problem(error)); }
+      finally { opening = false; renderDesktop(); }
+    }
+    // The desktop's status once it answers, or null when it didn't open.
+    async function openedDesktop() {
+      try { await send({ type: 'ui:openApp', confirmed: true }); }
+      catch (error) { if (error.outdated) throw error; return null; }
+      for (let check = 0; check < OPEN_CHECKS && !stopped; check++) {
+        await new Promise(resolve => setTimeout(resolve, OPEN_CHECK_MS));
+        const desktop = await send({ type: 'ui:desktopStatus' });
+        if (desktop?.connected) return desktop;
+      }
+      return null;
     }
     // Every action re-reads the active tab so a stale checklist can never act on another page.
     async function act(payload, waiting) {
@@ -712,7 +770,7 @@
       const stopping = autopilot;
       const result = await act(stopping ? { type: 'ui:stop', confirmed: true } : { type: 'ui:autofill', confirmed: true }, { key: stopping ? 'panel.stopping' : 'panel.filling' });
       if (result) autopilot = !stopping && continuing(result);
-      if (hasMessage(result)) show(fromResult(result), result.state === 'error' || result.state === 'offline');
+      if (reported(result)) show(fromResult(result), result.state === 'error');
       controls();
       if (!stopping) await desktopStatus();
       await refresh();
@@ -748,6 +806,7 @@
       if (result && !result.enabled) show({ key: 'panel.siteOffDone' });
     }));
     $('desktop-action').addEventListener('click', trusted(async () => {
+      if (desktopAction === 'open') return openApp();
       try { await send({ type: 'ui:showApp', confirmed: true }); desktopLine = { key: 'desktop.unlockThenAutofill' }; }
       catch (error) { desktopLine = problem(error); }
       renderDesktop();
