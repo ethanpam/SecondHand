@@ -5,8 +5,9 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
+const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
-const { FrameReader, frame, extensionFromOrigin, validateRequest, startBridge, relayRequest, runNativeHost, MAX_MESSAGE_BYTES } = require('../desktop/bridge.cjs');
+const { FrameReader, frame, extensionFromOrigin, validateRequest, startBridge, relayRequest, runNativeHost, appLaunch, startApp, MAX_MESSAGE_BYTES } = require('../desktop/bridge.cjs');
 const { PORTAL_URL, PROFILE_FIELDS } = require('../shared/schema.cjs');
 const EXTENSION = 'a'.repeat(32);
 
@@ -213,4 +214,111 @@ test('warmLaya carries nothing but its id: it only readies Laya’s model before
   for (const extra of [{ url: LAYA_SITE }, { fields: [box()] }, { questions: [choice()] }, { budgetMs: 3000 }]) {
     assert.throws(() => validateRequest({ id: 'warm-1', type: 'warmLaya', ...extra }), /Unexpected/, JSON.stringify(extra));
   }
+});
+
+// One native host session as Chrome runs it: framed requests in, decoded responses out.
+async function hostSession(directory, requests, launchApp) {
+  const input = new PassThrough(); const output = new PassThrough();
+  const decoded = new FrameReader(); const responses = [];
+  output.on('data', chunk => decoded.push(chunk));
+  decoded.on('message', message => responses.push(message));
+  const native = runNativeHost(directory, EXTENSION, input, output, launchApp);
+  input.end(Buffer.concat(requests.map(frame)));
+  await native;
+  output.destroy();
+  return responses;
+}
+// Stand-in for child_process.spawn: records each call. The child starts, or fails with `failure`.
+function fakeSpawn(failure) {
+  const calls = [];
+  const spawn = (command, args, options) => {
+    const call = { command, args, options, unref: false };
+    calls.push(call);
+    const child = Object.assign(new EventEmitter(), { unref: () => { call.unref = true; } });
+    process.nextTick(() => failure ? child.emit('error', failure) : child.emit('spawn'));
+    return child;
+  };
+  return { spawn, calls };
+}
+const temporary = async (t, name) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), name));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  return directory;
+};
+
+test('openApp carries nothing but its id: no command, path, or argument can ride along', () => {
+  assert.deepEqual(validateRequest({ id: 'open-1', type: 'openApp' }), { id: 'open-1', type: 'openApp' });
+  for (const extra of [{ url: PORTAL_URL }, { command: '/bin/sh' }, { args: ['--inspect'] }, { path: '/Applications/Other.app' }, { env: { SECONDHAND_USER_DATA: '/elsewhere' } }]) {
+    assert.throws(() => validateRequest({ id: 'open-1', type: 'openApp', ...extra }), /Unexpected/, JSON.stringify(extra));
+  }
+});
+
+test('the host starts SecondHand as its own executable: packaged with no arguments, in development with the app path, keeping the data folder and dropping test settings', () => {
+  const env = { PATH: '/usr/bin', HOME: '/synthetic-home', SECONDHAND_USER_DATA: '/synthetic-data', SECONDHAND_TEST_MODE: '1', SECONDHAND_TEST_USER_DATA: '/tmp/synthetic-test' };
+  const kept = { PATH: '/usr/bin', HOME: '/synthetic-home', SECONDHAND_USER_DATA: '/synthetic-data' };
+  assert.deepEqual(appLaunch({ execPath: '/Applications/secondHand.app/Contents/MacOS/secondHand', appPath: '/Applications/secondHand.app/Contents/Resources/app.asar', packaged: true, env }),
+    { command: '/Applications/secondHand.app/Contents/MacOS/secondHand', args: [], options: { detached: true, stdio: 'ignore', env: kept } });
+  assert.deepEqual(appLaunch({ execPath: '/synthetic/electron', appPath: '/synthetic/secondHand', packaged: false, env }),
+    { command: '/synthetic/electron', args: ['/synthetic/secondHand'], options: { detached: true, stdio: 'ignore', env: kept } });
+  assert.equal(env.SECONDHAND_TEST_MODE, '1', 'the host’s own environment is left as it was');
+});
+
+test('startApp resolves once the app process has started and lets it outlive the host; a failed start rejects', async () => {
+  const launch = { command: '/synthetic/electron', args: ['/synthetic/secondHand'], options: { detached: true, stdio: 'ignore', env: {} } };
+  const started = fakeSpawn();
+  await startApp(launch, started.spawn);
+  assert.deepEqual(started.calls, [{ ...launch, unref: true }]);
+  const failed = fakeSpawn(Object.assign(new Error('spawn /synthetic/electron ENOENT'), { code: 'ENOENT' }));
+  await assert.rejects(startApp(launch, failed.spawn), { code: 'ENOENT' });
+});
+
+test('openApp brings a running SecondHand forward through the bridge and starts nothing', async t => {
+  const directory = await temporary(t, 'secondhand-open-shown-');
+  const seen = [];
+  const bridge = await startBridge(directory, () => EXTENSION, async request => { seen.push(request); return { shown: true }; });
+  t.after(() => bridge.close());
+  let launches = 0;
+  const responses = await hostSession(directory, [{ id: 'open-1', type: 'openApp' }], async () => { launches++; });
+  assert.deepEqual(seen, [{ id: 'open-1', type: 'showApp' }]);
+  assert.deepEqual(responses, [{ id: 'open-1', ok: true, data: { opened: 'shown' } }]);
+  assert.equal(launches, 0);
+});
+
+test('a running SecondHand that refuses to come forward answers for itself, and nothing is started', async t => {
+  const directory = await temporary(t, 'secondhand-open-refused-');
+  const bridge = await startBridge(directory, () => 'b'.repeat(32), async () => assert.fail('an unregistered extension reached the handler'));
+  t.after(() => bridge.close());
+  let launches = 0;
+  const responses = await hostSession(directory, [{ id: 'open-1', type: 'openApp' }], async () => { launches++; });
+  assert.deepEqual(responses, [{ id: 'open-1', ok: false, error: 'The extension is not connected to this desktop app.' }]);
+  assert.equal(launches, 0);
+});
+
+test('openApp starts SecondHand when it isn’t running, and only once per host however often it is asked', async t => {
+  const directory = await temporary(t, 'secondhand-open-launch-');
+  const { spawn, calls } = fakeSpawn();
+  const launch = appLaunch({ execPath: '/synthetic/electron', appPath: '/synthetic/secondHand', packaged: false, env: { SECONDHAND_USER_DATA: directory, SECONDHAND_TEST_MODE: '1' } });
+  const responses = await hostSession(directory, [{ id: 'open-1', type: 'openApp' }, { id: 'open-2', type: 'openApp' }], () => startApp(launch, spawn));
+  assert.deepEqual(responses, [{ id: 'open-1', ok: true, data: { opened: 'launched' } }, { id: 'open-2', ok: true, data: { opened: 'launched' } }]);
+  assert.deepEqual(calls, [{ command: '/synthetic/electron', args: ['/synthetic/secondHand'], options: { detached: true, stdio: 'ignore', env: { SECONDHAND_USER_DATA: directory } }, unref: true }]);
+});
+
+test('a launch that fails answers a plain failure without local paths, never success', async t => {
+  const directory = await temporary(t, 'secondhand-open-failed-');
+  const { spawn, calls } = fakeSpawn(Object.assign(new Error('spawn /synthetic/electron ENOENT'), { code: 'ENOENT' }));
+  const launch = appLaunch({ execPath: '/synthetic/electron', appPath: '/synthetic/secondHand', packaged: false, env: {} });
+  const responses = await hostSession(directory, [{ id: 'open-1', type: 'openApp' }, { id: 'open-2', type: 'openApp' }], () => startApp(launch, spawn));
+  assert.deepEqual(responses, [{ id: 'open-1', ok: false, error: 'SecondHand could not be started (ENOENT).' }, { id: 'open-2', ok: false, error: 'SecondHand could not be started (ENOENT).' }]);
+  assert.equal(calls.length, 1, 'a failed start is not retried by the same host');
+});
+
+test('without a running app, requests answer that SecondHand can’t be reached, with a code the extension acts on; malformed ones say what was wrong', async t => {
+  const directory = await temporary(t, 'secondhand-host-closed-');
+  let launches = 0;
+  const responses = await hostSession(directory, [{ id: 'status-1', type: 'status' }, { id: 'show-1', type: 'showApp' }, { id: 'bad-1', type: 'status', profile: {} }, { id: 'bad-2', type: 'submit' }],
+    async () => { launches++; });
+  const unreachable = id => ({ id, ok: false, error: 'Open SecondHand, connect this extension, and unlock SecondHand.', code: 'DESKTOP_UNREACHABLE' });
+  assert.deepEqual(responses, [unreachable('status-1'), unreachable('show-1'),
+    { id: 'bad-1', ok: false, error: 'Unexpected request field.' }, { id: 'bad-2', ok: false, error: 'Unsupported bridge request.' }]);
+  assert.equal(launches, 0, 'only openApp starts the app');
 });

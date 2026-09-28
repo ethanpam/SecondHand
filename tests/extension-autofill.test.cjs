@@ -111,10 +111,13 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
             calls.native.push(request);
             queueMicrotask(() => {
               if (!vault.reachable) return onDisconnect();
+              // A host that runs but can't reach the desktop app answers every request with the same failure.
+              if (vault.unreachable) return onMessage({ id: request.id, ok: false, ...vault.unreachable });
               const reply = data => onMessage({ id: request.id, ok: true, data });
               const fail = error => onMessage({ id: request.id, ok: false, error });
               if (request.type === 'status') return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: 0, ...(vault.layaState ? { laya: { state: vault.layaState } } : {}) });
               if (request.type === 'showApp') return reply({ shown: true });
+              if (request.type === 'openApp') return vault.openError ? fail(vault.openError) : reply(vault.opened || { opened: 'shown' });
               if (request.type === 'recordProgress') return reply({ recorded: true });
               // Laya (#39, #42): readied before a click's questions; "not ready" unless a test plays it.
               if (request.type === 'warmLaya') return reply({ state: vault.layaState || 'unavailable' });
@@ -394,6 +397,49 @@ test('desktop status, showApp, and focusField pass through; guided and manual-fi
   assert.deepEqual(plain((await w.send({ type: 'ui:desktopStatus' }, noTab)).data), { connected: true, unlocked: true, laya: 'unavailable' });
   assert.deepEqual(plain((await w.send({ type: 'ui:showApp', confirmed: true }, noTab)).data), { shown: true });
   assert.equal(await w.send({ type: 'ui:pageState' }, noTab), undefined);
+});
+
+// What a native host answers when the desktop app isn't running: this host's code, and the fixed
+// words of the Windows relay and of hosts from before the code.
+const UNREACHABLE = {
+  host: { error: 'Open SecondHand, connect this extension, and unlock SecondHand.', code: 'DESKTOP_UNREACHABLE' },
+  olderHost: { error: 'Open SecondHand, connect this extension, and unlock SecondHand.' },
+  windowsRelay: { error: 'Open SecondHand, connect this extension, and unlock your local vault.' }
+};
+
+test('a native host that can’t reach the desktop app means the app is closed, the same as no host at all', async () => {
+  for (const [name, unreachable] of Object.entries(UNREACHABLE)) {
+    const w = worker({ desktop: { unreachable } });
+    assert.deepEqual(plain((await w.panel({ type: 'ui:desktopStatus' })).data), { connected: false, unlocked: false, laya: 'unavailable' }, name);
+    const result = plain((await autofill(w)).data);
+    assert.equal(result.state, 'offline', name);
+    assert.equal(result.messageKey, 'worker.openAppThenAutofill', name);
+    assert.equal(w.filled().length, 0, name);
+  }
+  // Any other refusal is still the desktop's own words.
+  const refused = await worker({ desktop: { unreachable: { error: 'The extension is not connected to this desktop app.' } } }).panel({ type: 'ui:desktopStatus' });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.error, 'The extension is not connected to this desktop app.');
+});
+
+test('openApp from a confirmed click asks the native host to bring SecondHand forward or start it, with nothing else in the request', async () => {
+  for (const opened of ['shown', 'launched']) {
+    const w = worker({ desktop: { opened: { opened } } });
+    assert.deepEqual(plain((await w.panel({ type: 'ui:openApp', confirmed: true })).data), { opened });
+    assert.deepEqual(plain((await w.launcher({ type: 'ui:openApp', confirmed: true })).data), { opened });
+    assert.deepEqual(w.calls.native.map(call => [call.type, Object.keys(call).sort()]), [['openApp', ['id', 'type']], ['openApp', ['id', 'type']]]);
+  }
+  const w = worker();
+  assert.equal(await w.panel({ type: 'ui:openApp' }), undefined, 'only from a confirmed click');
+  assert.equal(await w.launcher({ type: 'ui:openApp', confirmed: 'yes' }), undefined);
+  assert.equal(await w.send({ type: 'ui:openApp', confirmed: true }, { id: 'otherextension', url: PANEL_URL }), undefined);
+  assert.deepEqual(w.calls.native, []);
+  assert.equal((await worker({ desktop: { opened: { opened: 'maybe' } } }).panel({ type: 'ui:openApp', confirmed: true })).errorKey, 'worker.desktopUnexpected');
+  // No host, a host that can't open the app (the Windows relay), or a failed start: the click says so.
+  assert.equal((await worker({ desktop: { reachable: false } }).panel({ type: 'ui:openApp', confirmed: true })).errorKey, 'worker.desktopOffline');
+  assert.equal((await worker({ desktop: { unreachable: UNREACHABLE.windowsRelay } }).panel({ type: 'ui:openApp', confirmed: true })).errorKey, 'worker.desktopOffline');
+  const failed = await worker({ desktop: { openError: 'SecondHand could not be started (ENOENT).' } }).panel({ type: 'ui:openApp', confirmed: true });
+  assert.deepEqual([failed.ok, failed.error], [false, 'SecondHand could not be started (ENOENT).']);
 });
 
 // A multi-screen walk: each Continue moves the tab to the next screen and fires

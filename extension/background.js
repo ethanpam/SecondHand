@@ -9,7 +9,7 @@ if (typeof globalThis.SecondHandStrings?.english !== 'function' || typeof global
 }
 // Must match BUILD in panel.js: change both together. The panel compares them to tell
 // when Chrome is still running an older worker than the pages it loaded from disk.
-const BUILD = '2026-09-27.1';
+const BUILD = '2026-09-28.1';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
@@ -58,6 +58,10 @@ const LAYA = Object.freeze({ textTypes: Object.freeze(['text', 'textarea', 'numb
   fields: 40, questions: 30, label: 200, options: 30, option: 100, bytes: 48 * 1024, budgetMs: 3000 });
 const LAYA_NOT_READY = 'LAYA_NOT_READY';
 const LAYA_STATES = Object.freeze(['off', 'unavailable', 'not-downloaded', 'downloading', 'ready', 'error']);
+// A native host that runs but can't reach the desktop app says so with this code. The Windows relay
+// and hosts from before the code send one of these fixed sentences instead. Either means the app is closed.
+const DESKTOP_UNREACHABLE = 'DESKTOP_UNREACHABLE';
+const UNREACHABLE_WORDS = Object.freeze(['Open SecondHand, connect this extension, and unlock SecondHand.', 'Open SecondHand, connect this extension, and unlock your local vault.']);
 
 function nativeRequest(type, payload = {}) {
   return new Promise((resolve, reject) => {
@@ -75,8 +79,10 @@ function nativeRequest(type, payload = {}) {
       timer = setTimeout(() => finish(fault('worker.desktopTimedOut')), 115000);
       port.onMessage.addListener(message => {
         if (!message || message.id !== id) return finish(fault('worker.desktopUnexpected'));
-        // The desktop app's own wording travels as a detail.
         if (message.ok !== true) {
+          // A host that can't reach the desktop app means the app is closed, as when there is no host.
+          if (message.code === DESKTOP_UNREACHABLE || UNREACHABLE_WORDS.includes(message.error)) return finish(fault('worker.desktopOffline'), undefined, 'offline');
+          // The desktop app's own wording travels as a detail.
           return finish(typeof message.error === 'string' ? new Error(message.error.slice(0, 240)) : fault('worker.desktopDeclined'), undefined, message.code === LAYA_NOT_READY ? LAYA_NOT_READY : undefined);
         }
         finish(null, message.data);
@@ -1012,6 +1018,13 @@ function summaryLine(tabId, url) {
   return summary?.points.length ? { summary: { language: summary.language, point: summary.points[0], english: summary.english } } : {};
 }
 
+// Brings the desktop app forward, or has the native host start it when it isn't running.
+async function openApp() {
+  const reply = await nativeRequest('openApp');
+  if (!['shown', 'launched'].includes(reply?.opened)) throw fault('worker.desktopUnexpected');
+  return { opened: reply.opened };
+}
+
 // An error reply carries the same English, key, and parameters as a result.
 function errorReply(error) {
   const text = typeof error?.message === 'string' ? error.message : '';
@@ -1042,6 +1055,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   const tabId = launcher ? sender.tab.id : message.tabId;
   let run;
   if (message.type === 'ui:showApp' && message.confirmed === true) run = () => nativeRequest('showApp');
+  else if (message.type === 'ui:openApp' && message.confirmed === true) run = openApp;
   else if (panel && message.type === 'ui:desktopStatus') {
     run = () => nativeRequest('status').then(data => ({ connected: true, unlocked: Boolean(data?.unlocked), laya: layaState(data) }),
       error => { if (error.code === 'offline') return { connected: false, unlocked: false, laya: 'unavailable' }; throw error; });
