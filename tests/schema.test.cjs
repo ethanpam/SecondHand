@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { validateProfile, validateApplication, validateStoredApplication, isPortalUrl, YES_NO_FIELDS, PROFILE_FIELDS, REQUEST_FIELDS, DERIVED_FIELDS, FIELD_LABELS } = require('../shared/schema.cjs');
+const { validateProfile, validateApplication, validateStoredApplication, isPortalUrl, YES_NO_FIELDS, PROFILE_FIELDS, PROFILE_CHOICES, REQUEST_FIELDS, DERIVED_FIELDS, FIELD_LABELS } = require('../shared/schema.cjs');
 const fictionalProfile = require('./fixtures/applicant-profile.json');
 
 test('only the exact HTTPS Iowa application origin and path can receive fields', () => {
@@ -101,4 +101,45 @@ test('whether a Social Security number is saved is a field pages can ask for, ne
   assert.equal(DERIVED_FIELDS.hasSsn(validateProfile({ ssn: '123-45-6789' })), 'yes');
   assert.equal(DERIVED_FIELDS.hasSsn(validateProfile({})), '');
   assert.equal(DERIVED_FIELDS.hasSsn({}), '', 'a profile saved before the SSN field existed has none');
+});
+
+test('the applicant’s own answers to Iowa’s Tell Us More questions are optional choices; blank means not saved', () => {
+  assert.deepEqual(Object.fromEntries(['sex', 'maritalStatus', 'hasSsnAnswer', 'ssnCardNameMatches', 'usCitizen', 'militaryOrVeteran', 'disabled', 'blind', 'healthLimitation', 'medicare']
+    .map(key => [key, FIELD_LABELS[key]])), {
+    sex: 'Sex', maritalStatus: 'Marital status', hasSsnAnswer: 'You have a Social Security number',
+    ssnCardNameMatches: 'Your first and last name match your Social Security card', usCitizen: 'You are a U.S. citizen or national',
+    militaryOrVeteran: 'You are in the military, a veteran, or a spouse of a veteran', disabled: 'You are disabled', blind: 'You are blind',
+    healthLimitation: 'A health condition limits your daily activities, or you live in a medical facility or nursing home', medicare: 'You have Medicare'
+  });
+  const empty = validateProfile({});
+  for (const key of ['sex', 'maritalStatus', 'hasSsnAnswer', 'ssnCardNameMatches', 'usCitizen', 'militaryOrVeteran', 'disabled', 'blind', 'healthLimitation', 'medicare']) {
+    assert.ok(PROFILE_FIELDS.includes(key), key);
+    assert.equal(empty[key], '', key);
+  }
+  for (const key of ['hasSsnAnswer', 'ssnCardNameMatches', 'usCitizen', 'militaryOrVeteran', 'disabled', 'blind', 'healthLimitation', 'medicare']) {
+    assert.ok(YES_NO_FIELDS.includes(key), key);
+    for (const value of ['yes', 'no']) assert.equal(validateProfile({ [key]: value })[key], value, key);
+    for (const value of ['Yes', 'true', 'maybe']) assert.throws(() => validateProfile({ [key]: value }), /Yes, No, or left unanswered/, key);
+  }
+  // Exactly Iowa's choices, written as Iowa writes them.
+  assert.deepEqual(PROFILE_CHOICES.sex, ['', 'Male', 'Female']);
+  assert.deepEqual(PROFILE_CHOICES.maritalStatus, ['', 'Divorced', 'Legally Separated', 'Married (includes common-law)', 'Never Married', 'Separated', 'Widowed']);
+  for (const value of PROFILE_CHOICES.sex) assert.equal(validateProfile({ sex: value }).sex, value);
+  for (const value of PROFILE_CHOICES.maritalStatus) assert.equal(validateProfile({ maritalStatus: value }).maritalStatus, value);
+  for (const value of ['male', 'M', 'Other']) assert.throws(() => validateProfile({ sex: value }), /sex/, value);
+  for (const value of ['Married', 'single', 'never married']) assert.throws(() => validateProfile({ maritalStatus: value }), /marital status/, value);
+});
+
+test('a saved Social Security number and a No to having one contradict each other', () => {
+  assert.throws(() => validateProfile({ ssn: '123-45-6789', hasSsnAnswer: 'no' }), /Social Security number/);
+  assert.equal(validateProfile({ ssn: '123-45-6789', hasSsnAnswer: 'yes' }).hasSsnAnswer, 'yes');
+  assert.equal(validateProfile({ hasSsnAnswer: 'no' }).hasSsnAnswer, 'no');
+});
+
+test('whether you have a Social Security number comes from the saved number first, then your own answer, and never carries the number', () => {
+  assert.equal(DERIVED_FIELDS.hasSsn(validateProfile({ ssn: '123-45-6789' })), 'yes');
+  assert.equal(DERIVED_FIELDS.hasSsn(validateProfile({ ssn: '123-45-6789', hasSsnAnswer: 'yes' })), 'yes');
+  assert.equal(DERIVED_FIELDS.hasSsn(validateProfile({ hasSsnAnswer: 'yes' })), 'yes');
+  assert.equal(DERIVED_FIELDS.hasSsn(validateProfile({ hasSsnAnswer: 'no' })), 'no');
+  assert.equal(DERIVED_FIELDS.hasSsn(validateProfile({})), '');
 });

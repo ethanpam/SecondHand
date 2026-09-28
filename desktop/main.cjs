@@ -61,7 +61,8 @@ if (nativeOrigin) {
   let trustedSites = [];
   let layaEnabled = false;
   // Released only after a named confirmation on sites other than Iowa's portal.
-  const SENSITIVE_FIELDS = ['ssn', 'hasSsn', 'birthDate', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'assetsOnHand', 'monthlyMedicalExpenses'];
+  const SENSITIVE_FIELDS = ['ssn', 'hasSsn', 'hasSsnAnswer', 'birthDate', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'assetsOnHand', 'monthlyMedicalExpenses',
+    'usCitizen', 'disabled', 'blind', 'healthLimitation', 'medicare'];
   const MAX_TRUSTED_SITES = 50;
   // A worker may survive a desktop restart. A per-process seed prevents its old
   // access receipt matching a new process; six bytes leave ample safe-integer headroom.
@@ -255,7 +256,7 @@ if (nativeOrigin) {
         mainWindow.show(); mainWindow.focus();
         const answer = await dialog.showMessageBox(mainWindow, {
           type: 'question', title: 'Trust this site?', message: `Let SecondHand fill forms on ${origin}?`,
-          detail: 'When you click Autofill on this site, SecondHand fills the saved answers it can match. It never clicks Next or Submit. Social Security number, date of birth, income, money on hand, and medical expenses still ask every time. You can remove this site on the Chrome extension page.',
+          detail: 'When you click Autofill on this site, SecondHand fills the saved answers it can match. It never clicks Next or Submit. Social Security number, date of birth, income, money on hand, medical expenses, and your answers about citizenship, disability, blindness, health, Medicare, and having a Social Security number still ask every time. You can remove this site on the Chrome extension page.',
           buttons: ['Cancel', 'Trust this site'], defaultId: 1, cancelId: 0, noLink: true
         });
         if (answer.response !== 1) throw publicError('You cancelled trusting this site.');

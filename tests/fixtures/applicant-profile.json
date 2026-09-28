@@ -44,5 +44,15 @@
   "householdAllCitizens": "yes",
   "householdLegalStatus": "yes",
   "householdPregnant": "no",
-  "householdMedicare": "no"
+  "householdMedicare": "no",
+  "sex": "Female",
+  "maritalStatus": "Never Married",
+  "hasSsnAnswer": "yes",
+  "ssnCardNameMatches": "yes",
+  "usCitizen": "yes",
+  "militaryOrVeteran": "no",
+  "disabled": "no",
+  "blind": "no",
+  "healthLimitation": "no",
+  "medicare": "no"
 }

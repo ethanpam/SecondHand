@@ -85,7 +85,7 @@ async function main() {
 
     await chapter('1. Start Autofill with an intentionally incomplete fictional profile.', 3200);
     await panel.click('#panel-autofill');
-    await expect.poll(() => panel.text('[data-key="firstName"]'), { timeout: 20000 }).toContain('Needs you');
+    await expect.poll(() => panel.text('[data-key="firstName"]'), { timeout: 20000 }).toContain('Not saved in SecondHand — add it in My information');
     await expect(page.locator('#lastName')).toHaveValue(syntheticProfile.lastName);
     await expect(page.locator('#addressLine1')).toHaveValue(syntheticProfile.addressLine1);
     await expect(page.locator('#mailingAddressLine1')).toHaveValue(syntheticProfile.mailingAddressLine1);
@@ -99,7 +99,7 @@ async function main() {
     await chapter('Separate mailing address filled automatically too.', 3000);
     await panel.click('[data-key="firstName"]');
     await expect.poll(() => page.evaluate(() => document.activeElement.id)).toBe('firstName');
-    await expect.poll(() => panel.text('[data-key="firstName"]')).toContain('Needs you');
+    await expect.poll(() => panel.text('[data-key="firstName"]')).toContain('Not saved in SecondHand — add it in My information');
     await chapter('2. Click a missing checklist item to focus its field in the form.', 3000);
     await page.locator('#firstName').pressSequentially(syntheticProfile.firstName, { delay: 160 });
     await expect.poll(() => panel.text('[data-key="firstName"]')).toContain('Done');

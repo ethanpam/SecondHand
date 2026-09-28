@@ -586,36 +586,57 @@ async function main() {
       console.log(`Tell Us More ${variant}: mismatched context stays manual.`);
     }
 
-    // Tell Us More at dynamicQuestionsStart: Autofill types the saved date of birth and clicks the
-    // yes/no answers the saved profile settles. Everything else, including the Social Security number
-    // box Iowa's script shows after Yes, stays for the applicant, and Save and Continue is never clicked.
-    await resetTo(startDetailsUrl, { profile: { hasSsn: 'yes' } });
-    const settled = [[6, 1], [18, 1], [26, 2], [29, 2]].map(([answer, option]) => tellUsMore.radioId(answer, option));
+    // Tell Us More at dynamicQuestionsStart with every answer saved: Autofill types the date of birth,
+    // picks the marital status and clicks each saved answer, then answers the Social Security card
+    // question Iowa's script shows after Yes. The number box stays empty and Save and Continue is never
+    // clicked. (The native stub answers hasSsn itself, as the desktop works it out from saved answers.)
+    const startFields = ['sex', 'birthDate', 'hasSsn', 'ssnCardNameMatches', 'usCitizen', 'householdAllCitizens', 'maritalStatus',
+      'militaryOrVeteran', 'disabled', 'householdDisability', 'blind', 'healthLimitation', 'medicare', 'householdMedicare'];
+    const startRows = ['gender', 'birthDate', 'hasSsn', 'ssnCardName', 'usCitizen', 'maritalStatus', 'militaryOrVeteran', 'hasDisability', 'blind', 'healthLimits', 'hasMedicare'];
     const startChecked = () => page.evaluate(() => Array.from(document.querySelectorAll('#answerSet input[type="radio"]')).filter(element => element.checked).map(element => element.id));
-    await expect.poll(() => panel.text('[data-key="hasSsn"]')).toContain('Do you have a Social Security number?');
+    const startBoxes = () => page.evaluate(ids => ids.map(id => document.getElementById(id).value),
+      [tellUsMore.SSN_BOX_ID, 'answerSets0.answers12.answerValue', 'answerSets0.answers15.answerValue', 'answerSets0.answers16.answerValue']);
+    await resetTo(startDetailsUrl, { profile: { hasSsn: 'yes' } });
+    const answered = [['gender', 2], ['hasSsn', 1], ['ssnCardName', 1], ['usCitizen', 1], ['militaryOrVeteran', 2], ['hasDisability', 2], ['blind', 2], ['healthLimits', 2], ['hasMedicare', 2]]
+      .map(([key, option]) => tellUsMore.radioId(tellUsMore.ANSWERS[key], option));
+    await expect.poll(() => panel.text('[data-key="gender"]')).toContain('Are you male or female?');
     await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
     await panel.click('#panel-autofill');
     await expect(page.locator(`[id="${tellUsMore.DOB_ID}"]`)).toHaveValue('04/12/1985', { timeout: 20000 });
-    await expect.poll(startChecked, { timeout: 20000 }).toEqual(settled);
-    await expect(page.locator('#question03')).toBeVisible();
-    await expect.poll(() => panel.text('[data-key="hasMedicare"]')).toContain('Done');
-    await expect.poll(() => panel.text('[data-key="gender"]')).toContain('Do it yourself');
+    await expect.poll(startChecked, { timeout: 20000 }).toEqual(answered);
+    await expect(page.locator(`[id="${tellUsMore.MARITAL_ID}"]`)).toHaveValue('Never Married');
+    for (const key of startRows) await expect.poll(() => panel.text(`[data-key="${key}"]`)).toContain('Done');
     await page.waitForTimeout(1800);
-    assert.deepEqual(await startChecked(), settled);
-    assert.equal(await page.locator(`[id="${tellUsMore.SSN_BOX_ID}"]`).inputValue(), '');
-    assert.equal(await page.locator(`[id="${tellUsMore.MARITAL_ID}"]`).inputValue(), '');
-    assert.deepEqual(await page.evaluate(() => window.__startQa), { nextClicks: 0, shown: ['question03', 'question04068', 'question04070', 'question04071', 'question04072', 'question06181'] });
-    assert.deepEqual((await calls('getFields')).map(call => ({ url: call.url, fields: call.fields })),
-      [{ url: startDetailsUrl, fields: ['birthDate', 'hasSsn', 'householdAllCitizens', 'householdDisability', 'householdMedicare'] }]);
+    assert.deepEqual(await startChecked(), answered);
+    assert.deepEqual(await startBoxes(), ['', '', '', '']);
+    assert.deepEqual(await page.evaluate(() => window.__startQa), { nextClicks: 0, shown: ['question08008', 'question08107', 'question08108', 'question08109',
+      'question03261', 'question03262', 'question03263', 'question03', 'question04068', 'question04070', 'question04071', 'question04072', 'question06181'] });
+    assert.deepEqual((await calls('getFields')).map(call => ({ url: call.url, fields: call.fields })), [{ url: startDetailsUrl, fields: startFields }]);
     const startMetadata = await panel.evaluate(async () => {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       return JSON.stringify(await chrome.runtime.sendMessage({ type: 'ui:pageState', tabId: tab.id }));
     });
     const startText = await panel.evaluate(() => document.body.innerText);
-    for (const value of ['Avery', 'Example', '1985-04-12', '04/12/1985']) {
-      assert.equal(startMetadata.includes(value), false); assert.equal(startText.includes(value), false);
+    for (const value of ['Avery', 'Example', '1985-04-12', '04/12/1985', 'Female', 'Never Married']) {
+      assert.equal(startMetadata.includes(value), false, value); assert.equal(startText.includes(value), false, value);
     }
-    console.log('Tell Us More (dynamicQuestionsStart): DOB and settled yes/no answers filled; other questions, the revealed SSN box and Save and Continue left to the applicant.');
+    console.log('Tell Us More (dynamicQuestionsStart), every answer saved: all ten questions and the revealed card question filled; the SSN box and Save and Continue left to the applicant.');
+
+    // With nothing saved, nothing is filled and each row points to My information.
+    await resetTo(startDetailsUrl, { profile: Object.fromEntries(startFields.map(field => [field, ''])) });
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await panel.click('#panel-autofill');
+    for (const key of startRows.filter(key => key !== 'ssnCardName')) {
+      await expect.poll(() => panel.text(`[data-key="${key}"]`), { timeout: 20000 }).toContain('Not saved in SecondHand — add it in My information');
+    }
+    await page.waitForTimeout(1800);
+    assert.deepEqual(await startChecked(), []);
+    await expect(page.locator(`[id="${tellUsMore.DOB_ID}"]`)).toHaveValue('');
+    await expect(page.locator(`[id="${tellUsMore.MARITAL_ID}"]`)).toHaveValue('');
+    assert.deepEqual(await startBoxes(), ['', '', '', '']);
+    assert.deepEqual(await page.evaluate(() => window.__startQa), { nextClicks: 0, shown: [] });
+    assert.deepEqual((await calls('getFields')).map(call => call.fields), [startFields]);
+    console.log('Tell Us More (dynamicQuestionsStart), nothing saved: nothing filled; every row says it is not saved and points to My information.');
 
     assert.deepEqual(errors, []);
     console.log('Widget: intro pages show a small pill. All browser fixtures/data were synthetic; native desktop responses were DevTools stubs.');

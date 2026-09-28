@@ -41,11 +41,24 @@ async function renderer(t, overrides = {}) {
   window.eval(script);
   await tick();
   const get = id => window.document.getElementById(id);
+  // A profile field's control: its input or select, or its group of radio buttons.
+  const control = name => get('profile-form').elements.namedItem(name);
+  const radios = name => control(name) instanceof window.RadioNodeList ? Array.from(control(name)) : null;
   return {
-    window, get, database,
+    window, get, database, control, radios,
+    value: name => control(name).value,
+    choices: name => radios(name)?.map(radio => radio.value) ?? Array.from(control(name).options, option => option.value),
     edit(id, value) {
       get(id).value = value;
       get(id).dispatchEvent(new window.Event('input', { bubbles: true }));
+    },
+    // Answers a profile field the way a person does: types, picks an option, or clicks a radio button.
+    answer(name, value) {
+      const group = radios(name);
+      if (!group) return this.edit(name, value);
+      const radio = group.find(item => item.value === value);
+      assert.ok(radio, `${name} has no ${JSON.stringify(value)} option`);
+      radio.click();
     },
     submit(id) { get(id).dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); },
     lock(lockRevision) {
@@ -129,10 +142,10 @@ test('new profile choices default to unknown, save explicit no, and clear with a
   const saved = [];
   const view = await renderer(t, { saveProfile: async profile => { saved.push(structuredClone(profile)); return structuredClone(profile); } });
   for (const field of Object.keys(PROFILE_CHOICES)) {
-    assert.equal(view.get(field).value, '', field);
-    assert.deepEqual(Array.from(view.get(field).options, option => option.value), PROFILE_CHOICES[field]);
+    assert.equal(view.value(field), '', field);
+    assert.deepEqual([...view.choices(field)].sort(), [...PROFILE_CHOICES[field]].sort(), field);
   }
-  for (const [field, value] of Object.entries(fictionalProfile)) view.edit(field, value);
+  for (const [field, value] of Object.entries(fictionalProfile)) view.answer(field, value);
   view.submit('profile-form');await tick();
   assert.deepEqual(saved[0], fictionalProfile);
   assert.equal(view.get('programFip').value, 'no');
@@ -140,15 +153,85 @@ test('new profile choices default to unknown, save explicit no, and clear with a
   assert.equal(view.get('mailingAddressLine1').value, 'PO Box 123');
   assert.equal(view.get('addressLine1').value, fictionalProfile.addressLine1);
   view.lock();
-  for (const field of PROFILE_FIELDS) assert.equal(view.get(field).value, '', field);
+  for (const field of PROFILE_FIELDS) assert.equal(view.value(field), '', field);
 });
 
 test('legacy profile loading leaves all new choice fields unknown and does not populate mailing fields', async t => {
   const view = await renderer(t);
   assert.equal(view.get('firstName').value, 'Initial');
-  for (const field of [...YES_NO_FIELDS, 'suffix', 'maidenName', 'bestContactTime', 'mailingAddressLine1', 'mailingAddressLine2', 'mailingCity', 'mailingState', 'mailingZip']) {
-    assert.equal(view.get(field).value, '', field);
+  for (const field of [...YES_NO_FIELDS, 'suffix', 'sex', 'maritalStatus', 'maidenName', 'bestContactTime', 'mailingAddressLine1', 'mailingAddressLine2', 'mailingCity', 'mailingState', 'mailingZip']) {
+    assert.equal(view.value(field), '', field);
   }
+});
+
+// Iowa's Tell Us More questions about the applicant, in Iowa's own words.
+const IOWA_QUESTIONS = Object.freeze({
+  sex: 'Are you male or female?',
+  maritalStatus: 'Marital Status',
+  hasSsnAnswer: 'Do you have a Social Security Number?',
+  ssnCardNameMatches: 'Is the first and last name you provided the same name that appears on your Social Security card?',
+  usCitizen: 'Are you a U.S. Citizen or National?',
+  militaryOrVeteran: 'Are you in the military, a veteran, or a spouse of a veteran?',
+  disabled: 'Are you Disabled?',
+  blind: 'Are you Blind?',
+  healthLimitation: 'Do you have a physical, mental, or emotional health condition that causes limitations in activities (like bathing, dressing, daily chores, etc) or live in a medical facility or nursing home?',
+  medicare: 'Do you have Medicare?'
+});
+const text = element => element.textContent.replace(/\s+/g, ' ').trim();
+
+test('About you asks Iowa’s questions in Iowa’s words: radio buttons and a marital status list, each starting at Not answered', async t => {
+  const view = await renderer(t);
+  view.window.document.querySelector('.nav-item[data-view="profile"]').click();
+  const aboutYou = view.get('firstName').closest('.form-card');
+  assert.equal(text(aboutYou.querySelector('h2')), 'About you');
+  const group = view.get('about-you-questions');
+  assert.ok(aboutYou.contains(group));
+  assert.equal(text(group.querySelector('h3')), 'Iowa’s questions about you');
+  for (const [field, wording] of Object.entries(IOWA_QUESTIONS)) {
+    const radios = view.radios(field);
+    if (field === 'maritalStatus') {
+      assert.equal(radios, null);
+      const select = view.control(field);
+      assert.ok(group.contains(select));
+      assert.equal(text(view.window.document.querySelector(`label[for="${select.id}"]`)), wording);
+      assert.deepEqual(Array.from(select.options, option => [option.value, option.textContent]),
+        [['', 'Not answered'], ...PROFILE_CHOICES.maritalStatus.slice(1).map(choice => [choice, choice])]);
+      continue;
+    }
+    assert.ok(radios.every(radio => group.contains(radio) && radio.type === 'radio'), field);
+    const fieldset = radios[0].closest('fieldset');
+    assert.ok(radios.every(radio => fieldset.contains(radio)), field);
+    assert.equal(text(fieldset.querySelector('legend')), wording);
+    const options = field === 'sex' ? [['Male', 'Male'], ['Female', 'Female'], ['', 'Not answered']] : [['yes', 'Yes'], ['no', 'No'], ['', 'Not answered']];
+    assert.deepEqual(radios.map(radio => [radio.value, text(radio.labels[0])]), options, field);
+    assert.equal(radios.find(radio => radio.checked)?.value, '', `${field} starts at Not answered`);
+  }
+  assert.equal(view.get('about-you-questions').querySelectorAll('input[type="radio"]').length, 27);
+});
+
+test('Iowa’s questions save, show again after a reload, and clear back to Not answered', async t => {
+  const saved = [];
+  const answers = { sex: 'Male', maritalStatus: 'Legally Separated', hasSsnAnswer: 'yes', ssnCardNameMatches: 'no', usCitizen: 'yes',
+    militaryOrVeteran: 'yes', disabled: 'no', blind: 'no', healthLimitation: 'yes', medicare: 'no' };
+  const view = await renderer(t, { saveProfile: async profile => { saved.push(structuredClone(profile)); return structuredClone(profile); } });
+  view.window.document.querySelector('.nav-item[data-view="profile"]').click();
+  for (const [field, value] of Object.entries(answers)) view.answer(field, value);
+  assert.equal(view.get('profile-save-state').textContent, 'Unsaved changes');
+  view.submit('profile-form'); await tick();
+  assert.deepEqual(Object.fromEntries(Object.keys(answers).map(field => [field, saved[0][field]])), answers);
+  assert.equal(saved[0].firstName, 'Initial');
+  assert.equal(view.get('profile-save-state').hidden, true);
+
+  const reloaded = await renderer(t, { getData: async () => ({ profile: structuredClone(saved[0]), applications: [] }) });
+  for (const [field, value] of Object.entries(answers)) {
+    assert.equal(reloaded.value(field), value, field);
+    if (reloaded.radios(field)) assert.deepEqual(reloaded.radios(field).filter(radio => radio.checked).map(radio => radio.value), [value], field);
+  }
+
+  for (const field of Object.keys(answers)) view.answer(field, '');
+  view.submit('profile-form'); await tick();
+  for (const field of Object.keys(answers)) assert.equal(saved[1][field], '', field);
+  for (const field of Object.keys(answers)) assert.equal(view.value(field), '', field);
 });
 
 test('a pending profile save cannot repopulate fields after a vault lock', async t => {

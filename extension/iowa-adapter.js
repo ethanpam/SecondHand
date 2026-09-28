@@ -70,30 +70,45 @@
   });
 
   // Tell Us More at dynamicQuestionsStart, from a sanitized live capture: the same "yourself" page with
-  // other questions shown. Its visible questions in page order, each with Iowa's wording, its answer
-  // number (`index`) and the hideShowQuestions rule its options run (`reveals`). A question with a saved
-  // `profile` field is filled only when that field settles it: the date of birth, or the option
-  // named by `saved` when the saved field says exactly that. The rest stay for the applicant.
+  // other questions shown. Its questions in page order, each with Iowa's wording, its answer number
+  // (`index`) and the hideShowQuestions rule its options run (`reveals`). `ssnCardName` shows only after
+  // Yes to having a Social Security number. Each question fills from the applicant's own saved answer
+  // (`profile`); where none is saved, a `household` answer settles it only when it says exactly that.
   const startQuestions = Object.freeze({
     gender: { label: 'Are you male or female?', question: 'question02418', index: 1, wording: 'Are you male or female?', options: ['Male', 'Female'],
-      reveals: '::8008,8107,8108,8109,3261,3262,3263|Male::8008,8107,8108,8109,3261,3262,3263|Female:8008,8107,8108,8109,3261,3262,3263:' },
+      reveals: '::8008,8107,8108,8109,3261,3262,3263|Male::8008,8107,8108,8109,3261,3262,3263|Female:8008,8107,8108,8109,3261,3262,3263:', profile: 'sex' },
     birthDate: { label: 'Date of birth', question: 'question02', index: 5, date: true, profile: 'birthDate' },
     hasSsn: { label: 'Do you have a Social Security number?', question: 'question02420', index: 6, wording: 'Do you have a Social Security Number?',
-      reveals: '::3,4068,4070,4071,4072|Yes:3,4068,4070,4071,4072:|No::3,4068,4070,4071,4072', profile: 'hasSsn', saved: 'yes' },
+      reveals: '::3,4068,4070,4071,4072|Yes:3,4068,4070,4071,4072:|No::3,4068,4070,4071,4072', profile: 'hasSsn' },
+    ssnCardName: { label: 'Is your first and last name the same as on your Social Security card?', question: 'question04068', index: 11,
+      wording: 'Is the first and last name you provided the same name that appears on your Social Security card?',
+      reveals: '::4070,4071,4072|Yes::4070,4071,4072|No:4070,4071,4072:', profile: 'ssnCardNameMatches' },
     usCitizen: { label: 'Are you a U.S. citizen or national?', question: 'question06001', index: 18, wording: 'Are you a U.S. Citizen or National?',
-      reveals: '::6181|Yes:6181:|No::6181', profile: 'householdAllCitizens', saved: 'yes' },
+      reveals: '::6181|Yes:6181:|No::6181', profile: 'usCitizen', household: { field: 'householdAllCitizens', settles: 'yes' } },
     maritalStatus: { label: 'Marital status', question: 'question04', index: 22, wording: 'Marital Status',
-      choices: ['Select One', 'Divorced', 'Legally Separated', 'Married (includes common-law)', 'Never Married', 'Separated', 'Widowed'] },
-    // A household "no" to veterans doesn't settle "spouse of a veteran".
+      choices: ['Select One', 'Divorced', 'Legally Separated', 'Married (includes common-law)', 'Never Married', 'Separated', 'Widowed'], profile: 'maritalStatus' },
+    // A household answer about veterans doesn't settle "spouse of a veteran".
     militaryOrVeteran: { label: 'Are you in the military, a veteran, or a spouse of a veteran?', question: 'question01007331', index: 24,
-      wording: 'Are you in the military, a veteran, or a spouse of a veteran?', reveals: '' },
-    hasDisability: { label: 'Are you disabled?', question: 'question07', index: 26, wording: 'Are you Disabled?', reveals: '', profile: 'householdDisability', saved: 'no' },
-    blind: { label: 'Are you blind?', question: 'question0565', index: 27, wording: 'Are you Blind?', reveals: '' },
+      wording: 'Are you in the military, a veteran, or a spouse of a veteran?', reveals: '', profile: 'militaryOrVeteran' },
+    hasDisability: { label: 'Are you disabled?', question: 'question07', index: 26, wording: 'Are you Disabled?', reveals: '',
+      profile: 'disabled', household: { field: 'householdDisability', settles: 'no' } },
+    blind: { label: 'Are you blind?', question: 'question0565', index: 27, wording: 'Are you Blind?', reveals: '', profile: 'blind' },
     healthLimits: { label: 'Do you have a health condition that limits daily activities, or live in a medical facility or nursing home?', question: 'question01000031', index: 28,
-      wording: 'Do you have a physical, mental, or emotional health condition that causes limitations in activities (like bathing, dressing, daily chores, etc) or live in a medical facility or nursing home?', reveals: '' },
-    hasMedicare: { label: 'Do you have Medicare?', question: 'question01000414', index: 29, wording: 'Do you have Medicare?', reveals: '', profile: 'householdMedicare', saved: 'no' }
+      wording: 'Do you have a physical, mental, or emotional health condition that causes limitations in activities (like bathing, dressing, daily chores, etc) or live in a medical facility or nursing home?',
+      reveals: '', profile: 'healthLimitation' },
+    hasMedicare: { label: 'Do you have Medicare?', question: 'question01000414', index: 29, wording: 'Do you have Medicare?', reveals: '',
+      profile: 'medicare', household: { field: 'householdMedicare', settles: 'no' } }
   });
-  const startFills = Object.freeze(Object.keys(startQuestions).filter(key => startQuestions[key].profile));
+  const startKeys = Object.freeze(Object.keys(startQuestions));
+  // The answers a question accepts: a marital status as Iowa lists it, Male or Female, or yes or no.
+  const startAnswers = spec => spec.choices ? spec.choices.slice(1) : spec.options || ['yes', 'no'];
+  // The applicant's own saved answer, else the household answer where it settles the question, else null.
+  function startAnswer(spec, values) {
+    const own = values?.[spec.profile];
+    if (spec.date) return typeof own === 'string' ? own : null;
+    if (startAnswers(spec).includes(own)) return own;
+    return spec.household && values?.[spec.household.field] === spec.household.settles ? spec.household.settles : null;
+  }
 
   function isSupportedUrl(raw) {
     try {
@@ -254,7 +269,7 @@
     if (start) {
       result.recognizedPage = true;
       const startDetails = startDetailsState(start);
-      for (const key of startFills) {
+      for (const key of startKeys) {
         const elements = start.controls[key];
         if (elements && startOpen(elements, doc)) {
           result.fields.push({ key, label: startQuestions[key].label });
@@ -532,12 +547,12 @@
   const startOpen = (elements, doc) => elements.every(element => editable(element, doc)) && !hasAnswer(elements);
 
   // One question at a time, each after verifying the page again: a click runs Iowa's own scripts,
-  // which can reveal questions (never filled here) or change the page.
+  // which can reveal questions (filled on a later pass) or change the page.
   function fillStartDetails(doc, rawUrl, bindings, values) {
     const filled = [], skipped = [];
-    for (const binding of [...bindings].sort((a, b) => startFills.indexOf(a.key) - startFills.indexOf(b.key))) {
+    for (const binding of [...bindings].sort((a, b) => startKeys.indexOf(a.key) - startKeys.indexOf(b.key))) {
       const { key } = binding;
-      const spec = startFills.includes(key) ? startQuestions[key] : null;
+      const spec = startKeys.includes(key) ? startQuestions[key] : null;
       const current = () => {
         const context = startDetailsContext(doc, rawUrl);
         const elements = context?.controls[key];
@@ -548,19 +563,18 @@
       };
       if (!current()) { skipped.push(key); continue; }
       const value = Object.hasOwn(values, key) ? values[key] : null;
-      if (spec.date) {
-        const text = formatValue(key, value, binding.element);
+      if (spec.date || spec.choices) {
+        const text = spec.date ? formatValue(key, value, binding.element) : startAnswers(spec).includes(value) ? value : null;
         if (text === null || !scrollToField(binding.element, doc) || !current()) { skipped.push(key); continue; }
-        const setter = Object.getOwnPropertyDescriptor(doc.defaultView.HTMLInputElement.prototype, 'value').set;
-        setter.call(binding.element, text);
+        const prototype = spec.date ? doc.defaultView.HTMLInputElement.prototype : doc.defaultView.HTMLSelectElement.prototype;
+        Object.getOwnPropertyDescriptor(prototype, 'value').set.call(binding.element, text);
         binding.element.dispatchEvent(new doc.defaultView.Event('input', { bubbles: true }));
         binding.element.dispatchEvent(new doc.defaultView.Event('change', { bubbles: true }));
         if (binding.element.value === text) filled.push(key); else skipped.push(key);
         continue;
       }
-      if (value !== spec.saved) { skipped.push(key); continue; }
-      const target = binding.elements[value === 'yes' ? 0 : 1];
-      if (!scrollToField(target, doc) || !current()) { skipped.push(key); continue; }
+      const target = binding.elements[startAnswers(spec).indexOf(value)];
+      if (!target || !scrollToField(target, doc) || !current()) { skipped.push(key); continue; }
       target.click();
       if (target.checked) filled.push(key); else skipped.push(key);
     }
@@ -849,14 +863,14 @@
       for (const [key, spec] of Object.entries(startQuestions)) {
         if (!start.questions[key]) continue;
         const elements = start.controls[key];
-        const status = elements && hasAnswer(elements) ? 'complete' : elements && spec.profile && startOpen(elements, doc) ? 'missing' : 'manual';
-        checklist.push({ key, label: spec.label, status, required: Boolean(spec.profile), fillable: fields.some(field => field.key === key) });
+        const status = elements && hasAnswer(elements) ? 'complete' : elements && startOpen(elements, doc) ? 'missing' : 'manual';
+        checklist.push({ key, label: spec.label, status, required: true, fillable: fields.some(field => field.key === key) });
       }
       checklist.push({ key: 'startDetailsReview', label: 'Answer the remaining questions, then click Save and Continue in Iowa’s form', status: 'manual', required: false, fillable: false });
       return { ...result, kind: 'fillable', pageKey: 'iowa-tell-us-more', heading: 'Tell Us More', fields, checklist, canAdvance: false,
         requiredRemaining: checklist.filter(item => item.status === 'missing').length, manualRemaining: checklist.filter(item => item.status === 'manual').length,
         todo: 'Answer the remaining questions, then click Save and Continue in Iowa’s form yourself.',
-        reason: 'SecondHand can fill your saved date of birth and the yes-or-no answers your saved profile settles on this verified self-information page. Answer the other questions, then choose Save and Continue directly in Iowa’s form.' };
+        reason: 'SecondHand can fill the answers you saved in My information on this verified self-information page. Answer the other questions, then choose Save and Continue directly in Iowa’s form.' };
     }
     if (headings.includes('tell us more') || rawUrl === `${PORTAL}/applyForBenefits/dynamicQuestions`) return { ...result, pageKey: 'iowa-self-details-unverified', heading: 'Applicant questions', todo: 'Review and complete these questions directly in Iowa’s form.', reason: 'This person or question context is not verified for saved applicant facts.' };
     const pageId = identifyPage(doc);
@@ -942,7 +956,7 @@
   // Saved profile fields a page needs, and how they become that page's answers.
   function profileRequest(pageKey) {
     if (pageKey === 'iowa-self-details') return ['birthDate'];
-    if (pageKey === 'iowa-tell-us-more') return startFills.map(key => startQuestions[key].profile);
+    if (pageKey === 'iowa-tell-us-more') return Object.values(startQuestions).flatMap(spec => spec.household ? [spec.profile, spec.household.field] : [spec.profile]);
     if (pageKey === 'iowa-personal-information') return Object.keys(definitions);
     if (pageKey === 'iowa-program-intent') return [...programKeys];
     return [];
@@ -950,9 +964,7 @@
   function pageValues(pageKey, values) {
     if (pageKey === 'iowa-self-details') return typeof values?.birthDate === 'string' ? { birthDate: values.birthDate } : {};
     if (pageKey === 'iowa-tell-us-more') {
-      // The date of birth as saved; a Yes/No only when the saved field says exactly what settles it.
-      return Object.fromEntries(startFills.map(key => [key, values?.[startQuestions[key].profile]])
-        .filter(([key, value]) => startQuestions[key].date ? typeof value === 'string' : value === startQuestions[key].saved));
+      return Object.fromEntries(startKeys.map(key => [key, startAnswer(startQuestions[key], values)]).filter(([, value]) => value !== null));
     }
     if (pageKey === 'iowa-program-intent') return programKeys.some(key => values?.[key] === 'yes') ? { householdApplyProg: 'yes' } : {};
     return pageKey === 'iowa-personal-information' ? values : {};

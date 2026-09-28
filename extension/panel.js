@@ -271,6 +271,8 @@
     let autopilot = false;
     let site = null;
     let page = null;
+    // The questions the last Autofill on this page could have filled but had no saved answer for.
+    let notSaved = [];
     let contextRevision = 0;
     let checklistSignature = '';
     let working = false;
@@ -346,7 +348,7 @@
       renderSummary();
     }
     function clearPage() {
-      fillable = false; autopilot = false; site = null; page = null; checklistSignature = '';
+      fillable = false; autopilot = false; site = null; page = null; notSaved = []; checklistSignature = '';
       $('page-checklist').replaceChildren();
       $('checklist-section').hidden = true;
       resetQuestions();
@@ -358,9 +360,9 @@
       clearPage(); controls();
       show({ key: 'panel.checkingTab' });
     }
-    function renderChecklist(page) {
+    function renderChecklist() {
       const entries = Array.isArray(page.checklist) ? page.checklist.filter(item => item && fieldKeys([item.key]).length && typeof item.label === 'string' && Object.hasOwn(STATUS, item.status)).slice(0, 80) : [];
-      const signature = JSON.stringify([language, entries]);
+      const signature = JSON.stringify([language, entries, notSaved]);
       if (signature === checklistSignature) return;
       checklistSignature = signature;
       $('page-checklist').replaceChildren();
@@ -372,9 +374,10 @@
         const copy = document.createElement('span'); copy.className = 'checklist-copy';
         const text = words({ key: item.labelKey, params: item.labelParams, text: item.label }, 100);
         const label = document.createElement('span'); label.className = 'checklist-label'; label.textContent = text;
-        const detail = document.createElement('span'); detail.className = 'checklist-detail'; detail.textContent = t(STATUS[item.status]);
+        const status = t(item.status !== 'complete' && notSaved.includes(item.key) ? 'checklist.notSaved' : STATUS[item.status]);
+        const detail = document.createElement('span'); detail.className = 'checklist-detail'; detail.textContent = status;
         copy.append(label, detail);
-        button.setAttribute('aria-label', t('checklist.rowLabel', { label: text, status: t(STATUS[item.status]) }));
+        button.setAttribute('aria-label', t('checklist.rowLabel', { label: text, status }));
         button.append(mark, copy);
         button.addEventListener('click', trusted(() => { if (!button.disabled) focusField(item.key); }));
         $('page-checklist').append(button);
@@ -389,8 +392,9 @@
       site = siteOf(state);
       fillable = site ? site.enabled && site.ready : page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo);
       autopilot = Boolean(state.autopilot);
-      renderChecklist(page);
       const result = state.result;
+      notSaved = fieldKeys(result?.notSaved);
+      renderChecklist();
       const loading = target?.status === 'loading';
       if (site?.enabled && !site.ready) show({ key: loading ? 'panel.waitingLoad' : 'panel.reloadToRead' });
       else if (hasMessage(result)) show(fromResult(result), result.state === 'error' || result.state === 'offline');
@@ -754,7 +758,7 @@
     function relabel() {
       applyStatic();
       $('language').value = language;
-      if (page) renderChecklist(page);
+      if (page) renderChecklist();
       renderStatus();
       renderDesktop();
       resetQuestions();

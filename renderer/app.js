@@ -10,7 +10,8 @@
     'programSnap', 'programFip', 'programMedicaid', 'helpPayMedicalBills', 'householdSize',
     'householdAdults', 'householdChildren', 'householdSeniors', 'householdVeteran', 'householdDisability',
     'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare',
-    'monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand', 'monthlyMedicalExpenses'];
+    'monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand', 'monthlyMedicalExpenses',
+    'sex', 'maritalStatus', 'hasSsnAnswer', 'ssnCardNameMatches', 'usCitizen', 'militaryOrVeteran', 'disabled', 'blind', 'healthLimitation', 'medicare'];
   const viewNames = { overview: 'Overview', profile: 'My information', applications: 'Applications', extension: 'Chrome extension', privacy: 'Privacy & backups' };
   const statusNames = { draft: 'Draft', in_progress: 'In progress', submitted: 'Submitted', needs_action: 'Needs action', approved: 'Approved', denied: 'Denied' };
   let vaultStatus = { exists: false, unlocked: false, recoveryKey: false, deviceReset: false, deviceResetSupported: false, extensionId: '', bridgeRunning: false };
@@ -253,9 +254,12 @@
     return true;
   }
 
+  // A profile field's input or select, or its radio buttons: setting a group's value checks that answer.
+  const profileControl = (field) => $('profile-form').elements.namedItem(field);
+
   function fillProfile() {
     profileRevision++;
-    for (const key of profileFields) $(key).value = typeof data.profile[key] === 'string' ? data.profile[key] : '';
+    for (const key of profileFields) profileControl(key).value = typeof data.profile[key] === 'string' ? data.profile[key] : '';
     setProfileDirty(false);
   }
 
@@ -619,7 +623,7 @@
     event.preventDefault(); clearError('profile-error');
     const generation = vaultGeneration;
     const revision = profileRevision;
-    const profile = Object.fromEntries(profileFields.map((field) => [field, $(field).value.trim()]));
+    const profile = Object.fromEntries(profileFields.map((field) => [field, profileControl(field).value.trim()]));
     pending($('save-profile'), async () => {
       try {
         const saved = await api.saveProfile(profile);

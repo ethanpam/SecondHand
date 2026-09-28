@@ -7,9 +7,13 @@ const fixture = require('./fixtures/iowa-tell-us-more.cjs');
 const oldFixture = require('./fixtures/iowa-self-details.cjs');
 
 const PAGE_KEY = 'iowa-tell-us-more';
-const FILLS = ['birthDate', 'hasSsn', 'usCitizen', 'hasDisability', 'hasMedicare'];
-const saved = { birthDate: '1985-04-12', hasSsn: 'yes', householdAllCitizens: 'yes', householdDisability: 'no', householdMedicare: 'no' };
-const values = () => adapter.pageValues(PAGE_KEY, saved);
+// The questions on screen before any answer, in page order. Each fills from a saved answer.
+const FILLS = ['gender', 'birthDate', 'hasSsn', 'usCitizen', 'maritalStatus', 'militaryOrVeteran', 'hasDisability', 'blind', 'healthLimits', 'hasMedicare'];
+const RADIOS = FILLS.filter(key => !['birthDate', 'maritalStatus'].includes(key));
+// Every answer saved in My information.
+const saved = { sex: 'Female', birthDate: '1985-04-12', hasSsn: 'yes', ssnCardNameMatches: 'yes', usCitizen: 'yes', maritalStatus: 'Never Married',
+  militaryOrVeteran: 'no', disabled: 'no', blind: 'no', healthLimitation: 'no', medicare: 'no' };
+const values = (profile = saved) => adapter.pageValues(PAGE_KEY, profile);
 
 // Every element, including ones a test adds or clones, has an on-screen box unless its style hides it.
 function page(html = fixture.html, url = fixture.URL) {
@@ -21,33 +25,39 @@ function page(html = fixture.html, url = fixture.URL) {
 }
 const byId = (doc, id) => doc.getElementById(id);
 const dob = doc => byId(doc, fixture.DOB_ID);
+const marital = doc => byId(doc, fixture.MARITAL_ID);
 // option 1 is Yes (Male), option 2 is No (Female)
 const radio = (doc, key, option) => byId(doc, fixture.radioId(fixture.ANSWERS[key], option));
+// The option each saved answer picks.
+const picked = { gender: 2, hasSsn: 1, ssnCardName: 1, usCitizen: 1, militaryOrVeteran: 2, hasDisability: 2, blind: 2, healthLimits: 2, hasMedicare: 2 };
+const settled = (keys = RADIOS) => keys.map(key => fixture.radioId(fixture.ANSWERS[key], picked[key]));
 const checkedRadios = doc => Array.from(doc.querySelectorAll('input[type="radio"]')).filter(element => element.checked).map(element => element.id);
 const fieldKeys = doc => adapter.scan(doc, fixture.URL).fields.map(field => field.key);
-const fillAll = (doc, bindings = adapter.scan(doc, fixture.URL).bindings) => adapter.fill(doc, fixture.URL, bindings, values());
-const settled = [fixture.radioId(6, 1), fixture.radioId(18, 1), fixture.radioId(26, 2), fixture.radioId(29, 2)];
+const fillAll = (doc, bindings = adapter.scan(doc, fixture.URL).bindings, answers = values()) => adapter.fill(doc, fixture.URL, bindings, answers);
 function reveal(doc, ids) {
   for (const id of ids) { const question = byId(doc, id); question.classList.remove('hidden'); question.style.display = ''; }
 }
+// The Social Security number box and the boxes for the name on the card.
+const SSN_BOXES = [fixture.SSN_BOX_ID, 'answerSets0.answers12.answerValue', 'answerSets0.answers15.answerValue', 'answerSets0.answers16.answerValue'];
 
-test('Tell Us More at dynamicQuestionsStart offers the date of birth and four yes/no answers, and never Save and Continue', () => {
+test('Tell Us More at dynamicQuestionsStart offers every question, and never Save and Continue', () => {
   const doc = page(), scan = adapter.scan(doc, fixture.URL), probe = adapter.probePage(doc, fixture.URL);
   assert.equal(scan.recognizedPage, true);
   assert.deepEqual(scan.fields, [
-    { key: 'birthDate', label: 'Date of birth' }, { key: 'hasSsn', label: 'Do you have a Social Security number?' },
-    { key: 'usCitizen', label: 'Are you a U.S. citizen or national?' }, { key: 'hasDisability', label: 'Are you disabled?' },
+    { key: 'gender', label: 'Are you male or female?' }, { key: 'birthDate', label: 'Date of birth' },
+    { key: 'hasSsn', label: 'Do you have a Social Security number?' }, { key: 'usCitizen', label: 'Are you a U.S. citizen or national?' },
+    { key: 'maritalStatus', label: 'Marital status' }, { key: 'militaryOrVeteran', label: 'Are you in the military, a veteran, or a spouse of a veteran?' },
+    { key: 'hasDisability', label: 'Are you disabled?' }, { key: 'blind', label: 'Are you blind?' },
+    { key: 'healthLimits', label: 'Do you have a health condition that limits daily activities, or live in a medical facility or nursing home?' },
     { key: 'hasMedicare', label: 'Do you have Medicare?' }]);
   assert.equal(probe.kind, 'fillable'); assert.equal(probe.pageKey, PAGE_KEY); assert.equal(probe.heading, 'Tell Us More');
   assert.equal(probe.canAdvance, false);
   assert.deepEqual(probe.fields, scan.fields);
-  assert.deepEqual(probe.checklist.map(item => [item.key, item.status]), [
-    ['gender', 'manual'], ['birthDate', 'missing'], ['hasSsn', 'missing'], ['usCitizen', 'missing'], ['maritalStatus', 'manual'],
-    ['militaryOrVeteran', 'manual'], ['hasDisability', 'missing'], ['blind', 'manual'], ['healthLimits', 'manual'], ['hasMedicare', 'missing'],
-    ['startDetailsReview', 'manual']]);
+  assert.deepEqual(probe.checklist.map(item => [item.key, item.status]), [...FILLS.map(key => [key, 'missing']), ['startDetailsReview', 'manual']]);
   assert.deepEqual(probe.checklist.filter(item => item.fillable).map(item => item.key), FILLS);
-  assert.equal(probe.requiredRemaining, 5); assert.equal(probe.manualRemaining, 6);
+  assert.equal(probe.requiredRemaining, 10); assert.equal(probe.manualRemaining, 1);
   assert.equal(probe.todo, 'Answer the remaining questions, then click Save and Continue in Iowa’s form yourself.');
+  assert.equal(probe.reason, 'SecondHand can fill the answers you saved in My information on this verified self-information page. Answer the other questions, then choose Save and Continue directly in Iowa’s form.');
   assert.doesNotMatch(JSON.stringify(probe), /Avery|Example|answerSets|question0/);
   assert.equal(adapter.captureNavigation(doc, fixture.URL), null);
   let clicked = 0; byId(doc, 'dqButtonId309').addEventListener('click', () => clicked++);
@@ -56,75 +66,130 @@ test('Tell Us More at dynamicQuestionsStart offers the date of birth and four ye
   assert.equal(clicked, 0);
 });
 
-test('the saved profile maps only to answers it settles, and the Social Security number itself is never asked for', () => {
-  assert.deepEqual(adapter.profileRequest(PAGE_KEY), ['birthDate', 'hasSsn', 'householdAllCitizens', 'householdDisability', 'householdMedicare']);
-  assert.deepEqual(adapter.pageValues(PAGE_KEY, { ...saved, ssn: '999-99-9999', householdVeteran: 'no', firstName: 'Avery' }),
-    { birthDate: '1985-04-12', hasSsn: 'yes', usCitizen: 'yes', hasDisability: 'no', hasMedicare: 'no' });
-  // A household "no" to citizenship, a "yes" to disability or Medicare, or no saved SSN leaves the question for the applicant.
-  assert.deepEqual(adapter.pageValues(PAGE_KEY, { hasSsn: '', householdAllCitizens: 'no', householdDisability: 'yes', householdMedicare: 'yes' }), {});
-  assert.deepEqual(adapter.pageValues(PAGE_KEY, {}), {});
+test('each question maps to the applicant’s own saved answer, and the Social Security number itself is never asked for', () => {
+  assert.deepEqual(adapter.profileRequest(PAGE_KEY), ['sex', 'birthDate', 'hasSsn', 'ssnCardNameMatches', 'usCitizen', 'householdAllCitizens', 'maritalStatus',
+    'militaryOrVeteran', 'disabled', 'householdDisability', 'blind', 'healthLimitation', 'medicare', 'householdMedicare']);
+  assert.deepEqual(values({ ...saved, ssn: '999-99-9999', hasSsnAnswer: 'yes', householdVeteran: 'no', firstName: 'Avery' }),
+    { gender: 'Female', birthDate: '1985-04-12', hasSsn: 'yes', ssnCardName: 'yes', usCitizen: 'yes', maritalStatus: 'Never Married',
+      militaryOrVeteran: 'no', hasDisability: 'no', blind: 'no', healthLimits: 'no', hasMedicare: 'no' });
+  // Every one of Iowa's options is an answer.
+  assert.deepEqual(values({ sex: 'Male', hasSsn: 'no', ssnCardNameMatches: 'no', usCitizen: 'no', maritalStatus: 'Married (includes common-law)',
+    militaryOrVeteran: 'yes', disabled: 'yes', blind: 'yes', healthLimitation: 'yes', medicare: 'yes' }),
+  { gender: 'Male', hasSsn: 'no', ssnCardName: 'no', usCitizen: 'no', maritalStatus: 'Married (includes common-law)',
+    militaryOrVeteran: 'yes', hasDisability: 'yes', blind: 'yes', healthLimits: 'yes', hasMedicare: 'yes' });
+  // Anything else is not an answer.
+  assert.deepEqual(values({ sex: 'female', maritalStatus: 'Married', hasSsn: 'Y', usCitizen: 'true', blind: 'No', militaryOrVeteran: '' }), {});
+  assert.deepEqual(values({}), {});
   assert.deepEqual(adapter.pageValues(PAGE_KEY, null), {});
 });
 
-test('Autofill types the date of birth and clicks each settled answer like a person, leaving every other question alone', () => {
+test('a household answer settles a question only when the applicant saved none and it says exactly that', () => {
+  const household = { householdAllCitizens: 'yes', householdDisability: 'no', householdMedicare: 'no' };
+  assert.deepEqual(values(household), { usCitizen: 'yes', hasDisability: 'no', hasMedicare: 'no' });
+  // The applicant's own answer comes first.
+  assert.deepEqual(values({ ...household, usCitizen: 'no', disabled: 'yes', medicare: 'yes' }), { usCitizen: 'no', hasDisability: 'yes', hasMedicare: 'yes' });
+  // A household "no" to citizenship, a "yes" to disability or Medicare, or a "no" to veterans (which says
+  // nothing about "spouse of a veteran") leaves the question for the applicant.
+  assert.deepEqual(values({ householdAllCitizens: 'no', householdDisability: 'yes', householdMedicare: 'yes', householdVeteran: 'no' }), {});
+});
+
+test('Autofill types the date of birth, picks the marital status and clicks each saved answer like a person, never the Social Security number', () => {
   const doc = page(), events = [];
   for (const element of doc.querySelectorAll('input[type="radio"]')) {
     for (const type of ['click', 'change']) element.addEventListener(type, () => events.push(`${type}:${element.id}`));
   }
+  for (const type of ['input', 'change']) marital(doc).addEventListener(type, () => events.push(`${type}:${marital(doc).id}`));
   let typed = 0; dob(doc).addEventListener('change', () => typed++);
   assert.deepEqual(fillAll(doc), { filled: FILLS, skipped: [] });
   assert.equal(dob(doc).value, '04/12/1985'); assert.equal(typed, 1);
-  assert.deepEqual(checkedRadios(doc), settled);
-  assert.deepEqual(events, settled.flatMap(id => [`click:${id}`, `change:${id}`]));
-  assert.equal(byId(doc, fixture.MARITAL_ID).value, '');
+  assert.equal(marital(doc).value, 'Never Married');
+  assert.deepEqual(checkedRadios(doc), settled());
+  assert.deepEqual(events, FILLS.filter(key => key !== 'birthDate').flatMap(key => key === 'maritalStatus' ? [`input:${fixture.MARITAL_ID}`, `change:${fixture.MARITAL_ID}`]
+    : [`click:${settled([key])[0]}`, `change:${settled([key])[0]}`]));
   // The hidden and disabled date-of-birth alternatives and the Social Security number box stay empty.
   for (const id of ['answerSets0.answers3.answerValue', 'answerSets0.answers4.answerValue', fixture.SSN_BOX_ID]) assert.equal(byId(doc, id).value, '', id);
   assert.deepEqual(adapter.scan(doc, fixture.URL).fields, []);
   const probe = adapter.probePage(doc, fixture.URL);
   assert.deepEqual(probe.checklist.filter(item => item.status === 'complete').map(item => item.key), FILLS);
   assert.equal(probe.requiredRemaining, 0); assert.equal(probe.canAdvance, false);
+  assert.doesNotMatch(JSON.stringify(probe), /Female|Never Married|1985/);
 });
 
-test('an answer the saved profile does not settle is never clicked, even when handed straight to fill', () => {
+test('with nothing saved, nothing is filled and every question stays open for the applicant', () => {
   const doc = page();
-  const result = adapter.fill(doc, fixture.URL, adapter.scan(doc, fixture.URL).bindings, { hasSsn: 'no', usCitizen: 'no', hasDisability: 'yes', hasMedicare: 'yes', ssn: '999-99-9999' });
-  assert.deepEqual(result.filled, []);
+  assert.deepEqual(fillAll(doc, undefined, values({})), { filled: [], skipped: FILLS });
   assert.deepEqual(checkedRadios(doc), []);
+  assert.equal(dob(doc).value, ''); assert.equal(marital(doc).value, '');
+  assert.deepEqual(fieldKeys(doc), FILLS);
+  assert.deepEqual(adapter.probePage(doc, fixture.URL).checklist.filter(item => item.status === 'missing').map(item => item.key), FILLS);
+});
+
+test('an answer that is not one of the question’s own options is never picked, even when handed straight to fill', () => {
+  const doc = page();
+  const result = fillAll(doc, undefined, { gender: 'female', birthDate: 'April 12', hasSsn: 'maybe', usCitizen: 'true', maritalStatus: 'Married',
+    militaryOrVeteran: 'Yes', hasDisability: 'NO', blind: '', healthLimits: 'on', hasMedicare: 1, ssn: '999-99-9999' });
+  assert.deepEqual(result, { filled: [], skipped: FILLS });
+  assert.deepEqual(checkedRadios(doc), []);
+  assert.equal(marital(doc).value, ''); assert.equal(dob(doc).value, '');
   assert.equal(byId(doc, fixture.SSN_BOX_ID).value, '');
 });
 
 test('answers already on the page are never overwritten', () => {
   const answers = [
+    ['gender', doc => { radio(doc, 'gender', 1).checked = true; }],
+    ['birthDate', doc => { dob(doc).value = '01/01/1970'; }],
     ['hasSsn', doc => { radio(doc, 'hasSsn', 2).checked = true; }],
     ['usCitizen', doc => { radio(doc, 'usCitizen', 2).checked = true; }],
+    ['maritalStatus', doc => { marital(doc).value = 'Widowed'; }],
+    ['militaryOrVeteran', doc => { radio(doc, 'militaryOrVeteran', 1).checked = true; }],
     ['hasDisability', doc => { radio(doc, 'hasDisability', 1).checked = true; }],
-    ['hasMedicare', doc => { radio(doc, 'hasMedicare', 1).checked = true; }],
-    ['birthDate', doc => { dob(doc).value = '01/01/1970'; }]
+    ['blind', doc => { radio(doc, 'blind', 1).checked = true; }],
+    ['healthLimits', doc => { radio(doc, 'healthLimits', 1).checked = true; }],
+    ['hasMedicare', doc => { radio(doc, 'hasMedicare', 1).checked = true; }]
   ];
   for (const [key, answer] of answers) {
     const doc = page(); answer(doc);
     assert.deepEqual(fieldKeys(doc), FILLS.filter(item => item !== key), key);
     const stale = page(), bindings = adapter.scan(stale, fixture.URL).bindings; answer(stale);
-    const before = key === 'birthDate' ? '01/01/1970' : checkedRadios(stale)[0];
+    const before = checkedRadios(stale)[0];
     const result = fillAll(stale, bindings);
     assert.ok(result.skipped.includes(key) && !result.filled.includes(key), key);
-    if (key === 'birthDate') assert.equal(dob(stale).value, before);
-    else { assert.ok(byId(stale, before).checked, key); assert.equal(checkedRadios(stale).length, 4, key); }
+    if (key === 'birthDate') assert.equal(dob(stale).value, '01/01/1970');
+    else if (key === 'maritalStatus') assert.equal(marital(stale).value, 'Widowed');
+    else assert.ok(byId(stale, before).checked, key);
+    assert.equal(checkedRadios(stale).length, RADIOS.length, key);
   }
 });
 
-test('questions Iowa reveals after an answer stay for the applicant and the page stays verified', () => {
+test('the Social Security card question Iowa shows after Yes fills from the saved answer on the next pass; the number and name boxes never do', () => {
+  for (const [answer, option] of [['yes', 1], ['no', 2]]) {
+    const doc = page();
+    // Iowa's script shows the Social Security number box, the card name question and the name-on-card
+    // boxes after Yes, and "Were you born in the U.S.?" after a Yes to citizenship.
+    radio(doc, 'hasSsn', 1).addEventListener('click', () => reveal(doc, fixture.SSN_REVEALS));
+    radio(doc, 'usCitizen', 1).addEventListener('click', () => reveal(doc, ['question06181']));
+    const answers = values({ ...saved, ssnCardNameMatches: answer });
+    assert.deepEqual(fillAll(doc, undefined, answers), { filled: FILLS, skipped: [] });
+    // The next pass finds the question Iowa just showed, and nothing else.
+    assert.deepEqual(adapter.scan(doc, fixture.URL).fields, [{ key: 'ssnCardName', label: 'Is your first and last name the same as on your Social Security card?' }]);
+    const probe = adapter.probePage(doc, fixture.URL);
+    assert.deepEqual(probe.checklist.slice(2, 5).map(item => [item.key, item.status]), [['hasSsn', 'complete'], ['ssnCardName', 'missing'], ['usCitizen', 'complete']]);
+    assert.equal(probe.pageKey, PAGE_KEY);
+    assert.deepEqual(fillAll(doc, undefined, answers), { filled: ['ssnCardName'], skipped: [] });
+    assert.ok(radio(doc, 'ssnCardName', option).checked, answer);
+    for (const id of SSN_BOXES) assert.equal(byId(doc, id).value, '', id);
+    assert.equal(byId(doc, 'answerSets0.answers21.answerValue1').checked || byId(doc, 'answerSets0.answers21.answerValue2').checked, false);
+    assert.deepEqual(adapter.scan(doc, fixture.URL).fields, []);
+    assert.equal(adapter.probePage(doc, fixture.URL).checklist.find(item => item.key === 'ssnCardName').status, 'complete');
+  }
+  // Not saved: the question stays open for the applicant.
   const doc = page();
-  // Iowa's script shows the Social Security number box and the name-on-card questions after Yes,
-  // and "Were you born in the U.S.?" after a Yes to citizenship.
-  radio(doc, 'hasSsn', 1).addEventListener('click', () => reveal(doc, ['question03', 'question04068', 'question04070', 'question04071', 'question04072']));
-  radio(doc, 'usCitizen', 1).addEventListener('click', () => reveal(doc, ['question06181']));
-  assert.deepEqual(fillAll(doc), { filled: FILLS, skipped: [] });
-  assert.equal(byId(doc, fixture.SSN_BOX_ID).value, '');
-  for (const id of ['answerSets0.answers12.answerValue', 'answerSets0.answers13.answerValue', 'answerSets0.answers14.answerValue']) assert.equal(byId(doc, id).value, '', id);
-  assert.deepEqual(checkedRadios(doc), settled);
-  assert.deepEqual(adapter.scan(doc, fixture.URL).fields, []);
-  assert.equal(adapter.probePage(doc, fixture.URL).pageKey, PAGE_KEY);
+  radio(doc, 'hasSsn', 1).addEventListener('click', () => reveal(doc, fixture.SSN_REVEALS));
+  const unsaved = values({ ...saved, ssnCardNameMatches: '' });
+  assert.deepEqual(fillAll(doc, undefined, unsaved).filled, FILLS);
+  assert.deepEqual(fillAll(doc, undefined, unsaved), { filled: [], skipped: ['ssnCardName'] });
+  assert.equal(radio(doc, 'ssnCardName', 1).checked || radio(doc, 'ssnCardName', 2).checked, false);
+  assert.deepEqual(fieldKeys(doc), ['ssnCardName']);
 });
 
 test('follow-up questions Iowa shows, even from a disabled template, leave the page and its answers verified', () => {
@@ -138,8 +203,9 @@ test('follow-up questions Iowa shows, even from a disabled template, leave the p
 test('a click that changes whose page this is stops every later answer', () => {
   const doc = page();
   radio(doc, 'hasSsn', 1).addEventListener('click', () => { doc.querySelector('[title="People | Unvisited"]').title = 'People | Active'; });
-  assert.deepEqual(fillAll(doc), { filled: ['birthDate', 'hasSsn'], skipped: ['usCitizen', 'hasDisability', 'hasMedicare'] });
-  assert.deepEqual(checkedRadios(doc), [fixture.radioId(6, 1)]);
+  assert.deepEqual(fillAll(doc), { filled: ['gender', 'birthDate', 'hasSsn'], skipped: FILLS.slice(3) });
+  assert.deepEqual(checkedRadios(doc), settled(['gender', 'hasSsn']));
+  assert.equal(marital(doc).value, '');
 });
 
 test('another URL, phase, person, form or template keeps the whole page manual', () => {
@@ -171,11 +237,12 @@ test('another URL, phase, person, form or template keeps the whole page manual',
     assert.deepEqual(adapter.scan(doc, fixture.URL).fields, [], mutate.toString());
     assert.notEqual(adapter.probePage(doc, fixture.URL).pageKey, PAGE_KEY, mutate.toString());
   }
-  // A change after the preview stops a fill already on its way.
+  // A change after the preview stops a fill already on its way: another person's block gets none of the applicant's answers.
   for (const mutate of mutations.slice(0, 3)) {
     const stale = page(), bindings = adapter.scan(stale, fixture.URL).bindings; mutate(stale);
     assert.deepEqual(fillAll(stale, bindings).filled, [], mutate.toString());
     assert.deepEqual(checkedRadios(stale), [], mutate.toString());
+    assert.equal(marital(stale).value, '', mutate.toString()); assert.equal(dob(stale).value, '', mutate.toString());
   }
   for (const url of [`${fixture.URL}?person=1`, `${fixture.URL}/`, fixture.URL.replace('dynamicQuestionsStart', 'dynamicQuestions'), fixture.URL.replace('hhsservices.iowa.gov', 'example.com'), fixture.URL.replace('https:', 'http:')]) {
     const doc = page(fixture.html, url);
@@ -211,9 +278,18 @@ test('a question that differs from the recorded page is left for the applicant w
     ['hasSsn', doc => { byId(doc, 'question02420').classList.add('disabledQuestion'); }],
     // Another template's copy of the question on screen makes it ambiguous.
     ['hasSsn', doc => { byId(doc, 'question02421').style.display = 'block'; }],
+    ['gender', doc => { radio(doc, 'gender', 2).setAttribute('value', 'F'); }],
+    ['gender', doc => { byId(doc, 'question02418').querySelector('legend span').firstChild.data = 'Is your child male or female?'; }],
     ['usCitizen', doc => { byId(doc, 'question06179').style.display = 'block'; }],
     ['usCitizen', doc => { radio(doc, 'usCitizen', 1).setAttribute('onclick', "hideShowQuestions('question0', this, '::6181|No:6181:|Yes::6181')"); }],
+    ['maritalStatus', doc => { marital(doc).options[4].textContent = 'Single'; }],
+    ['maritalStatus', doc => { marital(doc).append(Object.assign(doc.createElement('option'), { value: 'Other', textContent: 'Other' })); }],
+    ['maritalStatus', doc => { marital(doc).setAttribute('onchange', 'saveStatus()'); }],
+    ['maritalStatus', doc => { byId(doc, 'question04').querySelector('label').firstChild.data = 'Spouse’s Marital Status '; }],
+    ['militaryOrVeteran', doc => { radio(doc, 'militaryOrVeteran', 1).setAttribute('value', 'true'); }],
     ['hasDisability', doc => { radio(doc, 'hasDisability', 2).labels[0].textContent = 'Yes'; }],
+    ['blind', doc => { byId(doc, 'question0565').querySelector('legend span').firstChild.data = 'Is anyone in your household blind?'; }],
+    ['healthLimits', doc => { radio(doc, 'healthLimits', 2).labels[0].textContent = 'Yes'; }],
     ['hasMedicare', doc => { byId(doc, 'question01000414').querySelector('legend span').firstChild.data = 'Does anyone else have Medicare?'; }],
     ['birthDate', doc => { dob(doc).title = 'dd/mm/yyyy'; }],
     ['birthDate', doc => { dob(doc).type = 'date'; }],
@@ -231,11 +307,12 @@ test('a question that differs from the recorded page is left for the applicant w
     assert.deepEqual(fieldKeys(doc), FILLS.filter(item => item !== key), mutate.toString());
     assert.equal(adapter.probePage(doc, fixture.URL).checklist.find(item => item.key === key)?.status ?? 'manual', 'manual', mutate.toString());
   }
-  for (const [key, mutate] of [mutations[0], mutations.find(([key]) => key === 'birthDate')]) {
-    const doc = page(); mutate(doc);
-    assert.deepEqual(fillAll(doc).filled, FILLS.filter(item => item !== key), mutate.toString());
+  for (const key of ['hasSsn', 'birthDate', 'maritalStatus']) {
+    const doc = page(); mutations.find(([item]) => item === key)[1](doc);
+    assert.deepEqual(fillAll(doc).filled, FILLS.filter(item => item !== key), key);
     if (key === 'birthDate') assert.equal(dob(doc).value, '');
-    else assert.deepEqual(checkedRadios(doc), settled.slice(1));
+    if (key === 'maritalStatus') assert.equal(marital(doc).value, '');
+    assert.deepEqual(checkedRadios(doc), settled(RADIOS.filter(item => item !== key)), key);
   }
 });
 
@@ -249,12 +326,13 @@ test('the private page fingerprint rejects a switched applicant, introduction, c
   for (const mutate of everything) {
     const doc = page(), bindings = adapter.scan(doc, fixture.URL).bindings; mutate(doc);
     assert.deepEqual(fillAll(doc, bindings).filled, [], mutate.toString());
-    assert.equal(dob(doc).value, ''); assert.deepEqual(checkedRadios(doc), []);
+    assert.equal(dob(doc).value, ''); assert.equal(marital(doc).value, ''); assert.deepEqual(checkedRadios(doc), []);
   }
   const replaced = page(), bindings = adapter.scan(replaced, fixture.URL).bindings;
   radio(replaced, 'usCitizen', 1).replaceWith(radio(replaced, 'usCitizen', 1).cloneNode(true));
   dob(replaced).replaceWith(dob(replaced).cloneNode(true));
-  assert.deepEqual(fillAll(replaced, bindings), { filled: ['hasSsn', 'hasDisability', 'hasMedicare'], skipped: ['birthDate', 'usCitizen'] });
+  marital(replaced).replaceWith(marital(replaced).cloneNode(true));
+  assert.deepEqual(fillAll(replaced, bindings), { filled: FILLS.filter(key => !['birthDate', 'usCitizen', 'maritalStatus'].includes(key)), skipped: ['birthDate', 'usCitizen', 'maritalStatus'] });
 });
 
 test('scrolling rechecks the page before each answer', () => {
@@ -262,14 +340,15 @@ test('scrolling rechecks the page before each answer', () => {
   const original = target.getBoundingClientRect;
   target.getBoundingClientRect = () => ({ left: 20, top: 2000, right: 220, bottom: 2030, width: 200, height: 30 });
   target.scrollIntoView = () => { target.getBoundingClientRect = original; doc.querySelector('.peTaxInfoName h3').textContent = 'Different QA Applicant'; };
-  assert.deepEqual(fillAll(doc, bindings), { filled: ['birthDate', 'hasSsn', 'usCitizen', 'hasDisability'], skipped: ['hasMedicare'] });
+  assert.deepEqual(fillAll(doc, bindings), { filled: FILLS.filter(key => key !== 'hasMedicare'), skipped: ['hasMedicare'] });
   assert.equal(target.checked, false);
 });
 
 test('checklist rows jump to their question, and answered questions show as done without their answers', () => {
   const doc = page();
-  const targets = { gender: radio(doc, 'gender', 1), birthDate: dob(doc), hasSsn: radio(doc, 'hasSsn', 1), usCitizen: radio(doc, 'usCitizen', 1),
-    maritalStatus: byId(doc, fixture.MARITAL_ID), militaryOrVeteran: radio(doc, 'militaryOrVeteran', 1), hasDisability: radio(doc, 'hasDisability', 1),
+  reveal(doc, fixture.SSN_REVEALS);
+  const targets = { gender: radio(doc, 'gender', 1), birthDate: dob(doc), hasSsn: radio(doc, 'hasSsn', 1), ssnCardName: radio(doc, 'ssnCardName', 1),
+    usCitizen: radio(doc, 'usCitizen', 1), maritalStatus: marital(doc), militaryOrVeteran: radio(doc, 'militaryOrVeteran', 1), hasDisability: radio(doc, 'hasDisability', 1),
     blind: radio(doc, 'blind', 1), healthLimits: radio(doc, 'healthLimits', 1), hasMedicare: radio(doc, 'hasMedicare', 1) };
   for (const [key, element] of Object.entries(targets)) {
     assert.equal(adapter.focusField(doc, fixture.URL, key), true, key); assert.equal(doc.activeElement, element, key);
@@ -277,7 +356,7 @@ test('checklist rows jump to their question, and answered questions show as done
   for (const key of ['startDetailsReview', 'ssn', 'firstName', 'question03']) assert.equal(adapter.focusField(doc, fixture.URL, key), false, key);
   assert.equal(adapter.focusField(doc, `${fixture.URL}?person=1`, 'birthDate'), false);
   radio(doc, 'gender', 2).checked = true;
-  byId(doc, fixture.MARITAL_ID).value = 'Never Married';
+  marital(doc).value = 'Never Married';
   radio(doc, 'blind', 2).checked = true;
   const probe = adapter.probePage(doc, fixture.URL);
   assert.deepEqual(probe.checklist.filter(item => item.status === 'complete').map(item => item.key), ['gender', 'maritalStatus', 'blind']);

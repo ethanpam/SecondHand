@@ -152,6 +152,8 @@ async function fillPage(tabId, state, pilot) {
     values = SecondHandIowa.pageValues(pageKey, response.values);
     let filled = 0;
     const attempted = pilot.attempted;
+    // Questions this page offered that have no saved answer: the side panel points to My information.
+    const unsaved = new Set();
     for (let pass = 0; pass < 4; pass++) {
       currentPilot(tabId, pilot);
       if ((await activePortal(tabId)).url !== url) throw fault('worker.pageChangedAutofill');
@@ -160,8 +162,10 @@ async function fillPage(tabId, state, pilot) {
       currentPilot(tabId, pilot);
       if (fresh.page.kind === 'blocked') break; // A household answer can reveal CAPTCHA.
       if (fresh.page.pageKey !== pageKey || !fresh.scan.recognizedPage) throw fault('worker.pageChangedAutofill');
-      const keys = fresh.scan.fields.map(field => field.key).filter(key => !attempted.has(key) && typeof values[key] === 'string' && values[key]);
-      fresh.scan.fields.forEach(field => attempted.add(field.key));
+      const offered = fresh.scan.fields.map(field => field.key).filter(key => !attempted.has(key));
+      offered.forEach(key => attempted.add(key));
+      const keys = offered.filter(key => typeof values[key] === 'string' && values[key]);
+      offered.filter(key => !keys.includes(key)).forEach(key => unsaved.add(key));
       if (!keys.length) break;
       await checkAccess(revision);
       currentPilot(tabId, pilot);
@@ -187,7 +191,7 @@ async function fillPage(tabId, state, pilot) {
     pilot.accessRevision = revision;
     const todo = after.page.todo ? adapterSays(after.page.todo, 'todo') : { todo: '' };
     const message = todo.todo ? say('result.thenTodo', { summary, todo: { key: todo.todoKey, params: todo.todoParams } }) : say(summary.key, summary.params);
-    return { state: 'done', filled, needYou: missing, ...message, ...todo, pageKey: after.page.pageKey };
+    return { state: 'done', filled, needYou: missing, notSaved: missing.filter(key => unsaved.has(key)), ...message, ...todo, pageKey: after.page.pageKey };
   } catch (error) {
     return { ...failed(error), filled: 0, needYou: [], pageKey };
   } finally { values = null; }
