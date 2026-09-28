@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from decisions import holdout_forms, training_precision
+from decisions import ABSTAIN, agreement, apply_probabilities, fill, holdout_forms, metrics, named_reference, probabilities, training_precision
 
 
 class TrainingPrecision(unittest.TestCase):
@@ -43,6 +43,91 @@ class HoldoutForms(unittest.TestCase):
     def test_a_bank_without_holdout_forms_is_refused(self):
         with self.assertRaisesRegex(ValueError, "holdout"):
             holdout_forms(self.bank({"trained": {"url": "https://b.example/form"}}))
+
+
+class Agreement(unittest.TestCase):
+    def test_share_over_the_tolerance_and_largest_difference(self):
+        left = {"a": [0.9, 0.1], "b": [0.5, 0.3]}
+        right = {"a": [0.91, 0.2], "b": [0.56, 0.3]}
+        # differences 0.01, 0.10, 0.06, 0: two of four exceed 0.05
+        result = agreement(left, right, atol=0.05)
+        self.assertEqual(result["rows"], 4)
+        self.assertAlmostEqual(result["share_diff_gt_atol"], 0.5)
+        self.assertAlmostEqual(result["max_abs_diff"], 0.1)
+        self.assertEqual(result["atol"], 0.05)
+
+    def test_counts_decisions_that_would_be_filled_differently(self):
+        # The last probability of each decision is the abstain candidate's.
+        reference = {"a": [0.996, 0.1, 0.01], "b": [0.3, 0.2, 0.01], "c": [0.96, 0.95, 0.0]}
+        other = {"a": [0.994, 0.1, 0.01], "b": [0.3, 0.2, 0.01], "c": [0.95, 0.96, 0.0]}
+        result = agreement(reference, other, thresholds=[0.9, 0.995])
+        self.assertEqual(result["decisions_with_different_fill"], {"0.9": 1, "0.995": 1})
+
+    def test_different_decisions_are_refused(self):
+        with self.assertRaisesRegex(ValueError, "decisions"):
+            agreement({"a": [0.1], "b": [0.2]}, {"a": [0.1]})
+        with self.assertRaisesRegex(ValueError, "decisions"):
+            agreement({"a": [0.1]}, {"a": [0.1], "c": [0.2]})
+
+    def test_different_candidate_counts_are_refused(self):
+        with self.assertRaisesRegex(ValueError, "rows"):
+            agreement({"a": [0.1, 0.2]}, {"a": [0.1]})
+
+
+class Fill(unittest.TestCase):
+    def test_fills_the_best_candidate_when_it_clears_the_bar_and_beats_abstaining(self):
+        self.assertEqual(fill([0.2, 0.97, 0.1], 0.95), 1)
+        self.assertIsNone(fill([0.2, 0.94, 0.1], 0.95))
+        self.assertIsNone(fill([0.2, 0.97, 0.98], 0.95))
+
+
+class ApplyProbabilities(unittest.TestCase):
+    def test_sets_each_rows_p_from_a_saved_scoring(self):
+        decisions = {"answer": {"d1": [{"x": 1}, {"x": 2}]}, "match": {}}
+        apply_probabilities(decisions, {"answer": {"d1": [0.3, 0.7]}, "match": {}})
+        self.assertEqual([row["p"] for row in decisions["answer"]["d1"]], [0.3, 0.7])
+
+    def test_a_saved_scoring_of_other_rows_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "decisions"):
+            apply_probabilities({"answer": {"d1": [{}]}}, {"answer": {"d2": [0.1]}})
+        with self.assertRaisesRegex(ValueError, "rows"):
+            apply_probabilities({"answer": {"d1": [{}]}}, {"answer": {"d1": [0.1, 0.2]}})
+
+
+class Probabilities(unittest.TestCase):
+    def test_keeps_each_decisions_rows_in_order(self):
+        decisions = {"answer": {"d1": [{"p": 0.9}, {"p": 0.2}]}, "match": {"m1": [{"p": 0.4}]}}
+        self.assertEqual(probabilities(decisions), {"answer": {"d1": [0.9, 0.2]}, "match": {"m1": [0.4]}})
+
+
+class NamedReference(unittest.TestCase):
+    def test_splits_name_and_path(self):
+        self.assertEqual(named_reference("mlx=/tmp/a.probs.json"), ("mlx", Path("/tmp/a.probs.json")))
+
+    def test_a_reference_without_a_name_is_refused(self):
+        with self.assertRaises(ValueError):
+            named_reference("/tmp/a.probs.json")
+
+
+class Metrics(unittest.TestCase):
+    def test_precision_and_coverage_at_a_threshold(self):
+        decisions = {
+            "d1": [
+                {"state": {"candidate": "Yes"}, "answers": {"correct": True}, "p": 0.96},
+                {"state": {"candidate": ABSTAIN}, "answers": {"correct": False}, "p": 0.1},
+            ],
+            "d2": [
+                {"state": {"candidate": "No"}, "answers": {"correct": False}, "p": 0.99},
+                {"state": {"candidate": ABSTAIN}, "answers": {"correct": True}, "p": 0.2},
+            ],
+        }
+        result = metrics(decisions, 0.95)
+        self.assertEqual(result["accepted"], 2)
+        self.assertEqual(result["right"], 1)
+        self.assertEqual(result["wrong_fill"], 1)
+        self.assertEqual(result["wrong_fill_on_unanswerable"], 1)
+        self.assertAlmostEqual(result["precision"], 0.5)
+        self.assertAlmostEqual(result["coverage"], 1.0)
 
 
 if __name__ == "__main__":
