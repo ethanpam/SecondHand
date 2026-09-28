@@ -169,6 +169,15 @@
     return { result, ambiguous, populated };
   }
 
+  function homeAddressChoice(doc, url, kind) {
+    if (kind !== "known" || !mapper.isAllowedURL(url)) return null;
+    // This is one inspected applicant question, never a generic radio mapping.
+    // The desktop adapter verifies both options, their labels, values, question,
+    // form membership and exact Iowa show/hide handlers; answered groups vanish.
+    const binding = iowa?.scan(doc, url).bindings.find(item => item.key === "hasHomeAddress");
+    return binding && binding.elements.every(element => safeForm(element.form, doc, url)) ? binding : null;
+  }
+
   function actionBindings(doc, url, kind) {
     if (["manual", "receipt"].includes(kind)) return [];
     // The real Iowa form puts required markers in labels, not HTML attributes.
@@ -244,11 +253,13 @@
     const scan = ["known", "mapping"].includes(page.kind) ? bindings(doc, url, page.kind) : { result: [], populated: 0, ambiguous: 0 };
     const fields = scan.result.map((field, index) => ({ ...field, id: `field-${index}` }));
     const actions = actionBindings(doc, url, page.kind).map((action, index) => ({ ...action, id: `action-${index}` }));
+    const homeChoice = homeAddressChoice(doc, url, page.kind);
     const token = doc.defaultView.crypto.randomUUID();
-    state.pending = { token, url, generation: state.generation, created: Date.now(), fields, actions, kind: page.kind, snapshot: snapshot(doc) };
+    state.pending = { token, url, generation: state.generation, created: Date.now(), fields, actions, homeChoice, kind: page.kind, snapshot: snapshot(doc) };
     return { token, documentID: state.documentID, pageURL: url, ...page,
       fields: fields.map(({ id, label, key, type }) => ({ id, label, key, type })),
       actions: actions.map(({ id, label, kind }) => ({ id, label, kind })),
+      canEnableHomeAddress: Boolean(homeChoice),
       populated: scan.populated, ambiguous: scan.ambiguous };
   }
 
@@ -293,15 +304,31 @@
     return element.maxLength >= 0 && value.length > element.maxLength ? null : value;
   }
 
-  async function reveal(element, doc) {
-    if (!rendered(element, doc)) return false;
-    if (!exposed(element, doc)) {
-      element.scrollIntoView?.({ block: "center", inline: "nearest", behavior: "instant" });
-      if (typeof doc.defaultView.requestAnimationFrame === "function") {
-        await new Promise(resolve => doc.defaultView.requestAnimationFrame(resolve));
+  async function reveal(element, doc, active = () => true) {
+    if (!active() || !rendered(element, doc)) return false;
+    if (exposed(element, doc)) return true;
+    // Safari can commit scroll/layout changes after the first animation frame,
+    // especially while its extension sheet or browser bars are moving. Require
+    // two exposed frames with a stable rectangle. Bound settling to 30 frames /
+    // 500 ms and one retry; never write through an overlay or offscreen.
+    element.scrollIntoView?.({ block: "center", inline: "nearest", behavior: "instant" });
+    if (typeof doc.defaultView.requestAnimationFrame !== "function") return active() && exposed(element, doc);
+    const deadline = doc.defaultView.performance.now() + 500;
+    let previous = null;
+    for (let frame = 0; frame < 30 && doc.defaultView.performance.now() < deadline; frame++) {
+      await new Promise(resolve => doc.defaultView.requestAnimationFrame(resolve));
+      if (!active() || !rendered(element, doc)) return false;
+      if (exposed(element, doc)) {
+        const rect = element.getBoundingClientRect();
+        const current = [rect.left, rect.top, rect.right, rect.bottom];
+        if (previous && current.every((value, index) => Math.abs(value - previous[index]) <= 0.5)) return true;
+        previous = current;
+      } else {
+        previous = null;
+        if (frame === 14) element.scrollIntoView?.({ block: "center", inline: "nearest", behavior: "instant" });
       }
     }
-    return exposed(element, doc);
+    return false;
   }
 
   async function fill(doc, url, token, assignments, values, expiresAt) {
@@ -328,7 +355,8 @@
         if (fresh?.length !== 1 || fresh[0] !== element) { skipped++; continue; }
       }
       const value = formatValue(assignment.key, values[assignment.key], element);
-      if (value === null || !await reveal(element, doc)) { skipped++; continue; }
+      const active = () => !cancelled(doc, plan) && validDocument(doc, url) && Date.now() < expiresAt;
+      if (value === null || !await reveal(element, doc, active)) { skipped++; continue; }
       // Scrolling/rendering is asynchronous. Repeat identity/context checks immediately before writing.
       if (cancelled(doc, plan) || !validDocument(doc, url) || Date.now() >= expiresAt || !eligible(element, doc, url)
         || pageContext(doc, url).kind !== plan.kind || String(element.value || "").trim()
@@ -346,6 +374,29 @@
     return { filled, skipped: skipped + Math.max(0, assignments.length - filled - skipped), needsInput: true };
   }
 
+  async function enableHomeAddress(doc, url, token, value, expiresAt) {
+    const plan = take(doc, url, token);
+    if (!plan || !plan.homeChoice || plan.kind !== "known") return { error: "preview_expired" };
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now() || expiresAt > Date.now() + 601_000) return { error: "session_expired" };
+    // Only the native vault's complete, reviewed home address authorizes Yes.
+    // Missing/false/No must never select or reverse an applicant's answer.
+    if (value !== "yes") return { filled: 0 };
+    const target = plan.homeChoice.element;
+    const active = () => !cancelled(doc, plan) && validDocument(doc, url) && Date.now() < expiresAt
+      && Date.now() - plan.created <= 120_000;
+    if (!await reveal(target, doc, active)) return active() ? { filled: 0 } : { error: "preview_expired" };
+    const fresh = homeAddressChoice(doc, url, pageContext(doc, url).kind);
+    if (cancelled(doc, plan) || !validDocument(doc, url) || Date.now() >= expiresAt
+      || Date.now() - plan.created > 120_000 || !unchanged(doc, plan.snapshot) || !fresh
+      || fresh.elements.some((element, index) => element !== plan.homeChoice.elements[index])
+      || !exposed(target, doc) || !iowa.visible(target, doc)) return { error: "preview_expired" };
+    // Reuse the exact choice click and dependent-answer guard. It refuses a
+    // choice that could hide/reset any existing home or mailing answers.
+    // The native click runs Iowa's own handler; no direct handler evaluation.
+    const result = iowa.fill(doc, url, [plan.homeChoice], { hasHomeAddress: "yes" });
+    return { filled: result.filled.includes("hasHomeAddress") ? 1 : 0 };
+  }
+
   async function act(doc, url, token, actionID, approvedSubmit, expiresAt) {
     const plan = take(doc, url, token);
     if (!plan) return { error: "preview_expired" };
@@ -358,7 +409,9 @@
     const fresh = actionBindings(doc, url, plan.kind);
     if (fresh.length !== 1 || fresh[0].element !== element || fresh[0].kind !== action.kind
       || !safeForm(form, doc, url, element) || !formComplete(form, doc) || !form.checkValidity()) return { error: "needs_input" };
-    if (!await reveal(element, doc)) return { error: "needs_input" };
+    const active = () => !cancelled(doc, plan) && validDocument(doc, url) && Date.now() < expiresAt
+      && Date.now() - plan.created <= 120_000;
+    if (!await reveal(element, doc, active)) return { error: active() ? "needs_input" : "preview_expired" };
     if (cancelled(doc, plan) || Date.now() >= expiresAt || !validDocument(doc, url) || Date.now() - plan.created > 120_000 || !unchanged(doc, plan.snapshot) || !exposed(element, doc)
       || element.matches(":disabled") || !safeForm(form, doc, url, element) || !formComplete(form, doc) || !form.checkValidity()
       || pageContext(doc, url).kind !== plan.kind) return { error: "preview_expired" };
@@ -368,7 +421,7 @@
     return { attempted: true, kind: action.kind };
   }
 
-  const api = Object.freeze({ isPortalURL, inspect, fill, act, cancel, formatValue });
+  const api = Object.freeze({ isPortalURL, inspect, fill, enableHomeAddress, act, cancel, formatValue });
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.SecondHandApplication = api;
 })(globalThis);

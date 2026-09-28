@@ -118,7 +118,7 @@ private final class OfflineApplicantQAModel: NSObject, ObservableObject, WKNavig
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
-                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+                 decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
         // Permit only WKWebView's initial in-memory HTML load. Even a fixture
         // link or scripted navigation cannot leave this document.
         let initialURL = navigationAction.request.url

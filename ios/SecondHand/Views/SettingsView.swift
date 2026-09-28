@@ -73,7 +73,7 @@ struct SettingsView: View {
                         }
                         Text("The link opens your default browser. If that isn’t Safari, open this address in Safari to use the extension.")
                             .font(.caption).foregroundStyle(.secondary)
-                        Text("Shared for 10 minutes: first, middle, and last name; email; home and mobile phone; home address; monthly income; monthly housing cost. General phone, household notes, written notes, and documents stay in the app. The website can save information as it is filled, before final submission. Revoking access doesn’t clear fields or withdraw information already sent.")
+                        Text("Shared for 10 minutes: first, middle, and last name; email; home and mobile phone; home address; monthly income; monthly housing cost. A complete home address you confirmed lets the assistant answer Yes to ‘Do you have a home address?’ and reveal its fields. It doesn’t guess other answers. General phone, household notes, written notes, and documents stay in the app. The website can save information as it is filled, before final submission. Revoking access doesn’t clear fields or withdraw information already sent.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
 
@@ -133,7 +133,7 @@ struct SettingsView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This includes name, email, home and mobile phone, home address, monthly income, and monthly housing cost. Iowa’s website can save filled information before submission. You still review answers and approve final submission.")
+                Text("This includes name, email, home and mobile phone, home address, monthly income, and monthly housing cost. A complete home address you confirmed allows the assistant to answer Yes to ‘Do you have a home address?’ It doesn’t guess other answers. Iowa’s website can save filled information before submission. You still review answers and approve final submission.")
             }
             .confirmationDialog("Permanently delete all app data?", isPresented: $deletingData, titleVisibility: .visible) {
                 Button("Delete all app data", role: .destructive) {

@@ -18,7 +18,8 @@ test("local multi-page application: automatic known fill, explicit mapping, sign
   const storage = {};
   let dom;
   let submitted = 0;
-  const profile = { firstName: "Example", lastName: "Applicant", monthlyIncome: "1234.50" };
+  const profile = { firstName: "Example", lastName: "Applicant", monthlyIncome: "1234.50", hasHomeAddress: "yes",
+    addressLine1: "100 Example Road", city: "Des Moines", state: "IA", postalCode: "50309" };
   const pages = {
     enterPersonalInfo: applicantFixture.html,
     income: '<h1>Income</h1><form action="income"><label>Monthly earnings<input id="earnings" required></label><button>Continue</button></form>',
@@ -81,10 +82,16 @@ test("local multi-page application: automatic known fill, explicit mapping, sign
   assert.equal(submitted, 0);
   assert.equal(view.scan.actions.length, 0);
   assert.equal(dom.window.document.querySelectorAll("input[required]").length, 0);
-  assert.equal(dom.window.document.querySelectorAll("input:checked").length, 0);
-  // These program and household answers come from the applicant, never autofill.
-  dom.window.document.querySelector("#hasHome1").click();
-  for (const [id, value] of Object.entries({ addressLine1: "100 Example Road", city: "Des Moines", state: "IA", zipcode: "50309" })) dom.window.document.getElementById(id).value = value;
+  assert.equal(dom.window.document.querySelectorAll("input:checked").length, 1);
+  assert.equal(dom.window.document.querySelector("#hasHome1").checked, true);
+  for (const [id, value] of Object.entries({ addressLine1: "100 Example Road", city: "Des Moines", state: "IA", zipcode: "50309" })) {
+    assert.equal(dom.window.document.getElementById(id).value, value);
+  }
+  assert.equal(view.workflow.filled, 6); // Text/select fields; Yes is reported separately.
+  assert.match(view.message, /Home address Yes selected/);
+  assert.ok(!Object.hasOwn(view.savedFields, "hasHomeAddress"));
+  assert.deepEqual(nativeCalls[1].keys, ["hasHomeAddress"]);
+  // The remaining program and household answers come from the applicant.
   dom.window.document.querySelector("#sameAddress1").click();
   dom.window.document.querySelector("#applicant1").click();
   dom.window.document.querySelector("#snap").click();

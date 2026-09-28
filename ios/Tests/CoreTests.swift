@@ -106,6 +106,70 @@ final class CoreTests: XCTestCase {
         XCTAssertNil(profile.applicationFields["mobilePhone"])
     }
 
+    func testConfirmedCompleteHomeAddressDerivesYesOnlyForApplicationSharing() throws {
+        let now = Date()
+        var profile = PersonalProfile()
+        profile.addressLine1 = " 123 Test Way "
+        profile.city = " Demo City "
+        profile.state = " ia "
+        profile.postalCode = " 50309 "
+        profile.reviewedAt = now
+        let fields = profile.applicationFields(now: now)
+        XCTAssertEqual(fields["hasHomeAddress"], "yes")
+        XCTAssertEqual(fields["addressLine1"], profile.addressLine1)
+        XCTAssertTrue(Set(fields.keys).isSubset(of: IowaApplicationBridge.allowedFieldKeys))
+        XCTAssertNil(profile.contactFields["hasHomeAddress"])
+        let encoded = try JSONEncoder().encode(profile)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertNil(object["hasHomeAddress"], "The answer is derived, not a persisted preference")
+        XCTAssertEqual(try JSONDecoder().decode(PersonalProfile.self, from: encoded).applicationFields(now: now)["hasHomeAddress"], "yes")
+    }
+
+    func testHomeAddressAnswerRequiresRecentConfirmationAndCompleteValidAddress() {
+        let now = Date()
+        var complete = PersonalProfile()
+        complete.addressLine1 = "123 Test Way"
+        complete.city = "Demo City"
+        complete.state = "IA"
+        complete.postalCode = "50309"
+        complete.reviewedAt = now.addingTimeInterval(-24 * 60 * 60 + 1)
+        XCTAssertEqual(complete.applicationFields(now: now)["hasHomeAddress"], "yes")
+
+        for reviewedAt in [nil, now.addingTimeInterval(1), now.addingTimeInterval(-24 * 60 * 60)] as [Date?] {
+            var profile = complete
+            profile.reviewedAt = reviewedAt
+            XCTAssertNil(profile.applicationFields(now: now)["hasHomeAddress"])
+        }
+        let invalidValues: [(WritableKeyPath<PersonalProfile, String>, String)] = [
+            (\.addressLine1, " \n "), (\.city, ""), (\.state, ""), (\.state, "ZZ"), (\.state, "Iowa"),
+            (\.postalCode, ""), (\.postalCode, "503"), (\.postalCode, "50309-1234"), (\.postalCode, "５０３０９")
+        ]
+        for (keyPath, value) in invalidValues {
+            var profile = complete
+            profile[keyPath: keyPath] = value
+            XCTAssertNil(profile.applicationFields(now: now)["hasHomeAddress"], "Incomplete or invalid addresses must not infer either answer")
+        }
+    }
+
+    func testApplicationSessionRejectsUnsupportedOrIncompleteHomeAddressAnswers() {
+        let now = Date()
+        let address = ["addressLine1": "123 Test Way", "city": "Demo City", "state": "IA", "postalCode": "50309"]
+        func session(_ fields: [String: String]) -> AutofillSession {
+            AutofillSession(expiresAt: now.addingTimeInterval(600), fields: fields)
+        }
+        XCTAssertTrue(session(address).isValid(now: now), "Older snapshots without a home-address answer remain valid")
+        var fields = address
+        fields["hasHomeAddress"] = "yes"
+        XCTAssertTrue(session(fields).isValid(now: now))
+        for answer in ["no", "true", "", "Yes"] {
+            fields["hasHomeAddress"] = answer
+            XCTAssertFalse(session(fields).isValid(now: now))
+        }
+        fields["hasHomeAddress"] = "yes"
+        fields.removeValue(forKey: "city")
+        XCTAssertFalse(session(fields).isValid(now: now))
+    }
+
     func testReadingExpiredSessionNeverDeletesTheSharedFile() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

@@ -1,10 +1,33 @@
-# iPhone autofill QA video
+# iPhone autofill QA videos
 
-[Watch/download the MP4](iphone-autofill-demo.mp4)
+## Live Safari — September 27, 2026
+
+[Watch/download the live Safari MP4](iphone-live-safari-demo.mp4)
+
+Duration: **6:33**. Portrait video: **588 × 1280**, H.264, **14.3 MB**, silent. This is an uninterrupted recording of the actual Simulator, including operator pauses; decoded frames were visually inspected.
+
+The recording shows the installed Safari extension on **SecondHand AutoApply QA**, an iPhone Simulator running iOS 26.5, filling Iowa's real **Enter Personal Information** page. It begins with the saved profile and sharing disclosure, then resets an earlier unsaved partial form through an ordinary Safari reload. From the freshly reloaded blank form, one **Start application assistance** action selects home-address **Yes** and fills **10 fields**: first/middle/last name, home/mobile phone, street, unit, city, state, and ZIP. The popup reports **“Home address Yes selected. 10 fields filled.”** The filled values were visually verified after the popup closed.
+
+Approximate landmarks:
+
+- **0:00** — saved native profile; **0:40** — sharing disclosure.
+- **2:29** — blank phone fields and unanswered home-address choice after reload.
+- **3:44** — extension Start screen; **4:27** — automatic Yes and ten-field success message.
+- **5:27** — filled address; **5:55** — phones; **6:27** — names.
+
+This verifies the real encrypted native sharing snapshot → installed Safari extension → live website. The user approved fictional **Avery Jordan Example** data with awareness of possible autosaving and completed CAPTCHA and consent. The signed Debug app used the approved Simulator-only `--ui-testing` bypass without `--offline-qa`. No applicant **Save and Continue**, signature, or submission was performed; physical hardware and the complete application workflow remain untested.
+
+The final signed Debug build, **20 native tests**, and **97 JavaScript tests** passed. An intermediate scroll-settling issue was fixed before this successful ten-field run. See the [validation report](../Validation.md#live-iphone-safari-autofill--september-27-2026) for the test boundary and remaining checks.
+
+MP4 SHA-256: `d36fe10ebb50d35d1f668a729fa91d0bda3c7a34bc6b9fd4531647591df57552`.
+
+## Earlier offline demo — September 27, 2026
+
+[Watch/download the offline MP4](iphone-autofill-demo.mp4)
 
 Recorded September 27, 2026, on the isolated **SecondHand AutoApply QA** iPhone Simulator, iOS 26.5. Duration: **3:35**. Portrait video: **588 × 1280**, H.264, approximately **6 MB**, silent. This is an uninterrupted recording of the actual running app; it includes pauses while operating the UI.
 
-## What the recording shows
+### What the offline recording shows
 
 1. The saved fictional **Avery Jordan Example** profile in Second Hand.
 2. Explicit approval of the normal ten-minute application-sharing snapshot.
@@ -15,9 +38,9 @@ Recorded September 27, 2026, on the isolated **SecondHand AutoApply QA** iPhone 
 
 The data comes from the real encrypted App Group snapshot through `SecureVault.readAutofillSession()`. The WebKit view runs the unchanged production field mapper, Iowa adapter, address policy, and application assistant. No field values or successful outcomes are scripted into the recording. Native diagnostics reported `unsupportedUntouched: true` for the asserted suffix, maiden-name, mailing-address-choice, applicant-choice, and program-choice controls on both fills.
 
-This verifies **saved native profile → encrypted sharing snapshot → production JavaScript → actual WebKit fields**. The QA view is inside the iPhone app; it is not the Safari extension popup and does not validate Safari native messaging. The form is reconstructed from public metadata, not a pixel-exact copy of Iowa's site. Login, CAPTCHA, live saving/submission, later application pages, physical-device authentication, and SNAP renewal remain unverified.
+This verifies **saved native profile → encrypted sharing snapshot → production JavaScript → actual WebKit fields**. The QA view is inside the iPhone app; it is not the Safari extension popup and does not validate Safari native messaging. The form is reconstructed from public metadata, not a pixel-exact copy of Iowa's site. This offline recording does not test login, CAPTCHA, live saving/submission, later application pages, physical-device authentication, or SNAP renewal. The separately authorized [live Safari follow-up](../Validation.md#live-iphone-safari-autofill--september-27-2026) records installed-extension results and remaining issues.
 
-## Replay locally
+### Replay the offline demo locally
 
 Use an isolated Simulator with fictional data only. In Xcode, select the **SecondHand** scheme, **Debug**, and an iPhone Simulator. Keep local signing enabled. Add both launch arguments:
 
@@ -32,7 +55,7 @@ Save and confirm a fake profile through **Profile**. Enable **Settings → Allow
 
 The local fixture's Content Security Policy blocks external resources, connections, and form submission. Native navigation cancellation prevents leaving the fixture, its web data store is nonpersistent, and Back/Save controls are disabled. The official URL is supplied only as the in-memory document's base URL so production URL checks can run unchanged; it is never requested by this view. Production website permissions and URL restrictions were not expanded.
 
-## Rebuild and record
+### Rebuild and record the offline demo
 
 From the repository root, with the pinned Node dependencies installed:
 
