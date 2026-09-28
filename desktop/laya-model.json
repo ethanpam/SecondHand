@@ -1,4 +1,38 @@
 {
   "version": 1,
-  "model": null
+  "model": {
+    "revision": "d1beee2813ce4996c50695eb604841365808f1e3",
+    "files": [
+      {
+        "path": "model.onnx",
+        "url": "https://huggingface.co/JacobTDang/secondhand-laya/resolve/d1beee2813ce4996c50695eb604841365808f1e3/model.onnx",
+        "size": 3820399,
+        "sha256": "4fba842d827c73f596b8f17be4a98700d258cfc43365e32898f577b365314fb8"
+      },
+      {
+        "path": "model.onnx.data",
+        "url": "https://huggingface.co/JacobTDang/secondhand-laya/resolve/d1beee2813ce4996c50695eb604841365808f1e3/model.onnx.data",
+        "size": 421294080,
+        "sha256": "af1f87d7d95ff5c72f205b81c91f414cd53bc4632d41972397b99a43a13cd741"
+      },
+      {
+        "path": "tokenizer/tokenizer.json",
+        "url": "https://huggingface.co/JacobTDang/secondhand-laya/resolve/d1beee2813ce4996c50695eb604841365808f1e3/tokenizer/tokenizer.json",
+        "size": 3583228,
+        "sha256": "6c8aaa9a542084f2457eab775d4eeb51f92a70c0fd9de28d5edb0ddec3c08d30"
+      },
+      {
+        "path": "tokenizer/tokenizer_config.json",
+        "url": "https://huggingface.co/JacobTDang/secondhand-laya/resolve/d1beee2813ce4996c50695eb604841365808f1e3/tokenizer/tokenizer_config.json",
+        "size": 308,
+        "sha256": "50044de60daaa73df97d262e15a40d4faf0160e7d742df64b377877a1320dd12"
+      },
+      {
+        "path": "rl_agent_config.json",
+        "url": "https://huggingface.co/JacobTDang/secondhand-laya/resolve/d1beee2813ce4996c50695eb604841365808f1e3/rl_agent_config.json",
+        "size": 1019,
+        "sha256": "7f4cb9dd484a70cd6352eb1efb804e5ebcc9b346e352215318aff486ced58c36"
+      }
+    ]
+  }
 }

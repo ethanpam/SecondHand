@@ -119,13 +119,13 @@ test('with the toggle off, startup reads, downloads, and loads nothing for Laya'
   assert.equal(fs.existsSync(path.join(app.userData, 'models')), false);
 });
 
-test('the shipped manifest has no model yet, so turning Laya on fails loudly and changes nothing', async t => {
+test('the shipped manifest pins the published model, and with Laya off nothing is downloaded', async t => {
   const app = await desktop(t);
   const status = await app.invoke('status');
-  assert.deepEqual(plain(status.laya), { state: 'unavailable', enabled: false, message: 'No Laya model is available to download yet.' });
-  await assert.rejects(app.invoke('setLayaEnabled', true), /No Laya model is available to download yet/);
+  const manifest = require('../desktop/laya-model.json');
+  assert.deepEqual(plain(status.laya), { state: 'off', enabled: false, sizeBytes: manifest.model.files.reduce((sum, file) => sum + file.size, 0) });
   assert.equal(app.writes.length, 0);
-  await assert.rejects(app.invoke('downloadLaya'), /No Laya model is available to download yet/);
+  assert.equal(fs.existsSync(path.join(app.userData, 'models')), false);
 });
 
 test('turning Laya on is saved, starts the download in one click, and turning it off is saved too', async t => {

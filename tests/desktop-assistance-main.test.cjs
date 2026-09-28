@@ -407,9 +407,9 @@ async function answering(settings) {
   return app;
 }
 
-test('this build has no Laya runtime: both Laya requests answer "not ready" and status says Laya is unavailable', async () => {
+test('with the shipped model and Laya off (the default), both Laya requests answer "not ready" and status says Laya is off', async () => {
   const app = await desktop({ settings: trusted });
-  assert.deepEqual(plain((await app.request({ type: 'status' })).laya), { state: 'unavailable' });
+  assert.deepEqual(plain((await app.request({ type: 'status' })).laya), { state: 'off' });
   const reads = app.dataReads;
   for (const request of [...layaRequests, answerRequest([sixty], { url: 'https://untrusted.example.org/' })]) {
     await assert.rejects(app.request(request), error => error.publicCode === 'LAYA_NOT_READY' && /Laya isn’t ready/.test(error.publicMessage), request.type);
@@ -612,7 +612,7 @@ test('warmLaya loads Laya’s model before a click’s questions are asked and a
   const offApp = await desktop({ laya: off });
   assert.deepEqual(plain(await offApp.request({ type: 'warmLaya' })), { state: 'off' });
   assert.equal(off.warms.length, 0, 'a Laya that is off is not loaded');
-  assert.deepEqual(plain(await (await desktop()).request({ type: 'warmLaya' })), { state: 'unavailable' }, 'this build ships no model');
+  assert.deepEqual(plain(await (await desktop()).request({ type: 'warmLaya' })), { state: 'off' }, 'the shipped model is off until the applicant turns Laya on');
 
   // A model that fails to load reports as an error, as the runtime does, instead of failing the click.
   let state = 'ready';
