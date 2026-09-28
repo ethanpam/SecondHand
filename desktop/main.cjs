@@ -219,11 +219,16 @@ if (nativeOrigin) {
       // with the option that would be filled. Iowa's portal keeps its rule of no sensitive prompt.
       const count = chosen.length;
       const lines = chosen.map(question => `“${question.label}”: ${answers[question.id]}`).join('\n');
+      // Laya reads every sensitive fact at once, so the prompt names them all and says how many
+      // answers needed them; which fact decided an answer is not known.
+      const needed = sensitive.length;
+      const which = needed === count ? (count === 1 ? 'this answer' : 'these answers') : `${needed} of these answers`;
+      const uses = needed === count ? (count === 1 ? 'It uses' : 'They use') : `${needed} of them ${needed === 1 ? 'uses' : 'use'}`;
       const approved = await approveRelease({ context, iowa, origin, generation,
         message: `Fill ${count === 1 ? 'this answer' : 'these answers'} into ${iowa ? 'Iowa’s application' : origin}?`,
         items: `Laya, SecondHand’s AI on this computer, picked ${count === 1 ? 'this answer' : 'these answers'} from your saved information:\n${lines}`,
-        sensitive: !iowa && sensitive.length ? { message: `Fill ${count === 1 ? 'an answer' : 'answers'} on ${origin} that ${sensitive.length === 1 ? 'uses' : 'use'} sensitive details?`,
-          detail: `${sensitiveFields.map(field => FIELD_LABELS[field]).join(', ')}\n\nLaya, SecondHand’s AI on this computer, used these saved details to pick ${sensitive.length === 1 ? 'an answer' : 'answers'} below. The details stay on this computer. Only allow this if you meant to give these answers to ${origin}:\n${lines}` } : null });
+        sensitive: !iowa && needed ? { message: `Fill ${count === 1 ? 'this answer' : `these ${count} answers`} on ${origin}? ${uses} sensitive details.`,
+          detail: `${sensitiveFields.map(field => FIELD_LABELS[field]).join(', ')}\n\nLaya, SecondHand’s AI on this computer, read these saved details to pick ${which}. The details stay on this computer. Only allow this if you meant to give these answers to ${origin}:\n${lines}` } : null });
       touch();
       return { answers: approved ? answers : {}, accessRevision };
     } catch (error) {

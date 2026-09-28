@@ -452,6 +452,27 @@ test('with Always allow on, everyday answers need no prompt; answers that needed
   assert.deepEqual(plain(cancelled.answers), {}, 'Cancel returns no answers');
 });
 
+test('the sensitive prompt says how many of the answers needed sensitive details, in plain grammar, and that Laya read them', async () => {
+  const app = await answering(trusted);
+  app.answer(async () => ({ response: 1 }));
+  await app.request(answerRequest([sixty]));
+  await app.request(answerRequest([sixty, veteran]));
+  // Both questions settled only once the applicant's age was known.
+  const both = await desktop({ laya: stubLaya(state => state.facts.includes('years old') ? (state.candidate === 'No' ? 0.97 : 0.01) : (state.candidate.startsWith('None') ? 0.95 : 0.01)), settings: trusted });
+  await both.invoke('saveProfile', household);
+  both.answer(async () => ({ response: 1 }));
+  await both.request(answerRequest([sixty, veteran]));
+  const prompts = [...app.prompts, ...both.prompts];
+  assert.deepEqual(prompts.map(prompt => prompt.message), [
+    'Fill this answer on https://pantry.example.org? It uses sensitive details.',
+    'Fill these 2 answers on https://pantry.example.org? 1 of them uses sensitive details.',
+    'Fill these 2 answers on https://pantry.example.org? They use sensitive details.']);
+  assert.match(prompts[0].detail, /Laya, SecondHand’s AI on this computer, read these saved details to pick this answer\./);
+  assert.match(prompts[1].detail, /read these saved details to pick 1 of these answers\./);
+  assert.match(prompts[2].detail, /read these saved details to pick these answers\./);
+  for (const prompt of prompts) assert.doesNotMatch(prompt.detail, /used these saved details/, 'Laya was given every sensitive fact; which one it relied on is unknown');
+});
+
 test('without Always allow, answers that needed sensitive facts fold into the same single "Share sensitive details?" prompt', async () => {
   const app = await answering(asking);
   app.answer(async () => ({ response: 1 }));
