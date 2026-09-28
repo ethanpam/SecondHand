@@ -345,7 +345,8 @@
   const megabytes = bytes => `${Math.round(bytes / 1e6)} MB`;
 
   // Laya's model status in the Chrome extension view: off, unavailable, not downloaded (or
-  // paused), downloading, ready, or error. Progress is polled while a download runs.
+  // paused), downloading, ready, or error, then what its update check said or an update's progress.
+  // Progress is polled while a download or an update download runs.
   function renderLaya(laya = vaultStatus.laya || { state: 'off', enabled: false }) {
     const size = laya.sizeBytes ? megabytes(laya.sizeBytes) : '';
     const percent = Math.floor((laya.progress || 0) * 100);
@@ -357,9 +358,12 @@
       ready: size ? `Ready. The model (${size}) is on this computer.` : 'Ready.',
       error: laya.message
     }[laya.state];
-    $('laya-toggle').checked = Boolean(laya.enabled);
+    const update = laya.update;
+    const updating = update?.state === 'downloading';
+    const note = updating ? `Downloading an update: ${Math.floor((update.progress || 0) * 100)}% of ${megabytes(update.sizeBytes)}…` : update?.message;
+    $('laya-toggle').checked = Boolean(laya.enabled) && laya.state !== 'unavailable';
     $('laya-toggle').disabled = laya.state === 'unavailable';
-    $('laya-status').textContent = text || '';
+    $('laya-status').textContent = [text, note].filter(Boolean).join(' ');
     const paused = laya.state === 'not-downloaded' && percent > 0;
     $('laya-progress').hidden = !(laya.state === 'downloading' || paused);
     $('laya-progress').value = percent;
@@ -368,7 +372,7 @@
     $('laya-cancel').hidden = laya.state !== 'downloading';
     $('laya-remove').hidden = !['ready', 'error'].includes(laya.state);
     clearTimeout(layaPoll);
-    if (laya.state === 'downloading') {
+    if (laya.state === 'downloading' || updating) {
       const generation = vaultGeneration;
       layaPoll = setTimeout(() => {
         api.layaStatus().then(status => { if (generation === vaultGeneration) showLaya(status); },
@@ -757,7 +761,7 @@
   for (const [buttonId, method, question, message] of [
     ['laya-download', 'downloadLaya', '', ''],
     ['laya-cancel', 'cancelLayaDownload', '', ''],
-    ['laya-remove', 'removeLaya', 'Remove the Laya model from this computer? You can download it again later.', 'The Laya model was removed from this computer.']
+    ['laya-remove', 'removeLaya', 'Remove the Laya model from this computer and turn Laya off? Turn it on again to download the model.', 'The Laya model was removed from this computer, and Laya is off.']
   ]) {
     $(buttonId).addEventListener('click', () => {
       if (question && !window.confirm(question)) return;

@@ -1,12 +1,12 @@
 'use strict';
 
-// The Laya model files: an opt-in download pinned by desktop/laya-model.json, stored under
-// userData at models/laya/<revision>/ and never bundled with the app. Nothing is used until every
-// file matches its pinned size and hash. The manifest is { "version": 1, "model": null } until a
-// model is published, then:
-//   { "version": 1, "model": { "revision": "<40-hex commit>", "files": [
+// The Laya model files: downloaded, never bundled with the app, and stored under userData at
+// models/laya/<revision>/. Nothing is used until every file matches its pinned size and hash. A
+// manifest is { "version": 1, "model": null } when no model is published, else:
+//   { "version": 1, "model": { "revision": "<40-hex commit>", "format": "noul-v1", "files": [
 //     { "path": "model.onnx", "url": "https://huggingface.co/<repo>/resolve/<revision>/model.onnx", "size": <bytes>, "sha256": "<hex>" }, … ] } }
-// listing every path in MODEL_FILES.
+// listing every path in MODEL_FILES. desktop/laya-model.json is the one the app ships with, the
+// model repo's latest.json names the newest model, and models/laya/installed.json the installed one.
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
 const { createReadStream, createWriteStream } = require('node:fs');
@@ -14,8 +14,15 @@ const http = require('node:http');
 const https = require('node:https');
 const path = require('node:path');
 const { pipeline } = require('node:stream/promises');
+const { atomicWrite } = require('./vault.cjs');
 
 const MODEL_FILES = Object.freeze(['model.onnx', 'model.onnx.data', 'tokenizer/tokenizer.json', 'tokenizer/tokenizer_config.json', 'rl_agent_config.json']);
+// Model formats this app can run. noul-v1: one yes/no (noul) question per candidate answer, asked
+// with the prompts in shared/laya-prompts.cjs. A model trained on other prompts gets a new format,
+// so an app that can't ask them never installs it.
+const MODEL_FORMATS = Object.freeze(['noul-v1']);
+const INSTALLED = 'installed.json';
+const MAX_MANIFEST_BYTES = 1024 * 1024;
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const DISK_ERRORS = new Set(['ENOSPC', 'EDQUOT', 'EACCES', 'EPERM', 'EROFS', 'EIO', 'EISDIR', 'ENOTDIR']);
 const STALL_MS = 30000;
@@ -25,6 +32,17 @@ class DownloadError extends Error {
   constructor(message) { super(message); this.publicMessage = message; }
 }
 const incomplete = () => new DownloadError('The Laya model download was incomplete, so SecondHand deleted it. Try again.');
+// What a failed request says, for a model download and for an update check.
+const DOWNLOAD = Object.freeze({
+  redirect: 'The Laya model download was redirected somewhere SecondHand doesn’t trust. Try again later.',
+  stalled: 'The Laya model download stopped responding. Try again.',
+  network: code => `The Laya model couldn’t be downloaded (${code}). Check the internet connection and try again.`
+});
+const CHECK = Object.freeze({
+  redirect: 'Update check failed: it was redirected somewhere SecondHand doesn’t trust.',
+  stalled: 'Update check failed: the server stopped responding.',
+  network: code => `Update check failed: couldn’t reach the server (${code}).`
+});
 
 // https, or http to this computer (which never leaves it). The pinned SHA-256 decides what is kept.
 function allowedUrl(value) {
@@ -38,8 +56,9 @@ function validateManifest(manifest) {
   if (!manifest || manifest.version !== 1) fail('it must be version 1');
   if (!Object.hasOwn(manifest, 'model')) fail('it needs a model entry, or null when no model is published');
   if (manifest.model === null) return { model: null };
-  const { revision, files } = manifest.model;
+  const { revision, format, files } = manifest.model;
   if (typeof revision !== 'string' || !/^[0-9a-f]{40}$/.test(revision)) fail('the revision must be a 40-character commit hash');
+  if (typeof format !== 'string' || !/^[a-z0-9][a-z0-9.-]{0,31}$/.test(format)) fail('the format must name the model’s prompt format, such as noul-v1');
   if (!Array.isArray(files)) fail('it must list its files');
   const seen = new Set();
   for (const file of files) {
@@ -56,7 +75,18 @@ function validateManifest(manifest) {
   const missing = MODEL_FILES.filter(name => !seen.has(name));
   if (missing.length) fail(`it must list ${missing.join(', ')}`);
   const ordered = MODEL_FILES.map(name => files.find(file => file.path === name));
-  return { model: Object.freeze({ revision, files: ordered.map(file => Object.freeze({ ...file })), sizeBytes: ordered.reduce((sum, file) => sum + file.size, 0) }) };
+  return { model: Object.freeze({ revision, format, files: ordered.map(file => Object.freeze({ ...file })), sizeBytes: ordered.reduce((sum, file) => sum + file.size, 0) }) };
+}
+
+// The installed model: models/laya/installed.json, written once all its files were verified.
+// Null when there is none; a damaged record is refused with the reason.
+async function readInstalled(userDataDir) {
+  let text;
+  try { text = await fs.readFile(path.join(userDataDir, 'models', 'laya', INSTALLED), 'utf8'); }
+  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  let manifest;
+  try { manifest = JSON.parse(text); } catch { throw new Error('installed.json isn’t valid JSON'); }
+  return validateManifest(manifest).model;
 }
 
 async function sizeOf(file) {
@@ -71,7 +101,8 @@ async function sha256Of(file, end) {
 }
 
 // GET that follows redirects (Hugging Face sends files from a CDN) to allowed URLs only.
-function get(url, headers, signal, redirects = MAX_REDIRECTS) {
+// `messages` says what a failure means: DOWNLOAD or CHECK.
+function get(url, { headers = {}, signal, messages }, redirects = MAX_REDIRECTS) {
   return new Promise((resolve, reject) => {
     const target = new URL(url);
     const transport = target.protocol === 'https:' ? https : http;
@@ -79,16 +110,39 @@ function get(url, headers, signal, redirects = MAX_REDIRECTS) {
       if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location) {
         response.resume();
         const next = new URL(response.headers.location, target).href;
-        if (!redirects || !allowedUrl(next)) { reject(new DownloadError('The Laya model download was redirected somewhere SecondHand doesn’t trust. Try again later.')); return; }
-        resolve(get(next, headers, signal, redirects - 1));
+        if (!redirects || !allowedUrl(next)) { reject(new DownloadError(messages.redirect)); return; }
+        resolve(get(next, { headers, signal, messages }, redirects - 1));
         return;
       }
       resolve(response);
     });
-    request.on('timeout', () => request.destroy(new DownloadError('The Laya model download stopped responding. Try again.')));
-    request.on('error', error => reject(error instanceof DownloadError || signal.aborted ? error :
-      new DownloadError(`The Laya model couldn’t be downloaded (${error.code || error.message}). Check the internet connection and try again.`)));
+    request.on('timeout', () => request.destroy(new DownloadError(messages.stalled)));
+    request.on('error', error => reject(error instanceof DownloadError || signal.aborted ? error : new DownloadError(messages.network(error.code || error.message))));
   });
+}
+
+// Reads an update list (the model repo's latest.json) and checks it like the shipped manifest.
+// Every failure is a DownloadError whose message starts "Update check failed:".
+async function fetchManifest(url, signal) {
+  const failed = reason => new DownloadError(`Update check failed: ${reason}`);
+  if (!allowedUrl(url)) throw failed('the update list must be read over https.');
+  const response = await get(url, { signal, messages: CHECK });
+  if (response.statusCode !== 200) { response.resume(); throw failed(`the server answered ${response.statusCode}.`); }
+  const chunks = [];
+  let size = 0;
+  try {
+    for await (const chunk of response) {
+      size += chunk.length;
+      if (size > MAX_MANIFEST_BYTES) { response.destroy(); throw failed(`the update list is larger than ${MAX_MANIFEST_BYTES / 1024 / 1024} MB.`); }
+      chunks.push(chunk);
+    }
+  } catch (error) {
+    if (error instanceof DownloadError || signal.aborted) throw error;
+    throw failed('the connection ended early.');
+  }
+  let manifest;
+  try { manifest = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw failed('the update list isn’t valid JSON.'); }
+  try { return validateManifest(manifest); } catch (error) { throw failed(error.message); }
 }
 
 class ModelStore {
@@ -147,6 +201,25 @@ class ModelStore {
     await fs.rm(this.root, { recursive: true, force: true });
   }
 
+  // Records this revision as the installed model, once every file was verified.
+  async install() {
+    const { revision, format, files } = this.model;
+    const model = { revision, format, files: files.map(({ path: file, url, size, sha256 }) => ({ path: file, url, size, sha256 })) };
+    await atomicWrite(path.join(this.root, INSTALLED), Buffer.from(`${JSON.stringify({ version: 1, model }, null, 2)}\n`));
+  }
+
+  // Deletes everything else under models/laya: other revisions and partial downloads, but not
+  // installed.json or the revisions in `keep`.
+  async removeOthers(keep = []) {
+    const kept = new Set([this.model.revision, INSTALLED, ...keep]);
+    let entries;
+    try { entries = await fs.readdir(this.root); }
+    catch (error) { if (error.code === 'ENOENT') return; throw error; }
+    for (const entry of entries) {
+      if (!kept.has(entry)) await fs.rm(path.join(this.root, entry), { recursive: true, force: true });
+    }
+  }
+
   // Checks every file against its pinned size and SHA-256 before the model is used.
   async verify() {
     for (const file of this.model.files) {
@@ -170,10 +243,6 @@ class ModelStore {
       if (existing !== null) await fs.rm(target, { force: true });
       await this.downloadFile(file, target, signal);
     }
-    // Only the pinned revision is kept; an older one is replaced once the new one is complete.
-    for (const entry of await fs.readdir(this.root)) {
-      if (entry !== this.model.revision) await fs.rm(path.join(this.root, entry), { recursive: true, force: true });
-    }
   }
 
   async downloadFile(file, target, signal) {
@@ -182,7 +251,7 @@ class ModelStore {
     if (offset >= file.size) { await fs.rm(partial, { force: true }); offset = 0; }
     let hash = offset ? await sha256Of(partial, offset - 1) : crypto.createHash('sha256');
     this.received += offset;
-    const response = await get(file.url, offset ? { Range: `bytes=${offset}-` } : {}, signal);
+    const response = await get(file.url, { headers: offset ? { Range: `bytes=${offset}-` } : {}, signal, messages: DOWNLOAD });
     if (response.statusCode === 200 && offset) {
       // The server sent the whole file instead of the rest: start this file again.
       this.received -= offset;
@@ -228,4 +297,4 @@ class ModelStore {
   }
 }
 
-module.exports = { MODEL_FILES, validateManifest, ModelStore };
+module.exports = { MODEL_FILES, MODEL_FORMATS, validateManifest, readInstalled, fetchManifest, ModelStore };

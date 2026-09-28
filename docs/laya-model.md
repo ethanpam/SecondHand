@@ -6,7 +6,8 @@ SecondHand's local decision model: [Laya](https://huggingface.co/convaiinnovatio
 - **Base:** `aac6fef/laya-mlx`, fine-tuned with LayaStudio on an Apple M4 Max.
 - **Run:** `round2-lora-proper-1790530553`, from commit `5582a70` (dataset `round2-1790530494`, SHA-256 `1064fcfe…`).
 - **Task:** one fixed yes/no question per candidate: "Given the facts about the household, is the candidate the correct answer to the form question?" A question is answered only when its best candidate clears the confidence bar and beats "None of these, or the facts don't say".
-- **Runtime export:** int8 ONNX, 409 MB, published at [huggingface.co/JacobTDang/secondhand-laya](https://huggingface.co/JacobTDang/secondhand-laya) (commit `d1beee2813ce4996c50695eb604841365808f1e3`, Apache-2.0). The desktop app downloads it from that commit (`desktop/laya-model.json`). Exported with `uv run --no-sync python -m layastudio.export run:round2-lora-proper-1790530553 --target onnx --precision int8`. The exporter checked 10 decisions against the trained model: all gave the same answer, with probabilities within 0.0007.
+- **Format:** `noul-v1`, the single-candidate yes/no prompts in `shared/laya-prompts.cjs`.
+- **Runtime export:** int8 ONNX, 409 MB, published at [huggingface.co/JacobTDang/secondhand-laya](https://huggingface.co/JacobTDang/secondhand-laya) (commit `d1beee2813ce4996c50695eb604841365808f1e3`, Apache-2.0). The desktop app ships pinned to that commit (`desktop/laya-model.json`) and installs whatever newer model the repo's `latest.json` names (see [Publishing a model](#publishing-a-model)). Exported with `uv run --no-sync python -m layastudio.export run:round2-lora-proper-1790530553 --target onnx --precision int8`. The exporter checked 10 decisions against the trained model: all gave the same answer, with probabilities within 0.0007.
 
   | File | Bytes | SHA-256 |
   |---|---|---|
@@ -89,3 +90,19 @@ SSN is no longer a match candidate, so SecondHand never offers it.
 - **Matching precision is below 0.95** on both sets (0.909 test, 0.902 holdout at 0.95).
 - **Answers without their facts.** The previous model answered "No" to "Is anyone in your household 60 or older?" from facts that didn't include the applicant's age (a sensitive fact left out of the first pass). The answer happened to be right. Round 2 hasn't been re-checked for this in the app.
 - **Speed.** The int8 model runs on the CPU. Each candidate is a separate pass, so a text box with about 20 candidates can take seconds on a busy machine. See the runtime spike (#37) for measurements.
+
+## Publishing a model
+The desktop app reads `latest.json` from the repo's `main` branch at startup and every 24 hours while Laya is on, and installs the model it names when that model is newer and in a format the app can run ([security.md](security.md#local-ai-with-laya)). `latest.json` has the same form as `desktop/laya-model.json`:
+
+```json
+{ "version": 1, "model": { "revision": "<commit that holds the files>", "format": "noul-v1", "files": [
+  { "path": "model.onnx", "url": "https://huggingface.co/JacobTDang/secondhand-laya/resolve/<commit>/model.onnx", "size": 3820399, "sha256": "4fba842d…" }, … ] } }
+```
+
+It lists `model.onnx`, `model.onnx.data`, `tokenizer/tokenizer.json`, `tokenizer/tokenizer_config.json`, and `rl_agent_config.json`. `scripts/publish-laya-model.cjs` writes it, with the `hf` CLI logged in with write access to the repo:
+
+1. Check what it would publish: `node scripts/publish-laya-model.cjs <export folder> --repo JacobTDang/secondhand-laya --format noul-v1 --dry-run`. It prints `latest.json` with each file's size and SHA-256, and `<commit>` in place of the commit the upload makes. Nothing is uploaded.
+2. Publish: the same command without `--dry-run`, plus `--hf <path to hf>` (or `SECONDHAND_HF_CLI`) when `hf` isn't on the PATH, such as `--hf ../LayaStudio/.venv/bin/hf`. It uploads the five runtime files and gets their commit, uploads `latest.json` pinned to that commit, then reads `latest.json` back from `main` the way the app does. If `latest.json` already names the same files in the same format, it uploads nothing.
+3. Update this card: the run, the results, and the file table.
+
+A model trained on different prompts needs a new format (the round-3 model, #65, for example). Add it to `MODEL_FORMATS` in `desktop/laya-model.cjs` with the prompts it needs, release that app, then publish the model with `--format <new format>`. The script only accepts formats this checkout lists, and apps that don't list a format keep their installed model.

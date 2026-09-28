@@ -22,6 +22,8 @@ app.setName('SecondHand');
 // The step-by-step Chrome setup guide on SecondHand's website. During
 // development, SECONDHAND_WEBSITE_URL can point it at a local website.
 const EXTENSION_GUIDE_URL = 'https://secondhand-download.khoidoan00.chatgpt.site/chrome-extension';
+// The Laya model repo's pointer to its newest model (docs/laya-model.md).
+const LAYA_UPDATE_URL = 'https://huggingface.co/JacobTDang/secondhand-laya/resolve/main/latest.json';
 function extensionGuideUrl() {
   const local = !app.isPackaged && process.env.SECONDHAND_WEBSITE_URL;
   if (!local) return EXTENSION_GUIDE_URL;
@@ -62,7 +64,8 @@ if (nativeOrigin) {
   let extensionSetupPending = false;
   let autofillWithoutAsking = false;
   let trustedSites = [];
-  let layaEnabled = false;
+  // Laya is on unless the person turned it off. Until they choose, this is undefined and not saved.
+  let layaEnabled;
   // Released only after a named confirmation on sites other than Iowa's portal.
   const SENSITIVE_FIELDS = ['ssn', 'hasSsn', 'hasSsnAnswer', 'birthDate', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'assetsOnHand', 'monthlyMedicalExpenses',
     'usCitizen', 'disabled', 'blind', 'healthLimitation', 'medicare'];
@@ -71,13 +74,16 @@ if (nativeOrigin) {
   // access receipt matching a new process; six bytes leave ample safe-integer headroom.
   let accessRevision = crypto.randomBytes(6).readUIntBE(0, 6);
   const userData = app.getPath('userData');
-  // The app's one Laya runtime. Nothing is read, downloaded, or loaded until the person turns it
-  // on and a decision is asked for; desktop request handlers call laya.decide / laya.decideBatch.
+  // The app's one Laya runtime. While it is on, it downloads its model and keeps it up to date in
+  // the background; the model loads when a decision is asked for. Desktop request handlers call
+  // laya.decide / laya.decideBatch.
   const laya = createLaya({ userDataDir: userData, manifest: require('./laya-model.json'),
-    // A local export skips the SHA-256 pin, so only development builds accept one.
+    // Development builds may check another latest.json (its files are still pinned by SHA-256), or use
+    // a local export, which skips the pin.
+    updateUrl: !app.isPackaged && process.env.SECONDHAND_LAYA_UPDATE_URL || LAYA_UPDATE_URL,
     modelDir: !app.isPackaged && process.env.SECONDHAND_LAYA_MODEL_DIR ? path.resolve(process.env.SECONDHAND_LAYA_MODEL_DIR) : undefined });
   // An unreadable Laya status is shown as an error; it must not keep the app from opening.
-  const layaStatus = () => laya.status().catch(error => ({ state: 'error', enabled: layaEnabled, message: `Laya’s status couldn’t be read (${error.message}).` }));
+  const layaStatus = () => laya.status().catch(error => ({ state: 'error', enabled: layaEnabled !== false, message: `Laya’s status couldn’t be read (${error.message}).` }));
   // The extension's uses of that runtime: matching text boxes (#39) and answering choice questions (#42).
   const fieldSuggestions = createFieldSuggestions({ laya });
   const fieldAnswers = createFieldAnswers({ laya });
@@ -457,8 +463,9 @@ if (nativeOrigin) {
       layaEnabled = enabled;
       await laya.setEnabled(enabled);
       await saveSettings();
-      // One click: turning Laya on starts its download. Progress and failures show in its status.
-      if (enabled && (await laya.status()).state === 'not-downloaded') laya.startDownload();
+      // One click: turning Laya on checks for its newest model and downloads it. Progress and
+      // failures show in its status.
+      if (enabled) laya.update();
       touch(); return layaStatus();
     },
     async downloadLaya() {
@@ -467,7 +474,14 @@ if (nativeOrigin) {
       touch(); return layaStatus();
     },
     async cancelLayaDownload() { requireUnlocked(); await laya.cancelDownload(); touch(); return layaStatus(); },
-    async removeLaya() { requireUnlocked(); await laya.remove(); touch(); return layaStatus(); },
+    // Removing the model also turns Laya off, so it isn't downloaded again at the next start.
+    async removeLaya() {
+      requireUnlocked();
+      layaEnabled = false;
+      await laya.remove();
+      await saveSettings();
+      touch(); return layaStatus();
+    },
     async openPortal() { await shell.openExternal(PORTAL_URL); return true; },
     async openExtensionGuide() { await shell.openExternal(extensionGuideUrl()); return true; },
     async prepareExtension() {
@@ -562,9 +576,12 @@ if (nativeOrigin) {
       const stat = await fs.stat(configPath);
       if (stat.size <= 4096) { const config = JSON.parse(await fs.readFile(configPath, 'utf8')); if (EXTENSION_ID.test(config.extensionId || '')) { extensionId = config.extensionId; autofillWithoutAsking = config.autofillWithoutAsking === true; }
       if (Array.isArray(config.trustedSites)) trustedSites = [...new Set(config.trustedSites.filter(origin => typeof origin === 'string' && siteOrigin(origin) === origin))].slice(0, MAX_TRUSTED_SITES);
-      layaEnabled = config.layaEnabled === true; }
+      if (typeof config.layaEnabled === 'boolean') layaEnabled = config.layaEnabled; }
     } catch { /* Missing or invalid non-sensitive setup settings are reset. */ }
-    await laya.setEnabled(layaEnabled);
+    await laya.setEnabled(layaEnabled !== false);
+    // Downloads the model if it's missing, then checks for a newer one now and every 24 hours.
+    // It needs no unlock: it touches no saved information. It does nothing while Laya is off.
+    laya.startUpdates();
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     session.defaultSession.setPermissionCheckHandler(() => false);
     session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (_details, callback) => callback({ cancel: true }));
