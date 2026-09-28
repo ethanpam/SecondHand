@@ -26,7 +26,7 @@ export default function NotFound() {
             <a href="/#setup">Setup guide</a>
           </li>
           <li>
-            <a href="/#faq">Common questions</a>
+            <a href="/faq">Common questions</a>
           </li>
           <li>
             <a href="/privacy">Privacy policy</a>

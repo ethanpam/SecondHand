@@ -8,7 +8,7 @@ if (typeof globalThis.SecondHandStrings?.english !== 'function' || typeof global
 }
 // Must match BUILD in panel.js: change both together. The panel compares them to tell
 // when Chrome is still running an older worker than the pages it loaded from disk.
-const BUILD = '2026-09-26.4';
+const BUILD = '2026-09-27.1';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
@@ -30,6 +30,12 @@ const siteRuns = new Map(); // tabId -> the fill running on an approved site, so
 const sitePlans = new Map(); // tabId -> { url, frames } the widget's on-device AI saw. Field metadata only.
 // Tabs whose widget asked the side panel to open on the question list. The panel takes it once.
 const questionViews = new Set();
+// tabId -> Map(url -> { id, url, pageKey, lang, text, unread, summary }): the words of pages the side
+// panel summarizes and the key points it wrote for them. Memory only. Iowa's information-only screens
+// stay until the tab leaves Iowa; other pages are kept by address, the latest few.
+const pageReads = new Map();
+const PAGE_TEXT_LIMIT = 16000;
+const KEPT_PAGES = 8;
 // tabId -> { steps, handled, running }. Memory only: a page can never turn autofill on,
 // and if Chrome restarts this worker, autofill is off and the widget shows Autofill again.
 const autopilots = new Map();
@@ -79,7 +85,7 @@ async function activePortal(tabId) {
   return tab;
 }
 async function inject(tabId) {
-  await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'content.js'] });
+  await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js'] });
 }
 async function readPage(tabId, navigationPreview = true) {
   const tab = await activePortal(tabId);
@@ -226,6 +232,8 @@ function step(tabId) {
       if (page.kind === 'info') {
         remember(tabId, { state: 'continuing', filled: 0, needYou: [], ...say('worker.continuing'), pageKey: page.pageKey });
         currentPilot(tabId, pilot);
+        await keepIowaScreen(tabId, state.url, page.pageKey);
+        currentPilot(tabId, pilot);
         const result = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:continue' }, { frameId: 0 });
         currentPilot(tabId, pilot);
         if (!result?.continued) return remember(tabId, { state: 'waiting', filled: 0, needYou: [], ...(result?.reason ? adapterSays(result.reason) : say('iowa.clickContinue')), pageKey: page.pageKey });
@@ -287,7 +295,7 @@ async function iowaPageState(tabId) {
   const result = results.get(tabId);
   const general = state.page.kind === 'manual' && !state.page.todo && generalPages.get(tabId) === safeUrl(state.url);
   const page = keyedPage(general ? { ...state.page, todo: english(GENERAL_TODO) } : state.page);
-  return { page, scan: state.scan, result: result && result.pageKey === state.page.pageKey ? result : null, autopilot: autopilots.has(tabId) };
+  return { page, scan: state.scan, result: result && result.pageKey === state.page.pageKey ? result : null, autopilot: autopilots.has(tabId), ...summaryLine(tabId, state.url) };
 }
 // The adapter's instruction, reason, and checklist labels, each with its catalog key.
 function keyedPage(page) {
@@ -303,8 +311,9 @@ function siteOrigin(raw) {
     return url.protocol === 'https:' && url.hostname && !url.username && !url.password && !url.port && url.origin !== IOWA_ORIGIN ? url.origin : '';
   } catch { return ''; }
 }
+const SITE_FILES = Object.freeze({ js: ['generic-adapter.js', 'page-text.js', 'generic-content.js'] });
 const siteScript = origin => ({ id: `site-${new URL(origin).hostname}`, matches: [`${origin}/*`],
-  js: ['generic-adapter.js', 'generic-content.js'], allFrames: true, runAt: 'document_idle', persistAcrossSessions: true });
+  js: [...SITE_FILES.js], allFrames: true, runAt: 'document_idle', persistAcrossSessions: true });
 const frameScriptPrefix = origin => `frame-${new URL(origin).hostname}--`;
 const frameScript = (topOrigin, origin) => ({ ...siteScript(origin), id: `${frameScriptPrefix(topOrigin)}${new URL(origin).hostname}` });
 async function siteEnabled(origin) {
@@ -423,6 +432,7 @@ async function disableSite(tabId) {
   await removeAccess([...new Set([origin, ...unused])]);
   results.delete(tabId);
   sitePlans.delete(tabId);
+  forgetReads(tabId, entry => siteOrigin(entry.url) === origin);
   return { enabled: false, origin };
 }
 
@@ -675,7 +685,8 @@ async function currentPageState(tabId, route) {
   if (!origin) throw fault('worker.openIowaPortal');
   const enabled = await siteEnabled(origin);
   const result = results.get(tabId);
-  return { page: { kind: 'general', pageKey: 'general' }, result: enabled && result?.pageKey === 'general' ? result : null, autopilot: false, site: { origin, enabled, ...(enabled ? await siteReadiness(tab, origin) : { frames: [], ready: false }) } };
+  return { page: { kind: 'general', pageKey: 'general' }, result: enabled && result?.pageKey === 'general' ? result : null, autopilot: false,
+    site: { origin, enabled, ...(enabled ? await siteReadiness(tab, origin) : { frames: [], ready: false }) }, ...(enabled ? summaryLine(tabId, tab.url) : {}) };
 }
 
 async function autofill(tabId, route, guesses) {
@@ -749,6 +760,101 @@ async function pageQuestions(tabId, route) {
   return { lang: main.lang, pending, questions: frames.flatMap(frame => frame.questions).slice(0, QUESTION_LIMIT) };
 }
 
+// "What this page says": a page's own words for the side panel's summary, never form values, and the
+// key points the panel wrote for them. Nothing here reaches the desktop.
+function readOf(reply, iowa) {
+  const valid = reply && typeof reply.text === 'string' && reply.text.length <= PAGE_TEXT_LIMIT &&
+    (!iowa || (reply.pageKey === '' ? !reply.text : SecondHandIowa.INFO_PAGE_KEYS.includes(reply.pageKey)));
+  if (!valid) throw fault('worker.pageTextUnreadable');
+  return { pageKey: iowa ? reply.pageKey : 'general', lang: languageTag(reply.lang), text: reply.text.trim(), unread: false };
+}
+// The same words at the same address keep their key points; changed words are read afresh.
+function keepRead(tabId, url, read) {
+  const reads = pageReads.get(tabId) || new Map();
+  const kept = reads.get(url);
+  const entry = kept && !kept.unread && !read.unread && kept.text === read.text && kept.lang === read.lang ? kept : { id: crypto.randomUUID(), url, ...read, summary: null };
+  reads.delete(url);
+  reads.set(url, entry);
+  while (reads.size > KEPT_PAGES) reads.delete(reads.keys().next().value);
+  pageReads.set(tabId, reads);
+}
+function forgetReads(tabId, which) {
+  const reads = pageReads.get(tabId);
+  if (!reads) return;
+  for (const [url, entry] of reads) if (which(entry)) reads.delete(url);
+  if (!reads.size) pageReads.delete(tabId);
+}
+// The page on screen first, then the others, latest first.
+function listedReads(tabId, url, which) {
+  const entries = [...(pageReads.get(tabId)?.values() || [])].filter(which).reverse();
+  return { pages: [...entries.filter(entry => entry.url === url), ...entries.filter(entry => entry.url !== url)]
+    .map(({ id, url: address, pageKey, lang, text, unread, summary }) => ({ id, pageKey, lang, current: address === url, text, unread, summary })) };
+}
+// Autofill moves past Iowa's information-only screens at once, so each one's words are kept before
+// Continue. A screen that can't be read is kept as unread, so the side panel says so.
+async function keepIowaScreen(tabId, url, pageKey) {
+  let read;
+  try { read = readOf(await chrome.tabs.sendMessage(tabId, { type: 'secondhand:pageText' }, { frameId: 0 }), true); }
+  catch { read = null; }
+  keepRead(tabId, url, read?.text && read.pageKey === pageKey ? read : { pageKey, lang: '', text: '', unread: true });
+}
+const isIowaRead = entry => SecondHandIowa.isSupportedUrl(entry.url);
+async function iowaPageText(tabId) {
+  const tab = await activePortal(tabId);
+  await inject(tabId);
+  const read = readOf(await chrome.tabs.sendMessage(tabId, { type: 'secondhand:pageText' }, { frameId: 0 }), true);
+  if ((await activePortal(tabId)).url !== tab.url) throw fault('worker.pageLoading');
+  if (read.text) keepRead(tabId, tab.url, read);
+  return listedReads(tabId, tab.url, isIowaRead);
+}
+// A site's own words first, then each embedded form that is on: whole lines while they fit.
+async function sitePageText(tabId) {
+  const { tab, origin } = await activeSite(tabId);
+  await requireSite(origin);
+  const message = { type: 'secondhand:generic:pageText' };
+  const frames = (await enabledSiteFrames(tabId, origin)).sort((a, b) => a.frameId - b.frameId);
+  const reads = await Promise.all(frames.map(async ({ frameId }) => readOf(frameId === 0 ? await topSiteMessage(tabId, message) : await chrome.tabs.sendMessage(tabId, message, { frameId }), false)));
+  let text = '';
+  for (const line of reads.flatMap(read => read.text ? read.text.split('\n') : [])) {
+    const joined = text ? `${text}\n${line}` : line;
+    if (joined.length > PAGE_TEXT_LIMIT) break;
+    text = joined;
+  }
+  if (!text) return { pages: [] };
+  keepRead(tabId, tab.url, { pageKey: 'general', lang: reads[0].lang, text, unread: false });
+  return listedReads(tabId, tab.url, entry => entry.url === tab.url);
+}
+async function pageText(tabId) {
+  const tab = await chrome.tabs.get(tabId);
+  if (SecondHandIowa.isSupportedUrl(tab.url)) return iowaPageText(tabId);
+  if (siteOrigin(tab.url)) return sitePageText(tabId);
+  throw fault('worker.openIowaPortal');
+}
+// The side panel's key points for words it read: at most five short lines, in a language SecondHand speaks.
+function keepSummary(tabId, id, summary) {
+  const valid = summary && typeof summary === 'object' && SecondHandStrings.LANGUAGES.includes(summary.language) && typeof summary.english === 'boolean' &&
+    Array.isArray(summary.points) && summary.points.length <= 5 && summary.points.every(point => typeof point === 'string' && point.trim() && point.length <= 400);
+  if (!valid) throw fault('worker.requestFailed');
+  const entry = [...(pageReads.get(tabId)?.values() || [])].find(item => item.id === id);
+  // Points for words that have since changed are not kept: the new words get their own.
+  if (!entry) return { kept: false };
+  entry.summary = { language: summary.language, points: [...summary.points], english: summary.english };
+  return { kept: true };
+}
+// The widget can't size its own frame, so its tab's content script fits the frame to the
+// widget's measured width, one row taller while it shows a line.
+const cardWidth = width => Number.isInteger(width) && width > 0 && width <= 1000; // CSS pixels; the page caps it
+async function widgetSize(tabId, line, width) {
+  const reply = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:widgetSize', line, ...(width === undefined ? {} : { width }) }, { frameId: 0 });
+  if (reply?.sized !== true) throw fault('worker.requestFailed');
+  return { sized: true };
+}
+// The widget's one line: the first key point of the page on screen.
+function summaryLine(tabId, url) {
+  const summary = pageReads.get(tabId)?.get(url)?.summary;
+  return summary?.points.length ? { summary: { language: summary.language, point: summary.points[0], english: summary.english } } : {};
+}
+
 // An error reply carries the same English, key, and parameters as a result.
 function errorReply(error) {
   const text = typeof error?.message === 'string' ? error.message : '';
@@ -793,6 +899,9 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   else if (panel && message.type === 'ui:enableFrames' && message.confirmed === true) run = () => enableFrames(tabId);
   else if (panel && message.type === 'ui:disableSite' && message.confirmed === true) run = () => disableSite(tabId);
   else if (message.type === 'ui:questions') run = () => pageQuestions(tabId, route);
+  else if (panel && message.type === 'ui:pageText') run = () => pageText(tabId);
+  else if (panel && message.type === 'ui:keepSummary' && typeof message.id === 'string') run = async () => keepSummary(tabId, message.id, message.summary);
+  else if (launcher && message.type === 'ui:widgetSize' && typeof message.line === 'boolean' && (message.width === undefined || cardWidth(message.width))) run = () => widgetSize(tabId, message.line, message.width);
   else return;
   // A widget on another site is honored only while that site is turned on.
   const work = route === 'site' ? requireSite(siteOrigin(sender.tab.url)).then(run) : run();
@@ -802,20 +911,28 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
 chrome.tabs.onActivated?.addListener(info => {
   for (const tabId of autopilots.keys()) if (tabId !== info.tabId) stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], ...say('worker.stoppedTabChanged'), pageKey: results.get(tabId)?.pageKey || '' });
 });
-chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); generalPages.delete(tabId); sitePlans.delete(tabId); questionViews.delete(tabId); });
+chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); generalPages.delete(tabId); sitePlans.delete(tabId); questionViews.delete(tabId); pageReads.delete(tabId); });
 chrome.tabs.onUpdated?.addListener((tabId, change) => {
   if (change.status === 'loading') {
     results.delete(tabId);
     generalPages.delete(tabId);
     sitePlans.delete(tabId);
     questionViews.delete(tabId);
-    // Chrome omits other sites' URLs without the tabs permission, so re-read the
-    // tab: anything that is not Iowa's portal (or unreadable) ends autofill.
-    if (autopilots.has(tabId)) {
-      chrome.tabs.get(tabId).then(tab => { if (!SecondHandIowa.isSupportedUrl(tab.url)) autopilots.delete(tabId); }, () => autopilots.delete(tabId));
+    // Chrome omits other sites' URLs without the tabs permission, so re-read the tab: anything that
+    // is not Iowa's portal (or unreadable) ends autofill and forgets the Iowa screens kept for the summary.
+    if (autopilots.has(tabId) || [...(pageReads.get(tabId)?.values() || [])].some(isIowaRead)) {
+      const leftIowa = () => { autopilots.delete(tabId); forgetReads(tabId, isIowaRead); };
+      chrome.tabs.get(tabId).then(tab => { if (!SecondHandIowa.isSupportedUrl(tab.url)) leftIowa(); }, leftIowa);
     }
   }
   if (change.status === 'complete' && autopilots.has(tabId)) void step(tabId);
 });
+// Site registrations made by an older version name its older script list; an update brings them current.
+async function refreshSiteScripts() {
+  const stale = (await chrome.scripting.getRegisteredContentScripts()).filter(script => /^(site|frame)-/.test(script.id) &&
+    JSON.stringify(script.js) !== JSON.stringify(SITE_FILES.js));
+  if (stale.length) await chrome.scripting.updateContentScripts(stale.map(script => ({ id: script.id, js: [...SITE_FILES.js] })));
+}
+chrome.runtime.onInstalled?.addListener(details => { if (details.reason === 'update') void refreshSiteScripts(); });
 // Chrome's native panel persists alongside navigation; it never opens itself.
 chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});

@@ -29,7 +29,7 @@ export function SiteHeader() {
         <Brand />
         <nav aria-label="Main navigation">
           <a href="/#setup">Setup guide</a>
-          <a href="/#faq">Questions</a>
+          <a href="/faq">Questions</a>
           <a href="/privacy">Privacy</a>
         </nav>
         <a className="header-download" href="/#downloads">
@@ -55,7 +55,7 @@ export function SiteFooter() {
         <nav aria-label="Footer" className="footer-links">
           <a href="/">Download</a>
           <a href="/#setup">Setup guide</a>
-          <a href="/#faq">Common questions</a>
+          <a href="/faq">Common questions</a>
           <a href="/privacy">Privacy policy</a>
           <a href={downloads.checksums}>
             Download checksums <ExternalIcon size={14} />

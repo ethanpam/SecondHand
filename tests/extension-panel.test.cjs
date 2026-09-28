@@ -63,6 +63,7 @@ function content(t, url = `${adapter.PORTAL}/applicant`, { engine = true, matche
     focusField: (_document, _url, key) => { if (key !== 'firstName') return false; window.document.getElementById('firstName').focus(); return true; },
     fill: (_document, _url, bindings, values) => { for (const binding of bindings) binding.element.value = values[binding.key]; return { filled: bindings.map(binding => binding.key), skipped: [] }; }
   };
+  window.eval(source('page-text.js'));
   window.eval(source('content.js'));
   return { window, frames, calls, setKind: (value, instruction) => { kind = value; todo = instruction; }, get continued() { return continued; }, get advanced() { return advanced; },
     host: () => window.document.querySelector('[data-secondhand-assistant]'),
@@ -150,7 +151,7 @@ test('widget host is a full bar on fillable pages and a small pill elsewhere', t
   const page = content(t);
   const host = page.window.document.querySelector('[data-secondhand-assistant]');
   assert.equal(host.getAttribute('data-secondhand-size'), 'full');
-  assert.equal(host.style.height, '70px');
+  assert.equal(host.style.height, '46px');
   page.setKind('manual');
   page.window.dispatchEvent(new page.window.Event('popstate'));
   assert.equal(host.getAttribute('data-secondhand-size'), 'pill');
@@ -161,8 +162,8 @@ test('widget host is a full bar on fillable pages and a small pill elsewhere', t
   assert.equal(host.getAttribute('data-secondhand-size'), 'full');
 });
 
-test('the Iowa content script loads the general engine before content.js', () => {
-  assert.deepEqual(JSON.parse(source('manifest.json')).content_scripts[0].js, ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'content.js']);
+test('the Iowa content script loads the general engine and the page reader before content.js', () => {
+  assert.deepEqual(JSON.parse(source('manifest.json')).content_scripts[0].js, ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js']);
 });
 
 test('on Iowa pages the adapter has not verified, the general engine plans, fills, and focuses with metadata only', async t => {
@@ -224,7 +225,7 @@ test('the widget grows to full size once the general engine finds fields on an u
   assert.deepEqual(seen, ['hidden'], 'the widget is hidden while the engine reads the page');
   assert.equal(host.style.visibility, '');
   assert.equal(host.getAttribute('data-secondhand-size'), 'full');
-  assert.equal(host.style.height, '70px');
+  assert.equal(host.style.height, '46px');
   page.window.dispatchEvent(new page.window.Event('popstate'));
   assert.equal(host.getAttribute('data-secondhand-size'), 'full', 'stays full on the same page');
 
@@ -238,7 +239,7 @@ test('foreign extension messages cannot scan or focus, and the launcher cannot e
   const page = content(t);
   const host = page.window.document.querySelector('[data-secondhand-assistant]');
   assert.equal(page.request({ type: 'secondhand:pageState' }, { id: 'b'.repeat(32) }), undefined);
-  assert.equal(host.style.height, '70px');
+  assert.equal(host.style.height, '46px');
   assert.equal(page.request({ type: 'secondhand:focusField', key: 'firstName' }, { id: 'b'.repeat(32) }), undefined);
   assert.equal(page.request({ type: 'secondhand:focusField', key: 'firstName' }).focused, true);
   assert.equal(page.window.document.activeElement.id, 'firstName');
@@ -318,6 +319,9 @@ async function panel(t, initial = {}) {
       // The worker hands the side panel a widget's request for the question list once.
       if (!initial.launcher && showQuestions) { showQuestions = false; data = { ...data, showQuestions: true }; }
     } else if (payload.type === 'ui:questions') data = structuredClone(initial.questions ?? { lang: 'en', pending: 0, questions: [] });
+    else if (payload.type === 'ui:pageText') data = structuredClone(initial.pageText ?? { pages: [] });
+    else if (payload.type === 'ui:keepSummary') data = { kept: true };
+    else if (payload.type === 'ui:widgetSize') data = { sized: true };
     else if (payload.type === 'ui:autofill') { state.result = initial.autofill || doneResult; state.autopilot = Boolean(initial.autopilotAfterAutofill); data = structuredClone(state.result); }
     else if (payload.type === 'ui:stop') { state.autopilot = false; state.result = { state: 'stopped', filled: 0, needYou: [], message: 'Autofill stopped.', pageKey: 'iowa-personal-information' }; data = structuredClone(state.result); }
     else if (payload.type === 'ui:desktopStatus') data = { ...desktop };
@@ -336,6 +340,7 @@ async function panel(t, initial = {}) {
   if (initial.LanguageModel) window.LanguageModel = initial.LanguageModel;
   if (initial.Translator) window.Translator = initial.Translator;
   if (initial.LanguageDetector) window.LanguageDetector = initial.LanguageDetector;
+  if (initial.Summarizer) window.Summarizer = initial.Summarizer;
   // Chrome gives extension pages localStorage; jsdom has none for this origin. A shared map is one browser profile.
   const storage = initial.storage || new Map();
   Object.defineProperty(window, 'localStorage', { configurable: true, value: {
@@ -348,6 +353,10 @@ async function panel(t, initial = {}) {
     if (file === 'translation.js' && initial.stallMs) {
       const service = window.SecondHandTranslation;
       window.SecondHandTranslation = { ...service, create: (scope, options) => service.create(scope, { ...options, stallMs: initial.stallMs }) };
+    }
+    if (file === 'summary.js' && initial.stallMs) {
+      const service = window.SecondHandSummary;
+      window.SecondHandSummary = { ...service, create: (scope, options) => service.create(scope, { ...options, stallMs: initial.stallMs }) };
     }
   }
   await tick(); await tick();
@@ -442,6 +451,10 @@ test('widget on a fillable page offers one-click Autofill and cycles through wha
   assert.equal(view.get('widget').hidden, false);
   assert.equal(view.get('pill').hidden, true);
   assert.equal(view.get('need-you').hidden, true);
+  assert.equal(view.get('summary-line'), null, 'the key-points line is gone');
+  assert.equal(view.get('details').textContent.trim(), '', 'the logo is the details button and has no words');
+  assert.equal(view.get('details').getAttribute('aria-label'), EN['widget.detailsTitle']);
+  assert.equal(view.get('widget-text').classList.contains('visually-hidden'), true, 'the ready line is read to screen readers, not shown');
   view.get('autofill').click(); await tick();
   assert.equal(view.types().includes('ui:autofill'), false);
   await view.userClick('autofill');
@@ -450,11 +463,36 @@ test('widget on a fillable page offers one-click Autofill and cycles through wha
   assert.equal(view.get('widget-text').textContent, 'Filled 3');
   assert.equal(view.get('need-you').hidden, false);
   assert.equal(view.get('need-you').textContent, '2 need you');
+  assert.equal(view.get('widget-text').classList.contains('visually-hidden'), true, 'the yellow link says what is left; no line is added');
+  assert.equal(view.types().includes('ui:widgetSize'), false, 'the widget stays one row');
   for (let i = 0; i < 3; i++) await view.userClick('need-you');
   assert.deepEqual(view.requests.filter(request => request.type === 'ui:focusField').map(request => request.key), ['firstName', 'lastName', 'firstName']);
   assert.ok(view.requests.filter(request => request.type === 'ui:focusField').every(request => request.confirmed === true && !('tabId' in request)));
   await view.userClick('details');
   assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'ui:openPanel', confirmed: true });
+});
+
+test('widget frame fits the logo and its buttons, grows for the yellow link, and asks again only when that changes', async t => {
+  const view = await panel(t, { launcher: true });
+  // jsdom lays nothing out, so the widget reports the width Chrome would.
+  view.get('widget').getBoundingClientRect = () => ({ width: view.get('need-you').hidden ? 151.2 : 214.6 });
+  const sizes = () => plainRequests(view.requests.filter(request => request.type === 'ui:widgetSize'));
+  await view.userClick('autofill');
+  assert.deepEqual(sizes(), [{ type: 'ui:widgetSize', line: false, width: 152 }, { type: 'ui:widgetSize', line: false, width: 215 }]);
+  await view.userClick('autofill');
+  assert.equal(sizes().length, 2, 'the same width is not asked for again');
+});
+
+test('widget frame is a row taller for a line and stays as wide as the widget with it', async t => {
+  const view = await panel(t, { launcher: true, autofill: { state: 'locked', filled: 0, needYou: [], message: 'Unlock SecondHand to autofill.', pageKey: 'iowa-personal-information' } });
+  view.get('widget').getBoundingClientRect = () => ({ width: view.get('widget-text').classList.contains('visually-hidden') ? 180.4 : 231.8 });
+  const sizes = () => plainRequests(view.requests.filter(request => request.type === 'ui:widgetSize'));
+  await view.userClick('autofill');
+  assert.deepEqual(sizes(), [{ type: 'ui:widgetSize', line: false, width: 181 }]);
+  await view.userClick('unlock');
+  assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: true, width: 232 });
+  await view.userClick('autofill');
+  assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: false, width: 181 });
 });
 
 test('widget is a pill off the applicant page and opens the side panel from it', async t => {
@@ -470,10 +508,12 @@ test('widget shows Unlock when the vault is locked and returns to Autofill after
   await view.userClick('autofill');
   assert.equal(view.get('unlock').hidden, false);
   assert.equal(view.get('autofill').hidden, true);
+  assert.equal(view.get('widget-text').classList.contains('visually-hidden'), true, 'the Unlock button says it all');
   await view.userClick('unlock');
-  assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'ui:showApp', confirmed: true });
+  assert.deepEqual(plainRequests(view.requests.slice(-2)), [{ type: 'ui:showApp', confirmed: true }, { type: 'ui:widgetSize', line: true }]);
   assert.equal(view.get('autofill').hidden, false);
   assert.match(view.get('widget-text').textContent, /Unlock SecondHand, then click Autofill/);
+  assert.equal(view.get('widget-text').classList.contains('visually-hidden'), false);
 });
 
 test('widget reports an unreachable desktop and restores an earlier result after reloading', async t => {
@@ -813,6 +853,20 @@ test('the Iowa question request answers the page language, info-screen text, and
   assert.deepEqual(plain(page.request({ type: 'secondhand:questions' })).questions, [], 'a verified page is listed from its checklist, never the general engine');
 });
 
+test('the Iowa page-text request answers only an information-only screen’s words, for our extension only', t => {
+  const page = content(t);
+  const doc = page.window.document;
+  doc.documentElement.lang = 'en';
+  doc.body.insertAdjacentHTML('afterbegin', '<main><h1>Important Information when applying and what to expect.</h1><p>What you need to do.</p><input value="Synthetic private value"></main>');
+  const box = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 };
+  for (const node of doc.querySelectorAll('*')) { node.getBoundingClientRect = () => box; node.getClientRects = () => [box]; }
+  page.window.SecondHandIowa.informationScreen = () => 'iowa-information';
+  assert.deepEqual(plain(page.request({ type: 'secondhand:pageText' })), { lang: 'en', pageKey: 'iowa-information', text: 'Important Information when applying and what to expect.\nWhat you need to do.' });
+  page.window.SecondHandIowa.informationScreen = () => '';
+  assert.deepEqual(plain(page.request({ type: 'secondhand:pageText' })), { lang: 'en', pageKey: '', text: '' }, 'a screen with questions can hold answers, so its words are never read');
+  assert.equal(page.request({ type: 'secondhand:pageText' }, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
+});
+
 test('verified navigation keeps its private snapshot local and consumes one authorized content token', t => {
   const page = content(t, `${adapter.PORTAL}/applicant`, { navigation: true });
   const first = page.request({ type: 'secondhand:pageState' });
@@ -1048,7 +1102,7 @@ test('the widget offers the Spanish view when the page is in English, and the of
   const detector = detectorStub();
   const view = await panel(t, { launcher: true, language: 'es-ES', Translator: translatorStub().Translator, LanguageDetector: detector.LanguageDetector, questions: pageQuestions });
   await settle();
-  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:ping' }, { type: 'ui:pageState' }, { type: 'ui:questions' }]);
+  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:ping' }, { type: 'ui:pageState' }, { type: 'ui:questions' }, { type: 'ui:widgetSize', line: true }], 'the offer gets a row');
   assert.equal(view.get('translate-offer').hidden, false);
   assert.equal(view.get('translate-offer').textContent, spanish('widget.offer'));
   assert.equal(view.get('translate-offer').title, spanish('widget.offerTitle'));
@@ -1091,4 +1145,213 @@ test('when the widget’s offer opened the side panel, the panel shows the list 
   await settle();
   assert.equal(english.get('questions').hidden, false);
   assert.equal(english.get('questions-list').children[2].querySelector('.checklist-label').textContent, '[en] Preferred pickup day');
+});
+
+// "What this page says". Mocks of Chrome's Summarizer live only here.
+const IMPORTANT_TEXT = 'Important Information when applying and what to expect.\nWhat you need to do.';
+const summaryPage = { id: 'read-1', pageKey: 'iowa-information', lang: 'en', current: true, text: IMPORTANT_TEXT, unread: false, summary: null };
+const KEY_POINTS = ['Have your documents ready.', 'Answer every question with a star.'];
+function summarizerStub({ availability = 'available', output = () => '* Have your documents ready.\n* Answer every question with a star.\n* You qualify for SNAP.', create, failure } = {}) {
+  const calls = { availability: [], create: [], summarize: [] };
+  const instance = () => ({ inputQuota: 4000, async measureInputUsage(text) { return Math.ceil(text.length / 4); },
+    async summarize(text) { calls.summarize.push(text); if (failure) throw failure; return output(text); } });
+  const Summarizer = {
+    async availability(options) { calls.availability.push(options); return typeof availability === 'function' ? availability(options) : availability; },
+    async create(options) { calls.create.push(options); return create ? create(options, instance) : instance(); }
+  };
+  return { Summarizer, calls };
+}
+const points = view => [...view.get('summary-list').querySelectorAll('li')].map(item => item.textContent);
+const groups = view => [...view.get('summary-list').children].map(group => [group.querySelector('h3')?.textContent || '', [...group.querySelectorAll('li, p')].map(node => node.textContent)]);
+const kept = view => plainRequests(view.requests.filter(request => request.type === 'ui:keepSummary'));
+
+test('without the Summarizer API the side panel says so in one line, hides the section, and never reads the page', async t => {
+  const view = await panel(t, { pageText: { pages: [summaryPage] } });
+  assert.equal(view.get('summary').hidden, true);
+  assert.equal(view.get('summary-get').hidden, true);
+  assert.equal(view.get('summary-note').hidden, false);
+  assert.equal(view.get('summary-note').textContent, EN['summary.missing']);
+  assert.equal(view.types().includes('ui:pageText'), false);
+  assert.equal((await panel(t, { language: 'es-ES' })).get('summary-note').textContent, spanish('summary.missing'));
+  const elsewhere = await panel(t, { tab: { id: 7, url: 'chrome://newtab/' } });
+  assert.equal(elsewhere.get('summary-note').hidden, true, 'nothing is said where there is no page to read');
+});
+
+test('with Chrome’s model ready, the side panel lists the page’s key points by itself, labelled as automatic, from the page’s words alone', async t => {
+  const ai = summarizerStub();
+  const view = await panel(t, { Summarizer: ai.Summarizer, pageText: { pages: [summaryPage] } });
+  await settle();
+  assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:pageText')), { type: 'ui:pageText', tabId: 7 });
+  assert.deepEqual(ai.calls.summarize, [IMPORTANT_TEXT], 'Chrome reads the page’s own words and nothing else');
+  assert.equal(ai.calls.create[0].outputLanguage, 'en');
+  assert.deepEqual([...ai.calls.create[0].expectedInputLanguages], ['en']);
+  assert.equal(view.get('summary').hidden, false);
+  assert.equal(view.get('summary-title').textContent, 'What this page says');
+  assert.deepEqual(groups(view), [['Important application information', KEY_POINTS]], 'at most five points, and never one saying the reader qualifies');
+  assert.ok([...view.get('summary-list').querySelectorAll('li')].every(item => item.dir === 'auto'), 'each point reads in its own direction, even in Arabic');
+  assert.equal(view.get('summary-caveat').textContent, 'Written automatically by Chrome on this computer. Read the page for details.');
+  assert.equal(view.get('summary-english').hidden, true);
+  assert.equal(view.get('summary-note').hidden, true);
+  assert.deepEqual(kept(view), [{ type: 'ui:keepSummary', tabId: 7, id: 'read-1', summary: { language: 'en', points: KEY_POINTS, english: false } }]);
+
+  const site = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, Summarizer: ai.Summarizer, pageText: { pages: [{ ...summaryPage, pageKey: 'general' }] } });
+  await settle();
+  assert.deepEqual(groups(site), [['', KEY_POINTS]], 'a site’s page has no screen name');
+  const off = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: false }, Summarizer: ai.Summarizer, pageText: { pages: [summaryPage] } });
+  await settle();
+  assert.equal(off.types().includes('ui:pageText'), false, 'a site that is not on is never read');
+  assert.equal(off.get('summary-note').hidden, true);
+});
+
+test('when Chrome can’t summarize here, the section is hidden behind one plain line; a page without words says nothing', async t => {
+  const ai = summarizerStub({ availability: 'unavailable' });
+  const view = await panel(t, { Summarizer: ai.Summarizer, pageText: { pages: [summaryPage] } });
+  await settle();
+  assert.equal(view.get('summary').hidden, true);
+  assert.equal(view.get('summary-note').textContent, EN['summary.unavailable']);
+  assert.equal(view.get('summary-note').classList.contains('error'), false);
+  assert.deepEqual(ai.calls.create, []);
+  const empty = await panel(t, { Summarizer: summarizerStub().Summarizer, pageText: { pages: [] } });
+  await settle();
+  assert.equal(empty.get('summary-note').hidden, true);
+  assert.equal(empty.get('summary').hidden, true);
+});
+
+test('a model Chrome must download starts from the applicant’s click, shows its progress, and says so when the download never starts', async t => {
+  let monitor, finish;
+  const ai = summarizerStub({ availability: 'downloadable', create: (options, instance) => { options.monitor(monitor = new EventTarget()); return new Promise(resolve => { finish = () => resolve(instance()); }); } });
+  const view = await panel(t, { Summarizer: ai.Summarizer, pageText: { pages: [summaryPage] } });
+  await settle();
+  assert.deepEqual(ai.calls.create, [], 'no download starts without the applicant’s click');
+  assert.equal(view.get('summary-note').textContent, EN['summary.needsDownload']);
+  assert.equal(view.get('summary-get').hidden, false);
+  assert.equal(view.get('summary-get').textContent, 'Download Chrome’s summary model');
+  view.get('summary-get').click(); await settle();
+  assert.deepEqual(ai.calls.create, [], 'an untrusted click does nothing');
+  await view.userClick('summary-get'); await settle();
+  assert.equal(ai.calls.create.length, 1);
+  assert.equal(view.get('summary-get').hidden, true);
+  assert.equal(view.get('summary-note').textContent, strings.text('en', 'summary.downloading', { percent: 0 }));
+  monitor.dispatchEvent(Object.assign(new Event('downloadprogress'), { loaded: 0.42 }));
+  assert.equal(view.get('summary-note').textContent, strings.text('en', 'summary.downloading', { percent: 42 }));
+  finish(); await settle();
+  assert.deepEqual(points(view), KEY_POINTS);
+  assert.equal(view.get('summary-note').hidden, true);
+
+  const stuck = summarizerStub({ availability: 'downloadable', create: () => new Promise(() => {}) });
+  const stalled = await panel(t, { Summarizer: stuck.Summarizer, pageText: { pages: [summaryPage] }, stallMs: 15 });
+  await settle();
+  await stalled.userClick('summary-get'); await settle();
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(stalled.get('summary-note').textContent, EN['summary.stalled']);
+  assert.equal(stalled.get('summary-note').classList.contains('error'), true);
+});
+
+test('Iowa’s information screens stay listed by name after autofill moves on, and points already written are not written again', async t => {
+  const ai = summarizerStub();
+  const screens = { pages: [
+    { id: 'read-2', pageKey: 'iowa-instructions', lang: 'en', current: false, text: 'Instructions\nOK. Let’s start the application.', unread: false,
+      summary: { language: 'en', points: ['Questions with a star must be answered.'], english: false } },
+    { id: 'read-1', pageKey: 'iowa-information', lang: 'en', current: false, text: '', unread: true, summary: null }] };
+  const view = await panel(t, { Summarizer: ai.Summarizer, pageText: screens });
+  await settle();
+  assert.equal(view.get('summary-title').textContent, 'What Iowa’s earlier screens said');
+  assert.deepEqual(groups(view), [['Instructions', ['Questions with a star must be answered.']], ['Important application information', [EN['summary.unread']]]]);
+  assert.deepEqual(ai.calls.summarize, [], 'points kept for the tab are not written again');
+  assert.deepEqual(kept(view), []);
+});
+
+test('points come in the applicant’s language: written by Chrome in Spanish, translated for other languages, or said plainly to be in English', async t => {
+  const es = summarizerStub({ output: () => '* Tenga listos sus documentos.\n* Usted califica para SNAP.' });
+  const view = await panel(t, { language: 'es-ES', Summarizer: es.Summarizer, pageText: { pages: [summaryPage] }, pageState: keyedChecklist });
+  await settle();
+  assert.equal(es.calls.create[0].outputLanguage, 'es');
+  assert.deepEqual(points(view), ['Tenga listos sus documentos.']);
+  assert.equal(view.get('summary-title').textContent, spanish('summary.title'));
+  assert.deepEqual(shownText(view).filter(text => englishOnly.has(text)), []);
+  assert.deepEqual(kept(view)[0].summary, { language: 'es', points: ['Tenga listos sus documentos.'], english: false });
+
+  const vi = await panel(t, { language: 'vi-VN', Summarizer: summarizerStub().Summarizer, Translator: translatorStub().Translator, pageText: { pages: [summaryPage] } });
+  await settle();
+  assert.deepEqual(points(vi), KEY_POINTS.map(point => `[vi] ${point}`));
+  assert.equal(vi.get('summary-english').hidden, true);
+  assert.deepEqual(kept(vi)[0].summary, { language: 'vi', points: KEY_POINTS.map(point => `[vi] ${point}`), english: false });
+
+  const french = await panel(t, { language: 'fr-FR', Summarizer: summarizerStub().Summarizer, pageText: { pages: [summaryPage] } });
+  await settle();
+  assert.deepEqual(points(french), KEY_POINTS);
+  assert.equal(french.get('summary-english').hidden, false);
+  assert.equal(french.get('summary-english').textContent, strings.text('fr', 'summary.inEnglish'));
+  assert.deepEqual(kept(french)[0].summary, { language: 'fr', points: KEY_POINTS, english: true });
+
+  const failing = translatorStub({ create: async () => ({ async translate() { throw new Error('Synthetic translation failure'); } }) });
+  const arabic = await panel(t, { language: 'ar-EG', Summarizer: summarizerStub().Summarizer, Translator: failing.Translator, pageText: { pages: [summaryPage] } });
+  await settle();
+  assert.deepEqual(points(arabic), KEY_POINTS);
+  assert.equal(arabic.get('summary-english').hidden, false);
+  assert.equal(arabic.get('summary-note').textContent, strings.text('ar', 'summary.translateFailed', { detail: 'Synthetic translation failure' }));
+  assert.equal(arabic.get('summary-note').classList.contains('error'), true);
+});
+
+test('choosing another language writes the page’s points again in it', async t => {
+  const ai = summarizerStub({ output: text => text === IMPORTANT_TEXT ? '* Have your documents ready.' : '* Unexpected.' });
+  const view = await panel(t, { Summarizer: ai.Summarizer, pageText: { pages: [summaryPage] } });
+  await settle();
+  assert.deepEqual(points(view), ['Have your documents ready.']);
+  view.get('language').value = 'es';
+  view.get('language').dispatchEvent(new view.window.Event('change'));
+  await settle();
+  assert.deepEqual(ai.calls.create.map(options => options.outputLanguage), ['en', 'es']);
+  assert.deepEqual(kept(view).map(request => request.summary.language), ['en', 'es']);
+  assert.equal(view.get('summary-title').textContent, spanish('summary.title'));
+});
+
+test('a summary that fails, or a worker reply that is not pages, says why in one line', async t => {
+  const view = await panel(t, { Summarizer: summarizerStub({ failure: new Error('Synthetic summary failure') }).Summarizer, pageText: { pages: [summaryPage] } });
+  await settle();
+  assert.equal(view.get('summary').hidden, true);
+  assert.equal(view.get('summary-note').textContent, strings.text('en', 'summary.failed', { detail: 'Synthetic summary failure' }));
+  assert.equal(view.get('summary-note').classList.contains('error'), true);
+  const odd = await panel(t, { Summarizer: summarizerStub().Summarizer, pageText: { pages: [{ id: 7 }] } });
+  await settle();
+  assert.equal(odd.get('summary-note').textContent, EN['worker.pageTextUnreadable']);
+  assert.equal(odd.get('summary-note').classList.contains('error'), true);
+});
+
+test('the Iowa widget grows by one row while it shows a message, when the worker asks for our extension', t => {
+  const page = content(t);
+  const host = page.host();
+  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: true })), { sized: true });
+  assert.equal(host.style.height, '86px');
+  page.window.dispatchEvent(new page.window.Event('popstate'));
+  assert.equal(host.style.height, '86px', 'the room stays while the message is shown');
+  page.setKind('manual');
+  page.window.dispatchEvent(new page.window.Event('popstate'));
+  assert.equal(host.style.height, '46px', 'a pill has no message');
+  page.setKind('fillable');
+  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: false })), { sized: true });
+  assert.equal(host.style.height, '46px');
+  assert.equal(page.request({ type: 'secondhand:widgetSize', line: true }, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
+  assert.equal(host.style.height, '46px');
+});
+
+test('the Iowa widget frame is as wide as the widget measured itself, never past 272px', t => {
+  const page = content(t);
+  const host = page.host();
+  assert.match(host.style.width, /^min\(272px/);
+  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: false, width: 152 })), { sized: true });
+  assert.match(host.style.width, /^min\(152px, 272px/, 'never wider than the full card');
+  page.window.dispatchEvent(new page.window.Event('popstate'));
+  assert.match(host.style.width, /^min\(152px/, 'the width stays across page changes');
+  page.setKind('manual');
+  page.window.dispatchEvent(new page.window.Event('popstate'));
+  assert.equal(host.style.width, '46px', 'a pill');
+  page.setKind('fillable');
+  page.request({ type: 'secondhand:widgetSize', line: true, width: 231 });
+  assert.match(host.style.width, /^min\(231px/, 'a line keeps the widget’s width');
+  assert.equal(host.style.height, '86px');
+  page.request({ type: 'secondhand:widgetSize', line: false });
+  assert.match(host.style.width, /^min\(272px/, 'a widget that could not measure itself gets the full card');
+  for (const width of [0, 1.5, '152', 5000]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: false, width }), undefined, `width ${width}`);
+  assert.match(host.style.width, /^min\(272px/);
 });

@@ -22,3 +22,5 @@ uv run --project ~/Projects/LayaStudio python ML_model/eval/latency_onnx.py --on
 ```
 
 The runtime comparison for #37 is in `docs/superpowers/specs/2026-09-27-laya-runtime-spike.md`.
+
+`runtime_fixtures.py` writes the Python reference outputs that the desktop app's JavaScript Laya runtime (#38) is tested against: token ids, prompts, and int8 ONNX probabilities for a fixed sample of rows (`tests/fixtures/laya/`). Its docstring has the commands.

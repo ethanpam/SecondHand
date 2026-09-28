@@ -36,6 +36,7 @@ The full list, with what each rule means and which question types it fits, is in
 | anyone 65+ / 60+ in the household | `anySenior65` / `anySenior60` |
 | "Are you 60 or older?" | `applicantAgeAtLeast` with `age: 60` |
 | children under 18 in the household (yes/no) | `anyChildren` |
+| anyone else in the household / household size > 1 | `householdMoreThanOne` |
 | how many people / adults / children / seniors (choices) | `householdSize` / `adultsCount` / `childrenCount` / `seniorsCount` |
 | the applicant's age range (choices) | `applicantAgeRange` |
 | veteran, disability, pregnant, Medicare, all US citizens, homeless | `veteran`, `disability`, `pregnant`, `medicare`, `allCitizens`, `homeless` |

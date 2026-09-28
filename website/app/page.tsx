@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { faq } from './faq';
 import { Home } from './home';
 import { release } from './release';
 import { siteUrl } from './site';
@@ -10,8 +9,7 @@ export const metadata: Metadata = {
   alternates: { canonical: '/' },
 };
 
-// Describes the app and the FAQ for search engines. The FAQ text comes from the
-// same data the page renders, so the two cannot drift apart.
+// Describes the app for search engines. The common questions have their own page and data.
 const structuredData = [
   {
     '@context': 'https://schema.org', '@type': 'SoftwareApplication',
@@ -19,10 +17,6 @@ const structuredData = [
     applicationCategory: 'UtilitiesApplication', operatingSystem: 'Windows 10 or later, macOS 13 or later',
     description: 'A desktop app and Chrome extension that keep your details encrypted on your computer and fill supported fields in Iowa’s SNAP application after you approve.',
     offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
-  },
-  {
-    '@context': 'https://schema.org', '@type': 'FAQPage',
-    mainEntity: faq.map(({ question, answer }) => ({ '@type': 'Question', name: question, acceptedAnswer: { '@type': 'Answer', text: answer } })),
   },
 ];
 

@@ -340,6 +340,21 @@ class Vault {
       await atomicWrite(this.filePath, bytes);
     });
   }
+  // For someone who has lost both their password and recovery key: delete the
+  // encrypted file, the copies kept by earlier restores, and any unfinished
+  // writes, so a new password can be created. Only while locked.
+  erase() {
+    return this.enqueue(async () => {
+      if (this.unlocked) throw new Error('Lock SecondHand before starting over.');
+      const directory = path.dirname(this.filePath);
+      const base = path.basename(this.filePath);
+      let names;
+      try { names = await fs.readdir(directory); }
+      catch (error) { if (error.code === 'ENOENT') return; throw error; }
+      const owned = names.filter(name => name === base || name.startsWith(`${base}.before-import-`) || (name.startsWith(`${base}.`) && name.endsWith('.tmp')));
+      for (const name of owned) await fs.rm(path.join(directory, name), { force: true });
+    });
+  }
 }
 
 module.exports = { Vault, atomicWrite, parseEnvelope, normalizeRecoveryKey, MAX_VAULT_BYTES };

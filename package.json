@@ -15,6 +15,7 @@
     "test:ui": "node scripts/smoke-ui.cjs",
     "test:extension": "node scripts/smoke-extension.cjs",
     "test:translation": "node scripts/smoke-translation.cjs",
+    "test:summary": "node scripts/smoke-summary.cjs",
     "test:extension:video": "node scripts/qa-extension-video.cjs",
     "test:native": "node tests/desktop-native-smoke.cjs",
     "extension:zip": "node scripts/zip-extension.cjs",
@@ -23,6 +24,9 @@
     "dist:mac:arm64": "electron-builder --mac dmg --arm64 --publish never",
     "dist:mac:x64": "electron-builder --mac dmg --x64 --publish never",
     "release:checksums": "node scripts/release-checksums.cjs"
+  },
+  "dependencies": {
+    "onnxruntime-node": "1.30.0"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
@@ -37,10 +41,12 @@
     "directories": { "output": "release" },
     "icon": "desktop/icon.png",
     "files": ["desktop/**/*", "renderer/**/*", "shared/**/*", "package.json"],
+    "asarUnpack": ["node_modules/onnxruntime-node/bin/**"],
     "extraResources": [{ "from": "extension", "to": "extension" }],
     "win": {
       "target": "nsis",
       "executableName": "secondHand",
+      "files": ["!node_modules/onnxruntime-node/bin/napi-v6/{darwin,linux}/**", "!node_modules/onnxruntime-node/bin/napi-v6/win32/arm64/**"],
       "extraFiles": [{ "from": "build/native/secondHand-native.exe", "to": "secondHand-native.exe" }]
     },
     "nsis": {
@@ -52,6 +58,7 @@
     },
     "mac": {
       "category": "public.app-category.productivity",
+      "files": ["!node_modules/onnxruntime-node/bin/napi-v6/{linux,win32}/**", "!node_modules/onnxruntime-node/bin/napi-v6/darwin/!(${arch})/**"],
       "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }],
       "identity": null,
       "hardenedRuntime": false,

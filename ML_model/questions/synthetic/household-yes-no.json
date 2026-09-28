@@ -123,7 +123,6 @@
     { "id": "s120", "label": "Do you currently lack a permanent home address?", "type": "radio", "options": ["Yes", "No", "Prefer not to say"], "rule": { "name": "homeless" } },
     { "id": "s121", "label": "Are you without a fixed address at this time?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "homeless" } },
     { "id": "s122", "label": "Check if you are currently homeless.", "type": "checkbox", "options": ["I am currently homeless"], "rule": { "name": "homeless" } },
-    { "id": "s123", "label": "Homeless?", "type": "select", "options": ["Yes", "No"], "rule": { "name": "homeless" } },
     { "id": "s124", "label": "Are you currently unhoused?", "type": "radio", "options": ["Yes", "No", "Prefer not to say"], "rule": { "name": "homeless" } },
     { "id": "s125", "label": "Are you living without a home address?", "type": "radio", "options": ["No", "Yes"], "rule": { "name": "homeless" } },
     { "id": "s126", "label": "IS YOUR HOUSEHOLD CURRENTLY HOMELESS?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "homeless" } },
