@@ -6,7 +6,7 @@ SecondHand's local decision model: [Laya](https://huggingface.co/convaiinnovatio
 - **Base:** `aac6fef/laya-mlx`, fine-tuned with LayaStudio on an Apple M4 Max.
 - **Run:** `round2-lora-proper-1790530553`, from commit `5582a70` (dataset `round2-1790530494`, SHA-256 `1064fcfe…`).
 - **Task:** one fixed yes/no question per candidate: "Given the facts about the household, is the candidate the correct answer to the form question?" A question is answered only when its best candidate clears the confidence bar and beats "None of these, or the facts don't say".
-- **Runtime export:** int8 ONNX, 409 MB, not published yet. Exported with `uv run --no-sync python -m layastudio.export run:round2-lora-proper-1790530553 --target onnx --precision int8`. The exporter checked 10 decisions against the trained model: all gave the same answer, with probabilities within 0.0007.
+- **Runtime export:** int8 ONNX, 409 MB, published at [huggingface.co/JacobTDang/secondhand-laya](https://huggingface.co/JacobTDang/secondhand-laya) (commit `d1beee2813ce4996c50695eb604841365808f1e3`, Apache-2.0). The desktop app downloads it from that commit (`desktop/laya-model.json`). Exported with `uv run --no-sync python -m layastudio.export run:round2-lora-proper-1790530553 --target onnx --precision int8`. The exporter checked 10 decisions against the trained model: all gave the same answer, with probabilities within 0.0007.
 
   | File | Bytes | SHA-256 |
   |---|---|---|

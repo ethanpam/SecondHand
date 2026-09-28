@@ -267,3 +267,16 @@ test('a saved part the server can no longer resume (416) is deleted, and the nex
   await store.startDownload();
   assert.deepEqual(await store.state(), { state: 'ready' });
 });
+
+test('the shipped manifest pins the published model: its commit, Hugging Face URLs, and the sizes and SHA-256s in the model card', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../desktop/laya-model.json'), 'utf8'));
+  const { model } = validateManifest(manifest);
+  assert.ok(model, 'a model is published');
+  for (const file of model.files) {
+    assert.equal(file.url, `https://huggingface.co/JacobTDang/secondhand-laya/resolve/${model.revision}/${file.path}`, file.path);
+  }
+  const card = fs.readFileSync(path.join(__dirname, '../docs/laya-model.md'), 'utf8');
+  const rows = new Map([...card.matchAll(/\| \`([^\`]+)\` \| ([\d,]+) \| \`([0-9a-f]{64})\` \|/g)].map(m => [m[1], { size: Number(m[2].replace(/,/g, '')), sha256: m[3] }]));
+  for (const file of model.files) assert.deepEqual({ size: file.size, sha256: file.sha256 }, rows.get(file.path), file.path);
+  assert.match(card, new RegExp(model.revision), 'the model card names the published commit');
+});
