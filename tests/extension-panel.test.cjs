@@ -484,9 +484,9 @@ test('if SecondHand never answers, the panel stops after about 20 seconds with o
   }
 });
 
-test('an open the host can’t do (no host, the Windows relay, a failed start) says so at once, without waiting', async t => {
+test('an open the host can’t do (no host, an older Windows relay, a failed start) says so at once, without waiting', async t => {
   const refusals = [{ ok: false, error: 'Cannot reach SecondHand. Open the app and prepare its Chrome extension.', errorKey: 'worker.desktopOffline', errorParams: {} },
-    { ok: false, error: 'SecondHand could not be started (ENOENT).', errorKey: 'detail', errorParams: { detail: 'SecondHand could not be started (ENOENT).' } }];
+    { ok: false, error: 'SecondHand could not be started (Windows error 2).', errorKey: 'detail', errorParams: { detail: 'SecondHand could not be started (Windows error 2).' } }];
   for (const refusal of refusals) {
     const view = await panel(t, { os: 'win', desktop: CLOSED, openApp: () => refusal });
     await view.userClick('desktop-action');
@@ -638,7 +638,7 @@ test('widget offers Open SecondHand in Autofill’s place when the app is closed
   assert.equal(offline.get('autofill').hidden, false);
   assert.match(offline.get('widget-text').textContent, /Unlock SecondHand, then click Autofill/);
   // An open that fails says so in one line that stays, and Autofill is back to check again.
-  const failing = await panel(t, { launcher: true, os: 'win', autofill: offlineResult, openApp: () => ({ ok: false, error: 'SecondHand could not be started (ENOENT).' }) });
+  const failing = await panel(t, { launcher: true, os: 'win', autofill: offlineResult, openApp: () => ({ ok: false, error: 'SecondHand could not be started (Windows error 2).' }) });
   await failing.userClick('autofill');
   await failing.userClick('open-app');
   await until(() => failing.get('widget-text').textContent === 'SecondHand didn’t open. Open it from the Start menu.');
