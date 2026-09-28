@@ -32,7 +32,8 @@ const addressVariants = {
   error: { selected: 'original', error: true },
   modal: { selected: 'original', modal: true },
   mailing: { selected: 'original', mailing: true },
-  county: { selected: 'original', renderedCounty: true }
+  county: { selected: 'original', renderedCounty: true },
+  countyStays: { selected: 'original', renderedCounty: true, countyStaysVisible: true }
 };
 
 function verifiedAddressFixture(variant) {
@@ -41,7 +42,7 @@ function verifiedAddressFixture(variant) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Verified address structure · isolated QA</title>
     <style>body{font:16px system-ui;background:#f7f8f2;color:#294035;margin:0;padding:30px}main{max-width:900px}label{display:block;margin:12px 0}button{padding:12px 18px;margin:12px}table{border-collapse:collapse}td,th{padding:10px;text-align:left}</style></head>
     <body><main><p data-verified-address-qa>ISOLATED QA · FICTIONAL APPLICANT · PUBLIC CAMPUS ADDRESS. No government connection.</p>${addressFixture.makeHtml(options)}</main>
-    <script>(${addressFixture.attachHandlers.toString()})(document);
+    <script>(${addressFixture.attachHandlers.toString()})(document, ${JSON.stringify(options)});
       document.querySelector(${JSON.stringify(addressFixture.NEXT_SELECTOR)}).addEventListener('click', () => {
         console.info(${JSON.stringify(verifiedAddressMarker)} + JSON.stringify(document.__addressQa));
         location.assign(${JSON.stringify(documentManualUrl)});
@@ -501,7 +502,7 @@ async function main() {
       await expect.poll(() => page.url(), { timeout: 20000 }).toBe(documentManualUrl);
       await expect.poll(() => verifiedAddressNext.length).toBe(1);
       assert.equal(verifiedApplicantClicks, 1); assert.equal(verifiedAddressLoads, 1); assert.equal(documentManualLoads, 1);
-      assert.deepEqual(verifiedAddressNext, [{ selectionClicks: ['0'], selectedIndexes: [['0']], nextClicks: 1 }]);
+      assert.deepEqual(verifiedAddressNext, [{ selectionClicks: ['0'], selectedIndexes: [['0']], shownCountyRows: [[]], nextClicks: 1 }]);
       const requests = await calls('getFields');
       assert.equal(requests.length, 2);
       assert.deepEqual(requests.filter(call => call.url === addressUrl).map(call => call.fields), [[]]);
@@ -511,7 +512,7 @@ async function main() {
       console.log(`Address ${variant}: one applicant Next, first suggestion selected, one address Next, no address profile values.`);
     }
 
-    for (const variant of ['error', 'modal', 'mailing', 'county']) {
+    for (const variant of ['error', 'modal', 'mailing']) {
       currentAddressVariant = variant; verifiedAddressNext.length = 0;
       await resetTo(addressUrl);
       await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
@@ -526,6 +527,39 @@ async function main() {
       assert.deepEqual(verifiedAddressNext, []);
       console.log(`Address ${variant}: unsupported variation stays manual and unchanged.`);
     }
+
+    // The entered address is chosen and Iowa shows its county question, defaulted to the wrong county.
+    const enteredCounty = page.locator('[id="homeAddressLst1.county"]');
+    currentAddressVariant = 'county'; verifiedAddressNext.length = 0; documentManualLoads = 0;
+    await resetTo(addressUrl);
+    await expect(page.locator('#homeAddressIndex1')).toBeChecked();
+    await expect(enteredCounty).toBeVisible();
+    await expect.poll(() => panel.text('[data-key="addressReview"]')).toContain('Needs you');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await panel.click('#panel-autofill');
+    await expect.poll(() => page.url(), { timeout: 20000 }).toBe(documentManualUrl);
+    await expect.poll(() => verifiedAddressNext.length).toBe(1);
+    assert.deepEqual(verifiedAddressNext, [{ selectionClicks: ['0'], selectedIndexes: [['0']], shownCountyRows: [[]], nextClicks: 1 }]);
+    assert.equal(documentManualLoads, 1);
+    assert.deepEqual((await calls('getFields')).map(call => ({ url: call.url, fields: call.fields })), [{ url: addressUrl, fields: [] }]);
+    console.log('Address county: first suggestion selected, county hidden, one Save and Continue.');
+
+    // If Iowa keeps the county question shown after the switch, the page is left to the applicant.
+    currentAddressVariant = 'countyStays'; verifiedAddressNext.length = 0;
+    await resetTo(addressUrl);
+    await expect(enteredCounty).toBeVisible();
+    const countyBefore = await enteredCounty.inputValue();
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await panel.click('#panel-autofill');
+    await expect.poll(() => page.evaluate(() => document.__addressQa.selectionClicks.length), { timeout: 20000 }).toBe(1);
+    await expect.poll(() => panel.text('[data-key="addressReview"]')).toContain('Do it yourself');
+    await page.waitForTimeout(1800);
+    assert.deepEqual(await page.evaluate(() => document.__addressQa), { selectionClicks: ['0'], selectedIndexes: [], shownCountyRows: [], nextClicks: 0 });
+    await expect(enteredCounty).toBeVisible();
+    assert.equal(await enteredCounty.inputValue(), countyBefore);
+    assert.equal(page.url(), addressUrl);
+    assert.deepEqual(verifiedAddressNext, []);
+    console.log('Address county stays visible: stays manual; Save and Continue not pressed and the county untouched.');
 
     await resetTo(`${applicant}?next=address-review`, { profile: { mailingSameAsHome: 'yes' } });
     await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');

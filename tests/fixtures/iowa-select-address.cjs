@@ -2,6 +2,9 @@
 // Sanitized metadata transcribed from the live Select Address HOME-only page.
 // All displayed addresses and hidden values below are QA data, not a page dump.
 // candidateCount > 1 is a generated structural variation, not live-verified.
+// renderedCounty with selected 'original' is the state an applicant saw live: the
+// "as entered" choice selected and its county select shown, defaulted to the
+// first county on the list (wrong for this address). The county list is abridged.
 const URL = 'https://hhsservices.iowa.gov/apspssp/ssp.portal/applyForBenefits/addressValidation';
 const NEXT_SELECTOR = 'form#addressValue button.btn.btn-primary.saveAndContinueButton';
 function makeHtml({ candidateCount = 1, selected = 'first', error = false, modal = false, mailing = false, renderedCounty = false } = {}) {
@@ -11,7 +14,7 @@ function makeHtml({ candidateCount = 1, selected = 'first', error = false, modal
   function choice(index, original) {
     const address = original ? '411 Morrill Road, Ames, IA 50011' : index ? '415 MORRILL RD, AMES, IA 50011' : '411 MORRILL RD, AMES, IA 50011';
     return `<tr><td><fieldset><legend>applyforBenefits.legend.linkText1</legend><input type="radio" id="homeAddressIndex${index}" name="homeAddressIndex" value="${index}" onclick="onHomeAddrSelect('${index}');" ${selectedIndex === index ? 'checked' : ''}><label for="homeAddressIndex${index}"><div>${address}</div></label></fieldset></td></tr>
-<tr id="homeAddrCounty${index}" class="displayNone" style="display:${original && renderedCounty ? 'block' : 'none'}">${original ? `<td><label for="homeAddressLst${index}.county">County*</label><select id="homeAddressLst${index}.county" name="homeAddressLst[${index}].county"><option value="">Select One</option><option value="STORY">Story</option></select></td>` : ''}</tr><tr><td></td></tr>`;
+<tr id="homeAddrCounty${index}" class="displayNone" style="display:${original && renderedCounty ? 'block' : 'none'}">${original ? `<td><label for="homeAddressLst${index}.county">County*</label><select id="homeAddressLst${index}.county" name="homeAddressLst[${index}].county"><option value="ADAIR">Adair</option><option value="STORY">Story</option></select></td>` : ''}</tr><tr><td></td></tr>`;
   }
   for (let index = 0; index < candidateCount; index++) rows.push(choice(index, false));
   return `<style>.displayNone,.modal { display:none; } .modal.qa-visible { display:block; }</style><h2>Select Address</h2>
@@ -32,18 +35,29 @@ ${mailing ? '<div hidden><input type="radio" name="mailingAddressIndex" id="mail
 }
 // Synthetic behavior only. The production adapter clicks verified controls; it
 // never evaluates or invokes the live page's JavaScript handler source.
-function attachHandlers(doc) {
-  doc.__addressQa = { selectionClicks: [], selectedIndexes: [], nextClicks: 0 };
-  doc.querySelectorAll('input[name="homeAddressIndex"]').forEach(radio => { radio.onclick = () => {
-    doc.__addressQa.selectionClicks.push(radio.value);
-    doc.querySelectorAll('input[name="homeAddressIndex"]').forEach(item => {
-      doc.getElementById(`homeAddrCounty${item.value}`).style.display = item.checked ? 'block' : 'none';
+// onHomeAddrSelect below is a stand-in for Iowa's script, which was not captured.
+// Assumed minimal behavior: choosing an option hides every county row, then shows
+// the chosen option's row only when it is the "as entered" option (the only row
+// with a county select). countyStaysVisible models Iowa leaving that row shown
+// after a suggestion is chosen. Each radio's onclick property stands in for its
+// inline onclick="onHomeAddrSelect('i');", which jsdom does not run.
+function attachHandlers(doc, { countyStaysVisible = false } = {}) {
+  doc.__addressQa = { selectionClicks: [], selectedIndexes: [], shownCountyRows: [], nextClicks: 0 };
+  const countyRows = () => Array.from(doc.querySelectorAll('tr[id^="homeAddrCounty"]'));
+  function onHomeAddrSelect(index) {
+    doc.__addressQa.selectionClicks.push(index);
+    countyRows().forEach(row => {
+      const entered = Boolean(row.querySelector('select'));
+      if (entered && countyStaysVisible && row.style.display === 'block') return;
+      row.style.display = entered && row.id === `homeAddrCounty${index}` ? 'block' : 'none';
     });
-  }; });
+  }
+  doc.querySelectorAll('input[name="homeAddressIndex"]').forEach(radio => { radio.onclick = () => onHomeAddrSelect(radio.value); });
   doc.querySelector('form#addressValue button.saveAndContinueButton').onclick = event => {
     event.preventDefault();
     doc.__addressQa.nextClicks++;
     doc.__addressQa.selectedIndexes.push(Array.from(doc.querySelectorAll('input[name="homeAddressIndex"]:checked'), item => item.value));
+    doc.__addressQa.shownCountyRows.push(countyRows().filter(row => doc.defaultView.getComputedStyle(row).display !== 'none').map(row => row.id));
   };
 }
 module.exports = { URL, NEXT_SELECTOR, makeHtml, html: makeHtml(), attachHandlers };

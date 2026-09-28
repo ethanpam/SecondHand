@@ -41,8 +41,9 @@ includes timed chapters, assertions, and the recording's scope.
 The broader browser smoke additionally exercises the observed home-address
 confirmation structure using `tests/fixtures/iowa-select-address.cjs`: it chooses
 the first possible home match, advances exactly once, makes only an empty-field desktop authorization request at that step (no profile values), and pauses at an unsupported later page. Generated variants
-cover prior selections, multiple suggestions, errors, visible dialogs/county
-questions, and unsupported mailing controls. The video flow above retains the
+cover prior selections, multiple suggestions, the original address chosen with
+its county question shown, a county question that stays shown after the switch,
+errors, visible dialogs, and unsupported mailing controls. The video flow above retains the
 separate hypothetical address page to demonstrate the unverified-layout pause.
 
 The browser smoke also exercises the sanitized primary-applicant **Tell Us More** fixture: it requests only `birthDate`, formats it as `MM/DD/YYYY`, preserves manual and hidden controls, and makes zero Next clicks. Changed person phase, form, or heading prevents profile release. The sidebar exposes static checklist labels without the applicant name, birth date, private navigation snapshot, or access receipt.
