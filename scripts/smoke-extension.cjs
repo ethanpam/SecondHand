@@ -13,6 +13,7 @@ const applicantFixture = require('../tests/fixtures/iowa-personal-information.cj
 const preApplicant = require('../tests/fixtures/iowa-pre-applicant.cjs');
 const addressFixture = require('../tests/fixtures/iowa-select-address.cjs');
 const selfFixture = require('../tests/fixtures/iowa-self-details.cjs');
+const tellUsMore = require('../tests/fixtures/iowa-tell-us-more.cjs');
 const root = path.join(__dirname, '..');
 const portal = 'https://hhsservices.iowa.gov/apspssp/ssp.portal';
 const applicant = `${portal}/applyForBenefits/enterPersonalInfo`;
@@ -22,6 +23,7 @@ const documentManualUrl = `${portal}/qa-only/document-manual`;
 const documentNextMarker = 'SECONDHAND_SYNTHETIC_FULL_DOCUMENT_NEXT';
 const addressUrl = addressFixture.URL;
 const selfDetailsUrl = selfFixture.URL;
+const startDetailsUrl = tellUsMore.URL;
 const verifiedApplicantMarker = 'SECONDHAND_VERIFIED_ADDRESS_APPLICANT_NEXT';
 const verifiedAddressMarker = 'SECONDHAND_VERIFIED_ADDRESS_NEXT:';
 const addressVariants = {
@@ -64,6 +66,28 @@ function selfDetailsFixture(variant = 'verified') {
       window.__selfQa = { nextClicks: 0, manualChanges: 0 };
       document.querySelectorAll('[data-qa-manual]').forEach(element => element.addEventListener('change', () => { window.__selfQa.manualChanges++; }));
       document.getElementById('dqButtonId309').onclick = () => { window.__selfQa.nextClicks++; };
+    </script></body></html>`;
+}
+
+// The trimmed Tell Us More page at dynamicQuestionsStart, with a QA stand-in for Iowa's
+// hideShowQuestions: each rule is "answer:shown ids:hidden ids", and ids follow the prefix.
+function startDetailsFixture() {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Tell Us More · isolated QA</title>
+    <style>body{font:16px system-ui;background:#f7f8f2;color:#294035;margin:0;padding:30px}main{max-width:900px}li{display:inline-block;margin-right:12px}label{margin:0 12px 0 4px}input[type=text],select{padding:8px}button{padding:12px;margin:10px}.questionAnswer{margin:16px 0}</style></head>
+    <body><main><p>ISOLATED QA · FICTIONAL APPLICANT. Trimmed from a sanitized capture; the script below is a QA stand-in for Iowa's.</p>${tellUsMore.html}</main>
+    <script>
+      window.__startQa = { nextClicks: 0, shown: [] };
+      function hideShowQuestions(prefix, input, rules) {
+        const rule = rules.split('|').map(part => part.split(':')).find(([answer]) => answer === input.value);
+        if (!rule) return;
+        for (const id of rule[1].split(',').filter(Boolean)) {
+          const question = document.getElementById(prefix + id);
+          question.classList.remove('hidden'); question.style.display = '';
+          if (!window.__startQa.shown.includes(question.id)) window.__startQa.shown.push(question.id);
+        }
+        for (const id of rule[2].split(',').filter(Boolean)) document.getElementById(prefix + id).classList.add('hidden');
+      }
+      document.getElementById('dqButtonId309').onclick = () => { window.__startQa.nextClicks++; };
     </script></body></html>`;
 }
 
@@ -244,6 +268,7 @@ async function main() {
         return route.fulfill({ status: 200, contentType: 'text/html', body: verifiedAddressFixture(currentAddressVariant) });
       }
       if (request.isNavigationRequest() && request.url() === selfDetailsUrl) return route.fulfill({ status: 200, contentType: 'text/html', body: selfDetailsFixture(currentSelfVariant) });
+      if (request.isNavigationRequest() && request.url() === startDetailsUrl) return route.fulfill({ status: 200, contentType: 'text/html', body: startDetailsFixture() });
       if (request.isNavigationRequest() && request.url() === documentManualUrl) {
         documentManualLoads++;
         return route.fulfill({ status: 200, contentType: 'text/html', body: fixture('document-manual-destination') });
@@ -560,6 +585,37 @@ async function main() {
       assert.deepEqual(await page.evaluate(() => window.__selfQa), { nextClicks: 0, manualChanges: 0 });
       console.log(`Tell Us More ${variant}: mismatched context stays manual.`);
     }
+
+    // Tell Us More at dynamicQuestionsStart: Autofill types the saved date of birth and clicks the
+    // yes/no answers the saved profile settles. Everything else, including the Social Security number
+    // box Iowa's script shows after Yes, stays for the applicant, and Save and Continue is never clicked.
+    await resetTo(startDetailsUrl, { profile: { hasSsn: 'yes' } });
+    const settled = [[6, 1], [18, 1], [26, 2], [29, 2]].map(([answer, option]) => tellUsMore.radioId(answer, option));
+    const startChecked = () => page.evaluate(() => Array.from(document.querySelectorAll('#answerSet input[type="radio"]')).filter(element => element.checked).map(element => element.id));
+    await expect.poll(() => panel.text('[data-key="hasSsn"]')).toContain('Do you have a Social Security number?');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await panel.click('#panel-autofill');
+    await expect(page.locator(`[id="${tellUsMore.DOB_ID}"]`)).toHaveValue('04/12/1985', { timeout: 20000 });
+    await expect.poll(startChecked, { timeout: 20000 }).toEqual(settled);
+    await expect(page.locator('#question03')).toBeVisible();
+    await expect.poll(() => panel.text('[data-key="hasMedicare"]')).toContain('Done');
+    await expect.poll(() => panel.text('[data-key="gender"]')).toContain('Do it yourself');
+    await page.waitForTimeout(1800);
+    assert.deepEqual(await startChecked(), settled);
+    assert.equal(await page.locator(`[id="${tellUsMore.SSN_BOX_ID}"]`).inputValue(), '');
+    assert.equal(await page.locator(`[id="${tellUsMore.MARITAL_ID}"]`).inputValue(), '');
+    assert.deepEqual(await page.evaluate(() => window.__startQa), { nextClicks: 0, shown: ['question03', 'question04068', 'question04070', 'question04071', 'question04072', 'question06181'] });
+    assert.deepEqual((await calls('getFields')).map(call => ({ url: call.url, fields: call.fields })),
+      [{ url: startDetailsUrl, fields: ['birthDate', 'hasSsn', 'householdAllCitizens', 'householdDisability', 'householdMedicare'] }]);
+    const startMetadata = await panel.evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      return JSON.stringify(await chrome.runtime.sendMessage({ type: 'ui:pageState', tabId: tab.id }));
+    });
+    const startText = await panel.evaluate(() => document.body.innerText);
+    for (const value of ['Avery', 'Example', '1985-04-12', '04/12/1985']) {
+      assert.equal(startMetadata.includes(value), false); assert.equal(startText.includes(value), false);
+    }
+    console.log('Tell Us More (dynamicQuestionsStart): DOB and settled yes/no answers filled; other questions, the revealed SSN box and Save and Continue left to the applicant.');
 
     assert.deepEqual(errors, []);
     console.log('Widget: intro pages show a small pill. All browser fixtures/data were synthetic; native desktop responses were DevTools stubs.');

@@ -1,6 +1,6 @@
 # Iowa SNAP portal: coverage and validation
 
-SecondHand is an **experimental application companion**, not a complete automatic SNAP application. It can fill all verified controls on the initial **Enter Personal Information** applicant page from explicit local profile answers, show a completion checklist, and use that page’s ordinary **Save and Continue** button after completeness checks. This development branch also selects the first suggested home address on the observed **Select Address** step, then continues, and fills the primary applicant’s saved birth date on the verified **Tell Us More** page. Other questions and Next on Tell Us More remain manual. Separate mailing confirmation, county questions, and all unverified later-page navigation remain manual. The generic engine may fill rule-matched fields on other unverified pages; that is not verified Iowa page coverage. Consent, signatures, and final submission always remain manual. A local progress entry or successful Next click does not mean an application was submitted or accepted. Public 0.4 downloads predate these address and birth-date changes.
+SecondHand is an **experimental application companion**, not a complete automatic SNAP application. It can fill all verified controls on the initial **Enter Personal Information** applicant page from explicit local profile answers, show a completion checklist, and use that page’s ordinary **Save and Continue** button after completeness checks. This development branch also selects the first suggested home address on the observed **Select Address** step, then continues, and fills the primary applicant’s saved birth date on the verified **Tell Us More** page, plus the Yes/No answers the saved profile settles on its `dynamicQuestionsStart` layout. Other questions and Next on Tell Us More remain manual. Separate mailing confirmation, county questions, and all unverified later-page navigation remain manual. The generic engine may fill rule-matched fields on other unverified pages; that is not verified Iowa page coverage. Consent, signatures, and final submission always remain manual. A local progress entry or successful Next click does not mean an application was submitted or accepted. Public 0.4 downloads predate these address and birth-date changes.
 
 
 ## Live inspection on September 26, 2026
@@ -50,6 +50,20 @@ Birth date, SSN, email, county, household size, income, rent, and utilities are 
 The optional **Tell Us More** mapping requires the exact `/applyForBenefits/dynamicQuestions` route, visible heading and self-information introduction, **Start Application | Active** and **People | Unvisited** breadcrumbs, and the observed `form#answerSet` posting to `simple`. It recognizes only `#question02419` with `input#answerSets0.answers3.answerValue`, name `answerSets[0].answers[3].answerValue`, label **Date of Birth (mm/dd/yyyy)**, and the observed date-input metadata. The two alternate birth-date templates must remain hidden. The primary-applicant heading and original elements are held in a private in-memory fingerprint and rechecked before filling; the name is never sent to the sidebar.
 
 A valid saved `birthDate` in `YYYY-MM-DD` format becomes `MM/DD/YYYY`. Blank, invalid, future, hidden, changed, or already-filled fields are skipped. No age or date is inferred. The checklist uses static labels for the remaining manual questions and **Next is always manual on this page**, even after birth date fills. Citizenship, gender, SSN, disability, and other answers are not mapped or defaulted. This adds one profile key to the existing 25 applicant-page keys; it does not widen the initial page’s selectors.
+
+## Tell Us More at dynamicQuestionsStart
+
+Tell Us More is also served at `/applyForBenefits/dynamicQuestionsStart` with other questions shown. It needs the same checks as the layout above (exact route, heading, introduction, breadcrumbs, and `form#answerSet`), plus the applicant’s name group directly above a single question panel, no disabled template question on screen, and one visible birth-date box. Each question is checked on its own against the recorded page (trimmed in `tests/fixtures/iowa-tell-us-more.html`): its id and class, its wording, and each control’s id, name, value, label, and `hideShowQuestions` handler. A question that differs is left for the applicant.
+
+| Question | Filled from | Answer |
+| --- | --- | --- |
+| Date of Birth (`#question02`, `answerSets[0].answers[5].answerValue`) | `birthDate` | `MM/DD/YYYY` |
+| Do you have a Social Security Number? (`#question02420`) | `hasSsn`, which the desktop works out as `yes` when an SSN is saved; the number never leaves the app for this | **Yes** |
+| Are you a U.S. Citizen or National? (`#question06001`) | `householdAllCitizens` is `yes` | **Yes** |
+| Are you Disabled? (`#question07`) | `householdDisability` is `no` | **No** |
+| Do you have Medicare? (`#question01000414`) | `householdMedicare` is `no` | **No** |
+
+Any other saved value leaves the question alone. Gender, marital status, military/veteran/spouse of a veteran, blindness, and the health-limitation question show in the checklist for the applicant. Radios are clicked one at a time, so Iowa’s own scripts run, and the page is verified again before each one; questions those scripts reveal, such as the Social Security number box, are never filled. Answers already on the page are never changed, and **Next is always manual on this page**.
 
 ## Conditional filling and checklist
 

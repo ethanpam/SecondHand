@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { validateProfile, validateApplication, validateStoredApplication, isPortalUrl, YES_NO_FIELDS, PROFILE_FIELDS, FIELD_LABELS } = require('../shared/schema.cjs');
+const { validateProfile, validateApplication, validateStoredApplication, isPortalUrl, YES_NO_FIELDS, PROFILE_FIELDS, REQUEST_FIELDS, DERIVED_FIELDS, FIELD_LABELS } = require('../shared/schema.cjs');
 const fictionalProfile = require('./fixtures/applicant-profile.json');
 
 test('only the exact HTTPS Iowa application origin and path can receive fields', () => {
@@ -91,4 +91,14 @@ test('Iowa financial answers: money on hand and medical costs are dollar amounts
     assert.equal(validateProfile({})[key], '', key);
     assert.throws(() => validateProfile({ [key]: 'maybe' }), /Yes, No, or left unanswered/, key);
   }
+});
+
+test('whether a Social Security number is saved is a field pages can ask for, never one the profile saves', () => {
+  assert.equal(FIELD_LABELS.hasSsn, 'Whether you have a Social Security number');
+  assert.equal(PROFILE_FIELDS.includes('hasSsn'), false);
+  assert.deepEqual(REQUEST_FIELDS, [...PROFILE_FIELDS, 'hasSsn']);
+  assert.throws(() => validateProfile({ hasSsn: 'yes' }), /Unknown profile field/);
+  assert.equal(DERIVED_FIELDS.hasSsn(validateProfile({ ssn: '123-45-6789' })), 'yes');
+  assert.equal(DERIVED_FIELDS.hasSsn(validateProfile({})), '');
+  assert.equal(DERIVED_FIELDS.hasSsn({}), '', 'a profile saved before the SSN field existed has none');
 });

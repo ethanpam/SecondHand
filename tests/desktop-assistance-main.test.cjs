@@ -282,6 +282,30 @@ test('sensitive fields on a non-Iowa site always ask, even with Always allow on'
   assert.equal(app.prompts.length, 1, 'Iowa keeps its own trust rules');
 });
 
+test('getFields says whether an SSN is saved without ever releasing the number', async () => {
+  const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true } });
+  await app.invoke('saveProfile', { ssn: '123-45-6789', birthDate: '1985-04-12' });
+  const response = plain(await app.request({ type: 'getFields', fields: ['birthDate', 'hasSsn'] }));
+  assert.deepEqual(response.values, { birthDate: '1985-04-12', hasSsn: 'yes' });
+  assert.doesNotMatch(JSON.stringify(response), /123-?45-?6789/);
+  await app.invoke('saveProfile', { birthDate: '1985-04-12' });
+  assert.deepEqual(plain((await app.request({ type: 'getFields', fields: ['birthDate', 'hasSsn'] })).values), { birthDate: '1985-04-12' }, 'no saved SSN leaves the answer out');
+  const asking = await desktop();
+  await asking.invoke('saveProfile', { ssn: '123-45-6789' });
+  asking.answer(async () => ({ response: 1 }));
+  assert.deepEqual(plain((await asking.request({ type: 'getFields', fields: ['hasSsn'] })).values), { hasSsn: 'yes' });
+  assert.match(asking.prompts[0].detail, /Whether you have a Social Security number/);
+  assert.doesNotMatch(asking.prompts[0].detail, /123-?45-?6789/);
+  // On other sites it counts as a sensitive detail and always asks.
+  const site = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'] } });
+  await site.invoke('saveProfile', { ssn: '123-45-6789' });
+  site.answer(async () => ({ response: 1 }));
+  assert.deepEqual(plain((await site.request({ type: 'getFields', url: PANTRY, fields: ['hasSsn'] })).values), { hasSsn: 'yes' });
+  assert.equal(site.prompts.length, 1);
+  assert.deepEqual(plain(site.prompts[0].buttons), ['Cancel', 'Allow once']);
+  assert.match(site.prompts[0].detail, /Whether you have a Social Security number/);
+});
+
 test('money on hand and medical expenses always ask on other sites but follow Iowa’s trust rules on Iowa', async () => {
   const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'] } });
   await app.invoke('saveProfile', { assetsOnHand: '250', monthlyMedicalExpenses: '40', householdPregnant: 'no' });
