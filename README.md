@@ -87,7 +87,7 @@ Autofill works screen by screen and stays on for the tab until you click **Stop*
 | Let's get started, About you | Waits for you to accept Iowa's consent or click Continue. |
 | **Enter Personal Information** | Fills your saved names, phones, home and mailing addresses, and program choices. Waits for missing required answers, then clicks Save and Continue. |
 | Select Address (verified home-only layout) | Picks Iowa's first suggested home address and continues. Check it before you submit. |
-| Tell Us More | Fills your saved date of birth. Everything else stays with you. |
+| Tell Us More | Fills your saved date of birth and the answers you saved under About you in My information. Anything not saved stays with you. |
 | Other Iowa pages | May fill matching saved answers after you approve. You continue. |
 | CAPTCHA, consent, signatures, final Submit | Never touched. |
 

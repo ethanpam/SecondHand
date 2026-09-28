@@ -408,6 +408,27 @@ test('checklist uses plain labels and a trusted row click finds the field', asyn
   assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:focusField')), { type: 'ui:focusField', key: 'firstName', tabId: 7 });
 });
 
+test('after Autofill, a question whose answer isn’t saved says so and points to My information', async t => {
+  const autofill = { ...doneResult, needYou: ['firstName', 'middleName', 'unverified'], notSaved: ['firstName', 'middleName', 'lastName'] };
+  const view = await panel(t, { autofill });
+  const detail = key => view.row(key).querySelector('.checklist-detail').textContent;
+  assert.equal(detail('firstName'), 'Needs you');
+  await view.userClick('panel-autofill');
+  assert.equal(detail('firstName'), 'Not saved in SecondHand — add it in My information');
+  assert.equal(detail('middleName'), 'Not saved in SecondHand — add it in My information');
+  assert.equal(view.row('firstName').getAttribute('aria-label'), 'First name: Not saved in SecondHand — add it in My information. Find it in Iowa’s form.');
+  // A question answered since shows as done; one SecondHand can't fill still says to do it yourself.
+  assert.equal(detail('lastName'), 'Done');
+  assert.equal(detail('unverified'), 'Do it yourself');
+  const spanish = await panel(t, { language: 'es', autofill });
+  await spanish.userClick('panel-autofill');
+  assert.equal(spanish.row('firstName').querySelector('.checklist-detail').textContent, 'No está guardado en SecondHand: agréguelo en “My information”');
+  // Only a list of question keys is read from the worker's result.
+  const malformed = await panel(t, { autofill: { ...doneResult, notSaved: 'firstName' } });
+  await malformed.userClick('panel-autofill');
+  assert.equal(malformed.row('firstName').querySelector('.checklist-detail').textContent, 'Needs you');
+});
+
 test('desktop line shows locked with Unlock, and not running with Open SecondHand', async t => {
   const locked = await panel(t, { desktop: { unlocked: false } });
   assert.match(locked.get('desktop-status').textContent, /locked/);

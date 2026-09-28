@@ -15,9 +15,14 @@ const html = fs.readFileSync(path.join(__dirname, 'iowa-tell-us-more.html'), 'ut
 const DOB_ID = 'answerSets0.answers5.answerValue';
 // A Yes/No (or Male/Female) radio's id: option 1 is Yes (Male), option 2 is No (Female).
 const radioId = (answer, option) => `answerSets0.answers${answer}.answerValue${option}`;
-// The visible questions and the answer index Iowa numbers each one's controls with.
-const ANSWERS = Object.freeze({ gender: 1, hasSsn: 6, usCitizen: 18, maritalStatus: 22, militaryOrVeteran: 24, hasDisability: 26, blind: 27, healthLimits: 28, hasMedicare: 29 });
+// The visible questions and the answer index Iowa numbers each one's controls with, and the question
+// on the Social Security card name that Iowa's script shows after Yes to having a number.
+const ANSWERS = Object.freeze({ gender: 1, hasSsn: 6, ssnCardName: 11, usCitizen: 18, maritalStatus: 22, militaryOrVeteran: 24, hasDisability: 26, blind: 27, healthLimits: 28, hasMedicare: 29 });
+// Everything Iowa's script shows after Yes to having a Social Security number: the number box, the
+// card name question, and boxes for the first, middle and last name on the card, which a Yes to the
+// card name question hides again.
+const SSN_REVEALS = Object.freeze(['question03', 'question04068', 'question04070', 'question04071', 'question04072']);
 const MARITAL_ID = 'answerSets0.answers22.answerValue';
 const SSN_BOX_ID = 'answerSets0.answers8.answerValue';
 
-module.exports = { URL, html, DOB_ID, radioId, ANSWERS, MARITAL_ID, SSN_BOX_ID };
+module.exports = { URL, html, DOB_ID, radioId, ANSWERS, SSN_REVEALS, MARITAL_ID, SSN_BOX_ID };

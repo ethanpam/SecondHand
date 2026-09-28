@@ -14,6 +14,8 @@ const passphrase = 'synthetic-test-vault-passphrase';
 // macOS runner. Bound the whole attempt generously instead of Playwright's 5s default.
 const AUTH_ATTEMPT_TIMEOUT_MS = 30000;
 const resetPassword = 'synthetic-reset-password';
+// Iowa's Tell Us More questions in the About you card: radio buttons, and a marital status list.
+const IOWA_QUESTIONS = ['sex', 'maritalStatus', 'hasSsnAnswer', 'ssnCardNameMatches', 'usCitizen', 'militaryOrVeteran', 'disabled', 'blind', 'healthLimitation', 'medicare'];
 const startOverPassword = 'synthetic-start-over-password';
 
 async function captureDiagnostic(page, name, options = {}) {
@@ -99,7 +101,11 @@ async function main() {
     await expect(page.locator('#recovery-dialog')).not.toBeVisible();
     await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('.nav-item[data-view="profile"]').click();
+    // What My information shows for every saved field, read the way the form submits it.
+    const shownProfile = () => page.locator('#profile-form').evaluate((form, fields) => Object.fromEntries(fields.map(field => [field, form.elements.namedItem(field).value])), PROFILE_FIELDS);
     for (const field of PROFILE_FIELDS) {
+      const radios = page.locator(`#profile-form input[type="radio"][name="${field}"]`);
+      if (await radios.count()) { await page.locator(`#profile-form input[type="radio"][name="${field}"][value="${applicantFixture[field]}"]`).check(); continue; }
       const control = page.locator(`#${field}`);
       if (await control.evaluate(element => element.tagName === 'SELECT')) await control.selectOption(applicantFixture[field]);
       else await control.fill(applicantFixture[field]);
@@ -132,14 +138,17 @@ async function main() {
       overview: document.querySelector('#overview-applications').textContent
     }));
     assert.deepEqual(cleared, { firstName: '', notes: '', cards: '', overview: '' });
-    const clearedProfile = await page.locator('#profile-form').evaluate(form => Object.fromEntries(Array.from(form.querySelectorAll('[name]'), control => [control.name, control.value])));
-    assert.deepEqual(clearedProfile, Object.fromEntries(PROFILE_FIELDS.map(field => [field, ''])));
+    assert.deepEqual(await shownProfile(), Object.fromEntries(PROFILE_FIELDS.map(field => [field, ''])));
     await rejectedPassphrase(page);
     await page.locator('#passphrase').fill(passphrase);
     await submitAuthForm(page);
     await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('.nav-item[data-view="profile"]').click();
     await expect(page.locator('#firstName')).toHaveValue(applicantFixture.firstName);
+    // After unlocking, My information shows every saved answer again, Iowa's questions included.
+    assert.deepEqual(await shownProfile(), applicantFixture);
+    await expect(page.locator('#sex-female')).toBeChecked();
+    await expect(page.locator('#maritalStatus')).toHaveValue(applicantFixture.maritalStatus);
 
     // Force the opposite IPC ordering: the lock status reply is rendered before
     // its notification. This test-only main-process hook is not shipped code.
@@ -196,6 +205,24 @@ async function main() {
     const bytes = await fs.readFile(path.join(userData, 'vault.secondhand'), 'utf8');
     for (const secret of ['Avery', 'Example', applicantFixture.addressLine1, '2025550147', 'SYNTHETIC-RECEIPT-ONLY', passphrase, resetPassword, recoveryKey, recoveryKey.replace(/-/g, '')]) assert.equal(bytes.includes(secret), false);
 
+    // Each of Iowa's questions clears back to Not answered, and stays cleared after unlocking again.
+    const unanswered = { ...applicantFixture, ...Object.fromEntries(IOWA_QUESTIONS.map(field => [field, ''])) };
+    await page.locator('.nav-item[data-view="profile"]').click();
+    for (const field of IOWA_QUESTIONS) {
+      if (field === 'maritalStatus') await page.locator('#maritalStatus').selectOption('');
+      else await page.locator(`#${field}-none`).check();
+    }
+    await page.locator('#save-profile').click();
+    await expect(page.locator('#profile-save-state')).toBeHidden();
+    assert.deepEqual((await page.evaluate(() => window.secondHand.getData())).profile, unanswered);
+    await page.locator('#lock-button').click();
+    await page.locator('#passphrase').fill(resetPassword);
+    await submitAuthForm(page);
+    await expect(page.locator('#workspace')).toBeVisible();
+    await page.locator('.nav-item[data-view="profile"]').click();
+    assert.deepEqual(await shownProfile(), unanswered);
+    for (const field of IOWA_QUESTIONS.filter(field => field !== 'maritalStatus')) await expect(page.locator(`#${field}-none`)).toBeChecked();
+
     // Locked out with no password or recovery key: start over from the reset screen.
     await page.locator('#lock-button').click();
     await page.locator('#forgot-password').click();
@@ -214,7 +241,7 @@ async function main() {
     await expect(page.locator('#workspace')).toBeVisible();
     assert.deepEqual((await page.evaluate(() => window.secondHand.getData())).profile, {});
     assert.deepEqual(errors, []);
-    console.log('Electron UI smoke passed: create, save full applicant choices and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence, recovery key password reset, start over.');
+    console.log('Electron UI smoke passed: create, save full applicant choices, Iowa’s questions about you and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence, recovery key password reset, clear Iowa’s questions, start over.');
   } catch (error) {
     if (page && !page.isClosed()) {
       const auth = await page.evaluate(() => ({

@@ -21,22 +21,32 @@ const FIELD_LABELS = Object.freeze({
   assetsOnHand: 'Money on hand (cash, checking, savings)', monthlyMedicalExpenses: 'Monthly medical expenses',
   householdAllCitizens: 'Everyone in household a US citizen', householdLegalStatus: 'If not, legal documents to stay in the US',
   householdPregnant: 'Anyone in household pregnant', householdMedicare: 'Anyone in household on Medicare',
+  // The applicant's own answers to Iowa's Tell Us More questions.
+  sex: 'Sex', maritalStatus: 'Marital status', hasSsnAnswer: 'You have a Social Security number',
+  ssnCardNameMatches: 'Your first and last name match your Social Security card', usCitizen: 'You are a U.S. citizen or national',
+  militaryOrVeteran: 'You are in the military, a veteran, or a spouse of a veteran', disabled: 'You are disabled', blind: 'You are blind',
+  healthLimitation: 'A health condition limits your daily activities, or you live in a medical facility or nursing home', medicare: 'You have Medicare',
   hasSsn: 'Whether you have a Social Security number'
 });
 // Answers the desktop works out from saved fields when a page asks for them. They are never saved,
-// and never carry the saved value itself: hasSsn says only that a Social Security number is saved.
+// and never carry the saved value itself: hasSsn is Yes when a Social Security number is saved,
+// otherwise the applicant's own saved Yes or No.
 const DERIVED_FIELDS = Object.freeze({
-  hasSsn: profile => typeof profile.ssn === 'string' && profile.ssn.trim() ? 'yes' : ''
+  hasSsn: profile => typeof profile.ssn === 'string' && profile.ssn.trim() ? 'yes' : ['yes', 'no'].includes(profile.hasSsnAnswer) ? profile.hasSsnAnswer : ''
 });
 const PROFILE_FIELDS = Object.freeze(Object.keys(FIELD_LABELS).filter(key => !Object.hasOwn(DERIVED_FIELDS, key)));
 // Every field a page may ask the desktop for.
 const REQUEST_FIELDS = Object.freeze(Object.keys(FIELD_LABELS));
 const YES_NO_FIELDS = Object.freeze(['hasHomeAddress', 'mailingSameAsHome', 'isApplicant',
   'programSnap', 'programFip', 'programMedicaid', 'helpPayMedicalBills', 'householdVeteran', 'householdDisability',
-  'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare']);
+  'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare',
+  'hasSsnAnswer', 'ssnCardNameMatches', 'usCitizen', 'militaryOrVeteran', 'disabled', 'blind', 'healthLimitation', 'medicare']);
 const PROFILE_CHOICES = Object.freeze({
   ...Object.fromEntries(YES_NO_FIELDS.map(field => [field, Object.freeze(['', 'yes', 'no'])])),
-  suffix: Object.freeze(['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'Jr.', 'Sr.'])
+  suffix: Object.freeze(['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'Jr.', 'Sr.']),
+  // Iowa's own options, word for word.
+  sex: Object.freeze(['', 'Male', 'Female']),
+  maritalStatus: Object.freeze(['', 'Divorced', 'Legally Separated', 'Married (includes common-law)', 'Never Married', 'Separated', 'Widowed'])
 });
 const APPLICATION_STATUSES = Object.freeze(['draft', 'in_progress', 'submitted', 'needs_action', 'approved', 'denied']);
 
@@ -80,6 +90,7 @@ function validateProfile(input) {
   if (result.bestContactTime.length > 30) throw new Error('Best time to call must be 30 characters or fewer.');
   if (result.birthDate && (!validDate(result.birthDate) || result.birthDate > new Date().toISOString().slice(0, 10))) throw new Error('Enter a valid date of birth.');
   if (result.ssn && !/^\d{3}-?\d{2}-?\d{4}$/.test(result.ssn)) throw new Error('Enter a nine-digit Social Security number or leave it blank.');
+  if (result.ssn && result.hasSsnAnswer === 'no') throw new Error('You saved a Social Security number, so answer Yes to having one, or leave that question unanswered.');
   if (result.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(result.email)) throw new Error('Enter a valid email address.');
   for (const field of ['phone', 'homePhone', 'mobilePhone']) {
     if (result[field] && !/^[+\d\s().-]{7,30}$/.test(result[field])) throw new Error(`Enter a valid ${FIELD_LABELS[field].toLowerCase()}.`);

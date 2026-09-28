@@ -11,6 +11,8 @@ const plain = value => JSON.parse(JSON.stringify(value));
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
+const START_KEYS = ['gender', 'birthDate', 'hasSsn', 'usCitizen', 'maritalStatus', 'militaryOrVeteran', 'hasDisability', 'blind', 'healthLimits', 'hasMedicare'];
+
 // A metadata-only content model. DOM/selector/first-suggestion safety is covered
 // separately by adapter fixtures. Native replies here are mocked, not Electron.
 function worker({ pageKey = 'iowa-personal-information', complete = false, todo, nativeHook } = {}) {
@@ -25,7 +27,8 @@ function worker({ pageKey = 'iowa-personal-information', complete = false, todo,
     const address = model.pageKey === 'iowa-select-address';
     const self = model.pageKey === 'iowa-self-details', start = model.pageKey === 'iowa-tell-us-more';
     const unverified = /unverified/.test(model.pageKey);
-    const keys = address || unverified ? [] : self ? ['birthDate'] : start ? ['birthDate', 'hasSsn', 'usCitizen', 'hasDisability', 'hasMedicare'] : ['firstName', 'lastName', ...model.revealed];
+    // On Tell Us More, Iowa shows the Social Security card name question after Yes to having a number.
+    const keys = address || unverified ? [] : self ? ['birthDate'] : start ? [...START_KEYS, ...(model.filled.includes('hasSsn') ? ['ssnCardName'] : [])] : ['firstName', 'lastName', ...model.revealed];
     const canAdvance = !self && !start && !unverified && (address || model.complete);
     if (message.navigationPreview !== false) model.nextToken = canAdvance ? `next-${++model.preview}` : null;
     return { page: { kind: unverified ? 'manual' : 'fillable', pageKey: model.pageKey, canAdvance, todo: model.todo,
@@ -144,20 +147,43 @@ test('self details only requests DOB and never advances; strict rejected pages c
   }
 });
 
-test('Tell Us More at dynamicQuestionsStart asks only for the fields that settle its answers, sends only settled answers, and never advances', async () => {
+test('Tell Us More at dynamicQuestionsStart asks for the applicant’s answers and the household facts that can settle them, sends only settled answers, and never advances', async () => {
   const w = worker({ pageKey: 'iowa-tell-us-more', todo: 'Answer the remaining questions, then click Save and Continue in Iowa’s form yourself.' });
   Object.assign(w.vault.values, { ssn: '999-99-9999', hasSsn: 'yes', householdAllCitizens: 'no', householdDisability: 'no', householdMedicare: 'yes' });
   const result = (await w.start()).data;
   assert.equal(result.state, 'done');
   assert.equal(result.todoKey, 'iowa.startDetailsTodo');
   assert.deepEqual(requests(w).map(request => [request.url, request.fields]),
-    [[`${adapter.PORTAL}/applyForBenefits/dynamicQuestionsStart`, ['birthDate', 'hasSsn', 'householdAllCitizens', 'householdDisability', 'householdMedicare']]]);
+    [[`${adapter.PORTAL}/applyForBenefits/dynamicQuestionsStart`, ['sex', 'birthDate', 'hasSsn', 'ssnCardNameMatches', 'usCitizen', 'householdAllCitizens',
+      'maritalStatus', 'militaryOrVeteran', 'disabled', 'householdDisability', 'blind', 'healthLimitation', 'medicare', 'householdMedicare']]]);
   assert.deepEqual(w.calls.content.filter(message => message.type === 'secondhand:fill').map(message => message.values),
     [{ birthDate: '1985-04-12', hasSsn: 'yes', hasDisability: 'no' }]);
   assert.deepEqual(w.model.filled, ['birthDate', 'hasSsn', 'hasDisability']);
+  // Every question still open had no saved answer, including the card question Iowa showed after Yes.
+  const open = ['gender', 'usCitizen', 'maritalStatus', 'militaryOrVeteran', 'blind', 'healthLimits', 'hasMedicare', 'ssnCardName'];
+  assert.deepEqual([...result.needYou].sort(), [...open].sort());
+  assert.deepEqual([...result.notSaved].sort(), [...open].sort());
   assert.equal(w.model.nextCount, 0);
   assert.equal(w.calls.content.some(message => message.type === 'secondhand:next'), false);
   assert.doesNotMatch(JSON.stringify(w.calls.content), /999-99-9999/);
+  assert.doesNotMatch(JSON.stringify(result), /1985|Female|Never Married/);
+});
+
+test('with every answer saved, Tell Us More fills them all, and the card question Iowa shows after Yes on the next pass', async () => {
+  const w = worker({ pageKey: 'iowa-tell-us-more', todo: 'Answer the remaining questions, then click Save and Continue in Iowa’s form yourself.' });
+  Object.assign(w.vault.values, { sex: 'Female', hasSsn: 'yes', ssnCardNameMatches: 'yes', usCitizen: 'yes', maritalStatus: 'Never Married',
+    militaryOrVeteran: 'no', disabled: 'no', blind: 'no', healthLimitation: 'no', medicare: 'no' });
+  const result = (await w.start()).data;
+  assert.equal(result.state, 'done');
+  const fills = w.calls.content.filter(message => message.type === 'secondhand:fill');
+  assert.deepEqual(fills.map(message => message.fields), [START_KEYS, ['ssnCardName']]);
+  assert.deepEqual(fills[0].values, { gender: 'Female', birthDate: '1985-04-12', hasSsn: 'yes', usCitizen: 'yes', maritalStatus: 'Never Married',
+    militaryOrVeteran: 'no', hasDisability: 'no', blind: 'no', healthLimits: 'no', hasMedicare: 'no' });
+  assert.deepEqual(fills[1].values, { ssnCardName: 'yes' });
+  assert.equal(result.filled, 11);
+  assert.deepEqual(result.needYou, []);
+  assert.deepEqual(result.notSaved, []);
+  assert.equal(w.model.nextCount, 0);
 });
 
 test('lock, revocation, desktop restart and malformed receipts stop values or Next before mutation', async () => {

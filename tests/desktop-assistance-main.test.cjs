@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { pathToFileURL } = require('node:url');
-const { PORTAL_URL } = require('../shared/schema.cjs');
+const { PORTAL_URL, FIELD_LABELS } = require('../shared/schema.cjs');
 
 const extensionId = 'a'.repeat(32);
 const context = { extensionId };
@@ -314,6 +314,37 @@ test('getFields says whether an SSN is saved without ever releasing the number',
   assert.match(site.prompts[0].detail, /Whether you have a Social Security number/);
 });
 
+test('a saved No to having a Social Security number answers Iowa without a number', async () => {
+  const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true } });
+  await app.invoke('saveProfile', { hasSsnAnswer: 'no' });
+  assert.deepEqual(plain((await app.request({ type: 'getFields', fields: ['hasSsn'] })).values), { hasSsn: 'no' });
+  await app.invoke('saveProfile', { hasSsnAnswer: 'yes' });
+  assert.deepEqual(plain((await app.request({ type: 'getFields', fields: ['hasSsn'] })).values), { hasSsn: 'yes' });
+  await assert.rejects(app.invoke('saveProfile', { ssn: '123-45-6789', hasSsnAnswer: 'no' }), /Social Security number/);
+});
+
+test('your citizenship, disability, blindness, health, Medicare and Social Security answers always ask on other sites but follow Iowa’s trust rules on Iowa', async () => {
+  const sensitive = { usCitizen: 'yes', disabled: 'no', blind: 'no', healthLimitation: 'no', medicare: 'no', hasSsnAnswer: 'yes' };
+  const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'] } });
+  await app.invoke('saveProfile', { ...sensitive, sex: 'Female', maritalStatus: 'Never Married', militaryOrVeteran: 'no', ssnCardNameMatches: 'yes' });
+  app.answer(async () => ({ response: 1 }));
+  for (const field of Object.keys(sensitive)) {
+    const before = app.prompts.length;
+    assert.deepEqual(plain((await app.request({ type: 'getFields', url: PANTRY, fields: ['sex', field] })).values), { sex: 'Female', [field]: sensitive[field] });
+    assert.equal(app.prompts.length, before + 1, field);
+    assert.deepEqual(plain(app.prompts.at(-1).buttons), ['Cancel', 'Allow once']);
+    assert.match(app.prompts.at(-1).detail, new RegExp(`^${FIELD_LABELS[field].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\n`));
+  }
+  const prompts = app.prompts.length;
+  assert.deepEqual(plain((await app.request({ type: 'getFields', url: PANTRY, fields: ['sex', 'maritalStatus', 'militaryOrVeteran', 'ssnCardNameMatches'] })).values),
+    { sex: 'Female', maritalStatus: 'Never Married', militaryOrVeteran: 'no', ssnCardNameMatches: 'yes' });
+  assert.equal(app.prompts.length, prompts, 'the other answers follow Always allow');
+  assert.deepEqual(plain((await app.request({ type: 'getFields', fields: Object.keys(sensitive) })).values), sensitive);
+  assert.equal(app.prompts.length, prompts, 'Iowa keeps its own trust rules');
+  await app.request({ type: 'trustSite', url: 'https://wic.example.gov/apply' });
+  assert.match(app.prompts.at(-1).detail, /your answers about citizenship, disability, blindness, health, Medicare, and having a Social Security number still ask every time/);
+});
+
 test('money on hand and medical expenses always ask on other sites but follow Iowa’s trust rules on Iowa', async () => {
   const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'] } });
   await app.invoke('saveProfile', { assetsOnHand: '250', monthlyMedicalExpenses: '40', householdPregnant: 'no' });
@@ -330,7 +361,7 @@ test('money on hand and medical expenses always ask on other sites but follow Io
   assert.equal(app.prompts.length, prompts, 'Iowa keeps its own trust rules');
   app.answer(async () => ({ response: 1 }));
   await app.request({ type: 'trustSite', url: 'https://wic.example.gov/apply' });
-  assert.match(app.prompts.at(-1).detail, /money on hand, and medical expenses still ask every time/);
+  assert.match(app.prompts.at(-1).detail, /money on hand, medical expenses, and your answers about/);
 });
 
 test('removing a trusted site stops field release; a locked vault cannot trust sites', async () => {
