@@ -93,7 +93,7 @@ async function localServer(t, files) {
   const close = () => { instance.closeAllConnections(); instance.close(); return closed; };
   t.after(() => instance.listening && close());
   const base = `http://127.0.0.1:${instance.address().port}`;
-  return { close, manifest: { version: 1, model: { revision, files: MODEL_FILES.map(name => ({ path: name, url: `${base}/${name}`, size: files[name].length,
+  return { close, manifest: { version: 1, model: { revision, format: 'noul-v1', files: MODEL_FILES.map(name => ({ path: name, url: `${base}/${name}`, size: files[name].length,
     sha256: crypto.createHash('sha256').update(files[name]).digest('hex') })) } } };
 }
 
@@ -316,9 +316,10 @@ test('turning the toggle off stops a download, keeps what arrived, and releases 
   await new Promise(resolve => instance.listen(0, '127.0.0.1', resolve));
   t.after(() => { instance.closeAllConnections(); instance.close(); });
   const base = `http://127.0.0.1:${instance.address().port}`;
-  const manifest = { version: 1, model: { revision, files: MODEL_FILES.map(name => ({ path: name, url: `${base}/${name}`, size: files[name].length, sha256: crypto.createHash('sha256').update(files[name]).digest('hex') })) } };
+  const manifest = { version: 1, model: { revision, format: 'noul-v1', files: MODEL_FILES.map(name => ({ path: name, url: `${base}/${name}`, size: files[name].length, sha256: crypto.createHash('sha256').update(files[name]).digest('hex') })) } };
   const runner = stubRunner();
-  const laya = createLaya({ userDataDir: temporary(t, 'secondhand-laya-'), manifest, runner, enabled: true });
+  const userDataDir = temporary(t, 'secondhand-laya-');
+  const laya = createLaya({ userDataDir, manifest, runner, enabled: true });
   const download = laya.startDownload();
   while (!stall) await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal((await laya.status()).state, 'downloading');
@@ -336,7 +337,331 @@ test('turning the toggle off stops a download, keeps what arrived, and releases 
   assert.equal(runner.releases, 1);
   await laya.setEnabled(true);
   await laya.remove();
+  assert.equal((await laya.status()).state, 'off', 'removing the model turns Laya off, so it isn’t downloaded again');
+  assert.equal(fs.existsSync(path.join(userDataDir, 'models/laya')), false);
+  await laya.setEnabled(true);
   assert.equal((await laya.status()).state, 'not-downloaded');
+});
+
+// A local stand-in for the model repo (tests only): each published revision's files at
+// /<revision>/<path>, and /latest.json naming the model `hub.latest` is set to (404 while null).
+// `hub.serve` can take over a request, to stall or corrupt it.
+const OLD = 'a'.repeat(40);
+const NEW = 'b'.repeat(40);
+async function modelHub(t) {
+  const routes = new Map();
+  const hub = { requests: [], latest: null, serve: null };
+  const instance = http.createServer((request, response) => {
+    const name = decodeURIComponent(new URL(request.url, 'http://127.0.0.1').pathname.slice(1));
+    hub.requests.push(name);
+    if (hub.serve && hub.serve(name, request, response) !== false) return;
+    const bytes = name === 'latest.json' ? hub.latest && Buffer.from(JSON.stringify(hub.latest)) : routes.get(name);
+    if (!bytes) { response.writeHead(404).end(); return; }
+    const start = Number(/^bytes=(\d+)-$/.exec(request.headers.range || '')?.[1] || 0);
+    response.writeHead(start ? 206 : 200, start ? { 'Content-Range': `bytes ${start}-${bytes.length - 1}/${bytes.length}` } : {}).end(bytes.subarray(start));
+  });
+  await new Promise(resolve => instance.listen(0, '127.0.0.1', resolve));
+  t.after(() => { instance.closeAllConnections(); instance.close(); });
+  const base = `http://127.0.0.1:${instance.address().port}`;
+  hub.updateUrl = `${base}/latest.json`;
+  hub.publish = (name, files = modelFiles(), format = 'noul-v1') => {
+    for (const [file, bytes] of Object.entries(files)) routes.set(`${name}/${file}`, bytes);
+    return { version: 1, model: { revision: name, format, files: MODEL_FILES.map(file => ({ path: file, url: `${base}/${name}/${file}`, size: files[file].length,
+      sha256: crypto.createHash('sha256').update(files[file]).digest('hex') })) } };
+  };
+  hub.fileRequests = name => hub.requests.filter(request => request.startsWith(`${name}/`));
+  hub.checks = () => hub.requests.filter(request => request === 'latest.json').length;
+  return hub;
+}
+const until = async (condition, what) => {
+  for (let attempt = 0; !(await condition()); attempt++) {
+    if (attempt > 1000) throw new Error(`Timed out waiting for ${what}`);
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+};
+const installedRevision = userDataDir => JSON.parse(fs.readFileSync(path.join(userDataDir, 'models/laya/installed.json'), 'utf8')).model.revision;
+const stored = userDataDir => fs.readdirSync(path.join(userDataDir, 'models/laya')).sort();
+const modelPath = (userDataDir, name) => path.join(userDataDir, 'models/laya', name, 'model.onnx');
+const sizeOf = manifest => manifest.model.files.reduce((sum, file) => sum + file.size, 0);
+
+test('with nothing installed, Laya downloads the newest model latest.json names and records it as installed', async t => {
+  const hub = await modelHub(t);
+  const shipped = hub.publish(OLD);
+  hub.latest = hub.publish(NEW);
+  const userDataDir = temporary(t, 'secondhand-laya-');
+  const runner = stubRunner();
+  const laya = createLaya({ userDataDir, manifest: shipped, updateUrl: hub.updateUrl, runner, enabled: true });
+  const update = laya.update();
+  assert.equal((await laya.status()).state, 'downloading', 'the check that starts the download counts as the download');
+  await update;
+  assert.deepEqual(await laya.status(), { state: 'ready', enabled: true, sizeBytes: sizeOf(hub.latest) });
+  assert.deepEqual(hub.fileRequests(OLD), [], 'the shipped model isn’t downloaded when a newer one can be');
+  assert.deepEqual(stored(userDataDir), [NEW, 'installed.json']);
+  assert.equal(installedRevision(userDataDir), NEW);
+
+  // After a restart the installed model is used as it is: nothing is downloaded, even with no update URL.
+  const requests = hub.requests.length;
+  const restarted = createLaya({ userDataDir, manifest: shipped, runner, enabled: true });
+  await restarted.update();
+  assert.equal((await restarted.status()).state, 'ready');
+  await restarted.decide(rowState('3'), { correct: DECISION });
+  assert.equal(runner.loads.at(-1), modelPath(userDataDir, NEW));
+  assert.equal(hub.requests.length, requests);
+});
+
+test('when latest.json can’t be read and nothing is installed, the shipped model downloads and the failed check shows beside it', async t => {
+  const hub = await modelHub(t);
+  const shipped = hub.publish(OLD);
+  const userDataDir = temporary(t, 'secondhand-laya-');
+  const laya = createLaya({ userDataDir, manifest: shipped, updateUrl: hub.updateUrl, runner: stubRunner(), enabled: true });
+  await laya.update();
+  assert.deepEqual(await laya.status(), { state: 'ready', enabled: true, sizeBytes: sizeOf(shipped),
+    update: { state: 'error', message: 'Update check failed: the server answered 404.' } });
+  assert.equal(installedRevision(userDataDir), OLD);
+  hub.latest = shipped;
+  await laya.update();
+  assert.deepEqual(await laya.status(), { state: 'ready', enabled: true, sizeBytes: sizeOf(shipped) }, 'a check that works clears the note');
+  assert.equal(hub.fileRequests(OLD).length, MODEL_FILES.length, 'the installed model isn’t downloaded again');
+});
+
+test('a newer model downloads beside the installed one, which keeps answering; once every file is verified Laya switches to it and deletes the old one', async t => {
+  const hub = await modelHub(t);
+  const shipped = hub.publish(OLD);
+  hub.latest = shipped;
+  const userDataDir = temporary(t, 'secondhand-laya-');
+  const runner = stubRunner();
+  const laya = createLaya({ userDataDir, manifest: shipped, updateUrl: hub.updateUrl, runner, enabled: true });
+  await laya.update();
+  await laya.decide(rowState('3'), { correct: DECISION });
+  assert.equal(runner.loads.at(-1), modelPath(userDataDir, OLD));
+
+  const newer = modelFiles();
+  hub.latest = hub.publish(NEW, newer);
+  let open;
+  const gate = new Promise(resolve => { open = resolve; });
+  hub.serve = (name, _request, response) => {
+    if (name !== `${NEW}/model.onnx.data`) return false;
+    gate.then(() => response.writeHead(200).end(newer['model.onnx.data']));
+  };
+  const update = laya.update();
+  await until(() => hub.requests.includes(`${NEW}/model.onnx.data`), 'the new weights');
+  const during = await laya.status();
+  assert.equal(during.state, 'ready');
+  assert.equal(during.update.state, 'downloading');
+  assert.equal(during.update.sizeBytes, sizeOf(hub.latest));
+  assert.ok(during.update.progress > 0 && during.update.progress < 1, String(during.update.progress));
+  await laya.decide(rowState('4'), { correct: DECISION });
+  assert.equal(runner.loads.length, 1, 'decisions keep using the installed model');
+
+  open();
+  await update;
+  assert.deepEqual(await laya.status(), { state: 'ready', enabled: true, sizeBytes: sizeOf(hub.latest) });
+  assert.equal(runner.releases, 1, 'the old model was released');
+  assert.deepEqual(stored(userDataDir), [NEW, 'installed.json'], 'the old revision was deleted');
+  assert.equal(installedRevision(userDataDir), NEW);
+  await laya.decide(rowState('5'), { correct: DECISION });
+  assert.equal(runner.loads.at(-1), modelPath(userDataDir, NEW), 'the next decision loads the new model');
+});
+
+test('a decision running when an update is ready finishes on the old model; the switch waits for it', async t => {
+  const hub = await modelHub(t);
+  const shipped = hub.publish(OLD);
+  hub.latest = shipped;
+  const userDataDir = temporary(t, 'secondhand-laya-');
+  let hold = null;
+  const runner = stubRunner({ run: () => hold && hold.promise });
+  const laya = createLaya({ userDataDir, manifest: shipped, updateUrl: hub.updateUrl, runner, enabled: true, timeoutMs: 60000 });
+  await laya.update();
+  hold = {};
+  hold.promise = new Promise(resolve => { hold.release = resolve; });
+  const decision = laya.decide(rowState('3'), { correct: DECISION });
+  await until(() => runner.runs.length === 1, 'the decision to start');
+
+  hub.latest = hub.publish(NEW);
+  await laya.update();
+  assert.equal(installedRevision(userDataDir), NEW, 'the verified update is recorded as installed');
+  assert.deepEqual(stored(userDataDir), [OLD, NEW, 'installed.json'].sort(), 'the old model stays while it answers');
+  assert.equal(runner.releases, 0);
+
+  const { release } = hold;
+  hold = null;
+  release();
+  assert.equal((await decision).answers.correct.type, 'noul', 'the running decision finishes');
+  assert.equal(runner.loads.length, 1);
+  await until(() => !fs.existsSync(path.join(userDataDir, 'models/laya', OLD)), 'the old revision to be deleted');
+  assert.equal(runner.releases, 1);
+  await laya.decide(rowState('4'), { correct: DECISION });
+  assert.equal(runner.loads.at(-1), modelPath(userDataDir, NEW));
+});
+
+test('a model in a format this app can’t run is ignored with a note, and the installed or shipped model is used', async t => {
+  const hub = await modelHub(t);
+  const shipped = hub.publish(OLD);
+  hub.latest = hub.publish(NEW, modelFiles(), 'noul-v9');
+  const userDataDir = temporary(t, 'secondhand-laya-');
+  const runner = stubRunner();
+  const laya = createLaya({ userDataDir, manifest: shipped, updateUrl: hub.updateUrl, runner, enabled: true });
+  await laya.update();
+  const status = await laya.status();
+  assert.equal(status.state, 'ready');
+  assert.deepEqual(status.update, { state: 'incompatible', message: 'A newer Laya model is available, but it needs a newer version of SecondHand.' });
+  assert.equal(installedRevision(userDataDir), OLD, 'with nothing installed, the shipped model was downloaded');
+  await laya.update();
+  assert.deepEqual(hub.fileRequests(NEW), [], 'nothing of the newer model is downloaded');
+  await laya.decide(rowState('3'), { correct: DECISION });
+  assert.equal(runner.loads.at(-1), modelPath(userDataDir, OLD));
+});
+
+test('a tampered update is deleted, the installed model keeps working, and the next check tries again', async t => {
+  const hub = await modelHub(t);
+  const shipped = hub.publish(OLD);
+  hub.latest = shipped;
+  const userDataDir = temporary(t, 'secondhand-laya-');
+  const runner = stubRunner();
+  const laya = createLaya({ userDataDir, manifest: shipped, updateUrl: hub.updateUrl, runner, enabled: true });
+  await laya.update();
+  const newer = modelFiles();
+  hub.latest = hub.publish(NEW, newer);
+  hub.serve = (name, _request, response) => {
+    if (name !== `${NEW}/model.onnx.data`) return false;
+    const bytes = Buffer.from(newer['model.onnx.data']);
+    bytes[10] ^= 0xff;
+    response.writeHead(200).end(bytes);
+  };
+  await laya.update();
+  const status = await laya.status();
+  assert.equal(status.state, 'ready');
+  assert.deepEqual(status.update, { state: 'error', message: 'Update download failed: The downloaded Laya model didn’t match its expected checksum, so SecondHand deleted it. Try again.' });
+  assert.equal(fs.existsSync(path.join(userDataDir, 'models/laya', NEW, 'model.onnx.data')), false);
+  assert.equal(fs.existsSync(path.join(userDataDir, 'models/laya', NEW, 'model.onnx.data.partial')), false);
+  assert.equal(installedRevision(userDataDir), OLD);
+  await laya.decide(rowState('3'), { correct: DECISION });
+  assert.equal(runner.loads.at(-1), modelPath(userDataDir, OLD));
+
+  hub.serve = null;
+  await laya.update();
+  assert.deepEqual(await laya.status(), { state: 'ready', enabled: true, sizeBytes: sizeOf(hub.latest) });
+  assert.equal(installedRevision(userDataDir), NEW);
+});
+
+test('nothing is checked or downloaded while Laya is off, and turning it off stops an update download, keeping what arrived', async t => {
+  const hub = await modelHub(t);
+  const shipped = hub.publish(OLD);
+  hub.latest = shipped;
+  const userDataDir = temporary(t, 'secondhand-laya-');
+  const laya = createLaya({ userDataDir, manifest: shipped, updateUrl: hub.updateUrl, runner: stubRunner() });
+  await laya.update();
+  await laya.startUpdates();
+  assert.deepEqual(hub.requests, []);
+  assert.equal(fs.existsSync(path.join(userDataDir, 'models')), false);
+  t.after(() => laya.close());
+
+  await laya.setEnabled(true);
+  await laya.update();
+  hub.latest = hub.publish(NEW);
+  hub.serve = name => name === `${NEW}/model.onnx.data` ? undefined : false; // never answers
+  const update = laya.update();
+  await until(() => hub.requests.includes(`${NEW}/model.onnx.data`), 'the new weights');
+  await laya.setEnabled(false);
+  await update;
+  assert.equal((await laya.status()).state, 'off');
+  assert.ok(fs.existsSync(path.join(userDataDir, 'models/laya', NEW, 'model.onnx')), 'files that arrived are kept');
+  assert.equal(installedRevision(userDataDir), OLD);
+
+  hub.serve = null;
+  await laya.setEnabled(true);
+  await laya.update();
+  assert.equal(installedRevision(userDataDir), NEW);
+  assert.equal(hub.fileRequests(NEW).filter(name => name === `${NEW}/model.onnx`).length, 1, 'the update resumed');
+});
+
+test('pausing the first download stops it and says so at once, even while the check that starts it runs', async t => {
+  const hub = await modelHub(t);
+  const shipped = hub.publish(OLD);
+  hub.latest = shipped;
+  let checked = false;
+  hub.serve = name => { if (name !== 'latest.json' || checked) return false; checked = true; }; // the first check never answers
+  const laya = createLaya({ userDataDir: temporary(t, 'secondhand-laya-'), manifest: shipped, updateUrl: hub.updateUrl, runner: stubRunner(), enabled: true });
+  const update = laya.update();
+  await until(() => checked, 'the check');
+  assert.equal((await laya.status()).state, 'downloading');
+  await laya.cancelDownload();
+  assert.deepEqual(await laya.status(), { state: 'not-downloaded', enabled: true, progress: 0, sizeBytes: sizeOf(shipped) });
+  await update;
+  assert.deepEqual(hub.fileRequests(OLD), [], 'the paused check started no download');
+
+  hub.serve = name => name === `${OLD}/model.onnx.data` ? undefined : false; // never answers
+  const resumed = laya.update();
+  await until(() => hub.requests.includes(`${OLD}/model.onnx.data`), 'the weights');
+  await laya.cancelDownload();
+  const paused = await laya.status();
+  assert.equal(paused.state, 'not-downloaded');
+  assert.ok(paused.progress > 0, 'what arrived is kept');
+  await resumed;
+});
+
+test('startUpdates checks at once and then every 24 hours until Laya closes', async t => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const hub = await modelHub(t);
+  const shipped = hub.publish(OLD);
+  hub.latest = shipped;
+  const laya = createLaya({ userDataDir: temporary(t, 'secondhand-laya-'), manifest: shipped, updateUrl: hub.updateUrl, runner: stubRunner(), enabled: true });
+  await laya.startUpdates();
+  await laya.startUpdates();
+  assert.equal(hub.checks(), 2, 'each call checks, but only one clock runs');
+  t.mock.timers.tick(24 * 60 * 60 * 1000 - 1);
+  await laya.update();
+  assert.equal(hub.checks(), 3);
+  t.mock.timers.tick(1);
+  await laya.update(); // joins the check the clock started
+  assert.equal(hub.checks(), 4, 'the 24-hour check ran');
+  await laya.close();
+  t.mock.timers.tick(24 * 60 * 60 * 1000);
+  await laya.update();
+  assert.equal(hub.checks(), 4, 'nothing is checked after close');
+});
+
+test('an installed.json SecondHand can’t use leaves the shipped model in place, and says why', async t => {
+  const hub = await modelHub(t);
+  const shipped = hub.publish(OLD);
+  const userDataDir = temporary(t, 'secondhand-laya-');
+  fs.mkdirSync(path.join(userDataDir, 'models/laya'), { recursive: true });
+  fs.writeFileSync(path.join(userDataDir, 'models/laya/installed.json'), '{ damaged');
+  const laya = createLaya({ userDataDir, manifest: shipped, runner: stubRunner(), enabled: true });
+  assert.deepEqual(await laya.status(), { state: 'not-downloaded', enabled: true, progress: 0, sizeBytes: sizeOf(shipped),
+    update: { state: 'error', message: 'SecondHand couldn’t read which Laya model is installed (installed.json isn’t valid JSON), so it uses the one it shipped with.' } });
+  await laya.update();
+  assert.deepEqual(await laya.status(), { state: 'ready', enabled: true, sizeBytes: sizeOf(shipped) }, 'installing the model replaces the record and clears the note');
+  assert.equal(installedRevision(userDataDir), OLD);
+
+  const newer = hub.publish(NEW, modelFiles(), 'noul-v9');
+  fs.writeFileSync(path.join(userDataDir, 'models/laya/installed.json'), JSON.stringify(newer));
+  const downgraded = createLaya({ userDataDir, manifest: shipped, runner: stubRunner(), enabled: true });
+  const status = await downgraded.status();
+  assert.equal(status.state, 'ready', 'the shipped model’s files are still there');
+  assert.deepEqual(status.update, { state: 'incompatible', message: 'The installed Laya model needs a newer version of SecondHand, so SecondHand uses one it can run.' });
+});
+
+test('remove turns Laya off and deletes every revision; turned on again, it downloads the newest model', async t => {
+  const hub = await modelHub(t);
+  const shipped = hub.publish(OLD);
+  hub.latest = shipped;
+  const userDataDir = temporary(t, 'secondhand-laya-');
+  const laya = createLaya({ userDataDir, manifest: shipped, updateUrl: hub.updateUrl, runner: stubRunner(), enabled: true });
+  await laya.update();
+  hub.latest = hub.publish(NEW);
+  hub.serve = name => name === `${NEW}/model.onnx.data` ? undefined : false; // never answers
+  const update = laya.update();
+  await until(() => hub.requests.includes(`${NEW}/model.onnx.data`), 'the new weights');
+  await laya.remove();
+  await update;
+  assert.deepEqual(await laya.status(), { state: 'off', enabled: false, sizeBytes: sizeOf(shipped) });
+  assert.equal(fs.existsSync(path.join(userDataDir, 'models/laya')), false);
+  hub.serve = null;
+  await laya.setEnabled(true);
+  await laya.update();
+  assert.equal(installedRevision(userDataDir), NEW);
+  assert.deepEqual(stored(userDataDir), [NEW, 'installed.json']);
 });
 
 function tinyModelDirectory(t, graph = fs.readFileSync(tinyGraph)) {

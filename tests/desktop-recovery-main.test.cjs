@@ -8,6 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
 const { pathToFileURL } = require('node:url');
+const realLaya = require('../desktop/laya.cjs');
 
 const root = path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'desktop/main.cjs'), 'utf8');
@@ -48,7 +49,9 @@ async function desktop(t, { encryptionAvailable = true, shell = {}, env = {}, is
     './bridge.cjs': { ...require('../desktop/bridge.cjs'), startBridge: async () => ({ close: async () => {} }) },
     './extension-setup.cjs': { getExtensionSetup: async () => ({ prepared: false }) },
     './registration.cjs': { registerHost: async () => ({}) },
-    './test-storage-path.cjs': { testStoragePath: () => null }
+    './test-storage-path.cjs': { testStoragePath: () => null },
+    // The real Laya runtime, minus its background download and update checks (tests/desktop-laya-main.test.cjs covers those).
+    './laya.cjs': { ...realLaya, createLaya: options => ({ ...realLaya.createLaya(options), startUpdates() {}, update() {} }) }
   };
   vm.runInNewContext(source, {
     require: name => Object.hasOwn(overrides, name) ? overrides[name] : require(name.startsWith('.') ? path.join(root, 'desktop', name) : name),

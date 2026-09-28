@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
-const { validateManifest, ModelStore, MODEL_FILES } = require('../desktop/laya-model.cjs');
+const { validateManifest, ModelStore, MODEL_FILES, MODEL_FORMATS, readInstalled, fetchManifest } = require('../desktop/laya-model.cjs');
 
 const revision = 'a'.repeat(40);
 const sha256 = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
@@ -45,7 +45,7 @@ async function server(t, files) {
   await new Promise(resolve => instance.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => { instance.closeAllConnections(); instance.close(resolve); }));
   const base = `http://127.0.0.1:${instance.address().port}`;
-  const model = { revision, files: MODEL_FILES.map(name => ({ path: name, url: `${base}/${name}`, size: files[name].length, sha256: sha256(files[name]) })) };
+  const model = { revision, format: 'noul-v1', files: MODEL_FILES.map(name => ({ path: name, url: `${base}/${name}`, size: files[name].length, sha256: sha256(files[name]) })) };
   return { requests, state, base, model };
 }
 
@@ -57,12 +57,18 @@ function userData(t) {
 
 test('an empty manifest means no model is available; a model entry is checked strictly', () => {
   assert.equal(validateManifest({ version: 1, model: null }).model, null);
-  const model = { revision, files: MODEL_FILES.map(name => ({ path: name, url: `https://huggingface.co/example/laya/resolve/${revision}/${name}`, size: 10, sha256: 'b'.repeat(64) })) };
+  const model = { revision, format: 'noul-v1', files: MODEL_FILES.map(name => ({ path: name, url: `https://huggingface.co/example/laya/resolve/${revision}/${name}`, size: 10, sha256: 'b'.repeat(64) })) };
   assert.equal(validateManifest({ version: 1, model }).model.sizeBytes, 10 * MODEL_FILES.length);
+  assert.equal(validateManifest({ version: 1, model }).model.format, 'noul-v1');
+  // A format the app doesn't know is still a valid manifest; whether to install it is the runtime's choice.
+  assert.equal(validateManifest({ version: 1, model: { ...model, format: 'noul-v2' } }).model.format, 'noul-v2');
+  const { format: _format, ...unformatted } = model;
   const broken = [
     [{ version: 2, model: null }, /version/],
     [{ version: 1 }, /model/],
     [{ version: 1, model: { ...model, revision: 'main' } }, /revision/],
+    [{ version: 1, model: unformatted }, /format/],
+    [{ version: 1, model: { ...model, format: 'Noul V1' } }, /format/],
     [{ version: 1, model: { ...model, files: model.files.slice(1) } }, /model\.onnx/],
     [{ version: 1, model: { ...model, files: [...model.files, { ...model.files[0], path: '../escape' }] } }, /path/],
     [{ version: 1, model: { ...model, files: [...model.files, model.files[0]] } }, /once/],
@@ -77,7 +83,7 @@ test('an empty manifest means no model is available; a model entry is checked st
   assert.equal(validateManifest({ version: 1, model: local }).model.files[0].url, 'http://127.0.0.1:9/model.onnx');
 });
 
-test('a download is verified, stored under models/laya/<revision>/, reports progress, and replaces older revisions', async t => {
+test('a download is verified, stored under models/laya/<revision>/, and reports progress; other revisions stay until removed', async t => {
   const files = fixtureFiles();
   const { model } = await server(t, files);
   const directory = userData(t);
@@ -91,8 +97,32 @@ test('a download is verified, stored under models/laya/<revision>/, reports prog
   assert.equal(store.directory, path.join(directory, 'models/laya', revision));
   for (const name of MODEL_FILES) assert.deepEqual(fs.readFileSync(path.join(store.directory, name)), files[name]);
   assert.equal(fs.readdirSync(store.directory).some(name => name.endsWith('.partial')), false);
-  assert.equal(fs.existsSync(old), false, 'the older revision is removed after a good download');
   assert.equal(await store.verify(), store.directory);
+  assert.ok(fs.existsSync(old), 'a download leaves the model in use alone');
+  assert.equal(await readInstalled(directory), null, 'nothing is recorded as installed yet');
+
+  await store.install();
+  assert.deepEqual(await readInstalled(directory), validateManifest({ version: 1, model }).model);
+  const kept = path.join(directory, 'models/laya', 'e'.repeat(40));
+  fs.mkdirSync(kept);
+  await store.removeOthers(['e'.repeat(40)]);
+  assert.equal(fs.existsSync(old), false, 'the older revision is removed');
+  assert.ok(fs.existsSync(kept), 'a revision it is told to keep stays');
+  assert.deepEqual(fs.readdirSync(path.join(directory, 'models/laya')).sort(), [revision, 'e'.repeat(40), 'installed.json'].sort());
+});
+
+test('installed.json names the installed model; a missing one means none, and a damaged one is refused with the reason', async t => {
+  const directory = userData(t);
+  assert.equal(await readInstalled(directory), null);
+  fs.mkdirSync(path.join(directory, 'models/laya'), { recursive: true });
+  fs.writeFileSync(path.join(directory, 'models/laya/installed.json'), '{ not json');
+  await assert.rejects(readInstalled(directory), /JSON/);
+  fs.writeFileSync(path.join(directory, 'models/laya/installed.json'), JSON.stringify({ version: 1, model: { revision } }));
+  await assert.rejects(readInstalled(directory), /manifest is invalid/);
+});
+
+test('the app supports the single-candidate noul prompt format', () => {
+  assert.deepEqual([...MODEL_FORMATS], ['noul-v1']);
 });
 
 test('a tampered download is rejected with a clear message and deleted', async t => {
@@ -272,6 +302,7 @@ test('the shipped manifest pins the published model: its commit, Hugging Face UR
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../desktop/laya-model.json'), 'utf8'));
   const { model } = validateManifest(manifest);
   assert.ok(model, 'a model is published');
+  assert.ok(MODEL_FORMATS.includes(model.format), 'the app can run the model it ships with');
   for (const file of model.files) {
     assert.equal(file.url, `https://huggingface.co/JacobTDang/secondhand-laya/resolve/${model.revision}/${file.path}`, file.path);
   }
@@ -279,4 +310,46 @@ test('the shipped manifest pins the published model: its commit, Hugging Face UR
   const rows = new Map([...card.matchAll(/\| \`([^\`]+)\` \| ([\d,]+) \| \`([0-9a-f]{64})\` \|/g)].map(m => [m[1], { size: Number(m[2].replace(/,/g, '')), sha256: m[3] }]));
   for (const file of model.files) assert.deepEqual({ size: file.size, sha256: file.sha256 }, rows.get(file.path), file.path);
   assert.match(card, new RegExp(model.revision), 'the model card names the published commit');
+});
+
+test('an update list (latest.json) is read over https or loopback http and checked like the shipped manifest', async t => {
+  const files = fixtureFiles();
+  const { model, state, base } = await server(t, files);
+  state.serve = (name, _request, response) => {
+    if (name === 'latest.json') { response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ version: 1, model })); return; }
+    if (name === 'moved') { response.writeHead(302, { Location: `${base}/latest.json` }).end(); return; }
+    if (name === 'empty.json') { response.writeHead(200).end(JSON.stringify({ version: 1, model: null })); return; }
+    return false;
+  };
+  const signal = new AbortController().signal;
+  assert.deepEqual(await fetchManifest(`${base}/latest.json`, signal), validateManifest({ version: 1, model }));
+  assert.deepEqual(await fetchManifest(`${base}/moved`, signal), validateManifest({ version: 1, model }), 'redirects are followed');
+  assert.deepEqual(await fetchManifest(`${base}/empty.json`, signal), { model: null });
+  await assert.rejects(fetchManifest('http://example.org/latest.json', signal), /Update check failed: .*https/);
+});
+
+test('a failed update check says why: the server’s answer, bad JSON, an invalid list, a list too large, or no connection', async t => {
+  const files = fixtureFiles();
+  const { model, state, base } = await server(t, files);
+  state.serve = (name, _request, response) => {
+    if (name === 'garbled.json') { response.writeHead(200).end('{ "version": 1, '); return; }
+    if (name === 'invalid.json') { response.writeHead(200).end(JSON.stringify({ version: 1, model: { ...model, revision: 'main' } })); return; }
+    if (name === 'huge.json') { response.writeHead(200).end(Buffer.alloc(2 * 1024 * 1024, 32)); return; }
+    if (name === 'elsewhere') { response.writeHead(302, { Location: 'http://example.org/latest.json' }).end(); return; }
+    return false;
+  };
+  const signal = new AbortController().signal;
+  await assert.rejects(fetchManifest(`${base}/latest.json`, signal), { message: 'Update check failed: the server answered 404.' });
+  await assert.rejects(fetchManifest(`${base}/garbled.json`, signal), /^Error: Update check failed: the update list isn’t valid JSON\.$/);
+  await assert.rejects(fetchManifest(`${base}/invalid.json`, signal), /^Error: Update check failed: The Laya model manifest is invalid: the revision/);
+  await assert.rejects(fetchManifest(`${base}/huge.json`, signal), /^Error: Update check failed: the update list is larger than/);
+  await assert.rejects(fetchManifest(`${base}/elsewhere`, signal), /^Error: Update check failed: it was redirected somewhere SecondHand doesn’t trust\.$/);
+  const closed = http.createServer();
+  await new Promise(resolve => closed.listen(0, '127.0.0.1', resolve));
+  const port = closed.address().port;
+  await new Promise(resolve => closed.close(resolve));
+  await assert.rejects(fetchManifest(`http://127.0.0.1:${port}/latest.json`, signal), { message: 'Update check failed: couldn’t reach the server (ECONNREFUSED).' });
+  for (const error of await Promise.all([`${base}/latest.json`].map(url => fetchManifest(url, signal).catch(caught => caught)))) {
+    assert.equal(error.publicMessage, error.message, 'the message is meant for the person');
+  }
 });

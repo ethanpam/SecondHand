@@ -2,6 +2,7 @@
   "version": 1,
   "model": {
     "revision": "d1beee2813ce4996c50695eb604841365808f1e3",
+    "format": "noul-v1",
     "files": [
       {
         "path": "model.onnx",
