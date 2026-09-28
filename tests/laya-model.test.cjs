@@ -121,8 +121,8 @@ test('installed.json names the installed model; a missing one means none, and a 
   await assert.rejects(readInstalled(directory), /manifest is invalid/);
 });
 
-test('the app supports the single-candidate noul prompt format', () => {
-  assert.deepEqual([...MODEL_FORMATS], ['noul-v1']);
+test('the app runs the single-candidate noul-v1 prompts and the one-pass choice-v1 prompts', () => {
+  assert.deepEqual([...MODEL_FORMATS], ['noul-v1', 'choice-v1']);
 });
 
 test('a tampered download is rejected with a clear message and deleted', async t => {

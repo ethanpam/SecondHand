@@ -74,7 +74,7 @@ test('latest.json pins every file to the commit that holds it, names its format,
   assert.deepEqual(latest, { version: 1, model: { revision: commit, format: 'noul-v1',
     files: files.map(file => ({ path: file.path, url: `https://huggingface.co/${repo}/resolve/${commit}/${file.path}`, size: file.size, sha256: file.sha256 })) } });
   assert.equal(validateManifest(latest).model.revision, commit);
-  assert.throws(() => latestManifest({ endpoint: 'https://huggingface.co', repo, commit, format: 'noul-v2', files }), /noul-v2 isn’t a format this SecondHand can run \(noul-v1\)/);
+  assert.throws(() => latestManifest({ endpoint: 'https://huggingface.co', repo, commit, format: 'noul-v2', files }), /noul-v2 isn’t a format this SecondHand can run \(noul-v1, choice-v1\)/);
   assert.throws(() => latestManifest({ endpoint: 'https://huggingface.co', repo, commit: 'main', files, format: 'noul-v1' }), /revision/);
 });
 

@@ -105,10 +105,14 @@ function checkItems(items) {
 
 // userDataDir: where models/laya/<revision>/ lives. manifest: desktop/laya-model.json, the model
 // used until another is installed. updateUrl: the model repo's latest.json, naming the newest model.
-// modelDir: an exported model folder to use instead of a download (SECONDHAND_LAYA_MODEL_DIR).
-function createLaya({ userDataDir, manifest, modelDir, updateUrl = null, runner = processRunner(), enabled = false, timeoutMs = 3000, idleMs = 5 * 60 * 1000, checkEveryMs = DAY_MS }) {
+// modelDir: an exported model folder to use instead of a download (SECONDHAND_LAYA_MODEL_DIR), and
+// modelFormat its prompt format (SECONDHAND_LAYA_MODEL_FORMAT).
+function createLaya({ userDataDir, manifest, modelDir, modelFormat, updateUrl = null, runner = processRunner(), enabled = false, timeoutMs = 3000, idleMs = 5 * 60 * 1000, checkEveryMs = DAY_MS }) {
   const { model: shipped } = validateManifest(manifest);
   if (shipped && !MODEL_FORMATS.includes(shipped.format)) throw new Error(`The shipped Laya model’s format (${shipped.format}) isn’t one this app can run.`);
+  if (modelDir !== undefined && !MODEL_FORMATS.includes(modelFormat)) {
+    throw new Error(`A Laya model folder needs its prompt format, one of ${MODEL_FORMATS.join(', ')}, not ${modelFormat}.`);
+  }
   const storeFor = model => new ModelStore({ userDataDir, model });
   // The model in use: the installed one (models/laya/installed.json) once read, else the shipped one.
   let store = !modelDir && shipped ? storeFor(shipped) : null;
@@ -195,9 +199,11 @@ function createLaya({ userDataDir, manifest, modelDir, updateUrl = null, runner 
   async function load() {
     const loadGeneration = generation;
     let directory = modelDir;
+    let format = modelFormat;
     if (store) {
       await init();
       const current = store;
+      format = current.model.format;
       if ((await current.state()).state !== 'ready') throw notReady('The Laya model isn’t downloaded yet.');
       try { directory = await current.verify(); } catch (error) { throw notReady(error.publicMessage || error.message); }
     } else {
@@ -214,7 +220,7 @@ function createLaya({ userDataDir, manifest, modelDir, updateUrl = null, runner 
       if (!Number.isInteger(limits.maxLen) || !Number.isInteger(limits.headMaxLen) || !(limits.headMaxLen > 4 && limits.headMaxLen < limits.maxLen)) {
         throw new Error('its token limits are invalid');
       }
-      result = { tokenizer, limits, calibration: readCalibration(config), model: await runner.load(path.join(directory, 'model.onnx')) };
+      result = { tokenizer, limits, format, calibration: readCalibration(config), model: await runner.load(path.join(directory, 'model.onnx')) };
     } catch (error) {
       loadFailure = `The Laya model couldn’t be loaded (${error.message}).`;
       throw notReady(loadFailure);
@@ -227,10 +233,14 @@ function createLaya({ userDataDir, manifest, modelDir, updateUrl = null, runner 
     return result;
   }
 
-  async function ready() {
+  function refuseIfOff() {
     const unavailable = unavailableReason();
     if (unavailable) throw notReady(unavailable);
     if (!on) throw notReady('Laya is turned off. Turn on “Find more fields with Laya” in SecondHand.');
+  }
+
+  async function ready() {
+    refuseIfOff();
     if (loaded) return loaded;
     if (!loading) loading = load().then(result => { loaded = result; return result; }).finally(() => { loading = null; });
     return loading;
@@ -244,10 +254,21 @@ function createLaya({ userDataDir, manifest, modelDir, updateUrl = null, runner 
     return run;
   }
 
-  async function decideAll(items, request) {
+  // The prompt format of the model decisions run on: the loaded model's, else the one that loads next.
+  async function format() {
+    refuseIfOff();
+    if (loaded) return loaded.format;
+    if (!store) return modelFormat;
+    await init();
+    return store.model.format;
+  }
+
+  async function decideAll(items, request, wanted) {
     const checked = checkItems(items);
     if (!checked.length) return [];
     const session = await ready();
+    // Prompts written for one format mean nothing to a model of another, such as after an update.
+    if (wanted && session.format !== wanted) throw notReady('The Laya model changed while this form was being checked. Click Autofill again.');
     const decisions = [];
     checked.forEach((item, index) => {
       for (const { id, question } of item.questions) {
@@ -422,11 +443,13 @@ function createLaya({ userDataDir, manifest, modelDir, updateUrl = null, runner 
     try { await ready(); } finally { settle(); }
   }
 
-  async function decideBatch(items) {
+  // `format`, when given, is the prompt format the items are written in; a model of another is refused.
+  async function decideBatch(items, { format: wanted } = {}) {
+    if (wanted !== undefined && !MODEL_FORMATS.includes(wanted)) throw new TypeError(`Laya decisions can only be written in a format this app runs (${MODEL_FORMATS.join(', ')}).`);
     const request = { expired: false };
     active++;
     clearTimeout(idleTimer);
-    const work = decideAll(items, request).finally(settle);
+    const work = decideAll(items, request, wanted).finally(settle);
     let timer;
     const timeout = new Promise((_, reject) => {
       timer = setTimeout(() => { request.expired = true; reject(failure(LAYA_TIMEOUT, `Laya took too long (over ${timeoutMs} ms).`)); }, timeoutMs);
@@ -437,7 +460,8 @@ function createLaya({ userDataDir, manifest, modelDir, updateUrl = null, runner 
 
   return {
     status,
-    decide: async (state, questions) => (await decideBatch([{ state, questions }]))[0],
+    format,
+    decide: async (state, questions, options) => (await decideBatch([{ state, questions }], options))[0],
     decideBatch,
     warm,
     // Off stops a check or download (keeping what arrived) and releases the model.
