@@ -98,7 +98,9 @@ async function main() {
     // One click walks the screens: each information screen is read before Continue, and kept for the tab.
     await resetTo(screenUrl('beforeYouStart'));
     widget = await launcherFrame();
-    await widget.locator('#autofill').click();
+    // In headless Chromium the open side panel covers the card's corner, so Autofill is pressed in the side panel (the same request to the worker).
+    await expect.poll(() => panel.evaluate(() => !document.getElementById('panel-autofill').disabled), { timeout: 15000 }).toBe(true);
+    await panel.click('#panel-autofill');
     await expect.poll(() => page.url(), { timeout: 20000 }).toBe(screenUrl('letsGetStarted'));
     await page.locator('#termChkbox').check();
     await page.locator('button.saveButton').click();
