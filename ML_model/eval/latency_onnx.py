@@ -2,7 +2,8 @@
 
 A page is one household's first N questions on a real form, in form order, each scored with
 every candidate it has (the way SecondHand would ask). Reports the time to load the model
-and score the first page, the median and 95th percentile of later pages, and peak memory.
+and score the first page, the median and 95th percentile of later pages with the 1-minute load
+average beside each run, and peak memory.
 
     uv run --project ~/Projects/LayaStudio python ML_model/eval/latency_onnx.py --onnx <export> \\
         --dataset <built dataset> --form <form url> --runs 30 --out <report.json>
@@ -44,6 +45,17 @@ def pick_page(dataset, form, household, questions):
     return [groups[key] for key in order[:questions]]
 
 
+def timed_runs(run, count):
+    """Call run() count times; each timing comes with the 1-minute load average taken before it."""
+    runs = []
+    for _ in range(count):
+        load = os.getloadavg()[0]
+        started = time.perf_counter()
+        run()
+        runs.append({"ms": round((time.perf_counter() - started) * 1000, 1), "load_1m": round(load, 2)})
+    return runs
+
+
 def percentile(values, q):
     """Nearest-rank percentile: the smallest value at least q% of the values are at or below."""
     ordered = sorted(values)
@@ -77,9 +89,9 @@ def main():
     questions = json.loads((Path(args.dataset) / "questions.json").read_text())
     page = pick_page(args.dataset, args.form, args.household, args.questions)
     rows = [row for candidates in page for row in candidates]
-    load_average = os.getloadavg()
     rss_before = peak_rss_mb()
 
+    first_load_1m = round(os.getloadavg()[0], 2)
     started = time.perf_counter()
     scorer = OnnxScorer(args.onnx, batch_size=args.batch_size, threads=args.threads)
     session_ms = (time.perf_counter() - started) * 1000
@@ -87,11 +99,8 @@ def main():
     scorer.score_rows(rows, questions)
     first_page_ms = (time.perf_counter() - started) * 1000
 
-    times = []
-    for _ in range(args.runs):
-        started = time.perf_counter()
-        scorer.score_rows(rows, questions)
-        times.append((time.perf_counter() - started) * 1000)
+    runs = timed_runs(lambda: scorer.score_rows(rows, questions), args.runs)
+    times = [run["ms"] for run in runs]
 
     report = {
         "machine": machine(),
@@ -106,15 +115,16 @@ def main():
         "candidate_rows": len(rows),
         "batch_size": args.batch_size,
         "threads": args.threads or "onnxruntime default",
-        "load_average_at_start": [round(value, 1) for value in load_average],
         "session_load_ms": round(session_ms, 1),
         "first_page_ms": round(first_page_ms, 1),
         "first_load_ms": round(session_ms + first_page_ms, 1),
-        "runs": args.runs,
-        "p50_ms": round(percentile(times, 50), 1),
-        "p95_ms": round(percentile(times, 95), 1),
-        "min_ms": round(min(times), 1),
-        "max_ms": round(max(times), 1),
+        "first_load_load_1m": first_load_1m,
+        "p50_ms": percentile(times, 50),
+        "p95_ms": percentile(times, 95),
+        "min_ms": min(times),
+        "max_ms": max(times),
+        "load_1m_range": [min(run["load_1m"] for run in runs), max(run["load_1m"] for run in runs)],
+        "runs": runs,
         "rss_before_model_mb": round(rss_before, 1),
         "peak_rss_mb": round(peak_rss_mb(), 1),
     }

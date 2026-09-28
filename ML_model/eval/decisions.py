@@ -22,7 +22,7 @@ from layastudio import runtime
 
 ROOT = Path(__file__).resolve().parents[1]
 ABSTAIN = "None of these, or the facts don’t say"
-THRESHOLDS = [0.5, 0.7, 0.8, 0.9, 0.95, 0.98, 0.99, 0.995]
+THRESHOLDS = [0.5, 0.7, 0.8, 0.9, 0.95, 0.98, 0.99, 0.992, 0.995, 0.996]
 
 
 def training_precision(model_dir):

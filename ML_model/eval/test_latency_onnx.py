@@ -4,8 +4,9 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from latency_onnx import percentile, pick_page
+from latency_onnx import percentile, pick_page, timed_runs
 
 FORM = "https://forms.example/intake"
 
@@ -40,6 +41,16 @@ class PickPage(unittest.TestCase):
     def test_a_form_with_too_few_questions_is_refused(self):
         with self.assertRaisesRegex(ValueError, "2 questions"):
             pick_page(self.dataset([row("match", f"{FORM}#q1", "a"), row("answer", f"{FORM}#q2#0", "Yes")]), FORM, household=0, questions=3)
+
+
+class TimedRuns(unittest.TestCase):
+    def test_times_each_run_and_records_the_load_beside_it(self):
+        calls = []
+        with patch("latency_onnx.os.getloadavg", side_effect=[(1.5, 2.0, 3.0), (2.5, 2.0, 3.0)]):
+            runs = timed_runs(lambda: calls.append(1), 2)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual([run["load_1m"] for run in runs], [1.5, 2.5])
+        self.assertTrue(all(run["ms"] >= 0 for run in runs))
 
 
 class Percentile(unittest.TestCase):
