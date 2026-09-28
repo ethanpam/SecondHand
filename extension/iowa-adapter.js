@@ -681,7 +681,9 @@
         const select = countyControls[0];
         if (select.tagName !== 'SELECT' || select.type !== 'select-one' || select.id !== `homeAddressLst${index}.county` ||
             select.name !== `homeAddressLst[${index}].county` || doc.querySelectorAll(`[id="${select.id}"]`).length !== 1 ||
-            rendered(select, doc) || namesFor(select, doc).join('|') !== 'county') return false;
+            namesFor(select, doc).join('|') !== 'county') return false;
+        // Iowa shows this county question only while the entered address is chosen.
+        if (rendered(select, doc) && !radio.checked) return false;
         originalCounty = select;
       } else if (countyControls.length || text(county)) return false;
       radios.push(radio); labels.push(associated[0]); countyRows.push(county);
@@ -722,7 +724,7 @@
         other.getAttribute('onclick') !== "submitUrlLink('enterPersonalInfo?enterPersonalInfo=true');return false;";
     });
     if (unfamiliarButton) return null;
-    return { kind: 'address', form, button, first: radios[decision.candidateIndex], radios, labels, countyRows, tbody, candidateCount };
+    return { kind: 'address', form, button, first: radios[decision.candidateIndex], radios, labels, countyRows, county: originalCounty, tbody, candidateCount };
   }
 
   function addressState(context) {
@@ -1002,7 +1004,9 @@
         if (!scrollToField(next.first, doc) || !unchanged(expected)) return fail('The address choice changed or is not safely accessible. Check this page again.');
         try { next.first.click(); }
         catch { return fail('The first address suggestion could not be selected. Review Iowa’s form.'); }
-        expected = original.controls.map(state => next.radios.includes(state.element) ? { ...state, checked: state.element === next.first } : state);
+        // Choosing a suggestion must hide the entered address's county question again.
+        expected = original.controls.map(state => next.radios.includes(state.element) ? { ...state, checked: state.element === next.first }
+          : state.element === next.county ? { ...state, rendered: false } : state);
       }
       if (!next.first.checked || !unchanged(expected) || !scrollToField(next.button, doc) || !unchanged(expected)) return fail('The address page changed after selection. Review it before continuing.');
       try { next.button.click(); }

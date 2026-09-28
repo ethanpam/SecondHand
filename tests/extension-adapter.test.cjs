@@ -556,7 +556,7 @@ test('save-and-exit, final submission, and duplicate Next buttons never advance'
 const addressFixture = require('./fixtures/iowa-select-address.cjs');
 function addressPage(options = {}, url = addressFixture.URL) {
   const doc = page(addressFixture.makeHtml(options), url);
-  addressFixture.attachHandlers(doc);
+  addressFixture.attachHandlers(doc, options);
   return doc;
 }
 
@@ -570,7 +570,7 @@ test('verified Select Address exposes static checklist only and advances presele
   assert.doesNotMatch(JSON.stringify(result), /MORRILL|Morrill|50011|Ames|addressLst|homeAddressIndex/);
   const token = adapter.captureNavigation(doc, addressFixture.URL); assert.ok(token); assert.deepEqual(Object.keys(token), []);
   assert.equal(adapter.advance(doc, addressFixture.URL, token).advanced, true);
-  assert.deepEqual(doc.__addressQa, { selectionClicks: [], selectedIndexes: [['0']], nextClicks: 1 });
+  assert.deepEqual(doc.__addressQa, { selectionClicks: [], selectedIndexes: [['0']], shownCountyRows: [[]], nextClicks: 1 });
   assert.equal(adapter.advance(doc, addressFixture.URL, token).advanced, false); assert.equal(doc.__addressQa.nextClicks, 1);
 });
 
@@ -585,7 +585,7 @@ test('approved Next chooses first possible match over an unchanged original or g
     const token = adapter.captureNavigation(doc, addressFixture.URL);
     assert.equal(doc.querySelector('input[name="homeAddressIndex"]:checked'), before, 'preview does not select an address');
     assert.equal(adapter.advance(doc, addressFixture.URL, token).advanced, true);
-    assert.deepEqual(doc.__addressQa, { selectionClicks: ['0'], selectedIndexes: [['0']], nextClicks: 1 });
+    assert.deepEqual(doc.__addressQa, { selectionClicks: ['0'], selectedIndexes: [['0']], shownCountyRows: [[]], nextClicks: 1 });
   }
 });
 
@@ -597,12 +597,76 @@ test('address page only clicks the first suggestion, irrespective of substantive
   assert.deepEqual(doc.__addressQa.selectedIndexes, [['0']]);
 });
 
-test('address errors, visible dialogs, hidden mailing controls, and rendered county questions pause', () => {
-  for (const options of [{ error: true }, { modal: true }, { mailing: true }, { selected: 'original', renderedCounty: true }]) {
+test('address errors, visible dialogs, hidden mailing controls, and a county question beside a suggestion pause', () => {
+  const enteredCounty = { selected: 'original', renderedCounty: true };
+  for (const options of [{ error: true }, { modal: true }, { mailing: true }, { renderedCounty: true }, { candidateCount: 2, selected: 'second', renderedCounty: true },
+    { ...enteredCounty, error: true }, { ...enteredCounty, modal: true }, { ...enteredCounty, mailing: true }]) {
     const doc = addressPage(options);
     assert.equal(adapter.probePage(doc, addressFixture.URL).canAdvance, false, JSON.stringify(options));
     assert.equal(adapter.captureNavigation(doc, addressFixture.URL), null);
     assert.equal(doc.__addressQa.nextClicks, 0); assert.deepEqual(doc.__addressQa.selectionClicks, []);
+  }
+});
+
+test('with the entered address chosen and its county shown, Next selects the first suggestion and continues once the county is hidden again', () => {
+  for (const candidateCount of [1, 2]) {
+    const doc = addressPage({ candidateCount, selected: 'original', renderedCounty: true });
+    const entered = doc.querySelector(`#homeAddressIndex${candidateCount}`), county = doc.querySelector(`[id="homeAddressLst${candidateCount}.county"]`);
+    assert.equal(adapter.rendered(county, doc), true);
+    const state = adapter.probePage(doc, addressFixture.URL);
+    assert.equal(state.kind, 'fillable'); assert.equal(state.canAdvance, true);
+    assert.deepEqual(state.checklist, [{ key: 'addressReview', label: 'First suggested home address', status: 'missing', required: true, fillable: false }]);
+    assert.equal(adapter.scan(doc, addressFixture.URL).recognizedPage, true);
+    const token = adapter.captureNavigation(doc, addressFixture.URL); assert.ok(token);
+    assert.equal(entered.checked, true, 'preview does not select an address');
+    assert.equal(adapter.advance(doc, addressFixture.URL, token).advanced, true);
+    assert.deepEqual(doc.__addressQa, { selectionClicks: ['0'], selectedIndexes: [['0']], shownCountyRows: [[]], nextClicks: 1 });
+    assert.equal(entered.checked, false); assert.equal(adapter.rendered(county, doc), false);
+    assert.equal(county.value, 'ADAIR', 'the county select is never changed');
+  }
+});
+
+test('an applicant who picks the entered address reveals its county; Next still selects the first suggestion', () => {
+  const doc = addressPage();
+  doc.querySelector('#homeAddressIndex1').click();
+  assert.equal(adapter.rendered(doc.querySelector('[id="homeAddressLst1.county"]'), doc), true);
+  const token = adapter.captureNavigation(doc, addressFixture.URL); assert.ok(token);
+  assert.equal(adapter.advance(doc, addressFixture.URL, token).advanced, true);
+  assert.deepEqual(doc.__addressQa, { selectionClicks: ['1', '0'], selectedIndexes: [['0']], shownCountyRows: [[]], nextClicks: 1 });
+});
+
+test('if the county stays shown or changes after the switch, Save and Continue is never pressed and the page is left to the applicant', () => {
+  const doc = addressPage({ selected: 'original', renderedCounty: true, countyStaysVisible: true });
+  const county = doc.querySelector('[id="homeAddressLst1.county"]');
+  const token = adapter.captureNavigation(doc, addressFixture.URL); assert.ok(token);
+  assert.deepEqual(adapter.advance(doc, addressFixture.URL, token), { advanced: false, reason: 'The address page changed after selection. Review it before continuing.' });
+  assert.deepEqual(doc.__addressQa, { selectionClicks: ['0'], selectedIndexes: [], shownCountyRows: [], nextClicks: 0 });
+  assert.equal(adapter.rendered(county, doc), true); assert.equal(county.value, 'ADAIR');
+  const after = adapter.probePage(doc, addressFixture.URL);
+  assert.equal(after.kind, 'manual'); assert.equal(after.canAdvance, false); assert.equal(after.checklist[0].status, 'manual');
+  assert.equal(after.todo, 'Review this address step and continue in Iowa’s form yourself.');
+  assert.equal(adapter.captureNavigation(doc, addressFixture.URL), null);
+  assert.equal(adapter.advance(doc, addressFixture.URL, token).advanced, false); assert.equal(doc.__addressQa.nextClicks, 0);
+  const changed = addressPage({ selected: 'original', renderedCounty: true });
+  changed.querySelector('#homeAddressIndex0').addEventListener('click', () => { changed.querySelector('[id="homeAddressLst1.county"]').value = 'STORY'; });
+  const changedToken = adapter.captureNavigation(changed, addressFixture.URL); assert.ok(changedToken);
+  assert.equal(adapter.advance(changed, addressFixture.URL, changedToken).advanced, false); assert.equal(changed.__addressQa.nextClicks, 0);
+});
+
+test('a shown county question is accepted only as the chosen entered address’s single, exact county select', () => {
+  const mutations = [
+    doc => { doc.querySelector('#homeAddressIndex1').checked = false; },
+    doc => { doc.querySelector('[id="homeAddressLst1.county"]').name = 'homeAddressLst[0].county'; },
+    doc => { doc.querySelector('[id="homeAddressLst1.county"]').id = 'homeAddressLst0.county'; },
+    doc => { doc.querySelector('label[for="homeAddressLst1.county"]').textContent = 'Mailing county*'; },
+    doc => { doc.querySelector('#homeAddrCounty1').classList.remove('displayNone'); },
+    doc => { doc.querySelector('#homeAddrCounty1 td').append(withBox(doc.createElement('select'))); },
+    doc => { doc.querySelector('#homeAddrCounty0').append(withBox(doc.createElement('td'))); doc.querySelector('#homeAddrCounty0 td').textContent = 'County*'; }
+  ];
+  for (const mutate of mutations) {
+    const doc = addressPage({ selected: 'original', renderedCounty: true }); mutate(doc);
+    assert.equal(adapter.probePage(doc, addressFixture.URL).canAdvance, false, mutate.toString());
+    assert.equal(adapter.captureNavigation(doc, addressFixture.URL), null);
   }
 });
 
