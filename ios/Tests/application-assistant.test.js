@@ -64,6 +64,120 @@ test("known applicant mapping reuses typed laptop fields without exposing existi
   assert.equal(doc.querySelector("#lastName").value, "PRIVATE_EXISTING_VALUE");
 });
 
+const enableHome = (doc, scan, value = "yes", expiresAt = Date.now() + 60_000) =>
+  assistant.enableHomeAddress(doc, doc.location.href, scan.token, value, expiresAt);
+
+test("verified home Yes uses Iowa's click handler and a fresh preview fills revealed address fields", async () => {
+  const doc = page();
+  const initial = inspect(doc);
+  assert.equal(initial.canEnableHomeAddress, true);
+  assert.ok(!initial.fields.some(field => field.key === "hasHomeAddress" || field.key === "city"));
+  let clicks = 0;
+  doc.querySelector("#hasHome1").addEventListener("click", () => { clicks++; });
+  assert.equal((await enableHome(doc, initial)).filled, 1);
+  assert.equal(clicks, 1);
+  assert.equal(doc.querySelector("#hasHome1").checked, true);
+  assert.equal(doc.querySelector("#homeAddrDiv").style.display, "block");
+  assert.equal((await enableHome(doc, initial)).error, "preview_expired");
+  const revealed = inspect(doc);
+  assert.equal(revealed.documentID, initial.documentID);
+  assert.notEqual(revealed.token, initial.token);
+  assert.equal(revealed.canEnableHomeAddress, false);
+  const result = await fill(doc, revealed, {
+    addressLine1: "123 Test Way", addressLine2: "Unit 4", city: "Des Moines", state: "IA", postalCode: "50309"
+  });
+  assert.equal(result.filled, 5);
+  assert.equal(doc.querySelector("#addressLine1").value, "123 Test Way");
+  assert.equal(doc.querySelector("#city").value, "Des Moines");
+  assert.equal(doc.querySelector("#state").value, "IA");
+  assert.equal(doc.querySelector("#zipcode").value, "50309");
+  assert.equal(doc.querySelector("#sameAddress1").checked, false);
+  assert.equal(doc.querySelector("#applicant1").checked, false);
+  assert.equal(doc.querySelector("#snap").checked, false);
+});
+
+test("home choice accepts only exact native yes and never a generic mapping", async () => {
+  for (const value of [undefined, false, "no", "true", "Yes", " yes "]) {
+    const doc = page();
+    assert.equal((await enableHome(doc, inspect(doc), value === undefined ? null : value)).filled, 0);
+    assert.equal(doc.querySelector("#hasHome1").checked, false);
+    assert.equal(doc.querySelector("#hasHome2").checked, false);
+  }
+  const generic = page('<h1>Information</h1><form><label>Home answer<input id="home"></label></form>', BASE + "more");
+  const scan = inspect(generic);
+  assert.equal(scan.canEnableHomeAddress, false);
+  assert.equal((await fill(generic, scan, { hasHomeAddress: "yes" }, [{ id: scan.fields[0].id, key: "hasHomeAddress" }])).error, "invalid_fields");
+});
+
+test("home choice rejects changed question schemas and never replaces existing Yes or No", async () => {
+  for (const mutate of [
+    doc => { doc.querySelector("#hasHome1").name = "differentQuestion"; },
+    doc => { doc.querySelector("#hasHome1").value = "false"; },
+    doc => { doc.querySelector("#hasHome1").setAttribute("onclick", "otherHandler()"); },
+    doc => { doc.querySelector("#hasHome1").closest("fieldset").querySelector("legend").textContent = "Does another person have a home address?"; },
+    doc => { doc.querySelector("#hasHome2").insertAdjacentHTML("afterend", '<input name="hasHome" type="radio" value="unknown">'); },
+    doc => { doc.querySelector("#hasHome1").click(); },
+    doc => { doc.querySelector("#hasHome2").click(); }
+  ]) {
+    const doc = page(); mutate(doc);
+    const selectedBefore = Array.from(doc.querySelectorAll('input[name="hasHome"]'), element => element.checked);
+    const scan = inspect(doc);
+    assert.equal(scan.canEnableHomeAddress, false);
+    assert.equal((await enableHome(doc, scan)).error, "preview_expired");
+    assert.deepEqual(Array.from(doc.querySelectorAll('input[name="hasHome"]'), element => element.checked), selectedBefore);
+  }
+});
+
+test("home Yes does not run a handler that could erase dependent home or mailing answers", async () => {
+  for (const id of ["addressLine1", "city", "state", "zipcode", "mailingAddressLine1", "mailingCity", "sameAddress1", "sameAddress2"]) {
+    const doc = page(), control = doc.getElementById(id);
+    if (control.type === "radio") control.checked = true;
+    else control.value = control.tagName === "SELECT" ? "IA" : "Existing answer";
+    const before = Array.from(doc.querySelectorAll("input,select"), element => [element.value, element.checked]);
+    let clicks = 0;
+    doc.querySelector("#hasHome1").addEventListener("click", () => { clicks++; });
+    assert.equal((await enableHome(doc, inspect(doc))).filled, 0, id);
+    assert.equal(clicks, 0, id);
+    assert.deepEqual(Array.from(doc.querySelectorAll("input,select"), element => [element.value, element.checked]), before, id);
+  }
+});
+
+test("home choice checks cancellation, expiry, document changes and overlays after asynchronous reveal", async () => {
+  for (const [label, interrupt] of [
+    ["Stop", doc => assistant.cancel(doc)],
+    ["changed answer", doc => { doc.querySelector("#lastName").value = "User edit"; }],
+    ["changed radio", doc => { doc.querySelector("#hasHome1").name = "otherQuestion"; }],
+    ["navigation", doc => { doc.defaultView.history.replaceState({}, "", BASE + "income"); }],
+    ["overlay", doc => { doc.elementFromPoint = () => doc.body; }]
+  ]) {
+    const doc = page(), target = doc.querySelector("#hasHome1"), normal = target.getBoundingClientRect;
+    target.getBoundingClientRect = () => ({ left: 20, right: 220, top: 1000, bottom: 1030, width: 200, height: 30 });
+    target.scrollIntoView = () => { target.getBoundingClientRect = normal; interrupt(doc); };
+    const scan = inspect(doc);
+    await enableHome(doc, scan);
+    assert.equal(target.checked, false, label);
+  }
+  const expired = page();
+  assert.equal((await enableHome(expired, inspect(expired), "yes", Date.now() - 1)).error, "session_expired");
+  assert.equal(expired.querySelector("#hasHome1").checked, false);
+  const changed = page(), scan = inspect(changed);
+  changed.querySelector("#hasHome1").name = "otherQuestion";
+  assert.equal((await enableHome(changed, scan)).error, "preview_expired");
+});
+
+test("a native home grant that expires during scrolling cannot click Yes", async () => {
+  const doc = page(), target = doc.querySelector("#hasHome1");
+  const originalNow = Date.now, normal = target.getBoundingClientRect;
+  const expiresAt = Date.now() + 1_000;
+  target.getBoundingClientRect = () => ({ left: 20, right: 220, top: 1000, bottom: 1030, width: 200, height: 30 });
+  target.scrollIntoView = () => { target.getBoundingClientRect = normal; Date.now = () => expiresAt; };
+  const scan = inspect(doc);
+  try {
+    assert.equal((await enableHome(doc, scan, "yes", expiresAt)).error, "preview_expired");
+    assert.equal(target.checked, false);
+  } finally { Date.now = originalNow; }
+});
+
 test("unknown pages never infer an answer but accept a user-selected mapping", async () => {
   const doc = page('<h1>Income</h1><form action="income"><label>Monthly earnings<input id="earnings" name="earnings"></label><label>Email<input type="email" id="email"></label><button>Continue</button></form>', BASE + "income");
   const scan = inspect(doc);
@@ -182,6 +296,70 @@ test("offscreen rendered fields can scroll into view, occluded and hidden fields
   const hidden = page();
   hidden.querySelector("#firstName").hidden = true;
   assert.ok(!inspect(hidden).fields.some(field => field.key === "firstName"));
+});
+
+test("scrolling waits for delayed Safari layout and retries once before filling", async () => {
+  for (const revealAfter of [2, 17]) {
+    const doc = page(), first = doc.querySelector("#firstName");
+    const normal = first.getBoundingClientRect;
+    let frames = 0, scrolls = 0;
+    first.getBoundingClientRect = () => frames >= revealAfter ? normal()
+      : { left: 20, right: 220, top: 1000, bottom: 1030, width: 200, height: 30 };
+    first.scrollIntoView = () => { scrolls++; };
+    doc.defaultView.requestAnimationFrame = callback => queueMicrotask(() => { frames++; callback(); });
+    const scan = inspect(doc);
+    const assignment = selected(scan).filter(field => field.key === "firstName");
+    assert.equal((await fill(doc, scan, { firstName: "Avery" }, assignment)).filled, 1);
+    assert.equal(first.value, "Avery");
+    assert.equal(frames, revealAfter + 1);
+    assert.equal(scrolls, revealAfter <= 15 ? 1 : 2);
+  }
+});
+
+test("permanently occluded or offscreen fields stop after thirty frames and two scrolls", async () => {
+  for (const kind of ["occluded", "offscreen"]) {
+    const doc = page(), first = doc.querySelector("#firstName");
+    let frames = 0, scrolls = 0;
+    if (kind === "occluded") doc.elementFromPoint = () => doc.body;
+    else first.getBoundingClientRect = () => ({ left: 20, right: 220, top: 1000, bottom: 1030, width: 200, height: 30 });
+    first.scrollIntoView = () => { scrolls++; };
+    doc.defaultView.requestAnimationFrame = callback => queueMicrotask(() => { frames++; callback(); });
+    const scan = inspect(doc);
+    const result = await fill(doc, scan, { firstName: "Avery" }, selected(scan).filter(field => field.key === "firstName"));
+    assert.equal(result.filled, 0);
+    assert.equal(first.value, "");
+    assert.equal(frames, 30);
+    assert.equal(scrolls, 2);
+  }
+});
+
+test("Stop, expiry and recipient changes during delayed layout still prevent every write", async () => {
+  for (const interrupt of ["stop", "expire", "recipient"]) {
+    const doc = page(), first = doc.querySelector("#firstName");
+    const normal = first.getBoundingClientRect, originalNow = Date.now;
+    const expiresAt = Date.now() + 1_000;
+    let frames = 0;
+    first.getBoundingClientRect = () => frames >= 3 ? normal()
+      : { left: 20, right: 220, top: 1000, bottom: 1030, width: 200, height: 30 };
+    first.scrollIntoView = () => {};
+    doc.defaultView.requestAnimationFrame = callback => queueMicrotask(() => {
+      frames++;
+      if (frames === 2) {
+        if (interrupt === "stop") assistant.cancel(doc);
+        if (interrupt === "expire") Date.now = () => expiresAt;
+        if (interrupt === "recipient") first.name = "childFirstName";
+      }
+      callback();
+    });
+    const scan = inspect(doc);
+    try {
+      const result = await assistant.fill(doc, APPLICANT, scan.token,
+        selected(scan).filter(field => field.key === "firstName"), { firstName: "Avery" }, expiresAt);
+      assert.equal(result.filled, 0, interrupt);
+      assert.equal(first.value, "", interrupt);
+      assert.equal(frames, interrupt === "recipient" ? 4 : 2, interrupt);
+    } finally { Date.now = originalNow; }
+  }
 });
 
 test("no values can be filled on signature pages", async () => {
@@ -312,6 +490,7 @@ test("formaction overrides and click-time overlay changes block navigation", asy
   const doc = signature();
   const scan = inspect(doc);
   doc.elementFromPoint = () => doc.body;
+  doc.defaultView.requestAnimationFrame = callback => queueMicrotask(callback);
   assert.equal((await act(doc, doc.location.href, scan.token, scan.actions[0].id, true)).error, "needs_input");
 });
 

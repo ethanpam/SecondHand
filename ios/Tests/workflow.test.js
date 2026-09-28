@@ -9,7 +9,7 @@ function deferred() { let resolve; const promise = new Promise(done => { resolve
 function harness(options = {}) {
   let time = Date.now(), serial = 0;
   const events = {}, stored = options.stored ? { [STORAGE_KEY]: options.stored } : {};
-  const calls = { native: [], fill: [], act: [], actionPhases: [], cancel: 0, storage: [] };
+  const calls = { native: [], fill: [], home: [], act: [], actionPhases: [], cancel: 0, storage: [] };
   const tab = { id: 7, url: PORTAL };
   const site = { kind: "known", fields: [{ id: "field-1", key: "firstName", label: "First name", type: "text" }],
     actions: [{ id: "next", label: "Continue", kind: "continue" }], token: null, changed: false };
@@ -34,8 +34,14 @@ function harness(options = {}) {
       let result;
       if (code.includes(".inspect(")) {
         site.token = `token-${++serial}`;
-        result = { token: site.token, documentID: "document-1", pageURL: tab.url, kind: site.kind, title: "Application step",
-          fields: [...site.fields], actions: [...site.actions], populated: 0, ambiguous: 0 };
+        result = { token: site.token, pageURL: tab.url, kind: site.kind, title: "Application step",
+          fields: [...site.fields], actions: [...site.actions], populated: 0, ambiguous: 0,
+          documentID: site.documentID || "document-1", canEnableHomeAddress: site.canEnableHomeAddress === true };
+      } else if (code.includes(".enableHomeAddress(")) {
+        calls.home.push(input.args);
+        result = { filled: 1 };
+        site.fields.push({ id: "home-city", key: "city", label: "Home city", type: "text" });
+        if (options.replaceDocumentAfterChoice) site.documentID = "document-2";
       } else if (code.includes(".fill(")) {
         calls.fill.push(input.args);
         result = { filled: input.args[2].length, skipped: 0, needsInput: false };
@@ -64,6 +70,90 @@ test("start fills known fields and waits for a separate Continue action", async 
   assert.equal(h.calls.act.length, 0);
   assert.equal(h.calls.native[0].action, "applicationFields");
   assert.equal(h.calls.fill[0][3].firstName, "Private Name");
+});
+
+test("Start selects verified home Yes once, then rescans and requests newly visible saved fields", async () => {
+  const h = harness({ native: async input => ({ fields: Object.fromEntries(input.keys.map(key =>
+    [key, key === "hasHomeAddress" ? "yes" : "Example"])), expiresAt: Date.now() + 600000 }) });
+  h.site.canEnableHomeAddress = true;
+  const view = await h.workflow.dispatch({ command: "start" });
+  assert.equal(h.calls.home.length, 1); // The fake site deliberately leaves the capability true.
+  assert.deepEqual(h.calls.native.map(call => call.keys), [["firstName"], ["hasHomeAddress"], ["firstName", "city"]]);
+  assert.notEqual(h.calls.home[0][1], h.calls.fill[0][1]);
+  assert.equal(h.calls.home[0][2], "yes");
+  assert.equal(h.calls.fill.length, 1);
+  assert.equal(view.workflow.filled, 2);
+  assert.match(view.message, /Home address Yes selected/);
+  assert.equal(view.savedFields.hasHomeAddress, undefined);
+  assert.equal(view.scan.canEnableHomeAddress, undefined);
+  assert.equal(h.calls.act.length, 0);
+});
+
+test("missing or false native home eligibility never clicks, but other saved answers still fill", async () => {
+  for (const answer of [undefined, false, "no", "true", "Yes"]) {
+    const h = harness({ native: async input => ({ fields: input.keys.includes("hasHomeAddress")
+      ? (answer === undefined ? {} : { hasHomeAddress: answer }) : { firstName: "Example" }, expiresAt: Date.now() + 600000 }) });
+    h.site.canEnableHomeAddress = true;
+    const view = await h.workflow.dispatch({ command: "start" });
+    assert.equal(h.calls.home.length, 0);
+    assert.equal(h.calls.fill.length, 1);
+    assert.equal(view.workflow.phase, "ready");
+  }
+});
+
+test("home eligibility never becomes a generic popup mapping or an unknown-page automatic answer", async () => {
+  const h = harness();
+  h.site.kind = "mapping"; h.site.canEnableHomeAddress = true;
+  h.site.fields = [{ id: "field-1", key: null, label: "Home question", type: "text" }];
+  const view = await h.workflow.dispatch({ command: "start" });
+  const result = await h.workflow.dispatch({ command: "fill", previewToken: view.scan.previewToken,
+    assignments: [{ id: "field-1", key: "hasHomeAddress" }] });
+  assert.equal(result.error, "mapping");
+  assert.equal(h.calls.native.length, 1);
+  assert.equal(h.calls.home.length, 0);
+});
+
+test("Stop, Pause, tab switch and navigation cancel delayed native home eligibility", async () => {
+  for (const command of ["stop", "pause", "switch", "navigate"]) {
+    const gate = deferred();
+    const h = harness({ native: async input => input.keys.includes("hasHomeAddress") ? gate.promise
+      : { fields: { firstName: "Example" }, expiresAt: Date.now() + 600000 } });
+    h.site.canEnableHomeAddress = true;
+    const starting = h.workflow.dispatch({ command: "start" });
+    while (h.calls.native.length < 2) await new Promise(resolve => setImmediate(resolve));
+    let pending;
+    if (command === "switch") { h.tab.id = 8; h.events.activated({ tabId: 8 }); }
+    else if (command === "navigate") { h.tab.url = PORTAL + "Changed"; h.events.updated(7, { status: "loading", url: h.tab.url }); }
+    else pending = h.workflow.dispatch({ command });
+    gate.resolve({ fields: { hasHomeAddress: "yes" }, expiresAt: Date.now() + 600000 });
+    await starting;
+    if (pending) await pending;
+    await h.workflow.dispatch({ command: "status" });
+    assert.equal(h.calls.home.length, 0, command);
+    assert.equal(h.calls.fill.length, 0, command);
+  }
+});
+
+test("revoked or expired native home eligibility cannot choose Yes", async () => {
+  for (const response of [{ error: "session_expired" }, { fields: { hasHomeAddress: "yes" }, expiresAt: Date.now() - 1 }]) {
+    const h = harness({ native: async input => input.keys.includes("hasHomeAddress") ? response
+      : { fields: {}, expiresAt: Date.now() + 600000 } });
+    h.site.canEnableHomeAddress = true;
+    assert.equal((await h.workflow.dispatch({ command: "start" })).error, "session");
+    assert.equal(h.calls.home.length, 0);
+    assert.equal(h.calls.fill.length, 0);
+  }
+});
+
+test("a replacement document after home choice never receives the next address fill", async () => {
+  const h = harness({ replaceDocumentAfterChoice: true, native: async input => ({ fields: input.keys.includes("hasHomeAddress")
+    ? { hasHomeAddress: "yes" } : {}, expiresAt: Date.now() + 600000 }) });
+  h.site.canEnableHomeAddress = true;
+  const result = await h.workflow.dispatch({ command: "start" });
+  assert.equal(result.error, "changed");
+  assert.equal(h.calls.home.length, 1);
+  assert.equal(h.calls.fill.length, 0);
+  assert.equal(h.calls.native.length, 2);
 });
 
 test("persistent storage contains metadata only, never values, page labels, URLs, or preview tokens", async () => {

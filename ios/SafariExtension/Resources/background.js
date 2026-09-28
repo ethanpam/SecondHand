@@ -112,7 +112,8 @@
           || typeof response.fields !== "object" || !Number.isFinite(response.expiresAt)
           || response.expiresAt <= now() || response.expiresAt > now() + 601000) throw problem("session");
         const values = Object.fromEntries(Object.entries(response.fields).filter(([key, value]) =>
-          keys.includes(key) && Object.hasOwn(SAVED_FIELDS, key) && typeof value === "string" && value.trim() && value.length <= 500));
+          keys.includes(key) && (Object.hasOwn(SAVED_FIELDS, key) || (key === "hasHomeAddress" && value === "yes"))
+          && typeof value === "string" && value.trim() && value.length <= 500));
         return await use(values, response.expiresAt);
       } finally { response = null; }
     }
@@ -165,12 +166,36 @@
     }
     async function run(version) {
       if (!state || state.phase === "awaiting_confirmation") return view();
-      const scan = await inspect(version);
+      let scan = await inspect(version);
+      let homeAddressSelected = false;
       state.pages += 1;
-      if (scan.kind === "known" && scan.fields.some(field => Object.hasOwn(SAVED_FIELDS, field.key))) {
-        return fill(scan.fields.filter(field => Object.hasOwn(SAVED_FIELDS, field.key)).map(({ id, key }) => ({ id, key })), version, scan.token);
+      if (scan.kind === "known" && scan.canEnableHomeAddress === true) {
+        state.phase = "processing"; message = MESSAGES.processing;
+        await persist(); check(version);
+        const choiceScan = scan;
+        const result = await nativeFields(choiceScan, ["hasHomeAddress"], version, async (values, expiresAt) => {
+          check(version);
+          if (plan !== choiceScan) throw problem("changed");
+          if (values.hasHomeAddress !== "yes") return null;
+          return script(choiceScan, async (url, token, value, expiry) =>
+            await globalThis.SecondHandApplication.enableHomeAddress(document, url, token, value, expiry),
+          [choiceScan.pageURL, choiceScan.token, values.hasHomeAddress, Math.min(expiresAt, state.expiresAt)]);
+        });
+        check(version);
+        if (result) {
+          homeAddressSelected = result.filled === 1;
+          // At most one choice pass, then one text-fill pass. Newly revealed
+          // fields require a fresh token in the same document and native grant.
+          scan = await inspect(version);
+          if (scan.documentID !== choiceScan.documentID || scan.pageURL !== choiceScan.pageURL) throw problem("changed");
+        }
       }
-      await present(scan);
+      if (scan.kind === "known" && scan.fields.some(field => Object.hasOwn(SAVED_FIELDS, field.key))) {
+        await fill(scan.fields.filter(field => Object.hasOwn(SAVED_FIELDS, field.key)).map(({ id, key }) => ({ id, key })), version, scan.token);
+      } else {
+        await present(scan);
+      }
+      if (homeAddressSelected) message = `Home address Yes selected. ${message}`;
       return view();
     }
     async function act(input, version) {
