@@ -9,7 +9,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { EventEmitter } = require('node:events');
 const { atomicWrite } = require('./vault.cjs');
-const { PROFILE_FIELDS, PORTAL_URL, isPortalUrl, isHttpsSiteUrl } = require('../shared/schema.cjs');
+const { REQUEST_FIELDS, PORTAL_URL, isPortalUrl, isHttpsSiteUrl } = require('../shared/schema.cjs');
 const { TEXT_TYPES, CHOICE_TYPES } = require('../shared/laya-prompts.cjs');
 
 const HOST_NAME = 'org.secondhand.bridge';
@@ -99,8 +99,8 @@ class FrameReader extends EventEmitter {
 }
 
 function validateFieldScope(fields) {
-  if (!Array.isArray(fields) || !fields.length || fields.length > PROFILE_FIELDS.length ||
-      fields.some(field => typeof field !== 'string' || !PROFILE_FIELDS.includes(field)) ||
+  if (!Array.isArray(fields) || !fields.length || fields.length > REQUEST_FIELDS.length ||
+      fields.some(field => typeof field !== 'string' || !REQUEST_FIELDS.includes(field)) ||
       new Set(fields).size !== fields.length) throw new Error('Invalid requested profile fields.');
   return fields;
 }

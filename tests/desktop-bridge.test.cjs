@@ -7,7 +7,7 @@ const path = require('node:path');
 const net = require('node:net');
 const { PassThrough } = require('node:stream');
 const { FrameReader, frame, extensionFromOrigin, validateRequest, startBridge, relayRequest, runNativeHost, MAX_MESSAGE_BYTES } = require('../desktop/bridge.cjs');
-const { PORTAL_URL } = require('../shared/schema.cjs');
+const { PORTAL_URL, PROFILE_FIELDS } = require('../shared/schema.cjs');
 const EXTENSION = 'a'.repeat(32);
 
 test('native frames handle split headers, split UTF-8, and multiple messages', () => {
@@ -47,6 +47,9 @@ test('Chrome native origins and Iowa portal requests use strict allowlists', () 
     assert.throws(() => validateRequest({ id: 'x', type: 'recordProgress', url, filledCount: 1 }), /Iowa portal/);
   }
   for (const fields of [[], ['password'], ['firstName', 'firstName'], [null]]) assert.throws(() => validateRequest({ id: 'x', type: 'getFields', url: PORTAL_URL, fields }), /profile fields/);
+  // Whether an SSN is saved is asked for like any saved field, alone or with every other one.
+  assert.deepEqual(validateRequest({ id: 'x', type: 'getFields', url: PORTAL_URL, fields: ['birthDate', 'hasSsn'] }).fields, ['birthDate', 'hasSsn']);
+  assert.equal(validateRequest({ id: 'x', type: 'getFields', url: PORTAL_URL, fields: [...PROFILE_FIELDS, 'hasSsn'] }).fields.length, PROFILE_FIELDS.length + 1);
   assert.throws(() => validateRequest({ id: 'x', type: 'status', profile: {} }), /Unexpected/);
   assert.throws(() => validateRequest({ id: 'x', type: 'submit' }), /Unsupported/);
   for (const filledCount of [-1, 0, 1.5, 101, '2']) assert.throws(() => validateRequest({ id: 'x', type: 'recordProgress', url: PORTAL_URL, filledCount }), /count/);

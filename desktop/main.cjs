@@ -15,7 +15,7 @@ const { testStoragePath } = require('./test-storage-path.cjs');
 const { createLaya } = require('./laya.cjs');
 const { createFieldSuggestions } = require('./field-suggestions.cjs');
 const { createFieldAnswers } = require('./field-answers.cjs');
-const { validateProfile, validateApplication, FIELD_LABELS, PORTAL_URL, isPortalUrl, siteOrigin } = require('../shared/schema.cjs');
+const { validateProfile, validateApplication, FIELD_LABELS, DERIVED_FIELDS, PORTAL_URL, isPortalUrl, siteOrigin } = require('../shared/schema.cjs');
 
 app.setName('SecondHand');
 // The step-by-step Chrome setup guide on SecondHand's website. During
@@ -61,7 +61,7 @@ if (nativeOrigin) {
   let trustedSites = [];
   let layaEnabled = false;
   // Released only after a named confirmation on sites other than Iowa's portal.
-  const SENSITIVE_FIELDS = ['ssn', 'birthDate', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'assetsOnHand', 'monthlyMedicalExpenses'];
+  const SENSITIVE_FIELDS = ['ssn', 'hasSsn', 'birthDate', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'assetsOnHand', 'monthlyMedicalExpenses'];
   const MAX_TRUSTED_SITES = 50;
   // A worker may survive a desktop restart. A per-process seed prevents its old
   // access receipt matching a new process; six bytes leave ample safe-integer headroom.
@@ -289,7 +289,10 @@ if (nativeOrigin) {
       if (navigationOnly) { touch(); return { values: {}, accessRevision }; }
       const profile = vault.getData().profile;
       const values = {};
-      for (const field of request.fields) if (typeof profile[field] === 'string' && profile[field].trim()) values[field] = profile[field];
+      for (const field of request.fields) {
+        const value = Object.hasOwn(DERIVED_FIELDS, field) ? DERIVED_FIELDS[field](profile) : profile[field];
+        if (typeof value === 'string' && value.trim()) values[field] = value;
+      }
       touch();
       return { values, accessRevision };
     }

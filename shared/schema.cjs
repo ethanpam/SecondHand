@@ -20,9 +20,17 @@ const FIELD_LABELS = Object.freeze({
   householdVeteran: 'Anyone in household a veteran', householdDisability: 'Anyone in household with a disability',
   assetsOnHand: 'Money on hand (cash, checking, savings)', monthlyMedicalExpenses: 'Monthly medical expenses',
   householdAllCitizens: 'Everyone in household a US citizen', householdLegalStatus: 'If not, legal documents to stay in the US',
-  householdPregnant: 'Anyone in household pregnant', householdMedicare: 'Anyone in household on Medicare'
+  householdPregnant: 'Anyone in household pregnant', householdMedicare: 'Anyone in household on Medicare',
+  hasSsn: 'Whether you have a Social Security number'
 });
-const PROFILE_FIELDS = Object.freeze(Object.keys(FIELD_LABELS));
+// Answers the desktop works out from saved fields when a page asks for them. They are never saved,
+// and never carry the saved value itself: hasSsn says only that a Social Security number is saved.
+const DERIVED_FIELDS = Object.freeze({
+  hasSsn: profile => typeof profile.ssn === 'string' && profile.ssn.trim() ? 'yes' : ''
+});
+const PROFILE_FIELDS = Object.freeze(Object.keys(FIELD_LABELS).filter(key => !Object.hasOwn(DERIVED_FIELDS, key)));
+// Every field a page may ask the desktop for.
+const REQUEST_FIELDS = Object.freeze(Object.keys(FIELD_LABELS));
 const YES_NO_FIELDS = Object.freeze(['hasHomeAddress', 'mailingSameAsHome', 'isApplicant',
   'programSnap', 'programFip', 'programMedicaid', 'helpPayMedicalBills', 'householdVeteran', 'householdDisability',
   'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare']);
@@ -124,4 +132,4 @@ function validateStoredApplication(input) {
   return { ...validateApplication(input), createdAt: input.createdAt, updatedAt: input.updatedAt };
 }
 
-module.exports = { PORTAL_URL, FIELD_LABELS, PROFILE_FIELDS, PROFILE_CHOICES, YES_NO_FIELDS, APPLICATION_STATUSES, isPortalUrl, isHttpsSiteUrl, siteOrigin, validateProfile, validateApplication, validateStoredApplication };
+module.exports = { PORTAL_URL, FIELD_LABELS, PROFILE_FIELDS, REQUEST_FIELDS, DERIVED_FIELDS, PROFILE_CHOICES, YES_NO_FIELDS, APPLICATION_STATUSES, isPortalUrl, isHttpsSiteUrl, siteOrigin, validateProfile, validateApplication, validateStoredApplication };
