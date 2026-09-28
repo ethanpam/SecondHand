@@ -135,9 +135,10 @@ test('every label, instruction, and reason the Iowa adapter and content script c
 
 test('the worker says nothing in English of its own: every message it builds comes from a catalog key', () => {
   const code = withoutComments(source('background.js'));
-  // Chrome's own error wording, compared but never shown, and the worker's start-up failure.
+  // Chrome's and the native hosts' own error wording, compared but never shown, and the worker's start-up failure.
   const allowed = ['Could not establish connection. Receiving end does not exist.', 'Receiving end does not exist.', 'SecondHand could not load generic-adapter.js. Reinstall the extension.',
-    'SecondHand could not load strings.js. Reinstall the extension.'];
+    'SecondHand could not load strings.js. Reinstall the extension.', 'Open SecondHand, connect this extension, and unlock SecondHand.',
+    'Open SecondHand, connect this extension, and unlock your local vault.'];
   const prose = unique(literals(code).map(item => item.text).filter(text => /^[A-Z][a-z’']+\s/.test(text) && !allowed.includes(text)));
   assert.deepEqual(prose, []);
   const keys = [...code.matchAll(/\b(?:say|fault|english)\(\s*'([^']+)'/g)].map(match => match[1]);

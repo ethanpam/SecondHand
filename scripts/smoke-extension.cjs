@@ -164,6 +164,13 @@ async function installNativeStub(worker) {
     nativeRequest = async (type, payload = {}) => {
       const state = globalThis.__nativeSmoke;
       state.calls.push({ type, fields: payload.fields || [], url: payload.url || '' });
+      // A closed app can't be reached, as the worker reports a host that can't reach it; openApp starts it, locked.
+      if (type === 'openApp') {
+        if (!state.closed) return { opened: 'shown' };
+        state.closed = false; state.locked = true;
+        return { opened: 'launched' };
+      }
+      if (state.closed) throw Object.assign(fault('worker.desktopOffline'), { code: 'offline' });
       if (type === 'status') return { unlocked: !state.locked, applicationCount: 0, accessRevision: state.accessRevision };
       if (type === 'showApp') return { shown: true };
       if (type === 'getFields') {
@@ -458,6 +465,27 @@ async function main() {
     }
     await panel.screenshot(path.join(root, 'artifacts/extension-native-sidebar.png'));
     console.log('Side panel: checklist and desktop status without profile values.');
+
+    // With SecondHand closed, Autofill fills nothing and the one desktop line and its Open SecondHand
+    // button say so, not a red repeat under Autofill. Opening it waits for the app, then offers Unlock.
+    await resetTo(`${applicant}?next=stay`);
+    await worker.evaluate(() => { globalThis.__nativeSmoke.closed = true; });
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await panel.click('#panel-autofill');
+    await expect.poll(() => panel.text('#desktop-status'), { timeout: 15000 }).toBe('SecondHand isn’t running. Open the app on this computer.');
+    await expect.poll(() => panel.text('#desktop-action')).toBe('Open SecondHand');
+    assert.equal(await panel.visible('#desktop-action'), true);
+    await expect.poll(() => panel.text('#status')).toBe('Click Autofill. SecondHand fills what it can and tells you what it needs.');
+    assert.equal(await panel.evaluate(() => document.getElementById('status').classList.contains('error')), false);
+    await expect(page.locator('#firstName')).toHaveValue('');
+    await expect((await launcherFrame()).locator('#open-app')).toBeVisible({ timeout: 15000 });
+    await panel.click('#desktop-action');
+    await expect.poll(() => panel.text('#desktop-status'), { timeout: 10000 }).toBe('SecondHand is locked.');
+    await expect.poll(() => panel.text('#desktop-action')).toBe('Unlock');
+    assert.equal((await calls('openApp')).length, 1);
+    await panel.click('#desktop-action');
+    await expect.poll(async () => (await calls('showApp')).length).toBe(1);
+    console.log('Side panel: with SecondHand closed, one line and Open SecondHand; opening it waited for the app, then offered Unlock.');
 
     // Existing answers are not overwritten, including answers a saved parent
     // choice would clear through a portal conditional handler.

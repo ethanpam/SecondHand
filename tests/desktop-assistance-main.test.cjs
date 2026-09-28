@@ -243,6 +243,14 @@ test('showApp brings the window forward even while locked and returns no profile
   assert.equal(app.shows, before + 1);
 });
 
+test('openApp relayed to a running app (the Windows relay passes it on) brings the window forward like showApp', async () => {
+  const app = await desktop();
+  await app.invoke('lock');
+  const before = app.shows;
+  assert.deepEqual(plain(await app.request({ type: 'openApp' })), { opened: 'shown' });
+  assert.equal(app.shows, before + 1);
+});
+
 test('desktop releases explicit No choices but omits unknown answers', async () => {
   const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true } });
   await app.invoke('saveProfile', { programSnap: 'yes', programFip: 'no', hasHomeAddress: 'no', mailingSameAsHome: 'no', mailingAddressLine1: 'PO Box 123' });
