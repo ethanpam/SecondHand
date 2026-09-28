@@ -13,6 +13,7 @@
   <a href="https://secondhand-download.khoidoan00.chatgpt.site"><strong>Download for Windows or Mac</strong></a>
   &nbsp;·&nbsp; <a href="docs/setup.md">Setup guide</a>
   &nbsp;·&nbsp; <a href="docs/iowa-portal.md">What it covers</a>
+  &nbsp;·&nbsp; <a href="#local-ai-with-laya">Local AI</a>
   &nbsp;·&nbsp; <a href="docs/security.md">Security</a>
   &nbsp;·&nbsp; <a href="#develop">Develop</a>
 </p>
@@ -31,6 +32,7 @@
 - **Keeps your details on your computer.** Your profile and application notes are saved in an encrypted file that only your password or recovery key opens. There is no account, no cloud copy, and no analytics.
 - **Fills Iowa's application in one click.** Click **Autofill** in the corner of Iowa's portal. SecondHand fills the questions it knows, moves past screens that only give information, and stops wherever you're needed.
 - **Shows what still needs you.** A yellow **1 need you** link jumps to each missing answer. Click the SecondHand logo on the card to open Chrome's side panel, which marks every question on the page as **Done**, **Needs you**, **Optional**, or **Do it yourself**.
+- **Answers the questions the rules miss.** Laya, a small AI model that runs inside the desktop app, picks an answer from your saved facts when it's confident, and marks it as a guess for you to check. When your facts don't say, it leaves the question for you.
 - **Leaves the decisions to you.** The app asks before sharing anything, unless you choose **Always allow**. CAPTCHA, consent, signatures, and final submission are always yours.
 - **Speaks your language.** The side panel works in English, Spanish, Vietnamese, Chinese, French, and Arabic. It can show Iowa's questions in your language and sum up long pages, using Chrome's built-in translator and summarizer on your computer.
 - **Helps with other food-assistance forms.** Turn SecondHand on for a food pantry's form site and it fills what it recognizes, one click at a time. It never navigates or submits on those sites.
@@ -58,6 +60,26 @@ flowchart LR
 ```
 
 The desktop app is the only place your details are kept. The Chrome extension talks to it through Chrome's native messaging, a direct connection between the two programs on your computer; nothing goes through a server. For each page, the extension asks only for the answers that page needs, and only while the app is unlocked. Filling a field on Iowa's page shares that answer with Iowa, as typing it would. Read more in [the security design](docs/security.md).
+
+## Local AI with Laya
+
+<p align="center">
+  <img src="docs/media/laya.gif" width="880" alt="A food-pantry form asks 'Is anyone in your household 60 or older?' and 'Do you have a pet?'. SecondHand reads the two questions, the desktop app writes the fictional applicant's profile as plain facts, and Laya scores each option: No 0.994, Yes 0.001, None of these 0.031. No is filled with a dashed amber guess outline. For the pet question Laya picks None of these, so it is left for the applicant and the side panel marks it Needs you.">
+  <br>
+  <sub>A fictional applicant on a made-up pantry form. The scores are the real model's.</sub>
+</p>
+
+Rules fill the questions SecondHand knows. For the rest, the desktop app asks Laya:
+
+1. **The extension reads the question and its options** from the page: labels only, never your saved answers.
+2. **The desktop app writes your saved profile as plain facts**, such as "The household has 1 person", on your computer.
+3. **Laya scores every option.** For each one it answers a single yes/no question: given the facts about the household, is this the correct answer to the form question? "None of these, or the facts don't say" is scored too.
+4. **It fills only a sure answer**, one that scores over 0.9 and beats "None of these". The answer gets a dashed amber outline and the summary says it was suggested by Laya, so you know to check it. On sites other than Iowa's portal, the app asks before it uses sensitive details such as your age.
+5. **Otherwise the question stays yours**, marked **Needs you** in the side panel.
+
+Laya also matches text boxes the rules don't recognize to the saved detail they ask for, such as a differently worded name or phone field.
+
+Laya is [fine-tuned](docs/laya-model.md) from the open [Laya](https://huggingface.co/convaiinnovations/laya) model and published at [huggingface.co/JacobTDang/secondhand-laya](https://huggingface.co/JacobTDang/secondhand-laya) under Apache-2.0. It is free and needs no account. The app downloads it (about 429 MB) in the background the first time it opens, checks for a newer version once a day, and runs it on the computer's processor, about a tenth of a second per option on a recent Mac. Your details never leave your computer: Laya's only network traffic is downloading the model and checking for a new one. To turn Laya off, use its switch in the app's **Chrome extension** view. It runs on Windows and on Macs with Apple silicon; Intel Macs show it as unavailable.
 
 ## Get started
 
@@ -88,10 +110,10 @@ Autofill works screen by screen and stays on for the tab until you click **Stop*
 | **Enter Personal Information** | Fills your saved names, phones, home and mailing addresses, and program choices. Waits for missing required answers, then clicks Save and Continue. |
 | Select Address (verified home-only layout) | Picks Iowa's first suggested home address and continues. Check it before you submit. |
 | Tell Us More | Fills your saved date of birth and the answers you saved under About you in My information. Anything not saved stays with you. |
-| Other Iowa pages | May fill matching saved answers after you approve. You continue. |
+| Other Iowa pages | May fill matching saved answers after you approve, and Laya's sure answers to other questions, marked as guesses. You continue. |
 | CAPTCHA, consent, signatures, final Submit | Never touched. |
 
-The Select Address and Tell Us More steps are in this code but not yet in the public 0.4 downloads. SecondHand never guesses an answer from your other facts and never changes an answer already on the page. [Portal coverage](docs/iowa-portal.md) has the exact field list.
+The Select Address and Tell Us More steps and Laya are in this code but not yet in the public 0.4 downloads. SecondHand never changes an answer already on the page, and any answer Laya picks is marked as a guess for you to check. [Portal coverage](docs/iowa-portal.md) has the exact field list.
 
 ## Privacy and safety
 
@@ -109,7 +131,6 @@ The Select Address and Tell Us More steps are in this code but not yet in the pu
 | --- | --- | --- |
 | **iPhone app and Safari extension** | [`ios/`](ios/README.md) | Prototype. Encrypted storage on the phone, renewal reminders, and a guided application assistant with separate approval to submit. |
 | **Android app** | [`android/`](android/README.md) | Prototype. Encrypted profiles and documents, notice-based reminders, and an in-app Iowa assistant. |
-| **Local AI model** | [`ML_model/`](ML_model/README.md) | In training. A small model that answers form questions from saved facts. It is trained locally and will run on the applicant's own computer. |
 
 The phone apps keep their own encrypted data; nothing syncs between devices. Live Iowa filing from the phone apps is not yet verified.
 
@@ -141,6 +162,7 @@ For live reloading, run `npm run dev` (run `npx playwright install chromium` onc
 | `npm run test:extension` | Runs the extension in an isolated Chromium against synthetic Iowa pages. |
 | `npm run test:translation` | Checks the language picker, translated questions, and right-to-left Arabic. |
 | `npm run test:summary` | Checks the side panel's "What this page says". |
+| `npm run test:laya` | Checks Laya's fills on a synthetic pantry form, with the desktop app stubbed. |
 | `npm run test:extension:video` | Records a walkthrough with a fictional applicant. |
 | `npm run test:native` | Tests the native messaging protocol. On Windows, set `SECONDHAND_PACKAGED_EXE` to the built host. |
 | `npm run extension:zip` | Packages the extension. |
@@ -175,7 +197,7 @@ There is no hosted CI: pull requests and tags don't run checks or build installe
 | `website/` | The download website and its release publishing |
 | `docs/` | Setup, coverage, security, and design notes |
 | `ios/`, `android/` | Phone app prototypes |
-| `ML_model/` | Training and evaluation for the local AI model |
+| `ML_model/` | Training data and evaluation for Laya, the local AI model |
 
 ## Documentation
 
@@ -183,6 +205,7 @@ There is no hosted CI: pull requests and tags don't run checks or build installe
 - [Iowa portal coverage](docs/iowa-portal.md): exactly which fields and screens are supported
 - [Home-address confirmation](docs/address-automation.md): how the Select Address step works
 - [Security and privacy design](docs/security.md): encryption, the native connection, and limits
+- [Laya model card](docs/laya-model.md): how the local AI model was trained, how accurate it is, and how new versions are published
 - [Extension QA](docs/extension-qa.md): test coverage and the recorded walkthrough
 - [Iowa guest-draft journey](docs/iowa-live-journey.md): the authorized live-portal check
 - [Implementation contract](docs/implementation-contract.md): internal rules the code keeps
