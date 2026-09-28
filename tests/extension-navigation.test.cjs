@@ -14,7 +14,7 @@ const deferred = () => { let resolve; const promise = new Promise(done => { reso
 // A metadata-only content model. DOM/selector/first-suggestion safety is covered
 // separately by adapter fixtures. Native replies here are mocked, not Electron.
 function worker({ pageKey = 'iowa-personal-information', complete = false, todo, nativeHook } = {}) {
-  const path = pageKey === 'iowa-select-address' ? 'addressValidation' : pageKey === 'iowa-self-details' ? 'dynamicQuestions' : 'enterPersonalInfo';
+  const path = { 'iowa-select-address': 'addressValidation', 'iowa-self-details': 'dynamicQuestions', 'iowa-tell-us-more': 'dynamicQuestionsStart' }[pageKey] || 'enterPersonalInfo';
   const tab = { id: 7, active: true, url: `${adapter.PORTAL}/applyForBenefits/${path}` };
   const model = { pageKey, complete, todo, revealed: [], filled: [], nextCount: 0, nextToken: null, preview: 0 };
   const vault = { unlocked: true, accessRevision: 872313042, values: { firstName: 'Synthetic private first', birthDate: '1985-04-12' } };
@@ -23,10 +23,10 @@ function worker({ pageKey = 'iowa-personal-information', complete = false, todo,
   let listener;
   function pageState(message) {
     const address = model.pageKey === 'iowa-select-address';
-    const self = model.pageKey === 'iowa-self-details';
+    const self = model.pageKey === 'iowa-self-details', start = model.pageKey === 'iowa-tell-us-more';
     const unverified = /unverified/.test(model.pageKey);
-    const keys = address || unverified ? [] : self ? ['birthDate'] : ['firstName', 'lastName', ...model.revealed];
-    const canAdvance = !self && !unverified && (address || model.complete);
+    const keys = address || unverified ? [] : self ? ['birthDate'] : start ? ['birthDate', 'hasSsn', 'usCitizen', 'hasDisability', 'hasMedicare'] : ['firstName', 'lastName', ...model.revealed];
+    const canAdvance = !self && !start && !unverified && (address || model.complete);
     if (message.navigationPreview !== false) model.nextToken = canAdvance ? `next-${++model.preview}` : null;
     return { page: { kind: unverified ? 'manual' : 'fillable', pageKey: model.pageKey, canAdvance, todo: model.todo,
       checklist: keys.map(key => ({ key, label: key, required: true, status: model.complete || model.filled.includes(key) ? 'complete' : 'missing' })) },
@@ -142,6 +142,22 @@ test('self details only requests DOB and never advances; strict rejected pages c
     assert.equal(unknown.calls.native.length, 0);
     assert.equal(unknown.calls.content.some(message => message.type.includes('generic')), false);
   }
+});
+
+test('Tell Us More at dynamicQuestionsStart asks only for the fields that settle its answers, sends only settled answers, and never advances', async () => {
+  const w = worker({ pageKey: 'iowa-tell-us-more', todo: 'Answer the remaining questions, then click Save and Continue in Iowa’s form yourself.' });
+  Object.assign(w.vault.values, { ssn: '999-99-9999', hasSsn: 'yes', householdAllCitizens: 'no', householdDisability: 'no', householdMedicare: 'yes' });
+  const result = (await w.start()).data;
+  assert.equal(result.state, 'done');
+  assert.equal(result.todoKey, 'iowa.startDetailsTodo');
+  assert.deepEqual(requests(w).map(request => [request.url, request.fields]),
+    [[`${adapter.PORTAL}/applyForBenefits/dynamicQuestionsStart`, ['birthDate', 'hasSsn', 'householdAllCitizens', 'householdDisability', 'householdMedicare']]]);
+  assert.deepEqual(w.calls.content.filter(message => message.type === 'secondhand:fill').map(message => message.values),
+    [{ birthDate: '1985-04-12', hasSsn: 'yes', hasDisability: 'no' }]);
+  assert.deepEqual(w.model.filled, ['birthDate', 'hasSsn', 'hasDisability']);
+  assert.equal(w.model.nextCount, 0);
+  assert.equal(w.calls.content.some(message => message.type === 'secondhand:next'), false);
+  assert.doesNotMatch(JSON.stringify(w.calls.content), /999-99-9999/);
 });
 
 test('lock, revocation, desktop restart and malformed receipts stop values or Next before mutation', async () => {
