@@ -88,8 +88,13 @@ struct SettingsView: View {
                             .font(.subheadline).foregroundStyle(.secondary)
                         Text("There is no automatic backup or recovery. Keep your original documents. Losing this iPhone or deleting the app can lose your saved information.")
                             .font(.caption).foregroundStyle(.secondary)
-                        Button { store.lock() } label: { Label("Lock now", systemImage: "lock") }
-                            .font(.subheadline.weight(.semibold)).frame(minHeight: 32)
+                        Toggle("Use Face ID", isOn: Binding(
+                            get: { store.faceIDEnabled },
+                            set: { enabled in Task { await store.setFaceID(enabled) } }
+                        ))
+                        .disabled(store.isLoading)
+                        Text("Open SecondHand with Face ID, or use the four-digit PIN you created in the app. If Face ID is unavailable, use your PIN.")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
 
                     AppCard {

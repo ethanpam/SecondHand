@@ -2,6 +2,27 @@ import XCTest
 
 final class AppUITests: XCTestCase {
     @MainActor
+    func testPINKeypadLimitsInputAndSupportsDeletion() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launch()
+        let zero = app.buttons["auth.digit.0"]
+        XCTAssertTrue(zero.waitForExistence(timeout: 20))
+        let proceed = app.buttons["auth.continue"]
+        XCTAssertFalse(proceed.isEnabled)
+        for digit in [0, 1, 2, 3] { app.buttons["auth.digit.\(digit)"].tap() }
+        XCTAssertTrue(proceed.isEnabled)
+        XCTAssertFalse(zero.isEnabled)
+        let dots = app.otherElements["auth.pin"]
+        XCTAssertEqual(dots.value as? String, "4 of 4 digits entered")
+        app.buttons["auth.delete"].tap()
+        XCTAssertFalse(proceed.isEnabled)
+        XCTAssertTrue(zero.isEnabled)
+        XCTAssertEqual(dots.value as? String, "3 of 4 digits entered")
+        attachScreenshot(app, name: "Four-digit PIN keypad")
+    }
+
+    @MainActor
     func testProfilePersistsAndCoreScreensAreAvailable() throws {
         continueAfterFailure = false
         let app = XCUIApplication()

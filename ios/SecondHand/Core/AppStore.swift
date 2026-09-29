@@ -26,6 +26,11 @@ final class AppStore: ObservableObject {
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
     @Published private(set) var autofillExpiresAt: Date?
+    @Published private(set) var needsPINSetup = false
+    @Published private(set) var faceIDEnabled = false
+    @Published private(set) var showingPIN = false
+    @Published private(set) var requiredPINDigits = 4
+    private var authenticatedPINMigration = false
     private var vault: SecureVault?
     private var authContext: LAContext?
     private var unlockGeneration = 0
@@ -34,11 +39,11 @@ final class AppStore: ObservableObject {
     private var reminderRevision = 0
     private let previewDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("SecondHandPreviews", isDirectory: true)
 
-    func unlock() async {
+    func unlock(pin: String? = nil) async {
         guard !isUnlocked, !isLoading else { return }
         isLoading = true
         let generation = unlockGeneration
-        defer { isLoading = false }
+        defer { isLoading = false; authContext = nil }
         do {
             #if DEBUG && targetEnvironment(simulator)
             let isUITesting = ProcessInfo.processInfo.arguments.contains("--ui-testing")
@@ -46,16 +51,37 @@ final class AppStore: ObservableObject {
             let isUITesting = false
             #endif
             if !isUITesting {
-                let context = LAContext()
-                authContext = context
-                var error: NSError?
-                guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
-                    throw error ?? AppError.locked as NSError
+                guard var credentials = try AppAuthentication.load() else {
+                    needsPINSetup = true
+                    return
                 }
-                let accepted = try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Unlock your saved profile and documents.")
-                guard accepted else { throw AppError.locked }
+                needsPINSetup = false
+                requiredPINDigits = credentials.requiredDigits
+                faceIDEnabled = credentials.faceID
+                if let pin {
+                    do { try credentials.verify(pin) }
+                    catch { try credentials.save(); throw error }
+                    try credentials.save()
+                } else {
+                    guard credentials.faceID else { showingPIN = true; return }
+                    let context = LAContext()
+                    authContext = context
+                    context.localizedFallbackTitle = "Use SecondHand PIN"
+                    guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil),
+                          context.biometryType == .faceID else { showingPIN = true; return }
+                    do {
+                        guard try await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics,
+                            localizedReason: "Open your saved profile and documents.") else { showingPIN = true; return }
+                    } catch { showingPIN = true; return }
+                }
             }
             guard generation == unlockGeneration else { return }
+            if !isUITesting, let credentials = try AppAuthentication.load(), credentials.requiredDigits != 4 {
+                authenticatedPINMigration = true
+                requiredPINDigits = 4
+                needsPINSetup = true
+                return
+            }
             let storage = try SecureVault.local()
             let restored = try storage.load()
             cleanupPreviews()
@@ -64,17 +90,81 @@ final class AppStore: ObservableObject {
             persistedRenewal = restored.renewal
             reminderRevision += 1
             isUnlocked = true
+            showingPIN = false
             errorMessage = nil
-            // The vault still works if a development build has not configured the extension capability.
             autofillExpiresAt = try? SecureVault.readAutofillSession()?.expiresAt
             await consumePendingReceipts()
         } catch {
-            errorMessage = error.localizedDescription
+            if generation == unlockGeneration { errorMessage = error.localizedDescription }
         }
+    }
+
+    func createPIN(_ pin: String, confirmation: String) async {
+        guard !isLoading, pin == confirmation else {
+            errorMessage = "The PINs don’t match. Please try again."
+            return
+        }
+        isLoading = true
+        let generation = unlockGeneration
+        do {
+            let previous = try AppAuthentication.load()
+            guard previous == nil || authenticatedPINMigration else { throw AuthenticationError.storage }
+            var credentials = try AppAuthentication(pin: pin)
+            credentials.faceID = previous?.faceID ?? false
+            // Preserve the previous authentication boundary when migrating existing data.
+            let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                appropriateFor: nil, create: true)
+            if !authenticatedPINMigration && FileManager.default.fileExists(atPath: root.appendingPathComponent("SecondHand/profile.sealed").path) {
+                let context = LAContext()
+                authContext = context
+                guard try await context.evaluatePolicy(.deviceOwnerAuthentication,
+                    localizedReason: "Verify your identity before creating your SecondHand PIN.") else { throw AppError.locked }
+            }
+            guard generation == unlockGeneration else { isLoading = false; return }
+            try credentials.save()
+            authenticatedPINMigration = false
+            needsPINSetup = false
+            isLoading = false
+            await unlock(pin: pin)
+        } catch { errorMessage = error.localizedDescription; isLoading = false }
         authContext = nil
     }
 
+    func setFaceID(_ enabled: Bool) async {
+        guard isUnlocked, !isLoading else { return }
+        isLoading = true
+        let generation = unlockGeneration
+        defer { isLoading = false; authContext = nil }
+        do {
+            guard var credentials = try AppAuthentication.load() else { throw AuthenticationError.storage }
+            if enabled {
+                let context = LAContext()
+                authContext = context
+                context.localizedFallbackTitle = ""
+                guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil),
+                      context.biometryType == .faceID else {
+                    errorMessage = "Face ID is unavailable. Set it up in iPhone Settings, or keep using your SecondHand PIN."
+                    return
+                }
+                guard try await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics,
+                    localizedReason: "Enable Face ID for SecondHand.") else { return }
+            }
+            guard isUnlocked, generation == unlockGeneration else { return }
+            credentials.faceID = enabled
+            try credentials.save()
+            faceIDEnabled = enabled
+        } catch { errorMessage = error.localizedDescription }
+    }
+
     func lock() {
+        authenticatedPINMigration = false
+        do {
+            let credentials = try AppAuthentication.load()
+            needsPINSetup = credentials == nil
+            requiredPINDigits = credentials?.requiredDigits ?? 4
+        } catch {
+            needsPINSetup = false
+        }
         unlockGeneration += 1
         authContext?.invalidate()
         authContext = nil

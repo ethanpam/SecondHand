@@ -3,6 +3,38 @@ import CryptoKit
 @testable import SecondHand
 
 final class CoreTests: XCTestCase {
+    func testAppPINValidationAndSaltedCredentials() throws {
+        for invalid in ["", "123", "12345", "123456", "abcd", "１２３４"] {
+            XCTAssertThrowsError(try AppAuthentication(pin: invalid))
+        }
+        var first = try AppAuthentication(pin: "0123")
+        let second = try AppAuthentication(pin: "0123")
+        XCTAssertNotEqual(first.salt, second.salt)
+        XCTAssertNotEqual(first.digest, second.digest)
+        XCTAssertNoThrow(try first.verify("0123"))
+        XCTAssertThrowsError(try first.verify("0124"))
+    }
+
+    func testLegacyPINLengthIsPreservedForMigration() throws {
+        let credentials = try AppAuthentication(pin: "1234")
+        XCTAssertEqual(credentials.requiredDigits, 4)
+        var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(credentials)) as? [String: Any])
+        legacy.removeValue(forKey: "pinLength")
+        let restored = try JSONDecoder().decode(AppAuthentication.self, from: JSONSerialization.data(withJSONObject: legacy))
+        XCTAssertEqual(restored.requiredDigits, 6)
+    }
+
+    func testAppPINThrottleSurvivesSerializationAndResetsOnSuccess() throws {
+        var credentials = try AppAuthentication(pin: "1234")
+        let now = Date()
+        for _ in 0..<5 { XCTAssertThrowsError(try credentials.verify("0000", now: now)) }
+        credentials = try JSONDecoder().decode(AppAuthentication.self, from: JSONEncoder().encode(credentials))
+        XCTAssertThrowsError(try credentials.verify("1234", now: now.addingTimeInterval(29)))
+        XCTAssertNoThrow(try credentials.verify("1234", now: now.addingTimeInterval(31)))
+        XCTAssertEqual(credentials.failures, 0)
+        XCTAssertEqual(credentials.retryAfter, .distantPast)
+    }
+
     func testVaultRoundTripAndPlaintextDoesNotAppearOnDisk() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

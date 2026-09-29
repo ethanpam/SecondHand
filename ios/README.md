@@ -10,7 +10,7 @@ This is an independent prototype, not an Iowa HHS product. It does not determine
 - Separate dates for renewal return, benefits ending, interview, and requested documents. Dates come from the user's notice; the app does not assume annual renewal.
 - An encrypted local document vault and document preview.
 - Local reminders with generic wording on the lock screen.
-- A device authentication gate using biometrics or the device passcode.
+- A required four-digit SecondHand PIN with optional Face ID, enabled in Settings. Face ID failures fall back to the app PIN.
 - A Safari extension with an expiring, one-tab application session; automatic filling of verified applicant fields; user-selected mappings on other supported forms; Pause/Resume/Stop; and separate Continue and final submission actions.
 - An encrypted handoff of a user-entered website confirmation to the app's renewal tracker.
 
@@ -80,7 +80,7 @@ The launch argument skips the device-authentication gate only in a **Debug Simul
 
 You can install the app directly from your Mac with a **free Apple account / Personal Team**. You do not need to enroll in the paid Apple Developer Program for this personal-device demo. Apple's current [iOS capability matrix](https://developer.apple.com/help/account/reference/supported-capabilities-ios) includes App Groups and Keychain sharing for free Apple Developer accounts; provisioning still needs to succeed for your own account and identifiers.
 
-1. Connect your iPhone to the Mac with a data-capable USB cable. Unlock it and tap **Trust This Computer** if prompted. Use an iPhone with a device passcode set, since the app protects access with Face ID, Touch ID, or the device passcode.
+1. Connect your iPhone to the Mac with a data-capable USB cable. Unlock it and tap **Trust This Computer** if prompted. Create a four-digit SecondHand PIN on first launch, then optionally enable Face ID in the app’s Settings. Existing saved profiles require one verification with the previous device authentication before PIN setup.
 2. In **Xcode → Settings → Apple Accounts**, add your Apple account and complete sign-in. Internet access is needed for Xcode to set up signing.
 3. Open `ios/SecondHand.xcodeproj`. Select the blue project icon, then the **SecondHand** target. Under **Signing & Capabilities**, enable **Automatically manage signing** and choose your **Personal Team**. Repeat for the **SafariExtension** target using the same team.
 4. Select the **SecondHand** scheme and your connected **iPhone** in Xcode's destination menu, then click **▶ Run** or press **Command-R**.

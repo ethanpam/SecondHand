@@ -95,12 +95,6 @@ struct OverviewView: View {
             .background(AppTheme.canvas)
             .navigationTitle("Second Hand")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { store.lock() } label: { Image(systemName: "lock") }
-                        .accessibilityLabel("Lock personal information")
-                }
-            }
             .sheet(isPresented: $editingRenewal) { RenewalEditor() }
             .sheet(isPresented: $editingProfile) { ProfileEditor() }
             .confirmationDialog("Start a new renewal?", isPresented: $startingRenewal, titleVisibility: .visible) {
