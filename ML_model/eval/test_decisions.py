@@ -185,10 +185,24 @@ class LoadDecisions(unittest.TestCase):
             {"state": {"question": "Phone"}, "answers": {"fields": MATCH_ABSTAIN}, "split": "train", "task": "match", "decision": "https://b.example#q3"},
         ]
         (folder / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
-        decisions = load_decisions(folder, {"yn": YES_NO, "fields": FIELDS}, "test", holdout=False, limit=0)
+        decisions = load_decisions(folder, {"yn": YES_NO, "fields": FIELDS}, "test")
         self.assertEqual(list(decisions["answer"]), ["https://a.example#q1#0"])
         self.assertEqual(list(decisions["match"]), ["https://a.example#q2"])
         self.assertEqual([c["state"]["candidate"] for c in decisions["match"]["https://a.example#q2"]], ["email address", "phone number", MATCH_ABSTAIN])
+
+
+    def test_keeps_the_held_out_forms_or_every_other_form(self):
+        held_out = "https://uticafoodpantry.org/wp-content/uploads/2022/06/ClientIntakeForm.pdf"
+        folder = Path(tempfile.mkdtemp())
+        rows = [{"state": {"facts": "F", "question": "Q"}, "answers": {"yn": "Yes"}, "split": "test", "task": "answer", "decision": f"{url}#q1#0"}
+                for url in (held_out, "https://a.example/form")]
+        (folder / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        pick = lambda forms: list(load_decisions(folder, {"yn": YES_NO}, "test", forms=forms)["answer"])
+        self.assertEqual(pick("holdout"), [f"{held_out}#q1#0"])
+        self.assertEqual(pick("not-holdout"), ["https://a.example/form#q1#0"])
+        self.assertEqual(len(pick("all")), 2)
+        with self.assertRaisesRegex(ValueError, "forms"):
+            pick("some")
 
 
 class ChoiceMetrics(unittest.TestCase):

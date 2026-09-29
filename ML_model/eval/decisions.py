@@ -192,16 +192,23 @@ def metrics(decisions, threshold):
     return result
 
 
-def load_decisions(source, questions, split, holdout, limit):
+FORMS = ("all", "holdout", "not-holdout")
+
+
+def load_decisions(source, questions, split, forms="all", limit=0):
+    """The split's decisions by task. `forms`: all of them, only the forms marked holdout, or every other form."""
+    if forms not in FORMS:
+        raise ValueError(f"forms must be one of {', '.join(FORMS)}, not {forms!r}")
     decisions = {"answer": defaultdict(list), "match": defaultdict(list)}
     with open(Path(source) / "rows.jsonl") as handle:
         for line in handle:
             row = json.loads(line)
             if row["split"] == split:
                 decisions[row["task"]][row["decision"]].extend(candidates(row, questions))
-    if holdout:
+    if forms != "all":
         urls = holdout_forms(ROOT / "questions")
-        decisions = {task: {key: rows for key, rows in groups.items() if key.split("#")[0] in urls} for task, groups in decisions.items()}
+        keep = (lambda url: url in urls) if forms == "holdout" else (lambda url: url not in urls)
+        decisions = {task: {key: rows for key, rows in groups.items() if keep(key.split("#")[0])} for task, groups in decisions.items()}
     if limit:
         decisions = {task: dict(list(groups.items())[:limit]) for task, groups in decisions.items()}
     return decisions
@@ -216,7 +223,9 @@ def main():
     parser.add_argument("--threads", type=int, default=0, help="onnxruntime intra-op threads (0 = its default)")
     parser.add_argument("--dataset", default=str(ROOT / "dataset" / "out"))
     parser.add_argument("--split", default="test")
-    parser.add_argument("--holdout", action="store_true", help="evaluate only the forms marked holdout in questions/")
+    held = parser.add_mutually_exclusive_group()
+    held.add_argument("--holdout", action="store_true", help="evaluate only the forms marked holdout in questions/")
+    held.add_argument("--exclude-holdout", action="store_true", help="evaluate every form but those marked holdout (to choose thresholds on)")
     parser.add_argument("--limit", type=int, default=0, help="evaluate this many decisions per task (0 = all)")
     parser.add_argument("--report", help="write the JSON report here")
     parser.add_argument("--errors", help="write every wrong fill at --error-threshold here (JSON lines)")
@@ -238,7 +247,8 @@ def main():
 
     source = Path(args.dataset)
     questions = json.loads((source / "questions.json").read_text())
-    decisions = load_decisions(source, questions, args.split, args.holdout, args.limit)
+    forms = "holdout" if args.holdout else "not-holdout" if args.exclude_holdout else "all"
+    decisions = load_decisions(source, questions, args.split, forms, args.limit)
     if args.probs:
         apply_probabilities(decisions, json.loads(Path(args.probs).read_text()))
     elif args.runtime == "onnx":
@@ -259,6 +269,7 @@ def main():
         "runtime": args.runtime,
         "split": args.split,
         "holdout": args.holdout,
+        "forms": forms,
         "tasks": {task: {str(t): metrics(groups, t) for t in THRESHOLDS} for task, groups in decisions.items()},
     }
     if args.runtime == "onnx":

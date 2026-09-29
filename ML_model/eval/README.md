@@ -1,6 +1,6 @@
 # Evaluation
 
-Our own checks of each trained model on held-out real forms: precision of accepted answers, how many answerable questions it answers, and wrong answers on "facts don't say" items. `--holdout` scores only the forms marked holdout. Reports are committed; raw outputs are not. See #41.
+Our own checks of each trained model on held-out real forms: precision of accepted answers, how many answerable questions it answers, and wrong answers on "facts don't say" items. `--holdout` scores only the forms marked holdout, and `--exclude-holdout` every other test form, so thresholds can be chosen on forms apart from the ones they are reported on. Reports are committed; raw outputs are not. See #41.
 
 Both dataset formats are scored the same way, per decision: a `noul-v1` dataset asks one prompt per candidate, and a `choice-v1` dataset (#65) one prompt per decision that scores all its candidates. The report names the format.
 
