@@ -11,6 +11,8 @@ const { answer: ANSWER_THRESHOLD, match: MATCH_THRESHOLD } = BARS['noul-v1'];
 test('the confidence bars live in one place, one pair per model format: to answer from the profile, and a stricter one to match a text box', () => {
   assert.deepEqual(Object.keys(BARS), [...MODEL_FORMATS]);
   assert.deepEqual(BARS['noul-v1'], { answer: 0.9, match: 0.95 });
+  // Chosen on round 3's int8 scores of the test forms not held out (docs/laya-model.md).
+  assert.deepEqual(BARS['choice-v1'], { answer: 0.9, match: 0.98 });
   for (const bars of Object.values(BARS)) assert.ok(bars.answer >= 0.9 && bars.match >= bars.answer && bars.match < 1);
   assert.ok(MIN_LEAD > 0 && MIN_LEAD < 1);
   assert.equal(BUDGET_MS, 3000);

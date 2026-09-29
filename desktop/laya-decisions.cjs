@@ -4,13 +4,15 @@
 const { QUESTIONS } = require('../shared/laya-prompts.cjs');
 const { BATCH_SIZE } = require('./laya.cjs');
 
-// The bars per model format (desktop/laya-model.cjs MODEL_FORMATS), set from each model's
-// evaluation on held-out forms (#41, #65) so accepted answers are 95% or more correct: one to
-// answer choice and yes/no questions from the saved profile, and one to match a text box to a
-// saved field.
+// The bars per model format (desktop/laya-model.cjs MODEL_FORMATS): one to answer choice and
+// yes/no questions from the saved profile, and one to match a text box to a saved field. Each is
+// set from its model's evaluation (#41, #65; docs/laya-model.md) so accepted answers are 95% or
+// more correct. choice-v1's come from round 3's int8 scores of the test forms not held out: the
+// answer bar stays 0.9 (0.970 there; 0.8 only just reaches 0.95), and the match bar is the lowest
+// that reaches 0.95 (0.975 gives 0.909).
 const BARS = Object.freeze({
   'noul-v1': Object.freeze({ answer: 0.9, match: 0.95 }),
-  'choice-v1': Object.freeze({ answer: 0.9, match: 0.95 })
+  'choice-v1': Object.freeze({ answer: 0.9, match: 0.98 })
 });
 // The best candidate must beat the runner-up by at least this much; two likely answers mean
 // the model isn't sure which, and the question goes to the applicant.
