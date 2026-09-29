@@ -61,6 +61,14 @@ flowchart LR
 
 The desktop app is the only place your details are kept. The Chrome extension talks to it through Chrome's native messaging, a direct connection between the two programs on your computer; nothing goes through a server. For each page, the extension asks only for the answers that page needs, and only while the app is unlocked. Filling a field on Iowa's page shares that answer with Iowa, as typing it would. Read more in [the security design](docs/security.md).
 
+## Read documents locally
+
+Open **Documents** in the unlocked desktop app to read a PDF, PNG, or JPEG on your computer. English OCR is bundled with the app: no upload, OCR account, model download, or separate program is needed. It accepts files up to 30 MiB and PDFs up to 12 pages.
+
+For recognizable 1040/1040-SR layouts, review suggested primary-applicant names, home address, and Social Security number against the original. Choose which details to put in your profile draft, then review **My information** and click **Save my information**. SSNs and tax amounts are omitted when two OCR passes disagree. Tax-year amounts and spouse/dependent details are for review only; they never become current income, household answers, or eligibility decisions automatically. Other documents show extracted text without tax-form suggestions.
+
+The original stays in place. SecondHand keeps no document database or copied original, and clears temporary review text when you discard it, leave Documents, or lock the app. This feature is in source; availability in a public installer is separate. See [local document reading](docs/document-ocr.md) for limits and QA scope.
+
 ## Local AI with Laya
 
 <p align="center">
@@ -158,6 +166,8 @@ For live reloading, run `npm run dev` (run `npx playwright install chromium` onc
 | `npm run dev` | Runs the app and a Chromium with the extension, reloading on edits. |
 | `npm test` | Unit tests: encryption, messaging, schema, portal adapters, and the extension's panels. |
 | `npm run check` | Syntax checks and the extension's permission rules. |
+| `npm run test:ocr` | Exercises bundled offline OCR on a generated synthetic image; pass `-- --input tests/fixtures/ocr/synthetic-1040sr.pdf` for the tax-form sample. |
+| `npm run test:ocr:ui` | Reads the synthetic tax form in the desktop app and verifies review, draft merging, encrypted saving, and lock/unlock. |
 | `npm run test:ui` | Drives the real Electron app end to end. Needs a desktop session. |
 | `npm run test:extension` | Runs the extension in an isolated Chromium against synthetic Iowa pages. |
 | `npm run test:translation` | Checks the language picker, translated questions, and right-to-left Arabic. |
@@ -204,6 +214,7 @@ There is no hosted CI: pull requests and tags don't run checks or build installe
 - [Set up SecondHand](docs/setup.md): installing, adding the extension, applying, and troubleshooting
 - [Iowa portal coverage](docs/iowa-portal.md): exactly which fields and screens are supported
 - [Home-address confirmation](docs/address-automation.md): how the Select Address step works
+- [Local document reading](docs/document-ocr.md): offline OCR, review before saving, limits, and synthetic QA
 - [Security and privacy design](docs/security.md): encryption, the native connection, and limits
 - [Laya model card](docs/laya-model.md): how the local AI model was trained, how accurate it is, and how new versions are published
 - [Extension QA](docs/extension-qa.md): test coverage and the recorded walkthrough

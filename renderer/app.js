@@ -12,7 +12,7 @@
     'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare',
     'monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand', 'monthlyMedicalExpenses',
     'sex', 'maritalStatus', 'hasSsnAnswer', 'ssnCardNameMatches', 'usCitizen', 'militaryOrVeteran', 'disabled', 'blind', 'healthLimitation', 'medicare'];
-  const viewNames = { overview: 'Overview', profile: 'My information', applications: 'Applications', extension: 'Chrome extension', privacy: 'Privacy & backups' };
+  const viewNames = { overview: 'Overview', profile: 'My information', documents: 'Documents', applications: 'Applications', extension: 'Chrome extension', privacy: 'Privacy & backups' };
   const statusNames = { draft: 'Draft', in_progress: 'In progress', submitted: 'Submitted', needs_action: 'Needs action', approved: 'Approved', denied: 'Denied' };
   let vaultStatus = { exists: false, unlocked: false, recoveryKey: false, deviceReset: false, deviceResetSupported: false, extensionId: '', bridgeRunning: false };
   let data = { profile: {}, applications: [] };
@@ -24,6 +24,12 @@
   let toastTimer;
   let vaultGeneration = 0;
   let handledLockRevision = -1;
+  let documentRevision = 0;
+  let documentRequestId = null;
+  let documentBusy = false;
+  let documentFields = [];
+  let stopDocumentProgress = null;
+  const documentProfileKeys = new Set(['firstName', 'middleName', 'lastName', 'ssn', 'addressLine1', 'addressLine2', 'city', 'state', 'zip']);
   let layaPoll;
   const LAYA_POLL_MS = 500;
 
@@ -113,6 +119,7 @@
 
   function clearSensitiveUI() {
     vaultGeneration++;
+    clearDocumentReview();
     document.querySelectorAll('button[aria-busy="true"]').forEach((button) => {
       button.disabled = !api;
       button.removeAttribute('aria-busy');
@@ -239,10 +246,11 @@
 
   function showView(view, { skipConfirmation = false, focus = true } = {}) {
     if (!viewNames[view] || !vaultStatus.unlocked) return;
-    if (!skipConfirmation && currentView === 'profile' && view !== 'profile' && profileDirty) {
+    if (!skipConfirmation && currentView === 'profile' && view !== 'profile' && view !== 'documents' && profileDirty) {
       if (!window.confirm('Leave without saving your profile changes?')) return;
       fillProfile();
     }
+    if (currentView === 'documents' && view !== 'documents') clearDocumentReview();
     currentView = view;
     for (const key of Object.keys(viewNames)) $(`view-${key}`).hidden = key !== view;
     document.querySelectorAll('.nav-item').forEach((item) => {
@@ -261,6 +269,186 @@
     profileRevision++;
     for (const key of profileFields) profileControl(key).value = typeof data.profile[key] === 'string' ? data.profile[key] : '';
     setProfileDirty(false);
+  }
+
+  function documentControls() {
+    $('read-document').disabled = documentBusy || !api?.readDocument;
+    $('read-document').setAttribute('aria-busy', String(documentBusy));
+    $('read-document').querySelector('span').textContent = documentFields.length || !$('document-review').hidden ? 'Choose another document' : 'Choose PDF or photo';
+    $('document-progress-card').hidden = !documentBusy;
+    const selected = documentFields.filter(field => field.checkbox?.checked);
+    $('document-selection-count').textContent = selected.length ? `${selected.length} ${selected.length === 1 ? 'detail' : 'details'} selected · profile draft only` : 'No details selected. Nothing will be changed.';
+    $('apply-document-fields').disabled = documentBusy || !selected.length || !$('document-confirm-applicant').checked || !vaultStatus.unlocked;
+  }
+
+  function clearDocumentReview({ cancel = true } = {}) {
+    const requestId = documentRequestId;
+    const wasBusy = documentBusy;
+    documentRevision++;
+    documentRequestId = null;
+    documentBusy = false;
+    if (stopDocumentProgress) { try { stopDocumentProgress(); } catch { /* Cleared generation still blocks late events. */ } }
+    stopDocumentProgress = null;
+    documentFields = [];
+    for (const id of ['document-fields', 'document-pages', 'document-warning-list']) $(id).replaceChildren();
+    for (const id of ['document-name', 'document-type', 'document-page-summary', 'document-status', 'document-progress-label']) $(id).textContent = '';
+    $('document-review').hidden = true;
+    $('document-empty').hidden = false;
+    $('document-warnings').hidden = true;
+    $('document-no-fields').hidden = true;
+    $('document-draft-note').hidden = true;
+    $('document-raw').open = false;
+    $('document-confirm-applicant').checked = false;
+    $('document-progress').removeAttribute('value');
+    clearError('document-error');
+    documentControls();
+    if (cancel && wasBusy && requestId && api?.cancelDocumentRead) {
+      Promise.resolve().then(() => api.cancelDocumentRead(requestId)).catch(() => { /* Lock/navigation must still clear local text. */ });
+    }
+  }
+
+  const documentText = (value, limit = 500) => typeof value === 'string' ? value.slice(0, limit) : '';
+  const confidenceText = confidence => typeof confidence === 'number' && Number.isFinite(confidence) && confidence >= 0 && confidence <= 100
+    ? `${Math.round(confidence)}% recognition confidence` : 'Recognition confidence unavailable';
+  function documentCurrent(field) {
+    field.current = String(profileControl(field.key).value || '');
+    field.currentValue.textContent = field.current || 'Blank';
+  }
+
+  function renderDocument(result) {
+    if (!result || typeof result.name !== 'string' || !Array.isArray(result.pages)) throw new Error('This document could not be displayed. Try reading it again.');
+    const pages = result.pages.slice(0, 100);
+    const analysis = result.analysis || {};
+    $('document-name').textContent = documentText(result.name, 250);
+    const title = documentText(analysis.title, 150) || 'Document type not recognized';
+    const year = /^\d{4}$/.test(String(analysis.taxYear || '')) ? ` · Tax year ${analysis.taxYear}` : '';
+    $('document-type').textContent = title + year;
+    $('document-page-summary').textContent = `${Number.isInteger(result.pageCount) && result.pageCount > 0 ? result.pageCount : pages.length} ${(result.pageCount || pages.length) === 1 ? 'page' : 'pages'} read · Compare every detail with the original`;
+    $('document-draft-note').hidden = !profileDirty;
+    const warnings = Array.isArray(analysis.warnings) ? analysis.warnings.filter(value => typeof value === 'string').slice(0, 100).map(value => documentText(value)) : [];
+    for (const [index, page] of pages.entries()) {
+      const number = Number.isInteger(page.pageNumber) && page.pageNumber > 0 ? page.pageNumber : index + 1;
+      const text = typeof page.text === 'string' ? page.text : '';
+      const unreadable = !text.trim();
+      const low = typeof page.confidence === 'number' && page.confidence >= 0 && page.confidence < 70;
+      if (unreadable) warnings.push(`Page ${number}: no readable text was found. Check the original or try a clearer image.`);
+      else if (low) warnings.push(`Page ${number}: recognition confidence is low. Check its text carefully against the original.`);
+      const details = element('details', `document-page${unreadable || low ? ' unreadable' : ''}`);
+      const summary = element('summary', '', `Page ${number} · ${unreadable ? 'No readable text' : confidenceText(page.confidence)}`);
+      details.append(summary, element('pre', '', unreadable ? 'No readable text found on this page.' : text));
+      $('document-pages').append(details);
+    }
+    for (const warning of [...new Set(warnings)]) $('document-warning-list').append(element('li', '', warning));
+    $('document-warnings').hidden = !warnings.length;
+    const fields = Array.isArray(analysis.fields) ? analysis.fields.slice(0, 150) : [];
+    for (const [index, field] of fields.entries()) {
+      if (!field || typeof field.value !== 'string' || !field.value.trim() || typeof field.label !== 'string') continue;
+      const key = documentProfileKeys.has(field.profileKey) ? field.profileKey : null;
+      const eligible = Boolean(key && field.value.length <= 200);
+      const row = element('div', `document-field${eligible ? '' : ' review-only'}`);
+      row.dataset.fieldId = documentText(field.id, 80) || `detail-${index}`;
+      const label = element(eligible ? 'label' : 'div', 'document-field-label', documentText(field.label, 150));
+      const page = Number.isInteger(field.page) && field.page > 0 ? `Page ${field.page} · ` : '';
+      label.append(element('span', 'document-field-source', page + confidenceText(field.confidence)));
+      const values = element('div', 'document-field-value');
+      if (eligible) {
+        const checkbox = element('input'); checkbox.type = 'checkbox'; checkbox.id = `document-select-${index}`;
+        checkbox.dataset.profileKey = key;
+        label.htmlFor = checkbox.id;
+        const input = element('input'); input.type = 'text'; input.maxLength = 200; input.autocomplete = 'off'; input.spellcheck = false;
+        input.value = field.value; input.setAttribute('aria-label', `Document value for ${documentText(field.label, 150)}`);
+        const current = element('div', 'document-current'); current.append(element('span', '', 'Current profile draft'));
+        const currentValue = element('div'); current.append(currentValue);
+        const record = { key, checkbox, input, currentValue, current: '' };
+        documentCurrent(record);
+        documentFields.push(record);
+        checkbox.addEventListener('change', () => {
+          if (checkbox.checked) {
+            for (const other of documentFields) if (other !== record && other.key === key) other.checkbox.checked = false;
+            documentCurrent(record);
+          }
+          $('document-confirm-applicant').checked = false;
+          documentControls();
+        });
+        input.addEventListener('input', () => { $('document-confirm-applicant').checked = false; documentControls(); });
+        values.append(input);
+        row.append(checkbox, label, values, current);
+      } else {
+        values.append(element('strong', '', documentText(field.value, 500)));
+        row.append(label, values, element('span', 'document-review-only', 'Review only · not added to profile'));
+      }
+      $('document-fields').append(row);
+    }
+    $('document-no-fields').hidden = $('document-fields').childElementCount > 0;
+    $('document-empty').hidden = true;
+    $('document-review').hidden = false;
+    $('document-status').textContent = 'Read locally. No information has been saved or shared.';
+    documentControls();
+  }
+
+  async function readDocument() {
+    if (documentBusy || !vaultStatus.unlocked || currentView !== 'documents' || !api?.readDocument) return;
+    clearDocumentReview();
+    const generation = vaultGeneration;
+    const revision = documentRevision;
+    const requestId = window.crypto.randomUUID();
+    documentRequestId = requestId;
+    documentBusy = true;
+    $('document-empty').hidden = true;
+    $('document-status').textContent = 'Choose a document in the file picker. Nothing is uploaded.';
+    $('document-progress-label').textContent = 'Opening your document…';
+    documentControls();
+    const current = () => vaultStatus.unlocked && generation === vaultGeneration && revision === documentRevision && documentRequestId === requestId && currentView === 'documents';
+    if (api.onDocumentProgress) stopDocumentProgress = api.onDocumentProgress(progress => {
+      if (!current() || progress?.requestId !== requestId) return;
+      const phases = { loading: 'Preparing local text recognition', rendering: 'Preparing page', recognizing: 'Reading page' };
+      const phase = phases[progress.phase] || 'Reading document';
+      const page = Number.isInteger(progress.page) && progress.page > 0 ? progress.page : 0;
+      const total = Number.isInteger(progress.total) && progress.total > 0 ? progress.total : 0;
+      $('document-progress-label').textContent = page && total ? `${phase} ${page} of ${total}…` : `${phase}…`;
+      if (page && total && page <= total) $('document-progress').value = Math.min(99, Math.round((page - 1) / total * 100));
+      else $('document-progress').removeAttribute('value');
+      $('document-status').textContent = 'Reading locally. Your document stays on this computer.';
+    });
+    try {
+      const response = await api.readDocument(requestId);
+      if (!current()) return;
+      if (response?.cancelled) {
+        clearDocumentReview({ cancel: false });
+        $('document-status').textContent = 'Reading cancelled. No document text was retained.';
+      } else renderDocument(response?.document);
+    } catch (error) {
+      if (current()) {
+        clearDocumentReview({ cancel: false });
+        showError('document-error', error);
+      }
+    } finally {
+      if (current()) {
+        if (stopDocumentProgress) stopDocumentProgress();
+        stopDocumentProgress = null;
+        documentRequestId = null;
+        documentBusy = false;
+        documentControls();
+      }
+    }
+  }
+
+  function applyDocumentFields() {
+    if (!vaultStatus.unlocked || currentView !== 'documents' || $('apply-document-fields').disabled) return;
+    const selected = documentFields.filter(field => field.checkbox.checked);
+    if (!selected.length || !$('document-confirm-applicant').checked) return;
+    if (selected.some(field => String(profileControl(field.key).value || '') !== field.current)) {
+      for (const field of documentFields) { documentCurrent(field); field.checkbox.checked = false; }
+      $('document-confirm-applicant').checked = false;
+      $('document-status').textContent = 'Your profile draft changed during review. Check the current values and select the details again.';
+      documentControls();
+      return;
+    }
+    for (const field of selected) profileControl(field.key).value = field.input.value.trim();
+    profileRevision++;
+    setProfileDirty(true);
+    showView('profile', { skipConfirmation: true });
+    toast(`${selected.length} ${selected.length === 1 ? 'detail added' : 'details added'} to your profile draft. Review and save when ready.`);
   }
 
   function dateLabel(value) {
@@ -619,6 +807,18 @@
     }
   }));
   document.querySelector('.auth-brand').addEventListener('click', (event) => event.preventDefault());
+  $('read-document').addEventListener('click', readDocument);
+  $('cancel-document').addEventListener('click', () => {
+    clearDocumentReview();
+    $('document-status').textContent = 'Reading cancelled. No document text was retained. If the file picker is still open, close it to finish cancelling.';
+  });
+  $('discard-document').addEventListener('click', () => {
+    clearDocumentReview();
+    $('document-status').textContent = 'Document review discarded. Your profile has not changed.';
+  });
+  $('document-confirm-applicant').addEventListener('change', documentControls);
+  $('apply-document-fields').addEventListener('click', applyDocumentFields);
+  documentControls();
   $('overview-start').addEventListener('click', () => showView('profile'));
   $('lock-button').addEventListener('click', lockVault);
   $('privacy-lock').addEventListener('click', lockVault);

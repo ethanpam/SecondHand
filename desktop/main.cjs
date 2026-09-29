@@ -16,6 +16,10 @@ const { testStoragePath } = require('./test-storage-path.cjs');
 const { createLaya } = require('./laya.cjs');
 const { createFieldSuggestions } = require('./field-suggestions.cjs');
 const { createFieldAnswers } = require('./field-answers.cjs');
+const { createOcrEngine } = require('./ocr-engine.cjs');
+const { createDocumentReader } = require('./ocr-service.cjs');
+const { requestId: documentRequestId } = require('./ocr-limits.cjs');
+const { analyzeDocument } = require('../shared/document-parser.cjs');
 const { validateProfile, validateApplication, FIELD_LABELS, DERIVED_FIELDS, PORTAL_URL, isPortalUrl, siteOrigin } = require('../shared/schema.cjs');
 
 app.setName('SecondHand');
@@ -102,6 +106,17 @@ if (nativeOrigin) {
     try { return validator(...values); } catch (error) { throw publicError(error.message); }
   };
   const formattedRecoveryKey = value => validated(normalizeRecoveryKey, value).match(/.{4}/g).join('-');
+  const documentReader = createDocumentReader({
+    isUnlocked: () => vault.unlocked,
+    chooseFile: () => dialog.showOpenDialog(mainWindow, { title: 'Read a document on this computer',
+      properties: ['openFile'], filters: [{ name: 'PDF or image', extensions: ['pdf', 'png', 'jpg', 'jpeg'] }] }),
+    createEngine: () => createOcrEngine({ BrowserWindow, session, ipcMain,
+      assetsDirectory: app.isPackaged ? path.join(process.resourcesPath, 'ocr') : path.join(__dirname, '../build/ocr') }),
+    onProgress: progress => {
+      if (vault.unlocked && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('secondhand:document-progress', progress);
+    },
+    analyzeDocument
+  });
 
   // The operating system protects this secret (macOS Keychain or Windows data
   // protection), so only this computer account can use it to reset the password.
@@ -133,6 +148,7 @@ if (nativeOrigin) {
   }
   async function lockVault() {
     clearTimeout(lockTimer);
+    documentReader.cancel();
     accessRevision++;
     await vault.lock();
     accessRevision++;
@@ -413,6 +429,14 @@ if (nativeOrigin) {
       requireUnlocked(); touch();
       const { profile, applications } = vault.getData(); return { profile, applications };
     },
+    async readDocument(requestId) {
+      requireUnlocked();
+      touch();
+      const result = await documentReader.read(requestId);
+      if (vault.unlocked) touch();
+      return result;
+    },
+    cancelDocumentRead: requestId => documentReader.cancel(documentRequestId(requestId)),
     async saveProfile(profile) {
       requireUnlocked();
       const clean = validated(validateProfile, profile);
@@ -603,6 +627,7 @@ if (nativeOrigin) {
     if (quitting) return;
     event.preventDefault(); quitting = true;
     clearTimeout(lockTimer);
+    documentReader.cancel();
     Promise.allSettled([vault.lock(), bridge?.close(), laya.close()]).then(() => app.quit());
   });
 }
