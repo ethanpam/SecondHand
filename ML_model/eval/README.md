@@ -23,6 +23,12 @@ uv run --project ~/Projects/LayaStudio python ML_model/eval/decisions.py --runti
 uv run --project ~/Projects/LayaStudio python ML_model/eval/latency_onnx.py --onnx <export> --dataset <built dataset> --form <form url> --out <name>.json
 ```
 
+`page_latency.cjs` times one form page through the desktop's own request code (`desktop/field-answers.cjs`, then `desktop/field-suggestions.cjs` with the time left) and onnxruntime-node, as one Autofill click does, with the 1-minute load average beside each run:
+
+```
+node ML_model/eval/page_latency.cjs --model <export> --format choice-v1 --form <form url> --runs 30 --out <name>.json
+```
+
 The runtime comparison for #37 is in `docs/superpowers/specs/2026-09-27-laya-runtime-spike.md`.
 
 `runtime_fixtures.py` writes the Python reference outputs that the desktop app's JavaScript Laya runtime (#38) is tested against: token ids, prompts, and int8 ONNX probabilities for a fixed sample of rows (`tests/fixtures/laya/`). Its docstring has the commands.
