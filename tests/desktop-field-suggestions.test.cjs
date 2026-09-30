@@ -118,12 +118,14 @@ function choiceLaya(choose = (_, choices) => choices.map((_, index) => index ===
 }
 // Probabilities that put `p` on the choice describing `key` (null: "None of these") and spread the rest.
 const sure = (choices, key, p) => choices.map(label => label === (key ? KEY_ABOUT[key] : CHOICE.MATCH_ABSTAIN) ? p : (1 - p) / (choices.length - 1));
+// A match the model is sure of: halfway between choice-v2's bar and certainty.
+const SURE = (1 + BARS['choice-v2'].match) / 2;
 const MEANS = { 'Where can we reach you by email?': 'email', 'Best number': 'phone', 'Your full name': 'fullName', 'People in your home': 'householdSize', 'Date of birth': null };
 
 test('choice-v2: each text box is one pass over the saved fields offered for its type, eight boxes to a request; a date box is never asked', async () => {
   const fields = [field('a', 'Where can we reach you by email?', 'email'), field('b', 'Best number', 'tel'), field('c', 'Your full name'), field('d', 'People in your home', 'number'),
     field('e', 'Date of birth', 'date'), ...Array.from({ length: 5 }, (_, index) => field(`x${index}`, `Favorite color ${index}`, 'textarea'))];
-  const laya = choiceLaya((label, choices) => sure(choices, MEANS[label] ?? null, 0.99));
+  const laya = choiceLaya((label, choices) => sure(choices, MEANS[label] ?? null, SURE));
   const suggestions = await createFieldSuggestions({ laya }).suggest(fields, BUDGET);
   assert.deepEqual(suggestions, { a: 'email', b: 'phone', c: 'fullName', d: 'householdSize' });
   assert.deepEqual(laya.batches.map(({ items }) => items.length), [8, 1]);
@@ -153,7 +155,7 @@ test('choice-v2: the match bar, "None of these", and a close runner-up each leav
 
 test('choice-v2: a timeout keeps the requests already decided; a request past the deadline is dropped; an unknown format fails loudly', async () => {
   const fields = Array.from({ length: 12 }, (_, index) => field(`e${index}`, 'Where can we reach you by email?', 'email'));
-  const email = (label, choices) => sure(choices, 'email', 0.99);
+  const email = (label, choices) => sure(choices, 'email', SURE);
   let calls = 0;
   const slow = choiceLaya(email);
   const batch = slow.decideBatch;

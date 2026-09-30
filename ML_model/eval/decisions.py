@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ABSTAIN = "None of these, or the facts don’t say"
 MATCH_ABSTAIN = "None of these"
 ABSTAINS = (ABSTAIN, MATCH_ABSTAIN)
-THRESHOLDS = [0.5, 0.7, 0.8, 0.9, 0.95, 0.98, 0.99, 0.992, 0.995, 0.996]
+THRESHOLDS = [0.5, 0.7, 0.8, 0.9, 0.95, 0.96, 0.97, 0.975, 0.98, 0.985, 0.99, 0.992, 0.995, 0.996, 0.998, 0.999]
 
 
 def training_precision(model_dir):

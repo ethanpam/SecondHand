@@ -7,10 +7,12 @@ const { BATCH_SIZE } = require('./laya.cjs');
 // The bars per model format (desktop/laya-model.cjs MODEL_FORMATS): one to answer choice and
 // yes/no questions from the saved profile, and one to match a text box to a saved field. Each is
 // set from its model's evaluation (#41, #65; docs/laya-model.md) so accepted answers are 95% or
-// more correct. choice-v2's are round 3's until round 4's evaluation sets them.
+// more correct. choice-v2's come from round 4's int8 scores of every test form, the old holdout forms
+// included: the answer bar is the lowest that reaches 0.95 there (0.959). No match bar reaches 0.95
+// there, so the match bar is the one with the best precision (0.941, matching 23% of the boxes).
 const BARS = Object.freeze({
   'noul-v1': Object.freeze({ answer: 0.9, match: 0.95 }),
-  'choice-v2': Object.freeze({ answer: 0.9, match: 0.98 })
+  'choice-v2': Object.freeze({ answer: 0.9, match: 0.999 })
 });
 // The best candidate must beat the runner-up by at least this much; two likely answers mean
 // the model isn't sure which, and the question goes to the applicant.
