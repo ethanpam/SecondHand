@@ -1,0 +1,273 @@
+{
+  "machine": "Apple M4 Max, 14 cores",
+  "platform": "darwin 25.5.0",
+  "node": "v26.4.0",
+  "model": "/Users/jacobdang/Projects/LayaStudio/workspace/exports/round4-lora-proper-1790727905-onnx-int8",
+  "format": "choice-v2",
+  "form": "https://uticafoodpantry.org/wp-content/uploads/2022/06/ClientIntakeForm.pdf",
+  "household": 0,
+  "questions": 20,
+  "choiceQuestions": 6,
+  "textBoxes": 14,
+  "budgetMs": 3000,
+  "loadMs": 463,
+  "firstPage": {
+    "ms": 1721,
+    "load1m": 2.83,
+    "passes": 21,
+    "needed": 21,
+    "complete": true,
+    "filled": 0
+  },
+  "p50Ms": 1644,
+  "p95Ms": 1705,
+  "minMs": 1610,
+  "maxMs": 1711,
+  "load1mRange": [
+    2.83,
+    6.69
+  ],
+  "completeRuns": 30,
+  "runs": [
+    {
+      "ms": 1645,
+      "load1m": 2.83,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1660,
+      "load1m": 3.65,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1624,
+      "load1m": 3.65,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1663,
+      "load1m": 3.65,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1667,
+      "load1m": 4.16,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1617,
+      "load1m": 4.16,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1653,
+      "load1m": 4.16,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1632,
+      "load1m": 4.63,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1624,
+      "load1m": 4.63,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1625,
+      "load1m": 4.63,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1644,
+      "load1m": 4.9,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1623,
+      "load1m": 4.9,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1679,
+      "load1m": 4.9,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1705,
+      "load1m": 5.22,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1645,
+      "load1m": 5.22,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1651,
+      "load1m": 5.22,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1689,
+      "load1m": 5.53,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1618,
+      "load1m": 5.53,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1681,
+      "load1m": 5.53,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1656,
+      "load1m": 5.96,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1633,
+      "load1m": 5.96,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1626,
+      "load1m": 5.96,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1617,
+      "load1m": 6.45,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1704,
+      "load1m": 6.45,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1614,
+      "load1m": 6.45,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1631,
+      "load1m": 6.49,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1692,
+      "load1m": 6.49,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1610,
+      "load1m": 6.49,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1637,
+      "load1m": 6.69,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    },
+    {
+      "ms": 1711,
+      "load1m": 6.69,
+      "passes": 21,
+      "needed": 21,
+      "complete": true,
+      "filled": 0
+    }
+  ]
+}
