@@ -13,7 +13,7 @@
     { "id": "q3", "label": "Date", "type": "date", "options": [], "rule": { "name": "none" }, "note": "The day the form is filled in; not a saved fact." },
     { "id": "q4", "label": "Address", "type": "text", "options": [], "rule": { "name": "field", "key": "addressLine1" }, "note": "Under \"Optional information\"." },
     { "id": "q5", "label": "Household member ages (0-17)", "type": "number", "options": [], "rule": { "name": "field", "key": "householdChildren" } },
-    { "id": "q6", "label": "Household member ages (18-59)", "type": "number", "options": [], "rule": { "name": "none" }, "note": "Members 18 to 59; the profile counts adults 18-64, so this is unknown when anyone is 60-64." },
-    { "id": "q7", "label": "Household member ages (60+)", "type": "number", "options": [], "rule": { "name": "none" }, "note": "Members 60 and older; the profile counts seniors 65+." }
+    { "id": "q6", "label": "Household member ages (18-59)", "type": "number", "options": [], "rule": { "name": "none" }, "note": "Members 18 to 59; the profile counts adults 18-64, so this is unknown when anyone is 60-64. The page prints only \"(18-59):\" after the (0-17) box; the row name is added." },
+    { "id": "q7", "label": "Household member ages (60+)", "type": "number", "options": [], "rule": { "name": "none" }, "note": "Members 60 and older; the profile counts seniors 65+. The page prints only \"(60+):\" after the (18-59) box; the row name is added." }
   ]
 }
