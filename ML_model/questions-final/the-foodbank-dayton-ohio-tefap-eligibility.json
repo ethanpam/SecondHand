@@ -1,0 +1,28 @@
+{
+  "source": {
+    "url": "https://thefoodbankdayton.org/wp-content/uploads/2026/06/JFS-04221-TEFAP-Application-Rev.-7.2026.pdf",
+    "title": "FEDERAL AND STATE FUNDED FOOD PROGRAMS ELIGIBILITY TO TAKE FOOD HOME",
+    "kind": "pdf",
+    "retrieved": "2026-09-29",
+    "region": "Dayton, OH",
+    "final": true
+  },
+  "questions": [
+    { "id": "q1", "label": "Name", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" } },
+    { "id": "q2", "label": "City", "type": "text", "options": [], "rule": { "name": "field", "key": "city" } },
+    { "id": "q3", "label": "State", "type": "text", "options": [], "rule": { "name": "field", "key": "state" } },
+    { "id": "q4", "label": "Zip Code", "type": "text", "options": [], "rule": { "name": "field", "key": "zip" } },
+    { "id": "q5", "label": "County", "type": "text", "options": [], "rule": { "name": "field", "key": "county" } },
+    { "id": "q6", "label": "Number of people in household by age: age 60+", "type": "number", "options": [], "rule": { "name": "none" }, "note": "People 60 or older; the profile counts seniors 65+. The page prints \"Number of people in household by age:\" once before the four boxes; it is added to each label." },
+    { "id": "q7", "label": "Number of people in household by age: age 18 - 59", "type": "number", "options": [], "rule": { "name": "none" }, "note": "People 18 to 59; the profile counts adults 18-64, so this is unknown when anyone is 60-64." },
+    { "id": "q8", "label": "Number of people in household by age: age birth - 17", "type": "number", "options": [], "rule": { "name": "field", "key": "householdChildren" } },
+    { "id": "q9", "label": "Number of people in household by age: Total", "type": "number", "options": [], "rule": { "name": "field", "key": "householdSize" } },
+    { "id": "q10", "label": "Signature", "type": "text", "options": [], "rule": { "name": "never" }, "note": "Attests income at or below the table for the household size and living in the area served." },
+    { "id": "q11", "label": "Date", "type": "date", "options": [], "rule": { "name": "never" }, "note": "Date written beside the signature." },
+    { "id": "q12", "label": "This box is optional for local agency use, check one:", "type": "radio", "options": ["Full Service", "Partial Service"], "rule": { "name": "none" }, "note": "Marked by the local agency, not the applicant. The box has 11 rows, one per visit." },
+    { "id": "q13", "label": "Signature", "type": "text", "options": [], "rule": { "name": "never" }, "note": "A signature for a later visit; the box has 11 of these rows." },
+    { "id": "q14", "label": "Date", "type": "date", "options": [], "rule": { "name": "never" }, "note": "Date written beside a visit signature." },
+    { "id": "q15", "label": "Street Address", "type": "text", "options": [], "rule": { "name": "field", "key": "addressLine1" }, "note": "Optional; the form says address and phone are not used to decide eligibility." },
+    { "id": "q16", "label": "Phone #", "type": "tel", "options": [], "rule": { "name": "field", "key": "phone" } }
+  ]
+}

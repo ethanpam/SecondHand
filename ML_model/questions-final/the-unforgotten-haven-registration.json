@@ -1,0 +1,26 @@
+{
+  "source": {
+    "url": "https://docs.google.com/forms/d/e/1FAIpQLSduKgIGVmC9IY0QUQLHqbW6u6NA1vC8gc0yMbDmeiybU_LYFQ/viewform",
+    "title": "Registration Form",
+    "kind": "google-form",
+    "retrieved": "2026-09-29",
+    "region": "Blackwood, NJ",
+    "final": true
+  },
+  "questions": [
+    { "id": "q1", "label": "Please acknowledge that you have read, and understand, the information provided above for anyone seeking help from The Unforgotten Haven:", "type": "checkbox", "options": ["I have read, and understand, the information regarding receiving assistance from The Unforgotten Haven and agree to abide by the rules and requirements."], "rule": { "name": "never" }, "note": "Acknowledges the rules and agrees to abide by them." },
+    { "id": "q2", "label": "If you have one, please provide your email address (optional):", "type": "text", "options": [], "rule": { "name": "field", "key": "email" } },
+    { "id": "q3", "label": "Please provide your ethnicity (optional and only to be used for grant approvals):", "type": "radio", "options": ["American Indian or Alaskan Native", "Asian/Pacific Islander", "Black or African American", "White/Caucasian", "Hispanic", "Multiple Ethnicity", "Other:"], "rule": { "name": "none" }, "note": "Ethnicity; not in the profile." },
+    { "id": "q4", "label": "First & Last Name as it appears on your ID:", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" } },
+    { "id": "q5", "label": "Please provide your phone number:", "type": "text", "options": [], "rule": { "name": "field", "key": "phone" } },
+    { "id": "q6", "label": "Are you currently homeless?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "homeless" }, "note": "Yes leads to the homeless-data section; No leads to the address section." },
+    { "id": "q7", "label": "Address (please include city and state):", "type": "text", "options": [], "rule": { "name": "none" }, "note": "One box for the street address together with city and state; no single saved field holds all of it." },
+    { "id": "q8", "label": "Which county do you reside in?", "type": "text", "options": [], "rule": { "name": "field", "key": "county" } },
+    { "id": "q9", "label": "Number of people who reside in your home:", "type": "text", "options": [], "rule": { "name": "field", "key": "householdSize" } },
+    { "id": "q10", "label": "How many of those that reside in your home are over the age of 18?", "type": "text", "options": [], "rule": { "name": "none" }, "note": "People over 18 (and seniors) together; the profile counts adults 18-64 and seniors 65+ separately." },
+    { "id": "q11", "label": "Do you have any pets? If so, select from the below:", "type": "checkbox", "options": ["Cat(s)", "Dog(s)", "Other", "No Pets"], "rule": { "name": "none" }, "note": "Pets; not in the profile." },
+    { "id": "q12", "label": "What is your current living situation?", "type": "radio", "options": ["Hotel/motel/inn, etc.", "On streets", "Living in vehicle"], "rule": { "name": "none" }, "note": "Only shown to someone who is homeless; which kind of shelter they have is not in the profile." },
+    { "id": "q13", "label": "Which county are you currently located in?", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Only shown to someone living on the streets or in a vehicle; asks where they are now, not a saved home county." },
+    { "id": "q14", "label": "Please provide the name of the hotel, along with address and room number:", "type": "textarea", "options": [], "rule": { "name": "none" }, "note": "Only shown to someone staying in a hotel; hotel name and room are not in the profile." }
+  ]
+}
