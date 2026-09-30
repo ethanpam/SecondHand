@@ -1,0 +1,26 @@
+{
+  "source": {
+    "url": "https://www.uab.edu/benfund/images/programs/blazer-kitchen/usda-elig-form-english.pdf",
+    "title": "THE EMERGENCY FOOD ASSISTANCE PROGRAM (TEFAP) CERTIFICATION OF ELIGIBILITY",
+    "kind": "pdf",
+    "retrieved": "2026-09-29",
+    "region": "Birmingham, AL",
+    "final": true
+  },
+  "questions": [
+    { "id": "q1", "label": "Name", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" } },
+    { "id": "q2", "label": "Address (Optional)", "type": "text", "options": [], "rule": { "name": "field", "key": "addressLine1" }, "note": "Two blank lines for the address; the street address is the saved field it starts with." },
+    { "id": "q3", "label": "County", "type": "text", "options": [], "rule": { "name": "field", "key": "county" } },
+    { "id": "q4", "label": "Phone Number", "type": "tel", "options": [], "rule": { "name": "field", "key": "phone" } },
+    { "id": "q5", "label": "Number of People in Household", "type": "number", "options": [], "rule": { "name": "field", "key": "householdSize" } },
+    { "id": "q6", "label": "Number in Household 18 & under", "type": "number", "options": [], "rule": { "name": "none" }, "note": "Ages 18 and under count 18-year-olds, whom the profile counts as adults; the profile's children are 0-17." },
+    { "id": "q7", "label": "Number in Household 60 & over", "type": "number", "options": [], "rule": { "name": "none" }, "note": "People 60 and over; the profile counts seniors 65+." },
+    { "id": "q8", "label": "Number of Veterans in Household", "type": "number", "options": [], "rule": { "name": "none" }, "note": "A count of veterans; the profile only knows whether anyone is a veteran." },
+    { "id": "q9", "label": "You are eligible to receive food from TEFAP if your household income falls below the poverty income guidelines (see reference chart) or if you participate in any of the following programs. Please place a checkmark in the space next to the category that applies.", "type": "checkbox", "options": ["Temporary Assistance to Needy Families (TANF)", "Supplemental Nutrition Assistance Program (SNAP) (formally Food Stamps)", "Supplemental Security Income (SSI)", "Income eligibility (Proof of income is NOT required)"], "rule": { "name": "none" }, "note": "Programs the household takes part in, or income eligibility; the profile only knows what the applicant is applying for." },
+    { "id": "q10", "label": "Signature", "type": "text", "options": [], "rule": { "name": "never" }, "note": "Certifies income at or below the chart (or program participation) and Alabama residence." },
+    { "id": "q11", "label": "Date", "type": "date", "options": [], "rule": { "name": "never" }, "note": "Date written beside the signature." },
+    { "id": "q12", "label": "PROXY (OPTIONAL): I authorize, ____ to pick up USDA foods on my behalf.", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Names a proxy to pick up food; not in the profile." },
+    { "id": "q13", "label": "Designated individual signing on behalf of client or proxy: Signature", "type": "text", "options": [], "rule": { "name": "never" }, "note": "Signature of someone signing for the client or proxy." },
+    { "id": "q14", "label": "Date", "type": "date", "options": [], "rule": { "name": "never" }, "note": "Date written beside that signature." }
+  ]
+}

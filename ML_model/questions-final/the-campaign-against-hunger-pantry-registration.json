@@ -1,0 +1,27 @@
+{
+  "source": {
+    "url": "https://form.jotform.com/233054756403150",
+    "title": "TCAH Pantry Registration Form",
+    "kind": "jotform",
+    "retrieved": "2026-09-29",
+    "region": "Brooklyn, NY",
+    "final": true
+  },
+  "questions": [
+    { "id": "q1", "label": "Date of initial contact:", "type": "date", "options": [], "rule": { "name": "none" }, "note": "The day of first contact with the pantry; not a saved fact." },
+    { "id": "q2", "label": "Your Name", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" }, "note": "Jotform name box with First Name and Last Name parts." },
+    { "id": "q3", "label": "Mobile Number", "type": "tel", "options": [], "rule": { "name": "field", "key": "phone" } },
+    { "id": "q4", "label": "Your E-mail Address", "type": "email", "options": [], "rule": { "name": "field", "key": "email" } },
+    { "id": "q5", "label": "Date of Birth:", "type": "date", "options": [], "rule": { "name": "field", "key": "birthDate" } },
+    { "id": "q6", "label": "Please provide your place of birth:", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Place of birth; not in the profile." },
+    { "id": "q7", "label": "Gender:", "type": "radio", "options": ["Male", "Female", "Other"], "rule": { "name": "none" }, "note": "Gender; not in the profile." },
+    { "id": "q8", "label": "Marital Status:", "type": "radio", "options": ["Divorced", "Married", "Single", "Widowed"], "rule": { "name": "none" }, "note": "Marital status; not in the profile." },
+    { "id": "q9", "label": "How many persons in the household?", "type": "text", "options": [], "rule": { "name": "field", "key": "householdSize" } },
+    { "id": "q10", "label": "Address Type:", "type": "radio", "options": ["House", "Apartment"], "rule": { "name": "none" }, "note": "House or apartment; not in the profile." },
+    { "id": "q11", "label": "Primary Address:", "type": "text", "options": [], "rule": { "name": "field", "key": "addressLine1" }, "note": "Jotform address box (street, line 2, city, state, ZIP); its first line is the street address." },
+    { "id": "q12", "label": "Primary Language:", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Primary language; not in the profile." },
+    { "id": "q13", "label": "Employment Status:", "type": "select", "options": ["Full-Time", "Part-Time", "Self-Employed", "Unemployed", "Other"], "rule": { "name": "none" }, "note": "Employment status; not in the profile." },
+    { "id": "q14", "label": "Are you currently receiving Food Stamps (SNAP)?:", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "none" }, "note": "Asks whether the applicant already receives SNAP, not whether they are applying." },
+    { "id": "q15", "label": "Pantry Enrollment Documentation:", "type": "text", "options": [], "rule": { "name": "none" }, "note": "A file upload for an ID document (not a text box); nothing the profile can supply." }
+  ]
+}
