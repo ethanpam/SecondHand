@@ -121,8 +121,8 @@ test('installed.json names the installed model; a missing one means none, and a 
   await assert.rejects(readInstalled(directory), /manifest is invalid/);
 });
 
-test('the app supports the single-candidate noul prompt format', () => {
-  assert.deepEqual([...MODEL_FORMATS], ['noul-v1']);
+test('the app runs the single-candidate noul-v1 prompts and the one-pass choice-v1 prompts', () => {
+  assert.deepEqual([...MODEL_FORMATS], ['noul-v1', 'choice-v1']);
 });
 
 test('a tampered download is rejected with a clear message and deleted', async t => {
@@ -307,8 +307,9 @@ test('the shipped manifest pins the published model: its commit, Hugging Face UR
     assert.equal(file.url, `https://huggingface.co/JacobTDang/secondhand-laya/resolve/${model.revision}/${file.path}`, file.path);
   }
   const card = fs.readFileSync(path.join(__dirname, '../docs/laya-model.md'), 'utf8');
-  const rows = new Map([...card.matchAll(/\| \`([^\`]+)\` \| ([\d,]+) \| \`([0-9a-f]{64})\` \|/g)].map(m => [m[1], { size: Number(m[2].replace(/,/g, '')), sha256: m[3] }]));
-  for (const file of model.files) assert.deepEqual({ size: file.size, sha256: file.sha256 }, rows.get(file.path), file.path);
+  // The card lists every model's files; the published one's must be among them.
+  const rows = [...card.matchAll(/\| \`([^\`]+)\` \| ([\d,]+) \| \`([0-9a-f]{64})\` \|/g)].map(m => ({ path: m[1], size: Number(m[2].replace(/,/g, '')), sha256: m[3] }));
+  for (const file of model.files) assert.ok(rows.some(row => row.path === file.path && row.size === file.size && row.sha256 === file.sha256), `${file.path} ${file.size} ${file.sha256}`);
   assert.match(card, new RegExp(model.revision), 'the model card names the published commit');
 });
 

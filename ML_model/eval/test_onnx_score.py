@@ -10,27 +10,33 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 
-from onnx_score import OnnxScorer, feeds, load_temperatures, noul_probability, temperature
+from decisions import ABSTAIN, candidates
+from onnx_score import OnnxScorer, calibrated, feeds, load_temperatures, temperature
 
 QUESTIONS = {"correct": {"type": "noul", "instructions": "Is the candidate correct?"}}
+YES_NO = {"type": "choice", "instructions": "Which option?", "criteria": ["Yes", "No", ABSTAIN]}
 
 
-class NoulProbability(unittest.TestCase):
-    def test_equal_logits_are_half(self):
-        self.assertEqual(noul_probability(np.array([0.0, 0.0]), temperature=1.0), 0.5)
+def noul_p(x, scale):
+    return calibrated(np.array([0.0, x]), scale)[1]
 
-    def test_temperature_softens_the_true_probability(self):
-        sharp = noul_probability(np.array([0.0, 2.0]), temperature=1.0)
-        soft = noul_probability(np.array([0.0, 2.0]), temperature=2.0)
+
+class Calibrated(unittest.TestCase):
+    def test_equal_logits_are_even(self):
+        self.assertEqual(calibrated(np.array([0.0, 0.0]), temperature=1.0), [0.5, 0.5])
+
+    def test_temperature_softens_the_top_probability(self):
+        sharp = noul_p(2.0, 1.0)
+        soft = noul_p(2.0, 2.0)
         self.assertGreater(sharp, soft)
         self.assertEqual(sharp, round(float(np.exp(2) / (1 + np.exp(2))), 4))
 
     def test_matches_laya_mlx_softmax_and_rounding(self):
-        logits, scale = np.array([-1.2, 0.8]), 1.5465
+        logits, scale = np.array([-1.2, 0.8, 0.1]), 1.5465
         z = logits / scale
         p = np.exp(z - z.max())
         p /= p.sum()
-        self.assertEqual(noul_probability(logits, temperature=scale), round(float(p[1]), 4))
+        self.assertEqual(calibrated(logits, temperature=scale), [round(float(v), 4) for v in p])
 
 
 class Temperatures(unittest.TestCase):
@@ -72,8 +78,8 @@ class Scorer(unittest.TestCase):
 
     def scorer(self, batch_size=2, threads=None):
         session = MagicMock()
-        # Row i of a batch gets logits [0, x] where x is the row's first token id.
-        session.run.side_effect = lambda names, fed: [np.stack([np.zeros(len(fed["input_ids"])), fed["input_ids"][:, 0]], axis=1).astype(np.float32)]
+        # Row i of a batch gets logits [0, x, 2x, ...], one per option, where x is its first token id.
+        session.run.side_effect = lambda names, fed: [(fed["input_ids"][:, :1] * np.arange(fed["marker_pos"].shape[1])).astype(np.float32)]
         with (
             patch("onnx_score.onnxruntime.InferenceSession", return_value=session) as make,
             patch("onnx_score.Tokenizer") as tokenizer,
@@ -86,15 +92,39 @@ class Scorer(unittest.TestCase):
         with self.assertRaisesRegex(FileNotFoundError, "model.onnx"):
             OnnxScorer(self.export_dir(with_model=False))
 
-    def test_scores_rows_in_batches_and_keeps_their_order(self):
+    def test_scores_noul_rows_one_prompt_each_in_batches_and_keeps_their_order(self):
         scorer, session, _ = self.scorer(batch_size=2)
         rows = [{"state": {"candidate": value}} for value in (1, 2, 3, 4, 5)]
         with patch("onnx_score.build_sequence", side_effect=lambda tok, state, q, *a: ([state["candidate"], 7, 7], [1, 2])):
             with redirect_stdout(io.StringIO()):
-                scorer.score_rows(rows, QUESTIONS)
+                scorer.score_decisions([rows[:3], rows[3:]], QUESTIONS)
         self.assertEqual(session.run.call_count, 3)
         self.assertEqual([len(call.args[1]["input_ids"]) for call in session.run.call_args_list], [2, 2, 1])
-        self.assertEqual([row["p"] for row in rows], [noul_probability(np.array([0.0, v]), 1.5) for v in (1, 2, 3, 4, 5)])
+        self.assertEqual([row["p"] for row in rows], [noul_p(v, 1.5) for v in (1, 2, 3, 4, 5)])
+
+    def test_scores_a_choice_decision_in_one_prompt_with_its_option_bucket_temperature(self):
+        scorer, session, _ = self.scorer(batch_size=8)
+        scorer.temps["by_options"]["choice:3-5"] = 2.0
+        row = {"decision": "d", "task": "answer", "state": {"facts": "F", "question": "Q"}, "answers": {"yn": "No"}}
+        decision = candidates(row, {"yn": YES_NO})
+        asked = []
+
+        def sequence(tok, state, q, *args):
+            asked.append((state, q))
+            return [3, 7, 7, 7], [1, 2, 3]
+
+        with patch("onnx_score.build_sequence", side_effect=sequence):
+            scorer.score_decisions([decision], {"yn": YES_NO})
+        self.assertEqual(session.run.call_count, 1)
+        self.assertEqual(asked, [({"facts": "F", "question": "Q"}, {"t": "choice", "ins": "Which option?", "crit": dict.fromkeys(YES_NO["criteria"])})])
+        self.assertEqual([c["p"] for c in decision], calibrated(np.array([0.0, 3.0, 6.0]), 2.0))
+
+    def test_a_prompt_that_loses_an_option_is_refused(self):
+        scorer, _, _ = self.scorer()
+        decision = candidates({"decision": "d", "task": "answer", "state": {"question": "Q"}, "answers": {"yn": "No"}}, {"yn": YES_NO})
+        with patch("onnx_score.build_sequence", side_effect=lambda *a: ([1, 7], [1, 2])):
+            with self.assertRaisesRegex(ValueError, "option"):
+                scorer.score_decisions([decision], {"yn": YES_NO})
 
     def test_prints_progress(self):
         scorer, _, _ = self.scorer(batch_size=2)
@@ -102,15 +132,15 @@ class Scorer(unittest.TestCase):
         out = io.StringIO()
         with patch("onnx_score.build_sequence", side_effect=lambda tok, state, q, *a: ([1, 7, 7], [1, 2])):
             with redirect_stdout(out):
-                scorer.score_rows(rows, QUESTIONS, progress_every=2)
-        self.assertEqual([line.split(" in ")[0] for line in out.getvalue().splitlines()], ["scored 2/5 rows", "scored 4/5 rows", "scored 5/5 rows"])
+                scorer.score_decisions([rows], QUESTIONS, progress_every=2)
+        self.assertEqual([line.split(" in ")[0] for line in out.getvalue().splitlines()], ["scored 2/5 prompts", "scored 4/5 prompts", "scored 5/5 prompts"])
 
-    def test_only_the_single_noul_question_is_scored(self):
+    def test_noul_rows_need_the_single_noul_question(self):
         scorer, _, _ = self.scorer()
         with self.assertRaisesRegex(ValueError, "noul"):
-            scorer.score_rows([{"state": {}}], {"correct": {"type": "choice", "instructions": "x", "criteria": ["a", "b"]}})
+            scorer.score_decisions([[{"state": {"candidate": "a"}}]], {"correct": {"type": "choice", "instructions": "x", "criteria": ["a", "b"]}})
         with self.assertRaisesRegex(ValueError, "single"):
-            scorer.score_rows([{"state": {}}], {**QUESTIONS, "other": QUESTIONS["correct"]})
+            scorer.score_decisions([[{"state": {"candidate": "a"}}]], {**QUESTIONS, "other": QUESTIONS["correct"]})
 
     def test_threads_limit_the_session(self):
         _, _, make = self.scorer(threads=4)

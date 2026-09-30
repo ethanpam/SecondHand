@@ -6,7 +6,7 @@ Training and evaluation for SecondHand's local AI: a [Laya](https://huggingface.
 1. **A real question** from a public form, copied into `questions/` and tagged with an answer rule.
 2. **A fictional household**, run through `shared/facts.cjs`, which turns a saved profile into plain facts. All math (ages, totals) happens there, not in the model.
 3. **The correct answer**, computed by code from the rule and the facts. No person or AI guesses the labels.
-4. **One example per candidate answer.** The state holds the facts, the form question and one candidate, and the fixed yes/no question is "Is this candidate the correct answer, given the facts?"
+4. **One example per candidate, or per question.** In the `noul-v1` format (round 2, the model the app ships), the state holds the facts, the form question and one candidate, and the fixed yes/no question is "Is this candidate the correct answer, given the facts?" In the `choice-v1` format (round 3, #65), the state holds the facts and the form question, and Laya's `choice` question lists the form's options plus "None of these, or the facts don't say", so the model scores every option in one pass. `docs/laya-model.md` compares them.
 
 ## Layout
 | Path | What |

@@ -376,11 +376,11 @@ test('removing a trusted site stops field release; a locked vault cannot trust s
   assert.deepEqual(plain((await stored.invoke('status')).trustedSites), ['https://ok.example.org']);
 });
 
-// A stand-in for desktop/laya.cjs (#38) with its exact interface. `scores(state)` plays the model.
+// A stand-in for desktop/laya.cjs (#38) running a noul-v1 model, with its exact interface. `scores(state)` plays the model.
 function stubLaya(scores = () => 0.01, state = 'ready', delayMs = 0) {
   const batches = [];
   const warms = [];
-  return { batches, warms, status: async () => ({ state, enabled: state !== 'off', sizeBytes: 1 }), decide: async () => { throw new Error('the desktop scores in batches'); },
+  return { batches, warms, format: async () => 'noul-v1', status: async () => ({ state, enabled: state !== 'off', sizeBytes: 1 }), decide: async () => { throw new Error('the desktop scores in batches'); },
     decideBatch: async items => {
       batches.push(items);
       if (delayMs) await new Promise(resolve => setTimeout(resolve, delayMs));

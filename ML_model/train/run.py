@@ -21,6 +21,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 ABSTAIN = "None of these, or the facts don\u2019t say"
+MATCH_ABSTAIN = "None of these"
+
+
+def answerable(row):
+    """Whether a row's decision has a real answer: a noul-v1 candidate row that is correct and not
+    abstaining, or a choice-v1 row whose answer isn't an abstain choice."""
+    if "candidate" in row["state"]:
+        return row["answers"]["correct"] and row["state"]["candidate"] != ABSTAIN
+    (answer,) = row["answers"].values()
+    return answer not in (ABSTAIN, MATCH_ABSTAIN)
 
 
 def balance(rows, abstain_ratio, seed):
@@ -35,13 +45,12 @@ def balance(rows, abstain_ratio, seed):
     kept = []
     # Sorted, so the same seed keeps the same rows in every run.
     for (_, split), decisions in sorted(by_split.items(), key=lambda item: item[0]):
-        answerable, abstain = [], []
+        answerable_groups, abstain = [], []
         for group in decisions.values():
-            real = any(r["answers"]["correct"] and r["state"]["candidate"] != ABSTAIN for r in group)
-            (answerable if real else abstain).append(group)
+            (answerable_groups if any(answerable(r) for r in group) else abstain).append(group)
         rng.shuffle(abstain)
-        keep_abstain = abstain if split == "test" else abstain[: max(1, round(abstain_ratio * len(answerable)))]
-        for group in answerable + keep_abstain:
+        keep_abstain = abstain if split == "test" else abstain[: max(1, round(abstain_ratio * len(answerable_groups)))]
+        for group in answerable_groups + keep_abstain:
             kept += group
     rng.shuffle(kept)
     return kept
@@ -92,7 +101,10 @@ def main():
     started = time.time()
 
     def emit(kind, **fields):
-        if kind in ("phase", "result", "error", "warning") or (kind == "progress" and fields.get("step", 0) % 50 == 0):
+        # Every milestone, every 50th update, and every 500th evaluated row.
+        if (kind in ("phase", "info", "epoch", "log", "calibration", "result", "error", "warning")
+                or (kind == "step" and fields.get("step", 0) % 50 == 0)
+                or (kind == "progress" and fields.get("done", 0) % 500 == 0)):
             print(f"[{time.time() - started:7.1f}s] {kind} {json.dumps(fields, default=str)[:300]}", flush=True)
 
     engine.train(spec, emit)

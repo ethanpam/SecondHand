@@ -126,7 +126,7 @@ test('an empty manifest reports that no model is available yet, whatever the tog
 });
 
 test('a computer the runtime has no build for reports Laya as unavailable', async t => {
-  const laya = createLaya({ modelDir: modelDirectory(t), manifest: { version: 1, model: null }, runner: { ...stubRunner(), supported: false }, enabled: true });
+  const laya = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: { version: 1, model: null }, runner: { ...stubRunner(), supported: false }, enabled: true });
   const status = await laya.status();
   assert.equal(status.state, 'unavailable');
   assert.match(status.message, /can’t run on this computer/);
@@ -135,7 +135,7 @@ test('a computer the runtime has no build for reports Laya as unavailable', asyn
 
 test('decide answers noul and choice questions with calibrated probabilities in the Python agent shape', async t => {
   const runner = stubRunner();
-  const laya = createLaya({ modelDir: modelDirectory(t), manifest: { version: 1, model: null }, runner, enabled: true });
+  const laya = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: { version: 1, model: null }, runner, enabled: true });
   assert.equal((await laya.status()).state, 'ready');
   assert.equal(runner.loads.length, 0, 'the model loads lazily, on the first decision');
   const result = await laya.decide(rowState('3'), { correct: DECISION, match: MATCH });
@@ -155,7 +155,7 @@ test('decide answers noul and choice questions with calibrated probabilities in 
 
 test('decideBatch returns answers in order, running decisions sorted by length in batches of at most 8', async t => {
   const runner = stubRunner();
-  const laya = createLaya({ modelDir: modelDirectory(t), manifest: { version: 1, model: null }, runner, enabled: true });
+  const laya = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: { version: 1, model: null }, runner, enabled: true });
   const items = Array.from({ length: 21 }, (_, index) => ({ state: rowState(`${'candidate '.repeat(index % 5)}${index}`), questions: { correct: DECISION } }));
   items[4].questions = { correct: DECISION, match: MATCH };
   const results = await laya.decideBatch(items);
@@ -172,8 +172,23 @@ test('decideBatch returns answers in order, running decisions sorted by length i
   assert.deepEqual(await laya.decideBatch([]), []);
 });
 
+test('a model folder must name its prompt format, and a decision can require the format its prompts are written in', async t => {
+  const modelDir = modelDirectory(t);
+  assert.throws(() => createLaya({ modelDir, manifest: NO_MODEL, runner: stubRunner(), enabled: true }), /format/);
+  assert.throws(() => createLaya({ modelDir, modelFormat: 'noul-v9', manifest: NO_MODEL, runner: stubRunner(), enabled: true }), /noul-v9/);
+  const laya = createLaya({ modelDir, modelFormat: 'choice-v1', manifest: NO_MODEL, runner: stubRunner(), enabled: true });
+  assert.equal(await laya.format(), 'choice-v1');
+  assert.equal((await laya.decideBatch([{ state: rowState('3'), questions: { match: MATCH } }], { format: 'choice-v1' }))[0].answers.match.type, 'choice');
+  const refused = await laya.decideBatch([{ state: rowState('3'), questions: { correct: DECISION } }], { format: 'noul-v1' }).catch(error => error);
+  assert.equal(refused.code, LAYA_NOT_READY);
+  assert.match(refused.message, /changed/);
+  await assert.rejects(laya.decideBatch([{ state: rowState('3'), questions: { match: MATCH } }], { format: 'choice' }), /format/);
+  const off = createLaya({ modelDir, modelFormat: 'choice-v1', manifest: NO_MODEL, runner: stubRunner(), enabled: false });
+  assert.equal((await off.format().catch(error => error)).code, LAYA_NOT_READY);
+});
+
 test('bad requests are refused with the reason, not answered', async t => {
-  const laya = createLaya({ modelDir: modelDirectory(t), manifest: { version: 1, model: null }, runner: stubRunner(), enabled: true });
+  const laya = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: { version: 1, model: null }, runner: stubRunner(), enabled: true });
   await assert.rejects(laya.decide(rowState('3'), {}), /at least one question/);
   await assert.rejects(laya.decide(rowState('3'), { score: { type: 'score', instructions: 'How much?', criteria: ['a', 'b'] } }), /choice or noul/);
   await assert.rejects(laya.decide({ amount: 2.5 }, { correct: DECISION }), /whole numbers/);
@@ -183,7 +198,7 @@ test('bad requests are refused with the reason, not answered', async t => {
 test('a request that takes longer than the timeout is rejected with LAYA_TIMEOUT', async t => {
   let release;
   const runner = stubRunner({ run: () => new Promise(resolve => { release = resolve; }) });
-  const laya = createLaya({ modelDir: modelDirectory(t), manifest: { version: 1, model: null }, runner, enabled: true, timeoutMs: 50 });
+  const laya = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: { version: 1, model: null }, runner, enabled: true, timeoutMs: 50 });
   // The clock only moves once the first batch is running, so a slow machine can't time out the request before it starts.
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const pending = laya.decideBatch(Array.from({ length: 20 }, () => ({ state: rowState('3'), questions: { correct: DECISION } }))).catch(caught => caught);
@@ -196,14 +211,14 @@ test('a request that takes longer than the timeout is rejected with LAYA_TIMEOUT
   await tick();
   assert.equal(runner.runs.length, 1, 'the rest of a timed-out request is not run');
   t.mock.timers.reset();
-  const later = createLaya({ modelDir: modelDirectory(t), manifest: { version: 1, model: null }, runner: stubRunner(), enabled: true, timeoutMs: 5000 });
+  const later = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: { version: 1, model: null }, runner: stubRunner(), enabled: true, timeoutMs: 5000 });
   assert.equal((await later.decide(rowState('3'), { correct: DECISION })).answers.correct.type, 'noul');
 });
 
 test('the model is released after 5 idle minutes and loads again on the next decision', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const runner = stubRunner();
-  const laya = createLaya({ modelDir: modelDirectory(t), manifest: { version: 1, model: null }, runner, enabled: true });
+  const laya = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: { version: 1, model: null }, runner, enabled: true });
   await laya.decide(rowState('3'), { correct: DECISION });
   t.mock.timers.tick(4 * 60 * 1000);
   await tick();
@@ -222,18 +237,18 @@ test('the model is released after 5 idle minutes and loads again on the next dec
 test('warming loads the model ahead of a request, so a first decision after idle isn’t spent loading it', async t => {
   // Loading the real model takes seconds (process start, checksum, load): longer than a request's timeout.
   const slowLoad = () => stubRunner({ load: () => new Promise(resolve => setTimeout(resolve, 120)) });
-  const cold = createLaya({ modelDir: modelDirectory(t), manifest: { version: 1, model: null }, runner: slowLoad(), enabled: true, timeoutMs: 60 });
+  const cold = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: { version: 1, model: null }, runner: slowLoad(), enabled: true, timeoutMs: 60 });
   assert.equal((await cold.decide(rowState('3'), { correct: DECISION }).catch(error => error)).code, LAYA_TIMEOUT, 'without warming, the load eats the request’s time');
   const runner = slowLoad();
-  const laya = createLaya({ modelDir: modelDirectory(t), manifest: { version: 1, model: null }, runner, enabled: true, timeoutMs: 60 });
+  const laya = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: { version: 1, model: null }, runner, enabled: true, timeoutMs: 60 });
   await Promise.all([laya.warm(), laya.warm()]);
   assert.equal(runner.loads.length, 1, 'warms share one load');
   assert.equal((await laya.decide(rowState('3'), { correct: DECISION })).answers.correct.type, 'noul');
   await laya.warm();
   assert.equal(runner.loads.length, 1, 'a warm model is not loaded again');
-  const off = createLaya({ modelDir: modelDirectory(t), manifest: { version: 1, model: null }, runner: stubRunner(), enabled: false });
+  const off = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: { version: 1, model: null }, runner: stubRunner(), enabled: false });
   assert.equal((await off.warm().catch(error => error)).code, LAYA_NOT_READY, 'warming is refused like a decision when Laya is off');
-  const broken = createLaya({ modelDir: modelDirectory(t), manifest: { version: 1, model: null }, runner: stubRunner({ load: async () => { throw new Error('synthetic load failure'); } }), enabled: true });
+  const broken = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: { version: 1, model: null }, runner: stubRunner({ load: async () => { throw new Error('synthetic load failure'); } }), enabled: true });
   assert.equal((await broken.warm().catch(error => error)).code, LAYA_NOT_READY);
   assert.equal((await broken.status()).state, 'error');
 });
@@ -241,7 +256,7 @@ test('warming loads the model ahead of a request, so a first decision after idle
 test('a warmed model is released after 5 idle minutes too', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const runner = stubRunner();
-  const laya = createLaya({ modelDir: modelDirectory(t), manifest: { version: 1, model: null }, runner, enabled: true });
+  const laya = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: { version: 1, model: null }, runner, enabled: true });
   await laya.warm();
   t.mock.timers.tick(5 * 60 * 1000 - 1);
   await tick();
@@ -253,20 +268,20 @@ test('a warmed model is released after 5 idle minutes too', async t => {
 
 test('concurrent first decisions share one model load', async t => {
   const runner = stubRunner();
-  const laya = createLaya({ modelDir: modelDirectory(t), manifest: { version: 1, model: null }, runner, enabled: true });
+  const laya = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: { version: 1, model: null }, runner, enabled: true });
   await Promise.all([laya.decide(rowState('1'), { correct: DECISION }), laya.decide(rowState('2'), { correct: DECISION }), laya.decideBatch([{ state: rowState('3'), questions: { correct: DECISION } }])]);
   assert.equal(runner.loads.length, 1);
 });
 
 test('a model that fails to load is reported as an error and decisions are refused as not ready', async t => {
   const runner = stubRunner({ load: async () => { throw new Error('synthetic load failure'); } });
-  const laya = createLaya({ modelDir: modelDirectory(t), manifest: { version: 1, model: null }, runner, enabled: true });
+  const laya = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: { version: 1, model: null }, runner, enabled: true });
   const error = await laya.decide(rowState('3'), { correct: DECISION }).catch(caught => caught);
   assert.equal(error.code, LAYA_NOT_READY);
   assert.match(error.message, /couldn’t be loaded \(synthetic load failure\)/);
   assert.deepEqual(await laya.status(), { state: 'error', enabled: true, sizeBytes: Object.values(modelFiles()).reduce((sum, bytes) => sum + bytes.length, 0),
     message: 'The Laya model couldn’t be loaded (synthetic load failure).' });
-  const missing = createLaya({ modelDir: path.join(os.tmpdir(), 'secondhand-no-such-laya-dir'), manifest: { version: 1, model: null }, runner: stubRunner(), enabled: true });
+  const missing = createLaya({ modelDir: path.join(os.tmpdir(), 'secondhand-no-such-laya-dir'), modelFormat: 'noul-v1', manifest: { version: 1, model: null }, runner: stubRunner(), enabled: true });
   assert.match((await missing.status()).message, /model folder is missing model\.onnx/);
 });
 
@@ -512,6 +527,26 @@ test('a model in a format this app can’t run is ignored with a note, and the i
   assert.equal(runner.loads.at(-1), modelPath(userDataDir, OLD));
 });
 
+test('the model in use says its format; after an update to another format, a request written for the old one is refused as not ready', async t => {
+  const hub = await modelHub(t);
+  const shipped = hub.publish(OLD);
+  hub.latest = shipped;
+  const userDataDir = temporary(t, 'secondhand-laya-');
+  const laya = createLaya({ userDataDir, manifest: shipped, updateUrl: hub.updateUrl, runner: stubRunner(), enabled: true });
+  await laya.update();
+  assert.equal(await laya.format(), 'noul-v1');
+  assert.equal((await laya.decideBatch([{ state: rowState('3'), questions: { correct: DECISION } }], { format: 'noul-v1' }))[0].answers.correct.type, 'noul');
+  hub.latest = hub.publish(NEW, modelFiles(), 'choice-v1');
+  await laya.update();
+  assert.equal(installedRevision(userDataDir), NEW);
+  assert.equal(await laya.format(), 'choice-v1');
+  const refused = await laya.decideBatch([{ state: rowState('3'), questions: { correct: DECISION } }], { format: 'noul-v1' }).catch(error => error);
+  assert.equal(refused.code, LAYA_NOT_READY);
+  assert.equal((await laya.decideBatch([{ state: rowState('3'), questions: { match: MATCH } }], { format: 'choice-v1' }))[0].answers.match.type, 'choice');
+  const restarted = createLaya({ userDataDir, manifest: shipped, runner: stubRunner(), enabled: true });
+  assert.equal(await restarted.format(), 'choice-v1', 'after a restart, the installed model’s format');
+});
+
 test('a tampered update is deleted, the installed model keeps working, and the next check tries again', async t => {
   const hub = await modelHub(t);
   const shipped = hub.publish(OLD);
@@ -683,7 +718,7 @@ function trackedRunner() {
 
 test('the ONNX runner runs the graph in its own process, and releasing the model ends that process', async t => {
   const { children, runner } = trackedRunner();
-  const laya = createLaya({ modelDir: tinyModelDirectory(t), manifest: NO_MODEL, runner, enabled: true, timeoutMs: 60000 });
+  const laya = createLaya({ modelDir: tinyModelDirectory(t), modelFormat: 'noul-v1', manifest: NO_MODEL, runner, enabled: true, timeoutMs: 60000 });
   t.after(() => laya.close());
   const state = rowState('3');
   const { answers } = await laya.decide(state, { correct: DECISION, match: MATCH });
@@ -702,7 +737,7 @@ test('the ONNX runner runs the graph in its own process, and releasing the model
 
 test('if the model process dies, that request is refused as not ready and the next one starts a new process', async t => {
   const { children, runner } = trackedRunner();
-  const laya = createLaya({ modelDir: tinyModelDirectory(t), manifest: NO_MODEL, runner, enabled: true, timeoutMs: 60000 });
+  const laya = createLaya({ modelDir: tinyModelDirectory(t), modelFormat: 'noul-v1', manifest: NO_MODEL, runner, enabled: true, timeoutMs: 60000 });
   t.after(() => laya.close());
   await laya.decide(rowState('3'), { correct: DECISION });
   process.kill(children[0].child.pid, 'SIGKILL');
@@ -716,7 +751,7 @@ test('if the model process dies, that request is refused as not ready and the ne
 
 test('a graph onnxruntime cannot load is reported, and its process is ended', async t => {
   const { children, runner } = trackedRunner();
-  const laya = createLaya({ modelDir: tinyModelDirectory(t, Buffer.from('not an onnx graph')), manifest: NO_MODEL, runner, enabled: true, timeoutMs: 60000 });
+  const laya = createLaya({ modelDir: tinyModelDirectory(t, Buffer.from('not an onnx graph')), modelFormat: 'noul-v1', manifest: NO_MODEL, runner, enabled: true, timeoutMs: 60000 });
   const error = await laya.decide(rowState('3'), { correct: DECISION }).catch(caught => caught);
   assert.equal(error.code, LAYA_NOT_READY);
   assert.match(error.message, /couldn’t be loaded/);

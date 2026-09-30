@@ -109,7 +109,7 @@ test('the dataset is written in LayaStudio\'s format', () => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'sh-dataset-'));
   try {
     const bank = [{ source: { url: 'https://pantry.example.org/a', title: 'A' }, questions: [q({ name: 'anyChildren' }, yesNo)] }];
-    const summary = writeDataset(out, bank, [family], { today: TODAY });
+    const summary = writeDataset(out, bank, [family], { today: TODAY, format: 'noul-v1' });
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(out, 'questions.json'), 'utf8')), { correct: DECISION });
     assert.equal(DECISION.type, 'noul');
     const lines = fs.readFileSync(path.join(out, 'rows.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
@@ -145,7 +145,7 @@ test('the written dataset holds both tasks and reports them separately', () => {
   try {
     const bank = [{ source: { url: 'https://pantry.example.org/c', title: 'C' }, questions: [
       q({ name: 'anyChildren' }, yesNo), { id: 't1', label: 'Email', type: 'email', options: [], rule: { name: 'field', key: 'email' } }] }];
-    const summary = writeDataset(out, bank, [family], { today: TODAY });
+    const summary = writeDataset(out, bank, [family], { today: TODAY, format: 'noul-v1' });
     assert.deepEqual(Object.keys(summary.tasks), ['answer', 'match']);
     assert.equal(summary.tasks.answer.rows, 3);
     assert.ok(summary.tasks.match.rows > 20);

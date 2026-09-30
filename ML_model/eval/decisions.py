@@ -1,10 +1,11 @@
 """Decision-level evaluation of a trained Laya model on SecondHand's held-out forms.
 
-LayaStudio scores rows; a form question is a decision made over several candidate rows.
-This regroups them: the model picks its best candidate, answers only when that candidate
-beats "none of these" and clears the confidence bar, and otherwise leaves the question to
-the applicant. What matters is how often an answer it fills is right (precision), how many
-answerable questions it fills (coverage), and how often it fills one it should have left.
+A form question is a decision over several candidates: one row per candidate in a noul-v1
+dataset, or one choice row listing every candidate in a choice-v1 dataset (#65). This regroups
+them: the model picks its best candidate, answers only when that candidate beats "none of
+these" and clears the confidence bar, and otherwise leaves the question to the applicant.
+What matters is how often an answer it fills is right (precision), how many answerable
+questions it fills (coverage), and how often it fills one it should have left.
 
     uv run --project ~/Projects/LayaStudio python ML_model/eval/decisions.py --model <run>/model
     uv run --project ~/Projects/LayaStudio python ML_model/eval/decisions.py --runtime onnx --onnx <export> \
@@ -22,6 +23,8 @@ from layastudio import runtime
 
 ROOT = Path(__file__).resolve().parents[1]
 ABSTAIN = "None of these, or the facts don’t say"
+MATCH_ABSTAIN = "None of these"
+ABSTAINS = (ABSTAIN, MATCH_ABSTAIN)
 THRESHOLDS = [0.5, 0.7, 0.8, 0.9, 0.95, 0.98, 0.99, 0.992, 0.995, 0.996]
 
 
@@ -46,6 +49,38 @@ def holdout_forms(questions_dir):
     if not urls:
         raise ValueError(f"No form in {questions_dir} is marked holdout.")
     return urls
+
+
+def dataset_format(questions):
+    """noul-v1 (one yes/no question about each candidate) or choice-v1 (one choice question per decision)."""
+    types = {definition["type"] for definition in questions.values()}
+    if types == {"noul"} and list(questions) == ["correct"]:
+        return "noul-v1"
+    if types == {"choice"}:
+        return "choice-v1"
+    raise ValueError(f"Unknown dataset format: questions {sorted(questions)[:5]} of types {sorted(types)}")
+
+
+def candidates(row, questions):
+    """A decision's candidates in the order the model sees them, the abstain choice last. A noul-v1
+    row is one candidate already; a choice-v1 row stands for every choice of its question, and
+    `source` keeps what the model is asked."""
+    if "candidate" in row["state"]:
+        return [row]
+    ((qid, gold),) = row["answers"].items()
+    choices = questions[qid]["criteria"]
+    if choices[-1] not in ABSTAINS:
+        raise ValueError(f"Question {qid} must list an abstain choice last, not {choices[-1]!r}")
+    return [
+        {
+            "decision": row["decision"],
+            "task": row["task"],
+            "state": {**row["state"], "candidate": label},
+            "answers": {"correct": label == gold},
+            "source": {"qid": qid, "state": row["state"]},
+        }
+        for label in choices
+    ]
 
 
 def probabilities(decisions):
@@ -114,25 +149,34 @@ def load(model_dir):
 
 
 def score(decisions, model_dir, questions):
+    """Each candidate's probability: one prompt per noul-v1 row, one per choice-v1 decision."""
     agent = load(model_dir)
-    started, done = time.time(), 0
+    started, done, report = time.time(), 0, 500
     for rows in decisions.values():
-        for row in rows:
-            out = agent.predict(row["state"], questions)
-            row["p"] = out["answers"]["correct"]["noul"]
+        source = rows[0].get("source")
+        if source:
+            out = agent.predict(source["state"], {source["qid"]: questions[source["qid"]]})
+            chosen = out["answers"][source["qid"]]["probabilities"]
+            for row in rows:
+                row["p"] = chosen[row["state"]["candidate"]]
             done += 1
-            if done % 500 == 0:
-                print(f"scored {done} rows in {time.time() - started:.0f}s", flush=True)
+        else:
+            for row in rows:
+                row["p"] = agent.predict(row["state"], questions)["answers"]["correct"]["noul"]
+                done += 1
+        if done >= report:
+            print(f"scored {done} prompts in {time.time() - started:.0f}s", flush=True)
+            report += 500
 
 
 def metrics(decisions, threshold):
     result = {"decisions": 0, "answerable": 0, "accepted": 0, "right": 0, "wrong_fill": 0, "wrong_fill_on_unanswerable": 0, "unanswerable": 0}
     for rows in decisions.values():
-        if rows[-1]["state"]["candidate"] != ABSTAIN:
+        if rows[-1]["state"]["candidate"] not in ABSTAINS:
             raise ValueError("Every decision must end with the abstain candidate.")
         gold = next(row["state"]["candidate"] for row in rows if row["answers"]["correct"])
         chosen = fill([row["p"] for row in rows], threshold)
-        answerable = gold != ABSTAIN
+        answerable = gold not in ABSTAINS
         result["decisions"] += 1
         result["answerable"] += answerable
         result["unanswerable"] += not answerable
@@ -148,16 +192,23 @@ def metrics(decisions, threshold):
     return result
 
 
-def load_decisions(source, split, holdout, limit):
+FORMS = ("all", "holdout", "not-holdout")
+
+
+def load_decisions(source, questions, split, forms="all", limit=0):
+    """The split's decisions by task. `forms`: all of them, only the forms marked holdout, or every other form."""
+    if forms not in FORMS:
+        raise ValueError(f"forms must be one of {', '.join(FORMS)}, not {forms!r}")
     decisions = {"answer": defaultdict(list), "match": defaultdict(list)}
     with open(Path(source) / "rows.jsonl") as handle:
         for line in handle:
             row = json.loads(line)
             if row["split"] == split:
-                decisions[row["task"]][row["decision"]].append(row)
-    if holdout:
+                decisions[row["task"]][row["decision"]].extend(candidates(row, questions))
+    if forms != "all":
         urls = holdout_forms(ROOT / "questions")
-        decisions = {task: {key: rows for key, rows in groups.items() if key.split("#")[0] in urls} for task, groups in decisions.items()}
+        keep = (lambda url: url in urls) if forms == "holdout" else (lambda url: url not in urls)
+        decisions = {task: {key: rows for key, rows in groups.items() if keep(key.split("#")[0])} for task, groups in decisions.items()}
     if limit:
         decisions = {task: dict(list(groups.items())[:limit]) for task, groups in decisions.items()}
     return decisions
@@ -172,7 +223,9 @@ def main():
     parser.add_argument("--threads", type=int, default=0, help="onnxruntime intra-op threads (0 = its default)")
     parser.add_argument("--dataset", default=str(ROOT / "dataset" / "out"))
     parser.add_argument("--split", default="test")
-    parser.add_argument("--holdout", action="store_true", help="evaluate only the forms marked holdout in questions/")
+    held = parser.add_mutually_exclusive_group()
+    held.add_argument("--holdout", action="store_true", help="evaluate only the forms marked holdout in questions/")
+    held.add_argument("--exclude-holdout", action="store_true", help="evaluate every form but those marked holdout (to choose thresholds on)")
     parser.add_argument("--limit", type=int, default=0, help="evaluate this many decisions per task (0 = all)")
     parser.add_argument("--report", help="write the JSON report here")
     parser.add_argument("--errors", help="write every wrong fill at --error-threshold here (JSON lines)")
@@ -194,7 +247,8 @@ def main():
 
     source = Path(args.dataset)
     questions = json.loads((source / "questions.json").read_text())
-    decisions = load_decisions(source, args.split, args.holdout, args.limit)
+    forms = "holdout" if args.holdout else "not-holdout" if args.exclude_holdout else "all"
+    decisions = load_decisions(source, questions, args.split, forms, args.limit)
     if args.probs:
         apply_probabilities(decisions, json.loads(Path(args.probs).read_text()))
     elif args.runtime == "onnx":
@@ -206,14 +260,16 @@ def main():
         if args.probs:
             continue
         if args.runtime == "onnx":
-            scorer.score_rows([row for rows in groups.values() for row in rows], questions, progress_every=500)
+            scorer.score_decisions(list(groups.values()), questions, progress_every=500)
         else:
             score(groups, Path(args.model), questions)
     report = {
         "model": model_label,
+        "format": dataset_format(questions),
         "runtime": args.runtime,
         "split": args.split,
         "holdout": args.holdout,
+        "forms": forms,
         "tasks": {task: {str(t): metrics(groups, t) for t in THRESHOLDS} for task, groups in decisions.items()},
     }
     if args.runtime == "onnx":

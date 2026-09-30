@@ -1,13 +1,14 @@
 {
+ "format": "noul-v1",
  "export": {
   "files": {
    "model.onnx": {
     "size": 3820399,
-    "sha256": "dd1658b67f562804d579f2ff64f94a89d4a3d9bd71144e8158c48cd8bd0eccd7"
+    "sha256": "4fba842d827c73f596b8f17be4a98700d258cfc43365e32898f577b365314fb8"
    },
    "model.onnx.data": {
     "size": 421294080,
-    "sha256": "67e86c975d31d065fe41dc533d46f832b9b89ff6d2913826792f00fb715caad8"
+    "sha256": "af1f87d7d95ff5c72f205b81c91f414cd53bc4632d41972397b99a43a13cd741"
    },
    "tokenizer/tokenizer.json": {
     "size": 3583228,
@@ -19,10 +20,10 @@
    },
    "rl_agent_config.json": {
     "size": 1019,
-    "sha256": "c60d46e60fbc282b74697fff8c1c2feb0ccbe4bad56d952edb37fc8c4d8bd1e9"
+    "sha256": "7f4cb9dd484a70cd6352eb1efb804e5ebcc9b346e352215318aff486ced58c36"
    }
   },
-  "checkpoint": "augmented-lora-proper-1790472969",
+  "checkpoint": "round2-lora-proper-1790530553",
   "onnxruntime": "1.30.0"
  },
  "batchSize": 8,
@@ -427,395 +428,23 @@
     34
    ],
    "onnx": [
-    0.9991587823708863,
-    0.0008412176291137017
+    0.9993937481934632,
+    0.0006062518065367696
    ],
    "onnxBatched": [
-    0.9991675957832256,
-    0.0008324042167745945
+    0.9993934223940338,
+    0.0006065776059661765
    ],
    "mlxBfloat16": [
-    0.9988926526332041,
-    0.001107347366795816
+    0.9994706090341975,
+    0.0005293909658024837
    ]
   },
   {
    "state": {
     "facts": "The applicant is 55 years old. The applicant is 55 or older and younger than 60. The household has 6 people. The household has 4 adults aged 18 to 64. The household has 1 child under 18. The household has 1 person aged 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household is pregnant. Someone in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Nevada. The applicant lives in Jackson County. The applicant lives in Milford. The applicant’s ZIP code is 15054. The household earns $3,700 a month from work. The household has no other income. The household’s total income is $3,700 a month ($44,400 a year). Utilities cost $300 a month. The household has no monthly medical costs. The applicant is applying for SNAP food assistance. The applicant is not applying for Medicaid health coverage.",
-    "question": "Which items would you like? (select up to 10)",
-    "candidate": "Alcohol Wipes"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 279,
-   "idsSha256": "86053c53b642cdd8c7e788962f6eb69efa47f2efc38d9a41ccf499c2436a2fe9",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9991863176608475,
-    0.0008136823391524797
-   ],
-   "onnxBatched": [
-    0.9992406667046306,
-    0.0007593332953693797
-   ],
-   "mlxBfloat16": [
-    0.9992825780215705,
-    0.0007174219784295467
-   ]
-  },
-  {
-   "state": {
-    "facts": "The applicant is 60 years old. The applicant is 60 or older and younger than 62. The household has 1 person. The household has 1 adult aged 18 to 64. The household has no children under 18. Nobody in the household is 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Iowa. The applicant lives in Johnson County. The household earns $3,400 a month from work. The household has no other income. The household’s total income is $3,400 a month ($40,800 a year). Rent or mortgage costs $1,090 a month. Utilities cost $340 a month. The household has $30 in cash, checking and savings. The household pays $160 a month in medical costs. The applicant is not applying for SNAP food assistance. The applicant is not applying for FIP cash assistance. The applicant is applying for Medicaid health coverage.",
-    "question": "Country of Birth",
-    "candidate": "Ghana"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 280,
-   "idsSha256": "3b2e9cd9c717f8649766225ecdb27f5799d17c1e77761c325aec79437afe91cf",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9994750039508999,
-    0.0005249960491000369
-   ],
-   "onnxBatched": [
-    0.9994750039508999,
-    0.0005249960491000369
-   ],
-   "mlxBfloat16": [
-    0.9996259705087309,
-    0.00037402949126915915
-   ]
-  },
-  {
-   "state": {
-    "facts": "The applicant is 60 years old. The applicant is 60 or older and younger than 62. The household has 1 person. The household has 1 adult aged 18 to 64. The household has no children under 18. Nobody in the household is 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Iowa. The applicant lives in Johnson County. The household earns $3,400 a month from work. The household has no other income. The household’s total income is $3,400 a month ($40,800 a year). Rent or mortgage costs $1,090 a month. Utilities cost $340 a month. The household has $30 in cash, checking and savings. The household pays $160 a month in medical costs. The applicant is not applying for SNAP food assistance. The applicant is not applying for FIP cash assistance. The applicant is applying for Medicaid health coverage.",
-    "question": "Do you have any children under age 8 living in the home?",
-    "candidate": "None of these, or the facts don’t say"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 298,
-   "idsSha256": "1ab2ad7e3e38c022b81ec11801345a75f9fc359ef8eebe5b9ebea5fcb421d1a5",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9351256354733247,
-    0.06487436452667533
-   ],
-   "onnxBatched": [
-    0.9314641376922163,
-    0.06853586230778382
-   ],
-   "mlxBfloat16": [
-    0.9420542044748224,
-    0.05794579552517773
-   ]
-  },
-  {
-   "state": {
-    "facts": "The applicant is 55 years old. The applicant is 55 or older and younger than 60. The household has 6 people. The household has 4 adults aged 18 to 64. The household has 1 child under 18. The household has 1 person aged 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household is pregnant. Someone in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Nevada. The applicant lives in Jackson County. The applicant lives in Milford. The applicant’s ZIP code is 15054. The household earns $3,700 a month from work. The household has no other income. The household’s total income is $3,700 a month ($44,400 a year). Utilities cost $300 a month. The household has no monthly medical costs. The applicant is applying for SNAP food assistance. The applicant is not applying for Medicaid health coverage.",
-    "question": "Please select any food items you DO NOT want/need. All other items will be included and packed in your box. Please note: our food supplies change daily and every item may not be available. We will do our best to accommodate your requests. Remember only check boxes of food you DO NOT want/need.",
-    "candidate": "Milk"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 328,
-   "idsSha256": "d00ddf9b52e91f0e7502298f0e5d39bc023f46340f07c8dfa976c6ced6de35b7",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9993939301070464,
-    0.000606069892953721
-   ],
-   "onnxBatched": [
-    0.9993939301070464,
-    0.000606069892953721
-   ],
-   "mlxBfloat16": [
-    0.9993213307104323,
-    0.0006786692895678273
-   ]
-  },
-  {
-   "state": {
-    "facts": "The applicant is 60 years old. The applicant is 60 or older and younger than 62. The household has 1 person. The household has 1 adult aged 18 to 64. The household has no children under 18. Nobody in the household is 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Iowa. The applicant lives in Johnson County. The household earns $3,400 a month from work. The household has no other income. The household’s total income is $3,400 a month ($40,800 a year). Rent or mortgage costs $1,090 a month. Utilities cost $340 a month. The household has $30 in cash, checking and savings. The household pays $160 a month in medical costs. The applicant is not applying for SNAP food assistance. The applicant is not applying for FIP cash assistance. The applicant is applying for Medicaid health coverage.",
-    "question": "What Race/Ethnicity does the Head of Household identify as?",
-    "candidate": "White"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 290,
-   "idsSha256": "bae558539f39ab6b093c6b8cc9b6bd64595c2a3ad184de972b9a8b96d219ba54",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9990516464492248,
-    0.000948353550775134
-   ],
-   "onnxBatched": [
-    0.9990264102821745,
-    0.0009735897178253916
-   ],
-   "mlxBfloat16": [
-    0.9991736622131403,
-    0.0008263377868596877
-   ]
-  },
-  {
-   "state": {
-    "facts": "The applicant is 60 years old. The applicant is 60 or older and younger than 62. The household has 1 person. The household has 1 adult aged 18 to 64. The household has no children under 18. Nobody in the household is 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Iowa. The applicant lives in Johnson County. The household earns $3,400 a month from work. The household has no other income. The household’s total income is $3,400 a month ($40,800 a year). Rent or mortgage costs $1,090 a month. Utilities cost $340 a month. The household has $30 in cash, checking and savings. The household pays $160 a month in medical costs. The applicant is not applying for SNAP food assistance. The applicant is not applying for FIP cash assistance. The applicant is applying for Medicaid health coverage.",
-    "question": "Country",
-    "candidate": "Swaziland"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 280,
-   "idsSha256": "9d533a24f0be7503570807fdb45b071165ee1f1639b2d17f7bb33223ea6a0e69",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.999701483271592,
-    0.00029851672840784676
-   ],
-   "onnxBatched": [
-    0.999701483271592,
-    0.00029851672840784676
-   ],
-   "mlxBfloat16": [
-    0.999712353839659,
-    0.0002876461603409438
-   ]
-  },
-  {
-   "state": {
-    "facts": "The applicant is 55 years old. The applicant is 55 or older and younger than 60. The household has 6 people. The household has 4 adults aged 18 to 64. The household has 1 child under 18. The household has 1 person aged 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household is pregnant. Someone in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Nevada. The applicant lives in Jackson County. The applicant lives in Milford. The applicant’s ZIP code is 15054. The household earns $3,700 a month from work. The household has no other income. The household’s total income is $3,700 a month ($44,400 a year). Utilities cost $300 a month. The household has no monthly medical costs. The applicant is applying for SNAP food assistance. The applicant is not applying for Medicaid health coverage.",
-    "question": "Which best describes your household? (Please check one)",
-    "candidate": "Single parent, HOH (male)"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 282,
-   "idsSha256": "ca715cb4c56b669e5f6bb5e7d8725cc28e8b6b4a7fea07bc210acb2448bf5c19",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9993423544133453,
-    0.0006576455866547478
-   ],
-   "onnxBatched": [
-    0.9993065860117564,
-    0.0006934139882436188
-   ],
-   "mlxBfloat16": [
-    0.9993708261963314,
-    0.0006291738036685508
-   ]
-  },
-  {
-   "state": {
-    "facts": "The applicant is 55 years old. The applicant is 55 or older and younger than 60. The household has 6 people. The household has 4 adults aged 18 to 64. The household has 1 child under 18. The household has 1 person aged 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household is pregnant. Someone in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Nevada. The applicant lives in Jackson County. The applicant lives in Milford. The applicant’s ZIP code is 15054. The household earns $3,700 a month from work. The household has no other income. The household’s total income is $3,700 a month ($44,400 a year). Utilities cost $300 a month. The household has no monthly medical costs. The applicant is applying for SNAP food assistance. The applicant is not applying for Medicaid health coverage.",
-    "question": "Number of minors (under 18) in the home",
-    "candidate": "5 or more"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 277,
-   "idsSha256": "d1a9852fda7c6be8d157cc2c56d2400343acb47f60677297cc718da84c1012c3",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9934399606156922,
-    0.006560039384307779
-   ],
-   "onnxBatched": [
-    0.9935033232695268,
-    0.006496676730473056
-   ],
-   "mlxBfloat16": [
-    0.9941331739078368,
-    0.005866826092163154
-   ]
-  },
-  {
-   "state": {
-    "facts": "The applicant is 60 years old. The applicant is 60 or older and younger than 62. The household has 1 person. The household has 1 adult aged 18 to 64. The household has no children under 18. Nobody in the household is 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Iowa. The applicant lives in Johnson County. The household earns $3,400 a month from work. The household has no other income. The household’s total income is $3,400 a month ($40,800 a year). Rent or mortgage costs $1,090 a month. Utilities cost $340 a month. The household has $30 in cash, checking and savings. The household pays $160 a month in medical costs. The applicant is not applying for SNAP food assistance. The applicant is not applying for FIP cash assistance. The applicant is applying for Medicaid health coverage.",
-    "question": "Our household currently has no income",
-    "candidate": "Our household currently has no income"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 287,
-   "idsSha256": "642aa3359b1d1a9a697dadda8751c7c9df63369f810c3386d26de6a30a0a74ec",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9865718067082652,
-    0.013428193291734787
-   ],
-   "onnxBatched": [
-    0.9910034098255289,
-    0.00899659017447109
-   ],
-   "mlxBfloat16": [
-    0.9828371863685477,
-    0.017162813631452386
-   ]
-  },
-  {
-   "state": {
-    "facts": "The applicant is 60 years old. The applicant is 60 or older and younger than 62. The household has 1 person. The household has 1 adult aged 18 to 64. The household has no children under 18. Nobody in the household is 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Iowa. The applicant lives in Johnson County. The household earns $3,400 a month from work. The household has no other income. The household’s total income is $3,400 a month ($40,800 a year). Rent or mortgage costs $1,090 a month. Utilities cost $340 a month. The household has $30 in cash, checking and savings. The household pays $160 a month in medical costs. The applicant is not applying for SNAP food assistance. The applicant is not applying for FIP cash assistance. The applicant is applying for Medicaid health coverage.",
-    "question": "Is any household member expecting a baby (pregnant)?",
-    "candidate": "None of these, or the facts don’t say"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 298,
-   "idsSha256": "ccd57f2d739b8aabf35d13005b7dfddec2065f9d6d4b5e536df6a0e1955987dd",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.008725768278128187,
-    0.9912742317218719
-   ],
-   "onnxBatched": [
-    0.008769260244533268,
-    0.9912307397554667
-   ],
-   "mlxBfloat16": [
-    0.01038801493557409,
-    0.9896119850644259
-   ]
-  },
-  {
-   "state": {
-    "facts": "Nobody in the household is a veteran. Nobody in the household is pregnant. The applicant has a home address.",
-    "question": "Do you currently reside in Nebraska?",
-    "candidate": "Prefer not to say"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 92,
-   "idsSha256": "4430013a9a8ff2c2fdbb19ef3dbbf0b779607ed2c6db3133367417b64ff8a3a5",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9988862337356083,
-    0.001113766264391795
-   ],
-   "onnxBatched": [
-    0.9988862337356083,
-    0.001113766264391795
-   ],
-   "mlxBfloat16": [
-    0.9982825220835488,
-    0.001717477916451176
-   ]
-  },
-  {
-   "state": {
-    "facts": "The applicant is 55 years old. The applicant is 55 or older and younger than 60. The household has 6 people. The household has 4 adults aged 18 to 64. The household has 1 child under 18. The household has 1 person aged 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household is pregnant. Someone in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Nevada. The applicant lives in Jackson County. The applicant lives in Milford. The applicant’s ZIP code is 15054. The household earns $3,700 a month from work. The household has no other income. The household’s total income is $3,700 a month ($44,400 a year). Utilities cost $300 a month. The household has no monthly medical costs. The applicant is applying for SNAP food assistance. The applicant is not applying for Medicaid health coverage.",
-    "question": "Select your state",
-    "candidate": "MT"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 268,
-   "idsSha256": "0233b593e01cdbd1e4e3e387fe174884786355fe8e86db86686f9a617ea222bf",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9996141832188876,
-    0.00038581678111244543
-   ],
-   "onnxBatched": [
-    0.9996141832188876,
-    0.00038581678111244543
-   ],
-   "mlxBfloat16": [
-    0.9995087217082482,
-    0.0004912782917518714
-   ]
-  },
-  {
-   "state": {
-    "facts": "The applicant is 55 years old. The applicant is 55 or older and younger than 60. The household has 6 people. The household has 4 adults aged 18 to 64. The household has 1 child under 18. The household has 1 person aged 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household is pregnant. Someone in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Nevada. The applicant lives in Jackson County. The applicant lives in Milford. The applicant’s ZIP code is 15054. The household earns $3,700 a month from work. The household has no other income. The household’s total income is $3,700 a month ($44,400 a year). Utilities cost $300 a month. The household has no monthly medical costs. The applicant is applying for SNAP food assistance. The applicant is not applying for Medicaid health coverage.",
-    "question": "County",
-    "candidate": "Monroe"
+    "question": "Phone Type",
+    "candidate": "Cell"
    },
    "questions": {
     "correct": {
@@ -824,29 +453,29 @@
     }
    },
    "length": 267,
-   "idsSha256": "d4f8846b1d84bcca7910775dda2f2f8cf4d25841a2b5f211506bd0805ddf3d84",
+   "idsSha256": "0249ba7dc561eb04b8f3e4cc38718ed0f8d9dc886b88260acc7dabc936d5d8ec",
    "markers": [
     24,
     34
    ],
    "onnx": [
-    0.9989206949811581,
-    0.001079305018841961
+    0.9996124863513167,
+    0.00038751364868319193
    ],
    "onnxBatched": [
-    0.9989746964067853,
-    0.0010253035932146993
+    0.9996067061483841,
+    0.00039329385161594613
    ],
    "mlxBfloat16": [
-    0.9990239041191344,
-    0.0009760958808656305
+    0.9996098044115936,
+    0.0003901955884063196
    ]
   },
   {
    "state": {
     "facts": "The applicant is 60 years old. The applicant is 60 or older and younger than 62. The household has 1 person. The household has 1 adult aged 18 to 64. The household has no children under 18. Nobody in the household is 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Iowa. The applicant lives in Johnson County. The household earns $3,400 a month from work. The household has no other income. The household’s total income is $3,400 a month ($40,800 a year). Rent or mortgage costs $1,090 a month. Utilities cost $340 a month. The household has $30 in cash, checking and savings. The household pays $160 a month in medical costs. The applicant is not applying for SNAP food assistance. The applicant is not applying for FIP cash assistance. The applicant is applying for Medicaid health coverage.",
-    "question": "Are you a veteran?",
-    "candidate": "Yes"
+    "question": "Country of Birth",
+    "candidate": "Honduras"
    },
    "questions": {
     "correct": {
@@ -854,30 +483,340 @@
      "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
     }
    },
-   "length": 280,
-   "idsSha256": "a7b7d530cb93dcb3f227877cb7b3fa140b79ae5f983a2349ef6a1d492cf00356",
+   "length": 281,
+   "idsSha256": "c303d640eef9112df635e73a13ff8cb655c5bbeafe47ed6ff930f4897fccad09",
    "markers": [
     24,
     34
    ],
    "onnx": [
-    0.9976421682516101,
-    0.002357831748389833
+    0.9996750678288827,
+    0.0003249321711171986
    ],
    "onnxBatched": [
-    0.9976421682516101,
-    0.002357831748389833
+    0.9996750678288827,
+    0.0003249321711171986
    ],
    "mlxBfloat16": [
-    0.9977677032358548,
-    0.0022322967641451104
+    0.999657631344281,
+    0.0003423686557188912
+   ]
+  },
+  {
+   "state": {
+    "facts": "The applicant is 60 years old. The applicant is 60 or older and younger than 62. The household has 1 person. The household has 1 adult aged 18 to 64. The household has no children under 18. Nobody in the household is 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Iowa. The applicant lives in Johnson County. The household earns $3,400 a month from work. The household has no other income. The household’s total income is $3,400 a month ($40,800 a year). Rent or mortgage costs $1,090 a month. Utilities cost $340 a month. The household has $30 in cash, checking and savings. The household pays $160 a month in medical costs. The applicant is not applying for SNAP food assistance. The applicant is not applying for FIP cash assistance. The applicant is applying for Medicaid health coverage.",
+    "question": "Person 1: Nationality/Race",
+    "candidate": "Multi-racial"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 287,
+   "idsSha256": "b0676b8af89152310e348413558728621b2396d9018b7386aa3dbbf46a698e5b",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9996516038657591,
+    0.00034839613424090247
+   ],
+   "onnxBatched": [
+    0.9996623165392626,
+    0.0003376834607374219
+   ],
+   "mlxBfloat16": [
+    0.9996500879410561,
+    0.00034991205894385085
    ]
   },
   {
    "state": {
     "facts": "The applicant is 55 years old. The applicant is 55 or older and younger than 60. The household has 6 people. The household has 4 adults aged 18 to 64. The household has 1 child under 18. The household has 1 person aged 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household is pregnant. Someone in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Nevada. The applicant lives in Jackson County. The applicant lives in Milford. The applicant’s ZIP code is 15054. The household earns $3,700 a month from work. The household has no other income. The household’s total income is $3,700 a month ($44,400 a year). Utilities cost $300 a month. The household has no monthly medical costs. The applicant is applying for SNAP food assistance. The applicant is not applying for Medicaid health coverage.",
-    "question": "How many people will come with you to pick up?",
-    "candidate": "0"
+    "question": "Have you or anyone in your household received or do you expect to receive Food Assistance benefits from any other county or any other state this month?",
+    "candidate": "No"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 292,
+   "idsSha256": "d2168ffbe4558c3d9e1d8e16b02cb5d6c13c0f7c46be39ee938de476928a8a70",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9995604507272582,
+    0.0004395492727418752
+   ],
+   "onnxBatched": [
+    0.9995604507272582,
+    0.0004395492727418752
+   ],
+   "mlxBfloat16": [
+    0.9995834420099178,
+    0.0004165579900822239
+   ]
+  },
+  {
+   "state": {
+    "facts": "The applicant is 55 years old. The applicant is 55 or older and younger than 60. The household has 6 people. The household has 4 adults aged 18 to 64. The household has 1 child under 18. The household has 1 person aged 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household is pregnant. Someone in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Nevada. The applicant lives in Jackson County. The applicant lives in Milford. The applicant’s ZIP code is 15054. The household earns $3,700 a month from work. The household has no other income. The household’s total income is $3,700 a month ($44,400 a year). Utilities cost $300 a month. The household has no monthly medical costs. The applicant is applying for SNAP food assistance. The applicant is not applying for Medicaid health coverage.",
+    "question": "How did you hear about us?",
+    "candidate": "Another Pantry"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 273,
+   "idsSha256": "83ba17c738138318210b2478caa97af84ebf0465c20e70b06bf3b78fdb9e4d8f",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9996376924348368,
+    0.0003623075651631441
+   ],
+   "onnxBatched": [
+    0.9996475705251546,
+    0.0003524294748455063
+   ],
+   "mlxBfloat16": [
+    0.99962644615888,
+    0.00037355384111991595
+   ]
+  },
+  {
+   "state": {
+    "facts": "The applicant is 55 years old. The applicant is 55 or older and younger than 60. The household has 6 people. The household has 4 adults aged 18 to 64. The household has 1 child under 18. The household has 1 person aged 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household is pregnant. Someone in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Nevada. The applicant lives in Jackson County. The applicant lives in Milford. The applicant’s ZIP code is 15054. The household earns $3,700 a month from work. The household has no other income. The household’s total income is $3,700 a month ($44,400 a year). Utilities cost $300 a month. The household has no monthly medical costs. The applicant is applying for SNAP food assistance. The applicant is not applying for Medicaid health coverage.",
+    "question": "Country",
+    "candidate": "United Kingdom"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 267,
+   "idsSha256": "3e5bf6ebf832d438f5f47d9100f7e55d75fd4d6a6c326bfaea1c046a9a7d8101",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9994021980158244,
+    0.0005978019841756137
+   ],
+   "onnxBatched": [
+    0.999379547264196,
+    0.0006204527358040708
+   ],
+   "mlxBfloat16": [
+    0.9994096752468208,
+    0.0005903247531792618
+   ]
+  },
+  {
+   "state": {
+    "facts": "The applicant is 55 years old. The applicant is 55 or older and younger than 60. The household has 6 people. The household has 4 adults aged 18 to 64. The household has 1 child under 18. The household has 1 person aged 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household is pregnant. Someone in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Nevada. The applicant lives in Jackson County. The applicant lives in Milford. The applicant’s ZIP code is 15054. The household earns $3,700 a month from work. The household has no other income. The household’s total income is $3,700 a month ($44,400 a year). Utilities cost $300 a month. The household has no monthly medical costs. The applicant is applying for SNAP food assistance. The applicant is not applying for Medicaid health coverage.",
+    "question": "Please check all public benefit programs you are currently participating in:",
+    "candidate": "SNAP (former food stamp program)"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 283,
+   "idsSha256": "5470b36dbdef3556ee5ba0250cc5ee7cf2f7e6a7a1b4ce07a5294586b78b3d5f",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9994340676894505,
+    0.0005659323105493683
+   ],
+   "onnxBatched": [
+    0.9994984838920177,
+    0.000501516107982398
+   ],
+   "mlxBfloat16": [
+    0.999458947201604,
+    0.0005410527983960213
+   ]
+  },
+  {
+   "state": {
+    "facts": "The applicant is 55 years old. The applicant is 55 or older and younger than 60. The household has 6 people. The household has 4 adults aged 18 to 64. The household has 1 child under 18. The household has 1 person aged 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household is pregnant. Someone in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Nevada. The applicant lives in Jackson County. The applicant lives in Milford. The applicant’s ZIP code is 15054. The household earns $3,700 a month from work. The household has no other income. The household’s total income is $3,700 a month ($44,400 a year). Utilities cost $300 a month. The household has no monthly medical costs. The applicant is applying for SNAP food assistance. The applicant is not applying for Medicaid health coverage.",
+    "question": "How many people in your household are younger than 18?",
+    "candidate": "Four or more"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 277,
+   "idsSha256": "87a25b146a3f00fa64be4bbdc6d420abf95dc9d62a034d430dff2024a556c91b",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9807853013120492,
+    0.01921469868795073
+   ],
+   "onnxBatched": [
+    0.9825635532166278,
+    0.017436446783372264
+   ],
+   "mlxBfloat16": [
+    0.982214764317549,
+    0.017785235682451016
+   ]
+  },
+  {
+   "state": {
+    "facts": "The applicant is 60 years old. The applicant is 60 or older and younger than 62. The household has 1 person. The household has 1 adult aged 18 to 64. The household has no children under 18. Nobody in the household is 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Iowa. The applicant lives in Johnson County. The household earns $3,400 a month from work. The household has no other income. The household’s total income is $3,400 a month ($40,800 a year). Rent or mortgage costs $1,090 a month. Utilities cost $340 a month. The household has $30 in cash, checking and savings. The household pays $160 a month in medical costs. The applicant is not applying for SNAP food assistance. The applicant is not applying for FIP cash assistance. The applicant is applying for Medicaid health coverage.",
+    "question": "Anyone in the household 65 years or older?",
+    "candidate": "Not sure"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 285,
+   "idsSha256": "2085611713f149742638e13d91359f6b6036b4a5699215419adfc79c1c0eb637",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9985582957522843,
+    0.0014417042477157553
+   ],
+   "onnxBatched": [
+    0.9984847496854474,
+    0.001515250314552704
+   ],
+   "mlxBfloat16": [
+    0.9986493225467963,
+    0.0013506774532036352
+   ]
+  },
+  {
+   "state": {
+    "facts": "The applicant is 55 years old. The applicant is 55 or older and younger than 60. The household has 6 people. The household has 4 adults aged 18 to 64. The household has 1 child under 18. The household has 1 person aged 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household is pregnant. Someone in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Nevada. The applicant lives in Jackson County. The applicant lives in Milford. The applicant’s ZIP code is 15054. The household earns $3,700 a month from work. The household has no other income. The household’s total income is $3,700 a month ($44,400 a year). Utilities cost $300 a month. The household has no monthly medical costs. The applicant is applying for SNAP food assistance. The applicant is not applying for Medicaid health coverage.",
+    "question": "Are there any pregnant household members?",
+    "candidate": "No"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 271,
+   "idsSha256": "2ba21d7857283b4f03c3549865bddc1a2adf7f7c25ff91948226e6e27239d3ab",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.003930980892002015,
+    0.996069019107998
+   ],
+   "onnxBatched": [
+    0.0036999691327865058,
+    0.9963000308672135
+   ],
+   "mlxBfloat16": [
+    0.0032953449844826312,
+    0.9967046550155173
+   ]
+  },
+  {
+   "state": {
+    "facts": "The applicant is 60 years old. The applicant is 60 or older and younger than 62. The household has 1 person. The household has 1 adult aged 18 to 64. The household has no children under 18. Nobody in the household is 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Iowa. The applicant lives in Johnson County. The household earns $3,400 a month from work. The household has no other income. The household’s total income is $3,400 a month ($40,800 a year). Rent or mortgage costs $1,090 a month. Utilities cost $340 a month. The household has $30 in cash, checking and savings. The household pays $160 a month in medical costs. The applicant is not applying for SNAP food assistance. The applicant is not applying for FIP cash assistance. The applicant is applying for Medicaid health coverage.",
+    "question": "Is your home located in Scott County?",
+    "candidate": "None of these, or the facts don’t say"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 293,
+   "idsSha256": "279fe02cb7b514b4e8622dd350a5dd2b41d6b2074642d5a924a9cf58c09ea6c6",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9899485911865432,
+    0.010051408813456812
+   ],
+   "onnxBatched": [
+    0.9899485911865432,
+    0.010051408813456812
+   ],
+   "mlxBfloat16": [
+    0.9909704541111455,
+    0.009029545888854452
+   ]
+  },
+  {
+   "state": {
+    "facts": "The applicant is 60 years old. The applicant is 60 or older and younger than 62. The household has 1 person. The household has 1 adult aged 18 to 64. The household has no children under 18. Nobody in the household is 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Iowa. The applicant lives in Johnson County. The household earns $3,400 a month from work. The household has no other income. The household’s total income is $3,400 a month ($40,800 a year). Rent or mortgage costs $1,090 a month. Utilities cost $340 a month. The household has $30 in cash, checking and savings. The household pays $160 a month in medical costs. The applicant is not applying for SNAP food assistance. The applicant is not applying for FIP cash assistance. The applicant is applying for Medicaid health coverage.",
+    "question": "State (where you currently live)",
+    "candidate": "Wyoming"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 284,
+   "idsSha256": "4c0c805c730a9c518ee8ebe2fe4442f97ae67a8ecbbac6c358d333d69db201d2",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9993018541949763,
+    0.0006981458050236825
+   ],
+   "onnxBatched": [
+    0.9993018541949763,
+    0.0006981458050236825
+   ],
+   "mlxBfloat16": [
+    0.9993272335842828,
+    0.0006727664157172929
+   ]
+  },
+  {
+   "state": {
+    "facts": "The applicant is 55 years old. The applicant is 55 or older and younger than 60. The household has 6 people. The household has 4 adults aged 18 to 64. The household has 1 child under 18. The household has 1 person aged 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household is pregnant. Someone in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Nevada. The applicant lives in Jackson County. The applicant lives in Milford. The applicant’s ZIP code is 15054. The household earns $3,700 a month from work. The household has no other income. The household’s total income is $3,700 a month ($44,400 a year). Utilities cost $300 a month. The household has no monthly medical costs. The applicant is applying for SNAP food assistance. The applicant is not applying for Medicaid health coverage.",
+    "question": "Programs you currently receive (check all that apply)",
+    "candidate": "None"
    },
    "questions": {
     "correct": {
@@ -886,28 +825,29 @@
     }
    },
    "length": 275,
-   "idsSha256": "033371b5ab8ae248ee70c86476433ea06a9c3d9b3ee3e1d819bf85c48611bb2b",
+   "idsSha256": "97a6fc05cdaae5b79dff99794fe238468223337fc0e3b422eb6dcc7161cbe581",
    "markers": [
     24,
     34
    ],
    "onnx": [
-    0.9992922893905458,
-    0.0007077106094541461
+    0.9996620064589896,
+    0.00033799354101033145
    ],
    "onnxBatched": [
-    0.9992867369060043,
-    0.0007132630939955364
+    0.9996761360534463,
+    0.0003238639465536518
    ],
    "mlxBfloat16": [
-    0.9994018023402633,
-    0.0005981976597365453
+    0.99962644615888,
+    0.00037355384111991595
    ]
   },
   {
    "state": {
-    "question": "In order to better serve you please answer a few questions: *What are other needs you may have during this Pandemic? *Do You or any one in your household have a physical disability? If so please list the age of the person/people.",
-    "candidate": "Saved answer: last (family) name"
+    "facts": "The applicant is 60 years old. The applicant is 60 or older and younger than 62. The household has 1 person. The household has 1 adult aged 18 to 64. The household has no children under 18. Nobody in the household is 65 or older. Nobody in the household is a veteran. Nobody in the household has a disability. Nobody in the household gets Medicare. Everyone in the household is a US citizen. The applicant has a home address. The applicant lives in Iowa. The applicant lives in Johnson County. The household earns $3,400 a month from work. The household has no other income. The household’s total income is $3,400 a month ($40,800 a year). Rent or mortgage costs $1,090 a month. Utilities cost $340 a month. The household has $30 in cash, checking and savings. The household pays $160 a month in medical costs. The applicant is not applying for SNAP food assistance. The applicant is not applying for FIP cash assistance. The applicant is applying for Medicaid health coverage.",
+    "question": "Weekly household income",
+    "candidate": "None of these, or the facts don’t say"
    },
    "questions": {
     "correct": {
@@ -915,599 +855,29 @@
      "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
     }
    },
-   "length": 114,
-   "idsSha256": "5f8e5d6f9bd7f534bb86d5507c947cbb58b0d4c0570cd1a40af148532e16e925",
+   "length": 290,
+   "idsSha256": "99d030e1ecdd8d709a2dbd62243dc9830883d438804c63035234ed3165754966",
    "markers": [
     24,
     34
    ],
    "onnx": [
-    0.9996570929843902,
-    0.0003429070156097517
+    0.0026998292159779213,
+    0.9973001707840221
    ],
    "onnxBatched": [
-    0.9996570929843902,
-    0.0003429070156097517
+    0.0027011175458666577,
+    0.9972988824541335
    ],
    "mlxBfloat16": [
-    0.9997004944076608,
-    0.00029950559233914934
-   ]
-  },
-  {
-   "state": {
-    "question": "Signature",
-    "candidate": "Saved answer: first (given) name"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 65,
-   "idsSha256": "43b9b01d029ed61033e564afa6f86b32c6fe975679605a079140acbda7b51d37",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9990813727646686,
-    0.0009186272353313639
-   ],
-   "onnxBatched": [
-    0.9990813727646686,
-    0.0009186272353313639
-   ],
-   "mlxBfloat16": [
-    0.9994398039725979,
-    0.0005601960274021668
+    0.002739450329610719,
+    0.9972605496703892
    ]
   },
   {
    "state": {
     "question": "Email",
-    "candidate": "Saved answer: medical expenses the household pays each month"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 67,
-   "idsSha256": "203f5e2b66d76ee3d5284defb9cd17771bc350342372836bf5ec6dad05408bca",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9996485652671313,
-    0.00035143473286881866
-   ],
-   "onnxBatched": [
-    0.9996485652671313,
-    0.00035143473286881866
-   ],
-   "mlxBfloat16": [
-    0.9996719927493275,
-    0.0003280072506725921
-   ]
-  },
-  {
-   "state": {
-    "question": "Household Members: First Name",
-    "candidate": "Saved answer: monthly utility costs"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 68,
-   "idsSha256": "bd04083d5e55029324500a6fc09164d2ddc3c2ef254347ca46c45f3bf1fec0e6",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9997525240205772,
-    0.0002474759794228816
-   ],
-   "onnxBatched": [
-    0.9997525240205772,
-    0.0002474759794228816
-   ],
-   "mlxBfloat16": [
-    0.999793892369087,
-    0.0002061076309129763
-   ]
-  },
-  {
-   "state": {
-    "question": "# of people in your household 18 - 59 yrs old",
-    "candidate": "Saved answer: total household income per year"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 75,
-   "idsSha256": "0105549be667795f4f0e598050d260dcda6fb4b4b7b61807b67e28abbefc0774",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9996764476846556,
-    0.0003235523153444281
-   ],
-   "onnxBatched": [
-    0.9996434374187049,
-    0.00035656258129501206
-   ],
-   "mlxBfloat16": [
-    0.9997265201381198,
-    0.00027347986188025144
-   ]
-  },
-  {
-   "state": {
-    "question": "Telephone Number",
-    "candidate": "Saved answer: number of seniors (65 or older) in the household"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 73,
-   "idsSha256": "0d4a3134a94784e487b507ad2bb341f8969d7125a02821af9d9edbd90f3b064c",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9995963535155205,
-    0.0004036464844795183
-   ],
-   "onnxBatched": [
-    0.9995963535155205,
-    0.0004036464844795183
-   ],
-   "mlxBfloat16": [
-    0.999668663047001,
-    0.0003313369529989963
-   ]
-  },
-  {
-   "state": {
-    "question": "Address: County",
-    "candidate": "Saved answer: number of adults in the household"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 68,
-   "idsSha256": "709cb3e6b6570edd5d7bfd3100b49a8f59d507740b503e9f888a3294b4dced11",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9997241120289629,
-    0.0002758879710370663
-   ],
-   "onnxBatched": [
-    0.9997241120289629,
-    0.0002758879710370663
-   ],
-   "mlxBfloat16": [
-    0.9997426020534064,
-    0.0002573979465936237
-   ]
-  },
-  {
-   "state": {
-    "question": "Phone",
-    "candidate": "Saved answer: county"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 61,
-   "idsSha256": "4a9a392535b9c74f6c1b7b4e1f83c734dbe7a12d11b9737747b8f3ec349041de",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.999696568112734,
-    0.0003034318872660251
-   ],
-   "onnxBatched": [
-    0.9996875899797001,
-    0.00031241002029995746
-   ],
-   "mlxBfloat16": [
-    0.9997181063280183,
-    0.00028189367198168993
-   ]
-  },
-  {
-   "state": {
-    "question": "Email Address (to contact you)",
-    "candidate": "Saved answer: state"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 66,
-   "idsSha256": "30164e36970140ed11bc3f368aa112762e6239805b0f2a7a9810d2befe778170",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.999709212022536,
-    0.00029078797746400457
-   ],
-   "onnxBatched": [
-    0.999709212022536,
-    0.00029078797746400457
-   ],
-   "mlxBfloat16": [
-    0.999750284910951,
-    0.0002497150890491433
-   ]
-  },
-  {
-   "state": {
-    "question": "Other Members of the Household: Veteran",
-    "candidate": "Saved answer: apartment, unit, or suite"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 73,
-   "idsSha256": "1f985d8bce5baece9bce3b7530e45bf83a61ba4e6c9231318106e4c214491ae0",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9997304174467916,
-    0.00026958255320839883
-   ],
-   "onnxBatched": [
-    0.9997304174467916,
-    0.00026958255320839883
-   ],
-   "mlxBfloat16": [
-    0.9997552790209162,
-    0.00024472097908367067
-   ]
-  },
-  {
-   "state": {
-    "question": "What is your household’s total monthly income? (Include income from all members of the household and all types of income: wages, social security, disability, etc.)",
-    "candidate": "Saved answer: phone number"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 95,
-   "idsSha256": "e2b54357525418bb0422c96b5181298161e6cf1c4815648fa5856e187449c578",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9996906277106183,
-    0.00030937228938172055
-   ],
-   "onnxBatched": [
-    0.9997218397594481,
-    0.00027816024055205804
-   ],
-   "mlxBfloat16": [
-    0.9997426020534064,
-    0.0002573979465936242
-   ]
-  },
-  {
-   "state": {
-    "question": "Is there anything else you would like us to know to help serve you?",
-    "candidate": "Saved answer: Social Security number"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 76,
-   "idsSha256": "b932de0caf3aab97cdbc00ba9f41331c0296cfc300635fa1b903fe924f04f2d7",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9988468273563047,
-    0.0011531726436953562
-   ],
-   "onnxBatched": [
-    0.9988468273563047,
-    0.0011531726436953562
-   ],
-   "mlxBfloat16": [
-    0.9992103618561506,
-    0.0007896381438492286
-   ]
-  },
-  {
-   "state": {
-    "question": "Mailing Address (if different): State",
-    "candidate": "Saved answer: name suffix such as Jr. or III"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 75,
-   "idsSha256": "7d9ecc0bc45347abd6304d9f539903d84cd3cc3a8488bed310a141da6d466a56",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9997246175648266,
-    0.00027538243517344796
-   ],
-   "onnxBatched": [
-    0.9997330683129315,
-    0.00026693168706851
-   ],
-   "mlxBfloat16": [
-    0.9997673317872363,
-    0.00023266821276368444
-   ]
-  },
-  {
-   "state": {
-    "question": "Race",
-    "candidate": "Saved answer: last (family) name"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 66,
-   "idsSha256": "643a6fe673d1ac19c0809d084f62b99b87011fccbca5254f61e4b4e1c1d68195",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9996845192703071,
-    0.0003154807296929112
-   ],
-   "onnxBatched": [
-    0.9996845192703071,
-    0.0003154807296929112
-   ],
-   "mlxBfloat16": [
-    0.9996719927493275,
-    0.0003280072506725915
-   ]
-  },
-  {
-   "state": {
-    "question": "Mailing Address: City:",
-    "candidate": "Saved answer: first (given) name"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 69,
-   "idsSha256": "2a7581589e8afc9510586fc6e3f87b955eeaab8cfd0e4c2640cf927938251933",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9997359230177265,
-    0.0002640769822734851
-   ],
-   "onnxBatched": [
-    0.9997359230177265,
-    0.0002640769822734851
-   ],
-   "mlxBfloat16": [
-    0.9996371333408418,
-    0.00036286665915809897
-   ]
-  },
-  {
-   "state": {
-    "question": "Your Spouse’s Signature or Another Adult in Your Home (not required)",
-    "candidate": "Saved answer: medical expenses the household pays each month"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 81,
-   "idsSha256": "27b2ff7ba9ed482a1958c0731eee7e19faf9219dde4f189a89829ff036766273",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9996738409323236,
-    0.00032615906767642655
-   ],
-   "onnxBatched": [
-    0.9996592630040891,
-    0.0003407369959109422
-   ],
-   "mlxBfloat16": [
-    0.9997237438070966,
-    0.0002762561929033747
-   ]
-  },
-  {
-   "state": {
-    "question": "Name of 3rd Child (Last, First)",
-    "candidate": "Saved answer: monthly utility costs"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 71,
-   "idsSha256": "5c52fc5d206cb49dd82d1b3617756c2b17241012c6f2f4b38e59b39d0f485040",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9996822065308788,
-    0.0003177934691212432
-   ],
-   "onnxBatched": [
-    0.9996822065308788,
-    0.0003177934691212432
-   ],
-   "mlxBfloat16": [
-    0.9996974539468564,
-    0.00030254605314358496
-   ]
-  },
-  {
-   "state": {
-    "question": "Signature of Head of Household",
-    "candidate": "Saved answer: total household income per year"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 70,
-   "idsSha256": "da6702537813b09fa5530c791af856af8abb8a21ad67c66fd95cee1f0e15e15f",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9996954541925144,
-    0.00030454580748570084
-   ],
-   "onnxBatched": [
-    0.9996954541925144,
-    0.00030454580748570084
-   ],
-   "mlxBfloat16": [
-    0.9997373493079228,
-    0.000262650692077311
-   ]
-  },
-  {
-   "state": {
-    "question": "First Name",
-    "candidate": "Saved answer: number of seniors (65 or older) in the household"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 72,
-   "idsSha256": "a058c919f2094abf97f87fc5a2696509776f5f4524be75b43a7be964eaf0cbee",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9996699207647358,
-    0.00033007923526413244
-   ],
-   "onnxBatched": [
-    0.9996699207647358,
-    0.00033007923526413244
-   ],
-   "mlxBfloat16": [
-    0.9996849803972078,
-    0.00031501960279224064
-   ]
-  },
-  {
-   "state": {
-    "question": "Email Address",
-    "candidate": "Saved answer: number of adults in the household"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 67,
-   "idsSha256": "b7e75b152aa0aa8cae318c49a253d865191e67d3d300b270971a59d598402763",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9996436668178807,
-    0.0003563331821191855
-   ],
-   "onnxBatched": [
-    0.9996651978709218,
-    0.00033480212907825165
-   ],
-   "mlxBfloat16": [
-    0.9996943826299476,
-    0.0003056173700523587
-   ]
-  },
-  {
-   "state": {
-    "question": "Street Address",
-    "candidate": "Saved answer: county"
+    "candidate": "Saved answer: street address"
    },
    "questions": {
     "correct": {
@@ -1516,28 +886,28 @@
     }
    },
    "length": 62,
-   "idsSha256": "5ffa19f8e27cfdfdce01dcd02029fb6cb79d21161ec0e4362624f2fa7459d4e2",
+   "idsSha256": "c357c511e5cafa7b275077a8919a07ae3d15ab91d127c84bf4ef3998b21095a6",
    "markers": [
     24,
     34
    ],
    "onnx": [
-    0.9995159833233322,
-    0.0004840166766677642
+    0.9994015565146088,
+    0.0005984434853911266
    ],
    "onnxBatched": [
-    0.9994594557595892,
-    0.0005405442404109489
+    0.9994015565146088,
+    0.0005984434853911266
    ],
    "mlxBfloat16": [
-    0.9996479631378841,
-    0.000352036862116025
+    0.999458947201604,
+    0.0005410527983960213
    ]
   },
   {
    "state": {
-    "question": "State / Province / Region",
-    "candidate": "Saved answer: state"
+    "question": "Name",
+    "candidate": "Saved answer: street address"
    },
    "questions": {
     "correct": {
@@ -1545,89 +915,29 @@
      "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
     }
    },
-   "length": 65,
-   "idsSha256": "6a077fc771155b94b62d0596ef9d0e1afa3d19efde93672380b09f03f32ad8da",
+   "length": 62,
+   "idsSha256": "80b1a0e916df4f9ea0d08a30cc5ab68962ea526356d8e477a4334b251a949a4f",
    "markers": [
     24,
     34
    ],
    "onnx": [
-    0.018746693655454904,
-    0.9812533063445451
+    0.9991213175989564,
+    0.0008786824010436122
    ],
    "onnxBatched": [
-    0.018746693655454904,
-    0.9812533063445451
+    0.9991213175989564,
+    0.0008786824010436122
    ],
    "mlxBfloat16": [
-    0.01643288984061901,
-    0.983567110159381
+    0.9992659756991507,
+    0.0007340243008492383
    ]
   },
   {
    "state": {
-    "question": "Total Number of People in Household",
-    "candidate": "Saved answer: apartment, unit, or suite"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 72,
-   "idsSha256": "03afc0df9aeac3e366e44aa104ca9dee263a5be4e4aa8e498e38d909c58835b2",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9996442461400723,
-    0.0003557538599276419
-   ],
-   "onnxBatched": [
-    0.9996442461400723,
-    0.0003557538599276419
-   ],
-   "mlxBfloat16": [
-    0.9997625835840434,
-    0.0002374164159566815
-   ]
-  },
-  {
-   "state": {
-    "question": "Total # of children under age 18 in your household:",
-    "candidate": "Saved answer: phone number"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 71,
-   "idsSha256": "1c6917ec57aec1f4b46f94150b5159a4755fc6235e023187598b2d36392d0480",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9997103800603291,
-    0.00028961993967097414
-   ],
-   "onnxBatched": [
-    0.9997045612146772,
-    0.00029543878532285587
-   ],
-   "mlxBfloat16": [
-    0.9997577385048305,
-    0.00024226149516953836
-   ]
-  },
-  {
-   "state": {
-    "question": "Please state the reason for your visit",
-    "candidate": "Saved answer: Social Security number"
+    "question": "Additional Members of Household: Last Name",
+    "candidate": "Saved answer: street address"
    },
    "questions": {
     "correct": {
@@ -1636,148 +946,28 @@
     }
    },
    "length": 69,
-   "idsSha256": "8c1bfb374066dd7126afa3678c8e4dac49bbec5e83ac0371885cf699e6565d33",
+   "idsSha256": "8859798ab59750e753ea9a979f13cda59cbcc91e17c8852bfc21fef5b550513e",
    "markers": [
     24,
     34
    ],
    "onnx": [
-    0.999739100215096,
-    0.0002608997849039709
+    0.9994220454037107,
+    0.0005779545962892592
    ],
    "onnxBatched": [
-    0.999739100215096,
-    0.0002608997849039709
+    0.9994220454037107,
+    0.0005779545962892592
    ],
    "mlxBfloat16": [
-    0.9997426020534064,
-    0.0002573979465936242
+    0.9994223984716105,
+    0.0005776015283894526
    ]
   },
   {
    "state": {
-    "question": "FIRST NAME",
-    "candidate": "Saved answer: name suffix such as Jr. or III"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 69,
-   "idsSha256": "6ffc47a70fd61e5275af03d8629d18a344fbbf8a22764a387d80e32ffd56b88e",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.997712362524279,
-    0.002287637475721138
-   ],
-   "onnxBatched": [
-    0.997712362524279,
-    0.002287637475721138
-   ],
-   "mlxBfloat16": [
-    0.9973504983148669,
-    0.0026495016851331376
-   ]
-  },
-  {
-   "state": {
-    "question": "Name suffix",
-    "candidate": "Saved answer: last (family) name"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 66,
-   "idsSha256": "87a2f7fd6f081881468f05d8aa45a8ba3c2359dcf418a4786d5027525aa9abd0",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9920475491771652,
-    0.007952450822834833
-   ],
-   "onnxBatched": [
-    0.9920475491771652,
-    0.007952450822834833
-   ],
-   "mlxBfloat16": [
-    0.9958001484903867,
-    0.0041998515096133456
-   ]
-  },
-  {
-   "state": {
-    "question": "Phone",
-    "candidate": "Saved answer: first (given) name"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 65,
-   "idsSha256": "884bf8ea9c4965eca643d73a97e94c4030263a67159ae5b6d5ea79a7c47090df",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9997266866638898,
-    0.0002733133361102803
-   ],
-   "onnxBatched": [
-    0.9997266866638898,
-    0.0002733133361102803
-   ],
-   "mlxBfloat16": [
-    0.9997319893978761,
-    0.0002680106021239137
-   ]
-  },
-  {
-   "state": {
-    "question": "State (2-letter abbreviation)",
-    "candidate": "Saved answer: medical expenses the household pays each month"
-   },
-   "questions": {
-    "correct": {
-     "type": "noul",
-     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
-    }
-   },
-   "length": 73,
-   "idsSha256": "a201c30d4894b7459ac1a24e85db644bbfb0636ea024b18c16af20c7786bb3de",
-   "markers": [
-    24,
-    34
-   ],
-   "onnx": [
-    0.9996245244417937,
-    0.00037547555820617714
-   ],
-   "onnxBatched": [
-    0.9996245244417937,
-    0.00037547555820617714
-   ],
-   "mlxBfloat16": [
-    0.9997181063280183,
-    0.00028189367198168993
-   ]
-  },
-  {
-   "state": {
-    "question": "Family size",
-    "candidate": "Saved answer: monthly utility costs"
+    "question": "Date of Birth",
+    "candidate": "Saved answer: street address"
    },
    "questions": {
     "correct": {
@@ -1786,28 +976,28 @@
     }
    },
    "length": 64,
-   "idsSha256": "5f55f21772e2d2c23b8aa3011f3afac14c8f7bcb61a5d076e45842fe9865f59f",
+   "idsSha256": "f85075be8b8b50c72cc10a175caa14e4d19540b014f6602e602c2e603f45b731",
    "markers": [
     24,
     34
    ],
    "onnx": [
-    0.999672641235115,
-    0.00032735876488495933
+    0.9995407291635,
+    0.00045927083649996946
    ],
    "onnxBatched": [
-    0.999672641235115,
-    0.00032735876488495933
+    0.9995407291635,
+    0.00045927083649996946
    ],
    "mlxBfloat16": [
-    0.9997527945740365,
-    0.0002472054259635296
+    0.9995834420099178,
+    0.0004165579900822239
    ]
   },
   {
    "state": {
-    "question": "Gross monthly income (all household members)",
-    "candidate": "Saved answer: total household income per year"
+    "question": "Phone Number",
+    "candidate": "Saved answer: street address"
    },
    "questions": {
     "correct": {
@@ -1815,29 +1005,29 @@
      "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
     }
    },
-   "length": 72,
-   "idsSha256": "217352b420c44cf353f8cd8b0cba145b75dd0bfc19317458d00076f81dca3b12",
+   "length": 63,
+   "idsSha256": "41aab3081725e90ef3bfe4c76737e5ee1b5b9f466b4523a2b60056c5362d98c2",
    "markers": [
     24,
     34
    ],
    "onnx": [
-    0.9863007538896174,
-    0.013699246110382757
+    0.9992480225477939,
+    0.0007519774522060737
    ],
    "onnxBatched": [
-    0.9863007538896174,
-    0.013699246110382757
+    0.9992480225477939,
+    0.0007519774522060737
    ],
    "mlxBfloat16": [
-    0.9872954902304105,
-    0.012704509769589539
+    0.9993272335842828,
+    0.0006727664157172929
    ]
   },
   {
    "state": {
-    "question": "Average monthly utility cost",
-    "candidate": "Saved answer: number of seniors (65 or older) in the household"
+    "question": "How many children (18 and younger) are in your household? Please fill in 0 if not applicable.",
+    "candidate": "Saved answer: street address"
    },
    "questions": {
     "correct": {
@@ -1845,29 +1035,29 @@
      "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
     }
    },
-   "length": 74,
-   "idsSha256": "fa50006773772dfa2ca40a1331588e2408ed11651eafdecfb4ce585727b0b3e1",
+   "length": 81,
+   "idsSha256": "bf151347d6fdfcce04662aa6746c07d9ba4f7158672f571422f11865ebf3ea31",
    "markers": [
     24,
     34
    ],
    "onnx": [
-    0.9995949763469583,
-    0.00040502365304164633
+    0.9993887267573057,
+    0.0006112732426942539
    ],
    "onnxBatched": [
-    0.9996131063784508,
-    0.0003868936215491907
+    0.9994260505251389,
+    0.0005739494748610066
    ],
    "mlxBfloat16": [
-    0.9996652995551608,
-    0.0003347004448393394
+    0.9994706090341975,
+    0.0005293909658024841
    ]
   },
   {
    "state": {
-    "question": "Name of person picking up food",
-    "candidate": "Saved answer: number of adults in the household"
+    "question": "Number of Household Members",
+    "candidate": "Saved answer: street address"
    },
    "questions": {
     "correct": {
@@ -1875,29 +1065,479 @@
      "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
     }
    },
-   "length": 71,
-   "idsSha256": "0b897964d16fa2616c80ee94c0948431091acf852a68eb00ca91155530e53613",
+   "length": 66,
+   "idsSha256": "e0101046ff163b253dd5ed45ee345f242496ffd0a2c699294a830f27c61d9433",
    "markers": [
     24,
     34
    ],
    "onnx": [
-    0.9996072617303334,
-    0.0003927382696664581
+    0.9993321833025787,
+    0.0006678166974211965
    ],
    "onnxBatched": [
-    0.9995751828379011,
-    0.00042481716209889623
+    0.9993321833025787,
+    0.0006678166974211965
    ],
    "mlxBfloat16": [
-    0.99965500289855,
-    0.0003449971014499261
+    0.9993698002390932,
+    0.000630199760906797
    ]
   },
   {
    "state": {
-    "question": "Food allergies or dietary restrictions",
-    "candidate": "Saved answer: county"
+    "question": "Street Address",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 63,
+   "idsSha256": "29b7ec42b66c112bc9aafffcfe9ca6059b2161a37ada2185dc8314c32bc5770f",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.002347989045971272,
+    0.9976520109540287
+   ],
+   "onnxBatched": [
+    0.002373477473809214,
+    0.9976265225261907
+   ],
+   "mlxBfloat16": [
+    0.002327188212437294,
+    0.9976728117875627
+   ]
+  },
+  {
+   "state": {
+    "question": "Street Address",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 63,
+   "idsSha256": "29b7ec42b66c112bc9aafffcfe9ca6059b2161a37ada2185dc8314c32bc5770f",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.002347989045971272,
+    0.9976520109540287
+   ],
+   "onnxBatched": [
+    0.002373477473809214,
+    0.9976265225261907
+   ],
+   "mlxBfloat16": [
+    0.002327188212437294,
+    0.9976728117875627
+   ]
+  },
+  {
+   "state": {
+    "question": "Other Members of the Household: Relationship",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 69,
+   "idsSha256": "539f778b2a4e0bee0fb9bb0bfee806d2a18c324a80be3bce2627ea5127966dc0",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9995529731780197,
+    0.0004470268219801864
+   ],
+   "onnxBatched": [
+    0.9995529731780197,
+    0.0004470268219801864
+   ],
+   "mlxBfloat16": [
+    0.9995742646904022,
+    0.00042573530959774854
+   ]
+  },
+  {
+   "state": {
+    "question": "Please list the names, birthdates, genders, ethnicity and race of all the people living in your household: Gender",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 85,
+   "idsSha256": "180fc53ac76dc71cdac12d4b95e7fb1fbcaf353e6429ca5505a1ca3b918121ba",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9993158743099557,
+    0.0006841256900442273
+   ],
+   "onnxBatched": [
+    0.9993158743099557,
+    0.0006841256900442273
+   ],
+   "mlxBfloat16": [
+    0.9994096752468208,
+    0.0005903247531792618
+   ]
+  },
+  {
+   "state": {
+    "question": "List any Household and/or Hygiene items needed here:",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 73,
+   "idsSha256": "847c47eb39b9e733ab9c8cd9053c3d60933565137feb41b990cd02401a175731",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9990978626352056,
+    0.000902137364794476
+   ],
+   "onnxBatched": [
+    0.9990814766284285,
+    0.0009185233715713907
+   ],
+   "mlxBfloat16": [
+    0.9993272335842828,
+    0.0006727664157172929
+   ]
+  },
+  {
+   "state": {
+    "question": "Mailing Address (if different): State",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 69,
+   "idsSha256": "9e6b49768ec4deb83c19eab1e3aad1efa605993599310df3197531afefe22e3d",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9993550016165803,
+    0.0006449983834196664
+   ],
+   "onnxBatched": [
+    0.9993550016165803,
+    0.0006449983834196664
+   ],
+   "mlxBfloat16": [
+    0.9994348476287671,
+    0.0005651523712327929
+   ]
+  },
+  {
+   "state": {
+    "question": "List anyone in your home who is disabled:",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 69,
+   "idsSha256": "c2400fc00c0473758292add4a10abb2f8c55b4754de89ae6836231f53db1903c",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9995833733007498,
+    0.0004166266992502771
+   ],
+   "onnxBatched": [
+    0.9995973086936522,
+    0.000402691306347844
+   ],
+   "mlxBfloat16": [
+    0.9996012076586898,
+    0.0003987923413101594
+   ]
+  },
+  {
+   "state": {
+    "question": "Mailing Address: Zip:",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 66,
+   "idsSha256": "bce995ec3f657794810f1b74e356893d7b95b3bb3ed8b5ddb09a0fa12a2b6486",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9994660167276169,
+    0.0005339832723831739
+   ],
+   "onnxBatched": [
+    0.9994660167276169,
+    0.0005339832723831739
+   ],
+   "mlxBfloat16": [
+    0.9994706090341975,
+    0.0005293909658024841
+   ]
+  },
+  {
+   "state": {
+    "question": "Zip Code (código postal)",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 69,
+   "idsSha256": "bedd68fa4e6ed283edac9e723c1d3ce32e897a4a795b9a423f5643584f3d8ac1",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9991155571703487,
+    0.0008844428296511689
+   ],
+   "onnxBatched": [
+    0.999101399150191,
+    0.000898600849809046
+   ],
+   "mlxBfloat16": [
+    0.9992164017454502,
+    0.0007835982545496199
+   ]
+  },
+  {
+   "state": {
+    "question": "Delivery Address",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 64,
+   "idsSha256": "0a11e072b27b9c286d20c7a1bf7ebdfb7895c6922dc8616dd8e5c21a8d7a9734",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9991679819236492,
+    0.0008320180763508121
+   ],
+   "onnxBatched": [
+    0.9991679819236492,
+    0.0008320180763508121
+   ],
+   "mlxBfloat16": [
+    0.9993272335842828,
+    0.0006727664157172929
+   ]
+  },
+  {
+   "state": {
+    "question": "Cell Phone Number",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 64,
+   "idsSha256": "5e9b3c9337e885f0fb3badc3bf93f1abe9e64b0c7221bc4112f29b89de083d80",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.999418490273295,
+    0.0005815097267050668
+   ],
+   "onnxBatched": [
+    0.999418490273295,
+    0.0005815097267050668
+   ],
+   "mlxBfloat16": [
+    0.9994348476287671,
+    0.0005651523712327929
+   ]
+  },
+  {
+   "state": {
+    "question": "Total number of people in your household",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 68,
+   "idsSha256": "508e99e876b16226888fdb3fa15a0c4b81e5284d85a01d3f9cfad727331978a6",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9984459824178703,
+    0.0015540175821297574
+   ],
+   "onnxBatched": [
+    0.9984459824178703,
+    0.0015540175821297574
+   ],
+   "mlxBfloat16": [
+    0.9988147377719475,
+    0.0011852622280525214
+   ]
+  },
+  {
+   "state": {
+    "question": "Zip Code",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 63,
+   "idsSha256": "bbe56a54a9ba382fb82e63a71fcb6ecef63563e187762c6b1a4fb9e3b6b59de2",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9992963622656682,
+    0.0007036377343319379
+   ],
+   "onnxBatched": [
+    0.9992784431073923,
+    0.0007215568926075841
+   ],
+   "mlxBfloat16": [
+    0.9992332873836965,
+    0.0007667126163035785
+   ]
+  },
+  {
+   "state": {
+    "question": "How many people in your household might you share this food with (including yourself)?",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 77,
+   "idsSha256": "c259ac7e94d4a3a4e3e1267a51e8be9074d4d19f80557a70ea4675b445b71a2c",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9992651673625274,
+    0.0007348326374725533
+   ],
+   "onnxBatched": [
+    0.9992810074553282,
+    0.0007189925446717556
+   ],
+   "mlxBfloat16": [
+    0.999341732497655,
+    0.0006582675023449282
+   ]
+  },
+  {
+   "state": {
+    "question": "Number of visit to food pantry",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 68,
+   "idsSha256": "1dd0b2fe504990e3dbb345f0cf32f6091482c50b5f513d6adb243346a2adcb13",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9995173219252459,
+    0.00048267807475413095
+   ],
+   "onnxBatched": [
+    0.9995173219252459,
+    0.00048267807475413095
+   ],
+   "mlxBfloat16": [
+    0.9995354894512277,
+    0.0004645105487721793
+   ]
+  },
+  {
+   "state": {
+    "question": "Today’s Date",
+    "candidate": "Saved answer: street address"
    },
    "questions": {
     "correct": {
@@ -1906,22 +1546,382 @@
     }
    },
    "length": 65,
-   "idsSha256": "dfb3956ca0aba96545e0886988f793c9bc303f70f61130465b4b7a8cc572c518",
+   "idsSha256": "7a490608454b85659c35ae163842e5940c0d59f12634b6303f5a8f17f01185a1",
    "markers": [
     24,
     34
    ],
    "onnx": [
-    0.9996893603601583,
-    0.0003106396398416938
+    0.9995074246983188,
+    0.0004925753016812705
    ],
    "onnxBatched": [
-    0.9996893603601583,
-    0.0003106396398416938
+    0.9995074246983188,
+    0.0004925753016812705
    ],
    "mlxBfloat16": [
-    0.9996912801439839,
-    0.0003087198560159736
+    0.9995924215801525,
+    0.0004075784198475681
+   ]
+  },
+  {
+   "state": {
+    "question": "STUDENT ID#",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 66,
+   "idsSha256": "36a98d88773451e10158a555eabadefec7a0e0275898e74e660827844b713706",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9995272329613036,
+    0.0004727670386964163
+   ],
+   "onnxBatched": [
+    0.9995272329613036,
+    0.0004727670386964163
+   ],
+   "mlxBfloat16": [
+    0.9995252561756323,
+    0.0004747438243676532
+   ]
+  },
+  {
+   "state": {
+    "question": "Agent Phone Number",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 64,
+   "idsSha256": "03e1a03be3795f83127ae63ed9ed002b038c3f40ba20277a846e8c58a115fe81",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9994825188442477,
+    0.0005174811557522947
+   ],
+   "onnxBatched": [
+    0.9994825188442477,
+    0.0005174811557522947
+   ],
+   "mlxBfloat16": [
+    0.9995041086715805,
+    0.0004958913284195782
+   ]
+  },
+  {
+   "state": {
+    "question": "Household Member 3 Name",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 66,
+   "idsSha256": "712a6af53357de5c710c2e86ed6f9d940db4c917676ae3632654394bb75d496c",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9995906136738435,
+    0.00040938632615646086
+   ],
+   "onnxBatched": [
+    0.9995906136738435,
+    0.00040938632615646086
+   ],
+   "mlxBfloat16": [
+    0.9995648852704986,
+    0.00043511472950138325
+   ]
+  },
+  {
+   "state": {
+    "question": "Sign here",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 63,
+   "idsSha256": "6c87331a664096e67a241145731358603d4b01f48860a97d17ab9e338693364d",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9988940289502142,
+    0.0011059710497857336
+   ],
+   "onnxBatched": [
+    0.9990383785513534,
+    0.0009616214486466708
+   ],
+   "mlxBfloat16": [
+    0.999025700544766,
+    0.0009742994552340336
+   ]
+  },
+  {
+   "state": {
+    "question": "Applicant's Email",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 66,
+   "idsSha256": "f3bddd1f928f7a145b2ccf4270c7e39757ae687fe7b5e6f3c233db8718cd30fb",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9993362346180199,
+    0.0006637653819801246
+   ],
+   "onnxBatched": [
+    0.999344759683923,
+    0.000655240316077024
+   ],
+   "mlxBfloat16": [
+    0.9994096752468208,
+    0.0005903247531792618
+   ]
+  },
+  {
+   "state": {
+    "question": "Full name",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 63,
+   "idsSha256": "57a69785d6968700cd68e5a628f17662fc753f1d53a26e700138ba740c406e9e",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9990836302720782,
+    0.0009163697279218154
+   ],
+   "onnxBatched": [
+    0.9990689483417808,
+    0.0009310516582191355
+   ],
+   "mlxBfloat16": [
+    0.9990672309343128,
+    0.0009327690656872206
+   ]
+  },
+  {
+   "state": {
+    "question": "Telephone number",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 64,
+   "idsSha256": "04e0550f3035bf6c0d1811c122f8c5d7f747feaf72a86d9384e5b96aed1de305",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9993039787058023,
+    0.0006960212941976164
+   ],
+   "onnxBatched": [
+    0.9993039787058023,
+    0.0006960212941976164
+   ],
+   "mlxBfloat16": [
+    0.9993559191436563,
+    0.0006440808563438452
+   ]
+  },
+  {
+   "state": {
+    "question": "5-digit ZIP",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 66,
+   "idsSha256": "6903ac880643db3e6b6efd2c8ae3c94734841f94b9ad4807f8d8275e3d458ce0",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.999166603841192,
+    0.0008333961588079115
+   ],
+   "onnxBatched": [
+    0.9991875058664749,
+    0.0008124941335249887
+   ],
+   "mlxBfloat16": [
+    0.9992164017454502,
+    0.0007835982545496199
+   ]
+  },
+  {
+   "state": {
+    "question": "How many minors (under 18) live with you?",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 71,
+   "idsSha256": "e9b32ed40c968b2fbab30f7a57a2ad4126e62804e56a0917b5ecd19db6ecc8ea",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.999378078311055,
+    0.0006219216889451343
+   ],
+   "onnxBatched": [
+    0.9993905858538992,
+    0.0006094141461007423
+   ],
+   "mlxBfloat16": [
+    0.9994470286152969,
+    0.0005529713847031596
+   ]
+  },
+  {
+   "state": {
+    "question": "Monthly housing payment (rent or mortgage)",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 69,
+   "idsSha256": "b98f8141d0605463977ba8c263391d92ec63d76d0278f8b716be66dce7201d7c",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9991346539906651,
+    0.0008653460093348135
+   ],
+   "onnxBatched": [
+    0.999081951516448,
+    0.0009180484835521077
+   ],
+   "mlxBfloat16": [
+    0.9993966719280255,
+    0.0006033280719744291
+   ]
+  },
+  {
+   "state": {
+    "question": "Emergency contact phone",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 65,
+   "idsSha256": "21eaa038278acfcd14cd07106fe54848c2ec02fa9f97292e3ff2d5a2dfd34a5c",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9995053434193323,
+    0.0004946565806678261
+   ],
+   "onnxBatched": [
+    0.9995053434193323,
+    0.0004946565806678261
+   ],
+   "mlxBfloat16": [
+    0.9995455022451519,
+    0.0004544977548480013
+   ]
+  },
+  {
+   "state": {
+    "question": "Monthly wages from work only",
+    "candidate": "Saved answer: street address"
+   },
+   "questions": {
+    "correct": {
+     "type": "noul",
+     "instructions": "Given the facts about the household, is the candidate the correct answer to the form question?"
+    }
+   },
+   "length": 67,
+   "idsSha256": "fcb128eb2a846da9e908f6bf2b4711c5f44ab7e4037cb069146933f9d81b7e23",
+   "markers": [
+    24,
+    34
+   ],
+   "onnx": [
+    0.9995030466844923,
+    0.0004969533155077416
+   ],
+   "onnxBatched": [
+    0.9995289008615308,
+    0.00047109913846910245
+   ],
+   "mlxBfloat16": [
+    0.9995742646904022,
+    0.00042573530959774854
    ]
   },
   {
@@ -1951,25 +1951,25 @@
     27
    ],
    "onnx": [
-    0.000190777753314721,
-    0.0002010967580041143,
-    0.9989618055967843,
-    0.00020784196797570375,
-    0.00043847792392108216
+    0.0038983906795305233,
+    0.004523475881283453,
+    0.9834092864803202,
+    0.0041340051648931855,
+    0.004034841793972489
    ],
    "onnxBatched": [
-    0.000190777753314721,
-    0.0002010967580041143,
-    0.9989618055967843,
-    0.00020784196797570375,
-    0.00043847792392108216
+    0.0038983906795305233,
+    0.004523475881283453,
+    0.9834092864803202,
+    0.0041340051648931855,
+    0.004034841793972489
    ],
    "mlxBfloat16": [
-    0.00018846882112225657,
-    0.00019528126184640331,
-    0.998677300651722,
-    0.00020596439982083317,
-    0.0007329848654884155
+    0.0043668606681639315,
+    0.004857720367545238,
+    0.981478475906163,
+    0.004772236761836317,
+    0.004524706296291334
    ]
   },
   {
@@ -1999,25 +1999,25 @@
     27
    ],
    "onnx": [
-    0.9881474806954332,
-    0.0002737633827044832,
-    0.006599119906512173,
-    0.003947668399526455,
-    0.0010319676158235262
+    0.9860074854162351,
+    0.003512241065793609,
+    0.0034339523483295897,
+    0.003457231178676666,
+    0.0035890899909651938
    ],
    "onnxBatched": [
-    0.9881474806954332,
-    0.0002737633827044832,
-    0.006599119906512173,
-    0.003947668399526455,
-    0.0010319676158235262
+    0.9860074854162351,
+    0.003512241065793609,
+    0.0034339523483295897,
+    0.003457231178676666,
+    0.0035890899909651938
    ],
    "mlxBfloat16": [
-    0.985790400238423,
-    0.00025158104601213054,
-    0.007162695893069186,
-    0.006269711290031501,
-    0.0005256115324644986
+    0.9867757922522654,
+    0.003363946671201244,
+    0.0031894626027975364,
+    0.003246594463006412,
+    0.0034242040107294145
    ]
   },
   {
@@ -2047,25 +2047,25 @@
     27
    ],
    "onnx": [
-    0.00026684333703798374,
-    0.9808505528828065,
-    0.0068013603995213485,
-    0.006281533285098185,
-    0.005799710095535952
+    0.003609280032163455,
+    0.9763795478260895,
+    0.003553448143653089,
+    0.0035927232654480563,
+    0.012865000732645805
    ],
    "onnxBatched": [
-    0.00026684333703798374,
-    0.9808505528828065,
-    0.0068013603995213485,
-    0.006281533285098185,
-    0.005799710095535952
+    0.003609280032163455,
+    0.9763795478260895,
+    0.003553448143653089,
+    0.0035927232654480563,
+    0.012865000732645805
    ],
    "mlxBfloat16": [
-    0.00020219548230205882,
-    0.9804026261094072,
-    0.007630881247795728,
-    0.006890316185914658,
-    0.004873980974580225
+    0.004115423663580743,
+    0.9755680821722429,
+    0.003971855973072141,
+    0.003971855973072141,
+    0.01237278221803205
    ]
   },
   {
@@ -2095,25 +2095,25 @@
     27
    ],
    "onnx": [
-    0.00020912192307027697,
-    0.00022384262411238932,
-    0.00021034897763204619,
-    0.9990171483337376,
-    0.00033953814144753274
+    0.0043852710124868835,
+    0.005090948709891159,
+    0.004427445749408932,
+    0.981649070831344,
+    0.0044472636968690684
    ],
    "onnxBatched": [
-    0.00020912192307027697,
-    0.00022384262411238932,
-    0.00021034897763204619,
-    0.9990171483337376,
-    0.00033953814144753274
+    0.0043852710124868835,
+    0.005090948709891159,
+    0.004427445749408932,
+    0.981649070831344,
+    0.0044472636968690684
    ],
    "mlxBfloat16": [
-    0.00020605092277004573,
-    0.00021732323029662433,
-    0.00020605092277004573,
-    0.9990968319175095,
-    0.00027374300665372814
+    0.0044452698923533275,
+    0.004901240859482463,
+    0.0044452698923533275,
+    0.981519764678883,
+    0.004688454676928008
    ]
   },
   {
@@ -2143,27 +2143,27 @@
     27
    ],
    "onnx": [
-    0.0018105072215330693,
-    0.0014252315219061712,
-    0.030710568399980966,
-    0.001402754777113318,
-    0.9646509380794666
+    0.013628016181824392,
+    0.0199839205005752,
+    0.009008244366546542,
+    0.00887678017116503,
+    0.9485030387798887
    ],
    "onnxBatched": [
-    0.0018105072215330693,
-    0.0014252315219061712,
-    0.030710568399980966,
-    0.001402754777113318,
-    0.9646509380794666
+    0.013628016181824392,
+    0.0199839205005752,
+    0.009008244366546542,
+    0.00887678017116503,
+    0.9485030387798887
    ],
    "mlxBfloat16": [
-    0.0013077475234181588,
-    0.0013311728015922614,
-    0.030356480131089977,
-    0.0013077475234181588,
-    0.9656968520204815
+    0.012403739192922618,
+    0.01197103132730045,
+    0.0075449749954302064,
+    0.007281766460030825,
+    0.960798488024316
    ]
   }
  ],
- "maxGapToMlxBfloat16": 0.006928569001497631
+ "maxGapToMlxBfloat16": 0.01229544924442727
 }
