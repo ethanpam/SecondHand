@@ -3,7 +3,7 @@
 // rows built by ML_model/dataset/build.cjs, so every constant and model input here must match that
 // file byte for byte; tests/laya-prompts.test.cjs checks it. The packaged desktop app can only
 // load desktop/, renderer/ and shared/, so the training constants are copied here. Each prompt
-// format is a MODEL_FORMATS entry in desktop/laya-model.cjs: noul-v1 below, then CHOICE (choice-v1).
+// format is a MODEL_FORMATS entry in desktop/laya-model.cjs: noul-v1 below, then CHOICE (choice-v2).
 
 // noul-v1: the one question the model answers, about one candidate answer at a time.
 const DECISION = Object.freeze({ type: 'noul', instructions: 'Given the facts about the household, is the candidate the correct answer to the form question?' });
@@ -39,17 +39,24 @@ const MATCH_CANDIDATES = Object.freeze(MATCH_KEYS.filter(key => !NEVER_SUGGESTED
 const matchState = (question, key) => ({ question, candidate: key === null ? ABSTAIN : `Saved answer: ${KEY_ABOUT[key]}` });
 const answerState = (facts, question, candidate) => ({ facts, question, candidate });
 
-// choice-v1 (#65): one `choice` question per form question, so every option is scored in one
+// choice-v2 (#65): one `choice` question per form question, so every option is scored in one
 // pass. Answering: the facts and the question are the state, the form's options plus ABSTAIN the
-// choices. Matching: the box's label is the state, the saved fields offered for its type (never a
-// NEVER_SUGGESTED one) plus MATCH_ABSTAIN the choices, described as KEY_ABOUT says.
+// choices. Matching: the box's label and type (BOX_TYPES) are the state, the saved fields offered
+// for its type (never a NEVER_SUGGESTED one) plus MATCH_ABSTAIN the choices, described as KEY_ABOUT says.
 const CHOICE_ANSWER_INSTRUCTIONS = 'Given the facts about the household, which option is the correct answer to the form question?';
-const CHOICE_MATCH_INSTRUCTIONS = 'Which saved answer belongs in the form box with this label?';
+const CHOICE_MATCH_INSTRUCTIONS = 'Which saved answer belongs in this form box, given its label and type?';
 const MATCH_ABSTAIN = 'None of these';
+// How each text-box type is described to the model.
+const BOX_TYPES = Object.freeze({ text: 'text', textarea: 'long text', number: 'number', date: 'date', email: 'email', tel: 'phone' });
+const boxType = type => {
+  if (!Object.hasOwn(BOX_TYPES, type)) throw new TypeError(`A ${type} field isn’t a text box Laya matches.`);
+  return BOX_TYPES[type];
+};
 const CHOICE = Object.freeze({
   ANSWER_INSTRUCTIONS: CHOICE_ANSWER_INSTRUCTIONS,
   MATCH_INSTRUCTIONS: CHOICE_MATCH_INSTRUCTIONS,
   MATCH_ABSTAIN,
+  BOX_TYPES,
   // In MATCH_KEYS order. A date box has nothing on offer (date of birth never is), so it isn't asked about.
   MATCH_SETS: Object.freeze({
     text: MATCH_CANDIDATES, textarea: MATCH_CANDIDATES,
@@ -59,7 +66,7 @@ const CHOICE = Object.freeze({
   answerQuestion: options => ({ type: 'choice', instructions: CHOICE_ANSWER_INSTRUCTIONS, criteria: [...options, ABSTAIN] }),
   matchQuestion: keys => ({ type: 'choice', instructions: CHOICE_MATCH_INSTRUCTIONS, criteria: [...keys.map(key => KEY_ABOUT[key]), MATCH_ABSTAIN] }),
   answerState: (facts, question) => ({ facts, question }),
-  matchState: question => ({ question })
+  matchState: (question, type) => ({ question, type: boxType(type) })
 });
 
 // Questions only the applicant answers: consent, signatures, attestations, agreements, terms,

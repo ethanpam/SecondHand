@@ -70,7 +70,7 @@ STRINGS = [
 
 
 # The reference outputs for each model format the desktop app runs (desktop/laya-model.cjs MODEL_FORMATS).
-PARITY_FIXTURES = {"noul-v1": "parity-noul.json", "choice-v1": "parity-choice.json"}
+PARITY_FIXTURES = {"noul-v1": "parity-noul.json", "choice-v2": "parity-choice.json"}
 
 
 def parity_fixture(model_format):
@@ -263,7 +263,7 @@ def parity(args):
         decisions = [{"state": row["state"], "questions": {"correct": DECISION}} for row in picked]
         decisions += [{"state": {"question": label}, "questions": {"match": MATCH}} for label in labels]
     else:
-        # A choice-v1 row's one question, under the name the desktop asks it by (desktop/laya-decisions.cjs).
+        # A choice-v2 row's one question, under the name the desktop asks it by (desktop/laya-decisions.cjs).
         decisions = [{"state": row["state"], "questions": {"choice": questions[next(iter(row["answers"]))]}} for row in picked]
 
     items = []

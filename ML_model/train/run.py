@@ -26,7 +26,7 @@ MATCH_ABSTAIN = "None of these"
 
 def answerable(row):
     """Whether a row's decision has a real answer: a noul-v1 candidate row that is correct and not
-    abstaining, or a choice-v1 row whose answer isn't an abstain choice."""
+    abstaining, or a choice-v2 row whose answer isn't an abstain choice."""
     if "candidate" in row["state"]:
         return row["answers"]["correct"] and row["state"]["candidate"] != ABSTAIN
     (answer,) = row["answers"].values()

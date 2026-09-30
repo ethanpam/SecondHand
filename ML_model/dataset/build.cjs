@@ -3,7 +3,8 @@
 // Every label is computed here by code from the question's answer rule and the saved
 // answers, never guessed. Two prompt formats (desktop/laya-model.cjs MODEL_FORMATS):
 // - noul-v1: one fixed yes/no question about one candidate answer at a time;
-// - choice-v1 (#65): one `choice` question per form question, scoring all its options in one pass.
+// - choice-v2 (#65): one `choice` question per form question, scoring all its options in one pass;
+//   a text box is described by its label and its type.
 // Either way, the abstain candidate is correct when the facts don't say.
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -21,11 +22,12 @@ const MATCH_KEYS = Object.freeze(['firstName', 'middleName', 'lastName', 'fullNa
   'monthlyUtilities', 'assetsOnHand', 'monthlyMedicalExpenses']);
 const matchCandidate = key => `Saved answer: ${KEY_ABOUT[key]}`;
 
-// choice-v1. Answering: the facts and the form question are the state; the form's options plus
-// ABSTAIN are the choices. Matching: the box's label is the state; the saved fields offered for
-// its type plus MATCH_ABSTAIN are the choices.
+// choice-v2. Answering: the facts and the form question are the state; the form's options plus
+// ABSTAIN are the choices. Matching: the box's label and its type (as BOX_TYPES words) are the
+// state; the saved fields offered for its type plus MATCH_ABSTAIN are the choices.
 const CHOICE_ANSWER_INSTRUCTIONS = 'Given the facts about the household, which option is the correct answer to the form question?';
-const CHOICE_MATCH_INSTRUCTIONS = 'Which saved answer belongs in the form box with this label?';
+const CHOICE_MATCH_INSTRUCTIONS = 'Which saved answer belongs in this form box, given its label and type?';
+const BOX_TYPES = Object.freeze({ text: 'text', textarea: 'long text', number: 'number', date: 'date', email: 'email', tel: 'phone' });
 const MATCH_ABSTAIN = 'None of these';
 // Saved fields only a confident rule may place are never offered, so a box asking for one is "None of these".
 const OFFERED = MATCH_KEYS.filter(key => !['birthDate', 'totalMonthlyIncome', 'annualIncome', 'assetsOnHand', 'monthlyMedicalExpenses'].includes(key));
@@ -44,7 +46,7 @@ const MATCH_GROUPS = Object.freeze({
   costs: ['monthlyRent', 'monthlyUtilities'],
   numbers: MATCH_SETS.number
 });
-const FORMATS = ['noul-v1', 'choice-v1'];
+const FORMATS = ['noul-v1', 'choice-v2'];
 const choiceAnswerQuestion = options => ({ type: 'choice', instructions: CHOICE_ANSWER_INSTRUCTIONS, criteria: [...options, ABSTAIN] });
 const choiceMatchQuestion = keys => ({ type: 'choice', instructions: CHOICE_MATCH_INSTRUCTIONS, criteria: [...keys.map(key => KEY_ABOUT[key]), MATCH_ABSTAIN] });
 // A LayaStudio question id for a set of choices: questions with the same choices share it.
@@ -228,7 +230,7 @@ function buildRows(bank, households, options = {}) {
     ({ state: { facts: sheets[index], question: question.label, candidate }, answers: { correct: candidate === answer }, split, group })));
 }
 
-// choice-v1: one row per choice question and household, and the LayaStudio questions they use.
+// choice-v2: one row per choice question and household, and the LayaStudio questions they use.
 function buildChoiceRows(bank, households, options = {}) {
   const sheets = households.map(profile => factsText(buildFacts(profile, { today: options.today })));
   const questions = {};
@@ -258,7 +260,7 @@ function buildMatchRows(bank) {
   return rows;
 }
 
-// choice-v1: one row per text box whose type has saved fields on offer. Training boxes are also asked
+// choice-v2: one row per text box whose type has saved fields on offer. Training boxes are also asked
 // with each of MATCH_GROUPS (decision `<box>~<group>`); validation and test boxes only as the app asks.
 function buildChoiceMatchRows(bank) {
   const rows = [];
@@ -268,7 +270,7 @@ function buildChoiceMatchRows(bank) {
     const id = choiceQuestionId('match', definition);
     questions[id] = definition;
     const answer = question.rule.name === 'field' && keys.includes(question.rule.key) ? KEY_ABOUT[question.rule.key] : MATCH_ABSTAIN;
-    rows.push({ state: { question: question.label }, answers: { [id]: answer }, split, group });
+    rows.push({ state: { question: question.label, type: BOX_TYPES[question.type] }, answers: { [id]: answer }, split, group });
   };
   for (const file of bank) {
     const split = formSplit(file);
@@ -329,4 +331,4 @@ if (require.main === module) {
 }
 
 module.exports = { correctOption, buildRows, buildMatchRows, buildChoiceRows, buildChoiceMatchRows, splitFor, writeDataset, range, ABSTAIN, DECISION, MATCH_KEYS,
-  CHOICE_ANSWER_INSTRUCTIONS, CHOICE_MATCH_INSTRUCTIONS, MATCH_ABSTAIN, MATCH_SETS, MATCH_GROUPS, FORMATS };
+  CHOICE_ANSWER_INSTRUCTIONS, CHOICE_MATCH_INSTRUCTIONS, BOX_TYPES, MATCH_ABSTAIN, MATCH_SETS, MATCH_GROUPS, FORMATS };

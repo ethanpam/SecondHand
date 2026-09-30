@@ -41,7 +41,7 @@ function passesNeeded(format, { choices, boxes }, profile, { answers, sensitive 
   const everyday = factsText(facts.filter(fact => !fact.sensitive)), everything = factsText(facts);
   const open = choices.filter(question => !unsafeQuestion(question) && !question.options.includes(ABSTAIN));
   const firstPass = Object.keys(answers).length - sensitive.length;
-  const matched = boxes.filter(box => !unsafeQuestion(box) && (format !== 'choice-v1' || CHOICE.MATCH_SETS[box.type].length));
+  const matched = boxes.filter(box => !unsafeQuestion(box) && (format !== 'choice-v2' || CHOICE.MATCH_SETS[box.type].length));
   return (everyday ? open.length : 0) + (everything !== everyday ? open.length - (everyday ? firstPass : 0) : 0) + matched.length;
 }
 
@@ -52,11 +52,11 @@ async function main() {
   const questions = page(url, count);
   const [profile] = generateHouseholds({ count: 400, seed: 11, today: TODAY });
   const laya = createLaya({ modelDir, modelFormat: format, manifest: { version: 1, model: null }, enabled: true, timeoutMs: BUDGET_MS });
-  // Counts the question passes the model finished: a noul-v1 request is one question, a choice-v1 request one per item.
+  // Counts the question passes the model finished: a noul-v1 request is one question, a choice-v2 request one per item.
   let passes = 0;
   const counted = { ...laya, decideBatch: async (items, options) => {
     const results = await laya.decideBatch(items, options);
-    passes += options?.format === 'choice-v1' ? items.length : 1;
+    passes += options?.format === 'choice-v2' ? items.length : 1;
     return results;
   } };
   const answerer = createFieldAnswers({ laya: counted, today: TODAY });

@@ -176,14 +176,14 @@ test('a model folder must name its prompt format, and a decision can require the
   const modelDir = modelDirectory(t);
   assert.throws(() => createLaya({ modelDir, manifest: NO_MODEL, runner: stubRunner(), enabled: true }), /format/);
   assert.throws(() => createLaya({ modelDir, modelFormat: 'noul-v9', manifest: NO_MODEL, runner: stubRunner(), enabled: true }), /noul-v9/);
-  const laya = createLaya({ modelDir, modelFormat: 'choice-v1', manifest: NO_MODEL, runner: stubRunner(), enabled: true });
-  assert.equal(await laya.format(), 'choice-v1');
-  assert.equal((await laya.decideBatch([{ state: rowState('3'), questions: { match: MATCH } }], { format: 'choice-v1' }))[0].answers.match.type, 'choice');
+  const laya = createLaya({ modelDir, modelFormat: 'choice-v2', manifest: NO_MODEL, runner: stubRunner(), enabled: true });
+  assert.equal(await laya.format(), 'choice-v2');
+  assert.equal((await laya.decideBatch([{ state: rowState('3'), questions: { match: MATCH } }], { format: 'choice-v2' }))[0].answers.match.type, 'choice');
   const refused = await laya.decideBatch([{ state: rowState('3'), questions: { correct: DECISION } }], { format: 'noul-v1' }).catch(error => error);
   assert.equal(refused.code, LAYA_NOT_READY);
   assert.match(refused.message, /changed/);
   await assert.rejects(laya.decideBatch([{ state: rowState('3'), questions: { match: MATCH } }], { format: 'choice' }), /format/);
-  const off = createLaya({ modelDir, modelFormat: 'choice-v1', manifest: NO_MODEL, runner: stubRunner(), enabled: false });
+  const off = createLaya({ modelDir, modelFormat: 'choice-v2', manifest: NO_MODEL, runner: stubRunner(), enabled: false });
   assert.equal((await off.format().catch(error => error)).code, LAYA_NOT_READY);
 });
 
@@ -536,15 +536,15 @@ test('the model in use says its format; after an update to another format, a req
   await laya.update();
   assert.equal(await laya.format(), 'noul-v1');
   assert.equal((await laya.decideBatch([{ state: rowState('3'), questions: { correct: DECISION } }], { format: 'noul-v1' }))[0].answers.correct.type, 'noul');
-  hub.latest = hub.publish(NEW, modelFiles(), 'choice-v1');
+  hub.latest = hub.publish(NEW, modelFiles(), 'choice-v2');
   await laya.update();
   assert.equal(installedRevision(userDataDir), NEW);
-  assert.equal(await laya.format(), 'choice-v1');
+  assert.equal(await laya.format(), 'choice-v2');
   const refused = await laya.decideBatch([{ state: rowState('3'), questions: { correct: DECISION } }], { format: 'noul-v1' }).catch(error => error);
   assert.equal(refused.code, LAYA_NOT_READY);
-  assert.equal((await laya.decideBatch([{ state: rowState('3'), questions: { match: MATCH } }], { format: 'choice-v1' }))[0].answers.match.type, 'choice');
+  assert.equal((await laya.decideBatch([{ state: rowState('3'), questions: { match: MATCH } }], { format: 'choice-v2' }))[0].answers.match.type, 'choice');
   const restarted = createLaya({ userDataDir, manifest: shipped, runner: stubRunner(), enabled: true });
-  assert.equal(await restarted.format(), 'choice-v1', 'after a restart, the installed model’s format');
+  assert.equal(await restarted.format(), 'choice-v2', 'after a restart, the installed model’s format');
 });
 
 test('a tampered update is deleted, the installed model keeps working, and the next check tries again', async t => {

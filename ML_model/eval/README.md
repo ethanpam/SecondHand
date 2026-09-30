@@ -2,7 +2,7 @@
 
 Our own checks of each trained model on held-out real forms: precision of accepted answers, how many answerable questions it answers, and wrong answers on "facts don't say" items. `--holdout` scores only the forms marked holdout, and `--exclude-holdout` every other test form, so thresholds can be chosen on forms apart from the ones they are reported on. Reports are committed; raw outputs are not. See #41.
 
-Both dataset formats are scored the same way, per decision: a `noul-v1` dataset asks one prompt per candidate, and a `choice-v1` dataset (#65) one prompt per decision that scores all its candidates. The report names the format.
+Both dataset formats are scored the same way, per decision: a `noul-v1` dataset asks one prompt per candidate, and a `choice-v2` dataset (#65) one prompt per decision that scores all its candidates. The report names the format.
 
 ```
 uv run --project ~/Projects/LayaStudio python ML_model/eval/decisions.py --model <LayaStudio>/workspace/runs/<run>/model --report ML_model/eval/reports/<name>.json
@@ -26,15 +26,15 @@ uv run --project ~/Projects/LayaStudio python ML_model/eval/latency_onnx.py --on
 `page_latency.cjs` times one form page through the desktop's own request code (`desktop/field-answers.cjs`, then `desktop/field-suggestions.cjs` with the time left) and onnxruntime-node, as one Autofill click does, with the 1-minute load average beside each run:
 
 ```
-node ML_model/eval/page_latency.cjs --model <export> --format choice-v1 --form <form url> --runs 30 --out <name>.json
+node ML_model/eval/page_latency.cjs --model <export> --format choice-v2 --form <form url> --runs 30 --out <name>.json
 ```
 
 The runtime comparison for #37 is in `docs/superpowers/specs/2026-09-27-laya-runtime-spike.md`.
 
-`runtime_fixtures.py` writes the Python reference outputs that the desktop app's JavaScript Laya runtime (#38) is tested against: token ids, prompts, and int8 ONNX probabilities for a fixed sample of rows. There is one file per model format: `tests/fixtures/laya/parity-noul.json` from round 2's export (the shipped model) and `parity-choice.json` from round 3's. Its docstring has the commands. `tests/laya-parity.test.cjs` checks each against its own export and skips a format whose export isn't given:
+`runtime_fixtures.py` writes the Python reference outputs that the desktop app's JavaScript Laya runtime (#38) is tested against: token ids, prompts, and int8 ONNX probabilities for a fixed sample of rows. There is one file per model format: `tests/fixtures/laya/parity-noul.json` from round 2's export (the shipped model) and `parity-choice.json` from a `choice-v2` export. Each file names the checkpoint it came from. Its docstring has the commands. `tests/laya-parity.test.cjs` checks each against its own export and skips a format whose export isn't given:
 
 ```
 SECONDHAND_LAYA_NOUL_MODEL_DIR=<LayaStudio>/workspace/exports/round2-lora-proper-1790530553-onnx-int8 \
-SECONDHAND_LAYA_CHOICE_MODEL_DIR=<LayaStudio>/workspace/exports/round3-lora-proper-1790708976-onnx-int8 \
+SECONDHAND_LAYA_CHOICE_MODEL_DIR=<the choice-v2 export the fixture names> \
   node --test tests/laya-parity.test.cjs
 ```

@@ -11,8 +11,8 @@ const { answer: ANSWER_THRESHOLD, match: MATCH_THRESHOLD } = BARS['noul-v1'];
 test('the confidence bars live in one place, one pair per model format: to answer from the profile, and a stricter one to match a text box', () => {
   assert.deepEqual(Object.keys(BARS), [...MODEL_FORMATS]);
   assert.deepEqual(BARS['noul-v1'], { answer: 0.9, match: 0.95 });
-  // Chosen on round 3's int8 scores of the test forms not held out (docs/laya-model.md).
-  assert.deepEqual(BARS['choice-v1'], { answer: 0.9, match: 0.98 });
+  // Provisional (round 3's) until round 4's evaluation sets them (docs/laya-model.md).
+  assert.deepEqual(BARS['choice-v2'], { answer: 0.9, match: 0.98 });
   for (const bars of Object.values(BARS)) assert.ok(bars.answer >= 0.9 && bars.match >= bars.answer && bars.match < 1);
   assert.ok(MIN_LEAD > 0 && MIN_LEAD < 1);
   assert.equal(BUDGET_MS, 3000);
@@ -51,10 +51,10 @@ test('scores come from one batch per decision with the trained question, and any
   await assert.rejects(score({ decideBatch: async () => { throw notReady; } }, [{ question: 'Q', candidate: 'A' }]), error => error === notReady);
 });
 
-test('choice-v1 scores come from one batch, one pass per question, as each question’s probabilities in the order of its choices', async () => {
+test('choice-v2 scores come from one batch, one pass per question, as each question’s probabilities in the order of its choices', async () => {
   const calls = [];
   const items = [{ state: CHOICE.answerState('F', 'Any children?'), question: CHOICE.answerQuestion(['Yes', 'No']) },
-    { state: CHOICE.matchState('Email'), question: CHOICE.matchQuestion(['email']) }];
+    { state: CHOICE.matchState('Email', 'email'), question: CHOICE.matchQuestion(['email']) }];
   const laya = { decideBatch: async (batch, options) => {
     calls.push({ batch, options });
     // Probabilities come back keyed by choice, in whatever order: the scores follow the question's own order.
@@ -62,7 +62,7 @@ test('choice-v1 scores come from one batch, one pass per question, as each quest
       probabilities: Object.fromEntries(questions.choice.criteria.map((label, index) => [label, (index + 1) / 10]).reverse()), confidence: 0.2 } } }));
   } };
   assert.deepEqual(await scoreChoices(laya, items), [[0.1, 0.2, 0.3], [0.1, 0.2]]);
-  assert.deepEqual(calls, [{ batch: items.map(({ state, question }) => ({ state, questions: { choice: question } })), options: { format: 'choice-v1' } }]);
+  assert.deepEqual(calls, [{ batch: items.map(({ state, question }) => ({ state, questions: { choice: question } })), options: { format: 'choice-v2' } }]);
   const reply = probabilities => ({ decideBatch: async () => [{ answers: { choice: { type: 'choice', choice: 'Yes', probabilities, confidence: 0.5 } } }] });
   for (const broken of [reply({ Yes: 0.9, No: 0.1 }), reply({ Yes: 0.9, No: 0.05, [CHOICE.answerQuestion([])['criteria'][0]]: 1.2 }), reply({ Yes: 'high', No: 0, [items[0].question.criteria[2]]: 0 }),
     { decideBatch: async () => [{ answers: { correct: { type: 'noul', noul: 0.5 } } }] }, { decideBatch: async () => [{ answers: { choice: { type: 'choice' } } }] },
@@ -72,7 +72,7 @@ test('choice-v1 scores come from one batch, one pass per question, as each quest
 });
 
 test('the bars follow the format of the model Laya runs, and a format without bars fails loudly', async () => {
-  assert.deepEqual(await decisions.barsFor({ format: async () => 'choice-v1' }), { format: 'choice-v1', bars: BARS['choice-v1'] });
+  assert.deepEqual(await decisions.barsFor({ format: async () => 'choice-v2' }), { format: 'choice-v2', bars: BARS['choice-v2'] });
   assert.deepEqual(await decisions.barsFor({ format: async () => 'noul-v1' }), { format: 'noul-v1', bars: BARS['noul-v1'] });
   await assert.rejects(decisions.barsFor({ format: async () => 'noul-v9' }), /noul-v9/);
   const notReady = Object.assign(new Error('Laya is off.'), { code: 'LAYA_NOT_READY' });

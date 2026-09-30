@@ -1,7 +1,7 @@
 """Export a trained run to ONNX with LayaStudio's exporter, for the desktop app (#38, #65).
 
 LayaStudio's exporter traces the graph, then checks it against MLX on every question in the
-checkpoint's questions.json, ten sample states each, in one batch. A choice-v1 checkpoint has one
+checkpoint's questions.json, ten sample states each, in one batch. A choice-v2 checkpoint has one
 question per set of choices, hundreds of them: far too many rows for one batch. So this exports
 from a view of the checkpoint (its files, linked) whose questions.json keeps one question of each
 task and option-count bucket. The graph's batch, token and option sizes stay dynamic, so the

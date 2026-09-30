@@ -177,5 +177,5 @@ It lists `model.onnx`, `model.onnx.data`, `tokenizer/tokenizer.json`, `tokenizer
 A model trained on different prompts needs a new format. Add it to `MODEL_FORMATS` in `desktop/laya-model.cjs` with the prompts and confidence bars it needs, release that app, then publish the model with `--format <new format>`.
 - The script only accepts formats this checkout lists.
 - Apps that don't list a format keep their installed model.
-- `choice-v1` is listed, so publishing round 3 with `--format choice-v1` switches apps with this code over to it. Older apps ignore it.
+- `choice-v2` is listed, so publishing a `choice-v2` model switches apps with this code over to it. Older apps ignore it. `choice-v1` (round 3) was never published and is no longer listed.
 - A development build runs a local export with `SECONDHAND_LAYA_MODEL_DIR=<export> SECONDHAND_LAYA_MODEL_FORMAT=<format>`.

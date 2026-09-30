@@ -1,7 +1,7 @@
 """Decision-level evaluation of a trained Laya model on SecondHand's held-out forms.
 
 A form question is a decision over several candidates: one row per candidate in a noul-v1
-dataset, or one choice row listing every candidate in a choice-v1 dataset (#65). This regroups
+dataset, or one choice row listing every candidate in a choice-v2 dataset (#65). This regroups
 them: the model picks its best candidate, answers only when that candidate beats "none of
 these" and clears the confidence bar, and otherwise leaves the question to the applicant.
 What matters is how often an answer it fills is right (precision), how many answerable
@@ -52,18 +52,18 @@ def holdout_forms(questions_dir):
 
 
 def dataset_format(questions):
-    """noul-v1 (one yes/no question about each candidate) or choice-v1 (one choice question per decision)."""
+    """noul-v1 (one yes/no question about each candidate) or choice-v2 (one choice question per decision)."""
     types = {definition["type"] for definition in questions.values()}
     if types == {"noul"} and list(questions) == ["correct"]:
         return "noul-v1"
     if types == {"choice"}:
-        return "choice-v1"
+        return "choice-v2"
     raise ValueError(f"Unknown dataset format: questions {sorted(questions)[:5]} of types {sorted(types)}")
 
 
 def candidates(row, questions):
     """A decision's candidates in the order the model sees them, the abstain choice last. A noul-v1
-    row is one candidate already; a choice-v1 row stands for every choice of its question, and
+    row is one candidate already; a choice-v2 row stands for every choice of its question, and
     `source` keeps what the model is asked."""
     if "candidate" in row["state"]:
         return [row]
@@ -149,7 +149,7 @@ def load(model_dir):
 
 
 def score(decisions, model_dir, questions):
-    """Each candidate's probability: one prompt per noul-v1 row, one per choice-v1 decision."""
+    """Each candidate's probability: one prompt per noul-v1 row, one per choice-v2 decision."""
     agent = load(model_dir)
     started, done, report = time.time(), 0, 500
     for rows in decisions.values():

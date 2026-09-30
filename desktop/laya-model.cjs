@@ -19,9 +19,10 @@ const { atomicWrite } = require('./vault.cjs');
 const MODEL_FILES = Object.freeze(['model.onnx', 'model.onnx.data', 'tokenizer/tokenizer.json', 'tokenizer/tokenizer_config.json', 'rl_agent_config.json']);
 // Model formats this app can run, each asked with its prompts in shared/laya-prompts.cjs:
 // - noul-v1: one yes/no (noul) question per candidate answer;
-// - choice-v1 (#65): one choice question per form question, scoring every option in one pass.
+// - choice-v2 (#65): one choice question per form question, scoring every option in one pass; a
+//   text box is described by its label and type. (choice-v1, without the type, was never published.)
 // A model trained on other prompts gets a new format, so an app that can't ask them never installs it.
-const MODEL_FORMATS = Object.freeze(['noul-v1', 'choice-v1']);
+const MODEL_FORMATS = Object.freeze(['noul-v1', 'choice-v2']);
 const INSTALLED = 'installed.json';
 const MAX_MANIFEST_BYTES = 1024 * 1024;
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);

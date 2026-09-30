@@ -22,8 +22,8 @@ function createFieldAnswers({ laya, now = Date.now, today } = {}) {
         found(question, optionFor(question, scores, bar));
       }
     },
-    // choice-v1 (#65): every option of a question in one pass, CHOICE_BATCH questions per request.
-    'choice-v1': async (facts, questions, bar, more, found) => {
+    // choice-v2 (#65): every option of a question in one pass, CHOICE_BATCH questions per request.
+    'choice-v2': async (facts, questions, bar, more, found) => {
       for (let start = 0; start < questions.length; start += CHOICE_BATCH) {
         if (!more()) return;
         const chunk = questions.slice(start, start + CHOICE_BATCH);

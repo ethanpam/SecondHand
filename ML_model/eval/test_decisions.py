@@ -171,7 +171,7 @@ class Candidates(unittest.TestCase):
 class DatasetFormat(unittest.TestCase):
     def test_names_the_format_from_its_questions(self):
         self.assertEqual(dataset_format(NOUL), "noul-v1")
-        self.assertEqual(dataset_format({"yn": YES_NO, "fields": FIELDS}), "choice-v1")
+        self.assertEqual(dataset_format({"yn": YES_NO, "fields": FIELDS}), "choice-v2")
         with self.assertRaisesRegex(ValueError, "format"):
             dataset_format({"yn": YES_NO, **NOUL})
 

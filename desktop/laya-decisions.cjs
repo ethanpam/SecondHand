@@ -7,12 +7,10 @@ const { BATCH_SIZE } = require('./laya.cjs');
 // The bars per model format (desktop/laya-model.cjs MODEL_FORMATS): one to answer choice and
 // yes/no questions from the saved profile, and one to match a text box to a saved field. Each is
 // set from its model's evaluation (#41, #65; docs/laya-model.md) so accepted answers are 95% or
-// more correct. choice-v1's come from round 3's int8 scores of the test forms not held out: the
-// answer bar stays 0.9 (0.970 there; 0.8 only just reaches 0.95), and the match bar is the lowest
-// that reaches 0.95 (0.975 gives 0.909).
+// more correct. choice-v2's are round 3's until round 4's evaluation sets them.
 const BARS = Object.freeze({
   'noul-v1': Object.freeze({ answer: 0.9, match: 0.95 }),
-  'choice-v1': Object.freeze({ answer: 0.9, match: 0.98 })
+  'choice-v2': Object.freeze({ answer: 0.9, match: 0.98 })
 });
 // The best candidate must beat the runner-up by at least this much; two likely answers mean
 // the model isn't sure which, and the question goes to the applicant.
@@ -20,7 +18,7 @@ const MIN_LEAD = 0.5;
 // Laya's time budget per Autofill click. The extension sends what its click has left with each
 // request; questions left when it runs out go to "need you".
 const BUDGET_MS = 3000;
-// choice-v1 questions per request: one batch through the model, so a timeout or the budget
+// choice-v2 questions per request: one batch through the model, so a timeout or the budget
 // running out keeps every batch decided before it.
 const CHOICE_BATCH = BATCH_SIZE;
 
@@ -39,10 +37,10 @@ async function score(laya, states) {
 
 const probability = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
 
-// choice-v1: for each { state, question } (a CHOICE question), the probability of each of its
+// choice-v2: for each { state, question } (a CHOICE question), the probability of each of its
 // choices in their order, from one batch: one pass per question.
 async function scoreChoices(laya, items) {
-  const results = await laya.decideBatch(items.map(({ state, question }) => ({ state, questions: { choice: question } })), { format: 'choice-v1' });
+  const results = await laya.decideBatch(items.map(({ state, question }) => ({ state, questions: { choice: question } })), { format: 'choice-v2' });
   if (!Array.isArray(results) || results.length !== items.length) throw new Error('Laya returned the wrong number of answers.');
   // Each answer is desktop/laya.cjs's { type: 'choice', choice, probabilities: { [choice]: p }, confidence }.
   return results.map((result, index) => {
