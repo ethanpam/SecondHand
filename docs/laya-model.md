@@ -8,7 +8,7 @@ SecondHand's local decision model: [Laya](https://huggingface.co/convaiinnovatio
 | Format | `noul-v1`: one yes/no question per candidate | `choice-v1`: one `choice` question per form question, all its options in one pass | `choice-v2`: as `choice-v1`, with a text box described by its label and type |
 | Run | `round2-lora-proper-1790530553`, from commit `5582a70` | `round3-lora-proper-1790708976`, from commit `3ecfd91` | `round4-lora-proper-1790727905`, from commit `5c5a5bc` |
 | Dataset | `round2-1790530494`, SHA-256 `1064fcfe…` | `round3-1790708973`, SHA-256 `08e5410f…` | `round4-1790727902`, SHA-256 `6b5b9279…` |
-| Status | Published; the desktop app ships pinned to it | Retired: never published, and the app no longer runs `choice-v1` | Exported, not published |
+| Status | Published; the desktop app ships pinned to it | Retired: never published, and the app no longer runs `choice-v1` | Exported, not published: below round 2 on the final holdout |
 
 Both are fine-tuned from `aac6fef/laya-mlx` (revision `20aed815…`) with LayaStudio on an Apple M4 Max. The desktop app asks a model in its own format (`MODEL_FORMATS` in `desktop/laya-model.cjs`), with that format's prompts in `shared/laya-prompts.cjs` and its confidence bars in `desktop/laya-decisions.cjs`. A question is answered only when its best candidate clears the bar and beats "None of these, or the facts don't say" (text boxes: "None of these").
 
@@ -71,7 +71,7 @@ Public form questions only. Households are fictional and generated in code; no r
 | Real forms, test split (by form) | 7 | 129 | test |
 | Real forms marked holdout (collected after the first model) | 7 | 124 | test, and scored on their own |
 | Synthetic rewordings (`questions/synthetic/`) | 11 | 883 (757 before round 4) | training only |
-| Final holdout (`questions-final/`, collected after round 3) | pending | pending | scored once, after round 4's bars were frozen |
+| Final holdout (`questions-final/`, collected after round 3) | 15 | 394 | scored once, after round 4's bars were frozen |
 
 - Every label is computed by code from the question's answer rule and the facts sheet (`shared/facts.cjs`). No label is written by hand.
 - Tests keep every held-out and test form out of training and validation (`tests/ml-dataset-choice.test.cjs`), and keep synthetic questions from repeating a test or held-out label (`tests/ml-question-bank.test.cjs`).
@@ -183,7 +183,58 @@ Round 3's held-out forms were then scored once, below. Round 2's bars were chose
 Round 4's two wrong answers here are "I am filling this form out for?"; its wrong match is "Children between Ages 0 - 18".
 
 ### Final holdout
-Pending. The final forms (`ML_model/questions-final/`) are scored once, with the bars above frozen in commit `0f636a4`, and the score goes here as it is.
+Fifteen real forms (394 questions) collected after round 3, re-checked against their live pages, tagged, and merged after round 4's bars were frozen in `0f636a4`. They were scored once, with no change to bars, data or prompts afterwards. The build is `node ML_model/dataset/build.cjs --final --format <format> --today 2026-09-26 --households 400 --seed 11 --per-question 8`.
+- 1,232 choice decisions. Only 11 questions are answerable by the key, which makes 59 answerable decisions.
+- 222 text boxes (240 in `noul-v1`, which also asks date boxes), 81 answerable.
+- Confidence intervals are Wilson 95% intervals over decisions. A question's households share one question, so the real uncertainty is wider than they show.
+
+| Model | Runtime | Bar | Filled | Right by key | Right by facts | Wrong | Key precision (95% CI) | #41 precision (95% CI) | Coverage |
+|---|---|---|---|---|---|---|---|---|---|
+| **Answering** | | | | | | | | | |
+| Round 2 | ONNX int8 | 0.9 | 72 | 57 | 10 | 5 | 0.792 (0.68–0.87) | **0.931** (0.85–0.97) | 57/59 = 0.966 |
+| Round 2 | MLX bf16 | 0.9 | 72 | 57 | 10 | 5 | 0.792 (0.68–0.87) | **0.931** (0.85–0.97) | 0.966 |
+| Round 4 | ONNX int8 | 0.9 | 79 | 49 | 13 | 17 | 0.620 (0.51–0.72) | **0.785** (0.68–0.86) | 49/59 = 0.831 |
+| Round 4 | MLX bf16 | 0.9 | 79 | 51 | 13 | 15 | 0.646 (0.54–0.74) | **0.810** (0.71–0.88) | 0.864 |
+| **Matching** (as the app asks) | | | | | | | | | |
+| Round 2 | ONNX int8 | 0.95 | 68 | 59 | 0 | 9 | 0.868 (0.77–0.93) | **0.868** | 59/81 = 0.728 |
+| Round 2 | MLX bf16 | 0.95 | 66 | 58 | 0 | 8 | 0.879 (0.78–0.94) | **0.879** | 0.716 |
+| Round 4 | ONNX int8 | 0.999 | 17 | 16 | 0 | 1 | 0.941 (0.73–0.99) | **0.941** | 16/81 = 0.198 |
+| Round 4 | MLX bf16 | 0.999 | 15 | 14 | 0 | 1 | 0.933 (0.70–0.99) | **0.933** | 0.173 |
+
+**Right by the facts** (the key tags these `none`; the facts settle them; the same rules for both rounds):
+- Vermont's "U.S. citizen?" for another member: Yes when everyone in the household is a citizen.
+- Vermont's "Disabled?" for another member: No when nobody in the household has a disability.
+- "Does anyone pay over $35 a month in medical expenses?": from the saved amount.
+- "Does anyone have income?": from the saved income.
+- "Do you pay rent or room rent?": No when the household pays no rent or mortgage.
+- "Do you pay for utilities?": from the saved amount.
+
+**Round 4's wrong answers** (int8, 17, on 5 questions):
+- 7 × "Anyone in your household elderly and/or disabled?" answered No. Three of those households have someone 65 or older, and the others could have someone 60 to 64.
+- 5 × Vermont's "Do you own your home?" answered Yes. Nothing in the profile says so.
+- 3 × Vermont's "Due to disability?" (whether one income is due to a disability) answered No.
+- 1 × Oregon's active-duty question answered "No, never served in the U.S. Armed Forces". The facts can't pick between its two "No" choices.
+- 1 × "Are you interested in applying for SNAP, Medicaid, Medicare or LIHEAP?" answered "All of the above", for an applicant who applies only for SNAP.
+
+**Round 2's wrong answers** (int8, 5, on 4 questions):
+- 2 × "elderly and/or disabled?" answered No.
+- 1 × "Have you or anyone in your household recently applied for SNAP?" answered No.
+- 1 × "…at least one shelter/utility expense?" answered No, for a household paying rent.
+- 1 × the interest question answered "SNAP".
+
+**Wrong matches:**
+- Round 4 (1): Vermont's "Phone number:" for the person who helped fill in the form.
+- Round 2 (int8, 9):
+  - someone else's name or phone;
+  - "Street Address (If Different)";
+  - combined name boxes answered with one part ("…& suffix" answered with the suffix, "NOMBRE - NAME" with the last name);
+  - "CIUDAD-CITY" answered with the county;
+  - "Who pays the rent?" answered with the rent amount;
+  - "Number of adults in household (including yourself)" answered with the count of adults 18 to 64. This is the one borderline tag: counted as right, round 2's int8 matching precision is 60/68.
+
+**"Facts don't say" fills.** Round 4 int8 filled 30 of the 1,173 questions the key marks "facts don't say": 13 are proved right and 17 are wrong (1.4%). Round 2 filled 15: 10 right and 5 wrong (0.4%).
+
+**Summary.** On forms neither round was tuned on, round 4 answers less precisely than round 2 (0.785 against 0.931) and matches far fewer boxes (20% against 73%), though more precisely (0.941 against 0.868). Its errors are confident answers to yes/no questions about property, income sources and other members that its facts don't settle. Round 4 is faster: a page fits the 3-second budget, which round 2's doesn't (see Speed).
 
 ### Round 3 on the test split (every test form, including the held-out ones: 2,016 decisions, 151 boxes)
 Round 3, ONNX int8:
@@ -211,6 +262,7 @@ One 20-question page through the desktop's own request code (`ML_model/eval/page
 - Each round-3 and round-4 page is 21 question passes: the 5 open choice questions without sensitive facts, the same 5 again with every fact (none was answered in the first pass), and 11 text boxes. "Type of ID" and the signature box never reach Laya, and the two date boxes aren't asked.
 
 ## Known weak spots
+- **Confident answers the facts don't settle (round 4, final holdout).** Yes/no questions about home ownership, income sources, "elderly and/or disabled" and other members are answered at 0.93–1.00. Its answering precision on the final forms is 0.785.
 - **Count boxes over other age ranges or groups (round 4).**
   - "Children 0-5", "Adults 19 - 64" and "children who attend a school" match the saved counts at 0.99–0.999. That's why no match bar reaches 0.95 on the pool.
   - At the 0.999 bar round 4 matches only 23% of the pool's answerable boxes, below the 50% target.
