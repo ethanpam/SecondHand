@@ -4,7 +4,7 @@
 // ML_model/eval/runtime_fixtures.py from the same exports. One set of outputs per model format the
 // app runs, each checked against its own export, named by its own variable:
 //   SECONDHAND_LAYA_NOUL_MODEL_DIR    noul-v1, the shipped model (round 2)
-//   SECONDHAND_LAYA_CHOICE_MODEL_DIR  choice-v1 (round 3)
+//   SECONDHAND_LAYA_CHOICE_MODEL_DIR  choice-v2 (round 4: round4-lora-proper-1790727905-onnx-int8)
 // e.g. SECONDHAND_LAYA_NOUL_MODEL_DIR=~/Projects/LayaStudio/workspace/exports/<name> node --test tests/laya-parity.test.cjs
 // A set whose variable isn't set is skipped, and says so.
 const test = require('node:test');
@@ -20,7 +20,7 @@ const { toQuestion, encodeDecision } = require('../desktop/laya-prompt.cjs');
 
 const SETS = [
   { format: 'noul-v1', fixture: 'parity-noul.json', env: 'SECONDHAND_LAYA_NOUL_MODEL_DIR' },
-  { format: 'choice-v1', fixture: 'parity-choice.json', env: 'SECONDHAND_LAYA_CHOICE_MODEL_DIR' }
+  { format: 'choice-v2', fixture: 'parity-choice.json', env: 'SECONDHAND_LAYA_CHOICE_MODEL_DIR' }
 ];
 const NO_MODEL = { version: 1, model: null };
 const TOLERANCE = 1e-3;

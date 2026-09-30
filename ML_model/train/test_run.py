@@ -25,7 +25,7 @@ def rows():
 
 
 def choice_rows():
-    """choice-v1: one row per decision, answered with its choice."""
+    """choice-v2: one row per decision, answered with its choice."""
     out = []
     for task, abstain in (("answer", ABSTAIN), ("match", MATCH_ABSTAIN)):
         for split in ("train", "val", "test"):

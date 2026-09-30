@@ -26,6 +26,7 @@ Check your files with `node --test tests/ml-question-bank.test.cjs`.
 - `options` lists the choices exactly, in page order, leaving out empty "Choose" placeholders. It's `[]` for text boxes.
 - `note` (optional) explains a judgment call, e.g. why a question is `none`.
 - `source.holdout: true` keeps a form in the test set for good. Use it only for fresh forms collected as a clean final check.
+- The final holdout (#65) lives apart, in `ML_model/questions-final/`: the same format plus `source.final: true`. Training never reads that folder, `questions/` refuses a final form, and a test fails on a leak: a training form at a final form's URL or site (form platforms aside), a synthetic rewording that repeats a final label, or a training form repeating a whole final question whose label has 7 or more words. Shared standard wording (race and ethnicity categories, program names, "Prefer not to answer", short labels like "Date of Birth") isn't a leak; the few synthetic labels that repeat a final label, all written before the final forms, are listed in the test with the reason each is accepted. Those forms are scored once, after the confidence bars are frozen.
 
 ## Picking a rule
 The full list, with what each rule means and which question types it fits, is in `ML_model/answer-rules.cjs`. The most common:
@@ -44,6 +45,8 @@ The full list, with what each rule means and which question types it fits, is in
 | which income range (choices) | `incomeBracket` with `period` |
 | state, county (choices), or "Do you live in Iowa / Polk County?" | `state`, `county`, `livesInState` / `livesInCounty` |
 | applying for SNAP, FIP, or Medicaid | `applyingSnap`, `applyingFip`, `applyingMedicaid` |
+| the applicant's own row in a household table: "Applying?" | `applyingFor` with `programs`, the ones the form covers (`snap`, `fip`, `medicaid`) |
+| coverage or benefits held now: "Do you have Medicaid?", "Which insurance do you have?" | `none`: the profile only says what the applicant is applying for |
 | anything the saved profile can't know: pets, pickup day, student ID, diet, "currently receive SNAP?", "how did you hear about us" | `none` |
 | consent, signatures, "I certify", terms, SSN | `never` |
 

@@ -218,11 +218,11 @@ test('SECONDHAND_LAYA_MODEL_DIR points Laya at a local model folder instead of a
     fs.mkdirSync(path.dirname(path.join(folder, name)), { recursive: true });
     fs.writeFileSync(path.join(folder, name), bytes);
   }
-  const app = await desktop(t, { shipped: true, env: { SECONDHAND_LAYA_MODEL_DIR: folder, SECONDHAND_LAYA_MODEL_FORMAT: 'choice-v1' } });
+  const app = await desktop(t, { shipped: true, env: { SECONDHAND_LAYA_MODEL_DIR: folder, SECONDHAND_LAYA_MODEL_FORMAT: 'choice-v2' } });
   assert.equal(app.created[0].options.modelDir, folder);
-  assert.equal(app.created[0].options.modelFormat, 'choice-v1', 'SECONDHAND_LAYA_MODEL_FORMAT names its prompt format');
+  assert.equal(app.created[0].options.modelFormat, 'choice-v2', 'SECONDHAND_LAYA_MODEL_FORMAT names its prompt format');
   assert.equal((await app.invoke('layaStatus')).state, 'ready');
-  assert.equal(await app.created[0].laya.format(), 'choice-v1');
+  assert.equal(await app.created[0].laya.format(), 'choice-v2');
   await assert.rejects(app.invoke('downloadLaya'), /SECONDHAND_LAYA_MODEL_DIR/);
   assert.equal(fs.existsSync(path.join(app.userData, 'models')), false, 'nothing is downloaded');
   await assert.rejects(desktop(t, { shipped: true, env: { SECONDHAND_LAYA_MODEL_DIR: folder } }), /prompt format/, 'a folder without its format stops the app with the reason');

@@ -2,7 +2,7 @@
 
 Prompts, padding and calibration are laya-mlx's own (build_sequence, collate_items, the
 clamped temperatures), so a candidate's probability is comparable with decisions.py's MLX
-path. A noul-v1 decision is one prompt per candidate row; a choice-v1 decision is one prompt
+path. A noul-v1 decision is one prompt per candidate row; a choice-v2 decision is one prompt
 whose options are its candidates. Prompts are padded into batches and each batch is one
 session.run.
 """

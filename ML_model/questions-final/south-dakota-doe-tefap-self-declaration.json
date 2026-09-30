@@ -1,0 +1,19 @@
+{
+  "source": {
+    "url": "https://doe.sd.gov/CANS/documents/TEFAP-SelfDelclaration-English.pdf",
+    "title": "The Emergency Food Assistance Program (TEFAP) Self-Declaration Form",
+    "kind": "pdf",
+    "retrieved": "2026-09-29",
+    "region": "Pierre, SD",
+    "final": true
+  },
+  "questions": [
+    { "id": "q1", "label": "Print Name", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" }, "note": "Under \"Required information\"; by writing it the applicant self-declares the four statements above." },
+    { "id": "q2", "label": "Household size", "type": "number", "options": [], "rule": { "name": "field", "key": "householdSize" } },
+    { "id": "q3", "label": "Date", "type": "date", "options": [], "rule": { "name": "never" }, "note": "The date of the self-declaration, like a signature date." },
+    { "id": "q4", "label": "Address", "type": "text", "options": [], "rule": { "name": "field", "key": "addressLine1" }, "note": "Under \"Optional information\"." },
+    { "id": "q5", "label": "Household member ages (0-17)", "type": "number", "options": [], "rule": { "name": "field", "key": "householdChildren" } },
+    { "id": "q6", "label": "Household member ages (18-59)", "type": "number", "options": [], "rule": { "name": "none" }, "note": "Members 18 to 59; the profile counts adults 18-64, so this is unknown when anyone is 60-64. The page prints only \"(18-59):\" after the (0-17) box; the row name is added." },
+    { "id": "q7", "label": "Household member ages (60+)", "type": "number", "options": [], "rule": { "name": "none" }, "note": "Members 60 and older; the profile counts seniors 65+. The page prints only \"(60+):\" after the (18-59) box; the row name is added." }
+  ]
+}

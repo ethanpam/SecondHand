@@ -1,5 +1,5 @@
 'use strict';
-// The choice-v1 dataset (#65): one `choice` question per form question, so Laya scores every
+// The choice-v2 dataset (#65): one `choice` question per form question, so Laya scores every
 // option in one pass. Labels come from the same answer rules and splits as noul-v1.
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -10,7 +10,7 @@ const build = require('../ML_model/dataset/build.cjs');
 const { KEY_ABOUT } = require('../extension/ai-mapper.js');
 const { buildFacts, factsText } = require('../shared/facts.cjs');
 
-const { buildRows, buildChoiceRows, buildChoiceMatchRows, writeDataset, splitFor, ABSTAIN, CHOICE_ANSWER_INSTRUCTIONS, CHOICE_MATCH_INSTRUCTIONS, MATCH_ABSTAIN,
+const { buildRows, buildChoiceRows, buildChoiceMatchRows, writeDataset, splitFor, ABSTAIN, CHOICE_ANSWER_INSTRUCTIONS, CHOICE_MATCH_INSTRUCTIONS, MATCH_ABSTAIN, BOX_TYPES,
   MATCH_SETS, MATCH_GROUPS } = build;
 const TODAY = '2026-09-26';
 const yesNo = ['Yes', 'No'];
@@ -96,7 +96,11 @@ test('matching: one row per text box, choosing among the saved fields offered fo
   assert.equal(onlyAnswer(byLabel['People at home'])[1], KEY_ABOUT.householdSize);
   assert.equal(onlyAnswer(byLabel['Monthly income'])[1], MATCH_ABSTAIN, 'income is never offered, so the right choice is none of these');
   assert.equal(onlyAnswer(byLabel['Student ID'])[1], MATCH_ABSTAIN);
-  assert.deepEqual(Object.keys(byLabel['Email'].state), ['question'], 'matching needs no facts about the household');
+  assert.deepEqual(byLabel['Email'].state, { question: 'Email', type: 'email' }, 'matching needs no facts about the household, and says what kind of box it is');
+  assert.deepEqual(byLabel['Best phone'].state, { question: 'Best phone', type: 'phone' });
+  assert.deepEqual(byLabel['People at home'].state, { question: 'People at home', type: 'number' });
+  assert.equal(CHOICE_MATCH_INSTRUCTIONS, 'Which saved answer belongs in this form box, given its label and type?');
+  assert.deepEqual(BOX_TYPES, { text: 'text', textarea: 'long text', number: 'number', date: 'date', email: 'email', tel: 'phone' });
   assert.ok(rows.every(row => row.split === 'test' && row.group.startsWith(`${url}#`)));
   assert.equal(new Set(rows.map(row => row.group)).size, rows.length);
 });
@@ -133,7 +137,7 @@ test('the choice dataset is written in LayaStudio’s format, with every questio
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'sh-choice-'));
   try {
     const bank = [form('https://pantry.example.org/c', [choice('q1', 'Any children?', yesNo, { name: 'anyChildren' }), box('t1', 'Email', 'email', { name: 'field', key: 'email' })], { holdout: true })];
-    const summary = writeDataset(out, bank, [family], { today: TODAY, format: 'choice-v1' });
+    const summary = writeDataset(out, bank, [family], { today: TODAY, format: 'choice-v2' });
     const questions = JSON.parse(fs.readFileSync(path.join(out, 'questions.json'), 'utf8'));
     const lines = fs.readFileSync(path.join(out, 'rows.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
     assert.equal(lines.length, summary.rows);
@@ -144,12 +148,12 @@ test('the choice dataset is written in LayaStudio’s format, with every questio
     }
     assert.deepEqual(new Set(Object.keys(questions)), new Set(lines.map(line => Object.keys(line.answers)[0])), 'no unused questions');
     assert.deepEqual(lines.map(line => line.task), ['answer', 'match']);
-    assert.equal(summary.format, 'choice-v1');
+    assert.equal(summary.format, 'choice-v2');
     assert.deepEqual(Object.keys(summary.tasks), ['answer', 'match']);
     assert.equal(summary.tasks.answer.abstainShare, 0);
   } finally { fs.rmSync(out, { recursive: true, force: true }); }
   assert.throws(() => writeDataset(out, [], [family], { today: TODAY }), /format/);
-  assert.throws(() => writeDataset(out, [], [family], { today: TODAY, format: 'choice-v2' }), /format/);
+  assert.throws(() => writeDataset(out, [], [family], { today: TODAY, format: 'choice-v1' }), /format/, 'choice-v1 was dropped: it was never published');
 });
 
 test('held-out and test forms never reach training or validation in the real choice dataset', () => {

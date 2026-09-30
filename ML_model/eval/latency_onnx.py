@@ -2,7 +2,7 @@
 
 A page is one household's first N questions on a real form, in form order, each scored with
 every candidate it has, the way the dataset's format asks: one prompt per candidate (noul-v1)
-or one per question (choice-v1). Reports the time to load the model
+or one per question (choice-v2). Reports the time to load the model
 and score the first page, the median and 95th percentile of later pages with the 1-minute load
 average beside each run, and peak memory.
 

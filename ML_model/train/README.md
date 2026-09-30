@@ -7,7 +7,7 @@ uv run --project ~/Projects/LayaStudio python ML_model/train/run.py --epochs 1 -
 uv run --project ~/Projects/LayaStudio python -m unittest discover -s ML_model/train
 ```
 
-`export.py` exports a run to ONNX with LayaStudio's exporter for the desktop app. A choice-v1 run has one question per set of choices, hundreds of them, which LayaStudio's export check would put in one batch, so it checks one question of each task and option count instead:
+`export.py` exports a run to ONNX with LayaStudio's exporter for the desktop app. A choice-v2 run has one question per set of choices, hundreds of them, which LayaStudio's export check would put in one batch, so it checks one question of each task and option count instead:
 
 ```
 uv run --project ~/Projects/LayaStudio python ML_model/train/export.py --run <run id> --precision int8

@@ -1,0 +1,367 @@
+{
+  "model": "/Users/jacobdang/Projects/LayaStudio/workspace/runs/round4-lora-proper-1790727905/model",
+  "format": "choice-v2",
+  "runtime": "mlx",
+  "split": "test",
+  "holdout": false,
+  "forms": "all",
+  "tasks": {
+    "answer": {
+      "0.5": {
+        "decisions": 2016,
+        "answerable": 164,
+        "accepted": 209,
+        "right": 157,
+        "wrong_fill": 52,
+        "wrong_fill_on_unanswerable": 52,
+        "unanswerable": 1852,
+        "precision": 0.7511961722488039,
+        "coverage": 0.9573170731707317
+      },
+      "0.7": {
+        "decisions": 2016,
+        "answerable": 164,
+        "accepted": 206,
+        "right": 156,
+        "wrong_fill": 50,
+        "wrong_fill_on_unanswerable": 50,
+        "unanswerable": 1852,
+        "precision": 0.7572815533980582,
+        "coverage": 0.9512195121951219
+      },
+      "0.8": {
+        "decisions": 2016,
+        "answerable": 164,
+        "accepted": 202,
+        "right": 155,
+        "wrong_fill": 47,
+        "wrong_fill_on_unanswerable": 47,
+        "unanswerable": 1852,
+        "precision": 0.7673267326732673,
+        "coverage": 0.9451219512195121
+      },
+      "0.9": {
+        "decisions": 2016,
+        "answerable": 164,
+        "accepted": 197,
+        "right": 153,
+        "wrong_fill": 44,
+        "wrong_fill_on_unanswerable": 44,
+        "unanswerable": 1852,
+        "precision": 0.7766497461928934,
+        "coverage": 0.9329268292682927
+      },
+      "0.95": {
+        "decisions": 2016,
+        "answerable": 164,
+        "accepted": 194,
+        "right": 151,
+        "wrong_fill": 43,
+        "wrong_fill_on_unanswerable": 43,
+        "unanswerable": 1852,
+        "precision": 0.7783505154639175,
+        "coverage": 0.9207317073170732
+      },
+      "0.96": {
+        "decisions": 2016,
+        "answerable": 164,
+        "accepted": 193,
+        "right": 151,
+        "wrong_fill": 42,
+        "wrong_fill_on_unanswerable": 42,
+        "unanswerable": 1852,
+        "precision": 0.7823834196891192,
+        "coverage": 0.9207317073170732
+      },
+      "0.97": {
+        "decisions": 2016,
+        "answerable": 164,
+        "accepted": 191,
+        "right": 149,
+        "wrong_fill": 42,
+        "wrong_fill_on_unanswerable": 42,
+        "unanswerable": 1852,
+        "precision": 0.7801047120418848,
+        "coverage": 0.9085365853658537
+      },
+      "0.975": {
+        "decisions": 2016,
+        "answerable": 164,
+        "accepted": 191,
+        "right": 149,
+        "wrong_fill": 42,
+        "wrong_fill_on_unanswerable": 42,
+        "unanswerable": 1852,
+        "precision": 0.7801047120418848,
+        "coverage": 0.9085365853658537
+      },
+      "0.98": {
+        "decisions": 2016,
+        "answerable": 164,
+        "accepted": 189,
+        "right": 147,
+        "wrong_fill": 42,
+        "wrong_fill_on_unanswerable": 42,
+        "unanswerable": 1852,
+        "precision": 0.7777777777777778,
+        "coverage": 0.8963414634146342
+      },
+      "0.985": {
+        "decisions": 2016,
+        "answerable": 164,
+        "accepted": 187,
+        "right": 145,
+        "wrong_fill": 42,
+        "wrong_fill_on_unanswerable": 42,
+        "unanswerable": 1852,
+        "precision": 0.7754010695187166,
+        "coverage": 0.8841463414634146
+      },
+      "0.99": {
+        "decisions": 2016,
+        "answerable": 164,
+        "accepted": 184,
+        "right": 144,
+        "wrong_fill": 40,
+        "wrong_fill_on_unanswerable": 40,
+        "unanswerable": 1852,
+        "precision": 0.782608695652174,
+        "coverage": 0.8780487804878049
+      },
+      "0.992": {
+        "decisions": 2016,
+        "answerable": 164,
+        "accepted": 182,
+        "right": 142,
+        "wrong_fill": 40,
+        "wrong_fill_on_unanswerable": 40,
+        "unanswerable": 1852,
+        "precision": 0.7802197802197802,
+        "coverage": 0.8658536585365854
+      },
+      "0.995": {
+        "decisions": 2016,
+        "answerable": 164,
+        "accepted": 179,
+        "right": 139,
+        "wrong_fill": 40,
+        "wrong_fill_on_unanswerable": 40,
+        "unanswerable": 1852,
+        "precision": 0.776536312849162,
+        "coverage": 0.8475609756097561
+      },
+      "0.996": {
+        "decisions": 2016,
+        "answerable": 164,
+        "accepted": 176,
+        "right": 136,
+        "wrong_fill": 40,
+        "wrong_fill_on_unanswerable": 40,
+        "unanswerable": 1852,
+        "precision": 0.7727272727272727,
+        "coverage": 0.8292682926829268
+      },
+      "0.998": {
+        "decisions": 2016,
+        "answerable": 164,
+        "accepted": 153,
+        "right": 115,
+        "wrong_fill": 38,
+        "wrong_fill_on_unanswerable": 38,
+        "unanswerable": 1852,
+        "precision": 0.7516339869281046,
+        "coverage": 0.7012195121951219
+      },
+      "0.999": {
+        "decisions": 2016,
+        "answerable": 164,
+        "accepted": 131,
+        "right": 94,
+        "wrong_fill": 37,
+        "wrong_fill_on_unanswerable": 37,
+        "unanswerable": 1852,
+        "precision": 0.7175572519083969,
+        "coverage": 0.573170731707317
+      }
+    },
+    "match": {
+      "0.5": {
+        "decisions": 151,
+        "answerable": 70,
+        "accepted": 81,
+        "right": 66,
+        "wrong_fill": 15,
+        "wrong_fill_on_unanswerable": 15,
+        "unanswerable": 81,
+        "precision": 0.8148148148148148,
+        "coverage": 0.9428571428571428
+      },
+      "0.7": {
+        "decisions": 151,
+        "answerable": 70,
+        "accepted": 79,
+        "right": 66,
+        "wrong_fill": 13,
+        "wrong_fill_on_unanswerable": 13,
+        "unanswerable": 81,
+        "precision": 0.8354430379746836,
+        "coverage": 0.9428571428571428
+      },
+      "0.8": {
+        "decisions": 151,
+        "answerable": 70,
+        "accepted": 79,
+        "right": 66,
+        "wrong_fill": 13,
+        "wrong_fill_on_unanswerable": 13,
+        "unanswerable": 81,
+        "precision": 0.8354430379746836,
+        "coverage": 0.9428571428571428
+      },
+      "0.9": {
+        "decisions": 151,
+        "answerable": 70,
+        "accepted": 78,
+        "right": 66,
+        "wrong_fill": 12,
+        "wrong_fill_on_unanswerable": 12,
+        "unanswerable": 81,
+        "precision": 0.8461538461538461,
+        "coverage": 0.9428571428571428
+      },
+      "0.95": {
+        "decisions": 151,
+        "answerable": 70,
+        "accepted": 76,
+        "right": 66,
+        "wrong_fill": 10,
+        "wrong_fill_on_unanswerable": 10,
+        "unanswerable": 81,
+        "precision": 0.868421052631579,
+        "coverage": 0.9428571428571428
+      },
+      "0.96": {
+        "decisions": 151,
+        "answerable": 70,
+        "accepted": 69,
+        "right": 61,
+        "wrong_fill": 8,
+        "wrong_fill_on_unanswerable": 8,
+        "unanswerable": 81,
+        "precision": 0.8840579710144928,
+        "coverage": 0.8714285714285714
+      },
+      "0.97": {
+        "decisions": 151,
+        "answerable": 70,
+        "accepted": 68,
+        "right": 61,
+        "wrong_fill": 7,
+        "wrong_fill_on_unanswerable": 7,
+        "unanswerable": 81,
+        "precision": 0.8970588235294118,
+        "coverage": 0.8714285714285714
+      },
+      "0.975": {
+        "decisions": 151,
+        "answerable": 70,
+        "accepted": 66,
+        "right": 60,
+        "wrong_fill": 6,
+        "wrong_fill_on_unanswerable": 6,
+        "unanswerable": 81,
+        "precision": 0.9090909090909091,
+        "coverage": 0.8571428571428571
+      },
+      "0.98": {
+        "decisions": 151,
+        "answerable": 70,
+        "accepted": 65,
+        "right": 59,
+        "wrong_fill": 6,
+        "wrong_fill_on_unanswerable": 6,
+        "unanswerable": 81,
+        "precision": 0.9076923076923077,
+        "coverage": 0.8428571428571429
+      },
+      "0.985": {
+        "decisions": 151,
+        "answerable": 70,
+        "accepted": 64,
+        "right": 58,
+        "wrong_fill": 6,
+        "wrong_fill_on_unanswerable": 6,
+        "unanswerable": 81,
+        "precision": 0.90625,
+        "coverage": 0.8285714285714286
+      },
+      "0.99": {
+        "decisions": 151,
+        "answerable": 70,
+        "accepted": 56,
+        "right": 50,
+        "wrong_fill": 6,
+        "wrong_fill_on_unanswerable": 6,
+        "unanswerable": 81,
+        "precision": 0.8928571428571429,
+        "coverage": 0.7142857142857143
+      },
+      "0.992": {
+        "decisions": 151,
+        "answerable": 70,
+        "accepted": 55,
+        "right": 50,
+        "wrong_fill": 5,
+        "wrong_fill_on_unanswerable": 5,
+        "unanswerable": 81,
+        "precision": 0.9090909090909091,
+        "coverage": 0.7142857142857143
+      },
+      "0.995": {
+        "decisions": 151,
+        "answerable": 70,
+        "accepted": 41,
+        "right": 37,
+        "wrong_fill": 4,
+        "wrong_fill_on_unanswerable": 4,
+        "unanswerable": 81,
+        "precision": 0.9024390243902439,
+        "coverage": 0.5285714285714286
+      },
+      "0.996": {
+        "decisions": 151,
+        "answerable": 70,
+        "accepted": 39,
+        "right": 35,
+        "wrong_fill": 4,
+        "wrong_fill_on_unanswerable": 4,
+        "unanswerable": 81,
+        "precision": 0.8974358974358975,
+        "coverage": 0.5
+      },
+      "0.998": {
+        "decisions": 151,
+        "answerable": 70,
+        "accepted": 30,
+        "right": 27,
+        "wrong_fill": 3,
+        "wrong_fill_on_unanswerable": 3,
+        "unanswerable": 81,
+        "precision": 0.9,
+        "coverage": 0.38571428571428573
+      },
+      "0.999": {
+        "decisions": 151,
+        "answerable": 70,
+        "accepted": 17,
+        "right": 16,
+        "wrong_fill": 1,
+        "wrong_fill_on_unanswerable": 1,
+        "unanswerable": 81,
+        "precision": 0.9411764705882353,
+        "coverage": 0.22857142857142856
+      }
+    }
+  },
+  "probs_from": "artifacts/round4/probs/round4-3epoch.probs.json"
+}

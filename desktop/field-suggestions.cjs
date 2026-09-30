@@ -19,9 +19,10 @@ function createFieldSuggestions({ laya, now = Date.now } = {}) {
         found(field, best >= 0 ? MATCH_CANDIDATES[best] : null);
       }
     },
-    // choice-v1 (#65): every field offered for the box's type in one pass, CHOICE_BATCH boxes per
-    // request. A box whose type has none on offer (a date: date of birth never is) isn't asked.
-    'choice-v1': async (fields, bar, more, found) => {
+    // choice-v2 (#65): every field offered for the box's type in one pass, with the box's label and
+    // type, CHOICE_BATCH boxes per request. A box whose type has none on offer (a date: date of
+    // birth never is) isn't asked.
+    'choice-v2': async (fields, bar, more, found) => {
       const offered = field => {
         const keys = CHOICE.MATCH_SETS[field.type];
         if (!keys) throw new TypeError(`A ${field.type} field isn’t a text box Laya matches.`);
@@ -31,7 +32,7 @@ function createFieldSuggestions({ laya, now = Date.now } = {}) {
       for (let start = 0; start < asked.length; start += CHOICE_BATCH) {
         if (!more()) return;
         const chunk = asked.slice(start, start + CHOICE_BATCH);
-        const scores = await scoreChoices(laya, chunk.map(field => ({ state: CHOICE.matchState(field.label), question: CHOICE.matchQuestion(offered(field)) })));
+        const scores = await scoreChoices(laya, chunk.map(field => ({ state: CHOICE.matchState(field.label, field.type), question: CHOICE.matchQuestion(offered(field)) })));
         if (!more()) return;
         chunk.forEach((field, index) => {
           const best = pick(scores[index], bar);

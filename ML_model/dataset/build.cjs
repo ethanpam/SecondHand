@@ -3,7 +3,8 @@
 // Every label is computed here by code from the question's answer rule and the saved
 // answers, never guessed. Two prompt formats (desktop/laya-model.cjs MODEL_FORMATS):
 // - noul-v1: one fixed yes/no question about one candidate answer at a time;
-// - choice-v1 (#65): one `choice` question per form question, scoring all its options in one pass.
+// - choice-v2 (#65): one `choice` question per form question, scoring all its options in one pass;
+//   a text box is described by its label and its type.
 // Either way, the abstain candidate is correct when the facts don't say.
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -21,11 +22,12 @@ const MATCH_KEYS = Object.freeze(['firstName', 'middleName', 'lastName', 'fullNa
   'monthlyUtilities', 'assetsOnHand', 'monthlyMedicalExpenses']);
 const matchCandidate = key => `Saved answer: ${KEY_ABOUT[key]}`;
 
-// choice-v1. Answering: the facts and the form question are the state; the form's options plus
-// ABSTAIN are the choices. Matching: the box's label is the state; the saved fields offered for
-// its type plus MATCH_ABSTAIN are the choices.
+// choice-v2. Answering: the facts and the form question are the state; the form's options plus
+// ABSTAIN are the choices. Matching: the box's label and its type (as BOX_TYPES words) are the
+// state; the saved fields offered for its type plus MATCH_ABSTAIN are the choices.
 const CHOICE_ANSWER_INSTRUCTIONS = 'Given the facts about the household, which option is the correct answer to the form question?';
-const CHOICE_MATCH_INSTRUCTIONS = 'Which saved answer belongs in the form box with this label?';
+const CHOICE_MATCH_INSTRUCTIONS = 'Which saved answer belongs in this form box, given its label and type?';
+const BOX_TYPES = Object.freeze({ text: 'text', textarea: 'long text', number: 'number', date: 'date', email: 'email', tel: 'phone' });
 const MATCH_ABSTAIN = 'None of these';
 // Saved fields only a confident rule may place are never offered, so a box asking for one is "None of these".
 const OFFERED = MATCH_KEYS.filter(key => !['birthDate', 'totalMonthlyIncome', 'annualIncome', 'assetsOnHand', 'monthlyMedicalExpenses'].includes(key));
@@ -44,11 +46,13 @@ const MATCH_GROUPS = Object.freeze({
   costs: ['monthlyRent', 'monthlyUtilities'],
   numbers: MATCH_SETS.number
 });
-const FORMATS = ['noul-v1', 'choice-v1'];
+const FORMATS = ['noul-v1', 'choice-v2'];
 const choiceAnswerQuestion = options => ({ type: 'choice', instructions: CHOICE_ANSWER_INSTRUCTIONS, criteria: [...options, ABSTAIN] });
 const choiceMatchQuestion = keys => ({ type: 'choice', instructions: CHOICE_MATCH_INSTRUCTIONS, criteria: [...keys.map(key => KEY_ABOUT[key]), MATCH_ABSTAIN] });
 // A LayaStudio question id for a set of choices: questions with the same choices share it.
 const choiceQuestionId = (task, question) => `${task}-${crypto.createHash('sha256').update(JSON.stringify(question)).digest('hex').slice(0, 16)}`;
+// The saved answers behind applyingFor's programs.
+const PROGRAM_FIELDS = Object.freeze({ snap: 'programSnap', fip: 'programFip', medicaid: 'programMedicaid' });
 const NUMBER_WORDS = { none: 0, zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
 
 const present = value => typeof value === 'string' && value.trim() !== '';
@@ -138,6 +142,11 @@ function decide(rule, profile, age) {
     case 'applyingSnap': return yes(profile, 'programSnap');
     case 'applyingFip': return yes(profile, 'programFip');
     case 'applyingMedicaid': return yes(profile, 'programMedicaid');
+    case 'applyingFor': {
+      const answers = rule.programs.map(program => yes(profile, PROGRAM_FIELDS[program]));
+      if (answers.includes(true)) return true;
+      return answers.every(answer => answer === false) ? false : null;
+    }
     default: return undefined;
   }
 }
@@ -177,7 +186,7 @@ function correctOption(question, profile, { today } = {}) {
 const unit = text => crypto.createHash('sha256').update(text).digest().readUInt32BE(0) / 2 ** 32;
 // Where a form's decisions come from: its URL, or its file for training-only rewordings.
 const formKey = file => file.source.kind === 'synthetic' ? `synthetic:${file.file}` : file.source.url;
-const formSplit = file => file.source.kind === 'synthetic' ? 'train' : file.source.holdout ? 'test' : splitFor(file.source.url);
+const formSplit = file => file.source.kind === 'synthetic' ? 'train' : file.source.holdout || file.source.final ? 'test' : splitFor(file.source.url);
 // Test forms are held out whole (about 20%), so the model is judged on forms it never saw.
 function splitFor(url) {
   return unit(url) < 0.8 ? 'train' : 'test';
@@ -221,7 +230,7 @@ function buildRows(bank, households, options = {}) {
     ({ state: { facts: sheets[index], question: question.label, candidate }, answers: { correct: candidate === answer }, split, group })));
 }
 
-// choice-v1: one row per choice question and household, and the LayaStudio questions they use.
+// choice-v2: one row per choice question and household, and the LayaStudio questions they use.
 function buildChoiceRows(bank, households, options = {}) {
   const sheets = households.map(profile => factsText(buildFacts(profile, { today: options.today })));
   const questions = {};
@@ -251,7 +260,7 @@ function buildMatchRows(bank) {
   return rows;
 }
 
-// choice-v1: one row per text box whose type has saved fields on offer. Training boxes are also asked
+// choice-v2: one row per text box whose type has saved fields on offer. Training boxes are also asked
 // with each of MATCH_GROUPS (decision `<box>~<group>`); validation and test boxes only as the app asks.
 function buildChoiceMatchRows(bank) {
   const rows = [];
@@ -261,7 +270,7 @@ function buildChoiceMatchRows(bank) {
     const id = choiceQuestionId('match', definition);
     questions[id] = definition;
     const answer = question.rule.name === 'field' && keys.includes(question.rule.key) ? KEY_ABOUT[question.rule.key] : MATCH_ABSTAIN;
-    rows.push({ state: { question: question.label }, answers: { [id]: answer }, split, group });
+    rows.push({ state: { question: question.label, type: BOX_TYPES[question.type] }, answers: { [id]: answer }, split, group });
   };
   for (const file of bank) {
     const split = formSplit(file);
@@ -288,18 +297,16 @@ function summarize(rows) {
     bySplit: Object.fromEntries(['train', 'val', 'test'].map(split => [split, rows.filter(row => row.split === split).length])) };
 }
 
-function writeDataset(outDir, bank, households, options = {}) {
+// The rows of `bank` in the dataset `format`: { answer, match, questions }.
+function datasetRows(bank, households, options) {
   const { format } = options;
   if (!FORMATS.includes(format)) throw new Error(`The dataset format must be one of ${FORMATS.join(', ')}.`);
-  let answer, match, questions;
-  if (format === 'noul-v1') {
-    answer = buildRows(bank, households, options);
-    match = buildMatchRows(bank);
-    questions = { correct: DECISION };
-  } else {
-    const answering = buildChoiceRows(bank, households, options), matching = buildChoiceMatchRows(bank);
-    [answer, match, questions] = [answering.rows, matching.rows, { ...answering.questions, ...matching.questions }];
-  }
+  if (format === 'noul-v1') return { answer: buildRows(bank, households, options), match: buildMatchRows(bank), questions: { correct: DECISION } };
+  const answering = buildChoiceRows(bank, households, options), matching = buildChoiceMatchRows(bank);
+  return { answer: answering.rows, match: matching.rows, questions: { ...answering.questions, ...matching.questions } };
+}
+
+function write(outDir, { answer, match, questions }, format) {
   answer = answer.map(row => ({ ...row, task: 'answer' }));
   match = match.map(row => ({ ...row, task: 'match' }));
   const rows = [...answer, ...match];
@@ -310,16 +317,35 @@ function writeDataset(outDir, bank, households, options = {}) {
   return { format, ...summarize(rows), tasks: { answer: summarize(answer), match: summarize(match) } };
 }
 
+// The training dataset: real forms and synthetic rewordings, never a final holdout form.
+function writeDataset(outDir, bank, households, options = {}) {
+  const final = bank.find(file => file.source.final);
+  if (final) throw new Error(`${final.file || final.source.url}: final holdout forms never go in the training dataset.`);
+  return write(outDir, datasetRows(bank, households, options), options.format);
+}
+
+// The final holdout's evaluation-only dataset: every row is a test row.
+function writeFinalDataset(outDir, finalBank, households, options = {}) {
+  const plain = finalBank.find(file => file.source.final !== true);
+  if (plain) throw new Error(`${plain.file || plain.source.url}: the final dataset only takes final holdout forms.`);
+  const rows = datasetRows(finalBank, households, options);
+  if ([...rows.answer, ...rows.match].some(row => row.split !== 'test')) throw new Error('Every final holdout row must be a test row.');
+  return write(outDir, rows, options.format);
+}
+
 if (require.main === module) {
   const { loadQuestionBank, loadSyntheticBank } = require('../question-bank.cjs');
   const { generateHouseholds } = require('../profiles/generate.cjs');
   const arg = (name, fallback) => { const index = process.argv.indexOf(`--${name}`); return index > 0 ? process.argv[index + 1] : fallback; };
   const today = arg('today', new Date().toISOString().slice(0, 10));
   const households = generateHouseholds({ count: Number(arg('households', '2000')), seed: Number(arg('seed', '7')), today });
-  const summary = writeDataset(path.resolve(arg('out', path.join(__dirname, 'out'))), [...loadQuestionBank(), ...loadSyntheticBank()], households,
-    { today, perQuestion: Number(arg('per-question', '24')), format: arg('format') });
+  const options = { today, perQuestion: Number(arg('per-question', '24')), format: arg('format') };
+  // --final builds the final holdout's evaluation-only dataset; nothing else ever reads questions-final/.
+  const summary = process.argv.includes('--final') ?
+    writeFinalDataset(path.resolve(arg('out', path.join(__dirname, 'out-final'))), require('../question-bank.cjs').loadFinalBank(), households, options) :
+    writeDataset(path.resolve(arg('out', path.join(__dirname, 'out'))), [...loadQuestionBank(), ...loadSyntheticBank()], households, options);
   console.log(JSON.stringify(summary, null, 2));
 }
 
-module.exports = { correctOption, buildRows, buildMatchRows, buildChoiceRows, buildChoiceMatchRows, splitFor, writeDataset, range, ABSTAIN, DECISION, MATCH_KEYS,
-  CHOICE_ANSWER_INSTRUCTIONS, CHOICE_MATCH_INSTRUCTIONS, MATCH_ABSTAIN, MATCH_SETS, MATCH_GROUPS, FORMATS };
+module.exports = { correctOption, buildRows, buildMatchRows, buildChoiceRows, buildChoiceMatchRows, splitFor, writeDataset, writeFinalDataset, range, ABSTAIN, DECISION, MATCH_KEYS,
+  CHOICE_ANSWER_INSTRUCTIONS, CHOICE_MATCH_INSTRUCTIONS, BOX_TYPES, MATCH_ABSTAIN, MATCH_SETS, MATCH_GROUPS, FORMATS };

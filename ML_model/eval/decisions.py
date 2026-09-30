@@ -1,7 +1,7 @@
 """Decision-level evaluation of a trained Laya model on SecondHand's held-out forms.
 
 A form question is a decision over several candidates: one row per candidate in a noul-v1
-dataset, or one choice row listing every candidate in a choice-v1 dataset (#65). This regroups
+dataset, or one choice row listing every candidate in a choice-v2 dataset (#65). This regroups
 them: the model picks its best candidate, answers only when that candidate beats "none of
 these" and clears the confidence bar, and otherwise leaves the question to the applicant.
 What matters is how often an answer it fills is right (precision), how many answerable
@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ABSTAIN = "None of these, or the facts don’t say"
 MATCH_ABSTAIN = "None of these"
 ABSTAINS = (ABSTAIN, MATCH_ABSTAIN)
-THRESHOLDS = [0.5, 0.7, 0.8, 0.9, 0.95, 0.98, 0.99, 0.992, 0.995, 0.996]
+THRESHOLDS = [0.5, 0.7, 0.8, 0.9, 0.95, 0.96, 0.97, 0.975, 0.98, 0.985, 0.99, 0.992, 0.995, 0.996, 0.998, 0.999]
 
 
 def training_precision(model_dir):
@@ -52,18 +52,18 @@ def holdout_forms(questions_dir):
 
 
 def dataset_format(questions):
-    """noul-v1 (one yes/no question about each candidate) or choice-v1 (one choice question per decision)."""
+    """noul-v1 (one yes/no question about each candidate) or choice-v2 (one choice question per decision)."""
     types = {definition["type"] for definition in questions.values()}
     if types == {"noul"} and list(questions) == ["correct"]:
         return "noul-v1"
     if types == {"choice"}:
-        return "choice-v1"
+        return "choice-v2"
     raise ValueError(f"Unknown dataset format: questions {sorted(questions)[:5]} of types {sorted(types)}")
 
 
 def candidates(row, questions):
     """A decision's candidates in the order the model sees them, the abstain choice last. A noul-v1
-    row is one candidate already; a choice-v1 row stands for every choice of its question, and
+    row is one candidate already; a choice-v2 row stands for every choice of its question, and
     `source` keeps what the model is asked."""
     if "candidate" in row["state"]:
         return [row]
@@ -81,6 +81,21 @@ def candidates(row, questions):
         }
         for label in choices
     ]
+
+
+def final_forms(final_dir):
+    """URLs of the final holdout's forms (questions-final/, each marked source.final)."""
+    urls = set()
+    for path in sorted(Path(final_dir).iterdir()):
+        if path.suffix != ".json":
+            continue
+        source = json.loads(path.read_text())["source"]
+        if source.get("final") is not True:
+            raise ValueError(f"{path.name} is in the final holdout's folder but isn't marked final")
+        urls.add(source["url"])
+    if not urls:
+        raise ValueError(f"No final holdout form in {final_dir}")
+    return urls
 
 
 def probabilities(decisions):
@@ -149,7 +164,7 @@ def load(model_dir):
 
 
 def score(decisions, model_dir, questions):
-    """Each candidate's probability: one prompt per noul-v1 row, one per choice-v1 decision."""
+    """Each candidate's probability: one prompt per noul-v1 row, one per choice-v2 decision."""
     agent = load(model_dir)
     started, done, report = time.time(), 0, 500
     for rows in decisions.values():
@@ -192,11 +207,12 @@ def metrics(decisions, threshold):
     return result
 
 
-FORMS = ("all", "holdout", "not-holdout")
+FORMS = ("all", "holdout", "not-holdout", "final")
 
 
-def load_decisions(source, questions, split, forms="all", limit=0):
-    """The split's decisions by task. `forms`: all of them, only the forms marked holdout, or every other form."""
+def load_decisions(source, questions, split, forms="all", limit=0, final_dir=ROOT / "questions-final"):
+    """The split's decisions by task. `forms`: all of them, only the forms marked holdout, every other
+    form, or only the final holdout's forms (from a dataset built with build.cjs --final)."""
     if forms not in FORMS:
         raise ValueError(f"forms must be one of {', '.join(FORMS)}, not {forms!r}")
     decisions = {"answer": defaultdict(list), "match": defaultdict(list)}
@@ -205,7 +221,12 @@ def load_decisions(source, questions, split, forms="all", limit=0):
             row = json.loads(line)
             if row["split"] == split:
                 decisions[row["task"]][row["decision"]].extend(candidates(row, questions))
-    if forms != "all":
+    if forms == "final":
+        urls = final_forms(final_dir)
+        decisions = {task: {key: rows for key, rows in groups.items() if key.split("#")[0] in urls} for task, groups in decisions.items()}
+        if not any(decisions.values()):
+            raise ValueError(f"{source} has no decisions from the final holdout's forms")
+    elif forms != "all":
         urls = holdout_forms(ROOT / "questions")
         keep = (lambda url: url in urls) if forms == "holdout" else (lambda url: url not in urls)
         decisions = {task: {key: rows for key, rows in groups.items() if keep(key.split("#")[0])} for task, groups in decisions.items()}
@@ -226,6 +247,7 @@ def main():
     held = parser.add_mutually_exclusive_group()
     held.add_argument("--holdout", action="store_true", help="evaluate only the forms marked holdout in questions/")
     held.add_argument("--exclude-holdout", action="store_true", help="evaluate every form but those marked holdout (to choose thresholds on)")
+    held.add_argument("--final", action="store_true", help="evaluate the final holdout's forms (a dataset built with build.cjs --final)")
     parser.add_argument("--limit", type=int, default=0, help="evaluate this many decisions per task (0 = all)")
     parser.add_argument("--report", help="write the JSON report here")
     parser.add_argument("--errors", help="write every wrong fill at --error-threshold here (JSON lines)")
@@ -247,7 +269,7 @@ def main():
 
     source = Path(args.dataset)
     questions = json.loads((source / "questions.json").read_text())
-    forms = "holdout" if args.holdout else "not-holdout" if args.exclude_holdout else "all"
+    forms = "holdout" if args.holdout else "not-holdout" if args.exclude_holdout else "final" if args.final else "all"
     decisions = load_decisions(source, questions, args.split, forms, args.limit)
     if args.probs:
         apply_probabilities(decisions, json.loads(Path(args.probs).read_text()))

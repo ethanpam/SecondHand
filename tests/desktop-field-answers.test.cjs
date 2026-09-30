@@ -136,12 +136,12 @@ test('Laya not ready fails loudly with its code; a timeout or the click’s budg
   assert.throws(() => createFieldAnswers({}), /Laya/);
 });
 
-// A stand-in for desktop/laya.cjs running a choice-v1 model. `choose(state, choices)` plays the model: one probability per choice.
+// A stand-in for desktop/laya.cjs running a choice-v2 model. `choose(state, choices)` plays the model: one probability per choice.
 function choiceLaya(choose = (_, choices) => choices.map((_, index) => index === choices.length - 1 ? 0.98 : 0.02 / (choices.length - 1))) {
   const batches = [];
   return {
     batches,
-    format: async () => 'choice-v1',
+    format: async () => 'choice-v2',
     status: async () => ({ state: 'ready', enabled: true, sizeBytes: 1 }),
     decide: async () => { throw new Error('field answers score in batches'); },
     decideBatch: async (items, options) => {
@@ -157,7 +157,7 @@ function choiceLaya(choose = (_, choices) => choices.map((_, index) => index ===
 // Probabilities that put `p` on `option` and spread the rest over the other choices.
 const sure = (choices, option, p) => choices.map(label => label === option ? p : (1 - p) / (choices.length - 1));
 
-test('choice-v1: every option of a question is scored in one pass, eight questions to a request, with the facts and the question as the state', async () => {
+test('choice-v2: every option of a question is scored in one pass, eight questions to a request, with the facts and the question as the state', async () => {
   const questions = Array.from({ length: 10 }, (_, index) => question(`q${index}`, index === 3 ? 'Do you live in Polk County?' : `Do you have pet number ${index}?`, index === 3 ? ['YES', 'NO'] : ['Yes', 'No']));
   const laya = choiceLaya((state, choices) => state.question === 'Do you live in Polk County?' && state.facts.includes('Polk County') ? sure(choices, 'YES', 0.97) : sure(choices, ABSTAIN, 0.97));
   const { answers, sensitive } = await answerer(laya).answer({ questions, profile, budgetMs });
@@ -166,13 +166,13 @@ test('choice-v1: every option of a question is scored in one pass, eight questio
   assert.deepEqual(laya.batches.map(({ items }) => items.length), [8, 2, 8, 1], 'the first pass in two requests; the nine still open again with every fact');
   assert.deepEqual(laya.batches[0].items[3], { state: CHOICE.answerState(everyday, 'Do you live in Polk County?'), questions: { choice: CHOICE.answerQuestion(['YES', 'NO']) } });
   assert.deepEqual(laya.batches[0].items[3].questions.choice.criteria, ['YES', 'NO', ABSTAIN]);
-  assert.ok(laya.batches.every(({ options }) => options.format === 'choice-v1'), 'the prompts are choice-v1’s, so only a choice-v1 model may answer them');
+  assert.ok(laya.batches.every(({ options }) => options.format === 'choice-v2'), 'the prompts are choice-v2’s, so only a choice-v2 model may answer them');
   assert.ok(laya.batches.slice(2).every(({ items }) => items.every(item => item.state.facts === everything)));
 });
 
-test('choice-v1: the bar, "the facts don’t say", and a close runner-up each leave the question to the applicant', async () => {
+test('choice-v2: the bar, "the facts don’t say", and a close runner-up each leave the question to the applicant', async () => {
   const household = { householdSize: '1', householdVeteran: 'no' };
-  const bar = BARS['choice-v1'].answer;
+  const bar = BARS['choice-v2'].answer;
   const vet = question('vet', 'Is anyone in your household a veteran?');
   const cases = [
     [choices => sure(choices, 'No', bar - 0.01), {}, 'below the bar'],
@@ -188,7 +188,7 @@ test('choice-v1: the bar, "the facts don’t say", and a close runner-up each le
   assert.deepEqual(dropdown, { size: '1 person' });
 });
 
-test('choice-v1: answers needing a sensitive fact are marked; a question whose option is the abstain choice itself is never asked', async () => {
+test('choice-v2: answers needing a sensitive fact are marked; a question whose option is the abstain choice itself is never asked', async () => {
   const laya = choiceLaya((state, choices) => {
     if (state.question === 'Is anyone in your household 60 or older?') return sure(choices, state.facts.includes('41 years old') ? 'No' : ABSTAIN, 0.97);
     if (state.question === 'Is anyone in your household a veteran?') return sure(choices, 'No', 0.98);
@@ -203,7 +203,7 @@ test('choice-v1: answers needing a sensitive fact are marked; a question whose o
   assert.equal(laya.batches.flatMap(({ items }) => items).some(item => item.state.question === 'Pick one'), false, 'its choices would be ambiguous');
 });
 
-test('choice-v1: a timeout keeps the requests already decided; a request past the deadline is dropped; a format without bars fails loudly', async () => {
+test('choice-v2: a timeout keeps the requests already decided; a request past the deadline is dropped; a format without bars fails loudly', async () => {
   const questions = Array.from({ length: 20 }, (_, index) => question(`q${index}`, `Is anyone a veteran ${index}?`));
   const vet = (_, choices) => sure(choices, 'No', 0.98);
   let calls = 0;

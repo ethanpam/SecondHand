@@ -98,12 +98,12 @@ test('Laya not ready fails the whole request with its code; a timeout or the thr
   assert.throws(() => createFieldSuggestions({}), /Laya/);
 });
 
-// A stand-in for desktop/laya.cjs running a choice-v1 model. `choose(label, choices)` plays the model: one probability per choice.
+// A stand-in for desktop/laya.cjs running a choice-v2 model. `choose(label, choices)` plays the model: one probability per choice.
 function choiceLaya(choose = (_, choices) => choices.map((_, index) => index === choices.length - 1 ? 0.99 : 0.01 / (choices.length - 1))) {
   const batches = [];
   return {
     batches,
-    format: async () => 'choice-v1',
+    format: async () => 'choice-v2',
     status: async () => ({ state: 'ready', enabled: true, sizeBytes: 1 }),
     decide: async () => { throw new Error('field suggestions score in batches'); },
     decideBatch: async (items, options) => {
@@ -118,25 +118,28 @@ function choiceLaya(choose = (_, choices) => choices.map((_, index) => index ===
 }
 // Probabilities that put `p` on the choice describing `key` (null: "None of these") and spread the rest.
 const sure = (choices, key, p) => choices.map(label => label === (key ? KEY_ABOUT[key] : CHOICE.MATCH_ABSTAIN) ? p : (1 - p) / (choices.length - 1));
+// A match the model is sure of: halfway between choice-v2's bar and certainty.
+const SURE = (1 + BARS['choice-v2'].match) / 2;
 const MEANS = { 'Where can we reach you by email?': 'email', 'Best number': 'phone', 'Your full name': 'fullName', 'People in your home': 'householdSize', 'Date of birth': null };
 
-test('choice-v1: each text box is one pass over the saved fields offered for its type, eight boxes to a request; a date box is never asked', async () => {
+test('choice-v2: each text box is one pass over the saved fields offered for its type, eight boxes to a request; a date box is never asked', async () => {
   const fields = [field('a', 'Where can we reach you by email?', 'email'), field('b', 'Best number', 'tel'), field('c', 'Your full name'), field('d', 'People in your home', 'number'),
     field('e', 'Date of birth', 'date'), ...Array.from({ length: 5 }, (_, index) => field(`x${index}`, `Favorite color ${index}`, 'textarea'))];
-  const laya = choiceLaya((label, choices) => sure(choices, MEANS[label] ?? null, 0.99));
+  const laya = choiceLaya((label, choices) => sure(choices, MEANS[label] ?? null, SURE));
   const suggestions = await createFieldSuggestions({ laya }).suggest(fields, BUDGET);
   assert.deepEqual(suggestions, { a: 'email', b: 'phone', c: 'fullName', d: 'householdSize' });
   assert.deepEqual(laya.batches.map(({ items }) => items.length), [8, 1]);
   assert.deepEqual(laya.batches[0].items.slice(0, 4), [['Where can we reach you by email?', 'email'], ['Best number', 'tel'], ['Your full name', 'text'], ['People in your home', 'number']]
-    .map(([label, type]) => ({ state: CHOICE.matchState(label), questions: { choice: CHOICE.matchQuestion(CHOICE.MATCH_SETS[type]) } })));
+    .map(([label, type]) => ({ state: CHOICE.matchState(label, type), questions: { choice: CHOICE.matchQuestion(CHOICE.MATCH_SETS[type]) } })));
+  assert.deepEqual(laya.batches[0].items[1].state, { question: 'Best number', type: 'phone' }, 'the model is told what kind of box it is');
   assert.deepEqual(laya.batches[0].items[1].questions.choice.criteria, [KEY_ABOUT.phone, CHOICE.MATCH_ABSTAIN]);
-  assert.ok(laya.batches.every(({ options }) => options.format === 'choice-v1'));
+  assert.ok(laya.batches.every(({ options }) => options.format === 'choice-v2'));
   const offered = laya.batches.flatMap(({ items }) => items.flatMap(item => item.questions.choice.criteria));
   for (const key of NEVER_SUGGESTED) assert.equal(offered.includes(KEY_ABOUT[key]), false, key);
 });
 
-test('choice-v1: the match bar, "None of these", and a close runner-up each leave the box to the applicant', async () => {
-  const bar = BARS['choice-v1'].match;
+test('choice-v2: the match bar, "None of these", and a close runner-up each leave the box to the applicant', async () => {
+  const bar = BARS['choice-v2'].match;
   const box = [field('z', 'Postal code', 'text')];
   const cases = [
     [choices => sure(choices, 'zip', bar - 0.005), {}, 'below the bar'],
@@ -150,9 +153,9 @@ test('choice-v1: the match bar, "None of these", and a close runner-up each leav
   assert.deepEqual(unsafe.batches, []);
 });
 
-test('choice-v1: a timeout keeps the requests already decided; a request past the deadline is dropped; an unknown format fails loudly', async () => {
+test('choice-v2: a timeout keeps the requests already decided; a request past the deadline is dropped; an unknown format fails loudly', async () => {
   const fields = Array.from({ length: 12 }, (_, index) => field(`e${index}`, 'Where can we reach you by email?', 'email'));
-  const email = (label, choices) => sure(choices, 'email', 0.99);
+  const email = (label, choices) => sure(choices, 'email', SURE);
   let calls = 0;
   const slow = choiceLaya(email);
   const batch = slow.decideBatch;

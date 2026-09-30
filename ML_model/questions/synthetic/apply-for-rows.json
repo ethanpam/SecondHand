@@ -1,0 +1,19 @@
+{
+  "source": { "title": "Rewordings: the applicant's own row in a household table, asking whether this person is applying", "kind": "synthetic", "retrieved": "2026-09-29" },
+  "questions": [
+    { "id": "r1", "label": "Applying?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "applyingFor", "programs": ["snap", "fip"] }, "note": "Self row of a food and cash assistance application's household table." },
+    { "id": "r2", "label": "Is this person applying? (you)", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "applyingFor", "programs": ["snap", "fip"] } },
+    { "id": "r3", "label": "Person 1 (yourself): requesting benefits?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "applyingFor", "programs": ["snap", "fip"] } },
+    { "id": "r4", "label": "Row 1, you: applying for assistance", "type": "select", "options": ["Yes", "No"], "rule": { "name": "applyingFor", "programs": ["snap", "fip"] } },
+    { "id": "r5", "label": "Applicant row: wants benefits?", "type": "radio", "options": ["YES", "NO"], "rule": { "name": "applyingFor", "programs": ["snap", "fip"] } },
+    { "id": "r6", "label": "Your line: include you in this application?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "applyingFor", "programs": ["snap", "fip"] } },
+    { "id": "r7", "label": "Applying for food benefits? (Person 1, you)", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "applyingFor", "programs": ["snap"] } },
+    { "id": "r8", "label": "Self: needs food assistance?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "applyingFor", "programs": ["snap"] } },
+    { "id": "r9", "label": "Person 1 (you): applying for health coverage?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "applyingFor", "programs": ["medicaid"] } },
+    { "id": "r10", "label": "You: applying for any program on this form?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "applyingFor", "programs": ["snap", "fip", "medicaid"] } },
+    { "id": "r11", "label": "Your row: benefits requested for you?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "applyingFor", "programs": ["snap", "fip", "medicaid"] } },
+    { "id": "r12", "label": "Person 2: applying?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "none" }, "note": "Another member's row; the profile only says what the applicant applies for." },
+    { "id": "r13", "label": "Person 3: requesting benefits?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "none" }, "note": "Another member's row." },
+    { "id": "r14", "label": "Household member #2: include in this application?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "none" }, "note": "Another member's row." }
+  ]
+}
