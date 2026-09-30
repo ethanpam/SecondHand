@@ -1,0 +1,10 @@
+{
+  "source": { "url": "https://final-pantry.example.org/intake", "title": "Synthetic final-holdout fixture (tests only)", "kind": "web", "retrieved": "2026-09-29", "final": true },
+  "questions": [
+    { "id": "q1", "label": "Does anyone in your home have a paying job right now?", "type": "radio", "options": ["Yes", "No"], "rule": { "name": "none" } },
+    { "id": "q2", "label": "How many people share your kitchen?", "type": "select", "options": ["1", "2", "3", "4 or more"], "rule": { "name": "householdSize" } },
+    { "id": "q3", "label": "Your given name", "type": "text", "options": [], "rule": { "name": "field", "key": "firstName" } },
+    { "id": "q4", "label": "Daytime number", "type": "tel", "options": [], "rule": { "name": "field", "key": "phone" } },
+    { "id": "q5", "label": "Sharing with partner agencies", "type": "checkbox", "options": ["I allow sharing my answers with partner agencies"], "rule": { "name": "never" } }
+  ]
+}

@@ -9,6 +9,8 @@ const QUESTION_TYPES = ['radio', 'select', 'checkbox', 'text', 'textarea', 'numb
 const KINDS = ['google-form', 'jotform', 'pdf', 'web', 'iowa-portal', 'synthetic'];
 const QUESTIONS_DIR = path.join(__dirname, 'questions');
 const SYNTHETIC_DIR = path.join(QUESTIONS_DIR, 'synthetic');
+// The final holdout (#65): real forms collected after round 3, scored once after the bars are frozen.
+const FINAL_DIR = path.join(__dirname, 'questions-final');
 const text = (value, max) => typeof value === 'string' && value.trim() !== '' && value.length <= max;
 
 function checkRule(where, question) {
@@ -61,6 +63,9 @@ function validateQuestionFile(file, where = 'form') {
   if (source.holdout !== undefined && (source.holdout !== true || source.kind === 'synthetic')) {
     throw new Error(`${where}: source.holdout can only be true, and only on a real form.`);
   }
+  if (source.final !== undefined && (source.final !== true || source.kind === 'synthetic' || source.holdout !== undefined)) {
+    throw new Error(`${where}: source.final can only be true, and only on a real form that isn't marked holdout.`);
+  }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(source.retrieved || '')) throw new Error(`${where}: source.retrieved must be a YYYY-MM-DD date.`);
   if (!Array.isArray(questions) || !questions.length) throw new Error(`${where}: needs at least one question.`);
   const seen = new Set();
@@ -90,7 +95,44 @@ function loadQuestionBank(directory = QUESTIONS_DIR) {
   const files = readFiles(directory);
   const mixed = files.find(file => file.source.kind === 'synthetic');
   if (mixed) throw new Error(`${mixed.file}: synthetic rewordings belong in questions/synthetic/.`);
+  const final = files.find(file => file.source.final);
+  if (final) throw new Error(`${final.file}: final holdout forms belong in questions-final/.`);
   return files;
+}
+
+// The final holdout: real forms, each marked final.
+function loadFinalBank(directory = FINAL_DIR) {
+  const files = readFiles(directory);
+  const plain = files.find(file => file.source.final !== true);
+  if (plain) throw new Error(`${plain.file}: every form in questions-final/ must say source.final: true.`);
+  return files;
+}
+
+// Where a final form's content appears in `others` (training forms and synthetic rewordings), as
+// readable lines. Synthetic rewordings may not repeat a final label at all. Real forms may share short
+// labels ("Email", "Daytime number") independently, so for them a label counts from 5 words and an
+// option from 4 words, besides the same form. Distinctive options count everywhere.
+const normalize = text => String(text).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const words = text => normalize(text).split(' ').filter(Boolean).length;
+function finalLeaks(finalBank, others) {
+  const labels = new Map(), options = new Map(), urls = new Set(finalBank.map(file => file.source.url));
+  for (const file of finalBank) for (const question of file.questions) {
+    labels.set(normalize(question.label), `${file.file} (${question.id})`);
+    for (const option of question.options) if (words(option) >= 4) options.set(normalize(option), `${file.file} (${question.id})`);
+  }
+  const leaks = [];
+  for (const file of others) {
+    const synthetic = file.source.kind === 'synthetic';
+    if (!synthetic && urls.has(file.source.url)) { leaks.push(`${file.file}: the form ${file.source.url} is a final form`); continue; }
+    for (const question of file.questions) {
+      const label = normalize(question.label);
+      if (labels.has(label) && (synthetic || words(question.label) >= 5)) leaks.push(`${file.file} ${question.id}: label "${question.label}" is on final form ${labels.get(label)}`);
+      for (const option of question.options) {
+        if (options.has(normalize(option))) leaks.push(`${file.file} ${question.id}: option "${option}" is on final form ${options.get(normalize(option))}`);
+      }
+    }
+  }
+  return leaks;
 }
 
 // Training-only rewordings.
@@ -101,4 +143,4 @@ function loadSyntheticBank(directory = SYNTHETIC_DIR) {
   return files;
 }
 
-module.exports = { validateQuestionFile, loadQuestionBank, loadSyntheticBank, QUESTION_TYPES, KINDS };
+module.exports = { validateQuestionFile, loadQuestionBank, loadSyntheticBank, loadFinalBank, finalLeaks, QUESTION_TYPES, KINDS, FINAL_DIR };

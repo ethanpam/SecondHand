@@ -13,6 +13,7 @@ from decisions import (
     candidates,
     dataset_format,
     fill,
+    final_forms,
     holdout_forms,
     load_decisions,
     metrics,
@@ -203,6 +204,35 @@ class LoadDecisions(unittest.TestCase):
         self.assertEqual(len(pick("all")), 2)
         with self.assertRaisesRegex(ValueError, "forms"):
             pick("some")
+
+
+class FinalForms(unittest.TestCase):
+    def folder(self, forms):
+        folder = Path(tempfile.mkdtemp())
+        for name, source in forms.items():
+            (folder / f"{name}.json").write_text(json.dumps({"source": source, "questions": []}))
+        return folder
+
+    def test_every_form_in_the_folder_must_be_marked_final(self):
+        self.assertEqual(final_forms(self.folder({"f": {"url": "https://f.example/form", "final": True}})), {"https://f.example/form"})
+        with self.assertRaisesRegex(ValueError, "final"):
+            final_forms(self.folder({"f": {"url": "https://f.example/form"}}))
+        with self.assertRaisesRegex(ValueError, "final"):
+            final_forms(self.folder({}))
+        with self.assertRaises(FileNotFoundError):
+            final_forms(Path(tempfile.mkdtemp()) / "missing")
+
+    def test_scoring_the_final_forms_keeps_only_their_decisions_and_refuses_a_dataset_without_them(self):
+        final = self.folder({"f": {"url": "https://f.example/form", "final": True}})
+        dataset = Path(tempfile.mkdtemp())
+        rows = [{"state": {"facts": "F", "question": "Q"}, "answers": {"yn": "Yes"}, "split": "test", "task": "answer", "decision": f"{url}#q1#0"}
+                for url in ("https://f.example/form", "https://a.example/form")]
+        (dataset / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        decisions = load_decisions(dataset, {"yn": YES_NO}, "test", forms="final", final_dir=final)
+        self.assertEqual(list(decisions["answer"]), ["https://f.example/form#q1#0"])
+        other = self.folder({"g": {"url": "https://g.example/form", "final": True}})
+        with self.assertRaisesRegex(ValueError, "final"):
+            load_decisions(dataset, {"yn": YES_NO}, "test", forms="final", final_dir=other)
 
 
 class ChoiceMetrics(unittest.TestCase):

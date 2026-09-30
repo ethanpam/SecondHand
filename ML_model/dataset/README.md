@@ -15,6 +15,8 @@ Two tasks:
 - `choice-v1` (round 3) was the same without the box's type; it was never published and is no longer built.
 - **`noul-v1`** (round 2, the model the app ships): one yes/no row per candidate, with the one question in `questions.json`.
 
+`--final` builds an evaluation-only dataset from the final holdout (`ML_model/questions-final/`) into `dataset/out-final/`: every row is a test row, and nothing else ever reads that folder. The training dataset refuses a final form.
+
 Both formats use the same decisions, households and splits. Splits are by form: about 20% of real forms, and every form marked holdout, are test; validation is about 10% of the other forms' decisions.
 
 ```

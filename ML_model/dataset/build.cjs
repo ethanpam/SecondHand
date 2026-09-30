@@ -186,7 +186,7 @@ function correctOption(question, profile, { today } = {}) {
 const unit = text => crypto.createHash('sha256').update(text).digest().readUInt32BE(0) / 2 ** 32;
 // Where a form's decisions come from: its URL, or its file for training-only rewordings.
 const formKey = file => file.source.kind === 'synthetic' ? `synthetic:${file.file}` : file.source.url;
-const formSplit = file => file.source.kind === 'synthetic' ? 'train' : file.source.holdout ? 'test' : splitFor(file.source.url);
+const formSplit = file => file.source.kind === 'synthetic' ? 'train' : file.source.holdout || file.source.final ? 'test' : splitFor(file.source.url);
 // Test forms are held out whole (about 20%), so the model is judged on forms it never saw.
 function splitFor(url) {
   return unit(url) < 0.8 ? 'train' : 'test';
@@ -297,18 +297,16 @@ function summarize(rows) {
     bySplit: Object.fromEntries(['train', 'val', 'test'].map(split => [split, rows.filter(row => row.split === split).length])) };
 }
 
-function writeDataset(outDir, bank, households, options = {}) {
+// The rows of `bank` in the dataset `format`: { answer, match, questions }.
+function datasetRows(bank, households, options) {
   const { format } = options;
   if (!FORMATS.includes(format)) throw new Error(`The dataset format must be one of ${FORMATS.join(', ')}.`);
-  let answer, match, questions;
-  if (format === 'noul-v1') {
-    answer = buildRows(bank, households, options);
-    match = buildMatchRows(bank);
-    questions = { correct: DECISION };
-  } else {
-    const answering = buildChoiceRows(bank, households, options), matching = buildChoiceMatchRows(bank);
-    [answer, match, questions] = [answering.rows, matching.rows, { ...answering.questions, ...matching.questions }];
-  }
+  if (format === 'noul-v1') return { answer: buildRows(bank, households, options), match: buildMatchRows(bank), questions: { correct: DECISION } };
+  const answering = buildChoiceRows(bank, households, options), matching = buildChoiceMatchRows(bank);
+  return { answer: answering.rows, match: matching.rows, questions: { ...answering.questions, ...matching.questions } };
+}
+
+function write(outDir, { answer, match, questions }, format) {
   answer = answer.map(row => ({ ...row, task: 'answer' }));
   match = match.map(row => ({ ...row, task: 'match' }));
   const rows = [...answer, ...match];
@@ -319,16 +317,35 @@ function writeDataset(outDir, bank, households, options = {}) {
   return { format, ...summarize(rows), tasks: { answer: summarize(answer), match: summarize(match) } };
 }
 
+// The training dataset: real forms and synthetic rewordings, never a final holdout form.
+function writeDataset(outDir, bank, households, options = {}) {
+  const final = bank.find(file => file.source.final);
+  if (final) throw new Error(`${final.file || final.source.url}: final holdout forms never go in the training dataset.`);
+  return write(outDir, datasetRows(bank, households, options), options.format);
+}
+
+// The final holdout's evaluation-only dataset: every row is a test row.
+function writeFinalDataset(outDir, finalBank, households, options = {}) {
+  const plain = finalBank.find(file => file.source.final !== true);
+  if (plain) throw new Error(`${plain.file || plain.source.url}: the final dataset only takes final holdout forms.`);
+  const rows = datasetRows(finalBank, households, options);
+  if ([...rows.answer, ...rows.match].some(row => row.split !== 'test')) throw new Error('Every final holdout row must be a test row.');
+  return write(outDir, rows, options.format);
+}
+
 if (require.main === module) {
   const { loadQuestionBank, loadSyntheticBank } = require('../question-bank.cjs');
   const { generateHouseholds } = require('../profiles/generate.cjs');
   const arg = (name, fallback) => { const index = process.argv.indexOf(`--${name}`); return index > 0 ? process.argv[index + 1] : fallback; };
   const today = arg('today', new Date().toISOString().slice(0, 10));
   const households = generateHouseholds({ count: Number(arg('households', '2000')), seed: Number(arg('seed', '7')), today });
-  const summary = writeDataset(path.resolve(arg('out', path.join(__dirname, 'out'))), [...loadQuestionBank(), ...loadSyntheticBank()], households,
-    { today, perQuestion: Number(arg('per-question', '24')), format: arg('format') });
+  const options = { today, perQuestion: Number(arg('per-question', '24')), format: arg('format') };
+  // --final builds the final holdout's evaluation-only dataset; nothing else ever reads questions-final/.
+  const summary = process.argv.includes('--final') ?
+    writeFinalDataset(path.resolve(arg('out', path.join(__dirname, 'out-final'))), require('../question-bank.cjs').loadFinalBank(), households, options) :
+    writeDataset(path.resolve(arg('out', path.join(__dirname, 'out'))), [...loadQuestionBank(), ...loadSyntheticBank()], households, options);
   console.log(JSON.stringify(summary, null, 2));
 }
 
-module.exports = { correctOption, buildRows, buildMatchRows, buildChoiceRows, buildChoiceMatchRows, splitFor, writeDataset, range, ABSTAIN, DECISION, MATCH_KEYS,
+module.exports = { correctOption, buildRows, buildMatchRows, buildChoiceRows, buildChoiceMatchRows, splitFor, writeDataset, writeFinalDataset, range, ABSTAIN, DECISION, MATCH_KEYS,
   CHOICE_ANSWER_INSTRUCTIONS, CHOICE_MATCH_INSTRUCTIONS, BOX_TYPES, MATCH_ABSTAIN, MATCH_SETS, MATCH_GROUPS, FORMATS };

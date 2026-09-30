@@ -26,6 +26,7 @@ Check your files with `node --test tests/ml-question-bank.test.cjs`.
 - `options` lists the choices exactly, in page order, leaving out empty "Choose" placeholders. It's `[]` for text boxes.
 - `note` (optional) explains a judgment call, e.g. why a question is `none`.
 - `source.holdout: true` keeps a form in the test set for good. Use it only for fresh forms collected as a clean final check.
+- The final holdout (#65) lives apart, in `ML_model/questions-final/`: the same format plus `source.final: true`. Training never reads that folder, `questions/` refuses a final form, and a test fails if a final form's label or distinctive option text appears in a training form or a synthetic rewording. Those forms are scored once, after the confidence bars are frozen.
 
 ## Picking a rule
 The full list, with what each rule means and which question types it fits, is in `ML_model/answer-rules.cjs`. The most common:
