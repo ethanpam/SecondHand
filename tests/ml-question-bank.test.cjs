@@ -86,6 +86,17 @@ test('holdout is a yes-or-nothing flag on real forms only', () => {
   assert.throws(() => validateQuestionFile({ source: { title: 'R', kind: 'synthetic', retrieved: '2026-09-26', holdout: true }, questions: [yesNo] }), /holdout/i);
 });
 
+test('a list parameter names known values, each once', () => {
+  const selfRow = programs => ({ ...yesNo, label: 'Applying?', rule: { name: 'applyingFor', programs } });
+  assert.doesNotThrow(() => validateQuestionFile(form([selfRow(['snap', 'fip'])])));
+  const bad = (programs, pattern) => assert.throws(() => validateQuestionFile(form([selfRow(programs)])), pattern, JSON.stringify(programs));
+  bad(undefined, /q1.*needs programs/);
+  bad([], /q1.*programs must be a list/);
+  bad('snap', /q1.*programs must be a list/);
+  bad(['snap', 'snap'], /q1.*programs must be a list/);
+  bad(['snap', 'wic'], /q1.*wic isn't one of snap, fip, medicaid/);
+});
+
 test('a field rule only fits text boxes: the matching task has no dropdowns', () => {
   const dropdown = { id: 'q1', label: 'State', type: 'select', options: ['Iowa', 'Illinois'], rule: { name: 'field', key: 'state' } };
   assert.throws(() => validateQuestionFile(form([dropdown])), /field doesn't fit a select/);

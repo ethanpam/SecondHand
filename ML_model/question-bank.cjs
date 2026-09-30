@@ -26,6 +26,14 @@ function checkRule(where, question) {
       if (want.required) throw new Error(`${where}: ${question.id}: rule ${rule.name} needs ${param}.`);
       continue;
     }
+    if (want.type === 'list') {
+      if (!Array.isArray(value) || !value.length || new Set(value).size !== value.length) {
+        throw new Error(`${where}: ${question.id}: rule ${rule.name} ${param} must be a list of different values.`);
+      }
+      const unknown = value.find(item => !want.enum.includes(item));
+      if (unknown !== undefined) throw new Error(`${where}: ${question.id}: ${rule.name} ${param} ${unknown} isn't one of ${want.enum.join(', ')}.`);
+      continue;
+    }
     if (typeof value !== want.type || (want.type === 'number' && !(Number.isFinite(value) && value >= 0)) || (want.type === 'string' && !value.trim())) {
       throw new Error(`${where}: ${question.id}: rule ${rule.name} ${param} must be a ${want.type}.`);
     }

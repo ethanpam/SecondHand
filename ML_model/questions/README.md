@@ -44,6 +44,8 @@ The full list, with what each rule means and which question types it fits, is in
 | which income range (choices) | `incomeBracket` with `period` |
 | state, county (choices), or "Do you live in Iowa / Polk County?" | `state`, `county`, `livesInState` / `livesInCounty` |
 | applying for SNAP, FIP, or Medicaid | `applyingSnap`, `applyingFip`, `applyingMedicaid` |
+| the applicant's own row in a household table: "Applying?" | `applyingFor` with `programs`, the ones the form covers (`snap`, `fip`, `medicaid`) |
+| coverage or benefits held now: "Do you have Medicaid?", "Which insurance do you have?" | `none`: the profile only says what the applicant is applying for |
 | anything the saved profile can't know: pets, pickup day, student ID, diet, "currently receive SNAP?", "how did you hear about us" | `none` |
 | consent, signatures, "I certify", terms, SSN | `never` |
 

@@ -199,3 +199,14 @@ test('a per-question limit that isn\'t a positive whole number is refused, not r
   }
   assert.ok(buildRows(bank, [family], { today: TODAY, perQuestion: 1 }).length);
 });
+
+test('applyingFor answers a self row ("Applying?") from the programs it lists: Yes for any, No only when every one is known no', () => {
+  const rule = programs => ({ name: 'applyingFor', programs });
+  assert.equal(pickFor(rule(['snap', 'fip']), yesNo), 'Yes', 'applying for SNAP');
+  assert.equal(pickFor(rule(['fip']), yesNo, { ...family, programFip: 'yes' }), 'Yes');
+  assert.equal(pickFor(rule(['snap', 'fip']), yesNo, { ...family, programSnap: 'no', programFip: 'no' }), 'No');
+  assert.equal(pickFor(rule(['snap', 'fip']), yesNo, { ...family, programSnap: 'no' }), ABSTAIN, 'FIP isn’t saved');
+  assert.equal(pickFor(rule(['snap', 'fip']), yesNo, { ...family, programSnap: 'no', programFip: 'no', programMedicaid: 'yes' }), 'No', 'Medicaid isn’t on this form');
+  assert.equal(pickFor(rule(['snap', 'fip', 'medicaid']), yesNo, { ...family, programSnap: 'no', programFip: 'no', programMedicaid: 'yes' }), 'Yes');
+  assert.equal(pickFor(rule(['medicaid']), yesNo, {}), ABSTAIN);
+});

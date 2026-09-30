@@ -44,6 +44,8 @@ const RULES = Object.freeze({
   applyingSnap: { about: 'Is the applicant applying for SNAP / food stamps? Not "do you currently receive SNAP" (that is none).', types: YES_NO, params: {} },
   applyingFip: { about: 'Is the applicant applying for FIP cash assistance?', types: YES_NO, params: {} },
   applyingMedicaid: { about: 'Is the applicant applying for Medicaid / health coverage?', types: YES_NO, params: {} },
+  applyingFor: { about: 'Is the applicant applying for any of `programs` (the ones the form covers), as in a household table\'s "Applying?" column on the applicant\'s own row? "No" only when every one is known no.',
+    types: YES_NO, params: { programs: { type: 'list', enum: ['snap', 'fip', 'medicaid'], required: true } } },
   // Choice questions whose options are numbers, ranges or places.
   householdSize: { about: 'How many people are in the household (options like 1, 2, "5 or more", "One (Myself)")?', types: CHOICE, params: {} },
   adultsCount: { about: 'How many adults aged 18 to 64?', types: CHOICE, params: {} },

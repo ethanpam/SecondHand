@@ -49,6 +49,8 @@ const choiceAnswerQuestion = options => ({ type: 'choice', instructions: CHOICE_
 const choiceMatchQuestion = keys => ({ type: 'choice', instructions: CHOICE_MATCH_INSTRUCTIONS, criteria: [...keys.map(key => KEY_ABOUT[key]), MATCH_ABSTAIN] });
 // A LayaStudio question id for a set of choices: questions with the same choices share it.
 const choiceQuestionId = (task, question) => `${task}-${crypto.createHash('sha256').update(JSON.stringify(question)).digest('hex').slice(0, 16)}`;
+// The saved answers behind applyingFor's programs.
+const PROGRAM_FIELDS = Object.freeze({ snap: 'programSnap', fip: 'programFip', medicaid: 'programMedicaid' });
 const NUMBER_WORDS = { none: 0, zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
 
 const present = value => typeof value === 'string' && value.trim() !== '';
@@ -138,6 +140,11 @@ function decide(rule, profile, age) {
     case 'applyingSnap': return yes(profile, 'programSnap');
     case 'applyingFip': return yes(profile, 'programFip');
     case 'applyingMedicaid': return yes(profile, 'programMedicaid');
+    case 'applyingFor': {
+      const answers = rule.programs.map(program => yes(profile, PROGRAM_FIELDS[program]));
+      if (answers.includes(true)) return true;
+      return answers.every(answer => answer === false) ? false : null;
+    }
     default: return undefined;
   }
 }
