@@ -31,4 +31,10 @@ node ML_model/eval/page_latency.cjs --model <export> --format choice-v1 --form <
 
 The runtime comparison for #37 is in `docs/superpowers/specs/2026-09-27-laya-runtime-spike.md`.
 
-`runtime_fixtures.py` writes the Python reference outputs that the desktop app's JavaScript Laya runtime (#38) is tested against: token ids, prompts, and int8 ONNX probabilities for a fixed sample of rows (`tests/fixtures/laya/`). Its docstring has the commands.
+`runtime_fixtures.py` writes the Python reference outputs that the desktop app's JavaScript Laya runtime (#38) is tested against: token ids, prompts, and int8 ONNX probabilities for a fixed sample of rows. There is one file per model format: `tests/fixtures/laya/parity-noul.json` from round 2's export (the shipped model) and `parity-choice.json` from round 3's. Its docstring has the commands. `tests/laya-parity.test.cjs` checks each against its own export and skips a format whose export isn't given:
+
+```
+SECONDHAND_LAYA_NOUL_MODEL_DIR=<LayaStudio>/workspace/exports/round2-lora-proper-1790530553-onnx-int8 \
+SECONDHAND_LAYA_CHOICE_MODEL_DIR=<LayaStudio>/workspace/exports/round3-lora-proper-1790708976-onnx-int8 \
+  node --test tests/laya-parity.test.cjs
+```

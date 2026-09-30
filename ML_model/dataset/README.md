@@ -12,7 +12,7 @@ Two tasks:
   - Matching: the state is `{ question }`, and the choices are the saved fields offered for the box's type plus "None of these". Sensitive fields (date of birth, income, money on hand, medical costs) are never offered, so a date box isn't asked about at all.
   - Training boxes are also asked with fixed groups of fields (`MATCH_GROUPS`), answered "None of these" when their field isn't in the group. Validation and test boxes are asked only the way the app asks.
   - `questions.json` holds one LayaStudio question per distinct set of choices.
-- **`noul-v1`** (round 2): one yes/no row per candidate, with the one question in `questions.json`.
+- **`noul-v1`** (round 2, the model the app ships): one yes/no row per candidate, with the one question in `questions.json`.
 
 Both formats use the same decisions, households and splits. Splits are by form: about 20% of real forms, and every form marked holdout, are test; validation is about 10% of the other forms' decisions.
 

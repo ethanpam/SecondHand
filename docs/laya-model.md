@@ -18,6 +18,7 @@ Every candidate is asked the same question: "Given the facts about the household
 The int8 ONNX export (409 MB) is published at [huggingface.co/JacobTDang/secondhand-laya](https://huggingface.co/JacobTDang/secondhand-laya) (commit `d1beee2813ce4996c50695eb604841365808f1e3`, Apache-2.0). The desktop app ships pinned to that commit (`desktop/laya-model.json`) and installs whatever newer model the repo's `latest.json` names (see [Publishing a model](#publishing-a-model)).
 - Exported with `uv run --no-sync python -m layastudio.export run:round2-lora-proper-1790530553 --target onnx --precision int8`.
 - The exporter checked 10 decisions against the trained model: all gave the same answer, with probabilities within 0.0007.
+- The desktop runtime gives the same probabilities as Python's onnxruntime on 55 `noul-v1` decisions, to 2e-16 (`tests/laya-parity.test.cjs`, with `SECONDHAND_LAYA_NOUL_MODEL_DIR` pointing at this export).
 
 | File | Bytes | SHA-256 |
 |---|---|---|
@@ -35,7 +36,7 @@ The int8 ONNX export (409 MB) is published at [huggingface.co/JacobTDang/secondh
 
 The int8 ONNX export is 425.1 MB of graph and weights (428.7 MB for the folder), at `<LayaStudio>/workspace/exports/round3-lora-proper-1790708976-onnx-int8`. It was exported with `uv run --project ~/Projects/LayaStudio python ML_model/train/export.py --run round3-lora-proper-1790708976 --precision int8`.
 - The exporter checked one question of each task and option-count bucket against the trained model, 80 decisions in all. All gave the same answer, with probabilities within 0.014.
-- The desktop runtime gives the same probabilities as Python's onnxruntime on 50 `choice-v1` decisions, to 3e-16 (`tests/laya-parity.test.cjs`).
+- The desktop runtime gives the same probabilities as Python's onnxruntime on 50 `choice-v1` decisions, to 3e-16 (`tests/laya-parity.test.cjs`, with `SECONDHAND_LAYA_CHOICE_MODEL_DIR` pointing at this export).
 
 | File | Bytes | SHA-256 |
 |---|---|---|
