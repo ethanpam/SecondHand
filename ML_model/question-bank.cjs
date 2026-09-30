@@ -109,32 +109,48 @@ function loadFinalBank(directory = FINAL_DIR) {
 }
 
 // Where a final form's content appears in `others` (training forms and synthetic rewordings), as
-// readable lines. Synthetic rewordings may not repeat a final label at all. Real forms may share short
-// labels ("Email", "Daytime number") independently, so for them a label counts from 5 words and an
-// option from 4 words, besides the same form. Distinctive options count everywhere.
+// readable lines. Real forms share standard wording (race and ethnicity categories, program names,
+// "Prefer not to answer") and short labels ("Name", "Date of Birth") without copying, so the signals are:
+// - a training form at a final form's URL, or on a final form's own site (form platforms aside);
+// - a synthetic rewording that repeats a final label, of any length;
+// - a training form repeating a whole final question, label and options, whose label has 7 or more words.
+// `accepted` lists reviewed overlaps ("<file> <question id>"); each must still overlap.
+const FORM_PLATFORMS = new Set(['docs.google.com', 'forms.gle', 'form.jotform.com', 'www.jotform.com', 'jotform.com', 'forms.office.com']);
 const normalize = text => String(text).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const words = text => normalize(text).split(' ').filter(Boolean).length;
-function finalLeaks(finalBank, others) {
-  const labels = new Map(), options = new Map(), urls = new Set(finalBank.map(file => file.source.url));
-  for (const file of finalBank) for (const question of file.questions) {
-    labels.set(normalize(question.label), `${file.file} (${question.id})`);
-    for (const option of question.options) if (words(option) >= 4) options.set(normalize(option), `${file.file} (${question.id})`);
-  }
-  const leaks = [];
-  for (const file of others) {
-    const synthetic = file.source.kind === 'synthetic';
-    if (!synthetic && urls.has(file.source.url)) { leaks.push(`${file.file}: the form ${file.source.url} is a final form`); continue; }
+const whole = question => `${normalize(question.label)} || ${question.options.map(normalize).join(' | ')}`;
+function finalLeaks(finalBank, others, accepted = []) {
+  const labels = new Map(), questions = new Map(), urls = new Set(), sites = new Set();
+  for (const file of finalBank) {
+    urls.add(file.source.url);
+    const host = new URL(file.source.url).host;
+    if (!FORM_PLATFORMS.has(host)) sites.add(host);
     for (const question of file.questions) {
-      const label = normalize(question.label);
-      if (labels.has(label) && (synthetic || words(question.label) >= 5)) leaks.push(`${file.file} ${question.id}: label "${question.label}" is on final form ${labels.get(label)}`);
-      for (const option of question.options) {
-        if (options.has(normalize(option))) leaks.push(`${file.file} ${question.id}: option "${option}" is on final form ${options.get(normalize(option))}`);
+      labels.set(normalize(question.label), `${file.file} (${question.id})`);
+      if (words(question.label) >= 7) questions.set(whole(question), `${file.file} (${question.id})`);
+    }
+  }
+  const leaks = [], found = new Set();
+  const report = (at, line) => { if (accepted.includes(at)) found.add(at); else leaks.push(line); };
+  for (const file of others) {
+    if (file.source.kind !== 'synthetic') {
+      if (urls.has(file.source.url)) { leaks.push(`${file.file}: ${file.source.url} is a final form`); continue; }
+      const host = new URL(file.source.url).host;
+      if (sites.has(host)) { leaks.push(`${file.file}: ${host} is a final form’s site`); continue; }
+    }
+    for (const question of file.questions) {
+      const at = `${file.file} ${question.id}`;
+      if (file.source.kind === 'synthetic' && labels.has(normalize(question.label))) {
+        report(at, `${at}: label "${question.label}" is on final form ${labels.get(normalize(question.label))}`);
+      } else if (file.source.kind !== 'synthetic' && questions.has(whole(question))) {
+        report(at, `${at}: the question "${question.label}" and its options are on final form ${questions.get(whole(question))}`);
       }
     }
   }
+  const stale = accepted.filter(at => !found.has(at) && others.some(file => at.startsWith(`${file.file} `)));
+  if (stale.length) throw new Error(`Accepted overlaps ${stale.join(', ')}: ${stale.length === 1 ? 'it no longer overlaps' : 'they no longer overlap'} a final form; take ${stale.length === 1 ? 'it' : 'them'} off the list.`);
   return leaks;
 }
-
 // Training-only rewordings.
 function loadSyntheticBank(directory = SYNTHETIC_DIR) {
   const files = readFiles(directory);
