@@ -1,8 +1,11 @@
 'use strict';
 // Builds LayaStudio training rows from the question bank and fictional households.
 // Every label is computed here by code from the question's answer rule and the saved
-// answers, never guessed. The model is always asked one fixed yes/no question about one
-// candidate answer at a time; the abstain candidate is correct when the facts don't say.
+// answers, never guessed. Two prompt formats (desktop/laya-model.cjs MODEL_FORMATS):
+// - noul-v1: one fixed yes/no question about one candidate answer at a time;
+// - choice-v2 (#65): one `choice` question per form question, scoring all its options in one pass;
+//   a text box is described by its label and its type.
+// Either way, the abstain candidate is correct when the facts don't say.
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -18,6 +21,38 @@ const MATCH_KEYS = Object.freeze(['firstName', 'middleName', 'lastName', 'fullNa
   'city', 'state', 'zip', 'county', 'householdSize', 'householdAdults', 'householdChildren', 'householdSeniors', 'totalMonthlyIncome', 'annualIncome', 'monthlyRent',
   'monthlyUtilities', 'assetsOnHand', 'monthlyMedicalExpenses']);
 const matchCandidate = key => `Saved answer: ${KEY_ABOUT[key]}`;
+
+// choice-v2. Answering: the facts and the form question are the state; the form's options plus
+// ABSTAIN are the choices. Matching: the box's label and its type (as BOX_TYPES words) are the
+// state; the saved fields offered for its type plus MATCH_ABSTAIN are the choices.
+const CHOICE_ANSWER_INSTRUCTIONS = 'Given the facts about the household, which option is the correct answer to the form question?';
+const CHOICE_MATCH_INSTRUCTIONS = 'Which saved answer belongs in this form box, given its label and type?';
+const BOX_TYPES = Object.freeze({ text: 'text', textarea: 'long text', number: 'number', date: 'date', email: 'email', tel: 'phone' });
+const MATCH_ABSTAIN = 'None of these';
+// Saved fields only a confident rule may place are never offered, so a box asking for one is "None of these".
+const OFFERED = MATCH_KEYS.filter(key => !['birthDate', 'totalMonthlyIncome', 'annualIncome', 'assetsOnHand', 'monthlyMedicalExpenses'].includes(key));
+const MATCH_SETS = Object.freeze({
+  text: OFFERED, textarea: OFFERED,
+  number: ['phone', 'zip', 'householdSize', 'householdAdults', 'householdChildren', 'householdSeniors', 'monthlyRent', 'monthlyUtilities'],
+  date: [], email: ['email'], tel: ['phone']
+});
+// Training only: each training box is also asked with these groups of fields, so the model learns
+// to answer "None of these" when its field isn't on offer.
+const MATCH_GROUPS = Object.freeze({
+  names: ['firstName', 'middleName', 'lastName', 'fullName', 'suffix'],
+  address: ['addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county'],
+  contact: ['email', 'phone'],
+  household: ['householdSize', 'householdAdults', 'householdChildren', 'householdSeniors'],
+  costs: ['monthlyRent', 'monthlyUtilities'],
+  numbers: MATCH_SETS.number
+});
+const FORMATS = ['noul-v1', 'choice-v2'];
+const choiceAnswerQuestion = options => ({ type: 'choice', instructions: CHOICE_ANSWER_INSTRUCTIONS, criteria: [...options, ABSTAIN] });
+const choiceMatchQuestion = keys => ({ type: 'choice', instructions: CHOICE_MATCH_INSTRUCTIONS, criteria: [...keys.map(key => KEY_ABOUT[key]), MATCH_ABSTAIN] });
+// A LayaStudio question id for a set of choices: questions with the same choices share it.
+const choiceQuestionId = (task, question) => `${task}-${crypto.createHash('sha256').update(JSON.stringify(question)).digest('hex').slice(0, 16)}`;
+// The saved answers behind applyingFor's programs.
+const PROGRAM_FIELDS = Object.freeze({ snap: 'programSnap', fip: 'programFip', medicaid: 'programMedicaid' });
 const NUMBER_WORDS = { none: 0, zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
 
 const present = value => typeof value === 'string' && value.trim() !== '';
@@ -107,6 +142,11 @@ function decide(rule, profile, age) {
     case 'applyingSnap': return yes(profile, 'programSnap');
     case 'applyingFip': return yes(profile, 'programFip');
     case 'applyingMedicaid': return yes(profile, 'programMedicaid');
+    case 'applyingFor': {
+      const answers = rule.programs.map(program => yes(profile, PROGRAM_FIELDS[program]));
+      if (answers.includes(true)) return true;
+      return answers.every(answer => answer === false) ? false : null;
+    }
     default: return undefined;
   }
 }
@@ -146,7 +186,7 @@ function correctOption(question, profile, { today } = {}) {
 const unit = text => crypto.createHash('sha256').update(text).digest().readUInt32BE(0) / 2 ** 32;
 // Where a form's decisions come from: its URL, or its file for training-only rewordings.
 const formKey = file => file.source.kind === 'synthetic' ? `synthetic:${file.file}` : file.source.url;
-const formSplit = file => file.source.kind === 'synthetic' ? 'train' : file.source.holdout ? 'test' : splitFor(file.source.url);
+const formSplit = file => file.source.kind === 'synthetic' ? 'train' : file.source.holdout || file.source.final ? 'test' : splitFor(file.source.url);
 // Test forms are held out whole (about 20%), so the model is judged on forms it never saw.
 function splitFor(url) {
   return unit(url) < 0.8 ? 'train' : 'test';
@@ -154,12 +194,12 @@ function splitFor(url) {
 // Validation (for early stopping and calibration) takes about 10% of the training forms' decisions.
 const decisionSplit = (formSplit, group) => formSplit === 'test' ? 'test' : unit(`val:${group}`) < 0.1 ? 'val' : 'train';
 
-// One row per candidate answer for every choice question and household. With `perQuestion`,
-// households are taken round-robin across the correct answers so every answer is represented.
-function buildRows(bank, households, { today, perQuestion = Infinity } = {}) {
+// Every choice question's decisions: { question, index, answer, group, split } for each
+// household it is asked for. With `perQuestion`, households are taken round-robin across the
+// correct answers so every answer is represented.
+function choiceDecisions(bank, households, { today, perQuestion = Infinity } = {}) {
   if (perQuestion !== Infinity && !(Number.isInteger(perQuestion) && perQuestion > 0)) throw new Error('per-question must be a positive whole number.');
-  const rows = [];
-  const sheets = households.map(profile => factsText(buildFacts(profile, { today })));
+  const decisions = [];
   for (const file of bank) {
     const split = formSplit(file);
     for (const question of file.questions.filter(item => CHOICE_TYPES.includes(item.type))) {
@@ -175,14 +215,32 @@ function buildRows(bank, households, { today, perQuestion = Infinity } = {}) {
         if (!added) break;
       }
       for (const index of chosen.sort((a, b) => a - b)) {
-        for (const candidate of [...question.options, ABSTAIN]) {
-          const group = `${formKey(file)}#${question.id}#${index}`;
-          rows.push({ state: { facts: sheets[index], question: question.label, candidate }, answers: { correct: candidate === answers[index] }, split: decisionSplit(split, group), group });
-        }
+        const group = `${formKey(file)}#${question.id}#${index}`;
+        decisions.push({ question, index, answer: answers[index], group, split: decisionSplit(split, group) });
       }
     }
   }
-  return rows;
+  return decisions;
+}
+
+// noul-v1: one row per candidate answer for every choice question and household.
+function buildRows(bank, households, options = {}) {
+  const sheets = households.map(profile => factsText(buildFacts(profile, { today: options.today })));
+  return choiceDecisions(bank, households, options).flatMap(({ question, index, answer, group, split }) => [...question.options, ABSTAIN].map(candidate =>
+    ({ state: { facts: sheets[index], question: question.label, candidate }, answers: { correct: candidate === answer }, split, group })));
+}
+
+// choice-v2: one row per choice question and household, and the LayaStudio questions they use.
+function buildChoiceRows(bank, households, options = {}) {
+  const sheets = households.map(profile => factsText(buildFacts(profile, { today: options.today })));
+  const questions = {};
+  const rows = choiceDecisions(bank, households, options).map(({ question, index, answer, group, split }) => {
+    const definition = choiceAnswerQuestion(question.options);
+    const id = choiceQuestionId('answer', definition);
+    questions[id] = definition;
+    return { state: { facts: sheets[index], question: question.label }, answers: { [id]: answer }, split, group };
+  });
+  return { rows, questions };
 }
 
 // Text boxes: which saved value, if any, belongs in the box. One row per candidate field plus abstain.
@@ -202,22 +260,77 @@ function buildMatchRows(bank) {
   return rows;
 }
 
+// choice-v2: one row per text box whose type has saved fields on offer. Training boxes are also asked
+// with each of MATCH_GROUPS (decision `<box>~<group>`); validation and test boxes only as the app asks.
+function buildChoiceMatchRows(bank) {
+  const rows = [];
+  const questions = {};
+  const add = (keys, question, group, split) => {
+    const definition = choiceMatchQuestion(keys);
+    const id = choiceQuestionId('match', definition);
+    questions[id] = definition;
+    const answer = question.rule.name === 'field' && keys.includes(question.rule.key) ? KEY_ABOUT[question.rule.key] : MATCH_ABSTAIN;
+    rows.push({ state: { question: question.label, type: BOX_TYPES[question.type] }, answers: { [id]: answer }, split, group });
+  };
+  for (const file of bank) {
+    const split = formSplit(file);
+    for (const question of file.questions.filter(item => TEXT_TYPES.includes(item.type))) {
+      if (question.rule.name === 'field' && !MATCH_KEYS.includes(question.rule.key)) throw new Error(`${question.id}: field key ${question.rule.key} isn't a text-box candidate.`);
+      const keys = MATCH_SETS[question.type];
+      if (!keys.length) continue;
+      const group = `${formKey(file)}#${question.id}`;
+      const boxSplit = decisionSplit(split, group);
+      add(keys, question, group, boxSplit);
+      if (boxSplit === 'train') for (const [name, groupKeys] of Object.entries(MATCH_GROUPS)) add(groupKeys, question, `${group}~${name}`, boxSplit);
+    }
+  }
+  return { rows, questions };
+}
+
+// Whether a row's correct answer is "leave it for the applicant", in either format.
+const abstains = row => row.state.candidate !== undefined ? row.answers.correct && row.state.candidate === ABSTAIN : [ABSTAIN, MATCH_ABSTAIN].includes(Object.values(row.answers)[0]);
+
 function summarize(rows) {
   const decisions = new Set(rows.map(row => row.group)).size;
-  const abstained = new Set(rows.filter(row => row.answers.correct && row.state.candidate === ABSTAIN).map(row => row.group)).size;
+  const abstained = new Set(rows.filter(abstains).map(row => row.group)).size;
   return { rows: rows.length, decisions, abstainShare: decisions ? abstained / decisions : 0,
     bySplit: Object.fromEntries(['train', 'val', 'test'].map(split => [split, rows.filter(row => row.split === split).length])) };
 }
 
-function writeDataset(outDir, bank, households, options = {}) {
-  const answer = buildRows(bank, households, options).map(row => ({ ...row, task: 'answer' }));
-  const match = buildMatchRows(bank).map(row => ({ ...row, task: 'match' }));
+// The rows of `bank` in the dataset `format`: { answer, match, questions }.
+function datasetRows(bank, households, options) {
+  const { format } = options;
+  if (!FORMATS.includes(format)) throw new Error(`The dataset format must be one of ${FORMATS.join(', ')}.`);
+  if (format === 'noul-v1') return { answer: buildRows(bank, households, options), match: buildMatchRows(bank), questions: { correct: DECISION } };
+  const answering = buildChoiceRows(bank, households, options), matching = buildChoiceMatchRows(bank);
+  return { answer: answering.rows, match: matching.rows, questions: { ...answering.questions, ...matching.questions } };
+}
+
+function write(outDir, { answer, match, questions }, format) {
+  answer = answer.map(row => ({ ...row, task: 'answer' }));
+  match = match.map(row => ({ ...row, task: 'match' }));
   const rows = [...answer, ...match];
   fs.mkdirSync(outDir, { recursive: true });
-  fs.writeFileSync(path.join(outDir, 'questions.json'), `${JSON.stringify({ correct: DECISION }, null, 2)}\n`);
+  fs.writeFileSync(path.join(outDir, 'questions.json'), `${JSON.stringify(questions, null, 2)}\n`);
   // `task` and `decision` let our own evaluation regroup the candidates of one decision; the training driver strips them.
   fs.writeFileSync(path.join(outDir, 'rows.jsonl'), rows.map(({ state, answers, split, task, group }) => JSON.stringify({ state, answers, split, task, decision: group })).join('\n') + '\n');
-  return { ...summarize(rows), tasks: { answer: summarize(answer), match: summarize(match) } };
+  return { format, ...summarize(rows), tasks: { answer: summarize(answer), match: summarize(match) } };
+}
+
+// The training dataset: real forms and synthetic rewordings, never a final holdout form.
+function writeDataset(outDir, bank, households, options = {}) {
+  const final = bank.find(file => file.source.final);
+  if (final) throw new Error(`${final.file || final.source.url}: final holdout forms never go in the training dataset.`);
+  return write(outDir, datasetRows(bank, households, options), options.format);
+}
+
+// The final holdout's evaluation-only dataset: every row is a test row.
+function writeFinalDataset(outDir, finalBank, households, options = {}) {
+  const plain = finalBank.find(file => file.source.final !== true);
+  if (plain) throw new Error(`${plain.file || plain.source.url}: the final dataset only takes final holdout forms.`);
+  const rows = datasetRows(finalBank, households, options);
+  if ([...rows.answer, ...rows.match].some(row => row.split !== 'test')) throw new Error('Every final holdout row must be a test row.');
+  return write(outDir, rows, options.format);
 }
 
 if (require.main === module) {
@@ -226,8 +339,13 @@ if (require.main === module) {
   const arg = (name, fallback) => { const index = process.argv.indexOf(`--${name}`); return index > 0 ? process.argv[index + 1] : fallback; };
   const today = arg('today', new Date().toISOString().slice(0, 10));
   const households = generateHouseholds({ count: Number(arg('households', '2000')), seed: Number(arg('seed', '7')), today });
-  const summary = writeDataset(path.resolve(arg('out', path.join(__dirname, 'out'))), [...loadQuestionBank(), ...loadSyntheticBank()], households, { today, perQuestion: Number(arg('per-question', '24')) });
+  const options = { today, perQuestion: Number(arg('per-question', '24')), format: arg('format') };
+  // --final builds the final holdout's evaluation-only dataset; nothing else ever reads questions-final/.
+  const summary = process.argv.includes('--final') ?
+    writeFinalDataset(path.resolve(arg('out', path.join(__dirname, 'out-final'))), require('../question-bank.cjs').loadFinalBank(), households, options) :
+    writeDataset(path.resolve(arg('out', path.join(__dirname, 'out'))), [...loadQuestionBank(), ...loadSyntheticBank()], households, options);
   console.log(JSON.stringify(summary, null, 2));
 }
 
-module.exports = { correctOption, buildRows, buildMatchRows, splitFor, writeDataset, range, ABSTAIN, DECISION, MATCH_KEYS };
+module.exports = { correctOption, buildRows, buildMatchRows, buildChoiceRows, buildChoiceMatchRows, splitFor, writeDataset, writeFinalDataset, range, ABSTAIN, DECISION, MATCH_KEYS,
+  CHOICE_ANSWER_INSTRUCTIONS, CHOICE_MATCH_INSTRUCTIONS, BOX_TYPES, MATCH_ABSTAIN, MATCH_SETS, MATCH_GROUPS, FORMATS };

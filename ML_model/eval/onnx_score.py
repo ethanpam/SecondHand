@@ -1,8 +1,10 @@
-"""Score SecondHand decision rows through an ONNX export of a Laya checkpoint, on the CPU.
+"""Score SecondHand decisions through an ONNX export of a Laya checkpoint, on the CPU.
 
 Prompts, padding and calibration are laya-mlx's own (build_sequence, collate_items, the
-clamped temperatures), so a row's `noul` probability is comparable with decisions.py's MLX
-path. Rows are padded into batches and each batch is one session.run.
+clamped temperatures), so a candidate's probability is comparable with decisions.py's MLX
+path. A noul-v1 decision is one prompt per candidate row; a choice-v2 decision is one prompt
+whose options are its candidates. Prompts are padded into batches and each batch is one
+session.run.
 """
 
 import json
@@ -11,16 +13,16 @@ from pathlib import Path
 
 import numpy as np
 import onnxruntime
-from laya_mlx.agent import collate_items
-from laya_mlx.common import QTYPES, build_sequence, clamp_temperature, temp_bucket
+from laya_mlx.agent import Agent, collate_items
+from laya_mlx.common import QTYPES, build_sequence, clamp_temperature, render_options, temp_bucket
 from laya_mlx.tokenizer import Tokenizer
 
 
-def noul_probability(logits, temperature):
-    """The true option's probability after temperature scaling, rounded like laya-mlx."""
+def calibrated(logits, temperature):
+    """Each option's probability after temperature scaling, rounded like laya-mlx."""
     z = np.asarray(logits, dtype=np.float64) / float(temperature)
     shifted = np.exp(z - z.max())
-    return round(float(shifted[1] / shifted.sum()), 4)
+    return [round(float(p), 4) for p in shifted / shifted.sum()]
 
 
 def load_temperatures(cfg):
@@ -48,6 +50,15 @@ def feeds(items, pad_id, max_len):
     }
 
 
+def noul_question(questions):
+    """The single noul question every noul-v1 row is labelled with."""
+    if len(questions) != 1 or "correct" not in questions:
+        raise ValueError("Expected the single 'correct' question SecondHand's noul-v1 rows are labelled with")
+    if questions["correct"]["type"] != "noul":
+        raise ValueError(f"The 'correct' question must be noul, not {questions['correct']['type']!r}")
+    return Agent._to_internal(questions["correct"])
+
+
 class OnnxScorer:
     def __init__(self, onnx_dir, batch_size=16, threads=None):
         self.onnx_dir = Path(onnx_dir)
@@ -63,29 +74,44 @@ class OnnxScorer:
             options.intra_op_num_threads = threads
         self.session = onnxruntime.InferenceSession(str(model), sess_options=options, providers=["CPUExecutionProvider"])
 
-    def score_rows(self, rows, questions, progress_every=0):
-        """Set row["p"], the calibrated probability that the row's candidate is correct."""
-        if len(questions) != 1 or "correct" not in questions:
-            raise ValueError("Expected the single 'correct' question SecondHand's rows are labelled with")
-        definition = questions["correct"]
-        if definition["type"] != "noul":
-            raise ValueError(f"The 'correct' question must be noul, not {definition['type']!r}")
-        q = {"t": "noul", "ins": definition["instructions"], "crit": definition.get("criteria")}
+    def prompts(self, decisions, questions):
+        """(state, question, rows its probabilities go to) for every prompt the decisions need."""
+        prompts = []
+        for rows in decisions:
+            source = rows[0].get("source")
+            if source:
+                definition = questions[source["qid"]]
+                if definition["type"] != "choice" or [row["state"]["candidate"] for row in rows] != definition["criteria"]:
+                    raise ValueError(f"Decision {rows[0].get('decision')!r} doesn't list the choices of its question {source['qid']}")
+                prompts.append((source["state"], Agent._to_internal(definition), rows))
+            else:
+                question = noul_question(questions)
+                prompts.extend((row["state"], question, [row]) for row in rows)
+        return prompts
+
+    def score_decisions(self, decisions, questions, progress_every=0):
+        """Set each candidate row's p, the calibrated probability that it is its decision's answer."""
+        prompts = self.prompts(decisions, questions)
         max_len, head_max_len = self.cfg.get("max_len", 512), self.cfg.get("head_max_len", 192)
         started, reported = time.time(), 0
-        for start in range(0, len(rows), self.batch_size):
-            chunk = rows[start : start + self.batch_size]
+        for start in range(0, len(prompts), self.batch_size):
+            chunk = prompts[start : start + self.batch_size]
             items = []
-            for row in chunk:
-                ids, markers = build_sequence(self.tok, row["state"], q, max_len, head_max_len)
-                if len(markers) != 2:
-                    raise ValueError(f"Row {row.get('decision')!r} lost an option marker to truncation")
-                items.append({"ids": ids, "markers": markers, "qtype": QTYPES["noul"]})
+            for state, question, rows in chunk:
+                ids, markers = build_sequence(self.tok, state, question, max_len, head_max_len)
+                if len(markers) != len(render_options(question)):
+                    raise ValueError(f"Decision {rows[0].get('decision')!r} lost an option marker to truncation")
+                items.append({"ids": ids, "markers": markers, "qtype": QTYPES[question["t"]]})
             logits = self.session.run(["logits"], feeds(items, self.tok.pad_token_id, max_len))[0]
-            scale = temperature(self.temps, QTYPES["noul"], 2)
-            for row, row_logits in zip(chunk, logits):
-                row["p"] = noul_probability(row_logits[:2], scale)
+            for (_, question, rows), item, row_logits in zip(chunk, items, logits):
+                k = len(item["markers"])
+                p = calibrated(row_logits[:k], temperature(self.temps, item["qtype"], k))
+                if question["t"] == "noul":
+                    rows[0]["p"] = p[1]
+                else:
+                    for row, value in zip(rows, p):
+                        row["p"] = value
             done = start + len(chunk)
-            if progress_every and (done - reported >= progress_every or done == len(rows)):
-                print(f"scored {done}/{len(rows)} rows in {time.time() - started:.0f}s", flush=True)
+            if progress_every and (done - reported >= progress_every or done == len(prompts)):
+                print(f"scored {done}/{len(prompts)} prompts in {time.time() - started:.0f}s", flush=True)
                 reported = done

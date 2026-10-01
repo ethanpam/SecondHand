@@ -1,0 +1,34 @@
+{
+  "source": {
+    "url": "https://form.jotform.com/230864343938060",
+    "title": "Patriot Pantry: First Time Registration",
+    "kind": "jotform",
+    "retrieved": "2026-09-29",
+    "region": "Virginia Beach, VA",
+    "final": true
+  },
+  "questions": [
+    { "id": "q1", "label": "Date and Time of Visit", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Visit date and time; the page also embeds a Calendly calendar above it for booking 3-5pm visits." },
+    { "id": "q2", "label": "Name", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" }, "note": "Jotform name box with First Name and Last Name parts." },
+    { "id": "q3", "label": "Email: Helpful if individual needs to be contacted (i.e., item left behind)", "type": "email", "options": [], "rule": { "name": "field", "key": "email" } },
+    { "id": "q4", "label": "Date of Birth:", "type": "text", "options": [], "rule": { "name": "field", "key": "birthDate" }, "note": "A plain text box." },
+    { "id": "q5", "label": "What is your branch of service? If you are a military spouse, please enter the active-duty member's information:", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Military branch; not in the profile." },
+    { "id": "q6", "label": "What is your military pay-grade? If you are a military spouse, please enter the active-duty member's information:", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Military pay grade; not in the profile." },
+    { "id": "q7", "label": "What base are you stationed on (or affiliated with)", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Military base; not in the profile." },
+    { "id": "q8", "label": "What is your residential zip code?", "type": "text", "options": [], "rule": { "name": "field", "key": "zip" } },
+    { "id": "q9", "label": "Please list ages of every person living in your household (not including yourself)", "type": "textarea", "options": [], "rule": { "name": "none" }, "note": "Ages of the other household members; the profile doesn't keep members' ages." },
+    { "id": "q10", "label": "Phone Number: Helpful if individual needs to be contacted (i.e., item left behind)", "type": "tel", "options": [], "rule": { "name": "field", "key": "phone" } },
+    { "id": "q11", "label": "What is your housing type?", "type": "radio", "options": ["Emergency Shelter / Mission / Transitional", "Private Rental", "Public (Social) Housing", "Evacuee", "Own Home", "Unhoused", "With Family/Friends", "Youth Home/ Shelter", "Other"], "rule": { "name": "none" }, "note": "Housing type; the profile only knows whether there is a home address, not which kind." },
+    { "id": "q12", "label": "Marital Status:", "type": "radio", "options": ["Single", "Married", "Widowed", "Divorced", "Common-Law", "Seperated", "Undisclosed"], "rule": { "name": "none" }, "note": "Marital status; not in the profile." },
+    { "id": "q13", "label": "Ethnicity:", "type": "radio", "options": ["White/ Anglo", "Black/ African American", "Hispanic/ Latino", "American Indian/ Native American", "Asian", "Alaska Native/ Aleut/ Eskimo", "Middle Eastern/ North-African", "Pacific Islander", "None", "Other", "Undisclosed"], "rule": { "name": "none" }, "note": "Ethnicity; not in the profile." },
+    { "id": "q14", "label": "Referred by:", "type": "select", "options": ["211", "Case Manager", "Church", "Doctor", "Foodbank", "Friend or Family", "Housing Crisis Hotline", "Self", "Social Services", "Undisclosed", "Other"], "rule": { "name": "none" }, "note": "Referral source; not in the profile." },
+    { "id": "q15", "label": "Disability:", "type": "radio", "options": ["Yes", "No", "Don't Know", "Prefer Not To Answer"], "rule": { "name": "applicantDisability" }, "note": "Under \"Personal Information\" about the person registering, not the household." },
+    { "id": "q16", "label": "Self-Identified As", "type": "checkbox", "options": ["Active-Duty Personnel", "Active-Duty Dependent", "Disability", "FFC", "Evacuee", "Mental Illness", "Pregnant", "Postpartum", "Breastfeeding", "Other", "Undisclosed", "None"], "rule": { "name": "none" }, "note": "Check-all of military, disability, pregnancy and other statuses; no single fact decides it." },
+    { "id": "q17", "label": "Highest Education Level Completed:", "type": "radio", "options": ["Grades 0-8", "Grades 9-11", "Highschool Diploma", "GED", "Post Secondary (Some)", "Trade School/ Professional Accreditation", "2 Year Degree", "4 Year Degree", "Master's Degree", "PhD", "Undisclosed"], "rule": { "name": "none" }, "note": "Education; not in the profile." },
+    { "id": "q18", "label": "Employment Type:", "type": "radio", "options": ["Post Secondary Student", "Full Time", "Part Time", "None", "Other", "Retired", "Undisclosed"], "rule": { "name": "none" }, "note": "Employment type; not in the profile." },
+    { "id": "q19", "label": "Primary Monthly Income(s):", "type": "checkbox", "options": ["Alimony", "Child Support", "Full Time Employment", "Part Time Employment", "Pension", "Seasonal Income", "Social Security Assistance", "Social Security Disability", "TANF", "Unemployment Benefits", "No Income", "Other"], "rule": { "name": "none" }, "note": "Income sources; the profile saves amounts, not their sources." },
+    { "id": "q20", "label": "Do you receive any of the following?", "type": "checkbox", "options": ["Aid to the Blind or Disabled", "Child Care Subsidy Program", "Commodity Supplemental Food Program (CSFP)", "Energy Assistance Program (EA)", "Medicaid", "School Meals", "Section 8 Rental Assistance Program", "Supplemental Assistance for Women, Infants & Children (WIC)", "Supplemental Nutrition Assistance Program (SNAP)", "Temporary Assistance for Needy Families (TANF)", "Vets Aid", "FAMIS", "Headstart", "Other"], "rule": { "name": "none" }, "note": "Programs already received; the profile only knows what the applicant is applying for." },
+    { "id": "q21", "label": "Any Dietary Restrictions?", "type": "checkbox", "options": ["None", "Diabetic", "Hypertensive", "Pre-Diabetic", "Pre-Hypertensive", "Low Sodium", "Peanut Allergy", "Tree Nut Allergy", "Seafood Allergy", "Gluten Sensitivity / Allergy", "Egg Allergy", "Fruit Allergy", "Dairy Allergy", "Lactose Intolerant", "Vegetarian", "Vegan", "Kosher", "Other"], "rule": { "name": "none" }, "note": "Dietary needs; not in the profile." },
+    { "id": "q22", "label": "I understand that there is a twice/month per household visit limitation and hereby state that all of the information provided in the form is correct. I give permission for the ASYMCA of Hampton Roads and Foodbank of Southeastern Virginia to record my information. This information is not shared.", "type": "text", "options": [], "rule": { "name": "never" }, "note": "Signature pad under the visit-limit statement, accuracy statement and permission to record information." }
+  ]
+}

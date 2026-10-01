@@ -2,15 +2,17 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createFieldAnswers } = require('../desktop/field-answers.cjs');
-const { ABSTAIN, QUESTIONS, answerState } = require('../shared/laya-prompts.cjs');
+const { ABSTAIN, QUESTIONS, CHOICE, answerState } = require('../shared/laya-prompts.cjs');
+const { BARS } = require('../desktop/laya-decisions.cjs');
 const { buildFacts, factsText } = require('../shared/facts.cjs');
 
 const TODAY = '2026-09-26';
-// A stand-in for desktop/laya.cjs (#38) with its exact decision interface. `scores(state)` plays the model.
+// A stand-in for desktop/laya.cjs (#38) running a noul-v1 model, with its exact decision interface. `scores(state)` plays the model.
 function stubLaya(scores = () => 0.01) {
   const batches = [];
   return {
     batches,
+    format: async () => 'noul-v1',
     status: async () => ({ state: 'ready', enabled: true, sizeBytes: 1 }),
     decide: async () => { throw new Error('field answers score in batches'); },
     decideBatch: async items => { batches.push(items); return items.map(({ state }) => { const noul = scores(state); return { answers: { correct: { type: 'noul', noul, confidence: Math.max(noul, 1 - noul) } } }; }); }
@@ -98,7 +100,7 @@ test('without sensitive facts there is no second pass; without any facts nothing
 
 test('Laya not ready fails loudly with its code; a timeout or the click’s budget stops scoring, and a decision past the deadline is dropped', async () => {
   const notReady = Object.assign(new Error('Laya is off.'), { code: 'LAYA_NOT_READY' });
-  const off = { status: async () => ({ state: 'off', enabled: false }), decide: async () => { throw notReady; }, decideBatch: async () => { throw notReady; } };
+  const off = { format: async () => { throw notReady; }, status: async () => ({ state: 'off', enabled: false }), decide: async () => { throw notReady; }, decideBatch: async () => { throw notReady; } };
   await assert.rejects(answerer(off).answer({ questions: [question('vet', 'Veteran?')], profile, budgetMs }), error => error.code === 'LAYA_NOT_READY');
 
   const vet = state => state.candidate === 'No' ? 0.98 : 0.01;
@@ -132,4 +134,92 @@ test('Laya not ready fails loudly with its code; a timeout or the click’s budg
   broken.decideBatch = async () => { throw new Error('model crashed'); };
   await assert.rejects(answerer(broken).answer({ questions: [question('a', 'Veteran?')], profile, budgetMs }), /model crashed/);
   assert.throws(() => createFieldAnswers({}), /Laya/);
+});
+
+// A stand-in for desktop/laya.cjs running a choice-v2 model. `choose(state, choices)` plays the model: one probability per choice.
+function choiceLaya(choose = (_, choices) => choices.map((_, index) => index === choices.length - 1 ? 0.98 : 0.02 / (choices.length - 1))) {
+  const batches = [];
+  return {
+    batches,
+    format: async () => 'choice-v2',
+    status: async () => ({ state: 'ready', enabled: true, sizeBytes: 1 }),
+    decide: async () => { throw new Error('field answers score in batches'); },
+    decideBatch: async (items, options) => {
+      batches.push({ items, options });
+      return items.map(({ state, questions }) => {
+        const choices = questions.choice.criteria;
+        const values = choose(state, choices);
+        return { answers: { choice: { type: 'choice', choice: choices[values.indexOf(Math.max(...values))], probabilities: Object.fromEntries(choices.map((label, index) => [label, values[index]])), confidence: 0.5 } } };
+      });
+    }
+  };
+}
+// Probabilities that put `p` on `option` and spread the rest over the other choices.
+const sure = (choices, option, p) => choices.map(label => label === option ? p : (1 - p) / (choices.length - 1));
+
+test('choice-v2: every option of a question is scored in one pass, eight questions to a request, with the facts and the question as the state', async () => {
+  const questions = Array.from({ length: 10 }, (_, index) => question(`q${index}`, index === 3 ? 'Do you live in Polk County?' : `Do you have pet number ${index}?`, index === 3 ? ['YES', 'NO'] : ['Yes', 'No']));
+  const laya = choiceLaya((state, choices) => state.question === 'Do you live in Polk County?' && state.facts.includes('Polk County') ? sure(choices, 'YES', 0.97) : sure(choices, ABSTAIN, 0.97));
+  const { answers, sensitive } = await answerer(laya).answer({ questions, profile, budgetMs });
+  assert.deepEqual(answers, { q3: 'YES' });
+  assert.deepEqual(sensitive, []);
+  assert.deepEqual(laya.batches.map(({ items }) => items.length), [8, 2, 8, 1], 'the first pass in two requests; the nine still open again with every fact');
+  assert.deepEqual(laya.batches[0].items[3], { state: CHOICE.answerState(everyday, 'Do you live in Polk County?'), questions: { choice: CHOICE.answerQuestion(['YES', 'NO']) } });
+  assert.deepEqual(laya.batches[0].items[3].questions.choice.criteria, ['YES', 'NO', ABSTAIN]);
+  assert.ok(laya.batches.every(({ options }) => options.format === 'choice-v2'), 'the prompts are choice-v2’s, so only a choice-v2 model may answer them');
+  assert.ok(laya.batches.slice(2).every(({ items }) => items.every(item => item.state.facts === everything)));
+});
+
+test('choice-v2: the bar, "the facts don’t say", and a close runner-up each leave the question to the applicant', async () => {
+  const household = { householdSize: '1', householdVeteran: 'no' };
+  const bar = BARS['choice-v2'].answer;
+  const vet = question('vet', 'Is anyone in your household a veteran?');
+  const cases = [
+    [choices => sure(choices, 'No', bar - 0.01), {}, 'below the bar'],
+    [choices => sure(choices, 'No', bar), { vet: 'No' }, 'at the bar'],
+    [() => [0.3, 0.3, 0.4], {}, 'the facts don’t say'],
+    [() => [0.5, 0.49, 0.01], {}, 'two likely answers']
+  ];
+  for (const [choose, expected, why] of cases) {
+    assert.deepEqual(await everydayAnswers(answerer(choiceLaya((_, choices) => choose(choices))).answer({ questions: [vet], profile: household, budgetMs })), expected, why);
+  }
+  const dropdown = await everydayAnswers(answerer(choiceLaya((_, choices) => sure(choices, '1 person', 0.98)))
+    .answer({ questions: [question('size', 'Household size', ['1 person', '2 people', '3 or more'], 'select')], profile: household, budgetMs }));
+  assert.deepEqual(dropdown, { size: '1 person' });
+});
+
+test('choice-v2: answers needing a sensitive fact are marked; a question whose option is the abstain choice itself is never asked', async () => {
+  const laya = choiceLaya((state, choices) => {
+    if (state.question === 'Is anyone in your household 60 or older?') return sure(choices, state.facts.includes('41 years old') ? 'No' : ABSTAIN, 0.97);
+    if (state.question === 'Is anyone in your household a veteran?') return sure(choices, 'No', 0.98);
+    return sure(choices, ABSTAIN, 0.99);
+  });
+  const questions = [question('sixty', 'Is anyone in your household 60 or older?'), question('vet', 'Is anyone in your household a veteran?'),
+    question('odd', 'Pick one', ['Yes', ABSTAIN])];
+  const { answers, sensitive, sensitiveFields } = await answerer(laya).answer({ questions, profile, budgetMs });
+  assert.deepEqual(answers, { vet: 'No', sixty: 'No' });
+  assert.deepEqual(sensitive, ['sixty']);
+  assert.deepEqual(sensitiveFields, ['birthDate', 'monthlyEarnedIncome', 'monthlyOtherIncome']);
+  assert.equal(laya.batches.flatMap(({ items }) => items).some(item => item.state.question === 'Pick one'), false, 'its choices would be ambiguous');
+});
+
+test('choice-v2: a timeout keeps the requests already decided; a request past the deadline is dropped; a format without bars fails loudly', async () => {
+  const questions = Array.from({ length: 20 }, (_, index) => question(`q${index}`, `Is anyone a veteran ${index}?`));
+  const vet = (_, choices) => sure(choices, 'No', 0.98);
+  let calls = 0;
+  const slow = choiceLaya(vet);
+  const batch = slow.decideBatch;
+  slow.decideBatch = async (items, options) => { if (++calls === 2) throw Object.assign(new Error('Laya took too long.'), { code: 'LAYA_TIMEOUT' }); return batch(items, options); };
+  assert.deepEqual(Object.keys((await answerer(slow).answer({ questions, profile, budgetMs })).answers), questions.slice(0, 8).map(item => item.id));
+
+  let clock = 0;
+  const timed = choiceLaya(vet);
+  const answer = timed.decideBatch;
+  timed.decideBatch = async (items, options) => { clock += 1600; return answer(items, options); };
+  const result = await createFieldAnswers({ laya: timed, today: TODAY, now: () => clock }).answer({ questions, profile, budgetMs });
+  assert.deepEqual(Object.keys(result.answers), questions.slice(0, 8).map(item => item.id), 'the second request came back at 3.2 seconds');
+  assert.equal(timed.batches.length, 2);
+
+  const unknown = { ...choiceLaya(vet), format: async () => 'choice-v9' };
+  await assert.rejects(answerer(unknown).answer({ questions, profile, budgetMs }), /choice-v9/);
 });

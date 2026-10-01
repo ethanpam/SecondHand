@@ -81,11 +81,12 @@ if (nativeOrigin) {
   // The app's one Laya runtime. While it is on, it downloads its model and keeps it up to date in
   // the background; the model loads when a decision is asked for. Desktop request handlers call
   // laya.decide / laya.decideBatch.
+  // Development builds may check another latest.json (its files are still pinned by SHA-256), or use
+  // a local export, which skips the pin, with its prompt format named.
+  const localModel = !app.isPackaged && process.env.SECONDHAND_LAYA_MODEL_DIR;
   const laya = createLaya({ userDataDir: userData, manifest: require('./laya-model.json'),
-    // Development builds may check another latest.json (its files are still pinned by SHA-256), or use
-    // a local export, which skips the pin.
     updateUrl: !app.isPackaged && process.env.SECONDHAND_LAYA_UPDATE_URL || LAYA_UPDATE_URL,
-    modelDir: !app.isPackaged && process.env.SECONDHAND_LAYA_MODEL_DIR ? path.resolve(process.env.SECONDHAND_LAYA_MODEL_DIR) : undefined });
+    modelDir: localModel ? path.resolve(localModel) : undefined, modelFormat: localModel ? process.env.SECONDHAND_LAYA_MODEL_FORMAT : undefined });
   // An unreadable Laya status is shown as an error; it must not keep the app from opening.
   const layaStatus = () => laya.status().catch(error => ({ state: 'error', enabled: layaEnabled !== false, message: `Laya’s status couldn’t be read (${error.message}).` }));
   // The extension's uses of that runtime: matching text boxes (#39) and answering choice questions (#42).

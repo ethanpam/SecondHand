@@ -7,7 +7,7 @@ import sys
 import unittest
 from pathlib import Path
 
-from run import ABSTAIN, balance
+from run import ABSTAIN, MATCH_ABSTAIN, balance
 
 HERE = Path(__file__).resolve().parent
 
@@ -24,7 +24,28 @@ def rows():
     return out
 
 
+def choice_rows():
+    """choice-v2: one row per decision, answered with its choice."""
+    out = []
+    for task, abstain in (("answer", ABSTAIN), ("match", MATCH_ABSTAIN)):
+        for split in ("train", "val", "test"):
+            for n in range(12):
+                out.append({"task": task, "split": split, "decision": f"{task}-{split}-{n}", "state": {"question": f"Q{n}"},
+                            "answers": {f"{task}-q": abstain if n % 3 else "Yes"}})
+    return out
+
+
 class Balance(unittest.TestCase):
+    def test_choice_rows_are_balanced_by_their_answer(self):
+        kept = balance(choice_rows(), 1.0, 13)
+        for task in ("answer", "match"):
+            self.assertEqual(sum(1 for r in kept if r["task"] == task and r["split"] == "test"), 12, "test keeps everything")
+            for split in ("train", "val"):
+                rows = [r for r in kept if r["task"] == task and r["split"] == split]
+                self.assertEqual(len(rows), 8, "4 answerable + 4 abstain")
+                self.assertEqual(sum(1 for r in rows if r["answers"][f"{task}-q"] == "Yes"), 4)
+
+
     def test_keeps_every_answerable_decision_and_at_most_one_abstain_each_outside_test(self):
         kept = balance(rows(), 1.0, 13)
         decisions = {(r["task"], r["split"], r["decision"]) for r in kept}

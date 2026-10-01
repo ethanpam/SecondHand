@@ -68,7 +68,46 @@ test('the desktop’s unsafe-question check is the extension engine’s, on ever
   assert.ok(unsafe > 40, `found ${unsafe}`);
 });
 
+test('choice-v2: a box of a type the model wasn’t trained on is refused, not described', () => {
+  assert.throws(() => prompts.CHOICE.matchState('Color', 'color'), /color/);
+});
+
 test('text boxes and choice questions are the question types the model was trained on', () => {
   assert.deepEqual([...prompts.TEXT_TYPES], ['text', 'textarea', 'number', 'date', 'email', 'tel']);
   assert.deepEqual([...prompts.CHOICE_TYPES], ['radio', 'select', 'checkbox']);
+});
+
+test('choice-v2: the desktop asks the trained model exactly the builder’s choices, instructions and abstain options', () => {
+  const { CHOICE } = prompts;
+  assert.equal(CHOICE.ANSWER_INSTRUCTIONS, build.CHOICE_ANSWER_INSTRUCTIONS);
+  assert.equal(CHOICE.MATCH_INSTRUCTIONS, build.CHOICE_MATCH_INSTRUCTIONS);
+  assert.equal(CHOICE.MATCH_ABSTAIN, build.MATCH_ABSTAIN);
+  assert.deepEqual({ ...CHOICE.BOX_TYPES }, build.BOX_TYPES);
+  assert.deepEqual(JSON.parse(JSON.stringify(CHOICE.MATCH_SETS)), JSON.parse(JSON.stringify(build.MATCH_SETS)));
+  assert.deepEqual([...CHOICE.MATCH_SETS.text], [...prompts.MATCH_CANDIDATES], 'a text box is offered every field AI may suggest');
+  for (const keys of Object.values(CHOICE.MATCH_SETS)) for (const key of keys) assert.equal(prompts.NEVER_SUGGESTED.includes(key), false, key);
+  assert.deepEqual(new Set(Object.keys(CHOICE.MATCH_SETS)), new Set(prompts.TEXT_TYPES), 'every text-box type has its set');
+});
+
+test('choice-v2: an answering decision is the training row’s question and state, byte for byte, facts sheet included', () => {
+  const question = { id: 'size', type: 'select', label: 'How many people live in your home?', options: ['1', '2', '3', '4 or more'], rule: { name: 'householdSize' } };
+  const household = { birthDate: '1985-04-12', householdSize: '3', householdAdults: '2', householdChildren: '1', householdSeniors: '0', state: 'IA', county: 'Polk' };
+  const { rows, questions } = build.buildChoiceRows([{ file: 'laya-prompts-check.json', source: { kind: 'synthetic' }, questions: [question] }], [household], { today: TODAY });
+  const [row] = rows;
+  const [id] = Object.keys(row.answers);
+  const facts = factsText(buildFacts(household, { today: TODAY }));
+  assert.equal(JSON.stringify(prompts.CHOICE.answerState(facts, question.label)), JSON.stringify(row.state));
+  assert.equal(JSON.stringify(prompts.CHOICE.answerQuestion(question.options)), JSON.stringify(questions[id]));
+});
+
+test('choice-v2: a matching decision is the training row’s question and state for every type of text box', () => {
+  for (const type of prompts.TEXT_TYPES) {
+    const file = { file: 'laya-prompts-check.json', source: { kind: 'synthetic' }, questions: [{ id: 'box', type, label: 'Where can we reach you?', options: [], rule: { name: 'none' } }] };
+    const { rows, questions } = build.buildChoiceMatchRows([file]);
+    const row = rows.find(item => item.group === 'synthetic:laya-prompts-check.json#box');
+    if (!prompts.CHOICE.MATCH_SETS[type].length) { assert.equal(row, undefined, `${type}: nothing on offer, nothing asked`); continue; }
+    const [id] = Object.keys(row.answers);
+    assert.equal(JSON.stringify(prompts.CHOICE.matchState('Where can we reach you?', type)), JSON.stringify(row.state), type);
+    assert.equal(JSON.stringify(prompts.CHOICE.matchQuestion(prompts.CHOICE.MATCH_SETS[type])), JSON.stringify(questions[id]), type);
+  }
 });

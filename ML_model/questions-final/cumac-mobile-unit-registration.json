@@ -1,0 +1,20 @@
+{
+  "source": {
+    "url": "https://docs.google.com/forms/d/e/1FAIpQLSfIErXME8JUm4GO_gdWufmC7dvASnnjNZbuFEF0rRxMoW3b9Q/viewform",
+    "title": "Mobile Unit Registration- 2026",
+    "kind": "google-form",
+    "retrieved": "2026-09-29",
+    "region": "Paterson, NJ",
+    "final": true
+  },
+  "questions": [
+    { "id": "q1", "label": "I would like to register for the Mobile unit on the following day:", "type": "radio", "options": ["10/6/2026- West Milford Presbyterian Church, 1452 Union Valled Rd, West Milford, NJ 07480 10AM-12PM", "10/6/2026- Bloomingdale Senior Center, 103 Hamburg Turnpike, Bloomingdale, NJ 07403 1PM-3PM", "10/7/2026- Center for Family Resources, 12 Morris Rd, Ringwood, NJ 07456 10AM-12PM", "10/7/2026- PCCC Wanaque Campus, 500 Union Ave, Haskell, NJ 07420 1PM-3PM", "10/13/2026- Pompton Lakes Municipal Building, 17 Pompton Ave, Pompton Lakes, NJ 07442 10AM-12PM", "10/13/2026- William Paterson University Food Pantry, WPU, Wayne, NJ 07470 1PM-3PM", "10/14/2026- Little Steps to Learning, 103 Overlook Ave, North Haledon, NJ 07508 10AM-12PM", "10/14/2026- Prospect Park Municipal Building Parking Lot, 106 Brown Ave, Prospect Park, NJ", "10/20/2026- Totowa, 537 Totowa Road, Totowa, NJ 07512 10AM-12PM", "10/20/2026- Little Falls (Please check back for updated location)", "10/21/2026- Clifton Boys and Girls Club, 181 Colfax Ave., Clifton, NJ 07013 10AM-12PM", "10/21/2026- PCCC of Passaic, 2 Paulison Ave, Passaic, NJ 07055 1PM-3PM", "10/27/2026- Boys and Girls Club Parking Lot, 8 Memorial Drive, Woodland Park, NJ 07424 10AM-12PM", "10/27/2026- Griffin Homes, 199 Carroll Street, Paterson, NJ 07501 1PM-3PM", "10/28/2026 Haledon Municipal Building, 510 Belmont Ave, Haledon, NJ 07508 10AM-12PM", "10/28/2026- John W. Rea House Parking Lot, 675 Goffle Road, Hawthorne, NJ 07506"], "rule": { "name": "none" }, "note": "Which mobile pantry stop and date to register for; not in the profile." },
+    { "id": "q2", "label": "Name", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" } },
+    { "id": "q3", "label": "Date of Birth", "type": "date", "options": [], "rule": { "name": "field", "key": "birthDate" } },
+    { "id": "q4", "label": "Phone number", "type": "text", "options": [], "rule": { "name": "field", "key": "phone" } },
+    { "id": "q5", "label": "E-mail address", "type": "text", "options": [], "rule": { "name": "field", "key": "email" } },
+    { "id": "q6", "label": "Full Home Address *Must be within Passaic County", "type": "textarea", "options": [], "rule": { "name": "none" }, "note": "One paragraph box for the full home address (street, town and ZIP); no single saved field holds all of it." },
+    { "id": "q7", "label": "How many people do you live with at home (including yourself)", "type": "radio", "options": ["1", "2", "3", "4", "5", "6", "7", "8", "9+"], "rule": { "name": "householdSize" }, "note": "Counts the applicant; options run 1 to 8, then 9+." },
+    { "id": "q8", "label": "Are you interested in applying for SNAP, Medicaid, Medicare or LIHEAP?", "type": "radio", "options": ["SNAP: Supplemental Nutrition Assistance Program", "Medicaid- Low-income health insurance", "Medicare: Health insurance for people 65+ or younger individuals with disabilities", "LIHEAP: Low Income Home Energy Assistance", "All of the above", "None of the above"], "rule": { "name": "none" }, "note": "Interest in applying, as one pick among four programs, \"All of the above\" or \"None of the above\"; no single applying fact decides it." }
+  ]
+}

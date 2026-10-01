@@ -109,7 +109,7 @@ test('the dataset is written in LayaStudio\'s format', () => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'sh-dataset-'));
   try {
     const bank = [{ source: { url: 'https://pantry.example.org/a', title: 'A' }, questions: [q({ name: 'anyChildren' }, yesNo)] }];
-    const summary = writeDataset(out, bank, [family], { today: TODAY });
+    const summary = writeDataset(out, bank, [family], { today: TODAY, format: 'noul-v1' });
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(out, 'questions.json'), 'utf8')), { correct: DECISION });
     assert.equal(DECISION.type, 'noul');
     const lines = fs.readFileSync(path.join(out, 'rows.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
@@ -145,7 +145,7 @@ test('the written dataset holds both tasks and reports them separately', () => {
   try {
     const bank = [{ source: { url: 'https://pantry.example.org/c', title: 'C' }, questions: [
       q({ name: 'anyChildren' }, yesNo), { id: 't1', label: 'Email', type: 'email', options: [], rule: { name: 'field', key: 'email' } }] }];
-    const summary = writeDataset(out, bank, [family], { today: TODAY });
+    const summary = writeDataset(out, bank, [family], { today: TODAY, format: 'noul-v1' });
     assert.deepEqual(Object.keys(summary.tasks), ['answer', 'match']);
     assert.equal(summary.tasks.answer.rows, 3);
     assert.ok(summary.tasks.match.rows > 20);
@@ -198,4 +198,15 @@ test('a per-question limit that isn\'t a positive whole number is refused, not r
     assert.throws(() => buildRows(bank, [family], { today: TODAY, perQuestion }), /per-question/i, String(perQuestion));
   }
   assert.ok(buildRows(bank, [family], { today: TODAY, perQuestion: 1 }).length);
+});
+
+test('applyingFor answers a self row ("Applying?") from the programs it lists: Yes for any, No only when every one is known no', () => {
+  const rule = programs => ({ name: 'applyingFor', programs });
+  assert.equal(pickFor(rule(['snap', 'fip']), yesNo), 'Yes', 'applying for SNAP');
+  assert.equal(pickFor(rule(['fip']), yesNo, { ...family, programFip: 'yes' }), 'Yes');
+  assert.equal(pickFor(rule(['snap', 'fip']), yesNo, { ...family, programSnap: 'no', programFip: 'no' }), 'No');
+  assert.equal(pickFor(rule(['snap', 'fip']), yesNo, { ...family, programSnap: 'no' }), ABSTAIN, 'FIP isn’t saved');
+  assert.equal(pickFor(rule(['snap', 'fip']), yesNo, { ...family, programSnap: 'no', programFip: 'no', programMedicaid: 'yes' }), 'No', 'Medicaid isn’t on this form');
+  assert.equal(pickFor(rule(['snap', 'fip', 'medicaid']), yesNo, { ...family, programSnap: 'no', programFip: 'no', programMedicaid: 'yes' }), 'Yes');
+  assert.equal(pickFor(rule(['medicaid']), yesNo, {}), ABSTAIN);
 });

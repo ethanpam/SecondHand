@@ -1,7 +1,8 @@
 """CPU latency and memory of an ONNX export for one form page, through onnxruntime.
 
 A page is one household's first N questions on a real form, in form order, each scored with
-every candidate it has (the way SecondHand would ask). Reports the time to load the model
+every candidate it has, the way the dataset's format asks: one prompt per candidate (noul-v1)
+or one per question (choice-v2). Reports the time to load the model
 and score the first page, the median and 95th percentile of later pages with the 1-minute load
 average beside each run, and peak memory.
 
@@ -23,6 +24,7 @@ from pathlib import Path
 
 import onnxruntime
 
+from decisions import candidates
 from onnx_score import OnnxScorer
 
 
@@ -87,8 +89,7 @@ def main():
     args = parser.parse_args()
 
     questions = json.loads((Path(args.dataset) / "questions.json").read_text())
-    page = pick_page(args.dataset, args.form, args.household, args.questions)
-    rows = [row for candidates in page for row in candidates]
+    page = [[c for row in rows for c in candidates(row, questions)] for rows in pick_page(args.dataset, args.form, args.household, args.questions)]
     rss_before = peak_rss_mb()
 
     first_load_1m = round(os.getloadavg()[0], 2)
@@ -96,10 +97,10 @@ def main():
     scorer = OnnxScorer(args.onnx, batch_size=args.batch_size, threads=args.threads)
     session_ms = (time.perf_counter() - started) * 1000
     started = time.perf_counter()
-    scorer.score_rows(rows, questions)
+    scorer.score_decisions(page, questions)
     first_page_ms = (time.perf_counter() - started) * 1000
 
-    runs = timed_runs(lambda: scorer.score_rows(rows, questions), args.runs)
+    runs = timed_runs(lambda: scorer.score_decisions(page, questions), args.runs)
     times = [run["ms"] for run in runs]
 
     report = {
@@ -112,7 +113,8 @@ def main():
         "household": args.household,
         "questions": args.questions,
         "questions_by_task": {task: sum(candidates[0]["task"] == task for candidates in page) for task in ("answer", "match")},
-        "candidate_rows": len(rows),
+        "candidates": sum(len(decision) for decision in page),
+        "prompts": len(scorer.prompts(page, questions)),
         "batch_size": args.batch_size,
         "threads": args.threads or "onnxruntime default",
         "session_load_ms": round(session_ms, 1),

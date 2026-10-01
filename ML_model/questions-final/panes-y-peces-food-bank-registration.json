@@ -1,0 +1,23 @@
+{
+  "source": {
+    "url": "https://docs.google.com/forms/d/e/1FAIpQLSdoBRu4za_V_vJwatuPKEI78hMfQ2JFQ-AdKuM4Bt7wxDBn8A/viewform",
+    "title": "Registro de Panes y Peces",
+    "kind": "google-form",
+    "retrieved": "2026-09-29",
+    "region": "Greenville, SC",
+    "final": true
+  },
+  "questions": [
+    { "id": "q1", "label": "***La Información que se proporciona a continuación es de suma Importancia para Usted y su familia, debe ser leída completamente y continuamente, los alimentos que son entregados periodicamente son producto de Donaciónes que realizan diversas organizaciones altruistas,", "type": "checkbox", "options": ["ACEPTO"], "rule": { "name": "never" }, "note": "Accepts a long bilingual notice about donated food, expiration dates and confidentiality. Label cut to the 300-character limit; the Spanish notice continues and is then repeated in English." },
+    { "id": "q2", "label": "NOMBRE - NAME", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" } },
+    { "id": "q3", "label": "DIRECCION-ADDRESS", "type": "text", "options": [], "rule": { "name": "field", "key": "addressLine1" } },
+    { "id": "q4", "label": "CIUDAD-CITY", "type": "text", "options": [], "rule": { "name": "field", "key": "city" } },
+    { "id": "q5", "label": "ESTADO-STATE", "type": "text", "options": [], "rule": { "name": "field", "key": "state" } },
+    { "id": "q6", "label": "ZIP-CODE", "type": "text", "options": [], "rule": { "name": "field", "key": "zip" }, "note": "The form validates this box as a number." },
+    { "id": "q7", "label": "TELEFONO-PHONE", "type": "text", "options": [], "rule": { "name": "field", "key": "phone" } },
+    { "id": "q8", "label": "Correo Electronico / Email", "type": "textarea", "options": [], "rule": { "name": "field", "key": "email" }, "note": "A paragraph box." },
+    { "id": "q9", "label": "Raza/ Race", "type": "radio", "options": ["Hispanic/Latino", "African American", "White/Caucasian", "Asian", "Multiracial", "Native American", "Other:"], "rule": { "name": "none" }, "note": "Race; not in the profile." },
+    { "id": "q10", "label": "CUÁNTAS PERSONAS VIVEN EN LA CASA? / HOW MANY PEOPLE LIVE IN THE HOUSE?", "type": "radio", "options": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "Other:"], "rule": { "name": "householdSize" }, "note": "Options 1 to 10, plus an Other box for larger households." },
+    { "id": "q11", "label": "ENLISTE CON NOMBRE, EDAD,SEXO Y RELACIÓN CON USTED TODOS LOS QUE VIVEN EN CASA / LIST WITH NAME, AGE, SEX AND RELATIONSHIP TO YOU OF EVERYONE WHO LIVES AT HOME", "type": "textarea", "options": [], "rule": { "name": "none" }, "note": "Open list of every household member with name, age, sex and relationship; not one saved answer." }
+  ]
+}
