@@ -83,6 +83,23 @@ if (!process.versions.electron) {
       await assert.rejects(engine.read(syntheticPdf(13)), { code: 'PAGE_LIMIT' });
       assert.equal(BrowserWindow.getAllWindows().length, 0);
       process.stdout.write('Actual OCR cancellation and 13-page PDF rejection passed.\n');
+      // Keep the real bundle untouched. A missing module fails during startup;
+      // damaged language data fails after the worker has received the document.
+      const damagedAssets = path.join(temporary, 'damaged-assets');
+      await fs.cp(assetsDirectory, damagedAssets, { recursive: true });
+      for (const [relative, missing] of [['pdf/pdf.mjs', true], ['language/eng.traineddata.gz', false]]) {
+        const target = path.join(damagedAssets, relative);
+        if (missing) await fs.rm(target);
+        else {
+          const damaged = await fs.readFile(target); damaged[0] ^= 1;
+          await fs.writeFile(target, damaged);
+        }
+        engine = createOcrEngine({ BrowserWindow, session, ipcMain, assetsDirectory: damagedAssets });
+        await assert.rejects(engine.read(bytes), { code: 'ASSETS', publicMessage: 'The local document reader is unavailable. Reinstall SecondHand and try again.' });
+        assert.equal(BrowserWindow.getAllWindows().length, 0);
+        await fs.copyFile(path.join(assetsDirectory, relative), target);
+      }
+      process.stdout.write('Actual missing and damaged OCR assets report the reinstall error.\n');
     }
     bytes.fill(0);
     process.stdout.write(`Local OCR smoke passed: ${result.pageCount} page(s), ${result.pages.reduce((n,p)=>n+p.words.length,0)} positioned words.\n`);

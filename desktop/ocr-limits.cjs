@@ -12,7 +12,7 @@ const ERRORS = Object.freeze({
   PASSWORD: 'This PDF is password protected. Choose an unlocked copy.',
   OUTPUT_LIMIT: 'This document contains too much text to read at once. Choose fewer pages.',
   TIMEOUT: 'Document reading took too long. Try fewer pages or a smaller image.',
-  ASSETS: 'The local document reader is unavailable. Reinstall SecondHand or prepare its OCR assets.',
+  ASSETS: 'The local document reader is unavailable. Reinstall SecondHand and try again.',
   READ_FAILED: 'The document could not be read. Check that it is a valid PDF, PNG, or JPEG and try again.'
 });
 function fault(code) { return Object.assign(new Error(ERRORS[code] || ERRORS.READ_FAILED), { code: Object.hasOwn(ERRORS, code) ? code : 'READ_FAILED', publicMessage: ERRORS[code] || ERRORS.READ_FAILED }); }

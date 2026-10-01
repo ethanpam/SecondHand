@@ -15,14 +15,17 @@ async function assetMap(directory) {
     if ((await fs.stat(path.join(directory, 'manifest.json'))).size > 256000) throw fault('ASSETS');
     manifest = JSON.parse(await fs.readFile(path.join(directory, 'manifest.json'), 'utf8'));
   } catch { throw fault('ASSETS'); }
-  if (manifest.version !== 1 || !manifest.assets || typeof manifest.assets !== 'object') throw fault('ASSETS');
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest) || manifest.version !== 1 ||
+      !manifest.assets || typeof manifest.assets !== 'object' || Array.isArray(manifest.assets)) throw fault('ASSETS');
   const files = new Map([
     ['/index.html', { file: path.join(__dirname, 'ocr.html') }],
     ['/runtime.mjs', { file: path.join(__dirname, 'ocr-runtime.mjs') }]
   ]);
   for (const [relative, metadata] of Object.entries(manifest.assets)) {
-    if (!/^[A-Za-z0-9_./-]+$/.test(relative) || relative.split('/').some(part => !part || part === '.' || part === '..') ||
-        !Number.isSafeInteger(metadata.bytes) || metadata.bytes < 1 || metadata.bytes > 40 * 1024 * 1024 || !/^[a-f0-9]{64}$/.test(metadata.sha256)) throw fault('ASSETS');
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata) ||
+        !/^[A-Za-z0-9_./-]+$/.test(relative) || relative.split('/').some(part => !part || part === '.' || part === '..') ||
+        !Number.isSafeInteger(metadata.bytes) || metadata.bytes < 1 || metadata.bytes > 40 * 1024 * 1024 ||
+        typeof metadata.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(metadata.sha256)) throw fault('ASSETS');
     files.set(`/assets/${relative}`, { file: path.join(directory, relative), ...metadata });
   }
   if (!files.has('/assets/language/eng.traineddata.gz') || !files.has('/assets/pdf/pdf.mjs') || !files.has('/assets/tesseract/tesseract.min.js')) throw fault('ASSETS');
@@ -68,7 +71,13 @@ function createOcrEngine({ BrowserWindow, session, ipcMain, assetsDirectory }) {
         if (asset.bytes !== undefined && (content.length !== asset.bytes || crypto.createHash('sha256').update(content).digest('hex') !== asset.sha256)) throw fault('ASSETS');
         return new Response(content, { headers: { 'Content-Type': MIME[path.extname(asset.file)] || 'application/octet-stream',
           'Content-Security-Policy': CSP, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
-      } catch { return new Response(null, { status: 404 }); }
+      } catch {
+        // Settle before the failed fetch reaches the renderer, which would
+        // otherwise replace a broken installation with a generic OCR error.
+        // A cancelled/finished job has already cleared finish and stays final.
+        finish?.(fault('ASSETS'));
+        return new Response(null, { status: 404 });
+      }
     });
     if (cancelled || signal?.aborted) { isolated.protocol.unhandle('https'); throw fault('CANCELLED'); }
     window = new BrowserWindow({ show: false, width: 320, height: 200, webPreferences: {
@@ -108,7 +117,7 @@ function createOcrEngine({ BrowserWindow, session, ipcMain, assetsDirectory }) {
         isolated.protocol.unhandle('https');
         // The nonpersistent partition has no document storage; clear any browser
         // implementation caches after the renderer and its workers are gone.
-        Promise.allSettled([isolated.clearCache(), isolated.clearStorageData()]).catch(() => {});
+        Promise.allSettled([isolated.clearCache(), isolated.clearStorageData()]);
         finish = null;
         if (error) reject(error); else resolve(result);
       };

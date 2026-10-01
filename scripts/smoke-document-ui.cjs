@@ -10,7 +10,17 @@ const path = require('node:path');
 const { _electron: electron, expect } = require('@playwright/test');
 const root = path.resolve(__dirname, '..');
 const fixture = path.join(root, 'tests/fixtures/ocr/synthetic-1040sr.pdf');
-const output = path.join(root, 'artifacts/ocr');
+const arguments_ = process.argv.slice(2);
+const options = {};
+for (let index = 0; index < arguments_.length; index += 2) {
+  const flag = arguments_[index], value = arguments_[index + 1];
+  if (!['--executable', '--artifacts'].includes(flag) || !value || value.startsWith('--') || options[flag]) {
+    throw new Error('Usage: node scripts/smoke-document-ui.cjs [--executable /absolute/path/to/app] [--artifacts directory]');
+  }
+  options[flag] = path.resolve(value);
+}
+const executable = options['--executable'];
+const output = options['--artifacts'] || path.join(root, 'artifacts/ocr');
 const passphrase = 'synthetic-document-ui-vault-passphrase';
 const expected = {
   firstName: 'ALEXANDER', lastName: 'SAMPLE',
@@ -27,7 +37,22 @@ async function main() {
     await fs.access(fixture);
     await fs.mkdir(output, { recursive: true });
     await fs.writeFile(path.join(userData, 'settings.json'), JSON.stringify({ layaEnabled: false, extensionId: '', autofillWithoutAsking: false, trustedSites: [] }));
-    application = await electron.launch({ args: [root], env: { ...process.env, SECONDHAND_USER_DATA: userData }, timeout: 30000 });
+    const env = { ...process.env };
+    delete env.ELECTRON_RUN_AS_NODE;
+    delete env.SECONDHAND_USER_DATA;
+    delete env.SECONDHAND_TEST_MODE;
+    delete env.SECONDHAND_TEST_USER_DATA;
+    if (executable) {
+      await fs.access(executable);
+      env.SECONDHAND_TEST_MODE = '1';
+      env.SECONDHAND_TEST_USER_DATA = userData;
+    } else env.SECONDHAND_USER_DATA = userData;
+    application = await electron.launch({ ...(executable ? { executablePath: executable } : {}),
+      args: executable ? [] : [root], env, timeout: 60000 });
+    const runtime = await application.evaluate(({ app }) => ({
+      packaged: app.isPackaged, arch: process.arch, platform: process.platform, electron: process.versions.electron
+    }));
+    assert.equal(runtime.packaged, Boolean(executable), 'The requested development or packaged app must actually be running.');
     page = await application.firstWindow();
     page.on('pageerror', error => errors.push(error.message));
     await application.evaluate(({ app, BrowserWindow, dialog }, { fixture, userData }) => {
@@ -137,7 +162,7 @@ async function main() {
     await page.evaluate(() => { window.__documentUiSmokeUnsubscribe(); delete window.__documentUiSmokeUnsubscribe; delete window.__documentUiSmokeProgress; });
     assert.deepEqual(errors, []);
     const report = {
-      passed: true, fixture: 'tests/fixtures/ocr/synthetic-1040sr.pdf', durationSeconds: (Date.now() - started) / 1000,
+      passed: true, runtime, fixture: 'tests/fixtures/ocr/synthetic-1040sr.pdf', durationSeconds: (Date.now() - started) / 1000,
       actual: ['Electron desktop UI', 'native IPC', 'PDF rendering', 'two English OCR passes', 'document analysis', 'encrypted vault save', 'lock and unlock'],
       stubbed: ['native file-picker response selects the explicit synthetic fixture'],
       selectedKeys: Object.keys(expected), reviewOnlyFieldCount: rows.filter(row => !row.key).length,
@@ -147,7 +172,7 @@ async function main() {
       limitations: 'Synthetic document only. This does not establish recognition accuracy on arbitrary real tax returns; every selected answer requires review.'
     };
     await fs.writeFile(path.join(output, 'document-ui-report.json'), JSON.stringify(report, null, 2) + '\n');
-    console.log(`Document UI smoke passed: actual PDF OCR, ${Object.keys(expected).length} reviewed draft fields, no auto-save, preserved edits, encrypted save and lock/unlock. Artifacts: ${output}`);
+    console.log(`Document UI smoke passed (${runtime.packaged ? 'packaged' : 'development'} ${runtime.platform}/${runtime.arch}): actual PDF OCR, ${Object.keys(expected).length} reviewed draft fields, no auto-save, preserved edits, encrypted save and lock/unlock. Artifacts: ${output}`);
   } catch (error) {
     if (page && !page.isClosed()) {
       console.error('Document UI state:', await page.evaluate(() => ({

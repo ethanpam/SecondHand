@@ -58,6 +58,8 @@ Clearing references is not guaranteed forensic memory erasure: JavaScript string
 
 ## Development and QA
 
+The [code walkthrough](document-ocr-code-guide.md) explains each OCR component, the review/save boundary, and what the tests cover.
+
 ```sh
 npm ci
 npm run test:ocr
@@ -65,11 +67,13 @@ npm run test:ocr -- --input tests/fixtures/ocr/synthetic-1040sr.pdf
 npm run test:ocr:ui
 ```
 
-The default smoke command runs the real Electron OCR engine on a generated synthetic PNG, then checks actual cancellation and rejection of a 13-page PDF. The command with `--input` reads the supplied one-page **synthetic** 2024 Form 1040-SR scan through the same bundled engine and parser. The fixture is marked as test data, not for filing; its [provenance](../tests/fixtures/ocr/README.md) is recorded alongside it. Neither check starts the applicant vault or Laya, or sends anything to a government portal.
+The default smoke command runs the real Electron OCR engine on a generated synthetic PNG, then checks actual cancellation, rejection of a 13-page PDF, and missing/corrupted bundled files. Damaged reader files show a reinstall message; malformed manifests fail before a worker opens. These checks use temporary copies and leave the real bundle untouched. The command with `--input` reads the supplied one-page **synthetic** 2024 Form 1040-SR scan through the same bundled engine and parser. The fixture is marked as test data, not for filing; its [provenance](../tests/fixtures/ocr/README.md) is recorded alongside it. Neither check starts the applicant vault or Laya, or sends anything to a government portal.
 
 `test:ocr:ui` exercises the desktop Documents view with that PDF and a temporary synthetic vault, with Laya disabled. Only the native file-picker response is stubbed. PDF rendering, OCR, parsing, review selection, draft merging, encrypted saving, and lock/unlock are real. It checks that reading and applying do not auto-save, unrelated draft edits survive, uncertain SSNs are omitted, and historical amounts cannot enter monthly income. Screenshots and a report are written to the ignored `artifacts/ocr/` folder.
 
-The Apple silicon Mac DMG has been built locally, its bundled asset hashes checked, and its packaged OCR reader tested with the synthetic PDF. Windows and Intel Mac installer execution remain unverified; Windows packaging requires the native-host compiler on a Windows machine. No CI workflow or public release is created by these commands.
+To test an installed or mounted package, run `node scripts/smoke-document-ui.cjs --executable /absolute/path/to/secondHand.app/Contents/MacOS/secondHand --artifacts artifacts/ocr-packaged` (use the app executable path on Windows). This opts the packaged app into its existing isolated test-storage mode. The harness verifies the storage path and packaged mode, records the runtime architecture, and never uses the normal applicant vault.
+
+Both Mac DMGs have been built locally, mounted read-only, and tested through the complete packaged OCR/review/encrypted-save/lock/unlock workflow with the synthetic PDF. Each package's 217 bundled OCR assets passed hash checks, and its OCR code matched source. The Apple silicon build ran natively; the Intel build ran as `darwin/x64` under Rosetta on Apple silicon, so physical Intel hardware remains untested. Windows execution remains unverified: this test machine has no Windows runtime or .NET Framework native-host compiler. The Mac builds retain the existing unsigned, non-notarized pilot packaging. No CI workflow or public release is created by these commands.
 
 On the supplied PDF, the current result proposes seven profile details: first name, last name, street, apartment, city, state, and ZIP. The middle initial and SSN are omitted. Only the agreeing historical amounts for line 1a (68,450) and line 2b (460) are proposed, for review only; the other amounts are omitted because the passes do not read them consistently. This is a deliberately partial result, not flawless extraction.
 
