@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, powerMonitor, session, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, powerMonitor, session, safeStorage, systemPreferences } = require('electron');
 const crypto = require('node:crypto');
 const path = require('node:path');
 const fs = require('node:fs/promises');
@@ -13,6 +13,7 @@ const { startBridge, runNativeHost, nativeStreams, appLaunch, startApp, extensio
 const { registerHost } = require('./registration.cjs');
 const { getExtensionSetup, prepareBundledExtension } = require('./extension-setup.cjs');
 const { testStoragePath } = require('./test-storage-path.cjs');
+const { touchIdPlatform, createTouchIdUnlock } = require('./touch-id.cjs');
 const { createLaya } = require('./laya.cjs');
 const { createFieldSuggestions } = require('./field-suggestions.cjs');
 const { createFieldAnswers } = require('./field-answers.cjs');
@@ -102,6 +103,9 @@ if (nativeOrigin) {
   const fieldSuggestions = createFieldSuggestions({ laya });
   const fieldAnswers = createFieldAnswers({ laya });
   const vault = new Vault(path.join(userData, 'vault.secondhand'));
+  // Unlock with Touch ID on a Mac (#99). Its key is sealed in this Mac's Keychain in touch-unlock.bin.
+  const touchIdUnlock = createTouchIdUnlock({ vault, filePath: path.join(userData, 'touch-unlock.bin'), now: () => Date.now(), lockRevision: () => lockRevision,
+    platform: touchIdPlatform({ systemPreferences, safeStorage, platform: process.platform, packaged: app.isPackaged, env: process.env }) });
   const configPath = path.join(userData, 'settings.json');
   const deviceSecretPath = path.join(userData, 'device-reset.bin');
   const deviceResetSupported = ['darwin', 'win32'].includes(process.platform);
@@ -149,6 +153,7 @@ if (nativeOrigin) {
     const details = await vault.inspect().catch(() => null);
     return { exists: await vault.exists(), unlocked: vault.unlocked, lockRevision, recoveryKey: Boolean(details?.recoveryKey),
       deviceReset: Boolean(details?.deviceReset) && await hasDeviceSecret(), deviceResetSupported, extensionId, autofillWithoutAsking, trustedSites: [...trustedSites], allSites,
+      touchId: await touchIdUnlock.state(), touchIdSupported: touchIdUnlock.supported(), touchIdNotice: touchIdUnlock.notice,
       bridgeRunning: Boolean(bridge), platform: process.platform, laya: await layaStatus(),
       extensionSetup: await getExtensionSetup(app).catch(() => ({ prepared: false, available: false })) };
   }
@@ -309,7 +314,16 @@ if (nativeOrigin) {
   }
   async function bridgeRequest(request, context) {
     if (request.type === 'status') return { unlocked: vault.unlocked, applicationCount: vault.unlocked ? vault.getData().applications.length : 0, accessRevision, allSites,
-      laya: await extensionLayaState(), extension: await shippedExtension() };
+      laya: await extensionLayaState(), extension: await shippedExtension(), touchId: await touchIdUnlock.state() };
+    // The side panel's Unlock: this app's Touch ID prompt, which macOS shows over Chrome. Only whether
+    // it unlocked, or why not, goes back; the window hears of an unlock to show the saved information.
+    if (request.type === 'unlockWithTouchId') {
+      const result = await touchIdUnlock.unlock();
+      if (!result.unlocked) return { unlocked: false, reason: result.reason };
+      touch();
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('secondhand:unlocked', { lockRevision });
+      return { unlocked: true };
+    }
     // On Windows the native relay passes openApp on as it is; the app is running, so it comes forward.
     if (request.type === 'showApp' || request.type === 'openApp') {
       if (mainWindow) { if (mainWindow.isMinimized?.()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); }
@@ -493,6 +507,8 @@ if (nativeOrigin) {
       try { created = await vault.create(request?.password, { deviceSecret: device?.secret }); }
       catch (error) { throw publicError(/password/.test(error.message) ? error.message : 'Could not set up SecondHand. Please try again.'); }
       finally { device?.secret.fill(0); }
+      // A Touch ID key left from earlier information can't open this one.
+      await touchIdUnlock.forget();
       // Store the sealed secret only after creation succeeds, so a failed attempt
       // never replaces the secret that belongs to an existing file.
       if (device) {
@@ -504,6 +520,7 @@ if (nativeOrigin) {
     async unlock(passphrase) {
       try { await vault.unlock(passphrase); }
       catch (error) { throw publicError(/password|already unlocked|Unable to unlock/.test(error.message) ? error.message : 'Could not unlock SecondHand.'); }
+      await touchIdUnlock.passwordUnlocked();
       touch(); return status();
     },
     async resetPassword(request) {
@@ -514,6 +531,8 @@ if (nativeOrigin) {
         } else await vault.resetWithRecoveryKey(request?.recoveryKey, request?.password);
       }
       catch (error) { throw publicError(/password|recovery key|already unlocked/.test(error.message) ? error.message : 'Could not reset your password. Please try again.'); }
+      // The reset removed the Touch ID slot; its key goes too.
+      await touchIdUnlock.forget();
       touch(); return status();
     },
     // For someone who has lost both their password and recovery key: erase the
@@ -526,6 +545,7 @@ if (nativeOrigin) {
       try {
         await vault.erase();
         await fs.rm(deviceSecretPath, { force: true });
+        await touchIdUnlock.removeSealed();
       } catch { throw publicError('Could not erase your saved information. Please try again.'); }
       finally { accessRevision++; }
       return status();
@@ -554,6 +574,18 @@ if (nativeOrigin) {
           await fs.rm(deviceSecretPath, { force: true });
         }
       } catch { throw publicError(enabled ? 'This computer couldn’t save a reset option. Your recovery key still works.' : 'Could not turn off reset on this computer. Please try again.'); }
+      touch(); return status();
+    },
+    // { enabled: true, password } turns Touch ID on; { enabled: false } turns it off.
+    async setTouchIdUnlock(request) {
+      requireUnlocked();
+      if (typeof request?.enabled !== 'boolean') throw publicError('Invalid setting.');
+      if (request.enabled) await touchIdUnlock.turnOn(request.password); else await touchIdUnlock.turnOff();
+      touch(); return status();
+    },
+    async unlockWithTouchId() {
+      const result = await touchIdUnlock.unlock();
+      if (!result.unlocked) throw publicError(result.message);
       touch(); return status();
     },
     async saveRecoveryKey(value) {
@@ -734,6 +766,8 @@ if (nativeOrigin) {
       await vault.importEncrypted(bytes);
       // Setup progress belonged to the information just replaced.
       await fs.rm(setupPath, { force: true });
+      // A restored backup opens with its own password first.
+      await touchIdUnlock.forget();
       return { cancelled: false };
     }
   };

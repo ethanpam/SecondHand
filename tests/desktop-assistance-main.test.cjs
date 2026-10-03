@@ -56,6 +56,8 @@ async function desktop(options = {}) {
     dialog: { async showMessageBox(_parent, options) { prompts.push(options); return answer(); }, showErrorBox() { assert.fail('Desktop setup failed'); } },
     shell: { async openPath(folder) { opened.push(folder); return ''; } }, clipboard: {}, powerMonitor: { on(name, handler) { powerEvents.set(name, handler); } },
     session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, webRequest: { onBeforeRequest() {} } } } };
+  // A Mac without Touch ID; tests/desktop-touch-id-main.test.cjs covers Touch ID.
+  electron.systemPreferences = { canPromptTouchID: () => false };
   const overrides = {
     electron,
     // settings.json from `options.settings`; the guided setup's progress file from `options.setup` (none by default), as written since.
