@@ -4,7 +4,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const root = path.join(__dirname, '..');
 const IOWA_HOSTS = ['https://hhsservices.iowa.gov/*', 'https://hhsservices.iowa.gov/apspssp/*'];
-// Other sites are approved one at a time at runtime; the manifest may only ask for plain https.
+// Other sites are approved at runtime, one at a time or all at once; the manifest may only ask for plain https.
 const OPTIONAL_HOSTS = ['https://*/*'];
 
 function checkFiles(directory) {

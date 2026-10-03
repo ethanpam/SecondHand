@@ -126,8 +126,20 @@ test('site trust requests carry only an https site URL; the desktop decides whic
     assert.throws(() => validateRequest({ id: 'x', type: 'getFields', url, fields: ['firstName'] }), /https site/, url);
   }
   assert.throws(() => validateRequest({ id: 'trust', type: 'trustSite', url: site, fields: ['ssn'] }), /Unexpected/);
+  assert.deepEqual(validateRequest({ id: 'off', type: 'untrustSite', url: site }), { id: 'off', type: 'untrustSite', url: site });
+  for (const url of ['http://pantry.example.org/', 'https://pantry.example.org:8443/', 'not a url']) assert.throws(() => validateRequest({ id: 'off', type: 'untrustSite', url }), /https site/, url);
+  assert.throws(() => validateRequest({ id: 'off', type: 'untrustSite', url: site, fields: ['ssn'] }), /Unexpected/);
   assert.deepEqual(validateRequest({ id: 'x', type: 'getFields', url: site, fields: ['firstName'] }).fields, ['firstName']);
   assert.throws(() => validateRequest({ id: 'x', type: 'recordProgress', url: site, filledCount: 1 }), /Iowa portal/);
+});
+
+test('turning all websites on or off carries nothing but the request itself', () => {
+  for (const type of ['trustAllSites', 'untrustAllSites']) {
+    assert.deepEqual(validateRequest({ id: 'all', type }), { id: 'all', type });
+    for (const extra of [{ url: 'https://pantry.example.org/' }, { fields: ['ssn'] }, { origins: ['https://*/*'] }]) {
+      assert.throws(() => validateRequest({ id: 'all', type, ...extra }), /Unexpected/, `${type} ${Object.keys(extra)}`);
+    }
+  }
 });
 
 const LAYA_SITE = 'https://pantry.example.org/intake?step=2';

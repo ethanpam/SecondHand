@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld('secondHand', Object.freeze({
   connectExtension: extensionId => invoke('connectExtension', extensionId),
   setAutofillTrust: enabled => invoke('setAutofillTrust', enabled),
   removeTrustedSite: origin => invoke('removeTrustedSite', origin),
+  turnOffAllSites: () => invoke('turnOffAllSites'),
   layaStatus: () => invoke('layaStatus'),
   setLayaEnabled: enabled => invoke('setLayaEnabled', enabled),
   downloadLaya: () => invoke('downloadLaya'),

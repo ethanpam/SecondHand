@@ -165,6 +165,9 @@ test('access receipts advance for lock, profile, trust, and extension changes in
     () => app.invoke('setAutofillTrust', false),
     () => app.request({ type: 'trustSite', url: 'https://pantry.example.org/intake' }),
     () => app.invoke('removeTrustedSite', 'https://pantry.example.org'),
+    () => app.request({ type: 'trustAllSites' }),
+    () => app.request({ type: 'untrustAllSites' }),
+    async () => { await app.request({ type: 'trustAllSites' }); await app.invoke('turnOffAllSites'); },
     async () => { await app.invoke('connectExtension', 'b'.repeat(32)); await app.invoke('connectExtension', extensionId); }
   ];
   for (const mutate of mutations) {
@@ -366,6 +369,23 @@ test('money on hand and medical expenses always ask on other sites but follow Io
   assert.match(app.prompts.at(-1).detail, /money on hand, medical expenses, and your answers about/);
 });
 
+test('turning a site off in the extension drops it from the trusted list at once, even while locked, with no prompt', async () => {
+  const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org', 'https://wic.example.gov'] } });
+  let revision = (await app.request({ type: 'status' })).accessRevision;
+  await app.invoke('lock');
+  revision = (await app.request({ type: 'status' })).accessRevision;
+  assert.deepEqual(plain(await app.request({ type: 'untrustSite', url: `${PANTRY}?week=2` })), { trusted: false, origin: 'https://pantry.example.org' });
+  assert.ok((await app.request({ type: 'status' })).accessRevision > revision, 'an access receipt from before can’t fill it');
+  assert.equal(app.prompts.length, 0);
+  assert.deepEqual(app.writes.at(-1).json.trustedSites, ['https://wic.example.gov']);
+  await app.invoke('unlock', 'synthetic password');
+  await assert.rejects(app.request({ type: 'getFields', url: PANTRY, fields: ['firstName'] }), /isn’t trusted/);
+  assert.equal((await app.request({ type: 'getFields', url: 'https://wic.example.gov/apply', fields: ['firstName'] })).values.firstName, 'Synthetic');
+  const writes = app.writes.length;
+  assert.deepEqual(plain(await app.request({ type: 'untrustSite', url: PANTRY })), { trusted: false, origin: 'https://pantry.example.org' }, 'a site not in the list is already off');
+  assert.equal(app.writes.length, writes);
+});
+
 test('removing a trusted site stops field release; a locked vault cannot trust sites', async () => {
   const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org', 'https://wic.example.gov'] } });
   assert.deepEqual(plain((await app.invoke('removeTrustedSite', 'https://pantry.example.org')).trustedSites), ['https://wic.example.gov']);
@@ -374,6 +394,81 @@ test('removing a trusted site stops field release; a locked vault cannot trust s
   await assert.rejects(app.request({ type: 'trustSite', url: PANTRY }), /Unlock/);
   const stored = await desktop({ settings: { extensionId, trustedSites: ['https://ok.example.org', 'http://bad.example.org', 'javascript:1', 42] } });
   assert.deepEqual(plain((await stored.invoke('status')).trustedSites), ['https://ok.example.org']);
+});
+
+const ANYWHERE = 'https://never.example.net/apply';
+test('trusting all websites asks once, is saved, and lets any https site ask for saved answers', async () => {
+  const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true } });
+  assert.equal((await app.request({ type: 'status' })).allSites, false);
+  assert.equal((await app.invoke('status')).allSites, false);
+  await assert.rejects(app.request({ type: 'getFields', url: ANYWHERE, fields: ['firstName'] }), /isn’t trusted/);
+  app.answer(async () => ({ response: 0 }));
+  await assert.rejects(app.request({ type: 'trustAllSites' }), /cancelled trusting all websites/);
+  assert.equal((await app.request({ type: 'status' })).allSites, false);
+  assert.equal(app.writes.some(write => 'allSites' in write.json), false, 'a cancelled approval saves nothing');
+  app.answer(async () => ({ response: 1 }));
+  assert.deepEqual(plain(await app.request({ type: 'trustAllSites' })), { allSites: true });
+  const prompt = app.prompts.at(-1);
+  assert.equal(prompt.title, 'Trust all websites?');
+  assert.equal(prompt.message, 'Let SecondHand fill forms on any website?');
+  assert.deepEqual(plain(prompt.buttons), ['Cancel', 'Trust all websites']);
+  assert.equal(prompt.cancelId, 0);
+  assert.match(prompt.detail, /Nothing is filled until you click Autofill/);
+  assert.match(prompt.detail, /never clicks Next or Submit/);
+  assert.match(prompt.detail, /Social Security number, date of birth, income, money on hand, medical expenses, and your answers about citizenship, disability, blindness, health, Medicare, and having a Social Security number still ask every time, on each site/);
+  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: true, trustedSites: [], allSites: true });
+  assert.equal((await app.request({ type: 'status' })).allSites, true);
+  assert.equal((await app.invoke('status')).allSites, true);
+  const prompts = app.prompts.length;
+  assert.deepEqual(plain((await app.request({ type: 'getFields', url: ANYWHERE, fields: ['firstName'] })).values), { firstName: 'Synthetic' });
+  assert.equal(app.prompts.length, prompts, 'Always allow covers ordinary fields there too');
+  assert.deepEqual(plain((await app.invoke('status')).trustedSites), [], 'no site is added to the trusted list');
+  await assert.rejects(app.request({ type: 'getFields', url: 'http://never.example.net/apply', fields: ['firstName'] }), /isn’t trusted/, 'https only');
+  const restarted = await desktop({ settings: app.writes.at(-1).json });
+  assert.equal((await restarted.request({ type: 'status' })).allSites, true, 'the setting survives a restart');
+  await app.invoke('lock');
+  await assert.rejects(app.request({ type: 'trustAllSites' }), /Unlock/);
+});
+
+test('sensitive fields still ask on every site that all websites allows, and Iowa keeps its rules', async () => {
+  const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true, allSites: true } });
+  await app.invoke('saveProfile', { firstName: 'Synthetic', ssn: '123-45-6789', monthlyEarnedIncome: '900' });
+  app.answer(async () => ({ response: 1 }));
+  const { values } = await app.request({ type: 'getFields', url: ANYWHERE, fields: ['firstName', 'ssn', 'monthlyEarnedIncome'] });
+  assert.equal(values.ssn, '123-45-6789');
+  assert.equal(app.prompts.length, 1);
+  assert.equal(app.prompts[0].title, 'Share sensitive details?');
+  assert.deepEqual(plain(app.prompts[0].buttons), ['Cancel', 'Allow once']);
+  assert.match(app.prompts[0].message, /never\.example\.net/);
+  app.answer(async () => ({ response: 0 }));
+  await assert.rejects(app.request({ type: 'getFields', url: ANYWHERE, fields: ['ssn'] }), /cancelled/);
+  await app.request({ type: 'getFields', fields: ['ssn'] });
+  assert.equal(app.prompts.length, 2, 'Iowa keeps its own trust rules');
+});
+
+test('turning all websites off, from the extension or the app, stops sites it allowed at once; trusted sites stay', async () => {
+  const settings = { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'], allSites: true };
+  const app = await desktop({ settings });
+  assert.equal((await app.request({ type: 'getFields', url: ANYWHERE, fields: ['firstName'] })).values.firstName, 'Synthetic');
+  await app.invoke('lock');
+  assert.deepEqual(plain(await app.request({ type: 'untrustAllSites' })), { allSites: false }, 'turning off works while locked');
+  assert.equal(app.prompts.length, 0, 'turning off needs no approval');
+  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'] });
+  assert.equal((await app.request({ type: 'status' })).allSites, false);
+  await app.invoke('unlock', 'synthetic password');
+  await assert.rejects(app.request({ type: 'getFields', url: ANYWHERE, fields: ['firstName'] }), /isn’t trusted/);
+  assert.equal((await app.request({ type: 'getFields', url: PANTRY, fields: ['firstName'] })).values.firstName, 'Synthetic', 'a trusted site stays');
+  assert.deepEqual(plain(await app.request({ type: 'untrustAllSites' })), { allSites: false }, 'turning off twice is fine');
+
+  const renderer = await desktop({ settings });
+  const status = await renderer.invoke('turnOffAllSites');
+  assert.equal(status.allSites, false);
+  assert.deepEqual(plain(status.trustedSites), ['https://pantry.example.org']);
+  assert.equal(renderer.writes.at(-1).json.allSites, undefined);
+  await assert.rejects(renderer.request({ type: 'getFields', url: ANYWHERE, fields: ['firstName'] }), /isn’t trusted/);
+  await assert.rejects(renderer.invoke('trustAllSites'), /Request denied/, 'only the extension turns it on, after Chrome’s prompt');
+  await renderer.invoke('lock');
+  await assert.rejects(renderer.invoke('turnOffAllSites'), /Unlock/);
 });
 
 // A stand-in for desktop/laya.cjs (#38) running a noul-v1 model, with its exact interface. `scores(state)` plays the model.
@@ -409,6 +504,19 @@ async function answering(settings) {
   await app.invoke('saveProfile', household);
   return app;
 }
+
+test('suggestFields and answerFields take an untrusted https site only while all websites is on', async () => {
+  const anywhere = [suggest([box], { url: ANYWHERE }), answerRequest([sixty], { url: ANYWHERE })];
+  const off = await answering({ extensionId, autofillWithoutAsking: true });
+  for (const request of anywhere) await assert.rejects(off.request(request), /isn’t trusted/, request.type);
+  const on = await answering({ extensionId, autofillWithoutAsking: true, allSites: true });
+  assert.deepEqual(plain((await on.request(anywhere[0])).suggestions), { [box.id]: 'email' });
+  const answered = plain(await on.request(anywhere[1]));
+  assert.deepEqual(answered.answers, { [sixty.id]: 'No' });
+  assert.equal(on.prompts.at(-1).title, 'Share sensitive details?', 'an answer that needed sensitive facts still asks on this site');
+  await on.request({ type: 'untrustAllSites' });
+  for (const request of anywhere) await assert.rejects(on.request(request), /isn’t trusted/, request.type);
+});
 
 test('before a new install has downloaded the shipped model, both Laya requests answer "not ready" and status says so', async () => {
   const app = await desktop({ settings: trusted });

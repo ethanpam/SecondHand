@@ -1,7 +1,7 @@
 'use strict';
 importScripts('address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'strings.js');
 if (typeof globalThis.SecondHandGeneric?.requestKeys !== 'function' || typeof globalThis.SecondHandGeneric.deriveValues !== 'function' || !Array.isArray(globalThis.SecondHandGeneric.GENERIC_KEYS) ||
-  typeof globalThis.SecondHandGeneric.unsafeQuestion !== 'function') {
+  typeof globalThis.SecondHandGeneric.unsafeQuestion !== 'function' || typeof globalThis.SecondHandGeneric.layaQuestion !== 'function') {
   throw new Error('SecondHand could not load generic-adapter.js. Reinstall the extension.');
 }
 if (typeof globalThis.SecondHandStrings?.english !== 'function' || typeof globalThis.SecondHandStrings.describeEnglish !== 'function') {
@@ -9,7 +9,7 @@ if (typeof globalThis.SecondHandStrings?.english !== 'function' || typeof global
 }
 // Must match BUILD in panel.js: change both together. The panel compares them to tell
 // when Chrome is still running an older worker than the pages it loaded from disk.
-const BUILD = '2026-09-28.1';
+const BUILD = '2026-10-03.1';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
@@ -54,8 +54,9 @@ const AI_KEYS = Object.freeze(SecondHandGeneric.GENERIC_KEYS.filter(key => !SENS
 // questions from the saved profile (#42). It gets question labels, types, and options only, within
 // the bridge's limits. Chrome's on-device AI runs only when Laya isn't ready.
 // Each Autofill click gives Laya `budgetMs` in all; every request carries what the click has left.
-const LAYA = Object.freeze({ textTypes: Object.freeze(['text', 'textarea', 'number', 'date', 'email', 'tel']), choiceTypes: Object.freeze(['radio', 'select', 'checkbox']),
-  fields: 40, questions: 30, label: 200, options: 30, option: 100, bytes: 48 * 1024, budgetMs: 3000 });
+// Which questions Laya may take is the site engine's rule (SecondHandGeneric.layaQuestion), so the
+// on-page card and the worker agree on it.
+const LAYA = Object.freeze({ fields: 40, questions: 30, bytes: 48 * 1024, budgetMs: 3000 });
 const LAYA_NOT_READY = 'LAYA_NOT_READY';
 const LAYA_STATES = Object.freeze(['off', 'unavailable', 'not-downloaded', 'downloading', 'ready', 'error']);
 // A native host that runs but can't reach the desktop app says so with this code. The Windows relay
@@ -131,7 +132,7 @@ function receiptRevision(response) {
   return response.accessRevision;
 }
 async function checkAccess(revision) {
-  const desktop = await nativeRequest('status');
+  const desktop = await desktopStatus();
   if (!desktop?.unlocked) throw fault('worker.unlockToAutofill');
   if (receiptRevision(desktop) !== revision) throw fault('worker.accessChanged');
 }
@@ -148,7 +149,7 @@ async function fillPage(tabId, state, pilot) {
   const pageKey = state.page.pageKey;
   let values = null;
   try {
-    const desktop = await nativeRequest('status');
+    const desktop = await desktopStatus();
     currentPilot(tabId, pilot);
     if (!desktop?.unlocked) return { state: 'locked', filled: 0, needYou: [], ...say('worker.unlockToAutofill'), pageKey };
     const response = await nativeRequest('getFields', { url: safeUrl(url), fields: SecondHandIowa.profileRequest(pageKey) });
@@ -337,10 +338,11 @@ function keyedPage(page) {
 
 // Other https sites the user turned on: Chrome access for the origin plus our
 // registered content script. The desktop keeps its own trusted list and has the final say.
+// A host named "all" would take the all-websites registration's id, so it is not a site here.
 function siteOrigin(raw) {
   try {
     const url = new URL(raw);
-    return url.protocol === 'https:' && url.hostname && !url.username && !url.password && !url.port && url.origin !== IOWA_ORIGIN ? url.origin : '';
+    return url.protocol === 'https:' && url.hostname && url.hostname !== 'all' && !url.username && !url.password && !url.port && url.origin !== IOWA_ORIGIN ? url.origin : '';
   } catch { return ''; }
 }
 const SITE_FILES = Object.freeze({ js: ['generic-adapter.js', 'page-text.js', 'generic-content.js'] });
@@ -348,10 +350,25 @@ const siteScript = origin => ({ id: `site-${new URL(origin).hostname}`, matches:
   js: [...SITE_FILES.js], allFrames: true, runAt: 'document_idle', persistAcrossSessions: true });
 const frameScriptPrefix = origin => `frame-${new URL(origin).hostname}--`;
 const frameScript = (topOrigin, origin) => ({ ...siteScript(origin), id: `${frameScriptPrefix(topOrigin)}${new URL(origin).hostname}` });
+// SecondHand on all websites: one registration for every https page but Iowa's site, which keeps its
+// own scripts, plus Chrome's access to every https site. The desktop keeps its own allSites setting.
+// Once given, Chrome's grant is kept: removing it would also take back every origin it covers, Iowa's
+// included until Chrome restarts. Without the registration it runs nothing, and the app trusts no site
+// for it, so a site is on only when its script is registered (or site-all is) and the app trusts it.
+const ALL_SITES = Object.freeze(['https://*/*']);
+const ALL_SITES_ID = 'site-all';
+const IOWA_HOST = `${IOWA_ORIGIN}/*`;
+const allSitesScript = () => ({ id: ALL_SITES_ID, matches: [...ALL_SITES], excludeMatches: [IOWA_HOST], js: [...SITE_FILES.js],
+  allFrames: true, runAt: 'document_idle', persistAcrossSessions: true });
 async function siteEnabled(origin) {
   const [scripts, allowed] = await Promise.all([chrome.scripting.getRegisteredContentScripts(),
     chrome.permissions.contains({ origins: [`${origin}/*`] })]);
-  return scripts.some(script => script.matches.includes(`${origin}/*`)) && allowed;
+  return allowed && scripts.some(script => script.id === ALL_SITES_ID || script.matches.includes(`${origin}/*`));
+}
+async function allSitesOn() {
+  const [scripts, allowed] = await Promise.all([chrome.scripting.getRegisteredContentScripts({ ids: [ALL_SITES_ID] }),
+    chrome.permissions.contains({ origins: [...ALL_SITES] })]);
+  return scripts.length > 0 && allowed;
 }
 async function requireSite(origin) {
   if (!(await siteEnabled(origin))) throw fault('worker.turnOnSiteFirst');
@@ -373,7 +390,7 @@ async function enableSite(tabId) {
     if (trust?.trusted !== true || trust.origin !== origin) throw fault('worker.appDidNotApproveSite');
   } catch (error) {
     // Nothing stays half on: without the app's approval, Chrome access goes back too.
-    await chrome.permissions.remove({ origins });
+    await dropAccess([origin]);
     throw error;
   }
   const script = siteScript(origin);
@@ -386,10 +403,11 @@ async function enableSite(tabId) {
 
 // Only Chrome's absent-receiver error means the top content script is missing.
 // A closed port or malformed response is a real failure, not a readiness signal.
+const NO_RECEIVER = Object.freeze(['Could not establish connection. Receiving end does not exist.', 'Receiving end does not exist.']);
 async function topSiteMessage(tabId, message) {
   try { return await chrome.tabs.sendMessage(tabId, message, { frameId: 0 }); }
   catch (error) {
-    if (error.message === 'Could not establish connection. Receiving end does not exist.' || error.message === 'Receiving end does not exist.') {
+    if (NO_RECEIVER.includes(error.message)) {
       const missing = fault('worker.reloadThenAutofill');
       missing.code = 'site-not-ready';
       throw missing;
@@ -416,11 +434,31 @@ async function siteFrames(tabId, origin) {
   return Promise.all(origins.map(async origin => ({ origin, enabled: await siteEnabled(origin) })));
 }
 
-async function removeAccess(origins) {
+// Chrome access to sites SecondHand no longer uses. Under Chrome's kept grant for every https site
+// there is nothing narrower to take back, and they stay off by having no script and no trust.
+async function dropAccess(origins) {
+  if (!origins.length || await chrome.permissions.contains({ origins: [...ALL_SITES] })) return;
   const patterns = origins.map(origin => `${origin}/*`);
   const removed = await chrome.permissions.remove({ origins: patterns });
   const kept = await Promise.all(patterns.map(origin => chrome.permissions.contains({ origins: [origin] })));
   if (!removed || kept.some(Boolean)) throw fault('worker.chromeKeptAccess');
+}
+// The app stops trusting sites SecondHand turned off. It needs no unlock: it only takes access away.
+async function untrustSites(origins) {
+  for (const origin of origins) {
+    let reply;
+    try { reply = await nativeRequest('untrustSite', { url: origin }); }
+    catch (error) { throw Object.assign(fault('worker.siteStillTrustedInApp'), { cause: error }); }
+    if (reply?.trusted !== false || reply.origin !== origin) throw fault('worker.desktopUnexpected');
+  }
+}
+// Sites SecondHand no longer uses lose Chrome access and the app's trust. Both are tried, so one
+// failing doesn't leave the other on, and the first failure is reported.
+async function forgetSites(origins) {
+  let failure = null;
+  try { await dropAccess(origins); } catch (error) { failure = error; }
+  try { await untrustSites(origins); } catch (error) { failure ||= error; }
+  if (failure) throw failure;
 }
 
 async function enableFrames(tabId) {
@@ -431,15 +469,19 @@ async function enableFrames(tabId) {
     if (!(await chrome.permissions.contains({ origins: [`${frameOrigin}/*`] }))) throw fault('worker.chromeNotAllowedFrames');
   }
   // Obtain every approval before registering any of the new scripts.
+  const approved = [];
   try {
     for (const frameOrigin of pending) {
       const trust = await nativeRequest('trustSite', { url: frameOrigin });
       if (trust?.trusted !== true || trust.origin !== frameOrigin) throw fault('worker.appDidNotApproveFrames');
+      approved.push(frameOrigin);
     }
     const current = await chrome.tabs.get(tabId);
     if (current.url !== tab.url || !current.active) throw fault('worker.pageChangedTryAgain');
   } catch (error) {
-    if (pending.length) await removeAccess(pending);
+    // Nothing stays half on: Chrome access goes back, and the app forgets the forms it approved.
+    await dropAccess(pending.filter(frameOrigin => !approved.includes(frameOrigin)));
+    await forgetSites(approved);
     throw error;
   }
   for (const frameOrigin of pending) {
@@ -453,19 +495,105 @@ async function enableFrames(tabId) {
 
 async function disableSite(tabId) {
   const { origin } = await activeSite(tabId);
+  // All websites covers every site; one can't be turned off inside it.
+  if (await allSitesOn()) throw fault('worker.allSitesCoverSite');
   // Registrations survive worker/extension restarts and identify which frames
   // this site enabled, even when no content script can answer in the open tab.
   const scripts = await chrome.scripting.getRegisteredContentScripts();
   const owned = scripts.filter(script => script.id === siteScript(origin).id || script.id.startsWith(frameScriptPrefix(origin)));
   if (owned.length) await chrome.scripting.unregisterContentScripts({ ids: owned.map(script => script.id) });
-  const remaining = await chrome.scripting.getRegisteredContentScripts();
-  const frameOrigins = owned.flatMap(script => script.matches.map(pattern => siteOrigin(pattern.slice(0, -2)))).filter(Boolean);
-  const unused = frameOrigins.filter(value => !remaining.some(script => script.matches.includes(`${value}/*`)));
-  await removeAccess([...new Set([origin, ...unused])]);
   results.delete(tabId);
   sitePlans.delete(tabId);
   forgetReads(tabId, entry => siteOrigin(entry.url) === origin);
+  // The site and the embedded forms no other site uses are forgotten.
+  const remaining = await chrome.scripting.getRegisteredContentScripts();
+  const frameOrigins = owned.flatMap(script => script.matches.map(pattern => siteOrigin(pattern.slice(0, -2)))).filter(Boolean);
+  await forgetSites([...new Set([origin, ...frameOrigins])].filter(value => !remaining.some(script => script.matches.includes(`${value}/*`))));
   return { enabled: false, origin };
+}
+
+const joined = (first, second) => ({ key: 'joined', params: { first, second } });
+const messageOf = error => error?.messageKey ? { key: error.messageKey, params: error.messageParams || {} } : { key: 'detail', params: { detail: String(error?.message || '').slice(0, 240) } };
+// While Chrome still holds its unused grant for every https site, a message about all websites says so
+// and how to remove it in Chrome's settings.
+async function withChromeGrant(message) {
+  return await chrome.permissions.contains({ origins: [...ALL_SITES] }) ? joined(message, { key: 'worker.chromeStillAllows', params: {} }) : message;
+}
+
+async function enableAllSites(tabId) {
+  // The side panel asks Chrome inside the user's click; the worker only confirms it happened.
+  if (!(await chrome.permissions.contains({ origins: [...ALL_SITES] }))) throw fault('worker.chromeNotAllowedAllSites');
+  try {
+    const trust = await nativeRequest('trustAllSites');
+    if (trust?.allSites !== true) throw fault('worker.appDidNotApproveAllSites');
+  } catch (error) {
+    // Nothing is registered and the app trusts nothing new. Chrome's grant stays, unused.
+    const declined = { key: 'worker.appDidNotApproveAllSites', params: {} };
+    const { key, params } = await withChromeGrant(error.messageKey === declined.key ? declined : joined(declined, messageOf(error)));
+    throw Object.assign(fault(key, params), { cause: error });
+  }
+  const script = allSitesScript();
+  if ((await chrome.scripting.getRegisteredContentScripts({ ids: [script.id] })).length) await chrome.scripting.updateContentScripts([script]);
+  else await chrome.scripting.registerContentScripts([script]);
+  // The registration covers later loads; the page already open gets the scripts now.
+  if (Number.isInteger(tabId) && siteOrigin((await chrome.tabs.get(tabId)).url)) await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: script.js });
+  return { enabled: true, ...say('worker.allSitesOn') };
+}
+
+// Turns all websites off in Chrome: the registration, and the card on open pages that are no longer on.
+// Sites turned on one at a time keep theirs. Chrome's grant is left as it is (see ALL_SITES).
+async function removeAllSites() {
+  if ((await chrome.scripting.getRegisteredContentScripts({ ids: [ALL_SITES_ID] })).length) await chrome.scripting.unregisterContentScripts({ ids: [ALL_SITES_ID] });
+  for (const tab of await chrome.tabs.query({})) {
+    const origin = siteOrigin(tab.url);
+    if (!origin || await siteEnabled(origin)) continue;
+    formFrames.delete(tab.id);
+    // Every frame of the page drops SecondHand: the top one its card, embedded ones their reports.
+    try { await chrome.tabs.sendMessage(tab.id, { type: 'secondhand:generic:off' }); }
+    catch (error) { if (!NO_RECEIVER.includes(error.message)) throw error; }
+  }
+}
+
+async function disableAllSites() {
+  await removeAllSites();
+  try {
+    const reply = await nativeRequest('untrustAllSites');
+    if (reply?.allSites !== false) throw fault('worker.desktopUnexpected');
+  } catch (error) {
+    // Chrome's side is off either way; the app keeps its setting until it hears.
+    const { key, params } = await withChromeGrant({ key: 'worker.allSitesStillOnInApp', params: {} });
+    throw Object.assign(fault(key, params), { cause: error });
+  }
+  const { key, params } = await withChromeGrant({ key: 'worker.allSitesOff', params: {} });
+  return { enabled: false, ...say(key, params) };
+}
+
+// The desktop's status. When the app no longer allows all websites (turned off there, or an app from
+// before it), SecondHand turns them off in Chrome too, before anything else is asked.
+async function desktopStatus() {
+  const status = await nativeRequest('status');
+  if (status?.allSites !== true && (await chrome.scripting.getRegisteredContentScripts({ ids: [ALL_SITES_ID] })).length) await removeAllSites();
+  return status;
+}
+
+// tabId -> ids of embedded frames whose page has a form SecondHand can help with, so the top page shows
+// its card for a form inside an iframe. Yes or no only; never what a form asks.
+const formFrames = new Map();
+async function formReport(sender, helps) {
+  const tabId = sender.tab.id;
+  const top = siteOrigin(sender.tab.url), own = siteOrigin(sender.url);
+  if (!top || !own || !(await siteEnabled(top)) || !(await siteEnabled(own))) return undefined;
+  const frames = formFrames.get(tabId) || new Set();
+  const before = frames.size > 0;
+  if (sender.frameId > 0) { if (helps) frames.add(sender.frameId); else frames.delete(sender.frameId); }
+  if (frames.size) formFrames.set(tabId, frames); else formFrames.delete(tabId);
+  const now = frames.size > 0;
+  if (sender.frameId > 0 && now !== before) {
+    // A top page that hasn't loaded yet asks when it does.
+    try { await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:formFrames', helps: now }, { frameId: 0 }); }
+    catch (error) { if (!NO_RECEIVER.includes(error.message)) throw error; }
+  }
+  return { frames: now };
 }
 
 // Chrome supplies frame ids only after access has been granted. Never message
@@ -600,7 +728,6 @@ function guessAssignments(stored, url, guesses) {
 }
 
 const plainEntries = value => value && typeof value === 'object' && !Array.isArray(value) ? Object.entries(value) : null;
-const layaText = (value, max) => typeof value === 'string' && value.trim() !== '' && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
 const utf8Length = text => { let bytes = 0; for (const char of text) { const code = char.codePointAt(0); bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4; } return bytes; };
 const knownLayaState = state => { if (!LAYA_STATES.includes(state)) throw fault('worker.desktopUnexpected'); return state; };
 // Laya's state as the desktop's status reports it. A desktop app from before Laya reports none.
@@ -619,12 +746,10 @@ async function layaReady() {
 function layaQuestions(frames, prefix) {
   const boxes = [], choices = [];
   for (const { frameId, plan } of frames) for (const field of plan.unmatched) {
+    const kind = SecondHandGeneric.layaQuestion(field);
+    if (!kind) continue;
     const { label, type, options } = field;
-    if (!layaText(label, LAYA.label) || options.length > LAYA.options || options.some(option => !layaText(option, LAYA.option)) ||
-      new Set(options).size !== options.length || SecondHandGeneric.unsafeQuestion(field)) continue;
-    const question = { id: prefix ? `f${frameId}:${field.id}` : field.id, label, type, options: [...options] };
-    if (LAYA.textTypes.includes(type)) boxes.push(question);
-    else if (LAYA.choiceTypes.includes(type) && options.length) choices.push(question);
+    (kind === 'text' ? boxes : choices).push({ id: prefix ? `f${frameId}:${field.id}` : field.id, label, type, options: [...options] });
   }
   return { boxes, choices };
 }
@@ -723,7 +848,7 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
     const keys = [...new Set(SecondHandGeneric.requestKeys(initial.flatMap(frame => frame.planned.filter(item => item.key !== undefined).map(item => item.key))))];
     if (keys.some(key => typeof key !== 'string' || !KEY.test(key))) throw fault('worker.fieldRequestFailed');
     if (keys.length) {
-      const desktop = await nativeRequest('status');
+      const desktop = await desktopStatus();
       if (!desktop?.unlocked) throw fault('worker.unlockToAutofill');
       const response = await nativeRequest('getFields', { url: safeUrl(url), fields: keys });
       if (!response?.values || typeof response.values !== 'object' || Array.isArray(response.values)) throw fault('worker.noProfileFields');
@@ -1046,6 +1171,13 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   const frame = sender.url === chrome.runtime.getURL('panel.html?surface=launcher') && sender.frameId > 0 && Number.isInteger(sender.tab?.id);
   const route = !frame ? undefined : SecondHandIowa.isSupportedUrl(sender.tab.url) ? 'iowa' : siteOrigin(sender.tab.url) ? 'site' : '';
   const launcher = Boolean(route);
+  // A site page's own content script says whether its frame has a form SecondHand can help with.
+  // Only that yes or no travels, to the page's top frame; nothing reaches the desktop.
+  if (!panel && !frame && message.type === 'secondhand:generic:form' && typeof message.helps === 'boolean' && Number.isInteger(sender.tab?.id) &&
+    Number.isInteger(sender.frameId) && sender.frameId >= 0 && typeof sender.url === 'string' && !sender.url.startsWith(chrome.runtime.getURL(''))) {
+    formReport(sender, message.helps).then(respond);
+    return true;
+  }
   if (!panel && !launcher) return;
   if (message.type === 'ui:ping') { respond({ ok: true, data: { build: BUILD } }); return; }
   if (launcher && message.type === 'ui:openPanel' && message.confirmed === true) {
@@ -1061,9 +1193,14 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (message.type === 'ui:showApp' && message.confirmed === true) run = () => nativeRequest('showApp');
   else if (message.type === 'ui:openApp' && message.confirmed === true) run = openApp;
   else if (panel && message.type === 'ui:desktopStatus') {
-    run = () => nativeRequest('status').then(data => ({ connected: true, unlocked: Boolean(data?.unlocked), laya: layaState(data) }),
-      error => { if (error.code === 'offline') return { connected: false, unlocked: false, laya: 'unavailable' }; throw error; });
-  } else if (!Number.isInteger(tabId)) return;
+    run = async () => {
+      const desktop = await desktopStatus().then(data => ({ connected: true, unlocked: Boolean(data?.unlocked), laya: layaState(data) }),
+        error => { if (error.code === 'offline') return { connected: false, unlocked: false, laya: 'unavailable' }; throw error; });
+      return { ...desktop, allSites: await allSitesOn() };
+    };
+  } else if (panel && message.type === 'ui:enableAllSites' && message.confirmed === true) run = () => enableAllSites(tabId);
+  else if (panel && message.type === 'ui:disableAllSites' && message.confirmed === true) run = disableAllSites;
+  else if (!Number.isInteger(tabId)) return;
   else if (message.type === 'ui:pageState') run = () => pageState(tabId, route);
   else if (message.type === 'ui:autofill' && message.confirmed === true) run = () => autofill(tabId, route, message.guesses);
   else if (message.type === 'ui:plan' && message.confirmed === true) run = () => planSite(tabId);
@@ -1086,10 +1223,11 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
 chrome.tabs.onActivated?.addListener(info => {
   for (const tabId of autopilots.keys()) if (tabId !== info.tabId) stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], ...say('worker.stoppedTabChanged'), pageKey: results.get(tabId)?.pageKey || '' });
 });
-chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); generalPages.delete(tabId); sitePlans.delete(tabId); questionViews.delete(tabId); pageReads.delete(tabId); });
+chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); generalPages.delete(tabId); sitePlans.delete(tabId); questionViews.delete(tabId); pageReads.delete(tabId); formFrames.delete(tabId); });
 chrome.tabs.onUpdated?.addListener((tabId, change) => {
   if (change.status === 'loading') {
     results.delete(tabId);
+    formFrames.delete(tabId);
     generalPages.delete(tabId);
     sitePlans.delete(tabId);
     questionViews.delete(tabId);

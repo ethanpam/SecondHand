@@ -10,13 +10,13 @@ const strings = require('../extension/strings.js');
 // Values created inside the worker's vm context have foreign prototypes.
 const plain = value => JSON.parse(JSON.stringify(value));
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
-const { GENERIC_KEYS, unsafeQuestion } = require('../extension/generic-adapter.js');
+const { GENERIC_KEYS, unsafeQuestion, layaQuestion } = require('../extension/generic-adapter.js');
 // Verified Iowa pages never use the general engine; any call there is a bug.
 const noSiteEngine = { GENERIC_KEYS, requestKeys: () => { throw new Error('Iowa used the site engine.'); }, deriveValues: () => { throw new Error('Iowa used the site engine.'); },
-  unsafeQuestion: () => { throw new Error('Iowa used the site engine.'); } };
+  unsafeQuestion: () => { throw new Error('Iowa used the site engine.'); }, layaQuestion: () => { throw new Error('Iowa used the site engine.'); } };
 // Stand-in for generic-adapter.js's pure helpers on pages the Iowa adapter hasn't verified.
 const generalEngine = {
-  GENERIC_KEYS, unsafeQuestion,
+  GENERIC_KEYS, unsafeQuestion, layaQuestion,
   requestKeys: keys => [...new Set(keys.flatMap(key => key === 'totalMonthlyIncome' ? ['monthlyEarnedIncome', 'monthlyOtherIncome'] : [key]))],
   deriveValues: values => ({ ...values, ...(values.monthlyEarnedIncome && values.monthlyOtherIncome ? { totalMonthlyIncome: 'Synthetic private total' } : {}) })
 };
@@ -97,7 +97,8 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
     },
     sidePanel: { setPanelBehavior: async () => {}, open: async () => {} },
     scripting: { executeScript: async details => { calls.injected.push(plain(details)); }, getRegisteredContentScripts: async () => [] },
-    permissions: { contains: async () => false },
+    // Iowa's site is the extension's own host permission; no other site is on.
+    permissions: { contains: async ({ origins }) => origins.every(origin => origin === 'https://hhsservices.iowa.gov/*') },
     runtime: {
       id: 'testextension', getURL: file => `chrome-extension://testextension/${file}`,
       onMessage: { addListener: callback => { listener = callback; } },
@@ -383,7 +384,7 @@ test('the worker answers a build ping from its own pages with the build the pane
 
 test('desktop status, showApp, and focusField pass through; guided and manual-fill messages are gone', async () => {
   const w = worker();
-  assert.deepEqual(plain((await w.panel({ type: 'ui:desktopStatus' })).data), { connected: true, unlocked: true, laya: 'unavailable' });
+  assert.deepEqual(plain((await w.panel({ type: 'ui:desktopStatus' })).data), { connected: true, unlocked: true, laya: 'unavailable', allSites: false });
   assert.deepEqual(plain((await w.launcher({ type: 'ui:showApp', confirmed: true })).data), { shown: true });
   assert.deepEqual(plain((await w.launcher({ type: 'ui:focusField', key: 'lastName', confirmed: true })).data), { focused: true });
   assert.equal(await w.launcher({ type: 'ui:focusField', key: 'input[type=password]', confirmed: true }), undefined);
@@ -391,10 +392,10 @@ test('desktop status, showApp, and focusField pass through; guided and manual-fi
     assert.equal(await w.panel({ type, confirmed: true, enabled: true }), undefined, type);
   }
   const offline = worker({ desktop: { reachable: false } });
-  assert.deepEqual(plain((await offline.panel({ type: 'ui:desktopStatus' })).data), { connected: false, unlocked: false, laya: 'unavailable' });
+  assert.deepEqual(plain((await offline.panel({ type: 'ui:desktopStatus' })).data), { connected: false, unlocked: false, laya: 'unavailable', allSites: false });
   // The side panel shows desktop state and can bring the app forward on any tab.
   const noTab = { id: 'testextension', url: PANEL_URL };
-  assert.deepEqual(plain((await w.send({ type: 'ui:desktopStatus' }, noTab)).data), { connected: true, unlocked: true, laya: 'unavailable' });
+  assert.deepEqual(plain((await w.send({ type: 'ui:desktopStatus' }, noTab)).data), { connected: true, unlocked: true, laya: 'unavailable', allSites: false });
   assert.deepEqual(plain((await w.send({ type: 'ui:showApp', confirmed: true }, noTab)).data), { shown: true });
   assert.equal(await w.send({ type: 'ui:pageState' }, noTab), undefined);
 });
@@ -410,7 +411,7 @@ const UNREACHABLE = {
 test('a native host that can’t reach the desktop app means the app is closed, the same as no host at all', async () => {
   for (const [name, unreachable] of Object.entries(UNREACHABLE)) {
     const w = worker({ desktop: { unreachable } });
-    assert.deepEqual(plain((await w.panel({ type: 'ui:desktopStatus' })).data), { connected: false, unlocked: false, laya: 'unavailable' }, name);
+    assert.deepEqual(plain((await w.panel({ type: 'ui:desktopStatus' })).data), { connected: false, unlocked: false, laya: 'unavailable', allSites: false }, name);
     const result = plain((await autofill(w)).data);
     assert.equal(result.state, 'offline', name);
     assert.equal(result.messageKey, 'worker.openAppThenAutofill', name);
@@ -489,7 +490,7 @@ function journey({ screens, desktop = {}, continueStays = false, engine = noSite
       onActivated: event('activated'), onRemoved: event('removed'), onUpdated: event('updated')
     },
     sidePanel: { setPanelBehavior: async () => {}, open: async () => {} },
-    scripting: { executeScript: async () => {} },
+    scripting: { executeScript: async () => {}, getRegisteredContentScripts: async () => [] },
     runtime: {
       id: 'testextension', getURL: file => `chrome-extension://testextension/${file}`,
       onMessage: { addListener: callback => { listener = callback; } },

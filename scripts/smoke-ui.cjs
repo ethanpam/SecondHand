@@ -139,6 +139,9 @@ async function main() {
     assert.deepEqual(layaServer.requests.slice(1).sort(), MODEL_FILES.map(name => `/${layaServer.revision}/${name}`).sort());
     assert.deepEqual((await fs.readdir(path.join(userData, 'models/laya'))).sort(), [layaServer.revision, 'installed.json']);
     await captureDiagnostic(page, 'desktop-laya-ready.png', { fullPage: true });
+    // All websites starts off, and only the extension's side panel can turn it on.
+    await expect(page.locator('#all-sites-status')).toHaveText('All websites: off. To turn it on, open SecondHand’s side panel in Chrome and choose Use SecondHand on all websites.');
+    await expect(page.locator('#all-sites-off')).toBeHidden();
     // Turning it off is saved, and stays off after a restart (checked below).
     await page.locator('#laya-toggle').uncheck();
     await expect(page.locator('#toast')).toHaveText('Laya is off.');
@@ -225,6 +228,9 @@ async function main() {
     application = null;
 
     const layaRequests = layaServer.requests.length;
+    // As if the extension had turned on all websites before this start: the app's page offers Turn off.
+    const settingsPath = path.join(userData, 'settings.json');
+    await fs.writeFile(settingsPath, JSON.stringify({ ...JSON.parse(await fs.readFile(settingsPath, 'utf8')), allSites: true }));
     page = await launch();
     await page.locator('#passphrase').fill(passphrase);
     await submitAuthForm(page);
@@ -232,6 +238,12 @@ async function main() {
     await page.locator('.nav-item[data-view="extension"]').click();
     await expect(page.locator('#laya-toggle')).not.toBeChecked();
     await expect(page.locator('#laya-status')).toHaveText(/^Off\. /);
+    await expect(page.locator('#all-sites-status')).toHaveText(/^All websites: on\. /);
+    await captureDiagnostic(page, 'desktop-all-websites-on.png', { fullPage: true });
+    await page.locator('#all-sites-off').click();
+    await expect(page.locator('#toast')).toHaveText('SecondHand will no longer fill forms on every website. Sites you trusted one by one stay on.');
+    await expect(page.locator('#all-sites-status')).toHaveText(/^All websites: off\. /);
+    assert.equal(JSON.parse(await fs.readFile(settingsPath, 'utf8')).allSites, undefined, 'turning it off is saved');
     await page.waitForTimeout(1500);
     assert.equal(layaServer.requests.length, layaRequests, 'Laya, turned off, checked and downloaded nothing after the restart');
     const restored = await page.evaluate(() => window.secondHand.getData());
