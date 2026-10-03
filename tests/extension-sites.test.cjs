@@ -94,9 +94,11 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
   };
 }
 
-function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSites = false, allGranted = allSites, desktop = {}, fields = pantryFields(), next, duringGetFields, duringStatus, frames = [], plan, keepAccess = false, discoveryError = false, topError, framesReply, pageText = { lang: 'en', text: '' }, clock, openTabs, lang = 'en', ai = {} } = {}) {
+// `build` runs the worker as another build, and `disk` is the build in the files Chrome would load on a reload (#85).
+function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSites = false, allGranted = allSites, desktop = {}, fields = pantryFields(), next, duringGetFields, duringStatus, frames = [], plan, keepAccess = false, discoveryError = false, topError, framesReply, pageText = { lang: 'en', text: '' }, clock, openTabs, lang = 'en', ai = {}, build, disk } = {}) {
   const tab = { id: 7, active: true, url };
   const log = [], native = [], content = [], injected = [], opened = [];
+  let reloads = 0;
   const permissions = new Set([...(granted ? [`${ORIGIN}/*`] : []), ...(allGranted ? [ALL] : [])]);
   // Iowa's site is a manifest permission. Chrome takes it back with https://*/* until it restarts.
   const iowa = { held: true };
@@ -188,6 +190,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
       id: 'testextension', getURL: file => `chrome-extension://testextension/${file}`,
       onMessage: { addListener: callback => { listener = callback; } },
       onInstalled: event('installed'),
+      reload: () => { reloads++; },
       connectNative: () => {
         let onMessage, onDisconnect;
         return {
@@ -196,13 +199,16 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
           disconnect: () => {},
           postMessage: request => {
             native.push(plain(request)); log.push(`native:${request.type}`);
-            queueMicrotask(() => {
+            queueMicrotask(async () => {
+              // A reply the test holds back, as the app does while its approval prompt is open.
+              await vault.delay?.[request.type];
               if (!vault.reachable) return onDisconnect();
               const reply = data => onMessage({ id: request.id, ok: true, data });
               const fail = error => onMessage({ id: request.id, ok: false, error });
               if (request.type === 'status') {
                 duringStatus?.(vault, ++statusChecks);
-                return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: vault.accessRevision, allSites: vault.allSites, ...(vault.layaState ? { laya: { state: vault.layaState } } : {}) });
+                return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: vault.accessRevision, allSites: vault.allSites, ...(vault.layaState ? { laya: { state: vault.layaState } } : {}),
+                  ...(vault.extension ? { extension: structuredClone(vault.extension) } : {}) });
               }
               if (request.type === 'trustAllSites') {
                 if (vault.trustAllError) return fail(vault.trustAllError);
@@ -237,8 +243,13 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
   };
   // A test may run the worker's clock itself: `clock.now` is what Date.now() returns. `ai` holds the
   // stand-ins for Chrome's Translator and LanguageDetector a test gives the worker; by default it has neither.
-  vm.runInNewContext(source('background.js'),
-    { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, SecondHandTranslation: translation, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console,
+  const code = source('background.js');
+  const fetch = async url => {
+    if (url !== 'chrome-extension://testextension/background.js' || !disk) throw new TypeError('Failed to fetch');
+    return { ok: true, text: async () => code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${disk}';`) };
+  };
+  vm.runInNewContext(build ? code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${build}';`) : code,
+    { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, SecondHandTranslation: translation, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console, fetch,
       ...ai, ...(clock ? { Date: { now: () => clock.now } } : {}) });
   const send = (message, sender) => new Promise(resolve => { if (!listener(message, sender, resolve)) resolve(undefined); });
   // Whether Chrome lets SecondHand read this address.
@@ -248,6 +259,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
   }
   return {
     tab, page, vault, log, native, content, injected, tallies, opened, permissions, registered, events, send, iowa,
+    reloads: () => reloads,
     nativeTypes: () => native.map(call => call.type),
     contentTypes: () => content.map(call => call.type),
     panel: message => send({ tabId: 7, ...message }, { id: 'testextension', url: PANEL_URL }),
@@ -1899,4 +1911,45 @@ test('a frame’s plan must say which language it declares', async () => {
   const result = plain((await autofill(w)).data);
   assert.equal(result.state, 'error');
   assert.equal(result.messageKey, 'worker.frameUnsafe');
+});
+
+// Updating itself (#85): a newer build from the app waits for what is under way on a site.
+const UPDATE = { build: '2026-10-04.1', copy: 'ready' };
+const updating = (options = {}) => siteWorker({ build: '2026-10-03.9', disk: UPDATE.build, ...options, desktop: { extension: UPDATE, ...options.desktop } });
+const statusRow = async w => { await w.panel({ type: 'ui:desktopStatus' }); await settle(); };
+
+test('a site fill waiting on its approval holds the reload; it reloads once the fill is answered', async () => {
+  let approve;
+  const w = updating({ enabled: true, desktop: { delay: { getFields: new Promise(resolve => { approve = resolve; }) } } });
+  const click = autofill(w);
+  await settle();
+  await statusRow(w);
+  assert.equal(w.reloads(), 0);
+  approve();
+  assert.equal((await click).ok, true);
+  await settle();
+  assert.equal(w.reloads(), 1);
+});
+
+test('a widget’s planned fill holds the reload between its plan and its Autofill', async () => {
+  const w = updating({ enabled: true, fields: openQuestions() });
+  await plan(w);
+  await statusRow(w);
+  assert.equal(w.reloads(), 0, 'Chrome’s AI is reading the plan in the widget');
+  assert.equal((await w.launcher({ type: 'ui:autofill', confirmed: true, guesses: {} })).ok, true);
+  await settle();
+  assert.equal(w.reloads(), 1);
+});
+
+test('the app’s prompt to trust all websites holds the reload until it is answered', async () => {
+  let answer;
+  const w = updating({ url: OTHER_URL, allGranted: true, desktop: { delay: { trustAllSites: new Promise(resolve => { answer = resolve; }) } } });
+  const click = allSitesOn(w);
+  await settle();
+  await statusRow(w);
+  assert.equal(w.reloads(), 0);
+  answer();
+  assert.equal((await click).ok, true);
+  await settle();
+  assert.equal(w.reloads(), 1);
 });

@@ -55,11 +55,13 @@ function generalPage(message, plan) {
 
 // A small page model: answering "has home address" reveals a mailing field,
 // the way Iowa's form reveals conditional sections.
-function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noSiteEngine, general = nothingPlanned(), page = {}, questions, pageText } = {}) {
+// `build` runs the worker as another build; `disk` is the build in the files Chrome would load on a
+// reload (null: they can't be read); `desktop.extension` is what the app says about the extension it ships.
+function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noSiteEngine, general = nothingPlanned(), page = {}, questions, pageText, build, disk } = {}) {
   const model = { kind, filled: [], revealed: false, token: null };
   const vault = { reachable: true, unlocked: true, getFieldsError: null,
     values: { firstName: 'Synthetic private first', hasHomeAddress: 'yes', mailingCity: 'Synthetic private city' }, ...desktop };
-  const calls = { native: [], content: [], pageTabs: [], injected: [] };
+  const calls = { native: [], content: [], pageTabs: [], injected: [], reads: [], order: [] };
   const tab = { id: 7, active: true, url: `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo` };
   const events = {};
   const event = key => ({ addListener: value => { events[key] = value; } });
@@ -105,6 +107,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
     runtime: {
       id: 'testextension', getURL: file => `chrome-extension://testextension/${file}`,
       onMessage: { addListener: callback => { listener = callback; } },
+      reload: () => { calls.order.push('reload'); },
       connectNative: () => {
         let onMessage, onDisconnect;
         return {
@@ -113,13 +116,16 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
           disconnect: () => {},
           postMessage: request => {
             calls.native.push(request);
-            queueMicrotask(() => {
+            queueMicrotask(async () => {
+              // A reply the test holds back, as the app does while its approval prompt is open.
+              await vault.delay?.[request.type];
               if (!vault.reachable) return onDisconnect();
               // A host that runs but can't reach the desktop app answers every request with the same failure.
               if (vault.unreachable) return onMessage({ id: request.id, ok: false, ...vault.unreachable });
               const reply = data => onMessage({ id: request.id, ok: true, data });
               const fail = error => onMessage({ id: request.id, ok: false, error });
-              if (request.type === 'status') return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: 0, ...(vault.layaState ? { laya: { state: vault.layaState } } : {}) });
+              if (request.type === 'status') return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: 0, ...(vault.layaState ? { laya: { state: vault.layaState } } : {}),
+                ...(vault.extension ? { extension: structuredClone(vault.extension) } : {}) });
               if (request.type === 'showApp') return reply({ shown: true });
               if (request.type === 'openApp') return vault.openError ? fail(vault.openError) : reply(vault.opened || { opened: 'shown' });
               if (request.type === 'recordProgress') return reply({ recorded: true });
@@ -142,11 +148,19 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
       }
     }
   };
-  vm.runInNewContext(fs.readFileSync(require.resolve('../extension/background.js'), 'utf8'),
-    { chrome, SecondHandIowa: adapter, SecondHandGeneric: engine, SecondHandStrings: strings, SecondHandTranslation: translation, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console });
-  const send = (message, sender) => new Promise(resolve => { if (!listener(message, sender, resolve)) resolve(undefined); });
+  const code = fs.readFileSync(require.resolve('../extension/background.js'), 'utf8');
+  // The worker reads its own background.js from disk with fetch, as Chrome would load it on a reload.
+  const fetch = async (url, options) => {
+    calls.reads.push({ url, cache: options?.cache });
+    if (url !== 'chrome-extension://testextension/background.js' || disk === null) throw new TypeError('Failed to fetch');
+    return { ok: true, text: async () => code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${disk}';`) };
+  };
+  vm.runInNewContext(build ? code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${build}';`) : code,
+    { chrome, SecondHandIowa: adapter, SecondHandGeneric: engine, SecondHandStrings: strings, SecondHandTranslation: translation, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console, fetch });
+  const send = (message, sender) => new Promise(resolve => { if (!listener(message, sender, value => { calls.order.push('reply'); resolve(value); })) resolve(undefined); });
   return {
-    calls, tab, events, filled: () => [...model.filled],
+    calls, tab, events, vault, filled: () => [...model.filled],
+    reloads: () => calls.order.filter(step => step === 'reload').length,
     send,
     panel: message => send({ tabId: 7, ...message }, { id: 'testextension', url: PANEL_URL }),
     launcher: message => send(message, { id: 'testextension', url: `${PANEL_URL}?surface=launcher`, frameId: 3, tab: { id: 7, url: tab.url } })
@@ -512,6 +526,7 @@ function journey({ screens, desktop = {}, continueStays = false, engine = noSite
     runtime: {
       id: 'testextension', getURL: file => `chrome-extension://testextension/${file}`,
       onMessage: { addListener: callback => { listener = callback; } },
+      reload: () => { calls.order.push('reload'); },
       connectNative: () => {
         let onMessage;
         return {
@@ -850,4 +865,102 @@ test('the widget’s request for room for its line goes to its own tab’s conte
   assert.deepEqual(plain(w.calls.content.at(-1)), { type: 'secondhand:widgetSize', line: false, width: 152 }, 'the widget’s measured width goes along');
   for (const width of [0, -5, 1.5, '152', 5000, null]) assert.equal(await w.launcher({ type: 'ui:widgetSize', line: false, width }), undefined, `width ${width}`);
   assert.deepEqual(w.calls.native, []);
+});
+
+// Updating itself (#85): the app reports the extension build it ships; the worker reloads from that copy.
+const RUNNING = '2026-10-03.9';
+const desktopRow = async w => { const reply = await w.panel({ type: 'ui:desktopStatus' }); await settle(); return plain(reply); };
+
+test('a newer build from the app reloads SecondHand from its copy, after the side panel has its answer', async () => {
+  const w = worker({ build: RUNNING, disk: '2026-10-04.1', desktop: { extension: { build: '2026-10-04.1', copy: 'ready' } } });
+  const reply = await desktopRow(w);
+  assert.equal(reply.ok, true, reply.error);
+  assert.equal(reply.data.update, undefined, 'nothing to say: SecondHand reloads');
+  assert.deepEqual(w.calls.order, ['reply', 'reload']);
+  assert.deepEqual(plain(w.calls.reads), [{ url: 'chrome-extension://testextension/background.js', cache: 'no-store' }]);
+});
+
+test('builds compare by date, then by number, so .10 is newer than .9; an equal or older build never reloads', async () => {
+  const cases = { '2026-10-03.10': 1, '2026-10-04.1': 1, '2027-01-01.1': 1, '2026-10-03.9': 0, '2026-10-03.8': 0, '2026-09-30.20': 0, '2025-12-31.99': 0 };
+  for (const [shipped, reloads] of Object.entries(cases)) {
+    const w = worker({ build: RUNNING, disk: shipped, desktop: { extension: { build: shipped, copy: 'ready' } } });
+    assert.equal((await desktopRow(w)).ok, true);
+    assert.equal(w.reloads(), reloads, shipped);
+    if (!reloads) assert.deepEqual(w.calls.reads, [], `${shipped}: an equal or older build reads nothing`);
+  }
+  // An app with no prepared copy (the extension loaded from elsewhere): the files Chrome loads decide.
+  const absent = worker({ build: RUNNING, disk: '2026-10-04.1', desktop: { extension: { build: '2026-10-04.1', copy: 'absent' } } });
+  await desktopRow(absent);
+  assert.equal(absent.reloads(), 1);
+});
+
+test('an app from before self-updates says nothing about the extension, and nothing changes', async () => {
+  const w = worker({ build: RUNNING });
+  const reply = await desktopRow(w);
+  assert.deepEqual({ ok: reply.ok, update: reply.data.update }, { ok: true, update: undefined });
+  assert.equal(w.reloads(), 0);
+  assert.deepEqual(w.calls.reads, []);
+});
+
+test('a reply about the extension that isn’t a build and a known copy state fails loudly', async () => {
+  for (const extension of [{ build: 'soon', copy: 'ready' }, { build: '2026-10-04', copy: 'ready' }, { build: '2026-10-04.1', copy: 'maybe' }, { build: '2026-10-04.1' }, 'yes']) {
+    const w = worker({ build: RUNNING, disk: '2026-10-04.1', desktop: { extension } });
+    const reply = await desktopRow(w);
+    assert.equal(reply.ok, false, JSON.stringify(extension));
+    assert.equal(reply.errorKey, 'worker.desktopUnexpected');
+    assert.equal(w.reloads(), 0);
+  }
+});
+
+test('no reload loop: files Chrome would load that aren’t the app’s build, or a copy the app couldn’t refresh, show the steps instead', async () => {
+  // The copy Chrome loads didn't change, or isn't the app's (loaded from another folder).
+  const unchanged = worker({ build: RUNNING, disk: RUNNING, desktop: { extension: { build: '2026-10-04.1', copy: 'ready' } } });
+  for (let i = 0; i < 3; i++) assert.equal((await desktopRow(unchanged)).data.update, 'elsewhere');
+  assert.equal(unchanged.reloads(), 0);
+  // The folder Chrome loads from is gone.
+  const gone = worker({ build: RUNNING, disk: null, desktop: { extension: { build: '2026-10-04.1', copy: 'ready' } } });
+  assert.equal((await desktopRow(gone)).data.update, 'elsewhere');
+  assert.equal(gone.reloads(), 0);
+  // The app couldn't refresh its copy: nothing is read, nothing reloads.
+  const failed = worker({ build: RUNNING, disk: '2026-10-04.1', desktop: { extension: { build: '2026-10-04.1', copy: 'failed' } } });
+  for (let i = 0; i < 3; i++) assert.equal((await desktopRow(failed)).data.update, 'failed');
+  assert.equal(failed.reloads(), 0);
+  assert.deepEqual(failed.calls.reads, []);
+  // Once the app's copy is refreshed, the next status reloads.
+  failed.vault.extension = { build: '2026-10-04.1', copy: 'ready' };
+  await desktopRow(failed);
+  assert.equal(failed.reloads(), 1);
+});
+
+test('while Autofill is on, SecondHand waits; it reloads at the next message after Autofill stops', async () => {
+  const w = worker({ build: RUNNING, disk: '2026-10-04.1', desktop: { extension: { build: '2026-10-04.1', copy: 'ready' } } });
+  // The click's own status checks see the update; the click and the autofill it leaves on hold it off.
+  assert.equal((await autofill(w)).data.state, 'done');
+  await settle();
+  assert.equal((await w.panel({ type: 'ui:pageState' })).data.autopilot, true);
+  await desktopRow(w);
+  assert.equal(w.reloads(), 0);
+  await w.panel({ type: 'ui:stop', confirmed: true });
+  await settle();
+  assert.equal(w.reloads(), 1);
+});
+
+test('an approval prompt in a click holds the reload until the click is answered', async () => {
+  let approve;
+  const w = worker({ kind: 'manual', engine: generalEngine, general: financialPlan(), build: RUNNING, disk: '2026-10-04.1',
+    desktop: { values: financialValues, extension: { build: '2026-10-04.1', copy: 'ready' }, delay: { getFields: new Promise(resolve => { approve = resolve; }) } } });
+  const click = autofill(w);
+  await settle();
+  await desktopRow(w);
+  assert.equal(w.reloads(), 0, 'the approval prompt is open');
+  approve();
+  assert.equal((await click).data.state, 'done');
+  await settle();
+  // Autofill stays on, waiting for the applicant to check the page and continue.
+  assert.equal((await w.panel({ type: 'ui:pageState' })).data.autopilot, true);
+  await settle();
+  assert.equal(w.reloads(), 0);
+  await w.panel({ type: 'ui:stop', confirmed: true });
+  await settle();
+  assert.equal(w.reloads(), 1);
 });

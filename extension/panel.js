@@ -7,7 +7,7 @@
   const summary = globalThis.SecondHandSummary;
   // Must match BUILD in background.js: change both together. Chrome loads these pages
   // from disk right away but keeps running the old worker until SecondHand is reloaded.
-  const BUILD = '2026-10-03.1';
+  const BUILD = '2026-10-03.2';
   // The applicant's language: the choice saved in this extension's storage, else the browser's.
   let language = strings.language();
   const t = (key, params = {}) => strings.text(language, key, params);
@@ -22,9 +22,16 @@
     : fixedText(error?.message) ? { key: 'detail', params: { detail: fixedText(error.message) } } : { key: fallback };
   const keyedError = (key, params = {}) => Object.assign(new Error(strings.english(key, params)), { messageKey: key, messageParams: params });
   const trusted = callback => event => { if (event.isTrusted) return callback(event); };
-  const outdatedError = () => Object.assign(keyedError('panel.outdated'), { outdated: true });
+  const outdatedError = (key = 'panel.outdated') => Object.assign(keyedError(key), { outdated: true });
   const send = async payload => {
-    const response = await chrome.runtime.sendMessage(payload);
+    let response;
+    try { response = await chrome.runtime.sendMessage(payload); }
+    catch (error) {
+      // A frame left on a page when SecondHand reloaded (it updates itself) has no extension id, and
+      // Chrome refuses its messages: only reloading the page brings the new SecondHand.
+      if (!chrome.runtime?.id) throw outdatedError('panel.reloadPage');
+      throw error;
+    }
     // An outdated worker ignores messages it doesn't know, so Chrome resolves with no response.
     if (response === undefined) throw outdatedError();
     if (!response?.ok) {
@@ -83,6 +90,8 @@
     let note = null;
     let working = false;
     let outdated = false;
+    // What an outdated widget says: reload SecondHand, or reload this page after SecondHand updated itself.
+    let outdatedKey = 'panel.outdated';
     let ai = { note: null, reason: '' };
     let cursor = 0;
     let pollTimer;
@@ -95,10 +104,10 @@
     let frame = { line: false, width: 0 };
     const AI_TIMEOUT_MS = 8000;
     // An outdated worker keeps its reload steps on screen and is not polled again.
-    const trouble = error => { if (error.outdated) outdated = true; return problem(error); };
+    const trouble = error => { if (error.outdated) { outdated = true; outdatedKey = error.messageKey; } return problem(error); };
 
     function statusText() {
-      if (outdated) return t('panel.outdated');
+      if (outdated) return t(outdatedKey);
       if (working) return t('widget.working');
       if (note) return words(note, 120);
       if (!result) return languageTrouble ? t('widget.languageCheckFailed') : site ? t('widget.siteReady', { host: hostOf(site.origin) }) : t('widget.iowaReady');
@@ -136,7 +145,7 @@
       $('widget-text').textContent = statusText();
       $('autofill').title = site ? t('widget.autofillSiteTitle') : t('widget.autofillIowaTitle');
       const details = [hasMessage(result) ? words(fromResult(result)) : '', ai.note ? words(ai.note) : '', ai.reason, fixedText(languageTrouble?.message, 160)];
-      $('widget-text').title = outdated ? t('panel.outdated') : fixedText(details.filter(Boolean).join(' '), 240);
+      $('widget-text').title = outdated ? t(outdatedKey) : fixedText(details.filter(Boolean).join(' '), 240);
       // The status is always read to screen readers, but shown as a line only when the reader
       // must act and neither the need-you link nor the Unlock or Open SecondHand button already
       // says so: a problem, an unlock or CAPTCHA step, a fill that found nothing, or an outdated
@@ -314,6 +323,13 @@
     const OPEN_CHECK_MS = 1000;
     // Whether Laya, the desktop's local AI, is ready: shown only while the desktop app answers.
     let layaLine = null;
+    // SecondHand updating itself (#85): the steps to do it by hand when the worker can't, as it last
+    // said, and whether this is the first side panel since an update.
+    let updateSteps = null;
+    let updated = false;
+    const UPDATE_STEPS = { failed: 'panel.updateFailed', elsewhere: 'panel.updateElsewhere' };
+    // The build the side panel last ran, in this extension's own storage (as the language choice is).
+    const BUILD_KEY = 'secondhand.build';
     const LAYA_LINES = { ready: 'desktop.layaReady', off: 'desktop.layaOff', downloading: 'desktop.layaDownloading',
       'not-downloaded': 'desktop.layaNotReady', error: 'desktop.layaNotReady', unavailable: 'desktop.layaNotReady' };
     // The question list for the page on screen: the worker's items, and Chrome's translations of their words.
@@ -351,6 +367,10 @@
       $('desktop-action').textContent = desktopAction ? t(ACTIONS[desktopAction]) : '';
       $('laya-status').hidden = !layaLine;
       $('laya-status').textContent = layaLine ? words(layaLine) : '';
+      const note = updateSteps ? { key: updateSteps } : updated ? { key: 'panel.updated' } : null;
+      $('update-note').hidden = !note;
+      $('update-note').textContent = note ? words(note) : '';
+      $('update-note').classList.toggle('error', Boolean(updateSteps));
     }
     function supportedUrl(raw) {
       try {
@@ -490,6 +510,7 @@
     // The desktop row for the status the worker read: closed, locked, or unlocked.
     function showDesktop(desktop) {
       allSites = typeof desktop?.allSites === 'boolean' ? desktop.allSites : null;
+      updateSteps = Object.hasOwn(UPDATE_STEPS, desktop?.update) ? UPDATE_STEPS[desktop.update] : null;
       desktopLine = { key: !desktop?.connected ? 'desktop.notRunning' : desktop.unlocked ? 'desktop.unlocked' : 'desktop.locked' };
       layaLine = desktop?.connected && Object.hasOwn(LAYA_LINES, desktop.laya) ? { key: LAYA_LINES[desktop.laya] } : null;
       desktopAction = !desktop?.connected ? 'open' : desktop.unlocked ? null : 'unlock';
@@ -885,7 +906,15 @@
     followLanguage(relabel);
     // An outdated worker stops the panel with its reload steps on screen.
     async function start() {
-      try { await checkBuild(); } catch (error) {
+      try {
+        await checkBuild();
+        // Chrome runs this build in both the worker and the panel: a different one remembered means
+        // SecondHand was updated since the last side panel. Said once; the first panel says nothing.
+        const last = localStorage.getItem(BUILD_KEY);
+        updated = last !== null && last !== BUILD;
+        localStorage.setItem(BUILD_KEY, BUILD);
+        renderDesktop();
+      } catch (error) {
         if (error.outdated) {
           stopped = true; target = null; clearPage(); controls(); show(problem(error), true);
           $('desktop-status').parentElement.hidden = true;
