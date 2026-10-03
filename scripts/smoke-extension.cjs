@@ -249,7 +249,12 @@ async function attachNativePanel(context, page, extensionId) {
     await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
   };
   return { evaluate, text, visible, click,
-    async screenshot(file) { const result = await send('Page.captureScreenshot', { format: 'png' }); await fs.writeFile(file, Buffer.from(result.data, 'base64')); },
+    // Like Playwright's page.screenshot, it creates the file's folder.
+    async screenshot(file) {
+      const result = await send('Page.captureScreenshot', { format: 'png' });
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await fs.writeFile(file, Buffer.from(result.data, 'base64'));
+    },
     async close() { for (const request of pending.values()) { clearTimeout(request.timer); request.reject(new Error('Panel test closed.')); } pending.clear(); await transport.detach().catch(() => {}); }
   };
 }
