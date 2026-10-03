@@ -102,7 +102,9 @@ The [setup guide](docs/setup.md) covers each step in detail, including how to fi
 <details>
 <summary><strong>Updating from an earlier version</strong></summary>
 
-Install the new app, open **Chrome extension**, and click **Refresh extension files**. Then click **Reload** for SecondHand at `chrome://extensions` and reload your Iowa tab. If Chrome asks, review the updated permissions. Save or finish the page you're on first, so reloading doesn't lose unsaved answers.
+Install the new app and open it. The next time you use the extension, SecondHand refreshes its files and reloads itself in Chrome, once nothing is filling. The side panel then says it was updated. Reload any form page that was open, after you save or finish it, so reloading doesn't lose unsaved answers. Keep **Developer mode** on at `chrome://extensions`, or Chrome turns SecondHand off.
+
+Coming from a version without automatic updates, such as the public 0.4 downloads, do it by hand once: open **Chrome extension** in the app and click **Refresh extension files**, then click **Reload** for SecondHand at `chrome://extensions` and reload your Iowa tab. If Chrome asks, review the updated permissions.
 
 </details>
 
