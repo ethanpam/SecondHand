@@ -438,7 +438,12 @@
     const active = setupStep !== null;
     // Each section of My information belongs to one step; a card shows while any of its sections does.
     for (const part of $('profile-form').querySelectorAll('[data-setup-step]')) part.hidden = active && Number(part.dataset.setupStep) !== setupStep + 1;
-    for (const card of $('profile-form').querySelectorAll(':scope > .form-card')) card.hidden = active && !card.matches('[data-setup-step]:not([hidden])') && !card.querySelector('[data-setup-step]:not([hidden])');
+    for (const card of $('profile-form').querySelectorAll(':scope > .form-card')) {
+      card.hidden = active && !card.matches('[data-setup-step]:not([hidden])') && !card.querySelector('[data-setup-step]:not([hidden])');
+      // A card split across steps shows one part at a time: the step's own title names it.
+      const heading = card.querySelector(':scope > .card-heading');
+      if (heading && !card.matches('[data-setup-step]')) heading.hidden = active;
+    }
     $('setup-bar').hidden = !active;
     $('setup-nav').hidden = !active;
     $('save-profile').closest('.form-save-bar').hidden = active;

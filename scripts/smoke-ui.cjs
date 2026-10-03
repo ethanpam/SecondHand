@@ -20,6 +20,11 @@ const resetPassword = 'synthetic-reset-password';
 // Iowa's Tell Us More questions in the About you card: radio buttons, and a marital status list.
 const IOWA_QUESTIONS = ['sex', 'maritalStatus', 'hasSsnAnswer', 'ssnCardNameMatches', 'usCitizen', 'militaryOrVeteran', 'disabled', 'blind', 'healthLimitation', 'medicare'];
 const startOverPassword = 'synthetic-start-over-password';
+// The household list (#98): member ids are made when a person is added, so profiles are compared without them.
+const withoutIds = profile => ({ ...profile, householdMembers: (profile.householdMembers || []).map(({ id, ...member }) => member) });
+const COUNT_FIELDS = ['householdSize', 'householdAdults', 'householdChildren', 'householdSeniors'];
+// Fields My information shows one by one; the household list has its own rows.
+const SCALAR_FIELDS = PROFILE_FIELDS.filter(field => field !== 'householdMembers');
 
 async function captureDiagnostic(page, name, options = {}) {
   try {
@@ -84,6 +89,79 @@ async function layaFixtureServer() {
   return { revision, requests, updateUrl: `${base}/latest.json`, close: () => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)); } };
 }
 
+// The guided first-run setup (#98), right after the new password's recovery key: offered with Skip for now, one
+// step at a time, each saved as the applicant moves on, finished later from Overview. The household step adds the
+// fictional household; the counts come from its birth dates.
+async function guidedSetup(page, application, userData) {
+  const progressFile = path.join(userData, 'setup-progress.json');
+  await expect(page.locator('#setup-dialog')).toBeVisible();
+  await expect(page.locator('#setup-start')).toHaveText('Set up your information (about 5 minutes)');
+  await expect(page.locator('#setup-skip')).toHaveText('Skip for now');
+  await captureDiagnostic(page, 'household/setup-offer.png');
+  assert.deepEqual(JSON.parse(await fs.readFile(progressFile, 'utf8')), { version: 1, step: 0 });
+  await page.locator('#setup-start').click();
+  await expect(page.locator('#setup-step-count')).toHaveText('Step 1 of 6');
+  await expect(page.locator('#setup-step-title')).toHaveText('You');
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'setup-step-title', 'a screen reader starts at the step’s heading');
+  await expect(page.locator('#addressLine1')).toBeHidden();
+  for (const field of ['firstName', 'lastName', 'birthDate']) await page.locator(`#${field}`).fill(applicantFixture[field]);
+  await page.locator('#setup-next').click();
+  await expect(page.locator('#setup-step-count')).toHaveText('Step 2 of 6');
+  await expect(page.locator('#setup-step-title')).toHaveText('Your household');
+  const members = applicantFixture.householdMembers;
+  for (let index = 1; index < members.length; index++) {
+    await page.locator('#add-household-member').click();
+    const row = page.locator('.household-member').nth(index);
+    for (const field of ['firstName', 'lastName', 'birthDate']) await row.locator(`[data-member-field="${field}"]`).fill(members[index][field]);
+    await row.locator('[data-member-field="relationship"]').selectOption(members[index].relationship);
+    await row.locator('[data-member-field="student"]').selectOption(members[index].student);
+    if (members[index].grade) await row.locator('[data-member-field="grade"]').fill(members[index].grade);
+  }
+  const self = page.locator('.household-member').first();
+  await expect(self.locator('legend')).toHaveText('You');
+  await expect(self.locator('[data-member-field="firstName"]')).toHaveValue(applicantFixture.firstName);
+  await self.locator('[data-member-field="student"]').selectOption('no');
+  for (const field of COUNT_FIELDS) await expect(page.locator(`#${field}`)).toHaveValue(applicantFixture[field]);
+  await expect(page.locator('#household-counts-note')).toHaveText('Counted from your household list. To change them, change the list.');
+  await captureDiagnostic(page, 'household/setup-household.png', { fullPage: true });
+  // Keyboard: Save and continue from the keyboard.
+  await page.locator('#setup-next').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#setup-step-count')).toHaveText('Step 3 of 6');
+  assert.deepEqual(JSON.parse(await fs.readFile(progressFile, 'utf8')), { version: 1, step: 2 });
+  const saved = await page.evaluate(async () => (await window.secondHand.getData()).profile);
+  assert.deepEqual(withoutIds(saved).householdMembers, withoutIds(applicantFixture).householdMembers, 'each step is saved as the applicant moves on');
+  // Readable at 200% zoom: the step, its fields and its buttons fit the window with no sideways scrolling.
+  const width = await page.evaluate(() => window.innerWidth);
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(2));
+  await expect.poll(() => page.evaluate(() => window.innerWidth)).toBeLessThanOrEqual(Math.ceil(width / 2));
+  const zoomed = await page.evaluate(() => ({ overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    buttons: ['setup-back', 'setup-later', 'setup-next'].map(id => { const box = document.getElementById(id).getBoundingClientRect(); return box.width > 0 && box.right <= document.documentElement.clientWidth; }) }));
+  assert.ok(zoomed.overflow <= 1, `no sideways scrolling at 200% (${zoomed.overflow}px)`);
+  assert.deepEqual(zoomed.buttons, [true, true, true]);
+  // Playwright's own screenshot doesn't know about the zoom, so the window draws itself.
+  const drawn = await application.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString('base64'));
+  await fs.mkdir(path.join(root, 'artifacts/household'), { recursive: true });
+  await fs.writeFile(path.join(root, 'artifacts/household/setup-zoom-200.png'), Buffer.from(drawn, 'base64'));
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1));
+  // Finish later, then pick up from Overview at the first step not done.
+  await page.locator('#setup-later').click();
+  await expect(page.locator('#view-overview')).toBeVisible();
+  await expect(page.locator('#setup-resume-text')).toHaveText('Finish setting up: 2 of 6 steps');
+  await captureDiagnostic(page, 'household/setup-resume.png');
+  await page.locator('#setup-resume-button').click();
+  await expect(page.locator('#setup-step-count')).toHaveText('Step 3 of 6');
+  for (const title of ['Where you live', 'Income and money on hand', 'Programs', 'About you']) {
+    await expect(page.locator('#setup-step-title')).toHaveText(title);
+    await page.locator('#setup-next').click();
+  }
+  await expect(page.locator('#view-overview')).toBeVisible();
+  await expect(page.locator('#toast')).toHaveText('Your information is set up. Change it any time in My information.');
+  await expect(page.locator('#setup-resume')).toBeHidden();
+  await assert.rejects(fs.access(progressFile), 'a finished setup keeps no progress file');
+  console.log('Guided setup: offered after the recovery key, six steps saved as the applicant moved on, finished later from Overview; the household step listed four people and counted their ages.');
+}
+
 async function main() {
   const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-ui-'));
   const layaServer = await layaFixtureServer();
@@ -131,6 +209,7 @@ async function main() {
     await page.locator('#recovery-done').click();
     await expect(page.locator('#recovery-dialog')).not.toBeVisible();
     await expect(page.locator('#workspace')).toBeVisible();
+    await guidedSetup(page, application, userData);
     // A new install has Laya on and downloads its model on its own: the newest one latest.json names.
     await page.locator('.nav-item[data-view="extension"]').click();
     await expect(page.locator('#laya-toggle')).toBeChecked();
@@ -149,8 +228,15 @@ async function main() {
     assert.equal(JSON.parse(await fs.readFile(path.join(userData, 'settings.json'), 'utf8')).layaEnabled, false);
     await page.locator('.nav-item[data-view="profile"]').click();
     // What My information shows for every saved field, read the way the form submits it.
-    const shownProfile = () => page.locator('#profile-form').evaluate((form, fields) => Object.fromEntries(fields.map(field => [field, form.elements.namedItem(field).value])), PROFILE_FIELDS);
-    for (const field of PROFILE_FIELDS) {
+    const shownProfile = () => page.locator('#profile-form').evaluate((form, fields) => Object.fromEntries(fields.map(field => [field, form.elements.namedItem(field).value])), SCALAR_FIELDS);
+    const { householdMembers: _, ...scalarFixture } = applicantFixture;
+    for (const field of SCALAR_FIELDS) {
+      // The guided setup saved the household list, so the counts come from it, read-only.
+      if (COUNT_FIELDS.includes(field)) {
+        await expect(page.locator(`#${field}`)).toHaveJSProperty('readOnly', true);
+        await expect(page.locator(`#${field}`)).toHaveValue(applicantFixture[field]);
+        continue;
+      }
       const radios = page.locator(`#profile-form input[type="radio"][name="${field}"]`);
       if (await radios.count()) { await page.locator(`#profile-form input[type="radio"][name="${field}"][value="${applicantFixture[field]}"]`).check(); continue; }
       const control = page.locator(`#${field}`);
@@ -160,7 +246,8 @@ async function main() {
     await page.locator('#save-profile').click();
     await expect(page.locator('#profile-save-state')).toBeHidden();
     const profile = await page.evaluate(async () => (await window.secondHand.getData()).profile);
-    assert.deepEqual(profile, applicantFixture);
+    assert.deepEqual(withoutIds(profile), withoutIds(applicantFixture));
+    assert.ok(profile.householdMembers.every(member => /^[0-9a-f-]{36}$/.test(member.id)));
     assert.equal(profile.monthlyEarnedIncome, '0');
     assert.equal(profile.ssn, '');
     await captureDiagnostic(page, 'desktop-profile.png', { fullPage: true });
@@ -185,15 +272,18 @@ async function main() {
       overview: document.querySelector('#overview-applications').textContent
     }));
     assert.deepEqual(cleared, { firstName: '', notes: '', cards: '', overview: '' });
-    assert.deepEqual(await shownProfile(), Object.fromEntries(PROFILE_FIELDS.map(field => [field, ''])));
+    assert.deepEqual(await shownProfile(), Object.fromEntries(SCALAR_FIELDS.map(field => [field, ''])));
+    assert.equal(await page.locator('.household-member').count(), 0, 'the household list is cleared on lock');
     await rejectedPassphrase(page);
     await page.locator('#passphrase').fill(passphrase);
     await submitAuthForm(page);
     await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('.nav-item[data-view="profile"]').click();
     await expect(page.locator('#firstName')).toHaveValue(applicantFixture.firstName);
-    // After unlocking, My information shows every saved answer again, Iowa's questions included.
-    assert.deepEqual(await shownProfile(), applicantFixture);
+    // After unlocking, My information shows every saved answer again, Iowa's questions and the household list included.
+    assert.deepEqual(await shownProfile(), scalarFixture);
+    assert.deepEqual(await page.locator('.household-member [data-member-field="firstName"]').evaluateAll(inputs => inputs.map(input => input.value)),
+      applicantFixture.householdMembers.map(member => member.firstName));
     await expect(page.locator('#sex-female')).toBeChecked();
     await expect(page.locator('#maritalStatus')).toHaveValue(applicantFixture.maritalStatus);
 
@@ -247,7 +337,7 @@ async function main() {
     await page.waitForTimeout(1500);
     assert.equal(layaServer.requests.length, layaRequests, 'Laya, turned off, checked and downloaded nothing after the restart');
     const restored = await page.evaluate(() => window.secondHand.getData());
-    assert.deepEqual(restored.profile, applicantFixture);
+    assert.deepEqual(withoutIds(restored.profile), withoutIds(applicantFixture));
     assert.equal(restored.applications[0].confirmationNumber, 'SYNTHETIC-RECEIPT-ONLY');
     await page.locator('#lock-button').click();
     await page.locator('#forgot-password').click();
@@ -256,7 +346,7 @@ async function main() {
     await page.locator('#reset-confirm').fill(resetPassword);
     await page.locator('#reset-submit').click();
     await expect(page.locator('#workspace')).toBeVisible();
-    assert.deepEqual((await page.evaluate(() => window.secondHand.getData())).profile, applicantFixture);
+    assert.deepEqual(withoutIds((await page.evaluate(() => window.secondHand.getData())).profile), withoutIds(applicantFixture));
     await page.locator('#lock-button').click();
     await page.locator('#passphrase').fill(passphrase);
     await submitAuthForm(page);
@@ -265,7 +355,7 @@ async function main() {
     await submitAuthForm(page);
     await expect(page.locator('#workspace')).toBeVisible();
     const bytes = await fs.readFile(path.join(userData, 'vault.secondhand'), 'utf8');
-    for (const secret of ['Avery', 'Example', applicantFixture.addressLine1, '2025550147', 'SYNTHETIC-RECEIPT-ONLY', passphrase, resetPassword, recoveryKey, recoveryKey.replace(/-/g, '')]) assert.equal(bytes.includes(secret), false);
+    for (const secret of ['Avery', 'Example', 'Riley', 'Morgan', '2015-09-03', applicantFixture.addressLine1, '2025550147', 'SYNTHETIC-RECEIPT-ONLY', passphrase, resetPassword, recoveryKey, recoveryKey.replace(/-/g, '')]) assert.equal(bytes.includes(secret), false);
 
     // Each of Iowa's questions clears back to Not answered, and stays cleared after unlocking again.
     const unanswered = { ...applicantFixture, ...Object.fromEntries(IOWA_QUESTIONS.map(field => [field, ''])) };
@@ -276,13 +366,14 @@ async function main() {
     }
     await page.locator('#save-profile').click();
     await expect(page.locator('#profile-save-state')).toBeHidden();
-    assert.deepEqual((await page.evaluate(() => window.secondHand.getData())).profile, unanswered);
+    assert.deepEqual(withoutIds((await page.evaluate(() => window.secondHand.getData())).profile), withoutIds(unanswered));
     await page.locator('#lock-button').click();
     await page.locator('#passphrase').fill(resetPassword);
     await submitAuthForm(page);
     await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('.nav-item[data-view="profile"]').click();
-    assert.deepEqual(await shownProfile(), unanswered);
+    const { householdMembers: __, ...scalarUnanswered } = unanswered;
+    assert.deepEqual(await shownProfile(), scalarUnanswered);
     for (const field of IOWA_QUESTIONS.filter(field => field !== 'maritalStatus')) await expect(page.locator(`#${field}-none`)).toBeChecked();
 
     // Locked out with no password or recovery key: start over from the reset screen.
@@ -301,9 +392,14 @@ async function main() {
     await page.locator('#recovery-saved').check();
     await page.locator('#recovery-done').click();
     await expect(page.locator('#workspace')).toBeVisible();
+    // A new password offers the setup again; skipping it leaves it on Overview to finish later.
+    await expect(page.locator('#setup-dialog')).toBeVisible();
+    await page.locator('#setup-skip').click();
+    await expect(page.locator('#setup-dialog')).not.toBeVisible();
+    await expect(page.locator('#setup-resume-text')).toHaveText('Finish setting up: 0 of 6 steps');
     assert.deepEqual((await page.evaluate(() => window.secondHand.getData())).profile, {});
     assert.deepEqual(errors, []);
-    console.log('Electron UI smoke passed: Laya downloads on its own on a new install and stays off once turned off, create, save full applicant choices, Iowa’s questions about you and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence, recovery key password reset, clear Iowa’s questions, start over.');
+    console.log('Electron UI smoke passed: guided setup offered after the recovery key, saved step by step with a household list, finished later from Overview and readable at 200% zoom; Laya downloads on its own on a new install and stays off once turned off, create, save full applicant choices, Iowa’s questions about you and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence, recovery key password reset, clear Iowa’s questions, start over and its setup offer.');
   } catch (error) {
     if (page && !page.isClosed()) {
       const auth = await page.evaluate(() => ({

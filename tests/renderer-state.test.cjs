@@ -1317,6 +1317,7 @@ test('the guided setup shows one step at a time, saves each step as the applican
   assert.equal(view.get('setup-step-count').textContent, 'Step 2 of 6');
   assert.equal(view.get('setup-step-title').textContent, 'Your household');
   assert.deepEqual(shownSteps(), ['2']);
+  assert.equal(view.get('householdSize').closest('.form-card').querySelector('.card-heading').hidden, true, 'the step’s own title names the part of a split card');
   view.get('setup-back').click();
   assert.equal(view.get('setup-step-title').textContent, 'You');
   assert.equal(saves.length, 1, 'going back saves nothing');
@@ -1335,6 +1336,7 @@ test('the guided setup shows one step at a time, saves each step as the applican
   assert.equal(view.get('toast').textContent, 'Your information is set up. Change it any time in My information.');
   openProfile(view);
   assert.deepEqual(shownSteps(), ['1', '2', '3', '4', '5', '6'], 'My information shows every section again');
+  assert.equal(view.window.document.querySelectorAll('#profile-form .card-heading[hidden]').length, 0);
 });
 
 test('the guided setup resumes at the first step not done, and a step that doesn’t save stays put with its error', async t => {
