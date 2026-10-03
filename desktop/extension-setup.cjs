@@ -66,7 +66,27 @@ async function prepareBundledExtension(app, resourcesPath) {
   if (!target.isDirectory() || target.isSymbolicLink()) throw new Error('The extension setup directory must be a local folder.');
   // Manifest is last, so the new version is exposed after its assets are written.
   for (const asset of assets) await atomicWrite(path.join(directory, asset.name), asset.bytes);
+  await removeReplacedExtensionFiles(directory);
   return { directory, extensionId, version: manifest.version, prepared: true };
+}
+
+// Only top-level regular files that the current bundle no longer ships. Links and
+// folders stay, and are reported, so a refresh cannot follow them outside this folder.
+async function removeReplacedExtensionFiles(directory) {
+  const kept = new Set(EXTENSION_FILES);
+  const root = path.resolve(directory);
+  const blocked = [];
+  for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+    if (kept.has(entry.name)) continue;
+    const target = path.resolve(directory, entry.name);
+    if (path.dirname(target) !== root) throw new Error(`Refusing to touch ${entry.name} outside the extension folder.`);
+    if (entry.isSymbolicLink() || entry.isDirectory() || !entry.isFile()) blocked.push(entry.name);
+    else await fs.unlink(target);
+  }
+  if (blocked.length) {
+    blocked.sort();
+    throw new Error(`The extension folder still has ${blocked.join(', ')}. Remove those links or folders, then prepare the extension again.`);
+  }
 }
 
 module.exports = { EXTENSION_FILES, extensionIdFromKey, extensionDirectory, bundledDirectory, getExtensionSetup, prepareBundledExtension };

@@ -76,6 +76,46 @@ test('a broken package fails before replacing an existing extension', async t =>
   assert.deepEqual(await fs.readFile(path.join(initial.directory, 'manifest.json')), before);
 });
 
+test('refresh removes leftover top-level files only after the new extension is written', async t => {
+  const { app, userData } = await fixture(t);
+  const initial = await prepareBundledExtension(app);
+  const stale = path.join(initial.directory, 'popup.js');
+  const outside = path.join(userData, 'notes.txt');
+  await fs.writeFile(stale, 'old removed file');
+  await fs.writeFile(outside, 'leave me');
+  const resources = path.join(userData, '..', 'resources');
+  await fs.mkdir(path.join(resources, 'extension'), { recursive: true });
+  await fs.copyFile(path.join(root, 'extension/manifest.json'), path.join(resources, 'extension/manifest.json'));
+  await assert.rejects(prepareBundledExtension({ ...app, isPackaged: true }, resources));
+  assert.equal(await fs.readFile(stale, 'utf8'), 'old removed file');
+  const refreshed = await prepareBundledExtension(app);
+  assert.equal(refreshed.directory, initial.directory);
+  await assert.rejects(fs.lstat(stale), { code: 'ENOENT' });
+  assert.deepEqual((await fs.readdir(initial.directory)).sort(), [...EXTENSION_FILES].sort());
+  assert.equal(await fs.readFile(outside, 'utf8'), 'leave me');
+});
+
+test('refresh leaves symlinks and subfolders in place and reports them', async t => {
+  const { app, directory } = await fixture(t);
+  const initial = await prepareBundledExtension(app);
+  const subfolder = path.join(initial.directory, 'old-folder');
+  await fs.mkdir(subfolder);
+  await fs.writeFile(path.join(subfolder, 'kept.txt'), 'inside');
+  const linkTarget = path.join(directory, 'link-target.txt');
+  await fs.writeFile(linkTarget, 'outside target');
+  await fs.symlink(linkTarget, path.join(initial.directory, 'old-link'));
+  await fs.writeFile(path.join(initial.directory, 'popup.css'), 'stale stylesheet');
+  await assert.rejects(prepareBundledExtension(app), /old-folder/);
+  await assert.rejects(prepareBundledExtension(app), /old-link/);
+  assert.equal(await fs.readFile(path.join(subfolder, 'kept.txt'), 'utf8'), 'inside');
+  assert.equal((await fs.lstat(path.join(initial.directory, 'old-link'))).isSymbolicLink(), true);
+  assert.equal(await fs.readFile(linkTarget, 'utf8'), 'outside target');
+  await assert.rejects(fs.lstat(path.join(initial.directory, 'popup.css')), { code: 'ENOENT' });
+  for (const filename of EXTENSION_FILES) {
+    assert.equal((await fs.lstat(path.join(initial.directory, filename))).isFile(), true);
+  }
+});
+
 test('preparation refuses a redirected extension directory', async t => {
   const { app, directory, userData } = await fixture(t);
   const unrelated = path.join(directory, 'unrelated');
