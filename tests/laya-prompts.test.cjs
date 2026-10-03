@@ -126,6 +126,12 @@ test('noul-v1: a text box is offered the groups of saved fields its label names,
   assert.deepEqual(box('Name of Head of Household'), [...names, ...counts], 'two groups, in MATCH_CANDIDATES order');
   assert.deepEqual(box('Dirección'), address, 'accents are folded');
   assert.deepEqual(box('Teléfono', 'tel'), ['email', 'phone']);
+  for (const label of ["Spouse's first name", 'Family Member: Last Name', 'Household Members: First Name', 'Name of Proxy', 'Address of Proxy',
+    'Emergency contact phone', 'Landlord name', 'Nombre del cónyuge', 'Teléfono del contacto de emergencia', 'Nombre del representante autorizado',
+    'City/State', 'City and Zip Code', 'City, State and Zip code', 'Complete Physical Address (including Town/City!)',
+    'Ciudad/Estado', 'Ciudad y Código Postal', 'Ciudad, Estado y Código Postal', 'Dirección completa', 'Who pays the rent?', '¿Quién paga?']) {
+    assert.deepEqual(box(label), [], label);
+  }
   assert.deepEqual(box('Anything else?'), [...MATCH_CANDIDATES]);
   assert.deepEqual(box('Today’s Date', 'date'), [], 'date of birth is never offered, so a date box is offered nothing');
   assert.deepEqual(box('Phone', 'date'), []);
