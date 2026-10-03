@@ -52,3 +52,17 @@ test('preload exposes the Laya settings actions as named desktop calls and nothi
     ['secondhand:invoke', 'cancelLayaDownload'], ['secondhand:invoke', 'removeLaya']]);
   assert.equal(Object.keys(api).some(name => /decide/i.test(name)), false, 'the renderer cannot ask Laya for decisions');
 });
+
+test('preload lets the app turn all websites off, never on: Chrome’s prompt can only come from the extension', () => {
+  let api;
+  const calls = [];
+  vm.runInNewContext(fs.readFileSync(require.resolve('../desktop/preload.cjs'), 'utf8'), {
+    require: () => ({
+      contextBridge: { exposeInMainWorld(_name, value) { api = value; } },
+      ipcRenderer: { invoke: (...args) => { calls.push(args); return Promise.resolve(); }, on() {}, removeListener() {} }
+    })
+  });
+  api.turnOffAllSites();
+  assert.deepEqual(calls, [['secondhand:invoke', 'turnOffAllSites']]);
+  assert.deepEqual(Object.keys(api).filter(name => /allSites/i.test(name)), ['turnOffAllSites']);
+});

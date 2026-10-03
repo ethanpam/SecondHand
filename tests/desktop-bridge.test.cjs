@@ -130,6 +130,15 @@ test('site trust requests carry only an https site URL; the desktop decides whic
   assert.throws(() => validateRequest({ id: 'x', type: 'recordProgress', url: site, filledCount: 1 }), /Iowa portal/);
 });
 
+test('turning all websites on or off carries nothing but the request itself', () => {
+  for (const type of ['trustAllSites', 'untrustAllSites']) {
+    assert.deepEqual(validateRequest({ id: 'all', type }), { id: 'all', type });
+    for (const extra of [{ url: 'https://pantry.example.org/' }, { fields: ['ssn'] }, { origins: ['https://*/*'] }]) {
+      assert.throws(() => validateRequest({ id: 'all', type, ...extra }), /Unexpected/, `${type} ${Object.keys(extra)}`);
+    }
+  }
+});
+
 const LAYA_SITE = 'https://pantry.example.org/intake?step=2';
 const box = (extra = {}) => ({ id: 'f0:sh-1-2', label: 'Where can we email you?', type: 'email', options: [], ...extra });
 const choice = (extra = {}) => ({ id: 'f4:sh-2-0', label: 'Is anyone in your household 60 or older?', type: 'radio', options: ['Yes', 'No'], ...extra });

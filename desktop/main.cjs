@@ -68,6 +68,8 @@ if (nativeOrigin) {
   let extensionSetupPending = false;
   let autofillWithoutAsking = false;
   let trustedSites = [];
+  // SecondHand on all websites: any https site may ask, as a trusted one does. Saved only while on.
+  let allSites = false;
   // Laya is on unless the person turned it off. Until they choose, this is undefined and not saved.
   let layaEnabled;
   // Released only after a named confirmation on sites other than Iowa's portal.
@@ -139,7 +141,7 @@ if (nativeOrigin) {
   async function status() {
     const details = await vault.inspect().catch(() => null);
     return { exists: await vault.exists(), unlocked: vault.unlocked, lockRevision, recoveryKey: Boolean(details?.recoveryKey),
-      deviceReset: Boolean(details?.deviceReset) && await hasDeviceSecret(), deviceResetSupported, extensionId, autofillWithoutAsking, trustedSites: [...trustedSites],
+      deviceReset: Boolean(details?.deviceReset) && await hasDeviceSecret(), deviceResetSupported, extensionId, autofillWithoutAsking, trustedSites: [...trustedSites], allSites,
       bridgeRunning: Boolean(bridge), platform: process.platform, laya: await layaStatus(),
       extensionSetup: await getExtensionSetup(app).catch(() => ({ prepared: false, available: false })) };
   }
@@ -161,7 +163,17 @@ if (nativeOrigin) {
     if (!vault.unlocked) throw publicError('Unlock SecondHand first.');
   }
   async function saveSettings() {
-    await atomicWrite(configPath, Buffer.from(JSON.stringify({ extensionId, autofillWithoutAsking, trustedSites, layaEnabled })));
+    await atomicWrite(configPath, Buffer.from(JSON.stringify({ extensionId, autofillWithoutAsking, trustedSites, layaEnabled, ...(allSites && { allSites }) })));
+  }
+  // A site other than Iowa's portal may receive saved answers when the person trusted it, or every
+  // https site while all websites is on. Sensitive details still ask on each one.
+  const siteAllowed = origin => trustedSites.includes(origin) || (allSites && Boolean(origin));
+  const SITE_RULES = 'Social Security number, date of birth, income, money on hand, medical expenses, and your answers about citizenship, disability, blindness, health, Medicare, and having a Social Security number still ask every time';
+  async function turnOffAllSites() {
+    if (!allSites) return;
+    accessRevision++;
+    allSites = false;
+    await saveSettings();
   }
   async function saveExtensionRegistration(id) {
     accessRevision++;
@@ -228,7 +240,7 @@ if (nativeOrigin) {
     if ((await extensionLayaState()).state !== 'ready') throw layaNotReady();
     const iowa = isPortalUrl(request.url);
     const origin = siteOrigin(request.url);
-    if (!iowa && !trustedSites.includes(origin)) throw publicError('This site isn’t trusted. Turn on SecondHand for it first.');
+    if (!iowa && !siteAllowed(origin)) throw publicError('This site isn’t trusted. Turn on SecondHand for it first.');
     requireUnlocked();
     try {
       if (request.type === 'suggestFields') {
@@ -265,7 +277,7 @@ if (nativeOrigin) {
     }
   }
   async function bridgeRequest(request, context) {
-    if (request.type === 'status') return { unlocked: vault.unlocked, applicationCount: vault.unlocked ? vault.getData().applications.length : 0, accessRevision, laya: await extensionLayaState() };
+    if (request.type === 'status') return { unlocked: vault.unlocked, applicationCount: vault.unlocked ? vault.getData().applications.length : 0, accessRevision, allSites, laya: await extensionLayaState() };
     // On Windows the native relay passes openApp on as it is; the app is running, so it comes forward.
     if (request.type === 'showApp' || request.type === 'openApp') {
       if (mainWindow) { if (mainWindow.isMinimized?.()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); }
@@ -273,6 +285,8 @@ if (nativeOrigin) {
     }
     if (request.type === 'warmLaya') return warmLaya();
     if (request.type === 'suggestFields' || request.type === 'answerFields') return layaRequest(request, context);
+    // Turning all websites off only ever takes access away, so it needs no unlock or approval.
+    if (request.type === 'untrustAllSites') { await turnOffAllSites(); return { allSites: false }; }
     requireUnlocked();
     if (request.type === 'trustSite') {
       const origin = siteOrigin(request.url);
@@ -283,7 +297,7 @@ if (nativeOrigin) {
         mainWindow.show(); mainWindow.focus();
         const answer = await dialog.showMessageBox(mainWindow, {
           type: 'question', title: 'Trust this site?', message: `Let SecondHand fill forms on ${origin}?`,
-          detail: 'When you click Autofill on this site, SecondHand fills the saved answers it can match. It never clicks Next or Submit. Social Security number, date of birth, income, money on hand, medical expenses, and your answers about citizenship, disability, blindness, health, Medicare, and having a Social Security number still ask every time. You can remove this site on the Chrome extension page.',
+          detail: `When you click Autofill on this site, SecondHand fills the saved answers it can match. It never clicks Next or Submit. ${SITE_RULES}. You can remove this site on the Chrome extension page.`,
           buttons: ['Cancel', 'Trust this site'], defaultId: 1, cancelId: 0, noLink: true
         });
         if (answer.response !== 1) throw publicError('You cancelled trusting this site.');
@@ -301,12 +315,35 @@ if (nativeOrigin) {
         return { trusted: true, origin };
       } finally { fieldRequestPending = false; }
     }
+    if (request.type === 'trustAllSites') {
+      if (fieldRequestPending) throw publicError('Another request is waiting for your approval.');
+      fieldRequestPending = true;
+      const generation = accessRevision;
+      try {
+        mainWindow.show(); mainWindow.focus();
+        const answer = await dialog.showMessageBox(mainWindow, {
+          type: 'question', title: 'Trust all websites?', message: 'Let SecondHand fill forms on any website?',
+          detail: `Nothing is filled until you click Autofill on a website. Then SecondHand fills the saved answers it can match there. It never clicks Next or Submit. ${SITE_RULES}, on each site. You can turn this off in SecondHand’s side panel in Chrome or on the Chrome extension page.`,
+          buttons: ['Cancel', 'Trust all websites'], defaultId: 1, cancelId: 0, noLink: true
+        });
+        if (answer.response !== 1) throw publicError('You cancelled trusting all websites.');
+        requireUnlocked();
+        if (generation !== accessRevision || extensionId !== context.extensionId) throw publicError('SecondHand access changed. Try again.');
+        allSites = true;
+        const approvedRevision = ++accessRevision;
+        await saveSettings();
+        requireUnlocked();
+        if (approvedRevision !== accessRevision || extensionId !== context.extensionId) throw publicError('SecondHand access changed. Try again.');
+        touch();
+        return { allSites: true };
+      } finally { fieldRequestPending = false; }
+    }
     if (request.type === 'getFields') {
       const iowa = isPortalUrl(request.url);
       const navigationOnly = isIowaNavigationAuthorization(request);
       if (!request.fields.length && !navigationOnly) throw publicError('This page does not support navigation authorization.');
       const origin = siteOrigin(request.url);
-      if (!iowa && !trustedSites.includes(origin)) throw publicError('This site isn’t trusted. Turn on SecondHand for it first.');
+      if (!iowa && !siteAllowed(origin)) throw publicError('This site isn’t trusted. Turn on SecondHand for it first.');
       const sensitive = iowa ? [] : request.fields.filter(field => SENSITIVE_FIELDS.includes(field));
       const approved = await approveRelease({ context, iowa, origin, generation: accessRevision,
         message: navigationOnly ? 'Continue this verified Iowa step?' : `Fill these saved answers into ${iowa ? 'Iowa’s application' : origin}?`,
@@ -471,6 +508,11 @@ if (nativeOrigin) {
       await saveSettings();
       touch(); return status();
     },
+    async turnOffAllSites() {
+      requireUnlocked();
+      await turnOffAllSites();
+      touch(); return status();
+    },
     async removeTrustedSite(origin) {
       requireUnlocked();
       if (typeof origin !== 'string' || !trustedSites.includes(origin)) throw publicError('That site isn’t in your trusted list.');
@@ -601,7 +643,8 @@ if (nativeOrigin) {
       const stat = await fs.stat(configPath);
       if (stat.size <= 4096) { const config = JSON.parse(await fs.readFile(configPath, 'utf8')); if (EXTENSION_ID.test(config.extensionId || '')) { extensionId = config.extensionId; autofillWithoutAsking = config.autofillWithoutAsking === true; }
       if (Array.isArray(config.trustedSites)) trustedSites = [...new Set(config.trustedSites.filter(origin => typeof origin === 'string' && siteOrigin(origin) === origin))].slice(0, MAX_TRUSTED_SITES);
-      if (typeof config.layaEnabled === 'boolean') layaEnabled = config.layaEnabled; }
+      if (typeof config.layaEnabled === 'boolean') layaEnabled = config.layaEnabled;
+      allSites = config.allSites === true; }
     } catch { /* Missing or invalid non-sensitive setup settings are reset. */ }
     await laya.setEnabled(layaEnabled !== false);
     // Downloads the model if it's missing, then checks for a newer one now and every 24 hours.

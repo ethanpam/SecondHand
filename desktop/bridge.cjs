@@ -128,7 +128,7 @@ function validateRequest(request) {
   if (!request || typeof request !== 'object' || Array.isArray(request) ||
       typeof request.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(request.id)) throw new Error('Invalid request identifier.');
   let allowed;
-  if (['status', 'showApp', 'openApp', 'warmLaya'].includes(request.type)) allowed = ['id', 'type'];
+  if (['status', 'showApp', 'openApp', 'warmLaya', 'trustAllSites', 'untrustAllSites'].includes(request.type)) allowed = ['id', 'type'];
   else if (request.type === 'getFields') allowed = ['id', 'type', 'url', 'fields'];
   else if (request.type === 'trustSite') allowed = ['id', 'type', 'url'];
   else if (request.type === 'recordProgress') allowed = ['id', 'type', 'url', 'filledCount'];
@@ -138,7 +138,7 @@ function validateRequest(request) {
   // Field requests, site trust, and Laya may name any HTTPS site; the desktop decides whether it is trusted.
   if (request.type === 'getFields' || request.type === 'trustSite' || Object.hasOwn(LAYA_REQUESTS, request.type)) {
     if (!isHttpsSiteUrl(request.url)) throw new Error('Only an https site without credentials or a custom port is allowed.');
-  } else if (!['status', 'showApp', 'openApp', 'warmLaya'].includes(request.type) && !isPortalUrl(request.url)) throw new Error('Only the supported Iowa portal is allowed.');
+  } else if (!['status', 'showApp', 'openApp', 'warmLaya', 'trustAllSites', 'untrustAllSites'].includes(request.type) && !isPortalUrl(request.url)) throw new Error('Only the supported Iowa portal is allowed.');
   if (request.type === 'getFields' && !isIowaNavigationAuthorization(request)) validateFieldScope(request.fields);
   if (Object.hasOwn(LAYA_REQUESTS, request.type)) {
     validateQuestions(request[LAYA_REQUESTS[request.type].list], LAYA_REQUESTS[request.type]);
