@@ -270,7 +270,8 @@ test('openApp carries nothing but its id: no command, path, or argument can ride
 });
 
 test('the host starts SecondHand as its own executable: packaged with no arguments, in development with the app path, keeping the data folder and dropping test settings', () => {
-  const env = { PATH: '/usr/bin', HOME: '/synthetic-home', SECONDHAND_USER_DATA: '/synthetic-data', SECONDHAND_TEST_MODE: '1', SECONDHAND_TEST_USER_DATA: '/tmp/synthetic-test' };
+  const env = { PATH: '/usr/bin', HOME: '/synthetic-home', SECONDHAND_USER_DATA: '/synthetic-data', SECONDHAND_TEST_MODE: '1', SECONDHAND_TEST_USER_DATA: '/tmp/synthetic-test',
+    SECONDHAND_TEST_TOUCH_ID: 'approve' };
   const kept = { PATH: '/usr/bin', HOME: '/synthetic-home', SECONDHAND_USER_DATA: '/synthetic-data' };
   assert.deepEqual(appLaunch({ execPath: '/Applications/secondHand.app/Contents/MacOS/secondHand', appPath: '/Applications/secondHand.app/Contents/Resources/app.asar', packaged: true, env }),
     { command: '/Applications/secondHand.app/Contents/MacOS/secondHand', args: [], options: { detached: true, stdio: 'ignore', env: kept } });
@@ -368,4 +369,25 @@ test('saveFields carries an https site and answers for saved profile fields only
   }
   assert.throws(() => save({ city: 'Ames' }, { values: { city: 'Ames' } }), /Unexpected/);
   assert.throws(() => save({ city: 'Ames' }, { confirmed: true }), /Unexpected/, 'a request can’t say it was confirmed: only the app asks');
+});
+
+test('unlockWithTouchId carries nothing but its id: the app shows its own Touch ID prompt, and no password ever comes from Chrome', () => {
+  assert.deepEqual(validateRequest({ id: 'touch-1', type: 'unlockWithTouchId' }), { id: 'touch-1', type: 'unlockWithTouchId' });
+  for (const extra of [{ url: PORTAL_URL }, { password: 'synthetic password' }, { reason: 'unlock SecondHand' }, { fields: ['firstName'] }]) {
+    assert.throws(() => validateRequest({ id: 'touch-1', type: 'unlockWithTouchId', ...extra }), /Unexpected/, JSON.stringify(extra));
+  }
+});
+
+test('the app’s unlockWithTouchId answer reaches the extension as it is, through the bridge and the native host', async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-bridge-touch-id-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const answers = [{ unlocked: false, reason: 'password' }, { unlocked: true }];
+  const bridge = await startBridge(directory, () => EXTENSION, async request => {
+    assert.equal(request.type, 'unlockWithTouchId');
+    return answers.shift();
+  });
+  t.after(() => bridge.close());
+  assert.deepEqual(await relayRequest(directory, EXTENSION, { id: 'touch-1', type: 'unlockWithTouchId' }), { id: 'touch-1', ok: true, data: { unlocked: false, reason: 'password' } });
+  const responses = await hostSession(directory, [{ id: 'touch-2', type: 'unlockWithTouchId' }]);
+  assert.deepEqual(responses, [{ id: 'touch-2', ok: true, data: { unlocked: true } }]);
 });

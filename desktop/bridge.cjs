@@ -35,6 +35,9 @@ const MAX_OPTION = 100;
 const MAX_BUDGET_MS = 3000;
 // Refusals the extension acts on. Only these codes travel back with an error.
 const PUBLIC_CODES = Object.freeze(['LAYA_NOT_READY', 'DESKTOP_UNREACHABLE']);
+// Requests that carry only their id and type. unlockWithTouchId asks the app to show its own
+// Touch ID prompt (#99); a password never comes from Chrome.
+const BARE_REQUESTS = Object.freeze(['status', 'showApp', 'openApp', 'warmLaya', 'trustAllSites', 'untrustAllSites', 'unlockWithTouchId']);
 // The native host's answer when the desktop app isn't running (or can't be reached).
 const UNREACHABLE = 'Open SecondHand, connect this extension, and unlock SecondHand.';
 
@@ -146,7 +149,7 @@ function validateRequest(request) {
   if (!request || typeof request !== 'object' || Array.isArray(request) ||
       typeof request.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(request.id)) throw new Error('Invalid request identifier.');
   let allowed;
-  if (['status', 'showApp', 'openApp', 'warmLaya', 'trustAllSites', 'untrustAllSites'].includes(request.type)) allowed = ['id', 'type'];
+  if (BARE_REQUESTS.includes(request.type)) allowed = ['id', 'type'];
   else if (request.type === 'getFields') allowed = ['id', 'type', 'url', 'fields'];
   else if (request.type === 'saveFields') allowed = ['id', 'type', 'url', 'fields'];
   else if (request.type === 'trustSite' || request.type === 'untrustSite') allowed = ['id', 'type', 'url'];
@@ -158,7 +161,7 @@ function validateRequest(request) {
   // Field requests, site trust, and Laya may name any HTTPS site; the desktop decides whether it is trusted.
   if (request.type === 'getFields' || request.type === 'trustSite' || request.type === 'untrustSite' || Object.hasOwn(LAYA_REQUESTS, request.type)) {
     if (!isHttpsSiteUrl(request.url)) throw new Error('Only an https site without credentials or a custom port is allowed.');
-  } else if (!['status', 'showApp', 'openApp', 'warmLaya', 'trustAllSites', 'untrustAllSites'].includes(request.type) && !isPortalUrl(request.url)) throw new Error('Only the supported Iowa portal is allowed.');
+  } else if (!BARE_REQUESTS.includes(request.type) && !isPortalUrl(request.url)) throw new Error('Only the supported Iowa portal is allowed.');
   if (request.type === 'getFields' && !isIowaNavigationAuthorization(request)) validateFieldScope(request.fields);
   if (Object.hasOwn(LAYA_REQUESTS, request.type)) {
     validateQuestions(request[LAYA_REQUESTS[request.type].list], LAYA_REQUESTS[request.type]);
@@ -265,7 +268,7 @@ async function relayRequest(userData, extensionId, request) {
 // Packaged, with no arguments; in development, with the app path. Never Chrome's origin or anything
 // from the request. The data folder setting carries over; test-only settings don't.
 function appLaunch({ execPath, appPath, packaged, env }) {
-  const { SECONDHAND_TEST_MODE, SECONDHAND_TEST_USER_DATA, ...kept } = env;
+  const { SECONDHAND_TEST_MODE, SECONDHAND_TEST_USER_DATA, SECONDHAND_TEST_TOUCH_ID, ...kept } = env;
   return { command: execPath, args: packaged ? [] : [appPath], options: { detached: true, stdio: 'ignore', env: kept } };
 }
 
