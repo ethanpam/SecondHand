@@ -9,7 +9,7 @@ if (typeof globalThis.SecondHandStrings?.english !== 'function' || typeof global
 }
 // Must match BUILD in panel.js: change both together. The panel compares them to tell
 // when Chrome is still running an older worker than the pages it loaded from disk.
-const BUILD = '2026-09-28.1';
+const BUILD = '2026-10-03.1';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys

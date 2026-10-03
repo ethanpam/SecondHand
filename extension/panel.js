@@ -7,7 +7,7 @@
   const summary = globalThis.SecondHandSummary;
   // Must match BUILD in background.js: change both together. Chrome loads these pages
   // from disk right away but keeps running the old worker until SecondHand is reloaded.
-  const BUILD = '2026-09-28.1';
+  const BUILD = '2026-10-03.1';
   // The applicant's language: the choice saved in this extension's storage, else the browser's.
   let language = strings.language();
   const t = (key, params = {}) => strings.text(language, key, params);
@@ -298,6 +298,13 @@
     let refreshAgain = false;
     let stopped = false;
     let status = { message: { key: 'panel.checkingTab' }, error: false };
+    // The last change to all websites, kept on screen until the tab changes or another action starts:
+    // it can name sites Chrome turned off along with it.
+    let notice = null;
+    // SecondHand on all websites, as the worker last said (null until it has), and whether Chrome paused
+    // SecondHand on Iowa's site, which it does when access to every site is removed.
+    let allSites = null;
+    let iowaPaused = false;
     let desktopLine = null;
     // What the desktop row's button does: open a closed app, or bring a locked one forward to unlock.
     let desktopAction = null;
@@ -334,9 +341,12 @@
     // A closed app is said once, by the desktop row and its Open SecondHand button, not again under Autofill.
     const reported = result => hasMessage(result) && result.state !== 'offline';
     function renderStatus() {
-      $('status').textContent = words(status.message, 650);
-      $('status').classList.toggle('error', status.error);
+      const shown = notice || status;
+      $('status').textContent = words(shown.message, 650);
+      $('status').classList.toggle('error', shown.error);
     }
+    // On a tab SecondHand can't read: where to go, or that Chrome paused it on Iowa's site.
+    const elsewhere = () => ({ key: iowaPaused ? 'panel.iowaPaused' : allSites ? 'panel.openForm' : 'panel.openIowa' });
     function renderDesktop() {
       if (desktopLine) $('desktop-status').textContent = words(desktopLine);
       $('desktop-action').hidden = !desktopAction;
@@ -367,8 +377,13 @@
       $('frames-enable').textContent = t('panel.framesEnableHosts', { hosts: pending.map(frame => hostOf(frame.origin)).join(', ') });
       $('site-enable').hidden = !off;
       $('site-enable').disabled = working;
-      $('site-disable').hidden = !(target && site?.enabled);
+      // A site turned on by itself can't be turned off inside all websites.
+      $('site-disable').hidden = !(target && site?.enabled) || allSites === true;
       $('site-disable').disabled = working;
+      $('all-sites-enable').hidden = allSites !== false || stopped;
+      $('all-sites-enable').disabled = working;
+      $('all-sites-disable').hidden = allSites !== true || stopped;
+      $('all-sites-disable').disabled = working;
       $('panel-autofill').hidden = off;
       $('panel-autofill').textContent = t(autopilot ? 'panel.stopAutofill' : 'panel.autofill');
       $('panel-autofill').disabled = !target || (!fillable && !autopilot) || working;
@@ -385,7 +400,7 @@
     }
     function invalidateTarget() {
       if (stopped) return;
-      contextRevision++; working = false; target = null;
+      contextRevision++; working = false; target = null; notice = null;
       clearPage(); controls();
       show({ key: 'panel.checkingTab' });
     }
@@ -447,7 +462,7 @@
           if (revision !== contextRevision || stopped) return;
           if (!tab || !Number.isInteger(tab.id) || (!supportedUrl(tab.url) && !siteUrl(tab.url))) {
             target = null; clearPage(); controls();
-            show({ key: 'panel.openIowa' });
+            show(elsewhere());
             return;
           }
           if (!target || target.id !== tab.id || target.url !== tab.url) {
@@ -476,6 +491,8 @@
     }
     // The desktop row for the status the worker read: closed, locked, or unlocked.
     function showDesktop(desktop) {
+      allSites = typeof desktop?.allSites === 'boolean' ? desktop.allSites : null;
+      iowaPaused = desktop?.iowaPaused === true;
       desktopLine = { key: !desktop?.connected ? 'desktop.notRunning' : desktop.unlocked ? 'desktop.unlocked' : 'desktop.locked' };
       layaLine = desktop?.connected && Object.hasOwn(LAYA_LINES, desktop.laya) ? { key: LAYA_LINES[desktop.laya] } : null;
       desktopAction = !desktop?.connected ? 'open' : desktop.unlocked ? null : 'unlock';
@@ -494,6 +511,9 @@
         if (run === desktopRun) showDesktop(desktop);
       } catch (error) { if (run === desktopRun) desktopProblem(problem(error)); }
       renderDesktop();
+      if (stopped) return;
+      if (!target) show(elsewhere());
+      controls();
     }
     // Open SecondHand: the native host brings the app forward or starts it, then the panel waits for it
     // to answer and shows its usual row. If it never does, one plain line says where to open it.
@@ -524,7 +544,7 @@
       if (!target) return null;
       const selected = { ...target };
       const revision = contextRevision;
-      working = true; controls();
+      working = true; notice = null; controls();
       try {
         if (pollPromise) await pollPromise;
         const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -785,6 +805,41 @@
       const result = await act({ type: 'ui:enableSite', confirmed: true }, { key: 'panel.approveSite' });
       await refresh();
       if (result?.enabled) show({ key: 'panel.siteOn', params: { host: hostOf(result.origin) } });
+    }));
+    // All websites isn't bound to a page; the active tab, if any, gets SecondHand's scripts at once.
+    async function allSitesAct(payload, waiting) {
+      working = true; notice = null; controls(); show(waiting);
+      try {
+        if (pollPromise) await pollPromise;
+        const [active] = payload.type === 'ui:enableAllSites' ? await chrome.tabs.query({ active: true, currentWindow: true }) : [];
+        const result = await send({ ...payload, ...(Number.isInteger(active?.id) ? { tabId: active.id } : {}) });
+        allSites = result?.enabled === true;
+        return result;
+      } catch (error) {
+        notice = { message: problem(error), error: true };
+        return null;
+      } finally {
+        working = false;
+        // Turning all websites on or off can change what Chrome lets SecondHand read, Iowa's site included.
+        await desktopStatus();
+        await refresh();
+        schedulePoll();
+      }
+    }
+    $('all-sites-enable').addEventListener('click', trusted(async () => {
+      if ($('all-sites-enable').disabled) return;
+      let granted;
+      // Ask before anything is awaited: Chrome only shows its prompt inside the user's click.
+      try { granted = await chrome.permissions.request({ origins: ['https://*/*'] }); }
+      catch (error) { show(problem(error, 'panel.chromeCouldntAskAllSites'), true); return; }
+      if (!granted) { show({ key: 'panel.chromeDeclinedAllSites' }, true); return; }
+      const result = await allSitesAct({ type: 'ui:enableAllSites', confirmed: true }, { key: 'panel.approveAllSites' });
+      if (result?.enabled) show(fromResult(result));
+    }));
+    $('all-sites-disable').addEventListener('click', trusted(async () => {
+      if ($('all-sites-disable').disabled) return;
+      const result = await allSitesAct({ type: 'ui:disableAllSites', confirmed: true }, { key: 'panel.turningOffAllSites' });
+      if (result) { notice = { message: fromResult(result), error: false }; renderStatus(); }
     }));
     $('frames-enable').addEventListener('click', trusted(async () => {
       if ($('frames-enable').disabled || !target || !site?.enabled) return;
