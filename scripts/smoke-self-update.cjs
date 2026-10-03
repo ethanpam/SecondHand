@@ -144,7 +144,7 @@ async function main() {
     await expect.poll(() => panel.text('#update-note'), { timeout: 15000 }).toBe(strings.english('panel.updated'));
     await expect.poll(() => panel.text('#desktop-status'), { timeout: 30000 }).toBe(strings.english('desktop.locked'));
     assert.equal(await panel.text('#status') === strings.english('panel.outdated'), false, 'the side panel and the worker agree on the build');
-    await panel.screenshot(path.join(root, 'artifacts/self-update-85/self-update-panel.png'));
+    await panel.screenshot(path.join(root, 'artifacts/self-update/self-update-panel.png'));
     await page.waitForTimeout(3000);
     assert.equal(await updated.evaluate(() => globalThis.__selfUpdateSmoke), 'same worker', 'no second reload');
     assert.equal(starts.length - started, 1);
