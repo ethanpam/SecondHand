@@ -172,7 +172,10 @@
   const MEMBER_RULES = [
     [/^(students? (full )?name (and )?(school )?grade( level)?|(full )?name (and )?(school )?grade( level)? of (the |your )?students?|name of (the |your )?students? (and )?(school )?grade( level)?)$/, 'studentNameGrade']
   ];
-  const memberRuleFor = text => MEMBER_RULES.find(([pattern]) => pattern.test(question(text)))?.[1] || null;
+  // The question may go on in a sentence of its own ("Student name and grade. Order will be assigned to…"):
+  // its first sentence is asked as the question too.
+  const firstSentence = text => String(text || '').split(/[.?!](?:\s|$)/)[0];
+  const memberRuleFor = text => MEMBER_RULES.find(([pattern]) => pattern.test(question(text)) || pattern.test(question(firstSentence(text))))?.[1] || null;
   function ruleFor(text) {
     const asked = question(text);
     return RULES.find(([pattern]) => pattern.test(asked))?.[1] || bandRule(asked);

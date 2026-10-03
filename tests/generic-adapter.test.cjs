@@ -232,10 +232,13 @@ test('band counts fill number boxes and count choices, and are asked for by key'
 
 test('a student box gets the one student’s name and grade; the applicant’s boxes never get a member’s details', () => {
   const labels = { student: 'Student name and grade', students: 'Student’s Name and Grade (if applicable)', slash: 'Student name/grade', of: 'Name and grade of student',
+    // A pantry form from the live QA (#89): the question, then an instruction in its own sentence.
+    order: 'Student name and grade. Order will be assigned to(first and Last)',
     alone: 'Student name', first: 'First name', full: 'Full name', school: 'Student school' };
   const doc = page(Object.entries(labels).map(([id, label]) => `<label for="${id}">${label}</label><input id="${id}">`).join(''));
   const result = generic.plan(doc);
-  assert.deepEqual(byElement(doc, result), { student: 'studentNameGrade', students: 'studentNameGrade', slash: 'studentNameGrade', of: 'studentNameGrade', first: 'firstName', full: 'fullName' });
+  assert.deepEqual(byElement(doc, result), { student: 'studentNameGrade', students: 'studentNameGrade', slash: 'studentNameGrade', of: 'studentNameGrade', order: 'studentNameGrade',
+    first: 'firstName', full: 'fullName' });
   assert.deepEqual(result.unmatched.map(field => field.label), [labels.alone, labels.school]);
   for (const item of result.unmatched) for (const key of ['fullName', 'firstName', 'lastName']) assert.equal(generic.canSuggest(key, item), false, `${item.label}: ${key}`);
   assert.deepEqual(generic.requestKeys(['studentNameGrade', 'fullName']), ['studentNameGrade', 'firstName', 'lastName']);
@@ -246,8 +249,11 @@ test('a student box gets the one student’s name and grade; the applicant’s b
     { id: idOf('studentNameGrade'), key: 'fullName', guessed: true }, { id: result.unmatched[0].id, key: 'fullName', guessed: true }], values);
   assert.deepEqual(crossed.filled, []);
   generic.fillFields(doc, result.token, result.matched.map(({ id, key }) => ({ id, key, guessed: false })), values);
-  assert.deepEqual(['student', 'students', 'slash', 'of', 'first', 'full', 'alone'].map(id => doc.getElementById(id).value),
-    ['Riley Example, 5th', 'Riley Example, 5th', 'Riley Example, 5th', 'Riley Example, 5th', 'Avery', 'Avery Example', '']);
+  assert.deepEqual(['student', 'students', 'slash', 'of', 'order', 'first', 'full', 'alone'].map(id => doc.getElementById(id).value),
+    ['Riley Example, 5th', 'Riley Example, 5th', 'Riley Example, 5th', 'Riley Example, 5th', 'Riley Example, 5th', 'Avery', 'Avery Example', '']);
+  // Only the first sentence is the question: a longer one that only starts the same way is not.
+  const other = page('<label for="x">Student name and grade of your oldest child</label><input id="x"><label for="y">Student name and grade? Bring a report card.</label><input id="y">');
+  assert.deepEqual(byElement(other, generic.plan(other)), { y: 'studentNameGrade' });
   // Zero or several students: the desktop has no answer, and the box stays empty.
   const again = page('<label for="s">Student name and grade</label><input id="s">');
   const plan = generic.plan(again);
