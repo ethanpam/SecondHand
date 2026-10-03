@@ -4,7 +4,7 @@
 // the applicant before any of it reaches a website.
 const { buildFacts, factsText, SENSITIVE_SOURCES } = require('../shared/facts.cjs');
 const { ABSTAIN, CHOICE, answerState, factsCover, unsafeQuestion } = require('../shared/laya-prompts.cjs');
-const { CHOICE_BATCH, score, scoreChoices, pick, budget, timedOut, inOrder, barsFor } = require('./laya-decisions.cjs');
+const { CHOICE_BATCH, score, scoreChoices, pick, budget, timedOut, inOrder, byCost, barsFor } = require('./laya-decisions.cjs');
 
 function createFieldAnswers({ laya, now = Date.now, today } = {}) {
   if (typeof laya?.decideBatch !== 'function' || typeof laya?.format !== 'function') throw new TypeError('Field answers need a Laya runtime.');
@@ -14,7 +14,7 @@ function createFieldAnswers({ laya, now = Date.now, today } = {}) {
   // that came after it is dropped, and nothing more is asked.
   const passes = {
     // noul-v1: one request per question, scoring each option and "the facts don't say" on its own.
-    // Every question is asked at once, each request ending when the click's time does. A question
+    // Every question of the pass is asked at once, each request ending when the click's time does. A question
     // on no topic the facts cover isn't asked (factsCover).
     'noul-v1': async (facts, questions, bar, more, found) => {
       questions = questions.filter(factsCover);
@@ -34,6 +34,14 @@ function createFieldAnswers({ laya, now = Date.now, today } = {}) {
       }
     }
   };
+  // The groups of questions decided one after another, each through both passes, so a long checklist
+  // can't keep the short questions from their answers (#90).
+  const groups = {
+    // noul-v1: a question costs a pass per option, plus abstaining: cheapest first (byCost).
+    'noul-v1': questions => byCost(questions, question => question.options.length + 1),
+    // choice-v2: every question is one pass, so one group, in page order.
+    'choice-v2': questions => [questions]
+  };
   // Questions in page order: { id, label, type, options }, and the milliseconds the click has left.
   // Returns { answers: { [id]: optionText }, sensitive: [id], sensitiveFields: [field] }: `sensitive`
   // lists the answers that needed a sensitive fact, and `sensitiveFields` the saved fields behind
@@ -48,19 +56,23 @@ function createFieldAnswers({ laya, now = Date.now, today } = {}) {
     const everything = factsText(facts);
     // An option that reads like the abstain candidate can't be told apart from it, so that question is the applicant's.
     const open = questions.filter(question => !unsafeQuestion(question) && !question.options.includes(ABSTAIN));
-    const answers = {}, sensitive = [];
+    const fromEveryday = new Map(), fromEverything = new Map();
     try {
-      // First pass: facts that are not sensitive.
-      if (everyday) await pass(everyday, open, bars.answer, more, (question, option) => { if (option !== null) answers[question.id] = option; });
-      // Second pass: the questions still open, with every fact. Their answers needed a sensitive one.
-      if (everything !== everyday) {
-        await pass(everything, open.filter(item => !Object.hasOwn(answers, item.id)), bars.answer, more, (question, option) => {
-          if (option !== null) { answers[question.id] = option; sensitive.push(question.id); }
-        });
+      for (const group of groups[format](open)) {
+        // First pass: facts that are not sensitive.
+        if (everyday) await pass(everyday, group, bars.answer, more, (question, option) => { if (option !== null) fromEveryday.set(question.id, option); });
+        // Second pass: the questions still open, with every fact. Their answers needed a sensitive one.
+        if (everything !== everyday) {
+          await pass(everything, group.filter(item => !fromEveryday.has(item.id)), bars.answer, more, (question, option) => { if (option !== null) fromEverything.set(question.id, option); });
+        }
       }
     } catch (error) {
       if (!timedOut(error)) throw error;
     }
+    // In page order, the answers from everyday facts first.
+    const answers = {}, sensitive = [];
+    for (const question of open) if (fromEveryday.has(question.id)) answers[question.id] = fromEveryday.get(question.id);
+    for (const question of open) if (fromEverything.has(question.id)) { answers[question.id] = fromEverything.get(question.id); sensitive.push(question.id); }
     const sensitiveFields = sensitive.length ? [...new Set(facts.filter(fact => fact.sensitive).flatMap(fact => fact.sources.filter(source => SENSITIVE_SOURCES.includes(source))))] : [];
     return { answers, sensitive, sensitiveFields };
   }

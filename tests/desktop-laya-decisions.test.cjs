@@ -127,3 +127,13 @@ test('a request’s time budget is what the click has left, never more than thre
   clock = 1300;
   assert.equal(timed.left(), 0);
 });
+
+test('noul-v1 work goes cheapest first: in groups by batches through the model, fewest candidates first, then page order', () => {
+  const { byCost } = decisions;
+  const BATCH = require('../desktop/laya.cjs').BATCH_SIZE;
+  const work = [{ id: 'a', candidates: 3 * BATCH }, { id: 'b', candidates: 3 }, { id: 'c', candidates: BATCH + 1 }, { id: 'd', candidates: 3 }, { id: 'e', candidates: 6 }, { id: 'f', candidates: BATCH }];
+  assert.deepEqual(byCost(work, item => item.candidates).map(group => group.map(item => item.id)), [['b', 'd', 'e', 'f'], ['c'], ['a']],
+    'one batch each (3, 3, 6 and 8 candidates), then two batches, then three');
+  assert.deepEqual(byCost([], item => item.candidates), []);
+  assert.deepEqual(work.map(item => item.id), ['a', 'b', 'c', 'd', 'e', 'f'], 'the page’s own list is left as it was');
+});
