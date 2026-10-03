@@ -13,7 +13,7 @@
     { "id": "q4", "label": "# of people in your household 18 - 59 yrs old", "type": "text", "options": [], "rule": { "name": "none" }, "note": "The profile counts adults 18-64 and seniors 65+, so the 18-59 count is unknown when anyone is 60-64. A household age-band count rule could answer it with members' ages." },
     { "id": "q5", "label": "# of people in your household 60 + yrs", "type": "text", "options": [], "rule": { "name": "none" }, "note": "The profile counts seniors 65+, not 60+. Only answerable if members' ages were saved." },
     { "id": "q6", "label": "Student name and grade. Order will be assigned to(first and Last)", "type": "text", "options": [], "rule": { "name": "none" }, "note": "The student's name and school grade; the profile holds the applicant, not a student." },
-    { "id": "q7", "label": "Guardian first and last name", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" }, "note": "The guardian is the person filling in the form." },
+    { "id": "q7", "label": "Guardian first and last name", "type": "text", "options": [], "rule": { "name": "none" }, "note": "The guardian may be the person filling in the form, but saying so would be a guess (#98): a guardian's name is never inferred." },
     { "id": "q8", "label": "Email Address:", "type": "text", "options": [], "rule": { "name": "field", "key": "email" } },
     { "id": "q9", "label": "PhoneNumber:", "type": "text", "options": [], "rule": { "name": "field", "key": "phone" } },
     { "id": "q10", "label": "Date ordered:", "type": "date", "options": [], "rule": { "name": "none" }, "note": "Today's order date, not a saved fact." },

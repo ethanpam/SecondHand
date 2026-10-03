@@ -21,6 +21,18 @@
     'monthlyMedicalExpenses', 'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare', 'anyoneSenior', 'iowaResident',
     'wantsHealthCoverage']);
   const COMPOSITE_KEYS = Object.freeze(['cityState', 'cityZip', 'cityStateZip', 'fullAddress']);
+  // Answers about a household member, worked out by the desktop from the household list. Only the
+  // rules place them, and only in a box that asks for that member: never a guess, never an applicant box.
+  const MEMBER_KEYS = Object.freeze(['studentNameGrade']);
+  // A household count by age, worked out by the desktop from birth dates: "householdCount:0-5" or
+  // "householdCount:60+", whole numbers 0 to 120 without leading zeros. shared/household.cjs reads them the same way.
+  const BAND_KEY = /^householdCount:(0|[1-9]\d{0,2})(?:-(0|[1-9]\d{0,2})|(\+))$/;
+  function isBandKey(key) {
+    const match = typeof key === 'string' ? BAND_KEY.exec(key) : null;
+    return Boolean(match) && Number(match[1]) <= 120 && (Boolean(match[3]) || (Number(match[2]) <= 120 && Number(match[2]) >= Number(match[1])));
+  }
+  // Keys the rules may place beyond the profile's own: composites, a member's answer, and band counts.
+  const ruleOnlyKey = key => MEMBER_KEYS.includes(key) || isBandKey(key);
   // Answers that are only ever a guess for the applicant to review, however they were matched.
   const GUESS_KEYS = Object.freeze(['iowaResident']);
   const KIND = Object.freeze({ birthDate: 'date', email: 'email', phone: 'tel', state: 'state', ageRange: 'ageRange', householdSize: 'count', householdAdults: 'count',
@@ -31,8 +43,8 @@
   const AUTOCOMPLETE = Object.freeze({ 'given-name': 'firstName', 'additional-name': 'middleName', 'family-name': 'lastName', name: 'fullName',
     'honorific-suffix': 'suffix', email: 'email', tel: 'phone', 'tel-national': 'phone', 'street-address': 'addressLine1', 'address-line1': 'addressLine1',
     'address-line2': 'addressLine2', 'address-level2': 'city', 'address-level1': 'state', 'postal-code': 'zip', bday: 'birthDate' });
-  // Household counts by age. An age band maps only when it is exactly the band the profile
-  // counts (children 0-17, adults 18-64, seniors 65+); "0-5", "18-59", or "60+" stay with the applicant.
+  // Household counts by age the profile keeps: children 0-17, adults 18-64, seniors 65+. Any other band
+  // ("0-5", "18-59", "60+") is a band count the desktop works out from the household list (bandRule).
   const AGE_BANDS = Object.freeze({
     householdChildren: '(under|below|younger than) (age )?18|(0|zero) (to |through |thru )?17|17 (and|or) (under|younger)',
     householdAdults: '18 (to |through |thru )?64',
@@ -46,7 +58,7 @@
     [/^(first|given) name$|^first$/, 'firstName'],
     [/^middle (name|initial)$/, 'middleName'],
     [/^(last|family|sur) ?name$|^last$/, 'lastName'],
-    [/^(full |legal |applicant )?name$|^((parents?|guardians?)( (or )?(parents?|guardians?))? )?(first (and )?last|full) name$|^name of (the )?head of household$|^head of household name$/, 'fullName'],
+    [/^(full |legal |applicant )?name$|^(first (and )?last|full) name$|^name of (the )?head of household$|^head of household name$/, 'fullName'],
     [/^(date of birth|birth ?date|dob|birthday)( mm dd yyyy| date)?$/, 'birthDate'],
     [/^(age range|age group)$/, 'ageRange'],
     [/^(social security( number)?|ssn)$/, 'ssn'],
@@ -114,9 +126,11 @@
     for (let previous = ''; previous !== text;) { previous = text; text = text.replace(LEAD, ''); }
     return text;
   }
-  const OTHER_PERSON_ROLE = /\b(spouse|spouses|partner|husband|wife|helper|proxy|emergency contact|reference|landlord|other household member|conyuge|esposo|esposa|pareja|dependiente|ayudante|contacto de emergencia|referencia|propietario|arrendador)\b|\brepresentative\b|\brepresentante\b/;
+  // A guardian or parent may be the applicant, but saying so would be a guess: their boxes stay with the applicant.
+  const OTHER_PERSON_ROLE = /\b(spouse|spouses|partner|husband|wife|helper|proxy|emergency contact|reference|landlord|other household member|guardian|guardians|parent|parents|conyuge|esposo|esposa|pareja|dependiente|ayudante|contacto de emergencia|referencia|propietario|arrendador|tutor legal)\b|\brepresentative\b|\brepresentante\b/;
   const MEMBER_DETAIL = /\b(family member|household member (number )?\d+|miembro de (la )?(familia|casa|hogar))\b/;
-  const CHILD_ROLE = /\b(child|children|son|daughter|hijo|hija|hijos|hijas)\b/;
+  // Someone other than the applicant when the question asks for their details: a child or a student.
+  const CHILD_ROLE = /\b(child|children|son|daughter|student|students|hijo|hija|hijos|hijas|estudiante|estudiantes)\b/;
   const PERSON_DETAIL = /\b(name|nombre|birth|nacimiento|address|direccion|phone|telefono|email|relationship|school|escuela)\b/;
   const COMBINED_ADDRESS_QUESTION = /^(city (and )?state|city (and )?(zip|zip code|zipcode|postal code)|city (and )?state (and )?(zip|zip code|zipcode|postal code)|(complete|full) (physical |home |residential )?address( including (town|city|town city))?|ciudad (y )?estado|ciudad (y )?codigo postal|ciudad (y )?estado (y )?codigo postal|direccion completa)$/;
   const PERSON_NOT_AMOUNT = /^(who|que persona|quien) (pays?|paga)( |$)/;
@@ -126,7 +140,40 @@
     return representative || MEMBER_DETAIL.test(text) || (CHILD_ROLE.test(text) && PERSON_DETAIL.test(text)) || text === 'household members' || /^household members (first|last|full|date|birth|name|phone|email|address|relation|relationship)\b/.test(text);
   }
   const blockedSuggestion = value => otherPersonQuestion(value) || COMBINED_ADDRESS_QUESTION.test(question(value)) || PERSON_NOT_AMOUNT.test(question(value));
-  const ruleFor = text => RULES.find(([pattern]) => pattern.test(question(text)))?.[1] || null;
+  // A count of people by age: "# of people in your household 18 - 59 yrs old", "60 +", "60 and older",
+  // "under 5", "ages 6 to 18", "0–5". The band is read whole or not at all.
+  const BAND_QUESTION = new RegExp(`^((number of|how many|total) )?(people|persons|individuals|members|household members|family members|children|kids|adults|seniors|older adults)${IN_HOUSEHOLD} (ages? |aged )?(?<band>.+?)( (years?|yrs?)( old| of age)?)?${IN_HOUSEHOLD}$`);
+  const BAND_FORMS = [
+    [/^(?:between )?(\d{1,3}) (?:to |through |thru |and )?(\d{1,3})$/, match => [match[1], match[2]]],
+    [/^(\d{1,3}) ?\+$/, match => [match[1], '']],
+    [/^(\d{1,3})(?: years?| yrs?)? (?:and|or) (?:older|over|above|up)$/, match => [match[1], '']],
+    [/^(?:under|below|younger than|less than) (?:age )?(\d{1,3})$/, match => ['0', String(Number(match[1]) - 1)]],
+    [/^(\d{1,3})(?: years?| yrs?)? (?:and|or) (?:under|younger|below)$/, match => ['0', match[1]]]
+  ];
+  // The profile's own counts answer their exact bands; any other band is a band count.
+  const SAVED_BANDS = Object.freeze({ 'householdCount:0-17': 'householdChildren', 'householdCount:18-64': 'householdAdults', 'householdCount:65+': 'householdSeniors' });
+  function bandRule(asked) {
+    const band = BAND_QUESTION.exec(asked)?.groups.band;
+    for (const [form, bounds] of band ? BAND_FORMS : []) {
+      const found = form.exec(band);
+      if (!found) continue;
+      const [low, high] = bounds(found).map(value => value === '' ? '' : String(Number(value)));
+      // Numbers as written: "007" is not a band.
+      if (found.slice(1).some(value => value && /^0\d/.test(value))) return null;
+      const key = `householdCount:${low}${high === '' ? '+' : `-${high}`}`;
+      return isBandKey(key) ? SAVED_BANDS[key] || key : null;
+    }
+    return null;
+  }
+  // A household member's own question, asked by name: the one student's name and grade.
+  const MEMBER_RULES = [
+    [/^(students? (full )?name (and )?(school )?grade( level)?|(full )?name (and )?(school )?grade( level)? of (the |your )?students?|name of (the |your )?students? (and )?(school )?grade( level)?)$/, 'studentNameGrade']
+  ];
+  const memberRuleFor = text => MEMBER_RULES.find(([pattern]) => pattern.test(question(text)))?.[1] || null;
+  function ruleFor(text) {
+    const asked = question(text);
+    return RULES.find(([pattern]) => pattern.test(asked))?.[1] || bandRule(asked);
+  }
   // Questions only the applicant answers: AI never suggests or picks an answer for consent,
   // signatures, attestations, agreements, terms, Social Security numbers, or secrets.
   // shared/laya-prompts.cjs keeps an identical copy for the desktop app.
@@ -285,9 +332,10 @@
   const ageRange = option => /^(\d+) (\d+)( yrs?| years?)?$/.exec(normal(option)) || /^(\d+)(\+| and older| or older)( yrs?| years?)?$/.exec(normal(option));
   // A key is only placed on a control that can hold its kind of answer. Div checkboxes and
   // listboxes are only ever left for the applicant.
+  const answerKind = key => isBandKey(key) ? 'count' : KIND[key] || 'text';
   function compatible(key, entry) {
     if (entry.kind === 'ariaCheckbox' || entry.kind === 'ariaListbox') return false;
-    const kind = KIND[key] || 'text';
+    const kind = answerKind(key);
     const type = (entry.elements[0].type || 'text').toLowerCase();
     const options = optionsOf(entry);
     const choice = entry.kind === 'radio' || entry.kind === 'ariaRadio';
@@ -303,6 +351,11 @@
   }
   function match(entry) {
     const element = entry.elements[0];
+    // A member's own question takes that member's answer; it names another person, so nothing of the applicant's.
+    for (const text of entry.labels) {
+      const key = memberRuleFor(text);
+      if (key && compatible(key, entry)) return { key, confidence: 'high' };
+    }
     if (entry.labels.some(otherPersonQuestion)) return { key: null, confidence: null };
     for (const text of entry.labels) {
       const key = ruleFor(text);
@@ -423,7 +476,7 @@
   }
 
   function requestKeys(keys) {
-    return [...new Set((Array.isArray(keys) ? keys : []).flatMap(key => SOURCES[key] || [key]))].filter(key => PROFILE_KEYS.includes(key));
+    return [...new Set((Array.isArray(keys) ? keys : []).flatMap(key => SOURCES[key] || [key]))].filter(key => PROFILE_KEYS.includes(key) || ruleOnlyKey(key));
   }
   const cents = value => /^\d{1,8}(\.\d{1,2})?$/.test(String(value || '')) ? Math.round(Number(value) * 100) : null;
   const dollars = amount => amount % 100 ? (amount / 100).toFixed(2) : String(amount / 100);
@@ -464,10 +517,10 @@
   }
   function chooseOption(options, key, value) {
     const wanted = normal(value);
-    if (KIND[key] === 'yesno') return options.findIndex(option => new RegExp(`^${wanted}\\b`).test(normal(option)));
-    if (KIND[key] === 'ageRange') return options.findIndex(option => { const range = ageRange(option); return range && Number(value) >= Number(range[1]) && (range[2] === '+' || range[2] === ' and older' || range[2] === ' or older' || Number(value) <= Number(range[2])); });
+    if (answerKind(key) === 'yesno') return options.findIndex(option => new RegExp(`^${wanted}\\b`).test(normal(option)));
+    if (answerKind(key) === 'ageRange') return options.findIndex(option => { const range = ageRange(option); return range && Number(value) >= Number(range[1]) && (range[2] === '+' || range[2] === ' and older' || range[2] === ' or older' || Number(value) <= Number(range[2])); });
     if (key === 'state') return options.findIndex(option => [wanted, normal(STATES[String(value).toUpperCase()])].includes(normal(option)));
-    if (KIND[key] === 'count') {
+    if (answerKind(key) === 'count') {
       if (!/^\d+$/.test(String(value))) return -1;
       const counts = options.map(countOf);
       const exact = counts.findIndex(count => count && !count.orMore && count.number === Number(value));
@@ -522,7 +575,7 @@
       option.click();
       return option.getAttribute('aria-checked') === 'true' || { pending: option };
     }
-    if (entry.kind === 'checkbox' && entry.elements.length === 1 && KIND[key] === 'yesno') {
+    if (entry.kind === 'checkbox' && entry.elements.length === 1 && answerKind(key) === 'yesno') {
       if (value !== 'yes') return false;
       first.click();
       return first.checked;
@@ -587,7 +640,7 @@
       const allowed = entry && (match(entry).key === key || canSuggest(key, { label: entry.labels[0] || '' }));
       const placed = !usable ? false
         : answering ? !unsafeQuestion({ label: entry.labels.join(' '), options: optionsOf(entry) }) && fillOption(entry, option)
-        : option === undefined && (GENERIC_KEYS.includes(key) || COMPOSITE_KEYS.includes(key)) && allowed && typeof value === 'string' && value && compatible(key, entry) && fillEntry(entry, key, value);
+        : option === undefined && (GENERIC_KEYS.includes(key) || COMPOSITE_KEYS.includes(key) || ruleOnlyKey(key)) && allowed && typeof value === 'string' && value && compatible(key, entry) && fillEntry(entry, key, value);
       if (!placed) { skipped.push(assignment?.id); continue; }
       const guess = answering || assignment.guessed || GUESS_KEYS.includes(key);
       if (placed.pending) { current.pending.set(assignment.id, { option: placed.pending, entry, guess }); pending.push(assignment.id); continue; }
@@ -654,8 +707,8 @@
   }
   const elementFor = id => current?.map.get(id)?.elements[0] || null;
 
-  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, GUESS_KEYS, UNSAFE_QUESTION, OTHER_PERSON_ROLE, MEMBER_DETAIL, CHILD_ROLE, PERSON_DETAIL,
-    COMBINED_ADDRESS_QUESTION, PERSON_NOT_AMOUNT, blockedSuggestion, plan, offers, questions, requestKeys, deriveValues, fillFields, settle, focusField, elementFor,
+  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, GUESS_KEYS, MEMBER_KEYS, UNSAFE_QUESTION, OTHER_PERSON_ROLE, MEMBER_DETAIL, CHILD_ROLE, PERSON_DETAIL,
+    COMBINED_ADDRESS_QUESTION, PERSON_NOT_AMOUNT, blockedSuggestion, isBandKey, plan, offers, questions, requestKeys, deriveValues, fillFields, settle, focusField, elementFor,
     canSuggest, unsafeQuestion, layaQuestion });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandGeneric = api;

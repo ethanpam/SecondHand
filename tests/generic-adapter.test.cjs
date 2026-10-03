@@ -56,13 +56,22 @@ test('numbered and run-together questions match once the number is dropped and w
   assert.deepEqual(result.unmatched.map(field => field.label), ['6. U.S. citizen?']);
 });
 
-test('"first and last name" and guardian names are full names; asides in parentheses are dropped unless they change who is asked', () => {
-  const labels = ['2. Guardian first and last name', 'Full Name (First and Last Name) *', 'Parent/Guardian First and Last Name', 'First & last name',
-    'Phone (optional)', 'Last name (spouse)', 'Name (of your pet)', 'Phone (work)', 'Guardian phone'];
+test('"first and last name" is a full name; asides in parentheses are dropped unless they change who is asked', () => {
+  const labels = ['Full Name (First and Last Name) *', 'First & last name', 'Phone (optional)', 'Last name (spouse)', 'Name (of your pet)', 'Phone (work)', 'Guardian phone'];
   const doc = page(labels.map((label, index) => `<label for="f${index}">${label}</label><input id="f${index}">`).join(''));
   const result = generic.plan(doc);
-  assert.deepEqual(byElement(doc, result), { f0: 'fullName', f1: 'fullName', f2: 'fullName', f3: 'fullName', f4: 'phone' });
+  assert.deepEqual(byElement(doc, result), { f0: 'fullName', f1: 'fullName', f2: 'phone' });
   assert.deepEqual(result.unmatched.map(field => field.label), ['Last name (spouse)', 'Name (of your pet)', 'Phone (work)', 'Guardian phone']);
+});
+
+test('a guardian’s or parent’s name is never filled: the applicant being that person would be a guess', () => {
+  const labels = ['2. Guardian first and last name', 'Parent/Guardian First and Last Name', 'Guardian name', 'Parent first and last name', 'Name of parent or guardian'];
+  const doc = page(labels.map((label, index) => `<label for="g${index}">${label}</label><input id="g${index}" autocomplete="name">`).join(''));
+  const result = generic.plan(doc);
+  assert.deepEqual(result.matched, [], 'not by the rules, nor by the box’s autocomplete hint');
+  for (const item of result.unmatched) for (const key of ['fullName', 'firstName', 'lastName', 'studentNameGrade']) assert.equal(generic.canSuggest(key, item), false, `${item.label}: ${key}`);
+  const filled = generic.fillFields(doc, result.token, result.unmatched.map(({ id }) => ({ id, key: 'fullName', guessed: true })), generic.deriveValues({ firstName: 'Avery', lastName: 'Example' }));
+  assert.deepEqual(filled.filled, [], 'a guess naming the applicant is refused too');
 });
 
 test('a generic date or time sub-label is read together with its question, and birth dates go only to birth questions', () => {
@@ -167,20 +176,83 @@ test('a document that loses its window while choices settle stops waiting and re
     'a page already gone is not waited on');
 });
 
-test('age-band household questions map only when the band is exactly what the profile counts', () => {
+test('age-band household questions map to the profile’s own counts when the band is one of them, otherwise to a band count', () => {
   const questions = {
     kids017: '# of people in your household 0 - 17 yrs old', kidsUnder18: 'Number of children under 18', kidsAges: 'Number of household members ages 0 to 17',
     adults1864: 'Number of adults (18-64)', adultsPeople: 'How many people in your household are 18 to 64 years old', seniors65: 'Number of seniors (65+)',
     seniorsOlder: 'How many people 65 or older live in your household', seniorsAdults: 'Number of adults 65 and older',
     band1859: '# of people in your household 18 - 59 yrs old', band60: '# of people in your household 60 + yrs', seniors60: 'Number of seniors (60+)',
-    kids05: '# of Children 0-5 years old', kids618: '# of Children 6-18 years old', adults18: 'Adults 18+', kidsUnder5: 'Number of children (under 5)'
+    kids05: '# of Children 0-5 years old', kids618: '# of Children 6-18 years old', adults18: 'Adults 18+', kidsUnder5: 'Number of children (under 5)',
+    older60: 'Number of people 60 and older', ages618: 'Number of household members ages 6 to 18', dash05: 'Children 0–5', orOlder: 'How many people in your household are 60 or older?',
+    andOver: 'People in household 60 and over', yearsOlder: 'Number of people 60 years and older', underFive: 'How many children under 5 live in your household?',
+    andUnder: 'Number of children 5 and under', through: 'Number of people ages 18 through 59'
   };
   const doc = page(Object.entries(questions).map(([id, label]) => `<label for="${id}">${label}</label><input id="${id}" type="number">`).join(''));
   const result = generic.plan(doc);
   assert.deepEqual(byElement(doc, result), { kids017: 'householdChildren', kidsUnder18: 'householdChildren', kidsAges: 'householdChildren',
-    adults1864: 'householdAdults', adultsPeople: 'householdAdults', seniors65: 'householdSeniors', seniorsOlder: 'householdSeniors', seniorsAdults: 'householdSeniors' });
-  assert.deepEqual(result.unmatched.map(field => field.label), [questions.band1859, questions.band60, questions.seniors60, questions.kids05, questions.kids618,
-    questions.adults18, questions.kidsUnder5]);
+    adults1864: 'householdAdults', adultsPeople: 'householdAdults', seniors65: 'householdSeniors', seniorsOlder: 'householdSeniors', seniorsAdults: 'householdSeniors',
+    band1859: 'householdCount:18-59', band60: 'householdCount:60+', seniors60: 'householdCount:60+', kids05: 'householdCount:0-5', kids618: 'householdCount:6-18',
+    adults18: 'householdCount:18+', kidsUnder5: 'householdCount:0-4', older60: 'householdCount:60+', ages618: 'householdCount:6-18', dash05: 'householdCount:0-5',
+    orOlder: 'householdCount:60+', andOver: 'householdCount:60+', yearsOlder: 'householdCount:60+', underFive: 'householdCount:0-4', andUnder: 'householdCount:0-5',
+    through: 'householdCount:18-59' });
+  assert.deepEqual(result.unmatched, []);
+});
+
+test('band questions that aren’t a clear count of people by age stay with the applicant', () => {
+  const labels = ['Number of people under 0', 'Number of people 121+', 'Number of people 18 to 5', 'People over 60', 'Number of people 60 or so', 'Number of people 1.5 to 3',
+    'Number of pets 0-5', 'Ages of children 0-5', 'Number of people in your household who work 2 jobs', 'Number of people 007-10', 'Number of people 0-5-9'];
+  const doc = page(labels.map((label, index) => `<label for="b${index}">${label}</label><input id="b${index}" type="number">`).join(''));
+  const result = generic.plan(doc);
+  assert.deepEqual(result.matched, []);
+  assert.deepEqual(result.unmatched.map(field => field.label), labels);
+});
+
+test('the extension reads band keys exactly as the desktop does', () => {
+  const household = require('../shared/household.cjs');
+  const keys = ['householdCount:0-17', 'householdCount:60+', 'householdCount:0-5', 'householdCount:120+', 'householdCount:5-5', 'householdCount:05-10', 'householdCount:10-5',
+    'householdCount:0-121', 'householdCount:121+', 'householdCount:', 'householdcount:0-5', 'householdCount:0–5', 'householdCount:1000+', 'householdSize', '', null];
+  for (const key of keys) assert.equal(generic.isBandKey(key), household.isBandKey(key), JSON.stringify(key));
+});
+
+test('band counts fill number boxes and count choices, and are asked for by key', () => {
+  const doc = page('<label for="young"># of people in your household 0 - 17 yrs old</label><input id="young" type="number">' +
+    '<label for="mid"># of people in your household 18 - 59 yrs old</label><input id="mid" type="number">' +
+    '<label for="old"># of people in your household 60 + yrs</label><select id="old"><option value="">Choose</option><option>0</option><option>1</option><option>2</option><option>3+</option></select>' +
+    '<label for="kids">Children 0-5</label><input id="kids" type="text">');
+  const result = generic.plan(doc);
+  assert.deepEqual(generic.requestKeys(result.matched.map(item => item.key)), ['householdChildren', 'householdCount:18-59', 'householdCount:60+', 'householdCount:0-5']);
+  const values = generic.deriveValues({ householdChildren: '2', 'householdCount:18-59': '1', 'householdCount:60+': '4', 'householdCount:0-5': '0' });
+  const filled = generic.fillFields(doc, result.token, result.matched.map(({ id, key }) => ({ id, key, guessed: false })), values);
+  assert.equal(filled.filled.length, 4);
+  assert.deepEqual(['young', 'mid', 'old', 'kids'].map(id => doc.getElementById(id).value), ['2', '1', '3+', '0']);
+  // A band count is placed only where the rules matched it, never as a guess elsewhere.
+  for (const label of ['Household size', 'Number of children', 'Anything else?']) assert.equal(generic.canSuggest('householdCount:0-5', { label }), false, label);
+  assert.equal(generic.GENERIC_KEYS.some(key => key.startsWith('householdCount:')), false);
+});
+
+test('a student box gets the one student’s name and grade; the applicant’s boxes never get a member’s details', () => {
+  const labels = { student: 'Student name and grade', students: 'Student’s Name and Grade (if applicable)', slash: 'Student name/grade', of: 'Name and grade of student',
+    alone: 'Student name', first: 'First name', full: 'Full name', school: 'Student school' };
+  const doc = page(Object.entries(labels).map(([id, label]) => `<label for="${id}">${label}</label><input id="${id}">`).join(''));
+  const result = generic.plan(doc);
+  assert.deepEqual(byElement(doc, result), { student: 'studentNameGrade', students: 'studentNameGrade', slash: 'studentNameGrade', of: 'studentNameGrade', first: 'firstName', full: 'fullName' });
+  assert.deepEqual(result.unmatched.map(field => field.label), [labels.alone, labels.school]);
+  for (const item of result.unmatched) for (const key of ['fullName', 'firstName', 'lastName']) assert.equal(generic.canSuggest(key, item), false, `${item.label}: ${key}`);
+  assert.deepEqual(generic.requestKeys(['studentNameGrade', 'fullName']), ['studentNameGrade', 'firstName', 'lastName']);
+  const values = generic.deriveValues({ studentNameGrade: 'Riley Example, 5th', firstName: 'Avery', lastName: 'Example' });
+  const idOf = key => result.matched.find(item => item.key === key).id;
+  // Each answer in the other's box, as a guess: refused both ways.
+  const crossed = generic.fillFields(doc, result.token, [{ id: idOf('firstName'), key: 'studentNameGrade', guessed: true }, { id: idOf('fullName'), key: 'studentNameGrade', guessed: true },
+    { id: idOf('studentNameGrade'), key: 'fullName', guessed: true }, { id: result.unmatched[0].id, key: 'fullName', guessed: true }], values);
+  assert.deepEqual(crossed.filled, []);
+  generic.fillFields(doc, result.token, result.matched.map(({ id, key }) => ({ id, key, guessed: false })), values);
+  assert.deepEqual(['student', 'students', 'slash', 'of', 'first', 'full', 'alone'].map(id => doc.getElementById(id).value),
+    ['Riley Example, 5th', 'Riley Example, 5th', 'Riley Example, 5th', 'Riley Example, 5th', 'Avery', 'Avery Example', '']);
+  // Zero or several students: the desktop has no answer, and the box stays empty.
+  const again = page('<label for="s">Student name and grade</label><input id="s">');
+  const plan = generic.plan(again);
+  assert.deepEqual(generic.fillFields(again, plan.token, plan.matched.map(({ id, key }) => ({ id, key, guessed: false })), generic.deriveValues({})).filled, []);
+  assert.equal(again.getElementById('s').value, '');
 });
 
 test('Iowa\'s Financial Information page maps every question it can answer from the profile', () => {

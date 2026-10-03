@@ -55,9 +55,9 @@ const OFFER_GROUPS = Object.freeze([
 // A label's words, lowercased and without accents or punctuation.
 const topicText = label => String(label).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[‘’']/g, '').replace(/#/g, ' number ')
   .replace(/[^a-z0-9+]+/g, ' ').trim();
-const OTHER_PERSON_ROLE = /\b(spouse|spouses|partner|husband|wife|helper|proxy|emergency contact|reference|landlord|other household member|conyuge|esposo|esposa|pareja|dependiente|ayudante|contacto de emergencia|referencia|propietario|arrendador)\b|\brepresentative\b|\brepresentante\b/;
+const OTHER_PERSON_ROLE = /\b(spouse|spouses|partner|husband|wife|helper|proxy|emergency contact|reference|landlord|other household member|guardian|guardians|parent|parents|conyuge|esposo|esposa|pareja|dependiente|ayudante|contacto de emergencia|referencia|propietario|arrendador|tutor legal)\b|\brepresentative\b|\brepresentante\b/;
 const MEMBER_DETAIL = /\b(family member|household member (number )?\d+|miembro de (la )?(familia|casa|hogar))\b/;
-const CHILD_ROLE = /\b(child|children|son|daughter|hijo|hija|hijos|hijas)\b/;
+const CHILD_ROLE = /\b(child|children|son|daughter|student|students|hijo|hija|hijos|hijas|estudiante|estudiantes)\b/;
 const PERSON_DETAIL = /\b(name|nombre|birth|nacimiento|address|direccion|phone|telefono|email|relationship|school|escuela)\b/;
 const COMBINED_ADDRESS_QUESTION = /^(city (and )?state|city (and )?(zip|zip code|zipcode|postal code)|city (and )?state (and )?(zip|zip code|zipcode|postal code)|(complete|full) (physical |home |residential )?address( including (town|city|town city))?|ciudad (y )?estado|ciudad (y )?codigo postal|ciudad (y )?estado (y )?codigo postal|direccion completa)$/;
 const PERSON_NOT_AMOUNT = /^(who|que persona|quien) (pays?|paga)( |$)/;
