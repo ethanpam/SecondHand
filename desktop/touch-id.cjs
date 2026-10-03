@@ -49,8 +49,9 @@ function touchIdPlatform({ systemPreferences, safeStorage, platform, packaged, e
   };
 }
 
-// `now` and `lockRevision` come from main.cjs: its clock, and its count of completed locks.
-function createTouchIdUnlock({ vault, platform, filePath, now, lockRevision }) {
+// `now` and `revision` come from main.cjs: its clock, and a number that moves on as soon as a lock
+// starts (its access revision), so a lock while Touch ID asks is never undone by the unlock.
+function createTouchIdUnlock({ vault, platform, filePath, now, revision }) {
   // When the password was last used, in memory: null at every start of the app, and set only by
   // the password (an unlock, or turning Touch ID on) while Touch ID is on. Until then Touch ID asks
   // for the password. The sealed file keeps the same time, and it is checked too.
@@ -176,15 +177,16 @@ function createTouchIdUnlock({ vault, platform, filePath, now, lockRevision }) {
     if (vault.unlocked) return { unlocked: true };
     if (!platform.supported() || !await sealedExists()) return refuse('off', 'Touch ID is off. Enter your password.');
     if (passwordNeeded(passwordAt)) return refuse('password', PASSWORD_NEEDED);
-    const revision = lockRevision();
+    const asked = revision();
     try { await platform.prompt(PROMPT_REASON); }
     catch (error) { return refuse('cancelled', `Touch ID didn’t unlock SecondHand (${error.message}). Enter your password.`); }
-    if (lockRevision() !== revision) return refuse('cancelled', 'SecondHand locked while Touch ID was asking. Try again, or enter your password.');
     if (vault.unlocked) return { unlocked: true };
     let record;
     try {
       record = await readSealed();
       if (passwordNeeded(record.passwordAt)) return refuse('password', PASSWORD_NEEDED);
+      // Checked right before the unlock is queued: a lock that starts later is queued after it.
+      if (revision() !== asked) return refuse('cancelled', 'SecondHand locked while Touch ID was asking. Try again, or enter your password.');
       await vault.unlockWithTouchIdKey(record.key);
     } catch (error) {
       // A password unlock finished first.

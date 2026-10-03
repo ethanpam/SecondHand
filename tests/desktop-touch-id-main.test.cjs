@@ -39,10 +39,12 @@ async function desktop(t, { userData, platform = 'darwin', canPrompt = true, enc
   const sent = [];
   const timers = [];
   let answer = async () => {};
+  let onUnseal = () => {};
   const safeStorage = {
     isEncryptionAvailable: () => encryptionAvailable,
     encryptString: text => Buffer.from(`sealed:${Buffer.from(text).toString('hex')}`),
     decryptString: bytes => {
+      onUnseal();
       const text = bytes.toString();
       if (!text.startsWith('sealed:')) throw new Error('Not sealed by this computer.');
       return Buffer.from(text.slice(7), 'hex').toString();
@@ -87,6 +89,7 @@ async function desktop(t, { userData, platform = 'darwin', canPrompt = true, enc
   return {
     userData, sealedPath, prompts, sent, timers, clock,
     answer: callback => { answer = callback; },
+    unsealing: callback => { onUnseal = callback; },
     invoke: (method, argument) => invoke({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, method, ...(argument === undefined ? [] : [argument])),
     request: type => bridge({ id: 'synthetic', type }, { extensionId: 'a'.repeat(32) }),
     sealed: async () => JSON.parse(safeStorage.decryptString(await fsp.readFile(sealedPath))),
@@ -229,6 +232,16 @@ test('a lock while the Touch ID prompt is up cancels it', async t => {
   await app.invoke('lock');
   approve();
   await assert.rejects(attempt, /SecondHand locked while Touch ID was asking/);
+  assert.equal((await app.invoke('status')).unlocked, false);
+});
+
+test('a lock that starts while the key is read after the prompt still wins', async t => {
+  const { app } = await withTouchId(t);
+  await app.invoke('lock');
+  let locking;
+  app.unsealing(() => { app.unsealing(() => {}); locking = app.invoke('lock'); });
+  await assert.rejects(app.invoke('unlockWithTouchId'), /SecondHand locked while Touch ID was asking/);
+  await locking;
   assert.equal((await app.invoke('status')).unlocked, false);
 });
 

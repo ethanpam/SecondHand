@@ -104,7 +104,7 @@ if (nativeOrigin) {
   const fieldAnswers = createFieldAnswers({ laya });
   const vault = new Vault(path.join(userData, 'vault.secondhand'));
   // Unlock with Touch ID on a Mac (#99). Its key is sealed in this Mac's Keychain in touch-unlock.bin.
-  const touchIdUnlock = createTouchIdUnlock({ vault, filePath: path.join(userData, 'touch-unlock.bin'), now: () => Date.now(), lockRevision: () => lockRevision,
+  const touchIdUnlock = createTouchIdUnlock({ vault, filePath: path.join(userData, 'touch-unlock.bin'), now: () => Date.now(), revision: () => accessRevision,
     platform: touchIdPlatform({ systemPreferences, safeStorage, platform: process.platform, packaged: app.isPackaged, env: process.env }) });
   const configPath = path.join(userData, 'settings.json');
   const deviceSecretPath = path.join(userData, 'device-reset.bin');
