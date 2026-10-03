@@ -26,11 +26,11 @@ const IOWA_HOST = `${IOWA_ORIGIN}/*`;
 const ALL_SCRIPT = { id: 'site-all', matches: [ALL], excludeMatches: [IOWA_HOST], js: SITE_SCRIPT.js, allFrames: true, runAt: 'document_idle', persistAcrossSessions: true };
 
 // Stand-in for generic-adapter.js's pure helpers; the real engine has its own tests.
-const { GENERIC_KEYS, unsafeQuestion, layaQuestion } = require('../extension/generic-adapter.js');
+const { GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey } = require('../extension/generic-adapter.js');
 const SENSITIVE = ['ssn', 'birthDate', 'ageRange', 'totalMonthlyIncome', 'annualIncome', 'assetsOnHand', 'monthlyMedicalExpenses',
   'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare'];
 const generic = {
-  GENERIC_KEYS, unsafeQuestion, layaQuestion,
+  GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey,
   requestKeys: keys => [...new Set(keys.flatMap(key => key === 'fullName' ? ['firstName', 'lastName'] : [key]))],
   deriveValues: values => ({ ...values, ...(values.firstName && values.lastName ? { fullName: `${values.firstName} ${values.lastName}` } : {}) })
 };
@@ -60,7 +60,7 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
       fields.filter(shown).forEach((field, index) => {
         const id = `sh-${sequence}-${index}`;
         ids.set(id, field);
-        if (field.key) matched.push({ id, key: field.key, confidence: 'high' });
+        if (field.key) matched.push({ id, key: field.key, confidence: 'high', label: field.label || field.name });
         else unmatched.push({ id, label: field.label, type: field.type, options: field.options || [], required: field.required === true });
       });
       current = { token: `${tokenPrefix}-${sequence}`, ids };
@@ -88,6 +88,15 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
       return { lang, questions: [...listed].map(([id, field]) => ({ id, label: field.label || field.name })) };
     },
     focus: id => Boolean(current?.ids.has(id) || listed?.has(id)),
+    // Save to My information: the applicant types an answer the profile didn't have. The engine reports only
+    // which listed boxes hold one, and reads one box after the click, for the key the rules matched to it.
+    type: (name, value) => { fields.find(field => field.name === name).typed = value; },
+    answeredIds: (token, ids) => token === current?.token && Array.isArray(ids) ? ids.filter(id => current.ids.get(id)?.typed) : [],
+    read({ token, id, key }) {
+      const field = token === current?.token ? current.ids.get(id) : null;
+      if (!field || field.key !== key) return null;
+      return field.typed === undefined ? { empty: true } : field.typed === null ? { unreadable: true } : { value: field.typed };
+    },
     // The id a field has in the latest plan.
     idOf: name => [...(current?.ids || [])].find(([, field]) => field.name === name)?.[0],
     answered: () => fields.filter(field => field.answered).map(field => field.name)
@@ -138,6 +147,8 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
         }
         if (message.type === 'secondhand:generic:focus') return { focused: model.focus(message.id) };
         if (message.type === 'secondhand:generic:questions') return model.questions();
+        if (message.type === 'secondhand:generic:answered') return { answered: model.answeredIds(message.token, message.ids) };
+        if (message.type === 'secondhand:generic:read') return model.read(plain(message));
         if (message.type === 'secondhand:generic:pageText') return structuredClone(frame ? frame.pageText || { lang: '', text: '' } : pageText);
         throw new Error(`Unexpected content message ${message.type}`);
       },
@@ -227,6 +238,10 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
               if (request.type === 'showApp') return reply({ shown: true });
               if (request.type === 'trustSite') return (vault.trustError || request.url === vault.declineOrigin) ? fail(vault.trustError || 'Declined') : reply({ trusted: true, origin: new URL(request.url).origin });
               if (request.type === 'untrustSite') return vault.untrustSiteError ? fail(vault.untrustSiteError) : reply({ trusted: false, origin: new URL(request.url).origin });
+              if (request.type === 'saveFields') {
+                if (vault.saveError) return fail(vault.saveError);
+                return reply({ saved: Object.keys(request.fields) });
+              }
               if (request.type === 'getFields') {
                 duringGetFields?.(tab);
                 // The app's rule: a site it doesn't trust gets nothing unless all websites is on.
@@ -367,7 +382,9 @@ test('autofill on an approved site asks for the planned keys once and fills with
   assert.equal(state.autopilot, false);
   assert.equal(state.result.message, response.data.message);
   w.events.updated(7, { status: 'complete' }); await settle();
-  assert.deepEqual(w.contentTypes(), ['secondhand:generic:frames', 'secondhand:generic:plan', 'secondhand:generic:fill', 'secondhand:generic:plan', 'secondhand:generic:frames'], 'nothing continues or navigates on its own');
+  // The side panel's page state also asks which listed boxes (the household size, not saved) hold an answer now.
+  assert.deepEqual(w.contentTypes(), ['secondhand:generic:frames', 'secondhand:generic:plan', 'secondhand:generic:fill', 'secondhand:generic:plan', 'secondhand:generic:frames',
+    'secondhand:generic:answered'], 'nothing continues or navigates on its own');
   assert.deepEqual(w.nativeTypes(), ['status', 'getFields', 'status']);
   assert.deepEqual(w.injected, []);
   w.events.updated(7, { status: 'loading' });
@@ -724,7 +741,10 @@ function siteContent(t, { url = SITE_URL, engine = true, settled = null, offers 
       },
       // Stands in for the engine confirming choices the page marks a moment after the click.
       settle: async (doc, token, result) => { calls.push(`settle:${token}`); return settled ? settled(result) : result; },
-      focusField: (doc, id) => { calls.push(`focus:${id}`); if (id !== 'sh-2') return false; doc.getElementById('day').focus(); return true; }
+      focusField: (doc, id) => { calls.push(`focus:${id}`); if (id !== 'sh-2') return false; doc.getElementById('day').focus(); return true; },
+      // Save to My information (#98): which listed boxes hold an answer, and one box's answer after the click.
+      answeredIds: (doc, token, ids) => { calls.push(`answered:${token}:${ids.join(',')}`); return token === 'plan-1' ? ids.filter(id => id === 'sh-1') : []; },
+      readAnswer: (doc, token, id, key) => { calls.push(`read:${token}:${id}:${key}`); return token === 'plan-1' && id === 'sh-1' && key === 'county' ? { value: 'Story', element: doc.getElementById('name') } : null; }
     };
   }
   window.eval(source('page-text.js'));
@@ -1967,4 +1987,104 @@ test('the app’s prompt to trust all websites holds the reload until it is answ
   assert.equal((await click).ok, true);
   await settle();
   assert.equal(w.reloads(), 1);
+});
+
+// Save to My information (#98).
+const saveAnswer = (w, id) => w.panel({ type: 'ui:saveAnswer', id, confirmed: true });
+const savable = async w => plain((await w.panel({ type: 'ui:pageState' })).data).savable;
+
+test('after Autofill, the side panel lists each matched question with no saved answer by its label, and whether it is answered now', async () => {
+  const w = siteWorker({ enabled: true });
+  await autofill(w);
+  const size = `f0:${w.page.idOf('size')}`;
+  assert.deepEqual(await savable(w), [{ id: size, label: 'size', answered: false }]);
+  const asked = w.content.filter(call => call.type === 'secondhand:generic:answered');
+  assert.deepEqual(asked.map(({ frameId, token, ids }) => ({ frameId, token, ids })), [{ frameId: 0, token: 'plan-2', ids: [w.page.idOf('size')] }], 'only the listed boxes, by id');
+  assert.equal(plain((await w.launcher({ type: 'ui:pageState' })).data).savable, undefined, 'the on-page widget never gets the list');
+  w.page.type('size', '3');
+  assert.deepEqual(await savable(w), [{ id: size, label: 'size', answered: true }]);
+  assert.equal(w.contentTypes().includes('secondhand:generic:read'), false, 'no box is read before the click');
+  assert.equal(w.nativeTypes().includes('saveFields'), false);
+});
+
+test('only saved profile fields are offered: never a composite, a band count, or a question without a saved field', async () => {
+  const fields = [{ name: 'name', key: 'fullName' }, { name: 'zip', key: 'zip' }, { name: 'kids', key: 'householdCount:0-5' }, { name: 'student', key: 'studentNameGrade' }, { ...PICKUP }];
+  const w = siteWorker({ enabled: true, fields, desktop: { values: {} } });
+  await autofill(w);
+  assert.deepEqual((await savable(w)).map(item => item.label), ['zip']);
+  const filled = siteWorker({ enabled: true, desktop: { values: { firstName: 'A', lastName: 'B', zip: '50309', householdSize: '3' } } });
+  await autofill(filled);
+  assert.equal(await savable(filled), undefined, 'everything had a saved answer: nothing to offer');
+});
+
+test('Save to My information reads that one box only after the side panel’s click, then the app saves it after its own confirmation', async () => {
+  const w = siteWorker({ enabled: true });
+  await autofill(w);
+  const size = `f0:${w.page.idOf('size')}`;
+  w.page.type('size', '3');
+  assert.equal(await w.panel({ type: 'ui:saveAnswer', id: size }), undefined, 'only a confirmed click');
+  assert.equal(await w.launcher({ type: 'ui:saveAnswer', id: size, confirmed: true }), undefined, 'only the side panel');
+  assert.equal(w.contentTypes().includes('secondhand:generic:read'), false);
+  const response = await saveAnswer(w, size);
+  assert.equal(response.ok, true, response.error);
+  assert.deepEqual(plain(response.data), { saved: true });
+  const reads = w.content.filter(call => call.type === 'secondhand:generic:read');
+  assert.deepEqual(reads.map(({ frameId, token, id, key }) => ({ frameId, token, id, key })), [{ frameId: 0, token: 'plan-2', id: w.page.idOf('size'), key: 'householdSize' }]);
+  assert.deepEqual(w.native.filter(call => call.type === 'saveFields').map(({ url, fields }) => ({ url, fields })), [{ url: `${ORIGIN}/intake`, fields: { householdSize: '3' } }]);
+  assert.equal(await savable(w), undefined, 'a saved answer leaves the list');
+  assert.equal((await saveAnswer(w, size)).errorKey, 'worker.answerGone', 'and can’t be saved twice');
+});
+
+test('an unanswered or unreadable box, an unknown question, or the app’s refusal saves nothing and says why', async () => {
+  const w = siteWorker({ enabled: true, desktop: { values: {} } });
+  await autofill(w);
+  const zip = `f0:${w.page.idOf('zip')}`, size = `f0:${w.page.idOf('size')}`;
+  assert.equal((await saveAnswer(w, zip)).errorKey, 'worker.answerFirst');
+  w.page.type('zip', null);
+  assert.equal((await saveAnswer(w, zip)).errorKey, 'worker.answerUnreadable');
+  for (const id of ['f0:sh-9-9', 'f3:sh-2-1', 'zip', 42]) {
+    const reply = await saveAnswer(w, id);
+    assert.ok(reply === undefined || reply.errorKey === 'worker.answerGone', JSON.stringify(id));
+  }
+  w.page.type('size', '3');
+  w.vault.saveError = 'You cancelled saving to My information.';
+  const refused = await saveAnswer(w, size);
+  assert.equal(refused.ok, false);
+  assert.equal(refused.errorKey, 'worker.saveCancelled');
+  assert.ok((await savable(w)).some(item => item.id === size), 'a refused answer stays on the list');
+  assert.equal(w.nativeTypes().filter(type => type === 'saveFields').length, 1);
+});
+
+test('a page that changed, or a site turned off, forgets the list and reads nothing', async () => {
+  const w = siteWorker({ enabled: true });
+  await autofill(w);
+  const size = `f0:${w.page.idOf('size')}`;
+  w.page.type('size', '3');
+  w.events.updated(7, { status: 'loading' });
+  assert.equal(await savable(w), undefined);
+  assert.equal((await saveAnswer(w, size)).errorKey, 'worker.answerGone');
+  const moved = siteWorker({ enabled: true });
+  await autofill(moved);
+  moved.page.type('size', '3');
+  moved.tab.url = `${ORIGIN}/intake?step=2`;
+  assert.equal((await saveAnswer(moved, `f0:${moved.page.idOf('size')}`)).errorKey, 'worker.answerGone', 'another address on the same site');
+  const off = siteWorker({ enabled: true });
+  await autofill(off);
+  off.page.type('size', '3');
+  off.registered.clear(); off.permissions.clear();
+  assert.equal((await saveAnswer(off, `f0:${off.page.idOf('size')}`)).ok, false);
+  for (const each of [w, moved, off]) assert.equal(each.contentTypes().includes('secondhand:generic:read'), false);
+});
+
+test('a site frame says which listed boxes hold an answer, by id, and reads one box only when the worker asks for it', t => {
+  const page = siteContent(t);
+  assert.deepEqual(plain(page.request({ type: 'secondhand:generic:answered', token: 'plan-1', ids: ['sh-1', 'sh-2'] })), { answered: ['sh-1'] });
+  assert.deepEqual(plain(page.request({ type: 'secondhand:generic:read', token: 'plan-1', id: 'sh-1', key: 'county' })), { value: 'Story' }, 'the value only, nothing else of the box');
+  assert.deepEqual(plain(page.request({ type: 'secondhand:generic:read', token: 'plan-1', id: 'sh-2', key: 'county' })), { readable: false });
+  for (const message of [{ type: 'secondhand:generic:answered', token: 'plan-1', ids: 'sh-1' }, { type: 'secondhand:generic:answered', token: 7, ids: [] },
+    { type: 'secondhand:generic:read', token: 'plan-1', id: 'sh-1' }, { type: 'secondhand:generic:read', token: 'plan-1', id: ['sh-1'], key: 'county' }]) {
+    assert.deepEqual(plain(page.request(message)), { ok: false, error: 'This page could not be checked safely. Review it manually.' }, JSON.stringify(message));
+  }
+  assert.equal(page.request({ type: 'secondhand:generic:read', token: 'plan-1', id: 'sh-1', key: 'county' }, { id: 'another-extension' }), undefined);
+  assert.deepEqual(page.calls.filter(call => typeof call === 'string' && call.startsWith('read:')), ['read:plan-1:sh-1:county', 'read:plan-1:sh-2:county']);
 });

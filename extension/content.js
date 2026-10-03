@@ -114,7 +114,7 @@
       token: planText(plan.token),
       // The language this page declares: with Chrome's detector, it decides how its questions are read to Laya.
       lang: document.documentElement.lang || '',
-      matched: plan.matched.map(field => ({ id: planText(field.id), key: planText(field.key), confidence: planText(field.confidence) })),
+      matched: plan.matched.map(field => ({ id: planText(field.id), key: planText(field.key), confidence: planText(field.confidence), ...(typeof field.label === 'string' ? { label: field.label } : {}) })),
       unmatched: plan.unmatched.map(field => ({ id: planText(field.id), label: typeof field.label === 'string' ? field.label : '',
         type: typeof field.type === 'string' ? field.type : '', options: strings(field.options), required: field.required === true }))
     };
@@ -148,6 +148,22 @@
     return engine.settle(document, message.token, result)
       .then(settled => ({ ok: settled?.ok === true, ...(settled?.pageChanged === true ? { pageChanged: true } : {}),
         filled: strings(settled?.filled), skipped: strings(settled?.skipped), rejected: strings(settled?.rejected) }));
+  }
+
+  // Save to My information on a page the general engine filled: which listed boxes hold an answer (ids
+  // only), and after the applicant's click in the side panel, one box's answer in the profile's format.
+  function saving(message) {
+    if (!engine || !unverified()) return { ok: false, error: 'SecondHand fills this page with its Iowa rules.' };
+    if (message.type === 'secondhand:generic:answered') {
+      if (typeof message.token !== 'string' || !Array.isArray(message.ids) || message.ids.some(id => typeof id !== 'string')) throw new Error('Invalid request.');
+      return { answered: strings(engine.answeredIds(document, message.token, message.ids)) };
+    }
+    if (typeof message.token !== 'string' || typeof message.id !== 'string' || typeof message.key !== 'string') throw new Error('Invalid request.');
+    const read = engine.readAnswer(document, message.token, message.id, message.key);
+    if (read && typeof read.value === 'string') return { value: read.value };
+    if (read?.empty === true) return { empty: true };
+    if (read?.unreadable === true) return { unreadable: true };
+    return { readable: false };
   }
 
   ensurePanel();
@@ -197,6 +213,8 @@
         if (typeof answer?.then !== 'function') { respond(answer); return; }
         answer.then(respond, () => respond({ ok: false, error: 'This page could not be checked safely. Review it manually, then rescan.' }));
         return true;
+      } else if (message.type === 'secondhand:generic:answered' || message.type === 'secondhand:generic:read') {
+        respond(withOwnPanelHidden(() => saving(message)));
       } else if (message.type === 'secondhand:questions') {
         respond(withOwnPanelHidden(questions));
       } else if (message.type === 'secondhand:pageText') {

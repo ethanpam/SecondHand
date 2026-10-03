@@ -20,6 +20,9 @@
     'householdVeteran', 'householdDisability', 'totalMonthlyIncome', 'annualIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand',
     'monthlyMedicalExpenses', 'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare', 'anyoneSenior', 'iowaResident',
     'wantsHealthCoverage']);
+  // Saved fields an answer typed on a page may be saved to (Save to My information): the profile's own
+  // fields, never the Social Security number. shared/schema.cjs SAVE_FIELDS is the desktop's identical list.
+  const SAVE_KEYS = Object.freeze(PROFILE_KEYS.filter(key => key !== 'ssn'));
   const COMPOSITE_KEYS = Object.freeze(['cityState', 'cityZip', 'cityStateZip', 'fullAddress']);
   // Answers about a household member, worked out by the desktop from the household list. Only the
   // rules place them, and only in a box that asks for that member: never a guess, never an applicant box.
@@ -444,11 +447,62 @@
       const id = `sh-${sequence}-${index}`;
       map.set(id, entry);
       const result = match(entry);
-      if (result.confidence === 'high') { matched.push({ id, key: result.key, confidence: 'high' }); return; }
+      if (result.confidence === 'high') { matched.push({ id, key: result.key, confidence: 'high', label: entry.labels[0] || '' }); return; }
       unmatched.push({ id, ...fieldOf(entry) });
     });
     current = { token, doc, map };
     return { token, matched, unmatched };
+  }
+
+  // Save to My information. Which of the listed boxes of the current plan now hold an answer: their ids
+  // only, never what they hold.
+  function answeredIds(doc, token, ids) {
+    if (!current || current.token !== token || current.doc !== doc || !Array.isArray(ids)) return [];
+    return ids.filter(id => { const entry = current.map.get(id); return Boolean(entry) && entry.elements.every(element => element.isConnected) && answered(entry); });
+  }
+  // After the applicant's click: one listed box's answer, in the profile's own format. Only for the
+  // saved field the rules matched to that box, never a password, code, signature or SSN box. Null when
+  // the box may not be read; { empty } when it holds no answer; { unreadable } when its answer doesn't fit the field.
+  const DATE_TYPED = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/;
+  function answerIn(entry, key) {
+    const first = entry.elements[0];
+    const kind = answerKind(key);
+    const chosen = entry.kind === 'radio' ? entry.elements.find(element => element.checked) : null;
+    const text = entry.kind === 'select' ? clean(first.selectedOptions[0]?.textContent) || first.value : chosen ? optionText(chosen) : String(first.value || '').trim();
+    if (kind === 'yesno') {
+      if (entry.kind === 'checkbox') return first.checked ? 'yes' : null;
+      return /^yes\b/.test(normal(text)) ? 'yes' : /^no\b/.test(normal(text)) ? 'no' : null;
+    }
+    if (kind === 'count') {
+      if (entry.kind === 'input') return /^\d{1,2}$/.test(text) ? String(Number(text)) : null;
+      const count = countOf(text);
+      return count && !count.orMore ? String(count.number) : null;
+    }
+    if (kind === 'money') {
+      const amount = text.replace(/^\$\s*/, '').replace(/,(?=\d{3}(\D|$))/g, '');
+      return /^\d{1,8}(\.\d{1,2})?$/.test(amount) ? amount : null;
+    }
+    if (kind === 'date') {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+      const typed = DATE_TYPED.exec(text);
+      return typed ? `${typed[3]}-${typed[1].padStart(2, '0')}-${typed[2].padStart(2, '0')}` : null;
+    }
+    if (kind === 'state') {
+      if (entry.kind === 'select' && Object.hasOwn(STATES, String(first.value).toUpperCase())) return String(first.value).toUpperCase();
+      const code = Object.keys(STATES).find(state => state === text.toUpperCase() || STATES[state] === normal(text));
+      return code || null;
+    }
+    return text.length <= 200 ? text : null;
+  }
+  function readAnswer(doc, token, id, key) {
+    if (!SAVE_KEYS.includes(key) || !current || current.token !== token || current.doc !== doc) return null;
+    const entry = current.map.get(id);
+    if (!entry || ARIA_TYPES[entry.kind] || !entry.elements.every(element => element.isConnected && eligible(element))) return null;
+    const label = entry.labels.join(' ');
+    if (match(entry).key !== key || unsafeQuestion({ label, options: optionsOf(entry) }) || CODE.test(normal(label)) || otherPersonQuestion(label)) return null;
+    if (!answered(entry)) return { empty: true };
+    const value = answerIn(entry, key);
+    return value === null ? { unreadable: true } : { value };
   }
 
   // Questions that never make SecondHand's card show: search boxes, verification codes, and the user
@@ -707,7 +761,7 @@
   }
   const elementFor = id => current?.map.get(id)?.elements[0] || null;
 
-  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, GUESS_KEYS, MEMBER_KEYS, UNSAFE_QUESTION, OTHER_PERSON_ROLE, MEMBER_DETAIL, CHILD_ROLE, PERSON_DETAIL,
+  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, SAVE_KEYS, GUESS_KEYS, MEMBER_KEYS, answeredIds, readAnswer, UNSAFE_QUESTION, OTHER_PERSON_ROLE, MEMBER_DETAIL, CHILD_ROLE, PERSON_DETAIL,
     COMBINED_ADDRESS_QUESTION, PERSON_NOT_AMOUNT, blockedSuggestion, isBandKey, plan, offers, questions, requestKeys, deriveValues, fillFields, settle, focusField, elementFor,
     canSuggest, unsafeQuestion, layaQuestion });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

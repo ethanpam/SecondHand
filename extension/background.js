@@ -1,7 +1,8 @@
 'use strict';
 importScripts('address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'strings.js', 'translation.js');
 if (typeof globalThis.SecondHandGeneric?.requestKeys !== 'function' || typeof globalThis.SecondHandGeneric.deriveValues !== 'function' || !Array.isArray(globalThis.SecondHandGeneric.GENERIC_KEYS) ||
-  typeof globalThis.SecondHandGeneric.unsafeQuestion !== 'function' || typeof globalThis.SecondHandGeneric.layaQuestion !== 'function') {
+  typeof globalThis.SecondHandGeneric.unsafeQuestion !== 'function' || typeof globalThis.SecondHandGeneric.layaQuestion !== 'function' ||
+  typeof globalThis.SecondHandGeneric.isBandKey !== 'function' || !Array.isArray(globalThis.SecondHandGeneric.SAVE_KEYS)) {
   throw new Error('SecondHand could not load generic-adapter.js. Reinstall the extension.');
 }
 if (typeof globalThis.SecondHandStrings?.english !== 'function' || typeof globalThis.SecondHandStrings.describeEnglish !== 'function') {
@@ -13,10 +14,12 @@ if (typeof globalThis.SecondHandTranslation?.create !== 'function') {
 // Must match BUILD in panel.js: change both together, with every change to the extension. The panel
 // compares them to tell when Chrome is still running an older worker than the pages it loaded from
 // disk, and the worker compares it with the build the desktop app ships to update itself (#85).
-const BUILD = '2026-10-03.2';
+const BUILD = '2026-10-03.3';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
+// A key the site engine may plan: a saved field, a derived answer, or a household count by age ("householdCount:0-5").
+const plannedKey = key => typeof key === 'string' && (KEY.test(key) || SecondHandGeneric.isBandKey(key));
 const SITE_FIELD_ID = /^f\d{1,6}:[A-Za-z][A-Za-z0-9_-]{0,59}$/;
 // Every message the panel shows travels as English text plus its catalog key and parameters,
 // so each page can show it in the applicant's language. Errors carry the same three.
@@ -32,6 +35,10 @@ const FRAME_ERROR = 'worker.frameUnsafe';
 const FIELD_ID = /^[A-Za-z][A-Za-z0-9_-]{0,59}$/; // field ids from the site engine's plan
 const results = new Map(); // tabId -> last autofill result: counts, keys, and fixed messages only. Never answers.
 const siteRuns = new Map(); // tabId -> the fill running on an approved site, so two clicks share one request.
+// Save to My information (#98). tabId -> { url, origin ('' on Iowa's portal), items: Map(id -> { frameId, planId, token, key, label }) }:
+// the questions the last Autofill matched to a saved field that has no saved answer. Memory only, forgotten when
+// the tab navigates. Keys and plan ids stay in the worker; the side panel gets each question's id and label.
+const savables = new Map();
 const sitePlans = new Map(); // tabId -> { url, frames } the widget's on-device AI saw. Field metadata only.
 // Tabs whose widget asked the side panel to open on the question list. The panel takes it once.
 const questionViews = new Set();
@@ -724,7 +731,7 @@ async function planGeneral(tabId, frameId = 0, prefix = false) {
     if (prefix) {
       const ids = [...plan.matched, ...plan.unmatched].map(field => field?.id);
       if (!plan.token || ids.some(id => typeof id !== 'string' || !FIELD_ID.test(id)) || new Set(ids).size !== ids.length ||
-        plan.matched.some(field => typeof field.key !== 'string' || !KEY.test(field.key))) throw fault(FRAME_ERROR);
+        plan.matched.some(field => !plannedKey(field.key) || (field.label !== undefined && typeof field.label !== 'string'))) throw fault(FRAME_ERROR);
     }
     return plan;
   } catch (error) {
@@ -907,7 +914,7 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       guard();
     }
     const keys = [...new Set(SecondHandGeneric.requestKeys(initial.flatMap(frame => frame.planned.filter(item => item.key !== undefined).map(item => item.key))))];
-    if (keys.some(key => typeof key !== 'string' || !KEY.test(key))) throw fault('worker.fieldRequestFailed');
+    if (keys.some(key => !plannedKey(key))) throw fault('worker.fieldRequestFailed');
     if (keys.length) {
       const desktop = await desktopStatus();
       if (!desktop?.unlocked) throw fault('worker.unlockToAutofill');
@@ -925,7 +932,7 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       for (const [id, option] of prepared.mapAnswers(answers.entries)) addLaya(id, { option });
     }
     let filled = 0, placedByLaya = 0;
-    const needYou = [];
+    const needYou = [], savable = [];
     for (const frame of initial) {
       const { frameId } = frame;
       let { plan, planned } = frame;
@@ -966,8 +973,14 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       const missing = [...plan.unmatched, ...plan.matched].map(field => field.id);
       for (const [key, id] of refused) if (!missing.includes(id) && !plan.matched.some(field => field.key === key)) missing.push(id);
       needYou.push(...missing.map(id => prefix ? `f${frameId}:${id}` : id));
+      // Questions the rules matched to a saved field with no saved answer: the side panel offers to save the applicant's own (#98).
+      for (const field of plan.matched) {
+        if (!SecondHandGeneric.SAVE_KEYS.includes(field.key) || !keys.includes(field.key) || (typeof values?.[field.key] === 'string' && values[field.key])) continue;
+        savable.push({ id: prefix ? `f${frameId}:${field.id}` : field.id, frameId, planId: field.id, token: plan.token, key: field.key,
+          label: typeof field.label === 'string' ? field.label.trim().slice(0, LABEL_LIMIT) : '' });
+      }
     }
-    return { filled, needYou, laya: placedByLaya, reason: prepared.reason };
+    return { filled, needYou, savable, laya: placedByLaya, reason: prepared.reason };
   } finally { values = null; questionTranslation.forget(); }
 }
 
@@ -998,7 +1011,8 @@ async function fillSiteOnce(tabId, url, guesses) {
       const hosts = pending.map(frame => new URL(frame.origin).hostname).join(', ');
       return siteResult('waiting', say('worker.formInsideFrames', { hosts }));
     }
-    const { needYou, laya: suggested, reason } = await fillPlan(tabId, url, frames, { prefix: true, laya });
+    const { needYou, savable, laya: suggested, reason } = await fillPlan(tabId, url, frames, { prefix: true, laya });
+    keepSavable(tabId, url, siteOrigin(url), savable);
     const tally = await tallySite(tabId, frames);
     const filled = tally.rule + tally.guess;
     return siteResult('done', siteSummary(filled, tally.guess, needYou, tally.next, suggested, reason), { filled, guessed: tally.guess, needYou, ...(suggested ? { laya: suggested } : {}) });
@@ -1012,7 +1026,8 @@ async function fillSiteOnce(tabId, url, guesses) {
 async function fillIowaGeneral(tabId, state, plan, guard, laya = null) {
   const { pageKey } = state.page;
   try {
-    const { filled, needYou, laya: suggested, reason } = await fillPlan(tabId, state.url, [{ frameId: 0, plan }], { guard, laya });
+    const { filled, needYou, savable, laya: suggested, reason } = await fillPlan(tabId, state.url, [{ frameId: 0, plan }], { guard, laya });
+    keepSavable(tabId, state.url, '', savable);
     return { state: 'done', filled, needYou, ...say('result.thenTodo', { summary: withReason(withLaya(filledSummary(filled, needYou), suggested), reason), todo: { key: GENERAL_TODO, params: {} } }),
       todo: english(GENERAL_TODO), todoKey: GENERAL_TODO, todoParams: {}, pageKey, ...(suggested ? { laya: suggested } : {}) };
   } catch (error) {
@@ -1030,8 +1045,66 @@ async function fillSite(tabId, guesses) {
 // The side panel routes by the tab's current page; a widget acts only as what it was loaded on.
 async function pageState(tabId, route) {
   const state = await currentPageState(tabId, route);
-  // Only the side panel (no route) opens the question list the widget asked for.
-  return route === undefined && questionViews.delete(tabId) ? { ...state, showQuestions: true } : state;
+  if (route !== undefined) return state;
+  // Only the side panel (no route) opens the question list the widget asked for, and gets the questions it may save.
+  const shown = questionViews.delete(tabId) ? { ...state, showQuestions: true } : state;
+  if (state.site && !(state.site.enabled && state.site.ready)) return shown;
+  const savable = await savableState(tabId);
+  return savable.length ? { ...shown, savable } : shown;
+}
+
+// Save to My information (#98). The last Autofill's questions with no saved answer, kept for the tab.
+function keepSavable(tabId, url, origin, items) {
+  if (items.length) savables.set(tabId, { url, origin, items: new Map(items.map(item => [item.id, item])) });
+  else savables.delete(tabId);
+}
+// A message to the frame a kept question is in: on a site, only while the site (and that embedded form) is on.
+async function savableMessage(tabId, kept, frameId, message) {
+  if (!kept.origin) {
+    await activePortal(tabId);
+    return chrome.tabs.sendMessage(tabId, message, { frameId: 0 });
+  }
+  await requireSite(kept.origin);
+  if (frameId === 0) return topSiteMessage(tabId, message);
+  if (!(await enabledSiteFrames(tabId, kept.origin)).some(frame => frame.frameId === frameId)) throw fault('worker.turnOnFrameFirst');
+  return chrome.tabs.sendMessage(tabId, message, { frameId });
+}
+// Each kept question's id and label, and whether its box holds an answer now. The page says which listed
+// boxes are answered, by id; nothing they hold is read here.
+async function savableState(tabId) {
+  const kept = savables.get(tabId);
+  if (!kept) return [];
+  if ((await chrome.tabs.get(tabId)).url !== kept.url || (kept.origin && !(await siteEnabled(kept.origin)))) { savables.delete(tabId); return []; }
+  const groups = new Map();
+  for (const item of kept.items.values()) {
+    const group = `${item.frameId}|${item.token}`;
+    groups.set(group, [...(groups.get(group) || []), item]);
+  }
+  const answered = new Set();
+  for (const items of groups.values()) {
+    const reply = await savableMessage(tabId, kept, items[0].frameId, { type: 'secondhand:generic:answered', token: items[0].token, ids: items.map(item => item.planId) });
+    if (!Array.isArray(reply?.answered) || reply.answered.some(id => typeof id !== 'string')) throw fault('worker.pageCheckUnsafe');
+    for (const item of items) if (reply.answered.includes(item.planId)) answered.add(item.id);
+  }
+  return [...kept.items.values()].map(({ id, label }) => ({ id, label, answered: answered.has(id) }));
+}
+// After the applicant's Save click in the side panel: that one box's answer is read, then the desktop app
+// saves it after its own confirmation. The answer goes only to the app, and is not kept.
+async function saveAnswer(tabId, id) {
+  const kept = savables.get(tabId);
+  const item = kept?.items.get(id);
+  if (!item || (await chrome.tabs.get(tabId)).url !== kept.url) throw fault('worker.answerGone');
+  const read = await savableMessage(tabId, kept, item.frameId, { type: 'secondhand:generic:read', token: item.token, id: item.planId, key: item.key });
+  if (read?.empty === true) throw fault('worker.answerFirst');
+  if (read?.unreadable === true) throw fault('worker.answerUnreadable');
+  if (typeof read?.value !== 'string' || !read.value.trim() || read.value.length > 200) throw fault('worker.answerGone');
+  let reply;
+  try { reply = await nativeRequest('saveFields', { url: safeUrl(kept.url), fields: { [item.key]: read.value } }); }
+  catch (error) { throw error.code !== 'offline' && /cancelled/i.test(error.message) ? fault('worker.saveCancelled') : error; }
+  if (!Array.isArray(reply?.saved) || !reply.saved.includes(item.key)) throw fault('worker.desktopUnexpected');
+  kept.items.delete(id);
+  if (!kept.items.size) savables.delete(tabId);
+  return { saved: true };
 }
 async function currentPageState(tabId, route) {
   const tab = await chrome.tabs.get(tabId);
@@ -1277,6 +1350,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   else if (message.type === 'ui:questions') run = () => pageQuestions(tabId, route);
   else if (panel && message.type === 'ui:pageText') run = () => pageText(tabId);
   else if (panel && message.type === 'ui:keepSummary' && typeof message.id === 'string') run = async () => keepSummary(tabId, message.id, message.summary);
+  else if (panel && message.type === 'ui:saveAnswer' && message.confirmed === true && typeof message.id === 'string') run = () => saveAnswer(tabId, message.id);
   else if (launcher && message.type === 'ui:widgetSize' && typeof message.line === 'boolean' && (message.width === undefined || cardWidth(message.width))) run = () => widgetSize(tabId, message.line, message.width);
   else return;
   // A click holds off an update until it settles; after any request, a waiting update may reload.
@@ -1291,11 +1365,12 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
 chrome.tabs.onActivated?.addListener(info => {
   for (const tabId of autopilots.keys()) if (tabId !== info.tabId) stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], ...say('worker.stoppedTabChanged'), pageKey: results.get(tabId)?.pageKey || '' });
 });
-chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); generalPages.delete(tabId); sitePlans.delete(tabId); questionViews.delete(tabId); pageReads.delete(tabId); formFrames.delete(tabId); });
+chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); generalPages.delete(tabId); sitePlans.delete(tabId); questionViews.delete(tabId); pageReads.delete(tabId); formFrames.delete(tabId); savables.delete(tabId); });
 chrome.tabs.onUpdated?.addListener((tabId, change) => {
   if (change.status === 'loading') {
     results.delete(tabId);
     formFrames.delete(tabId);
+    savables.delete(tabId);
     generalPages.delete(tabId);
     sitePlans.delete(tabId);
     questionViews.delete(tabId);

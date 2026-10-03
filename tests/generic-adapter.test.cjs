@@ -549,3 +549,79 @@ test('Laya takes text boxes and choice questions within the bridge’s limits, n
   };
   for (const [name, question] of Object.entries(refused)) assert.equal(generic.layaQuestion(question), '', name);
 });
+
+test('plans carry each matched question’s label, so the side panel can name a question that wasn’t saved', () => {
+  const doc = page('<label for="apt">Apartment number</label><input id="apt"><label for="kids">Children 0-5</label><input id="kids" type="number">');
+  const result = generic.plan(doc);
+  assert.deepEqual(result.matched.map(({ key, label }) => [key, label]), [['addressLine2', 'Apartment number'], ['householdCount:0-5', 'Children 0-5']]);
+});
+
+test('the answers a page may give back are the saved profile fields, never the SSN', () => {
+  assert.deepEqual(generic.SAVE_KEYS, generic.PROFILE_KEYS.filter(key => key !== 'ssn'));
+  const { SAVE_FIELDS } = require('../shared/schema.cjs');
+  assert.deepEqual(generic.SAVE_KEYS, SAVE_FIELDS, 'the extension and the desktop agree on what may be saved');
+});
+
+const savingPage = () => page('<label for="apt">Apartment number</label><input id="apt">' +
+  '<label for="county">County</label><input id="county">' +
+  '<label for="dob">Date of birth</label><input id="dob">' +
+  '<label for="st">State</label><select id="st"><option value="">Choose</option><option value="IA">Iowa</option><option value="MN">Minnesota</option></select>' +
+  '<fieldset><legend>Is anyone in your household a veteran?</legend><label><input type="radio" name="vet" value="y">Yes</label><label><input type="radio" name="vet" value="n">No</label></fieldset>' +
+  '<label for="rent">Monthly rent</label><input id="rent">' +
+  '<label for="hh">Household size</label><select id="hh"><option value="">Choose</option><option>1</option><option>2</option><option>3</option><option>4+</option></select>' +
+  '<label for="ssn">Social Security number</label><input id="ssn">' +
+  '<label for="kids">Children 0-5</label><input id="kids" type="number">' +
+  '<label for="full">Full name</label><input id="full">');
+
+test('only after the click, a listed box’s answer is read and put in the profile’s own format', () => {
+  const doc = savingPage();
+  const result = generic.plan(doc);
+  const idOf = key => result.matched.find(item => item.key === key).id;
+  // Before the applicant answers, nothing is answered and nothing can be read.
+  assert.deepEqual(generic.answeredIds(doc, result.token, result.matched.map(item => item.id)), []);
+  assert.deepEqual(generic.readAnswer(doc, result.token, idOf('addressLine2'), 'addressLine2'), { empty: true });
+  const type = (id, value) => { const box = doc.getElementById(id); box.value = value; box.dispatchEvent(new doc.defaultView.Event('input', { bubbles: true })); };
+  type('apt', '  Unit 5 '); type('county', 'Story'); type('dob', '4/12/1985'); type('st', 'MN'); type('rent', '$1,200.50'); type('hh', '3');
+  doc.querySelector('input[name="vet"][value="n"]').click();
+  type('ssn', '123-45-6789'); type('kids', '1'); type('full', 'Avery Example');
+  assert.deepEqual(generic.answeredIds(doc, result.token, ['addressLine2', 'county', 'birthDate', 'state', 'householdVeteran', 'monthlyRent', 'householdSize'].map(idOf)),
+    ['addressLine2', 'county', 'birthDate', 'state', 'householdVeteran', 'monthlyRent', 'householdSize'].map(idOf));
+  const read = key => generic.readAnswer(doc, result.token, idOf(key), key);
+  assert.deepEqual(read('addressLine2'), { value: 'Unit 5' });
+  assert.deepEqual(read('county'), { value: 'Story' });
+  assert.deepEqual(read('birthDate'), { value: '1985-04-12' });
+  assert.deepEqual(read('state'), { value: 'MN' });
+  assert.deepEqual(read('householdVeteran'), { value: 'no' });
+  assert.deepEqual(read('monthlyRent'), { value: '1200.50' });
+  assert.deepEqual(read('householdSize'), { value: '3' });
+  // Never the SSN, a band count, or a composite answer: none of them is a field a page may save.
+  for (const key of ['ssn', 'householdCount:0-5', 'fullName']) assert.equal(generic.readAnswer(doc, result.token, idOf(key), key), null, key);
+  // Only the key the rules matched to that box, only in the plan that listed it.
+  assert.equal(generic.readAnswer(doc, result.token, idOf('county'), 'city'), null);
+  assert.equal(generic.readAnswer(doc, 'plan-other', idOf('county'), 'county'), null);
+  assert.equal(generic.readAnswer(doc, result.token, 'sh-unknown', 'county'), null);
+});
+
+test('an answer that can’t be put in the profile’s format is reported unreadable, never guessed', () => {
+  const doc = savingPage();
+  const result = generic.plan(doc);
+  const idOf = key => result.matched.find(item => item.key === key).id;
+  const type = (id, value) => { doc.getElementById(id).value = value; };
+  type('dob', 'April 12'); type('rent', 'about 800'); type('hh', '4+');
+  for (const key of ['birthDate', 'monthlyRent', 'householdSize']) assert.deepEqual(generic.readAnswer(doc, result.token, idOf(key), key), { unreadable: true }, key);
+  type('apt', 'x'.repeat(201));
+  assert.deepEqual(generic.readAnswer(doc, result.token, idOf('addressLine2'), 'addressLine2'), { unreadable: true });
+});
+
+test('password, code and signature boxes are never read, whatever key they are given', () => {
+  const doc = page('<label for="email">Email</label><input id="email" type="email"><label for="pw">Password</label><input id="pw" type="password">' +
+    '<label for="code">Verification code</label><input id="code"><label for="sig">Signature</label><input id="sig">');
+  const result = generic.plan(doc);
+  const email = result.matched.find(item => item.key === 'email');
+  doc.getElementById('email').value = 'avery.example@example.invalid';
+  doc.getElementById('code').value = '123456';
+  doc.getElementById('sig').value = 'Avery Example';
+  assert.deepEqual(generic.readAnswer(doc, result.token, email.id, 'email'), { value: 'avery.example@example.invalid' });
+  for (const item of result.unmatched) for (const key of ['email', 'firstName', 'county']) assert.equal(generic.readAnswer(doc, result.token, item.id, key), null, `${item.label}: ${key}`);
+  assert.equal(JSON.stringify(result).includes('Password'), false, 'a password box is never even planned');
+});

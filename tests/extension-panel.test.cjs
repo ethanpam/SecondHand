@@ -298,7 +298,8 @@ async function panel(t, initial = {}) {
   const listeners = {};
   const tabs = { current: initial.tab || { id: 7, url: `${adapter.PORTAL}/applicant` } };
   // A site other than Iowa: metadata only, never a checklist or autopilot.
-  const state = initial.site ? { page: { kind: 'general', pageKey: 'general' }, result: initial.result || null, autopilot: false, site: { ...initial.site } } : {
+  const state = initial.site ? { page: { kind: 'general', pageKey: 'general' }, result: initial.result || null, autopilot: false, site: { ...initial.site },
+    ...(initial.savable ? { savable: structuredClone(initial.savable) } : {}) } : {
     page: { kind: initial.kind || 'fillable', pageKey: 'iowa-personal-information', reason: 'Complete this step in Iowa’s form.', checklist: [
       { key: 'firstName', label: 'First name', status: 'missing', required: true, fillable: true },
       { key: 'lastName', label: 'Last name', status: 'complete', required: true, fillable: true },
@@ -336,6 +337,12 @@ async function panel(t, initial = {}) {
     else if (payload.type === 'ui:stop') { state.autopilot = false; state.result = { state: 'stopped', filled: 0, needYou: [], message: 'Autofill stopped.', pageKey: 'iowa-personal-information' }; data = structuredClone(state.result); }
     else if (payload.type === 'ui:desktopStatus') data = { ...desktop };
     else if (payload.type === 'ui:focusField') data = { focused: true };
+    else if (payload.type === 'ui:saveAnswer') {
+      // Save to My information (#98): the worker reads that one box and the app saves it after its confirmation.
+      if (initial.saveError) return { ok: false, ...initial.saveError };
+      state.savable = state.savable.filter(item => item.id !== payload.id);
+      data = { saved: true };
+    }
     else if (payload.type === 'ui:showApp') data = { shown: true };
     else if (payload.type === 'ui:openApp') { if (initial.openApp) return initial.openApp(desktop); data = { opened: 'launched' }; }
     else if (payload.type === 'ui:openPanel') data = { opened: true };
@@ -1726,4 +1733,48 @@ test('a widget left on a page when SecondHand reloaded asks for the page to be r
   other.window.chrome.runtime.sendMessage = async () => { throw new Error('Synthetic Chrome failure.'); };
   await other.userClick('autofill');
   assert.equal(other.get('widget-text').textContent, 'Synthetic Chrome failure.');
+});
+
+// Save to My information (#98).
+const PANTRY_SITE = { origin: 'https://pantry.example.org', enabled: true, ready: true, frames: [] };
+const pantryTab = { id: 7, url: 'https://pantry.example.org/intake' };
+const SAVABLE = [{ id: 'f0:sh-2-1', label: 'Apartment number', answered: false }, { id: 'f0:sh-2-2', label: 'County', answered: true }];
+
+test('the side panel lists questions with no saved answer by their own words, and offers Save to My information once the page holds an answer', async t => {
+  const view = await panel(t, { tab: pantryTab, site: PANTRY_SITE, savable: SAVABLE });
+  assert.equal(view.get('save-section').hidden, false);
+  assert.equal(view.get('save-title').textContent, 'Not saved in SecondHand');
+  const row = id => view.window.document.querySelector(`[data-save-id="${id}"]`);
+  assert.match(row('f0:sh-2-1').textContent, /Apartment number.*Answer it on the page to save it\./);
+  assert.equal(row('f0:sh-2-1').querySelector('button'), null, 'nothing to save until the page holds an answer');
+  const button = row('f0:sh-2-2').querySelector('button');
+  assert.equal(button.textContent, 'Save to My information');
+  assert.equal(button.getAttribute('aria-label'), 'Save your answer to “County” to My information');
+  assert.doesNotMatch(view.get('save-section').textContent, /Story/, 'the panel never shows what the page holds');
+  button.click(); await tick();
+  assert.equal(view.types().includes('ui:saveAnswer'), false, 'only a trusted click');
+  await view.userClick(button);
+  assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:saveAnswer')), { type: 'ui:saveAnswer', id: 'f0:sh-2-2', confirmed: true, tabId: 7 });
+  assert.equal(view.get('status').textContent, 'Saved to My information. SecondHand can fill it next time.');
+  assert.equal(row('f0:sh-2-2'), null, 'a saved answer leaves the list');
+  assert.ok(row('f0:sh-2-1'));
+});
+
+test('a save the worker or the app refuses shows why, and nothing else changes', async t => {
+  const view = await panel(t, { tab: pantryTab, site: PANTRY_SITE, savable: SAVABLE,
+    saveError: { error: strings.english('worker.saveCancelled'), errorKey: 'worker.saveCancelled', errorParams: {} } });
+  await view.userClick(view.window.document.querySelector('[data-save-id="f0:sh-2-2"] button'));
+  assert.equal(view.get('status').textContent, 'Cancelled. Nothing was saved.');
+  assert.equal(view.get('status').classList.contains('error'), true);
+  assert.ok(view.window.document.querySelector('[data-save-id="f0:sh-2-2"] button'));
+});
+
+test('the list shows only well-formed questions, in the applicant’s language, and is gone with nothing to save', async t => {
+  const odd = [...SAVABLE, { id: 'not an id!', label: 'Bad id', answered: true }, { id: 'f0:sh-2-3', label: 42, answered: true }, { id: 'f0:sh-2-4', label: 'No flag' }];
+  const view = await panel(t, { tab: pantryTab, site: PANTRY_SITE, savable: odd, language: 'es' });
+  assert.deepEqual([...view.window.document.querySelectorAll('[data-save-id]')].map(row => row.dataset.saveId), ['f0:sh-2-1', 'f0:sh-2-2']);
+  assert.equal(view.get('save-title').textContent, 'No está guardado en SecondHand');
+  assert.equal(view.window.document.querySelector('[data-save-id="f0:sh-2-2"] button').textContent, 'Guardar en “My information”');
+  const none = await panel(t, { tab: pantryTab, site: PANTRY_SITE });
+  assert.equal(none.get('save-section').hidden, true);
 });
