@@ -25,6 +25,7 @@ const withoutIds = profile => ({ ...profile, householdMembers: (profile.househol
 const COUNT_FIELDS = ['householdSize', 'householdAdults', 'householdChildren', 'householdSeniors'];
 // Fields My information shows one by one; the household list has its own rows.
 const SCALAR_FIELDS = PROFILE_FIELDS.filter(field => field !== 'householdMembers');
+const PASSWORD_NEEDED = 'Enter your password: it’s needed after SecondHand restarts or every 14 days.';
 
 async function captureDiagnostic(page, name, options = {}) {
   try {
@@ -168,8 +169,12 @@ async function main() {
   const errors = [];
   let application;
   let page;
-  const launch = async () => {
-    application = await electron.launch({ args: [root], env: { ...process.env, SECONDHAND_USER_DATA: userData, SECONDHAND_LAYA_UPDATE_URL: layaServer.updateUrl }, timeout: 30000 });
+  // `touchId` turns on the Touch ID test hook (#99): it stands in for Touch ID and the Keychain, so no
+  // real prompt shows and no Keychain item is touched. It needs test mode, which keeps the app's data
+  // in this temporary folder; a packaged app refuses it.
+  const launch = async ({ touchId = false } = {}) => {
+    const touchIdEnv = touchId ? { SECONDHAND_TEST_MODE: '1', SECONDHAND_TEST_USER_DATA: userData, SECONDHAND_TEST_TOUCH_ID: 'approve' } : {};
+    application = await electron.launch({ args: [root], env: { ...process.env, SECONDHAND_USER_DATA: userData, SECONDHAND_LAYA_UPDATE_URL: layaServer.updateUrl, ...touchIdEnv }, timeout: 30000 });
     // Track the open window here so a failure during launch can still be diagnosed.
     page = await application.firstWindow();
     page.on('pageerror', error => errors.push(error.message));
@@ -339,6 +344,64 @@ async function main() {
     const restored = await page.evaluate(() => window.secondHand.getData());
     assert.deepEqual(withoutIds(restored.profile), withoutIds(applicantFixture));
     assert.equal(restored.applications[0].confirmationNumber, 'SYNTHETIC-RECEIPT-ONLY');
+
+    // Unlock with Touch ID (#99): turned on with the password, used after an automatic lock, and
+    // refused after a restart until the password is used.
+    await application.close();
+    application = null;
+    page = await launch({ touchId: true });
+    await expect(page.locator('#touch-id-unlock')).toBeHidden();
+    await expect(page.locator('#touch-id-note')).toBeHidden();
+    await page.locator('#passphrase').fill(passphrase);
+    await submitAuthForm(page);
+    await expect(page.locator('#workspace')).toBeVisible();
+    await page.locator('.nav-item[data-view="privacy"]').click();
+    await expect(page.locator('#touch-id-setting')).toBeVisible();
+    await expect(page.locator('#touch-id-toggle')).not.toBeChecked();
+    // Turning it on opens the password dialog; the box stays clear until the password is checked.
+    await page.locator('#touch-id-toggle').click();
+    await expect(page.locator('#touch-id-dialog')).toBeVisible();
+    await expect(page.locator('#touch-id-toggle')).not.toBeChecked();
+    await page.locator('#touch-id-password').fill('incorrect-passphrase');
+    await page.locator('#touch-id-confirm').click();
+    await expect(page.locator('#touch-id-error')).toHaveText(/That password isn’t right/);
+    await expect(page.locator('#touch-id-dialog')).toBeVisible();
+    await page.locator('#touch-id-password').fill(passphrase);
+    await page.locator('#touch-id-confirm').click();
+    await expect(page.locator('#touch-id-dialog')).toBeHidden();
+    await expect(page.locator('#touch-id-toggle')).toBeChecked();
+    await expect(page.locator('#toast')).toHaveText(/^Touch ID is on\./);
+    const sealedPath = path.join(userData, 'touch-unlock.bin');
+    assert.match(await fs.readFile(sealedPath, 'utf8'), /^test-sealed:/, 'sealed by the test hook, never this Mac’s Keychain');
+    assert.ok(JSON.parse(await fs.readFile(path.join(userData, 'vault.secondhand'), 'utf8')).slots.touchId, 'the vault has a Touch ID slot');
+    await captureDiagnostic(page, 'desktop-touch-id-setting.png', { fullPage: true });
+    // SecondHand locks itself when the screen locks; Touch ID then unlocks it.
+    await application.evaluate(({ powerMonitor }) => { powerMonitor.emit('lock-screen'); });
+    await expect(page.locator('#auth-view')).toBeVisible();
+    await expect(page.locator('#firstName')).toHaveValue('');
+    await expect(page.locator('#touch-id-unlock')).toBeVisible();
+    await expect(page.locator('#touch-id-note')).toBeHidden();
+    await captureDiagnostic(page, 'desktop-touch-id-lock.png');
+    await page.locator('#touch-id-unlock').click();
+    await expect(page.locator('#workspace')).toBeVisible();
+    assert.deepEqual(withoutIds((await page.evaluate(() => window.secondHand.getData())).profile), withoutIds(applicantFixture));
+    await application.close();
+    application = null;
+    // After a restart, the password comes first: no Touch ID button, and the app refuses it too.
+    page = await launch({ touchId: true });
+    await expect(page.locator('#touch-id-unlock')).toBeHidden();
+    await expect(page.locator('#touch-id-note')).toHaveText(PASSWORD_NEEDED);
+    await captureDiagnostic(page, 'desktop-touch-id-password-needed.png');
+    const refused = await page.evaluate(() => window.secondHand.unlockWithTouchId().then(() => 'unlocked', error => error.message));
+    assert.ok(refused.includes(PASSWORD_NEEDED), `Touch ID was refused after a restart: ${refused}`);
+    await expect(page.locator('#auth-view')).toBeVisible();
+    await page.locator('#passphrase').fill(passphrase);
+    await submitAuthForm(page);
+    await expect(page.locator('#workspace')).toBeVisible();
+    await page.locator('#lock-button').click();
+    await expect(page.locator('#touch-id-unlock')).toBeVisible();
+    await page.locator('#touch-id-unlock').click();
+    await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('#lock-button').click();
     await page.locator('#forgot-password').click();
     await page.locator('#recovery-key-input').fill(recoveryKey.toLowerCase().replace(/-/g, ' '));
@@ -347,7 +410,13 @@ async function main() {
     await page.locator('#reset-submit').click();
     await expect(page.locator('#workspace')).toBeVisible();
     assert.deepEqual(withoutIds((await page.evaluate(() => window.secondHand.getData())).profile), withoutIds(applicantFixture));
+    // A password reset removes Touch ID's key and slot: the new password comes first.
+    await assert.rejects(fs.access(path.join(userData, 'touch-unlock.bin')));
+    assert.equal(JSON.parse(await fs.readFile(path.join(userData, 'vault.secondhand'), 'utf8')).slots.touchId, undefined);
+    await page.locator('.nav-item[data-view="privacy"]').click();
+    await expect(page.locator('#touch-id-toggle')).not.toBeChecked();
     await page.locator('#lock-button').click();
+    await expect(page.locator('#touch-id-unlock')).toBeHidden();
     await page.locator('#passphrase').fill(passphrase);
     await submitAuthForm(page);
     await expect(page.locator('#auth-error')).toBeVisible();
@@ -399,7 +468,7 @@ async function main() {
     await expect(page.locator('#setup-resume-text')).toHaveText('Finish setting up: 0 of 6 steps');
     assert.deepEqual((await page.evaluate(() => window.secondHand.getData())).profile, {});
     assert.deepEqual(errors, []);
-    console.log('Electron UI smoke passed: guided setup offered after the recovery key, saved step by step with a household list, finished later from Overview and readable at 200% zoom; Laya downloads on its own on a new install and stays off once turned off, create, save full applicant choices, Iowa’s questions about you and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence, recovery key password reset, clear Iowa’s questions, start over and its setup offer.');
+    console.log('Electron UI smoke passed: guided setup offered after the recovery key, saved step by step with a household list, finished later from Overview and readable at 200% zoom; Laya downloads on its own on a new install and stays off once turned off, create, save full applicant choices, Iowa’s questions about you and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence, Touch ID on (test hook) with a lock-screen lock, a Touch ID unlock, and the password first after a restart, recovery key password reset that turns Touch ID off, clear Iowa’s questions, start over and its setup offer.');
   } catch (error) {
     if (page && !page.isClosed()) {
       const auth = await page.evaluate(() => ({
