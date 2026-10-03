@@ -66,3 +66,35 @@ test('preload lets the app turn all websites off, never on: Chrome’s prompt ca
   assert.deepEqual(calls, [['secondhand:invoke', 'turnOffAllSites']]);
   assert.deepEqual(Object.keys(api).filter(name => /allSites/i.test(name)), ['turnOffAllSites']);
 });
+
+test('preload tells My information which fields a save from Chrome changed, never their values, and exposes the setup’s progress calls', () => {
+  let api;
+  let listener;
+  let removed;
+  const calls = [];
+  vm.runInNewContext(fs.readFileSync(require.resolve('../desktop/preload.cjs'), 'utf8'), {
+    require: () => ({
+      contextBridge: { exposeInMainWorld(_name, value) { api = value; } },
+      ipcRenderer: { invoke: (...args) => { calls.push(args); return Promise.resolve(); },
+        on(channel, callback) { if (channel === 'secondhand:profile-changed') listener = callback; },
+        removeListener(channel, callback) { removed = { channel, callback }; } }
+    })
+  });
+  const received = [];
+  const unsubscribe = api.onProfileChanged(payload => received.push(payload));
+  listener({ sender: 'private-electron-event' }, { fields: ['county', 'addressLine2'], values: { county: 'private' } });
+  assert.deepEqual(JSON.parse(JSON.stringify(received.pop())), { fields: ['county', 'addressLine2'] });
+  for (const payload of [undefined, null, {}, { fields: 'county' }, { fields: [] }, { fields: [42] }, { fields: ['county', 'county'] }, { fields: ['not a field!'] }, { fields: Array(41).fill('county').map((name, n) => `${name}${n}`) }]) {
+    listener({ sender: 'private-electron-event' }, payload);
+    assert.equal(received.length, 0, JSON.stringify(payload));
+  }
+  unsubscribe();
+  assert.equal(removed.channel, 'secondhand:profile-changed');
+  assert.equal(removed.callback, listener);
+  assert.throws(() => api.onProfileChanged('not a function'), /callback/);
+  api.setupProgress();
+  api.startSetup();
+  api.saveSetupProgress(2);
+  assert.deepEqual(calls, [['secondhand:invoke', 'setupProgress'], ['secondhand:invoke', 'startSetup'], ['secondhand:invoke', 'saveSetupProgress', 2]]);
+  assert.equal(Object.keys(api).some(name => /saveFields/i.test(name)), false, 'saving from a page is the extension’s request, never the renderer’s');
+});

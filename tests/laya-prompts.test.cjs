@@ -79,7 +79,8 @@ test('the desktop and extension keep identical applicant-only box guards', () =>
     'Emergency contact phone', 'Landlord name', 'Spouse Name Etan Karejeram̗ Nombre del cónyuge: First', 'Nombre del representante autorizado',
     'City/State', 'City and Zip Code', 'City, State and Zip code', 'Complete Physical Address (including Town/City!)',
     'Ciudad/Estado', 'Ciudad y Código Postal', 'Dirección completa', 'Who pays the rent?', '¿Quién paga?',
-    'Household Representative: First', 'Number of children', 'How many children under 18?', 'Applicant phone'
+    'Household Representative: First', 'Number of children', 'How many children under 18?', 'Applicant phone',
+    'Guardian first and last name', 'Parent/Guardian Name', 'Student name and grade', 'Student name', 'Are you a student?'
   ];
   for (const label of labels) {
     const matchable = prompts.matchableBox({ label });

@@ -8,7 +8,7 @@
     "holdout": true
   },
   "questions": [
-    { "id": "q1", "label": "Parent/Guardian Name", "type": "text", "options": [], "rule": { "name": "field", "key": "fullName" } },
+    { "id": "q1", "label": "Parent/Guardian Name", "type": "text", "options": [], "rule": { "name": "none" }, "note": "The guardian may be the person filling in the form, but saying so would be a guess (#98): a guardian's name is never inferred." },
     { "id": "q2", "label": "Phone #", "type": "text", "options": [], "rule": { "name": "field", "key": "phone" } },
     { "id": "q3", "label": "Email Address", "type": "text", "options": [], "rule": { "name": "field", "key": "email" } },
     { "id": "q4", "label": "Student(s) Name", "type": "text", "options": [], "rule": { "name": "none" }, "note": "Specific student names." },

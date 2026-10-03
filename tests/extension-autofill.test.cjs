@@ -11,13 +11,14 @@ const translation = require('../extension/translation.js');
 // Values created inside the worker's vm context have foreign prototypes.
 const plain = value => JSON.parse(JSON.stringify(value));
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
-const { GENERIC_KEYS, unsafeQuestion, layaQuestion } = require('../extension/generic-adapter.js');
+const { GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey } = require('../extension/generic-adapter.js');
 // Verified Iowa pages never use the general engine; any call there is a bug.
-const noSiteEngine = { GENERIC_KEYS, requestKeys: () => { throw new Error('Iowa used the site engine.'); }, deriveValues: () => { throw new Error('Iowa used the site engine.'); },
-  unsafeQuestion: () => { throw new Error('Iowa used the site engine.'); }, layaQuestion: () => { throw new Error('Iowa used the site engine.'); } };
+const noSiteEngine = { GENERIC_KEYS, SAVE_KEYS, requestKeys: () => { throw new Error('Iowa used the site engine.'); }, deriveValues: () => { throw new Error('Iowa used the site engine.'); },
+  unsafeQuestion: () => { throw new Error('Iowa used the site engine.'); }, layaQuestion: () => { throw new Error('Iowa used the site engine.'); },
+  isBandKey: () => { throw new Error('Iowa used the site engine.'); } };
 // Stand-in for generic-adapter.js's pure helpers on pages the Iowa adapter hasn't verified.
 const generalEngine = {
-  GENERIC_KEYS, unsafeQuestion, layaQuestion,
+  GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey,
   requestKeys: keys => [...new Set(keys.flatMap(key => key === 'totalMonthlyIncome' ? ['monthlyEarnedIncome', 'monthlyOtherIncome'] : [key]))],
   deriveValues: values => ({ ...values, ...(values.monthlyEarnedIncome && values.monthlyOtherIncome ? { totalMonthlyIncome: 'Synthetic private total' } : {}) })
 };
@@ -50,6 +51,13 @@ function generalPage(message, plan) {
     return { ok: true, filled, skipped: message.assignments.map(item => item.id).filter(id => !filled.includes(id) && !rejected.includes(id)), rejected };
   }
   if (message.type === 'secondhand:generic:focus') return { focused: message.id === 'sh-1-3' };
+  // Save to My information (#98): a field's `typed` answer is what the applicant entered on the page.
+  const typed = id => [...(plan.matched || [])].find(field => field.id === id)?.typed;
+  if (message.type === 'secondhand:generic:answered') return { answered: message.token === plan.token ? message.ids.filter(id => typed(id) !== undefined) : [] };
+  if (message.type === 'secondhand:generic:read') {
+    const field = message.token === plan.token ? (plan.matched || []).find(item => item.id === message.id && item.key === message.key) : null;
+    return !field ? { readable: false } : field.typed === undefined ? { empty: true } : { value: field.typed };
+  }
   return undefined;
 }
 
@@ -129,6 +137,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
               if (request.type === 'showApp') return reply({ shown: true });
               if (request.type === 'openApp') return vault.openError ? fail(vault.openError) : reply(vault.opened || { opened: 'shown' });
               if (request.type === 'recordProgress') return reply({ recorded: true });
+              if (request.type === 'saveFields') return reply({ saved: Object.keys(request.fields) });
               // Laya (#39, #42): readied before a click's questions; "not ready" unless a test plays it.
               if (request.type === 'warmLaya') return reply({ state: vault.layaState || 'unavailable' });
               if (request.type === 'suggestFields' || request.type === 'answerFields') {
@@ -267,6 +276,27 @@ test('an unknown Iowa page gets one general fill, then waits for the applicant t
   assert.equal(w.calls.content.filter(message => message.type === 'secondhand:generic:fill').length, 1, 'one general fill per page');
   assert.equal(w.calls.content.some(message => ['secondhand:continue', 'secondhand:fill'].includes(message.type)), false, 'never continues or uses the Iowa fill');
   assert.equal(w.calls.native.some(call => call.type === 'recordProgress'), false);
+});
+
+test('on an unknown Iowa page, a matched question with no saved answer can be saved after the applicant answers it', async () => {
+  const plan = financialPlan();
+  plan.matched[2].label = 'How many people in your household are 65 or older?';
+  const w = worker({ kind: 'manual', engine: generalEngine, general: plan, desktop: { values: financialValues } });
+  await autofill(w);
+  const savable = async () => plain((await w.panel({ type: 'ui:pageState' })).data).savable;
+  assert.deepEqual(await savable(), [{ id: 'sh-1-2', label: 'How many people in your household are 65 or older?', answered: false }]);
+  assert.equal(plain((await w.launcher({ type: 'ui:pageState' })).data).savable, undefined);
+  assert.equal((await w.panel({ type: 'ui:saveAnswer', id: 'sh-1-2', confirmed: true })).errorKey, 'worker.answerFirst');
+  plan.matched[2].typed = '1';
+  assert.deepEqual(await savable(), [{ id: 'sh-1-2', label: 'How many people in your household are 65 or older?', answered: true }]);
+  const saved = await w.panel({ type: 'ui:saveAnswer', id: 'sh-1-2', confirmed: true });
+  assert.equal(saved.ok, true, saved.error);
+  assert.deepEqual(plain(w.calls.native.filter(call => call.type === 'saveFields').map(({ url, fields }) => ({ url, fields }))),
+    [{ url: `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo`, fields: { householdSeniors: '1' } }]);
+  assert.deepEqual(w.calls.content.filter(message => message.type === 'secondhand:generic:read').map(message => ({ ...plain(message) })),
+    [{ type: 'secondhand:generic:read', token: 'plan-1', id: 'sh-1-2', key: 'householdSeniors' }, { type: 'secondhand:generic:read', token: 'plan-1', id: 'sh-1-2', key: 'householdSeniors' }],
+    'one read for the click before the answer, one after');
+  assert.equal(await savable(), undefined);
 });
 
 test('an unknown Iowa page fills questions its answers reveal in the same click, from one desktop request', async () => {

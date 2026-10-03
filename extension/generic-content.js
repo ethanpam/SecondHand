@@ -71,10 +71,19 @@
       token: text(plan.token),
       // The language this frame declares: with Chrome's detector, it decides how its questions are read to Laya.
       lang: document.documentElement.lang || '',
-      matched: plan.matched.map(field => ({ id: text(field.id), key: text(field.key), confidence: text(field.confidence) })),
+      // A matched question's own label lets the side panel name it when its saved answer is missing.
+      matched: plan.matched.map(field => ({ id: text(field.id), key: text(field.key), confidence: text(field.confidence), ...(typeof field.label === 'string' ? { label: field.label } : {}) })),
       unmatched: plan.unmatched.map(field => ({ id: text(field.id), label: typeof field.label === 'string' ? field.label : '',
         type: typeof field.type === 'string' ? field.type : '', options: strings(field.options), required: field.required === true }))
     };
+  }
+
+  // Rebuilt so only the answer itself, or why there is none, leaves the page.
+  function savedAnswer(read) {
+    if (read && typeof read.value === 'string') return { value: read.value };
+    if (read?.empty === true) return { empty: true };
+    if (read?.unreadable === true) return { unreadable: true };
+    return { readable: false };
   }
 
   function placeCard() {
@@ -187,6 +196,14 @@
         const reader = globalThis.SecondHandPageText;
         if (!reader) { respond({ ok: false, error: 'SecondHand could not load its page reader. Reload the page.' }); return; }
         respond({ lang: document.documentElement.lang || '', text: reader.read(document) });
+      } else if (message.type === 'secondhand:generic:answered') {
+        // Save to My information: which of the listed boxes hold an answer now. Ids only, never what they hold.
+        if (typeof message.token !== 'string' || !Array.isArray(message.ids) || message.ids.some(id => typeof id !== 'string')) throw new Error('Invalid request.');
+        respond({ answered: strings(engine.answeredIds(document, message.token, message.ids)) });
+      } else if (message.type === 'secondhand:generic:read') {
+        // After the applicant's Save click in the side panel: one listed box's answer, in the profile's format.
+        if (typeof message.token !== 'string' || typeof message.id !== 'string' || typeof message.key !== 'string') throw new Error('Invalid request.');
+        respond(savedAnswer(engine.readAnswer(document, message.token, message.id, message.key)));
       } else if (message.type === 'secondhand:generic:focus' && typeof message.id === 'string') {
         respond({ focused: Boolean(withOwnPanelHidden(() => engine.focusField(document, message.id))) });
       }

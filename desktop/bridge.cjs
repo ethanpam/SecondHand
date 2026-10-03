@@ -9,7 +9,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { EventEmitter } = require('node:events');
 const { atomicWrite } = require('./vault.cjs');
-const { REQUEST_FIELDS, PORTAL_URL, isPortalUrl, isHttpsSiteUrl } = require('../shared/schema.cjs');
+const { REQUEST_FIELDS, SAVE_FIELDS, PORTAL_URL, isPortalUrl, isHttpsSiteUrl, isRequestField } = require('../shared/schema.cjs');
+const { isBandKey } = require('../shared/household.cjs');
 const { TEXT_TYPES, CHOICE_TYPES } = require('../shared/laya-prompts.cjs');
 
 const HOST_NAME = 'org.secondhand.bridge';
@@ -24,6 +25,10 @@ const LAYA_REQUESTS = Object.freeze({
 });
 const QUESTION_ID = /^(f\d{1,6}:)?[A-Za-z][A-Za-z0-9_-]{0,59}$/;
 const MAX_LABEL = 200;
+// Age-band counts one field request may name, beside the named fields.
+const MAX_BANDS = 20;
+// An answer the side panel offers to save: the applicant's own words from one box.
+const MAX_SAVED_VALUE = 200;
 const MAX_OPTIONS = 30;
 const MAX_OPTION = 100;
 // Laya's time per Autofill click: each request carries what its click has left.
@@ -101,10 +106,23 @@ class FrameReader extends EventEmitter {
 }
 
 function validateFieldScope(fields) {
-  if (!Array.isArray(fields) || !fields.length || fields.length > REQUEST_FIELDS.length ||
-      fields.some(field => typeof field !== 'string' || !REQUEST_FIELDS.includes(field)) ||
+  if (!Array.isArray(fields) || !fields.length || fields.length > REQUEST_FIELDS.length + MAX_BANDS ||
+      fields.some(field => typeof field !== 'string' || !isRequestField(field)) || fields.filter(isBandKey).length > MAX_BANDS ||
       new Set(fields).size !== fields.length) throw new Error('Invalid requested profile fields.');
   return fields;
+}
+
+// saveFields { url, fields: { key: value } }: like getFields, any HTTPS site (the desktop decides whether it is
+// trusted), and saved profile fields the side panel may offer, each the applicant's own answer from one box: a
+// nonblank string of at most 200 characters without control characters. The desktop still checks each value
+// against the schema and asks the applicant before saving.
+function validateSave(request) {
+  if (!isHttpsSiteUrl(request.url)) throw new Error('Only an https site without credentials or a custom port is allowed.');
+  const { fields } = request;
+  const entries = fields && typeof fields === 'object' && !Array.isArray(fields) && Object.getPrototypeOf(fields) === Object.prototype ? Object.entries(fields) : [];
+  if (!entries.length || entries.length > SAVE_FIELDS.length || entries.some(([key, value]) => !SAVE_FIELDS.includes(key) || typeof value !== 'string' ||
+      !value.trim() || value.length > MAX_SAVED_VALUE || /[\u0000-\u001f\u007f]/.test(value))) throw new Error('Invalid answers to save.');
+  return request;
 }
 
 const questionText = (value, max) => typeof value === 'string' && value.trim() !== '' && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
@@ -130,11 +148,13 @@ function validateRequest(request) {
   let allowed;
   if (['status', 'showApp', 'openApp', 'warmLaya', 'trustAllSites', 'untrustAllSites'].includes(request.type)) allowed = ['id', 'type'];
   else if (request.type === 'getFields') allowed = ['id', 'type', 'url', 'fields'];
+  else if (request.type === 'saveFields') allowed = ['id', 'type', 'url', 'fields'];
   else if (request.type === 'trustSite' || request.type === 'untrustSite') allowed = ['id', 'type', 'url'];
   else if (request.type === 'recordProgress') allowed = ['id', 'type', 'url', 'filledCount'];
   else if (Object.hasOwn(LAYA_REQUESTS, request.type)) allowed = ['id', 'type', 'url', LAYA_REQUESTS[request.type].list, 'budgetMs'];
   else throw new Error('Unsupported bridge request.');
   if (Object.keys(request).some(key => !allowed.includes(key))) throw new Error('Unexpected request field.');
+  if (request.type === 'saveFields') return validateSave(request);
   // Field requests, site trust, and Laya may name any HTTPS site; the desktop decides whether it is trusted.
   if (request.type === 'getFields' || request.type === 'trustSite' || request.type === 'untrustSite' || Object.hasOwn(LAYA_REQUESTS, request.type)) {
     if (!isHttpsSiteUrl(request.url)) throw new Error('Only an https site without credentials or a custom port is allowed.');

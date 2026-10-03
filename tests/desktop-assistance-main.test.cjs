@@ -22,6 +22,8 @@ async function desktop(options = {}) {
   let shows = 0;
   let dataReads = 0;
   const writes = [];
+  const removed = [];
+  let setupFile = options.setup === undefined ? null : typeof options.setup === 'string' ? options.setup : JSON.stringify(options.setup);
   let invoke;
   let window;
   let answer = async () => ({ response: 1 });
@@ -56,8 +58,14 @@ async function desktop(options = {}) {
     session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, webRequest: { onBeforeRequest() {} } } } };
   const overrides = {
     electron,
-    'node:fs/promises': { mkdir: async () => {}, stat: async () => ({ size: 10 }), readFile: async () => JSON.stringify(options.settings ?? { extensionId }) },
-    './vault.cjs': { Vault, atomicWrite: async (file, bytes) => { writes.push({ file, json: JSON.parse(bytes.toString()) }); }, MAX_VAULT_BYTES: 1000 },
+    // settings.json from `options.settings`; the guided setup's progress file from `options.setup` (none by default), as written since.
+    'node:fs/promises': { mkdir: async () => {}, stat: async () => ({ size: 10 }), rm: async file => { removed.push(file); if (file.endsWith('setup-progress.json')) setupFile = null; },
+      readFile: async file => {
+        if (!String(file).endsWith('setup-progress.json')) return JSON.stringify(options.settings ?? { extensionId });
+        if (setupFile === null) throw Object.assign(new Error('No such file'), { code: 'ENOENT' });
+        return setupFile;
+      } },
+    './vault.cjs': { Vault, atomicWrite: async (file, bytes) => { writes.push({ file, json: JSON.parse(bytes.toString()) }); if (file.endsWith('setup-progress.json')) setupFile = bytes.toString(); }, MAX_VAULT_BYTES: 1000 },
     './bridge.cjs': { ...require('../desktop/bridge.cjs'), startBridge: async (_directory, _getId, handler) => { bridge = handler; return { close: async () => {} }; } },
     './extension-setup.cjs': options.extensionCopy?.module ?? { getExtensionSetup: async () => ({ prepared: true }) },
     './registration.cjs': { registerHost: async () => { registrations++; return {}; } },
@@ -74,7 +82,7 @@ async function desktop(options = {}) {
   await tick();
   assert.equal(typeof bridge, 'function');
   return {
-    prompts, notifications, writes,
+    prompts, notifications, writes, removed,
     get shows() { return shows; },
     get dataReads() { return dataReads; },
     get registrations() { return registrations; },
@@ -419,7 +427,7 @@ test('trusting all websites asks once, is saved, and lets any https site ask for
   assert.equal(prompt.cancelId, 0);
   assert.match(prompt.detail, /Nothing is filled until you click Autofill/);
   assert.match(prompt.detail, /never clicks Next or Submit/);
-  assert.match(prompt.detail, /Social Security number, date of birth, income, money on hand, medical expenses, and your answers about citizenship, disability, blindness, health, Medicare, and having a Social Security number still ask every time, on each site/);
+  assert.match(prompt.detail, /Social Security number, date of birth, the ages of the people in your household, income, money on hand, medical expenses, and your answers about citizenship, disability, blindness, health, Medicare, and having a Social Security number still ask every time, on each site/);
   assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: true, trustedSites: [], allSites: true });
   assert.equal((await app.request({ type: 'status' })).allSites, true);
   assert.equal((await app.invoke('status')).allSites, true);
@@ -817,4 +825,176 @@ test('a refresh that fails is reported, and isn’t tried again until the files 
   await app.invoke('prepareExtension');
   assert.equal(copy.refreshes, 3);
   assert.deepEqual(await shipped(app), { build: SHIPPED, copy: 'ready' });
+});
+
+// A household list (#98): the applicant (41), two children (11 and 5, the older a student in 5th grade) and a parent (67).
+const SELF_ID = '0f2c8d4e-1a3b-4c5d-8e6f-7a8b9c0d1e2f';
+const memberId = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const listedHousehold = (changes = {}) => ({ firstName: 'Synthetic', lastName: 'Applicant', birthDate: '1985-04-12', householdSize: '9', householdChildren: '0',
+  householdMembers: [
+    { id: SELF_ID, relationship: 'self', student: 'no' },
+    { id: memberId(1), firstName: 'Riley', lastName: 'Example', birthDate: '2015-09-03', relationship: 'child', student: 'yes', grade: '5th' },
+    { id: memberId(2), firstName: 'Sam', lastName: 'Example', birthDate: '2021-02-14', relationship: 'child', student: 'no' },
+    { id: memberId(3), firstName: 'Morgan', lastName: 'Sample', birthDate: '1958-11-20', relationship: 'parent', student: 'no' }
+  ].map((member, n) => ({ ...member, ...changes[n] })) });
+const BANDS = ['householdCount:0-17', 'householdCount:18-59', 'householdCount:60+'];
+
+test('band counts and the student answer come from the household list; counts by birth date ask as the birth date does off Iowa', async () => {
+  const app = await desktop({ settings: trusted });
+  await app.invoke('saveProfile', listedHousehold());
+  app.answer(async () => ({ response: 1 }));
+  const { values } = await app.request({ type: 'getFields', url: PANTRY, fields: [...BANDS, 'studentNameGrade', 'householdSize'] });
+  assert.deepEqual(plain(values), { 'householdCount:0-17': '2', 'householdCount:18-59': '1', 'householdCount:60+': '1', studentNameGrade: 'Riley Example, 5th', householdSize: '4' });
+  assert.equal(app.prompts.length, 1, 'Always allow doesn’t cover counts by birth date on other sites');
+  assert.equal(app.prompts[0].title, 'Share sensitive details?');
+  assert.deepEqual(plain(app.prompts[0].buttons), ['Cancel', 'Allow once']);
+  assert.match(app.prompts[0].detail, /^People in the household aged 0 to 17, People in the household aged 18 to 59, People in the household aged 60 or older\n/);
+  assert.match(app.prompts[0].detail, /Other fields: Student name and grade, Household size\./);
+  assert.doesNotMatch(JSON.stringify(app.prompts[0]), /Riley|2015|1958/, 'the prompt names fields, never members’ details');
+  // The profile's own age counts, worked out from the list, are counts by birth date too.
+  await app.request({ type: 'getFields', url: PANTRY, fields: ['householdChildren'] });
+  assert.equal(app.prompts.length, 2);
+  assert.match(app.prompts[1].detail, /^Children in household\n/);
+  // Iowa keeps its own trust rules: Always allow, no sensitive prompt.
+  assert.deepEqual(plain((await app.request({ type: 'getFields', fields: ['householdCount:0-5', 'householdChildren'] })).values), { 'householdCount:0-5': '1', householdChildren: '2' });
+  assert.equal(app.prompts.length, 2);
+  assert.equal(app.dataReads > 0, true);
+});
+
+test('without the household list, the manual counts are everyday answers and band counts have no answer', async () => {
+  const app = await desktop({ settings: trusted });
+  await app.invoke('saveProfile', { householdSize: '3', householdChildren: '1', householdAdults: '2', householdSeniors: '0' });
+  const { values } = await app.request({ type: 'getFields', url: PANTRY, fields: ['householdSize', 'householdChildren', 'householdAdults', 'householdSeniors', 'studentNameGrade'] });
+  assert.deepEqual(plain(values), { householdSize: '3', householdChildren: '1', householdAdults: '2', householdSeniors: '0' });
+  assert.equal(app.prompts.length, 0);
+  app.answer(async () => ({ response: 1 }));
+  assert.deepEqual(plain((await app.request({ type: 'getFields', url: PANTRY, fields: BANDS })).values), {}, 'no list: the applicant answers each band');
+});
+
+test('a household member without a birth date leaves every count by age unanswered; the list still wins over the manual counts', async () => {
+  const app = await desktop({ settings: trusted });
+  await app.invoke('saveProfile', listedHousehold({ 2: { birthDate: '' } }));
+  app.answer(async () => ({ response: 1 }));
+  const { values } = await app.request({ type: 'getFields', url: PANTRY, fields: [...BANDS, 'householdChildren', 'householdSize'] });
+  assert.deepEqual(plain(values), { householdSize: '4' }, 'not the stale manual count of 0 children');
+});
+
+test('the household list itself is never released, whatever asks for it', async () => {
+  const app = await desktop({ settings: trusted });
+  await app.invoke('saveProfile', listedHousehold());
+  await assert.rejects(app.request({ type: 'getFields', url: PANTRY, fields: ['householdMembers'] }), /doesn’t share/);
+  const reply = JSON.stringify(plain(await app.request({ type: 'getFields', url: PANTRY, fields: ['firstName', 'studentNameGrade'] })));
+  assert.doesNotMatch(reply, /Sam|Morgan|1958|2021|householdMembers/);
+});
+
+test('Laya’s sensitive prompt names household members’ birth dates when facts from them were read', async () => {
+  const app = await desktop({ laya: stubLaya(sixtyFromAge), settings: trusted });
+  await app.invoke('saveProfile', listedHousehold());
+  app.answer(async () => ({ response: 1 }));
+  await app.request(answerRequest([sixty]));
+  assert.equal(app.prompts.at(-1).title, 'Share sensitive details?');
+  assert.match(app.prompts.at(-1).detail, /^Date of birth, Household members’ birth dates\n/);
+});
+
+const SAVE = { type: 'saveFields', url: PANTRY };
+test('Save to My information saves an answer only after the app’s confirmation naming the field and its value', async () => {
+  const app = await desktop({ settings: trusted });
+  await app.invoke('saveProfile', { firstName: 'Synthetic', state: 'IA', householdVeteran: '' });
+  const before = (await app.request({ type: 'status' })).accessRevision;
+  app.answer(async () => ({ response: 1 }));
+  assert.deepEqual(plain(await app.request({ ...SAVE, fields: { addressLine2: ' Unit 5 ', householdVeteran: 'no' } })), { saved: ['addressLine2', 'householdVeteran'] });
+  const [prompt] = app.prompts;
+  assert.equal(prompt.title, 'Save to My information?');
+  assert.equal(prompt.message, 'Save these answers from https://pantry.example.org to My information?');
+  assert.match(prompt.detail, /^Apartment or unit: Unit 5\nAnyone in household a veteran: No\n\n/);
+  assert.deepEqual(plain(prompt.buttons), ['Cancel', 'Save']);
+  assert.equal(prompt.cancelId, 0);
+  const { profile } = plain(await app.invoke('getData'));
+  assert.equal(profile.addressLine2, 'Unit 5');
+  assert.equal(profile.householdVeteran, 'no');
+  assert.equal(profile.firstName, 'Synthetic', 'the rest of the profile stays as it was');
+  assert.ok((await app.request({ type: 'status' })).accessRevision > before, 'a saved change outdates earlier fill approvals');
+  assert.deepEqual(app.notifications.filter(([channel]) => channel === 'secondhand:profile-changed').map(([, value]) => plain(value)), [{ fields: ['addressLine2', 'householdVeteran'] }],
+    'My information hears which fields changed, never their values');
+  // Iowa's portal may save too.
+  assert.deepEqual(plain(await app.request({ type: 'saveFields', url: `${PORTAL_URL}/applyForBenefits/enterPersonalInfo`, fields: { county: 'Story' } })), { saved: ['county'] });
+  assert.equal(app.prompts.at(-1).message, 'Save this answer from Iowa’s application to My information?');
+});
+
+test('sensitive answers get the warning confirmation, as filling them does', async () => {
+  const app = await desktop({ settings: trusted });
+  app.answer(async () => ({ response: 1 }));
+  await app.request({ ...SAVE, fields: { birthDate: '1985-04-12', assetsOnHand: '250' } });
+  const [prompt] = app.prompts;
+  assert.equal(prompt.type, 'warning');
+  assert.equal(prompt.title, 'Save sensitive details to My information?');
+  assert.equal(prompt.defaultId, 0, 'Cancel is the default for sensitive details');
+  assert.match(prompt.detail, /Date of birth and Money on hand \(cash, checking, savings\) are sensitive\./);
+  assert.equal(plain(await app.invoke('getData')).profile.birthDate, '1985-04-12');
+});
+
+test('nothing is saved without the confirmation, on a locked app, from a site that isn’t on, or with a value the schema refuses', async () => {
+  const cancelled = await desktop({ settings: trusted });
+  cancelled.answer(async () => ({ response: 0 }));
+  await assert.rejects(cancelled.request({ ...SAVE, fields: { county: 'Story' } }), /cancelled/);
+  assert.equal(plain(await cancelled.invoke('getData')).profile.county, undefined);
+  assert.equal(cancelled.notifications.some(([channel]) => channel === 'secondhand:profile-changed'), false);
+
+  const app = await desktop({ settings: trusted });
+  app.answer(async () => ({ response: 1 }));
+  await assert.rejects(app.request({ ...SAVE, url: ANYWHERE, fields: { county: 'Story' } }), /isn’t trusted/);
+  for (const fields of [{ zip: 'ABCDE' }, { birthDate: '2999-01-01' }, { state: 'Iowa' }, { householdVeteran: 'maybe' }, { email: 'not an email' }]) {
+    await assert.rejects(app.request({ ...SAVE, fields }), error => Boolean(error.publicMessage), JSON.stringify(fields));
+  }
+  assert.equal(app.prompts.length, 0, 'a refused value is never offered for confirmation');
+  await app.invoke('lock');
+  await assert.rejects(app.request({ ...SAVE, fields: { county: 'Story' } }), /Unlock/);
+  assert.equal(app.prompts.length, 0);
+});
+
+test('an answer already saved, or a household count while the list sets it, is never overwritten from a page', async () => {
+  const app = await desktop({ settings: trusted });
+  await app.invoke('saveProfile', { ...listedHousehold(), county: 'Polk' });
+  app.answer(async () => ({ response: 1 }));
+  await assert.rejects(app.request({ ...SAVE, fields: { county: 'Story' } }), /already saved/);
+  await assert.rejects(app.request({ ...SAVE, fields: { householdChildren: '3' } }), /household list/);
+  assert.equal(app.prompts.length, 0);
+  const manual = await desktop({ settings: trusted });
+  manual.answer(async () => ({ response: 1 }));
+  assert.deepEqual(plain(await manual.request({ ...SAVE, fields: { householdChildren: '3' } })), { saved: ['householdChildren'] }, 'without a list, a count is saved like any answer');
+});
+
+test('a change while the confirmation is open cancels the save', async () => {
+  const app = await desktop({ settings: trusted });
+  let resolve;
+  app.answer(() => new Promise(done => { resolve = done; }));
+  const pending = app.request({ ...SAVE, fields: { county: 'Story' } });
+  await tick();
+  await assert.rejects(app.request({ ...SAVE, fields: { city: 'Ames' } }), /waiting for your approval/, 'one approval at a time');
+  await app.invoke('saveProfile', { firstName: 'Edited meanwhile' });
+  resolve({ response: 1 });
+  await assert.rejects(pending, /changed/);
+  assert.equal(plain(await app.invoke('getData')).profile.county, '');
+});
+
+test('the guided setup remembers how many of its six steps are done until it is finished', async () => {
+  const fresh = await desktop({ settings: trusted });
+  assert.equal(await fresh.invoke('setupProgress'), null, 'no setup under way');
+  assert.deepEqual(plain(await fresh.invoke('startSetup')), { step: 0, steps: 6 });
+  assert.deepEqual(fresh.writes.at(-1), { file: '/synthetic-local-data/setup-progress.json', json: { version: 1, step: 0 } });
+  assert.deepEqual(plain(await fresh.invoke('saveSetupProgress', 3)), { step: 3, steps: 6 });
+  assert.deepEqual(plain(await fresh.invoke('saveSetupProgress', 2)), { step: 3, steps: 6 }, 'going back keeps the steps already done');
+  assert.equal(await fresh.invoke('saveSetupProgress', 6), null, 'all six done: setup is finished');
+  assert.deepEqual(fresh.removed, ['/synthetic-local-data/setup-progress.json']);
+  for (const step of [-1, 7, 2.5, '3', null]) await assert.rejects(fresh.invoke('saveSetupProgress', step), /Request denied|step/, JSON.stringify(step));
+
+  const resumed = await desktop({ settings: trusted, setup: { version: 1, step: 3 } });
+  assert.deepEqual(plain(await resumed.invoke('setupProgress')), { step: 3, steps: 6 });
+  await resumed.invoke('lock');
+  await assert.rejects(resumed.invoke('setupProgress'), /Unlock/);
+  await assert.rejects(resumed.invoke('saveSetupProgress', 4), /Unlock/);
+  const finished = await desktop({ settings: trusted });
+  await assert.rejects(finished.invoke('saveSetupProgress', 2), /isn’t under way/);
+  const broken = await desktop({ settings: trusted, setup: '{"version":1,"step":"three"}' });
+  await assert.rejects(broken.invoke('setupProgress'), /setup progress/, 'an unreadable progress file fails loudly');
 });

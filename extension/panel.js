@@ -7,7 +7,7 @@
   const summary = globalThis.SecondHandSummary;
   // Must match BUILD in background.js: change both together. Chrome loads these pages
   // from disk right away but keeps running the old worker until SecondHand is reloaded.
-  const BUILD = '2026-10-03.2';
+  const BUILD = '2026-10-03.3';
   // The applicant's language: the choice saved in this extension's storage, else the browser's.
   let language = strings.language();
   const t = (key, params = {}) => strings.text(language, key, params);
@@ -299,6 +299,10 @@
     let page = null;
     // The questions the last Autofill on this page could have filled but had no saved answer for.
     let notSaved = [];
+    // Save to My information (#98): those questions on a general-engine page, by id and their own words, and
+    // whether the page holds an answer now. Never the answer itself: the worker reads it after the Save click.
+    let savable = [];
+    let savableSignature = '';
     let contextRevision = 0;
     let checklistSignature = '';
     let working = false;
@@ -406,13 +410,17 @@
       $('panel-autofill').textContent = t(autopilot ? 'panel.stopAutofill' : 'panel.autofill');
       $('panel-autofill').disabled = !target || (!fillable && !autopilot) || working;
       document.querySelectorAll('.checklist-item').forEach(button => { button.disabled = working || !target; });
+      document.querySelectorAll('.save-row button').forEach(button => { button.disabled = working || !target; });
       renderQuestionControls();
       renderSummary();
     }
     function clearPage() {
       fillable = false; autopilot = false; site = null; page = null; notSaved = []; checklistSignature = '';
+      savable = []; savableSignature = '';
       $('page-checklist').replaceChildren();
       $('checklist-section').hidden = true;
+      $('save-list').replaceChildren();
+      $('save-section').hidden = true;
       resetQuestions();
       resetSummary();
     }
@@ -448,6 +456,38 @@
       $('checklist-summary').textContent = t('checklist.summary', { done, total: entries.length });
       $('checklist-section').hidden = !entries.length;
     }
+    // One row per question with no saved answer: its own words, then Save to My information once the page holds an answer.
+    function renderSaves() {
+      const signature = JSON.stringify([language, savable]);
+      if (signature === savableSignature) return;
+      savableSignature = signature;
+      $('save-list').replaceChildren(...savable.map(item => {
+        const row = document.createElement('div');
+        row.className = 'checklist-item save-row'; row.dataset.saveId = item.id;
+        const copy = document.createElement('span'); copy.className = 'checklist-copy';
+        const label = document.createElement('span'); label.className = 'checklist-label'; label.dir = 'auto'; label.textContent = fixedText(item.label, 200);
+        copy.append(label);
+        row.append(copy);
+        if (item.answered) {
+          const button = document.createElement('button');
+          button.type = 'button'; button.className = 'button secondary'; button.textContent = t('save.button');
+          button.setAttribute('aria-label', t('save.buttonLabel', { label: fixedText(item.label, 200) }));
+          button.disabled = working || !target;
+          button.addEventListener('click', trusted(() => { if (!button.disabled) saveAnswer(item.id); }));
+          row.append(button);
+        } else {
+          const detail = document.createElement('span'); detail.className = 'checklist-detail'; detail.textContent = t('save.answerFirst');
+          copy.append(detail);
+        }
+        return row;
+      }));
+      $('save-section').hidden = !savable.length;
+    }
+    async function saveAnswer(id) {
+      const result = await act({ type: 'ui:saveAnswer', id, confirmed: true }, { key: 'save.saving' });
+      // Kept on screen like a change to all websites: until the tab changes or another action starts.
+      if (result?.saved === true) { notice = { message: { key: 'save.saved' }, error: false }; renderStatus(); await refresh(); }
+    }
     function render(state) {
       if (!state || typeof state !== 'object') throw keyedError('panel.pageUnreadable');
       page = state.page || {};
@@ -456,7 +496,10 @@
       autopilot = Boolean(state.autopilot);
       const result = state.result;
       notSaved = fieldKeys(result?.notSaved);
+      savable = (Array.isArray(state.savable) ? state.savable : []).filter(item => fieldKeys([item?.id]).length && typeof item.label === 'string' && typeof item.answered === 'boolean')
+        .slice(0, 40).map(({ id, label, answered }) => ({ id, label, answered }));
       renderChecklist();
+      renderSaves();
       const loading = target?.status === 'loading';
       if (site?.enabled && !site.ready) show({ key: loading ? 'panel.waitingLoad' : 'panel.reloadToRead' });
       else if (reported(result)) show(fromResult(result), result.state === 'error');
@@ -889,7 +932,7 @@
     function relabel() {
       applyStatic();
       $('language').value = language;
-      if (page) renderChecklist();
+      if (page) { renderChecklist(); renderSaves(); }
       renderStatus();
       renderDesktop();
       resetQuestions();

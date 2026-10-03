@@ -111,3 +111,67 @@ test('malformed saved values fail loudly', () => {
   assert.throws(() => buildFacts({ householdSize: '-1' }, { today: TODAY }), /householdSize/);
   assert.throws(() => buildFacts({}, { today: 'yesterday' }), /today/);
 });
+
+const SELF = '0f2c8d4e-1a3b-4c5d-8e6f-7a8b9c0d1e2f';
+const memberId = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+// The applicant (41 on TODAY), two children (11 and 5, the older a student in 5th grade) and a parent (67).
+const listed = (changes = {}) => ({ ...household, householdSize: '9', householdAdults: '9', householdChildren: '0', householdSeniors: '0',
+  householdMembers: [
+    { id: SELF, firstName: 'Avery', lastName: 'Example', birthDate: '1985-04-12', relationship: 'self', student: 'no', grade: '' },
+    { id: memberId(1), firstName: 'Riley', lastName: 'Example', birthDate: '2015-09-03', relationship: 'child', student: 'yes', grade: '5th' },
+    { id: memberId(2), firstName: 'Sam', lastName: 'Example', birthDate: '2021-02-14', relationship: 'child', student: 'no', grade: '' },
+    { id: memberId(3), firstName: 'Morgan', lastName: 'Sample', birthDate: '1958-11-20', relationship: 'parent', student: 'no', grade: '' }
+  ].map(member => ({ ...member, ...changes[member.firstName] })) });
+
+test('with a household list, the household facts come from it: counts, each person’s age, children’s ages, and students', () => {
+  const facts = byId(buildFacts(listed(), { today: TODAY }));
+  assert.equal(facts['household.size'], 'The household has 4 people.');
+  assert.equal(facts['household.adults'], 'The household has 1 adult aged 18 to 64.');
+  assert.equal(facts['household.children'], 'The household has 2 children under 18.');
+  assert.equal(facts['household.seniors'], 'The household has 1 person aged 65 or older.');
+  assert.equal(facts['household.ages'], 'The household members are 67, 41, 11 and 5 years old.');
+  assert.equal(facts['household.childAges'], 'The household has 2 children: ages 5 and 11.');
+  assert.equal(facts['household.students'], 'One household member is a student in 5th grade.');
+});
+
+test('household facts from birth dates are sensitive, as the applicant’s own birth date is; the size and students are not', () => {
+  const facts = Object.fromEntries(buildFacts(listed(), { today: TODAY }).map(fact => [fact.id, fact]));
+  for (const id of ['household.adults', 'household.children', 'household.seniors', 'household.ages', 'household.childAges']) {
+    assert.equal(facts[id].sensitive, true, id);
+    assert.deepEqual(facts[id].sources, ['householdMembers.birthDate'], id);
+  }
+  for (const id of ['household.size', 'household.students']) {
+    assert.equal(facts[id].sensitive, false, id);
+    assert.deepEqual(facts[id].sources, ['householdMembers'], id);
+  }
+  assert.ok(SENSITIVE_SOURCES.includes('householdMembers.birthDate'));
+  assert.equal(SENSITIVE_SOURCES.includes('householdMembers'), false);
+});
+
+test('a missing birth date leaves every age fact out; the size and students stay', () => {
+  const facts = byId(buildFacts(listed({ Sam: { birthDate: '' } }), { today: TODAY }));
+  assert.equal(facts['household.size'], 'The household has 4 people.');
+  for (const id of ['household.adults', 'household.children', 'household.seniors', 'household.ages', 'household.childAges']) assert.equal(facts[id], undefined, id);
+  assert.equal(facts['household.students'], 'One household member is a student in 5th grade.');
+});
+
+test('student facts say only what every member’s saved answer proves', () => {
+  const students = changes => byId(buildFacts(listed(changes), { today: TODAY }))['household.students'];
+  assert.equal(students({ Sam: { student: 'yes', grade: 'K' } }), '2 household members are students.');
+  assert.equal(students({ Riley: { student: 'no', grade: '' } }), 'Nobody in the household is a student.');
+  assert.equal(students({ Avery: { student: '' } }), undefined, 'an unanswered member leaves it unknown');
+  assert.equal(students({ Riley: { grade: '' } }), 'One household member is a student.');
+  assert.equal(students({ Riley: { grade: '3' } }), 'One household member is a student in grade 3.');
+  assert.equal(students({ Riley: { grade: 'K' } }), 'One household member is a student in kindergarten.');
+  assert.equal(students({ Riley: { grade: 'College' } }), 'One household member is a student (grade: College).');
+});
+
+test('a household with no children says so; a household list never puts a name in the facts', () => {
+  const facts = byId(buildFacts(listed({ Riley: { birthDate: '1990-01-01', student: 'no', grade: '' }, Sam: { birthDate: '1992-01-01' } }), { today: TODAY }));
+  assert.equal(facts['household.children'], 'The household has no children under 18.');
+  assert.equal(facts['household.childAges'], undefined);
+  const sheet = factsText(buildFacts({ ...listed(), county: 'Story' }, { today: TODAY }));
+  for (const name of ['Avery', 'Riley', 'Sam', 'Morgan', 'Example', 'Sample']) assert.equal(sheet.includes(name), false, name);
+  const fromFixture = factsText(buildFacts({ ...fixture, county: 'Story' }, { today: TODAY }));
+  for (const member of fixture.householdMembers) assert.equal(fromFixture.includes(member.firstName), false, member.firstName);
+});

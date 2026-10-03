@@ -8,7 +8,7 @@ const net = require('node:net');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const { FrameReader, frame, extensionFromOrigin, validateRequest, startBridge, relayRequest, runNativeHost, appLaunch, startApp, MAX_MESSAGE_BYTES } = require('../desktop/bridge.cjs');
-const { PORTAL_URL, PROFILE_FIELDS } = require('../shared/schema.cjs');
+const { PORTAL_URL, PROFILE_FIELDS, REQUEST_FIELDS } = require('../shared/schema.cjs');
 const EXTENSION = 'a'.repeat(32);
 
 test('native frames handle split headers, split UTF-8, and multiple messages', () => {
@@ -50,7 +50,9 @@ test('Chrome native origins and Iowa portal requests use strict allowlists', () 
   for (const fields of [[], ['password'], ['firstName', 'firstName'], [null]]) assert.throws(() => validateRequest({ id: 'x', type: 'getFields', url: PORTAL_URL, fields }), /profile fields/);
   // Whether an SSN is saved is asked for like any saved field, alone or with every other one.
   assert.deepEqual(validateRequest({ id: 'x', type: 'getFields', url: PORTAL_URL, fields: ['birthDate', 'hasSsn'] }).fields, ['birthDate', 'hasSsn']);
-  assert.equal(validateRequest({ id: 'x', type: 'getFields', url: PORTAL_URL, fields: [...PROFILE_FIELDS, 'hasSsn'] }).fields.length, PROFILE_FIELDS.length + 1);
+  assert.equal(validateRequest({ id: 'x', type: 'getFields', url: PORTAL_URL, fields: [...REQUEST_FIELDS] }).fields.length, REQUEST_FIELDS.length);
+  // The household list itself is never asked for: only the answers worked out from it.
+  assert.throws(() => validateRequest({ id: 'x', type: 'getFields', url: PORTAL_URL, fields: ['householdMembers'] }), /profile fields/);
   assert.throws(() => validateRequest({ id: 'x', type: 'status', profile: {} }), /Unexpected/);
   // The extension says nothing about its own build or files: the app updates its copy from its own bundle.
   assert.throws(() => validateRequest({ id: 'x', type: 'status', build: '2026-10-03.1' }), /Unexpected/);
@@ -335,4 +337,35 @@ test('without a running app, requests answer that SecondHand can’t be reached,
   assert.deepEqual(responses, [unreachable('status-1'), unreachable('show-1'),
     { id: 'bad-1', ok: false, error: 'Unexpected request field.' }, { id: 'bad-2', ok: false, error: 'Unsupported bridge request.' }]);
   assert.equal(launches, 0, 'only openApp starts the app');
+});
+
+test('field requests may name age-band counts and the student answer, read strictly; never the household list', () => {
+  const ask = fields => validateRequest({ id: 'x', type: 'getFields', url: 'https://pantry.example.org/intake', fields });
+  assert.deepEqual(ask(['householdCount:0-17', 'householdCount:18-59', 'householdCount:60+', 'studentNameGrade']).fields,
+    ['householdCount:0-17', 'householdCount:18-59', 'householdCount:60+', 'studentNameGrade']);
+  for (const fields of [['householdCount:10-5'], ['householdCount:05-10'], ['householdCount:121+'], ['householdCount:'], ['householdCount:0–5'], ['householdMembers'],
+    ['householdCount:0-5', 'householdCount:0-5']]) assert.throws(() => ask(fields), /profile fields/, JSON.stringify(fields));
+  const bands = Array.from({ length: 20 }, (_, n) => `householdCount:${n}+`);
+  assert.equal(ask([...REQUEST_FIELDS, ...bands]).fields.length, REQUEST_FIELDS.length + 20);
+  assert.throws(() => ask([...bands, 'householdCount:20+']), /profile fields/, 'at most 20 band counts in one request');
+});
+
+test('saveFields carries an https site and answers for saved profile fields only, each a short plain string', () => {
+  const save = (fields, extra = {}) => validateRequest({ id: 'x', type: 'saveFields', url: 'https://pantry.example.org/intake', fields, ...extra });
+  assert.deepEqual(save({ addressLine2: 'Unit 5' }).fields, { addressLine2: 'Unit 5' });
+  assert.deepEqual(validateRequest({ id: 'x', type: 'saveFields', url: `${PORTAL_URL}/applyForBenefits/enterPersonalInfo`, fields: { county: 'Story' } }).fields, { county: 'Story' });
+  assert.deepEqual(Object.keys(save({ city: 'Ames', zip: '50011', birthDate: '1985-04-12', householdVeteran: 'no' }).fields), ['city', 'zip', 'birthDate', 'householdVeteran']);
+  const refused = {
+    'no answers': {}, 'an array': [['city', 'Ames']], 'a string': 'city=Ames', 'nothing': null,
+    'a Social Security number': { ssn: '123-45-6789' }, 'a derived answer': { hasSsn: 'yes' }, 'a band count': { 'householdCount:0-5': '1' },
+    'the household list': { householdMembers: '[]' }, 'an unknown field': { password: 'secret' }, 'a composite': { fullName: 'Avery Example' },
+    'a number': { householdSize: 3 }, 'an empty answer': { city: '   ' }, 'a long answer': { city: 'x'.repeat(201) }, 'a control character': { city: 'Am\u0000es' },
+    'a nested value': { city: { name: 'Ames' } }, 'an inherited object': Object.create({ city: 'Ames' })
+  };
+  for (const [name, fields] of Object.entries(refused)) assert.throws(() => save(fields), /answers to save/, name);
+  for (const url of ['http://pantry.example.org/intake', 'https://user@pantry.example.org/', 'https://pantry.example.org:8443/', 'not a url']) {
+    assert.throws(() => validateRequest({ id: 'x', type: 'saveFields', url, fields: { city: 'Ames' } }), /https site/, url);
+  }
+  assert.throws(() => save({ city: 'Ames' }, { values: { city: 'Ames' } }), /Unexpected/);
+  assert.throws(() => save({ city: 'Ames' }, { confirmed: true }), /Unexpected/, 'a request can’t say it was confirmed: only the app asks');
 });
