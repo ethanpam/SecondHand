@@ -37,6 +37,7 @@ async function renderer(t, { initialSetup = null, ...overrides } = {}) {
     status: async () => status,
     getData: async () => structuredClone(database),
     onLocked: callback => { onLocked = callback; return () => {}; },
+    onUnlocked: () => () => {},
     unlock: async () => { status = { ...status, unlocked: true }; return status; },
     saveProfile: async profile => { database.profile = structuredClone(profile); return structuredClone(profile); },
     setupProgress: async () => structuredClone(setup.progress),
