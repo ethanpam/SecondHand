@@ -1340,7 +1340,7 @@ test('Laya’s match and answer land in the embedded form they came from', async
     suggestFields: request => ({ suggestions: { [request.fields[0].id]: 'email' } }),
     answerFields: (request, vault) => ({ answers: { [request.questions[0].id]: 'No' }, accessRevision: vault.accessRevision }) }) });
   const result = plain((await autofill(w)).data);
-  assert.deepEqual(layaCalls(w).map(call => [call.type, (call.fields || call.questions).map(item => item.id)]), [['answerFields', ['f4:sh-1-1']], ['suggestFields', ['f4:sh-1-0']]]);
+  assert.deepEqual(layaCalls(w).map(call => [call.type, (call.fields || call.questions).map(item => item.id)]), [['suggestFields', ['f4:sh-1-0']], ['answerFields', ['f4:sh-1-1']]]);
   assert.deepEqual(child.page.answered(), ['reach', 'sixty']);
   assert.equal(result.guessed, 2);
   assert.equal(w.content.find(call => call.type === 'secondhand:generic:fill').frameId, 4);
@@ -1367,23 +1367,38 @@ async function timedClick({ answerMs = 0, suggestMs = 0, approvalMs = 0, loadMs 
   return { w, budgets, result: plain((await autofill(w)).data) };
 }
 
-test('with a slow Laya, the choice questions are answered first and the text boxes get only what is left of the click’s budget', async () => {
-  const slow = await timedClick({ answerMs: 2200 });
-  assert.deepEqual(slow.budgets, [['answerFields', 3000], ['suggestFields', 800]], 'the text boxes get the 0.8 seconds the answers left');
+test('with a slow Laya, the text boxes are matched first and the choice questions get only what is left of the click’s budget', async () => {
+  const slow = await timedClick({ suggestMs: 2200 });
+  assert.deepEqual(slow.budgets, [['suggestFields', 3000], ['answerFields', 800]], 'the choice questions get the 0.8 seconds the matches left');
   assert.deepEqual(slow.w.page.answered(), ['name', 'reach', 'sixty']);
 
-  const spent = await timedClick({ answerMs: 3000 });
-  assert.deepEqual(spent.budgets, [['answerFields', 3000]], 'no time is left to match the text boxes');
-  assert.deepEqual(spent.w.page.answered(), ['name', 'sixty'], 'the choice question is still answered');
-  assert.deepEqual(spent.result.needYou, [idOf(spent.w, 'reach')], 'the text box stays with the applicant');
-  assert.equal(spent.w.nativeTypes().includes('suggestFields'), false);
+  const spent = await timedClick({ suggestMs: 3000 });
+  assert.deepEqual(spent.budgets, [['suggestFields', 3000]], 'no time is left to answer the choice question');
+  assert.deepEqual(spent.w.page.answered(), ['name', 'reach'], 'the text box is still matched');
+  assert.deepEqual(spent.result.needYou, [idOf(spent.w, 'sixty')], 'the choice question stays with the applicant');
+  assert.equal(spent.w.nativeTypes().includes('answerFields'), false);
+});
+
+test('a long wait in the answers’ own approval prompt never takes the text boxes’ time: they are matched before it', async () => {
+  const waited = await timedClick({ answerMs: 20000 });
+  assert.deepEqual(waited.budgets, [['suggestFields', 3000], ['answerFields', 3000]]);
+  assert.deepEqual(waited.w.page.answered(), ['name', 'reach', 'sixty']);
+});
+
+test('Laya that isn’t ready at the click’s first request is asked nothing more in that click', async () => {
+  const w = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...REACH }, { ...SIXTY }], desktop: { layaState: 'ready', values: SAVED, laya: {
+    answerFields: (request, vault) => ({ answers: { [request.questions[0].id]: 'No' }, accessRevision: vault.accessRevision }) } } });
+  const result = plain((await autofill(w)).data);
+  assert.deepEqual(w.nativeTypes().filter(type => type !== 'status'), ['warmLaya', 'suggestFields', 'getFields'], 'the text boxes’ request said "not ready", so the choice questions aren’t sent');
+  assert.deepEqual(w.page.answered(), ['name']);
+  assert.deepEqual(result.needYou, [idOf(w, 'reach'), idOf(w, 'sixty')]);
 });
 
 test('Laya gets one three-second budget per click: each request carries what is left, and loading the model and the applicant’s approval time never count', async () => {
-  const quick = await timedClick({ answerMs: 1200, approvalMs: 20000, loadMs: 6000 });
-  assert.deepEqual(quick.budgets, [['answerFields', 3000], ['suggestFields', 1800]],
-    'loading the model first (6 seconds) and a 20-second approval are not Laya’s answering time; the answers took 1.2 seconds');
-  assert.deepEqual(quick.w.nativeTypes().slice(0, 3), ['warmLaya', 'answerFields', 'suggestFields'], 'Laya is warmed before the click’s budget starts');
+  const quick = await timedClick({ suggestMs: 1200, approvalMs: 20000, loadMs: 6000 });
+  assert.deepEqual(quick.budgets, [['suggestFields', 3000], ['answerFields', 1800]],
+    'loading the model first (6 seconds) and a 20-second approval are not Laya’s time; the matches took 1.2 seconds');
+  assert.deepEqual(quick.w.nativeTypes().slice(0, 3), ['warmLaya', 'suggestFields', 'answerFields'], 'Laya is warmed before the click’s budget starts');
   assert.deepEqual(quick.w.page.answered(), ['name', 'reach', 'sixty']);
 
   // A new click starts a new budget.

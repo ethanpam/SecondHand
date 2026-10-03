@@ -144,6 +144,56 @@ test('Laya not ready fails loudly with its code; a timeout or the click’s budg
   assert.throws(() => createFieldAnswers({}), /Laya/);
 });
 
+// #90: a question costs one model pass per option, plus abstaining, and the model runs eight passes to a batch.
+const items = count => Array.from({ length: count }, (_, index) => `Item ${index + 1}`);
+const checklist = question('foods', 'Which of these does your household need? Check all that apply.', items(23), 'checkbox');
+const sized = question('size', 'How many people live in your household?', items(8), 'select');
+// Plays the model: veteran settles from everyday facts, 60-or-older only with the applicant's age, and the rest abstain.
+const settles = state => {
+  if (state.question === 'Is anyone in your household a veteran?') return state.candidate === 'No' ? 0.98 : 0.01;
+  if (state.question === 'Is anyone in your household 60 or older?') return state.facts.includes('41 years old') ? (state.candidate === 'No' ? 0.97 : 0.01) : (state.candidate === ABSTAIN ? 0.95 : 0.01);
+  return state.candidate === ABSTAIN ? 0.99 : 0.01;
+};
+
+test('noul-v1: the questions with the fewest options go first, each group by batches through both passes, so long checklists come last', async () => {
+  const laya = stubLaya(settles);
+  const questions = [checklist, question('sixty', 'Is anyone in your household 60 or older?'), sized, question('vet', 'Is anyone in your household a veteran?')];
+  const { answers, sensitive } = await answerer(laya).answer({ questions, profile, budgetMs });
+  assert.deepEqual(answers, { vet: 'No', sixty: 'No' });
+  assert.deepEqual(sensitive, ['sixty']);
+  const asked = laya.batches.map(batch => [batch[0].state.question, batch[0].state.facts === everything ? 'every fact' : 'everyday', batch.length]);
+  assert.deepEqual(asked, [
+    ['Is anyone in your household 60 or older?', 'everyday', 3], ['Is anyone in your household a veteran?', 'everyday', 3], ['Is anyone in your household 60 or older?', 'every fact', 3],
+    ['How many people live in your household?', 'everyday', 9], ['How many people live in your household?', 'every fact', 9],
+    [checklist.label, 'everyday', 24], [checklist.label, 'every fact', 24]
+  ], 'yes/no questions (one batch each), then 8 options (two batches), then 23 (three), each through both passes');
+});
+
+test('noul-v1: a long checklist first on the page doesn’t take the short questions’ time; it gets what they leave', async () => {
+  // Laya runs one pass at a time, 100 ms each, in the order asked.
+  let clock = 0;
+  let previous = Promise.resolve();
+  const laya = stubLaya(settles);
+  const answer = laya.decideBatch;
+  laya.decideBatch = items => {
+    previous = previous.then(() => new Promise(resolve => setImmediate(resolve))).then(() => { clock += 100 * items.length; return answer(items); });
+    return previous;
+  };
+  const questions = [checklist, question('sixty', 'Is anyone in your household 60 or older?'), question('vet', 'Is anyone in your household a veteran?')];
+  const { answers, sensitive } = await createFieldAnswers({ laya, today: TODAY, now: () => clock }).answer({ questions, profile, budgetMs });
+  assert.deepEqual(answers, { vet: 'No', sixty: 'No' }, 'both short questions are decided, the sensitive pass included, by 0.9 seconds');
+  assert.deepEqual(sensitive, ['sixty']);
+  assert.equal(laya.batches.filter(batch => batch[0].state.question === checklist.label).length, 1, 'the checklist starts with the 2.1 seconds left, and its 2.4 seconds run out');
+});
+
+test('noul-v1: answers come back in page order, the ones from everyday facts first, as when every question was one group', async () => {
+  const laya = stubLaya(state => state.question === checklist.label ? (state.candidate === 'Item 3' ? 0.97 : 0.01) : settles(state));
+  const questions = [question('sixty', 'Is anyone in your household 60 or older?'), checklist, question('vet', 'Is anyone in your household a veteran?')];
+  const { answers, sensitive } = await answerer(laya).answer({ questions, profile, budgetMs });
+  assert.deepEqual(Object.entries(answers), [['foods', 'Item 3'], ['vet', 'No'], ['sixty', 'No']]);
+  assert.deepEqual(sensitive, ['sixty']);
+});
+
 // A stand-in for desktop/laya.cjs running a choice-v2 model. `choose(state, choices)` plays the model: one probability per choice.
 function choiceLaya(choose = (_, choices) => choices.map((_, index) => index === choices.length - 1 ? 0.98 : 0.02 / (choices.length - 1))) {
   const batches = [];
@@ -227,6 +277,11 @@ test('choice-v2: a timeout keeps the requests already decided; a request past th
   const result = await createFieldAnswers({ laya: timed, today: TODAY, now: () => clock }).answer({ questions, profile, budgetMs });
   assert.deepEqual(Object.keys(result.answers), questions.slice(0, 8).map(item => item.id), 'the second request came back at 3.2 seconds');
   assert.equal(timed.batches.length, 2);
+
+  const pageOrder = choiceLaya(vet);
+  await answerer(pageOrder).answer({ questions: [checklist, question('vet', 'Is anyone in your household a veteran?')], profile, budgetMs });
+  assert.deepEqual(pageOrder.batches[0].items.map(item => item.state.question), [checklist.label, 'Is anyone in your household a veteran?'],
+    'choice-v2 scores every option of a question in one pass, so its questions stay in page order');
 
   const unknown = { ...choiceLaya(vet), format: async () => 'choice-v9' };
   await assert.rejects(answerer(unknown).answer({ questions, profile, budgetMs }), /choice-v9/);

@@ -90,6 +90,20 @@ async function inOrder(requests, more, use) {
   if (errors.length) throw errors.find(error => !timedOut(error)) ?? errors[0];
 }
 
+// noul-v1 (#90): the order a click asks its questions in, cheapest first. Each candidate is one pass
+// through the model and Laya runs BATCH_SIZE of them to a batch, so a question costs its batches.
+// `items` in groups of equal batches, fewest first; each group by candidates, then in page order.
+function byCost(items, candidates) {
+  const groups = new Map();
+  const sorted = items.map((item, index) => ({ item, index, count: candidates(item) })).sort((a, b) => a.count - b.count || a.index - b.index);
+  for (const { item, count } of sorted) {
+    const batches = Math.ceil(count / BATCH_SIZE);
+    if (!groups.has(batches)) groups.set(batches, []);
+    groups.get(batches).push(item);
+  }
+  return [...groups.values()];
+}
+
 // The confidence bars for the model Laya runs now; a format this app has no bars for fails loudly.
 async function barsFor(laya) {
   const format = await laya.format();
@@ -97,4 +111,4 @@ async function barsFor(laya) {
   return { format, bars: BARS[format] };
 }
 
-module.exports = { BARS, MIN_LEAD, BUDGET_MS, CHOICE_BATCH, score, scoreChoices, pick, budget, timedOut, inOrder, barsFor };
+module.exports = { BARS, MIN_LEAD, BUDGET_MS, CHOICE_BATCH, score, scoreChoices, pick, budget, timedOut, inOrder, byCost, barsFor };

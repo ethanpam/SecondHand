@@ -29,7 +29,7 @@ A `noul-v1` dataset asks every text box about every saved field, and every choic
 uv run --project ~/Projects/LayaStudio python ML_model/eval/decisions.py --runtime onnx --onnx <export> --dataset <noul-v1 dataset> --final --as-app-asks --task match --report <name>.json
 ```
 
-`page_latency.cjs` times one form page through the desktop's own request code (`desktop/field-answers.cjs`, then `desktop/field-suggestions.cjs` with the time left) and onnxruntime-node, as one Autofill click does, with the 1-minute load average beside each run:
+`page_latency.cjs` times one form page through the desktop's own request code (`desktop/field-suggestions.cjs`, then `desktop/field-answers.cjs` with the time left) and onnxruntime-node, as one Autofill click does, with the 1-minute load average beside each run:
 
 ```
 node ML_model/eval/page_latency.cjs --model <export> --format choice-v2 --form <form url> --runs 30 --out <name>.json
