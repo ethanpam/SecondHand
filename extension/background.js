@@ -858,8 +858,10 @@ async function layaAnswers(url, choices, budgetMs) {
 // matches and any AI guesses), then up to four fill passes so questions revealed by an answer are
 // filled too. Each pass plans the page again. Never continues, submits, or navigates.
 // Laya is asked unless this click already found it not ready (`laya: false`). Both of its requests
-// share the click's time budget: choice questions first (about 3 candidates each), then text boxes
-// (about 20 each) with what is left, so the cheaper questions aren't starved. Its text-box matches
+// share the click's time budget (#90): text boxes first, then choice questions with what is left.
+// A text box's candidates are short saved-field descriptions, while a choice question's each carry the
+// whole facts sheet, so the boxes take a fraction of the time and a long checklist can't starve them;
+// the desktop then decides the choice questions with the fewest options first. Its text-box matches
 // join the one request for saved values.
 async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, laya = null } = {}) {
   let revision = null;
@@ -893,16 +895,16 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       choices: english.choices.filter(question => SecondHandGeneric.layaQuestion(question) === 'choice') };
     const budget = layaBudget();
     // null: Laya isn't ready; undefined: the budget was spent before this request.
+    if (layaOn && prepared.boxes.length) {
+      const suggestions = await budget.use(budgetMs => layaSuggestions(url, prepared.boxes, budgetMs));
+      guard();
+      if (suggestions === null) layaOn = false;
+      if (suggestions) for (const [id, key] of suggestions) addLaya(id, { key });
+    }
     let answers;
     if (layaOn && prepared.choices.length) {
       answers = await budget.use(budgetMs => layaAnswers(url, prepared.choices, budgetMs));
       guard();
-      if (answers === null) layaOn = false;
-    }
-    if (layaOn && prepared.boxes.length) {
-      const suggestions = await budget.use(budgetMs => layaSuggestions(url, prepared.boxes, budgetMs));
-      guard();
-      if (suggestions) for (const [id, key] of suggestions) addLaya(id, { key });
     }
     const keys = [...new Set(SecondHandGeneric.requestKeys(initial.flatMap(frame => frame.planned.filter(item => item.key !== undefined).map(item => item.key))))];
     if (keys.some(key => typeof key !== 'string' || !KEY.test(key))) throw fault('worker.fieldRequestFailed');

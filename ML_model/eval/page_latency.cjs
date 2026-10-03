@@ -1,8 +1,8 @@
 'use strict';
 // How long the desktop app takes to decide one form page with a real Laya export, on this computer's
-// CPU (#65). It runs the desktop's own request code: desktop/field-answers.cjs for the page's choice
-// questions, then desktop/field-suggestions.cjs for its text boxes with the time left, as one Autofill
-// click does, through desktop/laya.cjs and onnxruntime-node in the model's own process. The page is
+// CPU (#65). It runs the desktop's own request code: desktop/field-suggestions.cjs for the page's text
+// boxes, then desktop/field-answers.cjs for its choice questions with the time left, as one Autofill
+// click does (#90), through desktop/laya.cjs and onnxruntime-node in the model's own process. The page is
 // one fictional household's first N questions on a real form, in form order, whether or not the
 // rules would fill them (the worst case). Each run records the 1-minute load average taken before it
 // and whether every question was decided within the click's 3-second budget.
@@ -70,9 +70,9 @@ async function main() {
     passes = 0;
     const load1m = os.loadavg()[0];
     const started = performance.now();
-    const answered = await answerer.answer({ questions: questions.choices, profile, budgetMs: BUDGET_MS });
+    const suggestions = await matcher.suggest(questions.boxes, { budgetMs: BUDGET_MS });
     const left = Math.floor(BUDGET_MS - (performance.now() - started));
-    const suggestions = left >= 1 ? await matcher.suggest(questions.boxes, { budgetMs: left }) : {};
+    const answered = left >= 1 ? await answerer.answer({ questions: questions.choices, profile, budgetMs: left }) : { answers: {}, sensitive: [] };
     const ms = performance.now() - started;
     const needed = passesNeeded(format, questions, profile, answered);
     return { ms: Math.round(ms), load1m: Math.round(load1m * 100) / 100, passes, needed, complete: passes === needed && ms <= BUDGET_MS,
