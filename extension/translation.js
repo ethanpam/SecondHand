@@ -6,12 +6,14 @@
   const STALL_MS = 20000; // a download with no progress for this long is reported as stuck
   const primary = tag => (typeof tag === 'string' ? tag.trim().toLowerCase().split(/[-_]/)[0] : '');
 
+  const languageName = (code, lang = 'en') => (typeof Intl !== 'undefined' && Intl.DisplayNames ? new Intl.DisplayNames([lang], { type: 'language' }).of(code) : code) || code;
+
   function create(scope = root, { stallMs = STALL_MS } = {}) {
     const translators = new Map(); // "en>es" -> Promise of Chrome's translator for that pair
     const translations = new Map(); // "en>es\ntext" -> text, for the page on screen
     let detector = null;
 
-    return {
+    const service = {
       // An explicit check for the API itself: when it is missing, the panel shows one plain line.
       supported: () => typeof scope.Translator !== 'undefined',
 
@@ -60,11 +62,105 @@
         return out;
       },
 
+      // Prepares form questions for Laya on this computer. Non-English labels and options
+      // are translated to English, and answers map back strictly by option position.
+      // Untranslatable questions remain with the applicant with a clear reason.
+      async forLaya({ boxes = [], choices = [] } = {}, declared = '') {
+        const passThrough = { boxes, choices, mapAnswers: entries => entries, reason: null, reasons: new Map() };
+        const texts = [...new Set([...boxes.map(b => b.label), ...choices.flatMap(c => [c.label, ...c.options])].filter(text => typeof text === 'string' && text.trim() !== ''))];
+        if (!texts.length) return passThrough;
+        const source = await service.pageLanguage(texts, declared);
+        if (!source || source === 'en') return passThrough;
+
+        const allIds = [...boxes.map(b => b.id), ...choices.map(c => c.id)];
+        if (typeof scope.Translator === 'undefined') {
+          const reason = { key: 'translate.missing', params: {} };
+          return { boxes: [], choices: [], mapAnswers: entries => entries, reason, reasons: new Map(allIds.map(id => [id, reason])) };
+        }
+        const sourceName = languageName(source, 'en');
+        const targetName = languageName('en', 'en');
+        let avail;
+        try {
+          avail = await service.availability(source, 'en');
+        } catch (error) {
+          const reason = { key: 'translate.failed', params: { detail: error.message } };
+          return { boxes: [], choices: [], mapAnswers: entries => entries, reason, reasons: new Map(allIds.map(id => [id, reason])) };
+        }
+        if (avail === 'unavailable') {
+          const reason = { key: 'translate.unavailable', params: { source: sourceName, target: targetName } };
+          return { boxes: [], choices: [], mapAnswers: entries => entries, reason, reasons: new Map(allIds.map(id => [id, reason])) };
+        }
+        if (avail !== 'available') {
+          const reason = { key: 'translate.needsDownload', params: { language: sourceName } };
+          return { boxes: [], choices: [], mapAnswers: entries => entries, reason, reasons: new Map(allIds.map(id => [id, reason])) };
+        }
+        try {
+          const trans = await service.translator(source, 'en');
+          const translatedMap = await service.translate(trans, source, 'en', texts);
+          const reasons = new Map();
+          const translatedBoxes = [];
+          for (const b of boxes) {
+            const translatedLabel = translatedMap.get(b.label);
+            if (typeof translatedLabel !== 'string' || translatedLabel.trim() === '') {
+              reasons.set(b.id, { key: 'translate.untranslated', params: {} });
+              continue;
+            }
+            translatedBoxes.push({ ...b, label: translatedLabel });
+          }
+          const translatedChoices = [];
+          for (const c of choices) {
+            const translatedLabel = translatedMap.get(c.label);
+            if (typeof translatedLabel !== 'string' || translatedLabel.trim() === '') {
+              reasons.set(c.id, { key: 'translate.untranslated', params: {} });
+              continue;
+            }
+            const translatedOptions = [];
+            let optionsOk = true;
+            for (const opt of c.options) {
+              const translatedOpt = translatedMap.get(opt);
+              if (typeof translatedOpt !== 'string' || translatedOpt.trim() === '') {
+                optionsOk = false;
+                break;
+              }
+              translatedOptions.push(translatedOpt);
+            }
+            if (!optionsOk) {
+              reasons.set(c.id, { key: 'translate.untranslated', params: {} });
+              continue;
+            }
+            if (new Set(translatedOptions).size !== translatedOptions.length) {
+              reasons.set(c.id, { key: 'translate.optionsCollided', params: {} });
+              continue;
+            }
+            translatedChoices.push({ ...c, label: translatedLabel, options: translatedOptions });
+          }
+          const mapAnswers = entries => {
+            if (!Array.isArray(entries)) return [];
+            const mapped = [];
+            for (const [id, answer] of entries) {
+              const original = choices.find(c => c.id === id);
+              const translated = translatedChoices.find(c => c.id === id);
+              if (!original || !translated) continue;
+              const idx = translated.options.indexOf(answer);
+              if (idx === -1) continue;
+              mapped.push([id, original.options[idx]]);
+            }
+            return mapped;
+          };
+          const reason = (!translatedBoxes.length && !translatedChoices.length && reasons.size) ? reasons.values().next().value : null;
+          return { boxes: translatedBoxes, choices: translatedChoices, mapAnswers, reason, reasons };
+        } catch (error) {
+          const reason = { key: 'translate.failed', params: { detail: error.message } };
+          return { boxes: [], choices: [], mapAnswers: entries => entries, reason, reasons: new Map(allIds.map(id => [id, reason])) };
+        }
+      },
+
       forget() { translations.clear(); }
     };
+    return service;
   }
 
-  const api = Object.freeze({ create, primary });
+  const api = Object.freeze({ create, primary, languageName });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandTranslation = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

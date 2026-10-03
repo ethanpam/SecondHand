@@ -7,6 +7,7 @@ if (typeof globalThis.SecondHandGeneric?.requestKeys !== 'function' || typeof gl
 if (typeof globalThis.SecondHandStrings?.english !== 'function' || typeof globalThis.SecondHandStrings.describeEnglish !== 'function') {
   throw new Error('SecondHand could not load strings.js. Reinstall the extension.');
 }
+try { if (typeof globalThis.SecondHandTranslation === 'undefined') importScripts('translation.js'); } catch {}
 // Must match BUILD in panel.js: change both together. The panel compares them to tell
 // when Chrome is still running an older worker than the pages it loaded from disk.
 const BUILD = '2026-10-03.1';
@@ -655,14 +656,15 @@ async function tallySite(tabId, frames) {
 }
 // A summary that says when Laya suggested the guesses.
 const withLaya = (summary, laya) => laya ? { key: 'result.suggestedByLaya', params: { summary } } : summary;
-function siteSummary(filled, guessed, needYou, next, laya) {
+const withReason = (summary, reason) => reason ? { key: 'result.withReason', params: { summary, reason } } : summary;
+function siteSummary(filled, guessed, needYou, next, laya, reason = null) {
   let summary;
   if (filled) {
     const key = guessed ? (needYou.length ? 'result.siteFilledGuessedNeedYou' : 'result.siteFilledGuessed') : needYou.length ? 'result.siteFilledNeedYou' : 'result.siteFilled';
     summary = { key, params: { count: filled, ...(guessed ? { guessed } : {}), ...(needYou.length ? { needYou: needYou.length } : {}) } };
   } else if (needYou.length) summary = { key: 'result.nothingMatchesNeedYou', params: { count: needYou.length } };
   else summary = { key: next ? 'result.nothingToFillNext' : 'result.nothingToFill', params: {} };
-  const shown = withLaya(summary, laya);
+  const shown = withReason(withLaya(summary, laya), reason);
   return say(shown.key, shown.params);
 }
 
@@ -832,16 +834,22 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       layaOn = await layaReady();
       guard();
     }
+    const service = typeof globalThis.SecondHandTranslation?.forLaya === 'function' ? globalThis.SecondHandTranslation :
+      typeof globalThis.SecondHandTranslation?.create === 'function' ? globalThis.SecondHandTranslation.create() : null;
+    const prepared = service && layaOn && (open.boxes.length || open.choices.length)
+      ? await service.forLaya(open)
+      : { boxes: open.boxes, choices: open.choices, mapAnswers: entries => entries, reason: null };
+    guard();
     const budget = layaBudget();
     // null: Laya isn't ready; undefined: the budget was spent before this request.
     let answers;
-    if (layaOn && open.choices.length) {
-      answers = await budget.use(budgetMs => layaAnswers(url, open.choices, budgetMs));
+    if (layaOn && prepared.choices.length) {
+      answers = await budget.use(budgetMs => layaAnswers(url, prepared.choices, budgetMs));
       guard();
       if (answers === null) layaOn = false;
     }
-    if (layaOn && open.boxes.length) {
-      const suggestions = await budget.use(budgetMs => layaSuggestions(url, open.boxes, budgetMs));
+    if (layaOn && prepared.boxes.length) {
+      const suggestions = await budget.use(budgetMs => layaSuggestions(url, prepared.boxes, budgetMs));
       guard();
       if (suggestions) for (const [id, key] of suggestions) addLaya(id, { key });
     }
@@ -861,7 +869,7 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
     if (answers?.entries.length) {
       if (revision !== null && answers.revision !== revision) throw fault('worker.accessChanged');
       revision = answers.revision;
-      for (const [id, option] of answers.entries) addLaya(id, { option });
+      for (const [id, option] of prepared.mapAnswers(answers.entries)) addLaya(id, { option });
     }
     let filled = 0, placedByLaya = 0;
     const needYou = [];
@@ -906,7 +914,7 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       for (const [key, id] of refused) if (!missing.includes(id) && !plan.matched.some(field => field.key === key)) missing.push(id);
       needYou.push(...missing.map(id => prefix ? `f${frameId}:${id}` : id));
     }
-    return { filled, needYou, laya: placedByLaya };
+    return { filled, needYou, laya: placedByLaya, reason: prepared.reason };
   } finally { values = null; }
 }
 
@@ -937,10 +945,10 @@ async function fillSiteOnce(tabId, url, guesses) {
       const hosts = pending.map(frame => new URL(frame.origin).hostname).join(', ');
       return siteResult('waiting', say('worker.formInsideFrames', { hosts }));
     }
-    const { needYou, laya: suggested } = await fillPlan(tabId, url, frames, { prefix: true, laya });
+    const { needYou, laya: suggested, reason } = await fillPlan(tabId, url, frames, { prefix: true, laya });
     const tally = await tallySite(tabId, frames);
     const filled = tally.rule + tally.guess;
-    return siteResult('done', siteSummary(filled, tally.guess, needYou, tally.next, suggested), { filled, guessed: tally.guess, needYou, ...(suggested ? { laya: suggested } : {}) });
+    return siteResult('done', siteSummary(filled, tally.guess, needYou, tally.next, suggested, reason), { filled, guessed: tally.guess, needYou, ...(suggested ? { laya: suggested } : {}) });
   } catch (error) {
     const { state, ...message } = failed(error);
     return siteResult(state, message);
@@ -951,8 +959,8 @@ async function fillSiteOnce(tabId, url, guesses) {
 async function fillIowaGeneral(tabId, state, plan, guard, laya = null) {
   const { pageKey } = state.page;
   try {
-    const { filled, needYou, laya: suggested } = await fillPlan(tabId, state.url, [{ frameId: 0, plan }], { guard, laya });
-    return { state: 'done', filled, needYou, ...say('result.thenTodo', { summary: withLaya(filledSummary(filled, needYou), suggested), todo: { key: GENERAL_TODO, params: {} } }),
+    const { filled, needYou, laya: suggested, reason } = await fillPlan(tabId, state.url, [{ frameId: 0, plan }], { guard, laya });
+    return { state: 'done', filled, needYou, ...say('result.thenTodo', { summary: withReason(withLaya(filledSummary(filled, needYou), suggested), reason), todo: { key: GENERAL_TODO, params: {} } }),
       todo: english(GENERAL_TODO), todoKey: GENERAL_TODO, todoParams: {}, pageKey, ...(suggested ? { laya: suggested } : {}) };
   } catch (error) {
     return { ...failed(error), filled: 0, needYou: [], pageKey };

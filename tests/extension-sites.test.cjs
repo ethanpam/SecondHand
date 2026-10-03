@@ -9,6 +9,7 @@ const { JSDOM } = require('jsdom');
 const adapter = require('../extension/iowa-adapter.js');
 const strings = require('../extension/strings.js');
 const forms = require('./fixtures/pantry-forms.cjs');
+const translation = require('../extension/translation.js');
 
 // Values created inside the worker's vm context have foreign prototypes.
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -93,7 +94,7 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
   };
 }
 
-function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSites = false, allGranted = allSites, desktop = {}, fields = pantryFields(), next, duringGetFields, duringStatus, frames = [], plan, keepAccess = false, discoveryError = false, topError, framesReply, pageText = { lang: 'en', text: '' }, clock, openTabs } = {}) {
+function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSites = false, allGranted = allSites, desktop = {}, fields = pantryFields(), next, duringGetFields, duringStatus, frames = [], plan, keepAccess = false, discoveryError = false, topError, framesReply, pageText = { lang: 'en', text: '' }, clock, openTabs, translationService = translation } = {}) {
   const tab = { id: 7, active: true, url };
   const log = [], native = [], content = [], injected = [], opened = [];
   const permissions = new Set([...(granted ? [`${ORIGIN}/*`] : []), ...(allGranted ? [ALL] : [])]);
@@ -236,7 +237,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
   };
   // A test may run the worker's clock itself: `clock.now` is what Date.now() returns.
   vm.runInNewContext(source('background.js'),
-    { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console,
+    { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, SecondHandTranslation: translationService, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console,
       ...(clock ? { Date: { now: () => clock.now } } : {}) });
   const send = (message, sender) => new Promise(resolve => { if (!listener(message, sender, resolve)) resolve(undefined); });
   // Whether Chrome lets SecondHand read this address.
@@ -1800,4 +1801,75 @@ test('when SecondHand is turned off for the page, its card goes and the page ans
   await wait(CHECK_WAIT);
   assert.equal(page.host(), null, 'nothing brings it back');
   assert.deepEqual(page.calls, []);
+});
+
+test('non-English form questions are translated before asking Laya and answers map back by option position', async () => {
+  const dictionary = new Map([
+    ['¿Tiene 60 años o más?', 'Is anyone in your household 60 or older?'],
+    ['Sí', 'Yes'],
+    ['No', 'No']
+  ]);
+  const spanishScope = {
+    LanguageDetector: {
+      availability: async () => 'available',
+      create: async () => ({
+        detect: async () => [{ detectedLanguage: 'es', confidence: 0.95 }]
+      })
+    },
+    Translator: {
+      availability: async () => 'available',
+      create: async () => ({
+        translate: async text => dictionary.get(text) || text
+      })
+    }
+  };
+  let answerRequest;
+  const sixtySpanish = { name: 'sixty', label: '¿Tiene 60 años o más?', type: 'radio', options: ['Sí', 'No'], required: true };
+  const w = siteWorker({
+    enabled: true,
+    fields: [{ name: 'name', key: 'fullName' }, sixtySpanish],
+    translationService: translation.create(spanishScope),
+    desktop: layaDesktop({
+      answerFields: (request, vault) => {
+        answerRequest = request;
+        return { answers: { [request.questions[0].id]: 'No' }, accessRevision: vault.accessRevision };
+      }
+    })
+  });
+  const result = plain((await autofill(w)).data);
+  // Laya saw the translated English question and options
+  assert.equal(answerRequest.questions[0].label, 'Is anyone in your household 60 or older?');
+  assert.deepEqual(answerRequest.questions[0].options, ['Yes', 'No']);
+  // But the filled assignment used the original Spanish option 'No'
+  assert.deepEqual(w.content.find(call => call.type === 'secondhand:generic:fill').assignments,
+    [{ id: 'sh-1-0', key: 'fullName', guessed: false }, { id: 'sh-1-1', option: 'No', guessed: true }]);
+  assert.deepEqual(w.page.answered(), ['name', 'sixty']);
+  assert.equal(result.filled, 2);
+  assert.equal(result.guessed, 1);
+});
+
+test('if translation needs download or is unavailable, non-English questions stay under need you with a clear reason', async () => {
+  const needsDownloadScope = {
+    LanguageDetector: {
+      availability: async () => 'available',
+      create: async () => ({
+        detect: async () => [{ detectedLanguage: 'es', confidence: 0.95 }]
+      })
+    },
+    Translator: {
+      availability: async () => 'downloadable'
+    }
+  };
+  const sixtySpanish = { name: 'sixty', label: '¿Tiene 60 años o más?', type: 'radio', options: ['Sí', 'No'], required: true };
+  const w = siteWorker({
+    enabled: true,
+    fields: [{ name: 'name', key: 'fullName' }, sixtySpanish],
+    translationService: translation.create(needsDownloadScope),
+    desktop: layaDesktop()
+  });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.filled, 1);
+  assert.equal(result.guessed, 0);
+  assert.deepEqual(result.needYou, [idOf(w, 'sixty')]);
+  assert.match(result.message, /Chrome needs to download Spanish once to translate these questions/);
 });
