@@ -13,7 +13,7 @@
     "test": "node --test tests/*.test.cjs",
     "check": "node scripts/check.cjs",
     "test:ui": "node scripts/smoke-ui.cjs",
-    "test:extension": "node scripts/smoke-extension.cjs",
+    "test:extension": "node scripts/smoke-extension.cjs && node scripts/smoke-all-websites.cjs",
     "test:translation": "node scripts/smoke-translation.cjs",
     "test:summary": "node scripts/smoke-summary.cjs",
     "test:laya": "node scripts/smoke-laya.cjs",
