@@ -1,13 +1,25 @@
 (function () {
   'use strict';
-  // Runs only on https sites the user turned on. The widget and the worker do the
-  // deciding; this script plans, fills, and focuses fields, and answers with field
-  // metadata only. Values arrive for one fill and are never sent back.
+  // Runs only on https sites that are on: one the user turned on by itself, or every site with
+  // SecondHand on all websites. The widget and the worker do the deciding; this script plans,
+  // fills, and focuses fields, and answers with field metadata only. Values arrive for one fill
+  // and are never sent back. The card shows only while the page, or a form embedded in it, has a
+  // form SecondHand can help with.
   const engine = globalThis.SecondHandGeneric;
+  // One copy per frame, even when two registrations match the page.
   if (location.protocol !== 'https:' || !engine || globalThis.secondHandGenericInstalled) return;
   globalThis.secondHandGenericInstalled = true;
+  const top = window === window.top;
 
   let panelHost = null;
+  // Whether this frame's page has a form SecondHand can help with, and on the top page, whether a form
+  // embedded in it does. After a page change, the check waits a moment so a burst of changes is one check.
+  let helps = false;
+  let framesHelp = false;
+  let checkTimer = null;
+  const CHECK_MS = 500;
+  // SecondHand was turned off for this page: its card is gone and nothing more is answered.
+  let off = false;
   const strings = value => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
   // The widget's frame is as wide as the widget measured itself, never past 272px or the screen.
   const fits = width => Number.isInteger(width) && width > 0 && width <= 1000;
@@ -26,7 +38,7 @@
   }
 
   function ensurePanel() {
-    if (window !== window.top || !document.body) return;
+    if (!top || !document.body) return;
     if (!panelHost) {
       panelHost = document.createElement('div');
       panelHost.setAttribute('data-secondhand-assistant', '');
@@ -63,16 +75,58 @@
     };
   }
 
-  if (window === window.top) {
-    ensurePanel();
-    document.addEventListener('DOMContentLoaded', ensurePanel, { once: true });
-    // Pages that rebuild their body (single-page forms) get the widget back.
-    const watch = setInterval(ensurePanel, 1000);
-    window.addEventListener('pagehide', () => clearInterval(watch), { once: true });
+  function placeCard() {
+    if (!top || off) return;
+    if (helps || framesHelp) ensurePanel();
+    else panelHost?.remove();
+  }
+  // The top page places its card; an embedded frame tells the worker, which tells the top page.
+  function check() {
+    checkTimer = null;
+    if (off) return;
+    const now = engine.offers(document) === true;
+    const changed = now !== helps;
+    helps = now;
+    if (top) placeCard();
+    else if (changed) chrome.runtime.sendMessage({ type: 'secondhand:generic:form', helps });
+  }
+  function stop() {
+    clearTimeout(checkTimer);
+    clearInterval(watch);
+    observer.disconnect();
   }
 
+  check();
+  // A form embedded before this page loaded was reported to the worker already.
+  if (top) chrome.runtime.sendMessage({ type: 'secondhand:generic:form', helps }).then(reply => { framesHelp = reply?.frames === true; placeCard(); });
+  document.addEventListener('DOMContentLoaded', check, { once: true });
+  // Forms that load late or change: check again once the page settles. SecondHand's own card doesn't count.
+  const observer = new MutationObserver(records => {
+    if (off || checkTimer || records.every(record => panelHost && (record.target === panelHost || panelHost.contains(record.target)))) return;
+    checkTimer = setTimeout(check, CHECK_MS);
+  });
+  observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true });
+  // Pages that rebuild their body (single-page forms) get the widget back.
+  const watch = top ? setInterval(placeCard, 1000) : null;
+  window.addEventListener('pagehide', () => {
+    stop();
+    if (!top && helps && !off) chrome.runtime.sendMessage({ type: 'secondhand:generic:form', helps: false });
+  }, { once: true });
+
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
-    if (sender.id !== chrome.runtime.id || !message || typeof message !== 'object') return;
+    if (off || sender.id !== chrome.runtime.id || !message || typeof message !== 'object') return;
+    if (message.type === 'secondhand:generic:off') {
+      off = true;
+      stop();
+      panelHost?.remove();
+      panelHost = null;
+      return;
+    }
+    if (message.type === 'secondhand:generic:formFrames' && typeof message.helps === 'boolean' && top) {
+      framesHelp = message.helps;
+      placeCard();
+      return;
+    }
     try {
       if (message.type === 'secondhand:generic:frames' && window === window.top) {
         const origins = new Set();
