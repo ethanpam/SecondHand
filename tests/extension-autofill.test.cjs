@@ -133,8 +133,9 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
               const reply = data => onMessage({ id: request.id, ok: true, data });
               const fail = error => onMessage({ id: request.id, ok: false, error });
               if (request.type === 'status') return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: 0, ...(vault.layaState ? { laya: { state: vault.layaState } } : {}),
-                ...(vault.extension ? { extension: structuredClone(vault.extension) } : {}) });
+                ...(vault.extension ? { extension: structuredClone(vault.extension) } : {}), ...(vault.touchId ? { touchId: vault.touchId } : {}) });
               if (request.type === 'showApp') return reply({ shown: true });
+              if (request.type === 'unlockWithTouchId' && vault.touchIdUnlock) return reply(structuredClone(vault.touchIdUnlock));
               if (request.type === 'openApp') return vault.openError ? fail(vault.openError) : reply(vault.opened || { opened: 'shown' });
               if (request.type === 'recordProgress') return reply({ recorded: true });
               if (request.type === 'saveFields') return reply({ saved: Object.keys(request.fields) });
@@ -460,6 +461,36 @@ test('desktop status, showApp, and focusField pass through; guided and manual-fi
   assert.deepEqual(plain((await w.send({ type: 'ui:desktopStatus' }, noTab)).data), { connected: true, unlocked: true, laya: 'unavailable', allSites: false });
   assert.deepEqual(plain((await w.send({ type: 'ui:showApp', confirmed: true }, noTab)).data), { shown: true });
   assert.equal(await w.send({ type: 'ui:pageState' }, noTab), undefined);
+});
+
+test('the side panel can ask the app to unlock with Touch ID; only whether it unlocked, or why not, comes back', async () => {
+  const w = worker({ desktop: { unlocked: false, touchId: 'ready', touchIdUnlock: { unlocked: true } } });
+  assert.deepEqual(plain((await w.panel({ type: 'ui:desktopStatus' })).data), { connected: true, unlocked: false, laya: 'unavailable', touchId: 'ready', allSites: false });
+  assert.deepEqual(plain((await w.panel({ type: 'ui:unlockWithTouchId', confirmed: true })).data), { unlocked: true });
+  const sent = w.calls.native.find(call => call.type === 'unlockWithTouchId');
+  assert.deepEqual(Object.keys(sent).sort(), ['id', 'type'], 'nothing but the request itself goes to the app');
+  for (const reason of ['off', 'password', 'cancelled']) {
+    const refused = worker({ desktop: { unlocked: false, touchId: 'ready', touchIdUnlock: { unlocked: false, reason } } });
+    assert.deepEqual(plain((await refused.panel({ type: 'ui:unlockWithTouchId', confirmed: true })).data), { unlocked: false, reason }, reason);
+  }
+  for (const odd of [{ unlocked: false, reason: 'later' }, { unlocked: false }, { unlocked: 'yes' }, { unlocked: true, reason: 'off' }]) {
+    const reply = await worker({ desktop: { unlocked: false, touchId: 'ready', touchIdUnlock: odd } }).panel({ type: 'ui:unlockWithTouchId', confirmed: true });
+    assert.equal(reply.ok, false, JSON.stringify(odd));
+    assert.equal(reply.errorKey, 'worker.desktopUnexpected', JSON.stringify(odd));
+  }
+  // Only a click in the side panel asks: not the page's widget, and not without a click.
+  assert.equal(await w.launcher({ type: 'ui:unlockWithTouchId', confirmed: true }), undefined);
+  assert.equal(await w.panel({ type: 'ui:unlockWithTouchId' }), undefined);
+  assert.equal(w.calls.native.filter(call => call.type === 'unlockWithTouchId').length, 1);
+  const closed = await worker({ desktop: { reachable: false } }).panel({ type: 'ui:unlockWithTouchId', confirmed: true });
+  assert.equal(closed.errorKey, 'worker.desktopOffline');
+});
+
+test('desktop status passes on Touch ID’s state only as ready, password or off', async () => {
+  for (const touchId of ['ready', 'password', 'off']) {
+    assert.equal(plain((await worker({ desktop: { unlocked: false, touchId } }).panel({ type: 'ui:desktopStatus' })).data).touchId, touchId);
+  }
+  assert.equal((await worker({ desktop: { unlocked: false, touchId: 'maybe' } }).panel({ type: 'ui:desktopStatus' })).ok, false, 'a state SecondHand doesn’t know is an error, not a guess');
 });
 
 // What a native host answers when the desktop app isn't running: this host's code, and the fixed
