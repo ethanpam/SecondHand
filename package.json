@@ -20,20 +20,28 @@
     "test:extension:video": "node scripts/qa-extension-video.cjs",
     "test:native": "node tests/desktop-native-smoke.cjs",
     "extension:zip": "node scripts/zip-extension.cjs",
-    "dist:win": "node scripts/build-native-host.cjs && electron-builder --win nsis --x64 --publish never",
-    "dist:mac": "electron-builder --mac dmg --arm64 --x64 --publish never",
-    "dist:mac:arm64": "electron-builder --mac dmg --arm64 --publish never",
-    "dist:mac:x64": "electron-builder --mac dmg --x64 --publish never",
-    "release:checksums": "node scripts/release-checksums.cjs"
+    "dist:win": "npm run ocr:prepare && node scripts/build-native-host.cjs && electron-builder --win nsis --x64 --publish never",
+    "dist:mac": "npm run ocr:prepare && electron-builder --mac dmg --arm64 --x64 --publish never",
+    "dist:mac:arm64": "npm run ocr:prepare && electron-builder --mac dmg --arm64 --publish never",
+    "dist:mac:x64": "npm run ocr:prepare && electron-builder --mac dmg --x64 --publish never",
+    "release:checksums": "node scripts/release-checksums.cjs",
+    "ocr:prepare": "node scripts/prepare-ocr-assets.cjs",
+    "prestart": "npm run ocr:prepare",
+    "predev": "npm run ocr:prepare",
+    "test:ocr": "npm run ocr:prepare && node scripts/smoke-ocr.cjs",
+    "test:ocr:ui": "npm run ocr:prepare && node scripts/smoke-document-ui.cjs"
   },
   "dependencies": {
     "onnxruntime-node": "1.30.0"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
+    "@tesseract.js-data/eng": "1.0.0",
     "electron": "44.4.5",
     "electron-builder": "26.15.3",
-    "jsdom": "30.1.1"
+    "jsdom": "30.1.1",
+    "pdfjs-dist": "6.3.289",
+    "tesseract.js": "7.0.0"
   },
   "build": {
     "appId": "org.secondhand.desktop",
@@ -43,7 +51,10 @@
     "icon": "desktop/icon.png",
     "files": ["desktop/**/*", "renderer/**/*", "shared/**/*", "package.json"],
     "asarUnpack": ["node_modules/onnxruntime-node/bin/**"],
-    "extraResources": [{ "from": "extension", "to": "extension" }],
+    "extraResources": [
+      { "from": "extension", "to": "extension" },
+      { "from": "build/ocr", "to": "ocr" }
+    ],
     "win": {
       "target": "nsis",
       "executableName": "secondHand",
