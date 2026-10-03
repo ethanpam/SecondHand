@@ -1,0 +1,273 @@
+{
+  "machine": "Apple M4 Max, 14 cores",
+  "platform": "darwin 25.5.0",
+  "node": "v26.4.0",
+  "model": "<LayaStudio>/workspace/exports/round2-lora-proper-1790530553-onnx-int8",
+  "format": "noul-v1",
+  "form": "https://uticafoodpantry.org/wp-content/uploads/2022/06/ClientIntakeForm.pdf",
+  "household": 0,
+  "questions": 20,
+  "choiceQuestions": 6,
+  "textBoxes": 14,
+  "budgetMs": 3000,
+  "loadMs": 476,
+  "firstPage": {
+    "ms": 3326,
+    "load1m": 4.23,
+    "passes": 9,
+    "needed": 23,
+    "complete": false,
+    "filled": 0
+  },
+  "p50Ms": 3234,
+  "p95Ms": 3295,
+  "minMs": 3040,
+  "maxMs": 3296,
+  "load1mRange": [
+    4.23,
+    6.81
+  ],
+  "completeRuns": 0,
+  "runs": [
+    {
+      "ms": 3181,
+      "load1m": 4.23,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3209,
+      "load1m": 4.53,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3040,
+      "load1m": 4.73,
+      "passes": 8,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3287,
+      "load1m": 4.73,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3257,
+      "load1m": 5.63,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3235,
+      "load1m": 5.63,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3234,
+      "load1m": 5.98,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3205,
+      "load1m": 6.06,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3291,
+      "load1m": 6.06,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3202,
+      "load1m": 6.14,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3170,
+      "load1m": 6.2,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3272,
+      "load1m": 6.2,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3266,
+      "load1m": 6.27,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3228,
+      "load1m": 6.41,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3279,
+      "load1m": 6.41,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3266,
+      "load1m": 6.45,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3235,
+      "load1m": 6.5,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3227,
+      "load1m": 6.5,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3196,
+      "load1m": 6.54,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3296,
+      "load1m": 6.54,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3250,
+      "load1m": 6.57,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3208,
+      "load1m": 6.61,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3242,
+      "load1m": 6.61,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3238,
+      "load1m": 6.64,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3295,
+      "load1m": 6.67,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3217,
+      "load1m": 6.67,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3220,
+      "load1m": 6.77,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3265,
+      "load1m": 6.79,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3233,
+      "load1m": 6.79,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    },
+    {
+      "ms": 3225,
+      "load1m": 6.81,
+      "passes": 9,
+      "needed": 23,
+      "complete": false,
+      "filled": 0
+    }
+  ]
+}
