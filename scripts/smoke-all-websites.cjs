@@ -4,8 +4,8 @@
 // so a first launch of a temporary copy of the extension lists https://*/* (and one synthetic site turned
 // on by itself) as required host permissions, which Chrome grants at load. The second launch, on the same
 // profile, uses the shipped manifest unchanged: https://*/* is optional there and already granted, so the
-// side panel's own chrome.permissions.request in the click resolves without a prompt. Everything else is
-// SecondHand's own path. Native desktop replies are DevTools stubs; fixtures and profile data are
+// side panel's own chrome.permissions.request in the click resolves without a prompt, as it does for a
+// person who granted it before. Everything else is SecondHand's own path. Native desktop replies are DevTools stubs; fixtures and profile data are
 // synthetic, DNS is disabled, and nothing is ever submitted.
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
@@ -21,6 +21,7 @@ const WIC = 'https://wic.example.org/apply';
 const SEARCH = 'https://search.example.org/';
 const FORMS = 'https://forms.example.net/embed';
 const EMBEDDING = 'https://pantry.example.org/sign-up';
+const NEVER = 'https://never.example.net/apply';
 const IOWA_HOST = 'https://hhsservices.iowa.gov/*';
 const en = (key, params) => strings.text('en', key, params);
 
@@ -38,7 +39,8 @@ const pages = {
     `<iframe src="${FORMS}" title="Embedded sign-up" style="width:420px;height:180px;border:1px solid #ced7c5"></iframe>`),
   [EMBEDDING]: formPage('Sign up below', `<iframe src="${FORMS}" title="Embedded sign-up" style="width:420px;height:180px;border:1px solid #ced7c5"></iframe>`),
   [FORMS]: formPage('Embedded sign-up', '<form><label for="city">City</label><input id="city" name="city"><button type="submit">Submit</button></form>'),
-  [SEARCH]: formPage('Find a pantry', '<form role="search"><input type="search" name="q" aria-label="Search"><button>Search</button></form>')
+  [SEARCH]: formPage('Find a pantry', '<form role="search"><input type="search" name="q" aria-label="Search"><button>Search</button></form>'),
+  [NEVER]: formPage('Never trusted', '<form><label for="first">First name</label><input id="first" name="first"><button type="submit">Submit</button></form>')
 };
 
 // The desktop app as the worker sees it over native messaging, with Always allow on. It keeps its own
@@ -53,6 +55,7 @@ async function installDesktop(worker, profile) {
       if (type === 'trustAllSites') { desktop.allSites = true; return { allSites: true }; }
       if (type === 'untrustAllSites') { desktop.allSites = false; return { allSites: false }; }
       if (type === 'trustSite') return { trusted: true, origin: new URL(payload.url).origin };
+      if (type === 'untrustSite') return { trusted: false, origin: new URL(payload.url).origin };
       if (type === 'showApp') return { shown: true };
       if (type === 'warmLaya') return { state: 'unavailable' };
       if (type === 'suggestFields' || type === 'answerFields') throw Object.assign(new Error('Laya isn’t ready on this computer.'), { code: 'LAYA_NOT_READY' });
@@ -194,6 +197,8 @@ async function main() {
     console.log('All websites: a form embedded from another site brought the card and filled with no second approval.');
 
     // Turn it off from the side panel: the card leaves the open page at once and doesn't come back.
+    // Chrome's grant is kept, unused, and Iowa's portal is untouched.
+    const allowed = origins => worker.evaluate(origins => chrome.permissions.contains({ origins }), origins);
     await page.goto(PANTRY, { waitUntil: 'domcontentloaded' });
     await launcherFrame();
     assert.equal(await cards(), 1);
@@ -203,20 +208,59 @@ async function main() {
     assert.equal(await worker.evaluate(() => allSitesOn()), false);
     assert.deepEqual((await worker.evaluate(() => chrome.scripting.getRegisteredContentScripts())).map(script => script.id), ['site-wic.example.org'],
       'the site turned on by itself keeps its registration');
-    assert.equal(await worker.evaluate(() => chrome.permissions.contains({ origins: ['https://*/*'] })), false);
+    assert.equal(await allowed(['https://*/*']), true, 'Chrome’s grant is kept');
+    assert.equal(await allowed([IOWA_HOST]), true, 'Iowa’s site is untouched');
     assert.equal((await calls('untrustAllSites')).length, 1);
-    // What Chrome took back with https://*/* is named, as Chrome did it.
-    const wicKept = await worker.evaluate(origin => chrome.permissions.contains({ origins: [`${origin}/*`] }), new URL(WIC).origin);
-    const iowaKept = await worker.evaluate(host => chrome.permissions.contains({ origins: [host] }), IOWA_HOST);
     const shown = await panel.text('#status');
-    assert.ok(shown.startsWith(en('worker.allSitesOff')), shown);
-    assert.equal(shown.includes('wic.example.org'), !wicKept, shown);
-    assert.equal(shown.includes(en('worker.chromePausedIowa')), !iowaKept, shown);
+    assert.equal(shown, en('joined', { first: { key: 'worker.allSitesOff' }, second: { key: 'worker.chromeStillAllows' } }));
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(1500);
     assert.equal(await cards(), 0, 'the card stays gone after a reload');
     await panel.screenshot(path.join(root, 'artifacts/all-websites/all-websites-off-panel.png'));
-    console.log(`All websites: off. The card left the open page. Chrome ${wicKept ? 'kept' : 'took back'} wic.example.org and ${iowaKept ? 'kept' : 'paused'} Iowa’s site; the side panel says: "${shown}"`);
+    console.log(`All websites: off. The card left the open page; Chrome’s grant and Iowa’s access are kept. The side panel says: "${shown}"`);
+
+    // With the grant kept and all websites off, a site that was never trusted gets nothing.
+    await page.goto(NEVER, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1500);
+    assert.equal(await cards(), 0, 'no card on a site that was never trusted');
+    assert.equal(await worker.evaluate(origin => siteEnabled(origin), new URL(NEVER).origin), false);
+    assert.equal(await panel.visible('#panel-autofill'), false, 'the panel offers to turn the site on, not Autofill');
+    assert.equal((await calls('getFields')).some(call => call.url.startsWith(new URL(NEVER).origin)), false);
+    console.log('Off: a site that was never trusted gets no card and no fill, though Chrome’s grant is kept.');
+
+    // Iowa's portal still works, with no Chrome restart.
+    await page.goto(`${applicant}?next=stay`, { waitUntil: 'domcontentloaded' });
+    await launcherFrame();
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+    await panel.click('#panel-autofill');
+    await expect(page.locator('#firstName')).toHaveValue(syntheticProfile.firstName, { timeout: 20000 });
+    await expect(page.locator('#lastName')).toHaveValue(syntheticProfile.lastName);
+    console.log('Off: Iowa’s portal filled from the fictional profile without a Chrome restart.');
+
+    // The site turned on by itself is still on, and turning it off works under the kept grant: the app drops it.
+    await page.goto(WIC, { waitUntil: 'domcontentloaded' });
+    await launcherFrame();
+    await expect.poll(() => panel.visible('#site-disable'), { timeout: 15000 }).toBe(true);
+    await panel.click('#site-disable');
+    await expect.poll(() => panel.text('#status'), { timeout: 15000 }).toBe(en('panel.siteOffDone'));
+    assert.deepEqual((await calls('untrustSite')).map(call => call.url), [new URL(WIC).origin]);
+    assert.deepEqual(await worker.evaluate(() => chrome.scripting.getRegisteredContentScripts()), []);
+    assert.equal(await allowed(['https://*/*']), true);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1500);
+    assert.equal(await cards(), 0);
+    console.log('Per-site: wic.example.org turned off under the kept grant; the app dropped it and its card is gone.');
+
+    // Turning all websites on again needs no second Chrome prompt (one would never be answered here).
+    await panel.click('#all-sites-enable');
+    await expect.poll(() => panel.visible('#all-sites-disable'), { timeout: 15000 }).toBe(true);
+    assert.equal((await calls('trustAllSites')).length, 2, 'the app still asks');
+    await page.goto(PANTRY, { waitUntil: 'domcontentloaded' });
+    await expect.poll(cards, { timeout: 15000 }).toBe(1);
+    await panel.click('#all-sites-disable');
+    await expect.poll(cards, { timeout: 10000 }).toBe(0);
+    assert.equal(await worker.evaluate(() => allSitesOn()), false);
+    console.log('All websites: on again with no second Chrome prompt, then off.');
 
     const synthetic = new Set([...Object.keys(pages).map(url => new URL(url).origin), 'https://hhsservices.iowa.gov']);
     // The extension's own files, and inline data: URLs, load nothing from anywhere.
