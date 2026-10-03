@@ -68,6 +68,27 @@ test('the desktop’s unsafe-question check is the extension engine’s, on ever
   assert.ok(unsafe > 40, `found ${unsafe}`);
 });
 
+test('the desktop and extension keep identical applicant-only box guards', () => {
+  const patterns = ['OTHER_PERSON_ROLE', 'MEMBER_DETAIL', 'CHILD_ROLE', 'PERSON_DETAIL', 'COMBINED_ADDRESS_QUESTION', 'PERSON_NOT_AMOUNT'];
+  for (const name of patterns) {
+    assert.equal(prompts[name].source, generic[name].source, `${name} source`);
+    assert.equal(prompts[name].flags, generic[name].flags, `${name} flags`);
+  }
+  const labels = [
+    "Spouse's first name", 'Family Member: First Name', 'Household Members: First Name', 'Name of Proxy', 'Address of Proxy',
+    'Emergency contact phone', 'Landlord name', 'Spouse Name Etan Karejeram̗ Nombre del cónyuge: First', 'Nombre del representante autorizado',
+    'City/State', 'City and Zip Code', 'City, State and Zip code', 'Complete Physical Address (including Town/City!)',
+    'Ciudad/Estado', 'Ciudad y Código Postal', 'Dirección completa', 'Who pays the rent?', '¿Quién paga?',
+    'Household Representative: First', 'Number of children', 'How many children under 18?', 'Applicant phone'
+  ];
+  for (const label of labels) {
+    const matchable = prompts.matchableBox({ label });
+    assert.equal(generic.blockedSuggestion(label), !matchable, label);
+  }
+  assert.equal(prompts.matchableBox({ label: 'Household Representative: First' }), true);
+  assert.equal(prompts.matchableBox({ label: 'Number of children' }), true);
+});
+
 test('choice-v2: a box of a type the model wasn’t trained on is refused, not described', () => {
   assert.throws(() => prompts.CHOICE.matchState('Color', 'color'), /color/);
 });
@@ -126,6 +147,12 @@ test('noul-v1: a text box is offered the groups of saved fields its label names,
   assert.deepEqual(box('Name of Head of Household'), [...names, ...counts], 'two groups, in MATCH_CANDIDATES order');
   assert.deepEqual(box('Dirección'), address, 'accents are folded');
   assert.deepEqual(box('Teléfono', 'tel'), ['email', 'phone']);
+  for (const label of ["Spouse's first name", 'Family Member: Last Name', 'Household Members: First Name', 'Name of Proxy', 'Address of Proxy',
+    'Emergency contact phone', 'Landlord name', 'Nombre del cónyuge', 'Teléfono del contacto de emergencia', 'Nombre del representante autorizado',
+    'City/State', 'City and Zip Code', 'City, State and Zip code', 'Complete Physical Address (including Town/City!)',
+    'Ciudad/Estado', 'Ciudad y Código Postal', 'Ciudad, Estado y Código Postal', 'Dirección completa', 'Who pays the rent?', '¿Quién paga?']) {
+    assert.deepEqual(box(label), [], label);
+  }
   assert.deepEqual(box('Anything else?'), [...MATCH_CANDIDATES]);
   assert.deepEqual(box('Today’s Date', 'date'), [], 'date of birth is never offered, so a date box is offered nothing');
   assert.deepEqual(box('Phone', 'date'), []);

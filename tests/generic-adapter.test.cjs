@@ -211,6 +211,50 @@ test('only confident matches are planned; vague labels stay unmatched for the ap
   assert.equal(result.unmatched.length, 3);
 });
 
+test('applicant details never match boxes that name another person in English or Spanish', () => {
+  const labels = [
+    "Spouse's first name", 'Family Member: Last Name', 'Household member #2: First and Last Name', 'Name of Proxy',
+    'Emergency contact phone', 'Landlord name', 'Nombre del cónyuge: First', 'Teléfono del contacto de emergencia',
+    'Nombre del representante autorizado', 'Nombre del hijo'
+  ];
+  const doc = page(labels.map((label, index) => `<label for="p${index}">${label}</label><input id="p${index}" autocomplete="${index === 7 ? 'tel' : 'name'}">`).join(''));
+  const result = generic.plan(doc);
+  assert.deepEqual(result.matched, []);
+  assert.deepEqual(result.unmatched.map(field => field.label), labels);
+  for (const item of result.unmatched) assert.equal(generic.canSuggest('fullName', item), false, item.label);
+});
+
+test('a field inside another person section is not matched from its short label', () => {
+  const doc = page('<fieldset><legend>Emergency Contact</legend><label for="name">Name</label><input id="name" autocomplete="name"><label for="phone">Phone</label><input id="phone" autocomplete="tel"></fieldset>');
+  const result = generic.plan(doc);
+  assert.deepEqual(result.matched, []);
+  assert.deepEqual(result.unmatched.map(field => field.label), ['Emergency Contact: Name', 'Emergency Contact: Phone']);
+});
+
+test('combined address boxes use every required saved part and never a single part', () => {
+  const labels = ['City/State', 'City and Zip Code', 'City, State and Zip code', 'Complete Physical Address (including Town/City!)',
+    'Ciudad/Estado', 'Ciudad y Código Postal', 'Ciudad, Estado y Código Postal', 'Dirección completa'];
+  const doc = page(labels.map((label, index) => `<label for="a${index}">${label}</label><input id="a${index}">`).join(''));
+  const result = generic.plan(doc);
+  assert.deepEqual(byElement(doc, result), { a0: 'cityState', a1: 'cityZip', a2: 'cityStateZip', a3: 'fullAddress',
+    a4: 'cityState', a5: 'cityZip', a6: 'cityStateZip', a7: 'fullAddress' });
+  assert.deepEqual(generic.requestKeys(result.matched.map(item => item.key)).sort(), ['addressLine1', 'addressLine2', 'city', 'state', 'zip']);
+  const complete = generic.deriveValues(profile);
+  assert.equal(complete.cityState, 'Demo City, IA');
+  assert.equal(complete.cityZip, 'Demo City, 50309');
+  assert.equal(complete.cityStateZip, 'Demo City, IA 50309');
+  assert.equal(complete.fullAddress, '123 Test Way, Unit 4, Demo City, IA 50309');
+  const incomplete = generic.deriveValues({ city: 'Demo City', state: 'IA' });
+  assert.equal(incomplete.cityState, 'Demo City, IA');
+  assert.equal(incomplete.cityZip, undefined);
+  assert.equal(incomplete.cityStateZip, undefined);
+  assert.equal(incomplete.fullAddress, undefined);
+  const filled = generic.fillFields(doc, result.token, result.matched.map(({ id, key }) => ({ id, key, guessed: false })), incomplete);
+  assert.equal(doc.getElementById('a0').value, 'Demo City, IA');
+  assert.deepEqual(filled.filled, [result.matched[0].id, result.matched[4].id]);
+  assert.deepEqual(['a1', 'a2', 'a3', 'a5', 'a6', 'a7'].map(id => doc.getElementById(id).value), ['', '', '', '', '', '']);
+});
+
 test('requested profile fields and derived answers cover composite questions', () => {
   assert.deepEqual(generic.requestKeys(['fullName', 'phone', 'totalMonthlyIncome', 'zip', 'zip']).sort(),
     ['firstName', 'homePhone', 'lastName', 'mobilePhone', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'phone', 'zip'].sort());

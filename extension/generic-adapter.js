@@ -12,6 +12,7 @@
     'householdVeteran', 'householdDisability', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand',
     'monthlyMedicalExpenses', 'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare', 'programMedicaid']);
   const SOURCES = Object.freeze({ fullName: ['firstName', 'lastName'], phone: ['mobilePhone', 'homePhone', 'phone'],
+    cityState: ['city', 'state'], cityZip: ['city', 'zip'], cityStateZip: ['city', 'state', 'zip'], fullAddress: ['addressLine1', 'addressLine2', 'city', 'state', 'zip'],
     ageRange: ['birthDate'], totalMonthlyIncome: ['monthlyEarnedIncome', 'monthlyOtherIncome'], annualIncome: ['monthlyEarnedIncome', 'monthlyOtherIncome'],
     anyoneSenior: ['householdSeniors'], iowaResident: ['state'], wantsHealthCoverage: ['programMedicaid'] });
   const GENERIC_KEYS = Object.freeze(['firstName', 'middleName', 'lastName', 'fullName', 'suffix', 'birthDate', 'ssn', 'email', 'phone',
@@ -19,6 +20,7 @@
     'householdVeteran', 'householdDisability', 'totalMonthlyIncome', 'annualIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand',
     'monthlyMedicalExpenses', 'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare', 'anyoneSenior', 'iowaResident',
     'wantsHealthCoverage']);
+  const COMPOSITE_KEYS = Object.freeze(['cityState', 'cityZip', 'cityStateZip', 'fullAddress']);
   // Answers that are only ever a guess for the applicant to review, however they were matched.
   const GUESS_KEYS = Object.freeze(['iowaResident']);
   const KIND = Object.freeze({ birthDate: 'date', email: 'email', phone: 'tel', state: 'state', ageRange: 'ageRange', householdSize: 'count', householdAdults: 'count',
@@ -50,6 +52,10 @@
     [/^(social security( number)?|ssn)$/, 'ssn'],
     [/^e ?mail( address)?$/, 'email'],
     [/^((cell|mobile|home|best|primary) )?(phone|telephone)( number)?$|^(mobile|cell) number$/, 'phone'],
+    [/^(city (and )?state|ciudad (y )?estado)$/, 'cityState'],
+    [/^(city (and )?(zip|zip code|zipcode|postal code)|ciudad (y )?codigo postal)$/, 'cityZip'],
+    [/^(city (and )?state (and )?(zip|zip code|zipcode|postal code)|ciudad (y )?estado (y )?codigo postal)$/, 'cityStateZip'],
+    [/^(complete |full )(physical |home |residential )?address( including (town|city|town city))?$|^direccion completa$/, 'fullAddress'],
     [/^(street |home )?address( line 1)?$|^street$/, 'addressLine1'],
     [/^address line 2$|^(apt|apartment|unit|suite)( number| or unit)?$|^apt suite$/, 'addressLine2'],
     [/^(city|town)$/, 'city'],
@@ -95,7 +101,7 @@
 
   const clean = value => String(value || '').replace(/\s+/g, ' ').trim().replace(/[\s*:]+$/, '').trim();
   // "#" reads as "number" ("# of adults", "Apt #").
-  const normal = value => String(value || '').toLowerCase().replace(/[‘’']/g, '').replace(/#/g, ' number ').replace(/\*/g, ' ').replace(/[^a-z0-9+]+/g, ' ').trim();
+  const normal = value => String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[‘’']/g, '').replace(/#/g, ' number ').replace(/\*/g, ' ').replace(/[^a-z0-9+]+/g, ' ').trim();
   // A question number or letter the author added ("3.", "4)", "b. ") is not part of the question.
   const QUESTION_NUMBER = /^\s*(\d{1,3}\s*[.)]|[a-z][.)](?=\s))\s*/i;
   // An aside in parentheses ("(First and Last Name)") is dropped, unless it holds numbers
@@ -108,6 +114,18 @@
     for (let previous = ''; previous !== text;) { previous = text; text = text.replace(LEAD, ''); }
     return text;
   }
+  const OTHER_PERSON_ROLE = /\b(spouse|spouses|partner|husband|wife|helper|proxy|emergency contact|reference|landlord|other household member|conyuge|esposo|esposa|pareja|dependiente|ayudante|contacto de emergencia|referencia|propietario|arrendador)\b|\brepresentative\b|\brepresentante\b/;
+  const MEMBER_DETAIL = /\b(family member|household member (number )?\d+|miembro de (la )?(familia|casa|hogar))\b/;
+  const CHILD_ROLE = /\b(child|children|son|daughter|hijo|hija|hijos|hijas)\b/;
+  const PERSON_DETAIL = /\b(name|nombre|birth|nacimiento|address|direccion|phone|telefono|email|relationship|school|escuela)\b/;
+  const COMBINED_ADDRESS_QUESTION = /^(city (and )?state|city (and )?(zip|zip code|zipcode|postal code)|city (and )?state (and )?(zip|zip code|zipcode|postal code)|(complete|full) (physical |home |residential )?address( including (town|city|town city))?|ciudad (y )?estado|ciudad (y )?codigo postal|ciudad (y )?estado (y )?codigo postal|direccion completa)$/;
+  const PERSON_NOT_AMOUNT = /^(who|que persona|quien) (pays?|paga)( |$)/;
+  function otherPersonQuestion(value) {
+    const text = normal(value);
+    const representative = !(text.startsWith('household representative ') || text === 'household representative') && OTHER_PERSON_ROLE.test(text);
+    return representative || MEMBER_DETAIL.test(text) || (CHILD_ROLE.test(text) && PERSON_DETAIL.test(text)) || text === 'household members' || /^household members (first|last|full|date|birth|name|phone|email|address|relation|relationship)\b/.test(text);
+  }
+  const blockedSuggestion = value => otherPersonQuestion(value) || COMBINED_ADDRESS_QUESTION.test(question(value)) || PERSON_NOT_AMOUNT.test(question(value));
   const ruleFor = text => RULES.find(([pattern]) => pattern.test(question(text)))?.[1] || null;
   // Questions only the applicant answers: AI never suggests or picks an answer for consent,
   // signatures, attestations, agreements, terms, Social Security numbers, or secrets.
@@ -129,6 +147,7 @@
   // whole-date question about birth, never to "Date ordered", a month box, or a child's birthday.
   function canSuggest(key, field) {
     if (!GENERIC_KEYS.includes(key)) return false;
+    if (blockedSuggestion(field?.label)) return false;
     if (key !== 'birthDate') return true;
     const text = question(field?.label);
     return /\b(birth|born|dob)/.test(text) && !/\b(month|day|year|time|hours?|minutes?)\b/.test(text) && !OTHER_PERSON.test(text);
@@ -187,8 +206,9 @@
     const present = candidates.filter(Boolean);
     const labels = present.length ? present : [precedingText(element)].filter(Boolean);
     return labels.map(text => {
-      if (!DATE_PART.test(normal(text))) return text;
       const asked = enclosingQuestion(element, doc)?.text;
+      if (asked && normal(asked) !== normal(text) && otherPersonQuestion(asked)) return `${asked}: ${text}`;
+      if (!DATE_PART.test(normal(text))) return text;
       return asked && normal(asked) !== normal(text) ? `${asked}: ${text}` : text;
     });
   }
@@ -283,6 +303,11 @@
   }
   function match(entry) {
     const element = entry.elements[0];
+    if (entry.labels.some(otherPersonQuestion)) return { key: null, confidence: null };
+    for (const text of entry.labels) {
+      const key = ruleFor(text);
+      if (['cityState', 'cityZip', 'cityStateZip', 'fullAddress'].includes(key) && compatible(key, entry)) return { key, confidence: 'high' };
+    }
     const tokens = String(element.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/).reverse();
     const auto = tokens.map(token => AUTOCOMPLETE[token]).find(Boolean);
     if (auto && compatible(auto, entry)) return { key: auto, confidence: 'high' };
@@ -405,6 +430,11 @@
   function deriveValues(values) {
     const result = { ...(values || {}) };
     if (result.firstName && result.lastName) result.fullName = `${result.firstName} ${result.lastName}`;
+    if (result.city && result.state) result.cityState = `${result.city}, ${result.state}`; else delete result.cityState;
+    if (result.city && result.zip) result.cityZip = `${result.city}, ${result.zip}`; else delete result.cityZip;
+    if (result.city && result.state && result.zip) result.cityStateZip = `${result.city}, ${result.state} ${result.zip}`; else delete result.cityStateZip;
+    if (result.addressLine1 && result.city && result.state && result.zip) result.fullAddress = [result.addressLine1, result.addressLine2, `${result.city}, ${result.state} ${result.zip}`].filter(Boolean).join(', ');
+    else delete result.fullAddress;
     const phone = values?.mobilePhone || values?.homePhone || values?.phone;
     if (phone) result.phone = phone; else delete result.phone;
     const birth = /^(\d{4})-(\d{2})-(\d{2})$/.exec(values?.birthDate || '');
@@ -557,7 +587,7 @@
       const allowed = entry && (match(entry).key === key || canSuggest(key, { label: entry.labels[0] || '' }));
       const placed = !usable ? false
         : answering ? !unsafeQuestion({ label: entry.labels.join(' '), options: optionsOf(entry) }) && fillOption(entry, option)
-        : option === undefined && GENERIC_KEYS.includes(key) && allowed && typeof value === 'string' && value && compatible(key, entry) && fillEntry(entry, key, value);
+        : option === undefined && (GENERIC_KEYS.includes(key) || COMPOSITE_KEYS.includes(key)) && allowed && typeof value === 'string' && value && compatible(key, entry) && fillEntry(entry, key, value);
       if (!placed) { skipped.push(assignment?.id); continue; }
       const guess = answering || assignment.guessed || GUESS_KEYS.includes(key);
       if (placed.pending) { current.pending.set(assignment.id, { option: placed.pending, entry, guess }); pending.push(assignment.id); continue; }
@@ -618,7 +648,8 @@
   }
   const elementFor = id => current?.map.get(id)?.elements[0] || null;
 
-  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, GUESS_KEYS, UNSAFE_QUESTION, plan, offers, questions, requestKeys, deriveValues, fillFields, settle, focusField, elementFor,
+  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, GUESS_KEYS, UNSAFE_QUESTION, OTHER_PERSON_ROLE, MEMBER_DETAIL, CHILD_ROLE, PERSON_DETAIL,
+    COMBINED_ADDRESS_QUESTION, PERSON_NOT_AMOUNT, blockedSuggestion, plan, offers, questions, requestKeys, deriveValues, fillFields, settle, focusField, elementFor,
     canSuggest, unsafeQuestion, layaQuestion });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandGeneric = api;

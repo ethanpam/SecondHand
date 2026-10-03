@@ -55,9 +55,21 @@ const OFFER_GROUPS = Object.freeze([
 // A label's words, lowercased and without accents or punctuation.
 const topicText = label => String(label).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[‘’']/g, '').replace(/#/g, ' number ')
   .replace(/[^a-z0-9+]+/g, ' ').trim();
+const OTHER_PERSON_ROLE = /\b(spouse|spouses|partner|husband|wife|helper|proxy|emergency contact|reference|landlord|other household member|conyuge|esposo|esposa|pareja|dependiente|ayudante|contacto de emergencia|referencia|propietario|arrendador)\b|\brepresentative\b|\brepresentante\b/;
+const MEMBER_DETAIL = /\b(family member|household member (number )?\d+|miembro de (la )?(familia|casa|hogar))\b/;
+const CHILD_ROLE = /\b(child|children|son|daughter|hijo|hija|hijos|hijas)\b/;
+const PERSON_DETAIL = /\b(name|nombre|birth|nacimiento|address|direccion|phone|telefono|email|relationship|school|escuela)\b/;
+const COMBINED_ADDRESS_QUESTION = /^(city (and )?state|city (and )?(zip|zip code|zipcode|postal code)|city (and )?state (and )?(zip|zip code|zipcode|postal code)|(complete|full) (physical |home |residential )?address( including (town|city|town city))?|ciudad (y )?estado|ciudad (y )?codigo postal|ciudad (y )?estado (y )?codigo postal|direccion completa)$/;
+const PERSON_NOT_AMOUNT = /^(who|que persona|quien) (pays?|paga)( |$)/;
+function matchableBox({ label }) {
+  const text = topicText(label);
+  const representative = !(text.startsWith('household representative ') || text === 'household representative') && OTHER_PERSON_ROLE.test(text);
+  const other = representative || MEMBER_DETAIL.test(text) || (CHILD_ROLE.test(text) && PERSON_DETAIL.test(text)) || text === 'household members' || /^household members (first|last|full|date|birth|name|phone|email|address|relation|relationship)\b/.test(text);
+  return !other && !COMBINED_ADDRESS_QUESTION.test(text) && !PERSON_NOT_AMOUNT.test(text);
+}
 function offeredFields({ label, type }) {
   if (!TEXT_TYPES.includes(type)) throw new TypeError(`A ${type} field isn’t a text box Laya matches.`);
-  if (type === 'date') return [];
+  if (type === 'date' || !matchableBox({ label })) return [];
   const text = topicText(label);
   const named = new Set(OFFER_GROUPS.filter(group => group.words.test(text)).flatMap(group => group.keys));
   return named.size ? MATCH_CANDIDATES.filter(key => named.has(key)) : [...MATCH_CANDIDATES];
@@ -130,5 +142,5 @@ const UNSAFE_QUESTION = /^social security$|\b(consent\w*|sign|signs|signed|signi
 const normal = value => String(value || '').toLowerCase().replace(/[‘’']/g, '').replace(/#/g, ' number ').replace(/\*/g, ' ').replace(/[^a-z0-9+]+/g, ' ').trim();
 const unsafeQuestion = field => [field?.label, ...(Array.isArray(field?.options) ? field.options : [])].some(text => UNSAFE_QUESTION.test(normal(text)));
 
-module.exports = { DECISION, QUESTIONS, ABSTAIN, TEXT_TYPES, CHOICE_TYPES, MATCH_KEYS, KEY_ABOUT, NEVER_SUGGESTED, MATCH_CANDIDATES, matchState, offeredFields, factsCover, answerState,
-  CHOICE, UNSAFE_QUESTION, unsafeQuestion };
+module.exports = { DECISION, QUESTIONS, ABSTAIN, TEXT_TYPES, CHOICE_TYPES, MATCH_KEYS, KEY_ABOUT, NEVER_SUGGESTED, MATCH_CANDIDATES, matchState, matchableBox, offeredFields, factsCover, answerState,
+  CHOICE, UNSAFE_QUESTION, OTHER_PERSON_ROLE, MEMBER_DETAIL, CHILD_ROLE, PERSON_DETAIL, COMBINED_ADDRESS_QUESTION, PERSON_NOT_AMOUNT, unsafeQuestion };

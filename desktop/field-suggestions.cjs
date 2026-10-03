@@ -1,7 +1,7 @@
 'use strict';
 // #39: which saved field a text box on a form asks for, decided by Laya on this computer.
 // The model reads the question's label and a description of each saved field, never a saved value.
-const { CHOICE, matchState, offeredFields, unsafeQuestion } = require('../shared/laya-prompts.cjs');
+const { CHOICE, matchState, matchableBox, offeredFields, unsafeQuestion } = require('../shared/laya-prompts.cjs');
 const { CHOICE_BATCH, score, scoreChoices, pick, budget, timedOut, inOrder, barsFor } = require('./laya-decisions.cjs');
 
 function createFieldSuggestions({ laya, now = Date.now } = {}) {
@@ -55,7 +55,7 @@ function createFieldSuggestions({ laya, now = Date.now } = {}) {
     if (!pass) throw new Error(`Field suggestions can’t ask a Laya model in the ${format} format.`);
     const suggestions = {};
     try {
-      await pass(fields.filter(field => !unsafeQuestion(field)), bars.match, more, (field, key) => { if (key !== null) suggestions[field.id] = key; });
+      await pass(fields.filter(field => !unsafeQuestion(field) && matchableBox(field)), bars.match, more, (field, key) => { if (key !== null) suggestions[field.id] = key; });
     } catch (error) {
       if (!timedOut(error)) throw error;
     }

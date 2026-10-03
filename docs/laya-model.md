@@ -207,6 +207,19 @@ Fifteen real forms (394 questions) collected after round 3, re-checked against t
 | Round 4 | ONNX int8 | 0.999 | 17 | 16 | 0 | 1 | 0.941 (0.73–0.99) | **0.941** | 16/81 = 0.198 |
 | Round 4 | MLX bf16 | 0.999 | 15 | 14 | 0 | 1 | 0.933 (0.70–0.99) | **0.933** | 0.173 |
 
+#### Applicant-only and combined-box guard (#83)
+
+The shipped round-2 model remains unchanged. Before asking it, the app now excludes boxes that name another person, boxes that ask who pays, and combined address boxes that the rules engine handles only from complete saved parts. At the published 0.95 matching bar, `decisions.py --as-app-asks` gives:
+
+| Forms | Offer policy | Decisions asked | Filled | Right | Wrong | Precision | Coverage |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Test pool | Before | 151 | 68 | 60 | 8 | 0.882 | 60/70 = 0.857 |
+| Test pool | After | 137 | 65 | 60 | 5 | **0.923** | 60/70 = 0.857 |
+| Final holdout | Before | 222 | 68 | 59 | 9 | 0.868 | 59/81 = 0.728 |
+| Final holdout | After | 201 | 67 | 59 | 8 | **0.881** | 59/81 = 0.728 |
+
+No correct model match is lost. Rules now fill `City/State`, `City and Zip Code`, `City, State and Zip code`, and full/complete physical-address boxes with one formatted value only when every required saved part exists; otherwise they remain for the applicant. The wording was chosen from the training forms, including `Family Member: First Name`, `Household Members: First Name`, `Name of Proxy`, `Address of Proxy`, `Spouse Name … Nombre del cónyuge`, `City/State`, `City and Zip Code`, `City, State and Zip code`, and `Complete Physical Address (including Town/City!)`. Final-form labels were used only for the after-the-fact score above.
+
 **Right by the facts** (the key tags these `none`; the facts settle them; the same rules for both rounds):
 - Vermont's "U.S. citizen?" for another member: Yes when everyone in the household is a citizen.
 - Vermont's "Disabled?" for another member: No when nobody in the household has a disability.

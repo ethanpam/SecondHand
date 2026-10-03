@@ -47,6 +47,15 @@ test('each text box is asked about the saved fields its label names, every field
   assert.equal(laya.batches[0].length, 7, 'the six address fields and abstain');
 });
 
+test('other-person, combined-address, and person-not-amount boxes never reach either model format', async () => {
+  const blocked = [field('a', "Spouse's first name"), field('b', 'Nombre del cónyuge'), field('c', 'Emergency contact phone', 'tel'),
+    field('d', 'City, State and Zip code'), field('e', 'Who pays the rent?')];
+  for (const laya of [stubLaya(() => 0.99), choiceLaya(() => { throw new Error('blocked box reached model'); })]) {
+    assert.deepEqual(await createFieldSuggestions({ laya }).suggest(blocked, BUDGET), {});
+    assert.deepEqual(laya.batches, []);
+  }
+});
+
 test('the bar is 0.95: a lower score, an abstain that wins, or two likely fields leave the box to the applicant', async () => {
   const cases = [
     [() => 0.94, 'below the bar'],
