@@ -19,13 +19,16 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-async function renderer(t, overrides = {}) {
+async function renderer(t, { initialSetup = null, ...overrides } = {}) {
   const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'https://secondhand.invalid/' });
   t.after(() => dom.window.close());
   const window = dom.window;
   let onLocked;
+  let onProfileChanged;
   let status = { exists: true, unlocked: true, extensionId: '', bridgeRunning: true };
   const database = { profile: { firstName: 'Initial', lastName: 'Test' }, applications: [] };
+  // The guided setup's progress as the desktop keeps it: null when none is under way.
+  const setup = { progress: initialSetup, calls: [] };
   window.scrollTo = () => {};
   window.confirm = () => true;
   window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
@@ -36,6 +39,14 @@ async function renderer(t, overrides = {}) {
     onLocked: callback => { onLocked = callback; return () => {}; },
     unlock: async () => { status = { ...status, unlocked: true }; return status; },
     saveProfile: async profile => { database.profile = structuredClone(profile); return structuredClone(profile); },
+    setupProgress: async () => structuredClone(setup.progress),
+    startSetup: async () => { setup.calls.push('start'); setup.progress = { step: 0, steps: 6 }; return structuredClone(setup.progress); },
+    saveSetupProgress: async step => {
+      setup.calls.push(step);
+      setup.progress = step >= 6 ? null : { step: Math.max(step, setup.progress.step), steps: 6 };
+      return structuredClone(setup.progress);
+    },
+    onProfileChanged: callback => { onProfileChanged = callback; return () => {}; },
     ...overrides
   };
   window.eval(script);
@@ -45,7 +56,9 @@ async function renderer(t, overrides = {}) {
   const control = name => get('profile-form').elements.namedItem(name);
   const radios = name => control(name) instanceof window.RadioNodeList ? Array.from(control(name)) : null;
   return {
-    window, get, database, control, radios,
+    window, get, database, control, radios, setup,
+    // Save to My information in Chrome changed these saved fields.
+    profileChanged: fields => onProfileChanged({ fields }),
     value: name => control(name).value,
     choices: name => radios(name)?.map(radio => radio.value) ?? Array.from(control(name).options, option => option.value),
     edit(id, value) {
@@ -1151,4 +1164,222 @@ test('going back from start over returns to the reset screen, and a failed erase
   assert.equal(view.get('reset-form').hidden, false);
   assert.equal(view.get('auth-title').textContent, 'Reset your password');
   assert.equal(view.get('start-over-confirm').value, '', 'Leaving start over clears the typed phrase');
+});
+
+// The household list and the guided setup (#98).
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const openProfile = view => view.window.document.querySelector('.nav-item[data-view="profile"]').click();
+const memberRows = view => [...view.get('household-members').querySelectorAll('.household-member')];
+const inRow = (row, field) => row.querySelector(`[data-member-field="${field}"]`);
+function editRow(view, row, field, value) {
+  const control = inRow(row, field);
+  control.value = value;
+  control.dispatchEvent(new view.window.Event(control.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
+  if (control.tagName === 'SELECT') control.dispatchEvent(new view.window.Event('input', { bubbles: true }));
+}
+
+test('the household list starts with the applicant, who mirrors their own name and birth date, and saves each person with their own answers', async t => {
+  const saved = [];
+  const view = await renderer(t, { saveProfile: async profile => { saved.push(structuredClone(profile)); return structuredClone(profile); } });
+  openProfile(view);
+  assert.deepEqual(memberRows(view), []);
+  assert.equal(view.get('add-household-member').textContent.trim(), 'Add a person');
+  view.get('add-household-member').click();
+  const [self, other] = memberRows(view);
+  assert.equal(self.querySelector('legend').textContent, 'You');
+  assert.equal(other.querySelector('legend').textContent, 'Person 2');
+  assert.equal(inRow(self, 'firstName').value, 'Initial');
+  assert.equal(inRow(self, 'firstName').readOnly, true, 'your own name is edited in About you');
+  assert.equal(inRow(self, 'relationship'), null, 'you are you');
+  assert.equal(self.querySelector('.remove-member'), null, 'you stay on the list while others are on it');
+  view.edit('firstName', 'Avery');
+  view.edit('birthDate', '1985-04-12');
+  assert.equal(inRow(self, 'firstName').value, 'Avery');
+  assert.equal(inRow(self, 'birthDate').value, '1985-04-12');
+  editRow(view, self, 'student', 'no');
+  for (const [field, value] of [['firstName', 'Riley'], ['lastName', 'Example'], ['birthDate', '2015-09-03'], ['relationship', 'child']]) editRow(view, other, field, value);
+  assert.equal(inRow(other, 'grade').closest('.field').hidden, true, 'a grade is asked only for a student');
+  editRow(view, other, 'student', 'yes');
+  assert.equal(inRow(other, 'grade').closest('.field').hidden, false);
+  editRow(view, other, 'grade', '5th');
+  assert.equal(view.get('profile-save-state').hidden, false, 'list edits are unsaved changes too');
+  view.submit('profile-form');
+  await tick();
+  const members = saved[0].householdMembers;
+  assert.ok(members.every(member => UUID.test(member.id)) && members[0].id !== members[1].id);
+  assert.deepEqual(members.map(({ id, ...member }) => member), [
+    { firstName: 'Avery', lastName: 'Test', birthDate: '1985-04-12', relationship: 'self', student: 'no', grade: '' },
+    { firstName: 'Riley', lastName: 'Example', birthDate: '2015-09-03', relationship: 'child', student: 'yes', grade: '5th' }]);
+  // A student answer changed to No clears the grade, so a grade is never saved for someone who isn't a student.
+  editRow(view, memberRows(view)[1], 'student', 'no');
+  view.submit('profile-form');
+  await tick();
+  assert.deepEqual([saved[1].householdMembers[1].student, saved[1].householdMembers[1].grade], ['no', '']);
+});
+
+test('a saved household list shows again after a reload, and the applicant can be removed only when alone', async t => {
+  const view = await renderer(t);
+  view.database.profile = structuredClone(fictionalProfile);
+  view.lock(1);
+  await view.window.secondHand.unlock();
+  view.submit('auth-form');
+  await tick(); await tick();
+  openProfile(view);
+  const rows = memberRows(view);
+  assert.deepEqual(rows.map(row => inRow(row, 'firstName').value), ['Avery', 'Riley', 'Sam', 'Morgan']);
+  assert.equal(inRow(rows[1], 'relationship').value, 'child');
+  assert.equal(inRow(rows[1], 'grade').value, '5th');
+  for (const row of rows.slice(1)) row.querySelector('.remove-member').click();
+  assert.equal(memberRows(view).length, 1);
+  const alone = memberRows(view)[0].querySelector('.remove-member');
+  assert.ok(alone, 'alone on the list, you can remove the list');
+  assert.equal(alone.textContent.trim(), 'Remove the list');
+  alone.click();
+  assert.deepEqual(memberRows(view), []);
+});
+
+test('with people on the list, the household counts come from their birth dates, read-only, with a note; without it the manual counts come back', async t => {
+  const view = await renderer(t, { getData: async () => structuredClone({ profile: { ...fictionalProfile, householdSize: '9', householdAdults: '9', householdChildren: '9', householdSeniors: '9' }, applications: [] }) });
+  openProfile(view);
+  // The fixture's household: the applicant, two children, and a parent over 65.
+  assert.deepEqual(['householdSize', 'householdAdults', 'householdChildren', 'householdSeniors'].map(view.value), ['4', '1', '2', '1']);
+  for (const field of ['householdSize', 'householdAdults', 'householdChildren', 'householdSeniors']) assert.equal(view.get(field).readOnly, true, field);
+  assert.equal(view.get('household-counts-note').hidden, false);
+  assert.equal(view.get('household-counts-note').textContent, 'Counted from your household list. To change them, change the list.');
+  editRow(view, memberRows(view)[2], 'birthDate', '');
+  assert.deepEqual(['householdSize', 'householdAdults', 'householdChildren', 'householdSeniors'].map(view.value), ['4', '', '', '']);
+  assert.equal(view.get('household-counts-note').textContent, 'Counted from your household list. Add every person’s birth date to count their ages.');
+  for (const row of memberRows(view).slice(1)) row.querySelector('.remove-member').click();
+  memberRows(view)[0].querySelector('.remove-member').click();
+  assert.deepEqual(['householdSize', 'householdAdults', 'householdChildren', 'householdSeniors'].map(view.value), ['9', '9', '9', '9'], 'the manual counts saved before');
+  for (const field of ['householdSize', 'householdAdults', 'householdChildren', 'householdSeniors']) assert.equal(view.get(field).readOnly, false, field);
+  assert.equal(view.get('household-counts-note').hidden, true);
+});
+
+test('the household list holds up to 20 people', async t => {
+  const view = await renderer(t);
+  openProfile(view);
+  for (let n = 0; n < 19; n++) view.get('add-household-member').click();
+  assert.equal(memberRows(view).length, 20);
+  assert.equal(view.get('add-household-member').disabled, true);
+  assert.equal(view.get('household-limit').hidden, false);
+  memberRows(view)[5].querySelector('.remove-member').click();
+  assert.equal(view.get('add-household-member').disabled, false);
+});
+
+test('after a new password, the app offers the guided setup once the recovery key is saved; Skip for now leaves it on Overview', async t => {
+  const view = await renderer(t, {
+    status: async () => ({ exists: false, unlocked: false, recoveryKey: false, extensionId: '', bridgeRunning: true }),
+    createVault: async () => ({ status: { exists: true, unlocked: true, recoveryKey: true, extensionId: '', bridgeRunning: true }, recoveryKey: 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789' })
+  });
+  view.edit('passphrase', 'synthetic long password');
+  view.edit('confirm-passphrase', 'synthetic long password');
+  view.submit('auth-form');
+  await tick(); await tick(); await tick();
+  assert.deepEqual(view.setup.calls, ['start'], 'the setup starts with the new password, so it can be resumed');
+  assert.equal(view.get('recovery-dialog').open, true);
+  assert.equal(view.get('setup-dialog').open, false, 'the recovery key comes first');
+  view.get('recovery-saved').checked = true;
+  view.get('recovery-saved').dispatchEvent(new view.window.Event('change'));
+  view.get('recovery-done').click();
+  assert.equal(view.get('setup-dialog').open, true);
+  assert.equal(view.get('setup-start').textContent.trim(), 'Set up your information (about 5 minutes)');
+  assert.equal(view.get('setup-skip').textContent.trim(), 'Skip for now');
+  view.get('setup-skip').click();
+  assert.equal(view.get('setup-dialog').open, false);
+  assert.equal(view.get('view-overview').hidden, false);
+  assert.equal(view.get('setup-resume').hidden, false);
+  assert.equal(view.get('setup-resume-text').textContent, 'Finish setting up: 0 of 6 steps');
+});
+
+test('the guided setup shows one step at a time, saves each step as the applicant moves on, and finishes after the sixth', async t => {
+  const saves = [];
+  const view = await renderer(t, { initialSetup: { step: 0, steps: 6 }, saveProfile: async profile => { saves.push(structuredClone(profile)); return structuredClone(profile); } });
+  // The steps whose sections show: each section of My information belongs to one step.
+  const shownSteps = () => [...new Set([...view.get('profile-form').querySelectorAll('[data-setup-step]')].filter(part => !part.hidden && !part.closest('.form-card').hidden)
+    .map(part => part.dataset.setupStep))].sort();
+  assert.equal(view.get('setup-resume-text').textContent, 'Finish setting up: 0 of 6 steps');
+  view.get('setup-resume-button').click();
+  assert.equal(view.get('view-profile').hidden, false);
+  assert.equal(view.get('setup-bar').hidden, false);
+  assert.equal(view.get('setup-step-count').textContent, 'Step 1 of 6');
+  assert.equal(view.get('setup-step-title').textContent, 'You');
+  assert.equal(view.window.document.activeElement, view.get('setup-step-title'), 'the step’s heading is read first');
+  assert.deepEqual(shownSteps(), ['1']);
+  assert.equal(view.get('save-profile').closest('.form-save-bar').hidden, true);
+  assert.equal(view.get('setup-back').disabled, true);
+  view.edit('firstName', 'Avery');
+  view.submit('profile-form');
+  await tick(); await tick();
+  assert.equal(saves.length, 1);
+  assert.equal(saves[0].firstName, 'Avery');
+  assert.deepEqual(view.setup.calls, [1]);
+  assert.equal(view.get('setup-step-count').textContent, 'Step 2 of 6');
+  assert.equal(view.get('setup-step-title').textContent, 'Your household');
+  assert.deepEqual(shownSteps(), ['2']);
+  view.get('setup-back').click();
+  assert.equal(view.get('setup-step-title').textContent, 'You');
+  assert.equal(saves.length, 1, 'going back saves nothing');
+  const titles = [];
+  for (let step = 1; step <= 6; step++) {
+    titles.push(view.get('setup-step-title').textContent);
+    view.submit('profile-form');
+    await tick(); await tick();
+  }
+  assert.deepEqual(titles, ['You', 'Your household', 'Where you live', 'Income and money on hand', 'Programs', 'About you']);
+  assert.deepEqual(view.setup.calls, [1, 1, 2, 3, 4, 5, 6]);
+  assert.equal(saves.length, 7);
+  assert.equal(view.get('setup-bar').hidden, true, 'setup is finished');
+  assert.equal(view.get('view-overview').hidden, false);
+  assert.equal(view.get('setup-resume').hidden, true);
+  assert.equal(view.get('toast').textContent, 'Your information is set up. Change it any time in My information.');
+  openProfile(view);
+  assert.deepEqual(shownSteps(), ['1', '2', '3', '4', '5', '6'], 'My information shows every section again');
+});
+
+test('the guided setup resumes at the first step not done, and a step that doesn’t save stays put with its error', async t => {
+  let fail = true;
+  let window;
+  const view = await renderer(t, { initialSetup: { step: 3, steps: 6 },
+    saveProfile: async profile => { if (fail) throw new window.Error('Enter a valid email address.'); return structuredClone(profile); } });
+  window = view.window;
+  assert.equal(view.get('setup-resume-text').textContent, 'Finish setting up: 3 of 6 steps');
+  view.get('setup-resume-button').click();
+  assert.equal(view.get('setup-step-count').textContent, 'Step 4 of 6');
+  assert.equal(view.get('setup-step-title').textContent, 'Income and money on hand');
+  view.submit('profile-form');
+  await tick(); await tick();
+  assert.equal(view.get('setup-step-count').textContent, 'Step 4 of 6');
+  assert.equal(view.get('profile-error').textContent, 'Enter a valid email address.');
+  assert.deepEqual(view.setup.calls, []);
+  fail = false;
+  view.submit('profile-form');
+  await tick(); await tick();
+  assert.deepEqual(view.setup.calls, [4]);
+  assert.equal(view.get('setup-step-count').textContent, 'Step 5 of 6');
+  view.get('setup-later').click();
+  assert.equal(view.get('view-overview').hidden, false);
+  assert.equal(view.get('setup-bar').hidden, true);
+  assert.equal(view.get('setup-resume-text').textContent, 'Finish setting up: 4 of 6 steps');
+  view.lock(1);
+  assert.equal(view.get('setup-resume').hidden, true, 'locking clears the setup from the screen');
+});
+
+test('an answer saved from Chrome shows in My information without losing the applicant’s own unsaved edits', async t => {
+  const view = await renderer(t);
+  openProfile(view);
+  view.edit('lastName', 'Edited, not saved');
+  view.database.profile = { ...view.database.profile, county: 'Story', city: 'Ames' };
+  view.profileChanged(['county', 'city']);
+  await tick(); await tick();
+  assert.equal(view.get('county').value, 'Story');
+  assert.equal(view.get('city').value, 'Ames');
+  assert.equal(view.get('lastName').value, 'Edited, not saved');
+  assert.equal(view.get('profile-save-state').hidden, false, 'the applicant’s own edit still needs saving');
+  assert.equal(view.get('toast').textContent, 'An answer you saved from Chrome is now in My information.');
+  view.edit('zip', '50011');
+  view.database.profile = { ...view.database.profile, zip: '50309' };
+  view.profileChanged(['zip']);
+  await tick(); await tick();
+  assert.equal(view.get('zip').value, '50011', 'a field the applicant is editing keeps their edit');
 });

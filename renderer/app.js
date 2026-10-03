@@ -32,6 +32,29 @@
   const documentProfileKeys = new Set(['firstName', 'middleName', 'lastName', 'ssn', 'addressLine1', 'addressLine2', 'city', 'state', 'zip']);
   let layaPoll;
   const LAYA_POLL_MS = 500;
+  // The household list (#98): each person who lives with the applicant, the applicant's own row first.
+  // The rows are part of the profile draft and are saved with the form.
+  const RELATIONSHIPS = [['spouse-partner', 'Spouse or partner'], ['child', 'Child'], ['parent', 'Parent'], ['sibling', 'Brother or sister'],
+    ['grandchild', 'Grandchild'], ['other-relative', 'Other relative'], ['other', 'Someone else']];
+  const MAX_MEMBERS = 20;
+  const COUNT_FIELDS = ['householdSize', 'householdAdults', 'householdChildren', 'householdSeniors'];
+  // The manual counts while the list sets them, to show again if the list is removed.
+  let manualCounts = null;
+  // The guided first-run setup: six steps over the same My information form, each saved as the applicant moves on.
+  const SETUP_STEPS = [
+    { title: 'You', intro: 'Your name, date of birth, and how to reach you.' },
+    { title: 'Your household', intro: 'Everyone who lives with you and shares food with you. SecondHand works out their ages from their birth dates.' },
+    { title: 'Where you live', intro: 'Your home address and where you get mail.' },
+    { title: 'Income and money on hand', intro: 'Monthly income, housing costs, money on hand, and medical costs. Leave blank anything you don’t know yet.' },
+    { title: 'Programs', intro: 'The programs you want to ask Iowa for.' },
+    { title: 'About you', intro: 'Iowa’s questions about you, so SecondHand can answer them on Iowa’s Tell Us More page.' }
+  ];
+  // How many steps the desktop says are done ({ step, steps }), or null when no setup is under way.
+  let setupProgress = null;
+  // The step on screen (0 to 5) while the guided setup is open, else null.
+  let setupStep = null;
+  // A new password offers the setup once its recovery key is saved.
+  let offerSetup = false;
 
   function icon(name) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -119,6 +142,10 @@
 
   function clearSensitiveUI() {
     vaultGeneration++;
+    offerSetup = false;
+    setupProgress = null;
+    closeSetup();
+    if ($('setup-dialog').open) $('setup-dialog').close();
     clearDocumentReview();
     document.querySelectorAll('button[aria-busy="true"]').forEach((button) => {
       button.disabled = !api;
@@ -128,6 +155,9 @@
     setApplicationBusy(false);
     data = { profile: {}, applications: [] };
     $('profile-form').reset();
+    manualCounts = null;
+    renderMembers([]);
+    renderSetupResume();
     $('application-form').reset();
     $('application-id').value = '';
     $('auth-form').reset();
@@ -250,6 +280,7 @@
       if (!window.confirm('Leave without saving your profile changes?')) return;
       fillProfile();
     }
+    if (view !== 'profile') closeSetup();
     if (currentView === 'documents' && view !== 'documents') clearDocumentReview();
     currentView = view;
     for (const key of Object.keys(viewNames)) $(`view-${key}`).hidden = key !== view;
@@ -267,8 +298,207 @@
 
   function fillProfile() {
     profileRevision++;
+    manualCounts = null;
     for (const key of profileFields) profileControl(key).value = typeof data.profile[key] === 'string' ? data.profile[key] : '';
+    renderMembers(Array.isArray(data.profile.householdMembers) ? data.profile.householdMembers : []);
     setProfileDirty(false);
+  }
+
+  // Whole years on this computer's calendar today; a birthday counts on the day itself. Null without a date.
+  function ageOn(birthDate) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(birthDate || '');
+    if (!match) return null;
+    const now = new Date();
+    const [year, month, day] = match.slice(1).map(Number);
+    return now.getFullYear() - year - (now.getMonth() + 1 < month || (now.getMonth() + 1 === month && now.getDate() < day) ? 1 : 0);
+  }
+
+  const memberRows = () => Array.from($('household-members').querySelectorAll('.household-member'));
+  function memberField(row, member, field, label, control) {
+    const wrap = element('div', 'field');
+    const id = `member-${member.id}-${field}`;
+    const name = element('label', '', label); name.htmlFor = id;
+    control.id = id;
+    control.dataset.memberField = field;
+    wrap.append(name, control);
+    return wrap;
+  }
+  function choice(options, value) {
+    const select = element('select');
+    for (const [optionValue, text] of options) { const option = element('option', '', text); option.value = optionValue; select.append(option); }
+    select.value = value;
+    return select;
+  }
+  // One person's row. The applicant's own name and birth date come from About you and show here read-only.
+  function memberRow(member) {
+    const self = member.relationship === 'self';
+    const row = element('fieldset', 'household-member');
+    row.dataset.memberId = member.id;
+    row.dataset.self = String(self);
+    const grid = element('div', 'field-grid three');
+    const text = (field, max, type = 'text') => {
+      const input = element('input'); input.type = type; input.value = member[field] || ''; input.autocomplete = 'off';
+      if (max) input.maxLength = max;
+      if (self) { input.readOnly = true; input.tabIndex = -1; }
+      return input;
+    };
+    grid.append(memberField(row, member, 'firstName', 'First name', text('firstName', 100)), memberField(row, member, 'lastName', 'Last name', text('lastName', 100)),
+      memberField(row, member, 'birthDate', 'Date of birth', text('birthDate', 0, 'date')));
+    if (!self) grid.append(memberField(row, member, 'relationship', 'How they are related to you', choice([['', 'Choose one'], ...RELATIONSHIPS], member.relationship || '')));
+    const student = memberField(row, member, 'student', 'A student?', choice([['', 'Not answered yet'], ['yes', 'Yes'], ['no', 'No']], member.student || ''));
+    const grade = memberField(row, member, 'grade', 'Grade (for example 3rd, K, or College)', text('grade', 20));
+    grade.querySelector('input').readOnly = false; grade.querySelector('input').tabIndex = 0;
+    grade.hidden = member.student !== 'yes';
+    student.querySelector('select').addEventListener('change', () => {
+      const yes = student.querySelector('select').value === 'yes';
+      grade.hidden = !yes;
+      if (!yes) grade.querySelector('input').value = '';
+    });
+    grid.append(student, grade);
+    row.append(element('legend'), grid);
+    if (self) row.append(element('p', 'field-hint', 'Your name and date of birth come from About you.'));
+    row.querySelectorAll('[data-member-field="birthDate"]').forEach(input => input.addEventListener('input', renderCounts));
+    return row;
+  }
+  // The list's rows, legends, remove buttons and Add button, and the counts worked out from it.
+  function renderMembers(members) {
+    $('household-members').replaceChildren(...members.map(memberRow));
+    refreshMembers();
+  }
+  function refreshMembers() {
+    const rows = memberRows();
+    rows.forEach((row, index) => {
+      const self = row.dataset.self === 'true';
+      row.querySelector('legend').textContent = self ? 'You' : `Person ${index + 1}`;
+      row.querySelector(':scope > .remove-member')?.remove();
+      // The applicant stays on the list while anyone else is on it; alone, removing them removes the list.
+      if (self && rows.length > 1) return;
+      const remove = element('button', 'text-button danger remove-member', self ? 'Remove the list' : 'Remove this person');
+      remove.type = 'button';
+      if (!self) remove.setAttribute('aria-label', `Remove person ${index + 1}`);
+      remove.addEventListener('click', () => { row.remove(); refreshMembers(); profileRevision++; setProfileDirty(true); });
+      row.append(remove);
+    });
+    $('add-household-member').disabled = rows.length >= MAX_MEMBERS;
+    $('household-limit').hidden = rows.length < MAX_MEMBERS;
+    syncSelf();
+  }
+  // The applicant's own row shows their name and birth date as About you has them now.
+  function syncSelf() {
+    const row = memberRows().find(item => item.dataset.self === 'true');
+    if (row) for (const field of ['firstName', 'lastName', 'birthDate']) row.querySelector(`[data-member-field="${field}"]`).value = profileControl(field).value.trim();
+    renderCounts();
+  }
+  function collectMembers() {
+    return memberRows().map(row => {
+      const self = row.dataset.self === 'true';
+      const value = field => row.querySelector(`[data-member-field="${field}"]`)?.value.trim() ?? '';
+      const student = value('student');
+      return { id: row.dataset.memberId, firstName: self ? profileControl('firstName').value.trim() : value('firstName'),
+        lastName: self ? profileControl('lastName').value.trim() : value('lastName'), birthDate: self ? profileControl('birthDate').value.trim() : value('birthDate'),
+        relationship: self ? 'self' : value('relationship'), student, grade: student === 'yes' ? value('grade') : '' };
+    });
+  }
+  // With people on the list, the household counts are worked out from it and shown read-only; the
+  // desktop works them out the same way. Without the list, the manual counts are the applicant's to enter.
+  function renderCounts() {
+    const members = collectMembers();
+    const listed = members.length > 0;
+    if (listed && !manualCounts) manualCounts = Object.fromEntries(COUNT_FIELDS.map(field => [field, profileControl(field).value]));
+    if (!listed && manualCounts) { for (const field of COUNT_FIELDS) profileControl(field).value = manualCounts[field]; manualCounts = null; }
+    for (const field of COUNT_FIELDS) profileControl(field).readOnly = listed;
+    $('household-counts-note').hidden = !listed;
+    if (!listed) return;
+    const ages = members.map(member => ageOn(member.birthDate));
+    const known = ages.every(age => age !== null);
+    const count = (low, high) => known ? String(ages.filter(age => age >= low && age <= high).length) : '';
+    profileControl('householdSize').value = String(members.length);
+    profileControl('householdAdults').value = count(18, 64);
+    profileControl('householdChildren').value = count(0, 17);
+    profileControl('householdSeniors').value = count(65, Infinity);
+    $('household-counts-note').textContent = known ? 'Counted from your household list. To change them, change the list.'
+      : 'Counted from your household list. Add every person’s birth date to count their ages.';
+  }
+  function addMember() {
+    const rows = memberRows();
+    if (rows.length >= MAX_MEMBERS) return;
+    const blank = relationship => ({ id: window.crypto.randomUUID(), firstName: '', lastName: '', birthDate: '', relationship, student: '', grade: '' });
+    // The list starts with the applicant.
+    if (!rows.length) $('household-members').append(memberRow(blank('self')));
+    const row = memberRow(blank(''));
+    $('household-members').append(row);
+    refreshMembers();
+    profileRevision++;
+    setProfileDirty(true);
+    row.querySelector('[data-member-field="firstName"]').focus();
+  }
+
+  // The guided setup on screen: one step's cards, its title, and Back, Finish later, and Save and continue.
+  function renderSetupStep() {
+    const active = setupStep !== null;
+    // Each section of My information belongs to one step; a card shows while any of its sections does.
+    for (const part of $('profile-form').querySelectorAll('[data-setup-step]')) part.hidden = active && Number(part.dataset.setupStep) !== setupStep + 1;
+    for (const card of $('profile-form').querySelectorAll(':scope > .form-card')) card.hidden = active && !card.matches('[data-setup-step]:not([hidden])') && !card.querySelector('[data-setup-step]:not([hidden])');
+    $('setup-bar').hidden = !active;
+    $('setup-nav').hidden = !active;
+    $('save-profile').closest('.form-save-bar').hidden = active;
+    $('profile-heading').textContent = active ? 'Set up your information' : 'My information';
+    if (!active) return;
+    const step = SETUP_STEPS[setupStep];
+    $('setup-step-count').textContent = `Step ${setupStep + 1} of ${SETUP_STEPS.length}`;
+    $('setup-step-title').textContent = step.title;
+    $('setup-step-intro').textContent = step.intro;
+    $('setup-progress').value = setupStep;
+    $('setup-back').disabled = setupStep === 0;
+    $('setup-next-label').textContent = setupStep === SETUP_STEPS.length - 1 ? 'Save and finish' : 'Save and continue';
+    window.scrollTo(0, 0);
+    $('setup-step-title').focus();
+  }
+  function openSetup() {
+    if (!setupProgress || !showView('profile')) return;
+    setupStep = Math.min(setupProgress.step, SETUP_STEPS.length - 1);
+    renderSetupStep();
+  }
+  function closeSetup() {
+    if (setupStep === null) return;
+    setupStep = null;
+    renderSetupStep();
+  }
+  // Overview's "Finish setting up" while a setup is under way.
+  function renderSetupResume() {
+    $('setup-resume').hidden = !setupProgress;
+    $('setup-resume-text').textContent = setupProgress ? `Finish setting up: ${setupProgress.step} of ${SETUP_STEPS.length} steps` : '';
+  }
+  // A step saved: the desktop records it, then the next step shows, or after the last, Overview.
+  async function setupStepSaved(step, generation) {
+    const progress = await api.saveSetupProgress(step + 1);
+    if (generation !== vaultGeneration || !vaultStatus.unlocked) return;
+    setupProgress = progress;
+    renderSetupResume();
+    if (setupStep !== step) return;
+    if (step + 1 < SETUP_STEPS.length) { setupStep = step + 1; renderSetupStep(); return; }
+    closeSetup();
+    showView('overview', { skipConfirmation: true });
+    toast('Your information is set up. Change it any time in My information.');
+  }
+
+  // Save to My information in Chrome changed these saved fields. My information shows the new answers;
+  // a field the applicant is editing keeps their unsaved edit.
+  async function profileChangedElsewhere(fields) {
+    if (!vaultStatus.unlocked) return;
+    const generation = vaultGeneration;
+    try {
+      const latest = await api.getData();
+      if (generation !== vaultGeneration || !vaultStatus.unlocked) return;
+      const before = data.profile;
+      data = { ...data, profile: latest.profile || {} };
+      if (!profileDirty) fillProfile();
+      else for (const field of fields.filter(name => profileFields.includes(name))) {
+        if (String(profileControl(field).value) === String(before[field] ?? '')) profileControl(field).value = typeof data.profile[field] === 'string' ? data.profile[field] : '';
+      }
+      renderSummary();
+      toast('An answer you saved from Chrome is now in My information.');
+    } catch (error) { if (generation === vaultGeneration) toast(error.message || 'Unable to show the answer you saved from Chrome.', true); }
   }
 
   function documentControls() {
@@ -616,7 +846,7 @@
 
   async function loadUnlocked(status) {
     const generation = vaultGeneration;
-    const loaded = await api.getData();
+    const [loaded, progress] = await Promise.all([api.getData(), api.setupProgress().then(value => ({ value }), error => ({ error }))]);
     if (generation !== vaultGeneration) return;
     // A successful unlock can supersede a delayed event for a lock that the
     // desktop already completed before this authenticated status was returned.
@@ -629,8 +859,11 @@
     $('reset-form').reset();
     $('auth-view').hidden = true;
     $('workspace').hidden = false;
+    setupProgress = progress.value || null;
     fillProfile(); renderSummary();
     showView('overview', { skipConfirmation: true });
+    renderSetupResume();
+    if (progress.error) toast(progress.error.message || 'SecondHand couldn’t read your setup progress.', true);
   }
 
   async function lockVault() {
@@ -691,6 +924,11 @@
           if (generation !== vaultGeneration) return;
           await loadUnlocked(created.status);
           if (generation !== vaultGeneration) return;
+          // The guided setup starts with the new password, so it can be resumed; it is offered after the recovery key.
+          setupProgress = await api.startSetup();
+          if (generation !== vaultGeneration) return;
+          renderSetupResume();
+          offerSetup = true;
           showRecoveryKey(created.recoveryKey);
           if (created.deviceResetFailed) $('recovery-feedback').textContent = 'This computer couldn’t save a reset option, so keep this key safe.';
         }
@@ -769,6 +1007,17 @@
   $('recovery-done').addEventListener('click', () => $('recovery-dialog').close());
   $('recovery-dialog').addEventListener('cancel', (event) => { if (!$('recovery-saved').checked) event.preventDefault(); });
   $('recovery-dialog').addEventListener('close', clearRecoveryKey);
+  $('recovery-done').addEventListener('click', () => {
+    if (!offerSetup || !vaultStatus.unlocked) return;
+    offerSetup = false;
+    $('setup-dialog').showModal();
+  });
+  $('setup-start').addEventListener('click', () => { $('setup-dialog').close(); openSetup(); });
+  $('setup-skip').addEventListener('click', () => { $('setup-dialog').close(); showView('overview', { skipConfirmation: true }); renderSetupResume(); });
+  $('setup-resume-button').addEventListener('click', openSetup);
+  $('setup-back').addEventListener('click', () => { if (setupStep > 0) { setupStep--; renderSetupStep(); } });
+  $('setup-later').addEventListener('click', () => { if (showView('overview')) renderSetupResume(); });
+  $('add-household-member').addEventListener('click', addMember);
   for (const [buttonId, method, message] of [
     ['copy-recovery-key', 'copyRecoveryKey', 'Copied. It will be cleared from the clipboard in 1 minute.'],
     ['save-recovery-key', 'saveRecoveryKey', 'Saved. Print it or move it somewhere safe, away from this computer.']
@@ -833,14 +1082,18 @@
   $('overview-start').addEventListener('click', () => showView('profile'));
   $('lock-button').addEventListener('click', lockVault);
   $('privacy-lock').addEventListener('click', lockVault);
-  $('profile-form').addEventListener('input', () => { profileRevision++; setProfileDirty(true); });
+  $('profile-form').addEventListener('input', (event) => {
+    profileRevision++; setProfileDirty(true);
+    if (['firstName', 'lastName', 'birthDate'].includes(event.target.name)) syncSelf();
+  });
   $('profile-form').addEventListener('submit', (event) => {
     event.preventDefault(); clearError('profile-error');
     const generation = vaultGeneration;
     const revision = profileRevision;
-    const profile = { ...Object.fromEntries(profileFields.map((field) => [field, profileControl(field).value.trim()])),
-      householdMembers: (Array.isArray(data.profile.householdMembers) ? data.profile.householdMembers : []).map(member => ({ ...member })) };
-    pending($('save-profile'), async () => {
+    // In the guided setup, saving a step moves on to the next.
+    const step = setupStep;
+    const profile = { ...Object.fromEntries(profileFields.map((field) => [field, profileControl(field).value.trim()])), householdMembers: collectMembers() };
+    pending(step === null ? $('save-profile') : $('setup-next'), async () => {
       try {
         const saved = await api.saveProfile(profile);
         if (!vaultStatus.unlocked || generation !== vaultGeneration) return;
@@ -849,6 +1102,7 @@
         if (!newerEdits) fillProfile();
         renderSummary();
         toast(newerEdits ? 'Earlier changes saved. Your newer edits still need to be saved.' : 'Your information is saved on this computer.');
+        if (step !== null) await setupStepSaved(step, generation);
       } catch (error) { if (generation === vaultGeneration) showError('profile-error', error); }
     });
   });
@@ -1039,6 +1293,7 @@
     // cannot reset an unlock attempt the person has started, while a newer lock still
     // cancels any pending unlock or profile load.
     api.onLocked(notification => showLocked({ ...vaultStatus, exists: true, unlocked: false, lockRevision: notification?.lockRevision }));
+    api.onProfileChanged(change => profileChangedElsewhere(change.fields));
     try {
       const status = await api.status();
       if (status.unlocked) await loadUnlocked(status); else showLocked(status);
