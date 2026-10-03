@@ -347,5 +347,5 @@ if (require.main === module) {
   console.log(JSON.stringify(summary, null, 2));
 }
 
-module.exports = { correctOption, buildRows, buildMatchRows, buildChoiceRows, buildChoiceMatchRows, splitFor, writeDataset, writeFinalDataset, range, ABSTAIN, DECISION, MATCH_KEYS,
+module.exports = { formKey, correctOption, buildRows, buildMatchRows, buildChoiceRows, buildChoiceMatchRows, splitFor, writeDataset, writeFinalDataset, range, ABSTAIN, DECISION, MATCH_KEYS,
   CHOICE_ANSWER_INSTRUCTIONS, CHOICE_MATCH_INSTRUCTIONS, BOX_TYPES, MATCH_ABSTAIN, MATCH_SETS, MATCH_GROUPS, FORMATS };

@@ -111,3 +111,66 @@ test('choice-v2: a matching decision is the training row’s question and state 
     assert.equal(JSON.stringify(prompts.CHOICE.matchQuestion(prompts.CHOICE.MATCH_SETS[type])), JSON.stringify(questions[id]), type);
   }
 });
+
+test('noul-v1: a text box is offered the groups of saved fields its label names, in training order, and every field when it names none', () => {
+  const { offeredFields, MATCH_CANDIDATES, NEVER_SUGGESTED } = prompts;
+  const box = (label, type = 'text') => offeredFields({ label, type });
+  const names = ['firstName', 'middleName', 'lastName', 'fullName', 'suffix'];
+  const address = ['addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county'];
+  const counts = ['householdSize', 'householdAdults', 'householdChildren', 'householdSeniors'];
+  assert.deepEqual(box('First Name:'), names);
+  assert.deepEqual(box('Zip Code:'), address);
+  assert.deepEqual(box('Phone:'), ['email', 'phone']);
+  assert.deepEqual(box('Total # of individuals living in your household:'), counts);
+  assert.deepEqual(box('Utility costs per month (gas, electric, water)'), ['monthlyRent', 'monthlyUtilities']);
+  assert.deepEqual(box('Name of Head of Household'), [...names, ...counts], 'two groups, in MATCH_CANDIDATES order');
+  assert.deepEqual(box('Dirección'), address, 'accents are folded');
+  assert.deepEqual(box('Teléfono', 'tel'), ['email', 'phone']);
+  assert.deepEqual(box('Anything else?'), [...MATCH_CANDIDATES]);
+  assert.deepEqual(box('Today’s Date', 'date'), [], 'date of birth is never offered, so a date box is offered nothing');
+  assert.deepEqual(box('Phone', 'date'), []);
+  for (const label of ['First Name', 'Anything else?', 'Rent', 'Email', 'City']) {
+    assert.equal(box(label).some(key => NEVER_SUGGESTED.includes(key)), false, label);
+  }
+  const grouped = new Set(['Name', 'Email', 'Address', 'Household size', 'Monthly rent'].flatMap(label => box(label)));
+  assert.deepEqual(MATCH_CANDIDATES.filter(key => !grouped.has(key)), [], 'every field the app offers is in a group');
+  assert.throws(() => offeredFields({ label: 'Name', type: 'radio' }), /text box/);
+});
+
+test('noul-v1: every answerable text box in the question bank is offered its saved field', () => {
+  const { offeredFields, MATCH_CANDIDATES } = prompts;
+  let boxes = 0;
+  for (const form of [...loadQuestionBank(), ...loadSyntheticBank()]) {
+    for (const question of form.questions) {
+      const key = question.rule.name === 'field' ? question.rule.key : null;
+      if (!prompts.TEXT_TYPES.includes(question.type) || !MATCH_CANDIDATES.includes(key)) continue;
+      boxes++;
+      assert.ok(offeredFields(question).includes(key), `${form.source.url}: ${question.label} -> ${key}`);
+    }
+  }
+  assert.ok(boxes > 100, `${boxes} answerable boxes`);
+});
+
+test('noul-v1: a choice question is asked only when its label or options name a topic the facts sheet covers', () => {
+  const { factsCover } = prompts;
+  const yesNo = ['Yes', 'No'];
+  for (const label of ['New Client:', 'Existing Client:', 'Is this your first time receiving food this year?', 'Gender', 'Preferred pickup day', 'Do you have any pets?']) {
+    assert.equal(factsCover({ label, options: yesNo }), false, label);
+  }
+  for (const [label, options] of [['Is anyone in your household 60 or older?', yesNo], ['Are you 55+?', yesNo], ['Do you live in Polk County?', yesNo], ['Is your home in Minnesota?', yesNo],
+    ['Veteran?', yesNo], ['Are you a U.S. citizen?', yesNo], ['Pick one', ['SNAP', 'WIC']],
+    ['How would you best describe your employment status?', ['Employed', 'Unemployed', 'Retired', 'Disabled', 'Student']]]) {
+    assert.equal(factsCover({ label, options }), true, label);
+  }
+});
+
+test('noul-v1: every choice question with an answer rule in the question bank names a topic the facts cover', () => {
+  let ruled = 0;
+  for (const form of [...loadQuestionBank(), ...loadSyntheticBank()]) {
+    for (const question of form.questions.filter(item => prompts.CHOICE_TYPES.includes(item.type) && !['none', 'never'].includes(item.rule.name))) {
+      ruled++;
+      assert.ok(prompts.factsCover(question), `${form.source.url || form.file}: ${question.label} (${question.rule.name})`);
+    }
+  }
+  assert.ok(ruled > 350, `${ruled} questions with a rule`);
+});

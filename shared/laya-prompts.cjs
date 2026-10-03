@@ -37,6 +37,60 @@ const MATCH_CANDIDATES = Object.freeze(MATCH_KEYS.filter(key => !NEVER_SUGGESTED
 
 // One model input each, in the key order of the training rows. A null key is the abstain candidate.
 const matchState = (question, key) => ({ question, candidate: key === null ? ABSTAIN : `Saved answer: ${KEY_ABOUT[key]}` });
+
+// noul-v1: the saved fields a text box is asked about. Each one is a pass through the model, so a box
+// is offered only the groups of fields its label names, and every field when its label names none of
+// them. A date box is offered none: date of birth never is. The groups and their words were chosen on
+// the training forms' labels. On the test and final forms they keep every box's saved field and change
+// none of the model's decisions (docs/laya-model.md, Speed).
+const OFFER_GROUPS = Object.freeze([
+  { keys: ['firstName', 'middleName', 'lastName', 'fullName', 'suffix'], words: /\b(names?|nombres?|surnames?|apellidos?|given|first|last|middle|initial|mi|suffix|jr|sr|ii|iii|iv)\b/ },
+  { keys: ['email', 'phone'], words: /\b(e ?mail|emails|correo|electronico|phones?|telephones?|tel|telefono|cell|cellphone|mobile|contact|reach|text|call)\b/ },
+  { keys: ['addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county'],
+    words: /\b(address(es)?|direccion|street|apt|apartment|suite|unit|po box|city|ciudad|town|village|state|province|region|estado|zip|zipcode|postal|codigo|county|condado|parish|mailing|physical)\b/ },
+  { keys: ['householdSize', 'householdAdults', 'householdChildren', 'householdSeniors'],
+    words: /\b(households?|family|families|people|persons?|members?|individuals?|adults?|child|children|kids?|minors?|infants?|babies|seniors?|elderly|size|how many)\b/ },
+  { keys: ['monthlyRent', 'monthlyUtilities'], words: /\b(rent|rental|mortgage|housing|utility|utilities|electric|electricity|gas|water|heat|heating|bills?|payments?|pay|costs?|expenses?|monthly|month|amount|dollars)\b/ }
+].map(group => Object.freeze({ keys: Object.freeze(group.keys), words: group.words })));
+// A label's words, lowercased and without accents or punctuation.
+const topicText = label => String(label).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[‘’']/g, '').replace(/#/g, ' number ')
+  .replace(/[^a-z0-9+]+/g, ' ').trim();
+function offeredFields({ label, type }) {
+  if (!TEXT_TYPES.includes(type)) throw new TypeError(`A ${type} field isn’t a text box Laya matches.`);
+  if (type === 'date') return [];
+  const text = topicText(label);
+  const named = new Set(OFFER_GROUPS.filter(group => group.words.test(text)).flatMap(group => group.keys));
+  return named.size ? MATCH_CANDIDATES.filter(key => named.has(key)) : [...MATCH_CANDIDATES];
+}
+
+// noul-v1: whether the saved facts could settle a choice question. Every question costs two passes
+// through the model, so one whose label and options name none of the topics the facts sheet covers
+// (FACT_TOPICS: the household and its members' ages, veterans, disability, pregnancy, Medicare,
+// citizenship, home and place, income, housing costs, money on hand, medical costs, and programs
+// applied for) isn't asked: pickup times, gender, pets, "New client?". The facts never settle those.
+// The words were chosen on the training questions, where every question with an answer rule names its
+// topic. The facts sheet itself is unchanged. On the test and final forms, asking only these changes
+// none of the model's answers (docs/laya-model.md, Speed).
+const STATE_WORDS = Object.values(require('./facts.cjs').STATE_NAMES).map(name => name.toLowerCase()).join('|');
+const FACT_TOPICS = Object.freeze([
+  /\b(households?|family|families|people|persons?|members?|individuals?|live with|lives with|living with|alone|size|ages?|aged|old|older|younger|born|birth|birthday|seniors?|elderly|elders?|adults?|minors?|child|children|kids?|infants?|babies|baby|teens?|youth|retired|retire\w*|parents?|hoh|head|dependents?|anyone|anybody|someone|else|others|share|sharing|with you|over \d+|under \d+)\b|\d+ ?\+/,
+  /\b(veterans?|military|armed|served|service|army|navy|marines?|air force|national guard|coast guard|active duty|discharged)\b/,
+  /\b(disab\w*|handicap\w*|impair\w*|ssi|ssdi|blind)\b/,
+  /\b(pregnan\w*|expecting|wic)\b/,
+  /\b(medicare|medicaid|insurance|insured|coverage|covered|health)\b/,
+  /\b(citizens?|citizenship|immigra\w*|legal|lawful|qualified|alien|documented|undocumented|green card|naturaliz\w*|permanent resident|refugee)\b/,
+  /\b(homeless\w*|unhoused|housed|home|house|housing|shelter|address|living situation|stay|staying|own|owns|rent|rents|renting|mortgage|lease|apartment)\b/,
+  new RegExp(`\\b(state|county|city|town|zip|zipcode|postal|live in|lives in|reside|resides|residents?|residence|located|location|area|where|${STATE_WORDS})\\b`),
+  /\b(income|incomes|earn|earns|earned|earnings|wages?|salary|paid|paycheck|jobs?|work|works|working|employ\w*|unemploy\w*|self employed|hours|money|support|pension|social security|unemployment|fpl|poverty|annual|monthly|gross|net)\b/,
+  /\b(utility|utilities|electric\w*|gas|heat\w*|water|energy|liheap|bills?|phone bill)\b/,
+  /\b(assets?|resources|savings?|bank|checking|cash|accounts?|on hand)\b/,
+  /\b(medical|medicine|prescriptions?|doctor|dental|hospital|health care|out of pocket)\b/,
+  /\b(snap|food stamps?|ebt|fip|tanf|cash assistance|apply|applying|applied|application|programs?|benefits?|assistance|hawk ?i|chip)\b/
+]);
+function factsCover({ label, options }) {
+  const words = [label, ...options].map(topicText);
+  return FACT_TOPICS.some(topic => words.some(text => topic.test(text)));
+}
 const answerState = (facts, question, candidate) => ({ facts, question, candidate });
 
 // choice-v2 (#65): one `choice` question per form question, so every option is scored in one
@@ -76,5 +130,5 @@ const UNSAFE_QUESTION = /^social security$|\b(consent\w*|sign|signs|signed|signi
 const normal = value => String(value || '').toLowerCase().replace(/[‘’']/g, '').replace(/#/g, ' number ').replace(/\*/g, ' ').replace(/[^a-z0-9+]+/g, ' ').trim();
 const unsafeQuestion = field => [field?.label, ...(Array.isArray(field?.options) ? field.options : [])].some(text => UNSAFE_QUESTION.test(normal(text)));
 
-module.exports = { DECISION, QUESTIONS, ABSTAIN, TEXT_TYPES, CHOICE_TYPES, MATCH_KEYS, KEY_ABOUT, NEVER_SUGGESTED, MATCH_CANDIDATES, matchState, answerState,
+module.exports = { DECISION, QUESTIONS, ABSTAIN, TEXT_TYPES, CHOICE_TYPES, MATCH_KEYS, KEY_ABOUT, NEVER_SUGGESTED, MATCH_CANDIDATES, matchState, offeredFields, factsCover, answerState,
   CHOICE, UNSAFE_QUESTION, unsafeQuestion };

@@ -5,6 +5,8 @@
 // and keeps up to date while it is on. This is the runtime only: confidence bars, key limits and
 // sensitive-data rules belong to its callers (#39, #42).
 const fs = require('node:fs/promises');
+const os = require('node:os');
+const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 const { validateManifest, readInstalled, fetchManifest, ModelStore, MODEL_FILES, MODEL_FORMATS } = require('./laya-model.cjs');
 const { loadTokenizer } = require('./laya-tokenizer.cjs');
@@ -35,9 +37,35 @@ function forkWorker(script) {
     on: (event, listener) => child.on(event, listener), once: (event, listener) => child.once(event, listener), kill: () => child.kill() };
 }
 
-// The production runner: onnxruntime-node on the CPU, in its own process (laya-worker.cjs).
+// A Mac with Apple silicon's performance cores; null elsewhere. Its efficiency cores slow onnxruntime
+// down when they share its work.
+function applePerformanceCores() {
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') return null;
+  const cores = Number(execFileSync('/usr/sbin/sysctl', ['-n', 'hw.perflevel0.physicalcpu'], { encoding: 'utf8' }).trim());
+  if (!Number.isInteger(cores) || cores < 1) throw new Error('This Mac didn’t say how many performance cores it has.');
+  return cores;
+}
+
+// How many onnxruntime sessions the model process runs, and the threads each one uses. One session
+// keeps a many-core CPU poorly busy: its int8 matrix products run only 1.7 times faster on 10 threads
+// than on 1 (#65). So a Mac with 8 or more performance cores and 16 GB or more of memory runs two
+// sessions, each on half of those cores; each holds its own copy of the weights (about 0.4 GB). A
+// smaller Mac runs one on its performance cores. Elsewhere (not yet measured), one session runs with
+// onnxruntime's own thread count.
+function sessionPlan({ performanceCores = applePerformanceCores(), memory = os.totalmem() } = {}) {
+  if (performanceCores === null) return { sessions: 1 };
+  if (performanceCores >= 8 && memory >= 16 * 2 ** 30) return { sessions: 2, threads: Math.floor(performanceCores / 2) };
+  return { sessions: 1, threads: performanceCores };
+}
+
+// The production runner: onnxruntime-node on the CPU, in its own process (laya-worker.cjs), with
+// `sessions` sessions there of `threads` threads each (unset: onnxruntime's default). Without
+// `sessions`, sessionPlan() picks both for this computer.
 // Ending that process is what returns the model's memory; the desktop process never loads it.
-function processRunner({ fork = forkWorker } = {}) {
+function processRunner({ fork = forkWorker, ...options } = {}) {
+  const { sessions, threads } = options.sessions === undefined && options.threads === undefined ? sessionPlan() : { sessions: options.sessions ?? 1, threads: options.threads };
+  if (!Number.isInteger(sessions) || sessions < 1) throw new TypeError('The Laya model process needs a whole number of sessions, 1 or more.');
+  if (threads !== undefined && (!Number.isInteger(threads) || threads < 1)) throw new TypeError('Laya sessions need a whole number of threads, 1 or more.');
   return {
     supported: SUPPORTED_PLATFORMS.has(`${process.platform}-${process.arch}`),
     async load(file) {
@@ -65,8 +93,9 @@ function processRunner({ fork = forkWorker } = {}) {
         child.postMessage(message);
       });
       const end = () => stopped ? Promise.resolve() : new Promise(resolve => { child.once('exit', resolve); child.kill(); });
-      try { await request({ type: 'load', file }); } catch (error) { await end(); throw error; }
+      try { await request({ type: 'load', file, sessions, threads }); } catch (error) { await end(); throw error; }
       return {
+        sessions,
         async run(batch) {
           const { data, dims } = await request({ type: 'run', id: ++nextId, batch });
           return { data, dims };
@@ -139,7 +168,9 @@ function createLaya({ userDataDir, manifest, modelDir, modelFormat, updateUrl = 
   let generation = 0;
   let active = 0;
   let idleTimer = null;
-  let queue = Promise.resolve();
+  // Batches waiting for a session, oldest first, and how many are running.
+  const waiting = [];
+  let runningBatches = 0;
 
   const unavailableReason = () => runner.supported === false ? UNSUPPORTED : !modelDir && !store ? UNAVAILABLE : null;
   // Deletes everything under models/laya but the model in use and an update on its way.
@@ -246,12 +277,22 @@ function createLaya({ userDataDir, manifest, modelDir, modelFormat, updateUrl = 
     return loading;
   }
 
-  // One batch at a time through the model, so memory stays bounded. A failed run still lets
-  // the next one start; its error reaches its own caller through the returned promise.
-  function runQueued(model, batch) {
-    const run = queue.then(() => model.run(batch));
-    queue = run.then(() => {}, () => {});
-    return run;
+  // Batches go through the model in the order they were asked, one per session at a time, so memory
+  // stays bounded. A batch whose request has ended is dropped (null) instead of run. A failed run
+  // still lets the next one start; its error reaches its own caller through the returned promise.
+  function runQueued(model, batch, request) {
+    return new Promise((resolve, reject) => {
+      waiting.push({ model, batch, request, resolve, reject });
+      startWaiting();
+    });
+  }
+  function startWaiting() {
+    while (waiting.length && runningBatches < (waiting[0].model.sessions ?? 1)) {
+      const next = waiting.shift();
+      if (next.request.expired) { next.resolve(null); continue; }
+      runningBatches++;
+      next.model.run(next.batch).then(next.resolve, next.reject).finally(() => { runningBatches--; startWaiting(); });
+    }
   }
 
   // The prompt format of the model decisions run on: the loaded model's, else the one that loads next.
@@ -276,16 +317,19 @@ function createLaya({ userDataDir, manifest, modelDir, modelFormat, updateUrl = 
       }
     });
     const order = decisions.map((_, index) => index).sort((a, b) => decisions[a].ids.length - decisions[b].ids.length);
-    for (let start = 0; start < order.length; start += BATCH_SIZE) {
-      if (request.expired) return null;
-      const chunk = order.slice(start, start + BATCH_SIZE).map(index => decisions[index]);
+    const chunks = [];
+    for (let start = 0; start < order.length; start += BATCH_SIZE) chunks.push(order.slice(start, start + BATCH_SIZE).map(index => decisions[index]));
+    if (request.expired) return null;
+    // Every batch is queued at once; the model's sessions take them in order.
+    const ran = await Promise.all(chunks.map(async chunk => {
       const batch = collate(chunk, session.tokenizer.padId);
       let output;
-      try { output = await runQueued(session.model, batch); } catch (error) {
+      try { output = await runQueued(session.model, batch, request); } catch (error) {
         // The model is dropped so the next request starts from a fresh load.
         if (loaded === session) await release();
         throw notReady(`The Laya model stopped (${error.message}). It will load again on the next request.`);
       }
+      if (output === null) return false;
       const { data, dims } = output;
       if (dims[0] !== batch.rows || dims[1] !== batch.count || !data.every(Number.isFinite)) {
         throw new RangeError('Laya returned scores of the wrong shape or non-finite scores.');
@@ -294,7 +338,9 @@ function createLaya({ userDataDir, manifest, modelDir, modelFormat, updateUrl = 
         const values = probabilities(data.subarray(row * batch.count, (row + 1) * batch.count), decision.markers.length, decision.qtype, session.calibration);
         decision.answer = answerFor(decision.question, values);
       });
-    }
+      return true;
+    }));
+    if (!ran.every(Boolean)) return null;
     const results = checked.map(() => ({ answers: {} }));
     for (const decision of decisions) results[decision.index].answers[decision.id] = decision.answer;
     return results;
@@ -444,15 +490,19 @@ function createLaya({ userDataDir, manifest, modelDir, modelFormat, updateUrl = 
   }
 
   // `format`, when given, is the prompt format the items are written in; a model of another is refused.
-  async function decideBatch(items, { format: wanted } = {}) {
+  // `timeoutMs`, when given, ends this request sooner than the runtime's own timeout, such as when an
+  // Autofill click has less time left.
+  async function decideBatch(items, { format: wanted, timeoutMs: within } = {}) {
     if (wanted !== undefined && !MODEL_FORMATS.includes(wanted)) throw new TypeError(`Laya decisions can only be written in a format this app runs (${MODEL_FORMATS.join(', ')}).`);
+    if (within !== undefined && (!Number.isInteger(within) || within < 1)) throw new TypeError('A Laya request’s timeout must be whole milliseconds, 1 or more.');
+    const limit = Math.min(within ?? timeoutMs, timeoutMs);
     const request = { expired: false };
     active++;
     clearTimeout(idleTimer);
     const work = decideAll(items, request, wanted).finally(settle);
     let timer;
     const timeout = new Promise((_, reject) => {
-      timer = setTimeout(() => { request.expired = true; reject(failure(LAYA_TIMEOUT, `Laya took too long (over ${timeoutMs} ms).`)); }, timeoutMs);
+      timer = setTimeout(() => { request.expired = true; reject(failure(LAYA_TIMEOUT, `Laya took too long (over ${limit} ms).`)); }, limit);
       timer.unref?.();
     });
     try { return await Promise.race([work, timeout]); } finally { clearTimeout(timer); }
@@ -520,4 +570,4 @@ function createLaya({ userDataDir, manifest, modelDir, modelFormat, updateUrl = 
   };
 }
 
-module.exports = { createLaya, processRunner, forkWorker, LAYA_NOT_READY, LAYA_TIMEOUT, BATCH_SIZE };
+module.exports = { createLaya, processRunner, sessionPlan, forkWorker, LAYA_NOT_READY, LAYA_TIMEOUT, BATCH_SIZE };

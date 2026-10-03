@@ -14,6 +14,7 @@ questions it fills (coverage), and how often it fills one it should have left.
 
 import argparse
 import json
+import subprocess
 import sys
 import time
 from collections import defaultdict
@@ -96,6 +97,48 @@ def final_forms(final_dir):
     if not urls:
         raise ValueError(f"No final holdout form in {final_dir}")
     return urls
+
+
+def as_app_asks(decisions, offers):
+    """The decisions as the desktop app asks them (`offers`, from app_offers.cjs). A text box is asked only
+    the candidates in offers["match"] and the abstain row, in their order; a box offered nothing isn't asked,
+    so it is left out, and one whose answer isn't on offer can only be answered rightly by abstaining. A
+    choice question offers["answer"] marks False isn't asked: it stays counted, and is never filled."""
+    match, answer = decisions["match"], decisions["answer"]
+    if set(offers["match"]) != set(match):
+        raise ValueError(f"The offers cover other text boxes than the dataset: {sorted(set(offers['match']) ^ set(match))[:3]}")
+    if set(offers["answer"]) != set(answer):
+        raise ValueError(f"The offers cover other choice questions than the dataset: {sorted(set(offers['answer']) ^ set(answer))[:3]}")
+    kept = {}
+    for key, rows in match.items():
+        offered = offers["match"][key]
+        if not offered:
+            continue
+        candidates = [row["state"]["candidate"] for row in rows]
+        missing = [candidate for candidate in offered if candidate not in candidates]
+        if missing:
+            raise ValueError(f"{key}: {missing[0]!r} isn't one of its candidates")
+        chosen = [dict(row, answers=dict(row["answers"])) for row in rows if row["state"]["candidate"] in offered or row["state"]["candidate"] in ABSTAINS]
+        if not any(row["answers"]["correct"] for row in chosen):
+            chosen[-1]["answers"]["correct"] = True
+        kept[key] = chosen
+    asked = {key: rows if offers["answer"][key] else [dict(row, asked=False) for row in rows] for key, rows in answer.items()}
+    return {**decisions, "answer": asked, "match": kept}
+
+
+def select_task(decisions, task):
+    """Only `task`'s decisions ("answer" or "match"), or every task's when it is None."""
+    if task is None:
+        return decisions
+    if task not in decisions:
+        raise ValueError(f"The task must be one of {', '.join(decisions)}, not {task!r}")
+    return {task: decisions[task]}
+
+
+def app_offers(source, final):
+    """What the desktop app offers each text box of a noul-v1 dataset, from its own code (app_offers.cjs)."""
+    command = ["node", str(Path(__file__).with_name("app_offers.cjs")), str(source)] + (["--final"] if final else [])
+    return json.loads(subprocess.run(command, check=True, capture_output=True, text=True).stdout)
 
 
 def probabilities(decisions):
@@ -190,7 +233,7 @@ def metrics(decisions, threshold):
         if rows[-1]["state"]["candidate"] not in ABSTAINS:
             raise ValueError("Every decision must end with the abstain candidate.")
         gold = next(row["state"]["candidate"] for row in rows if row["answers"]["correct"])
-        chosen = fill([row["p"] for row in rows], threshold)
+        chosen = None if rows[0].get("asked") is False else fill([row["p"] for row in rows], threshold)
         answerable = gold not in ABSTAINS
         result["decisions"] += 1
         result["answerable"] += answerable
@@ -249,6 +292,9 @@ def main():
     held.add_argument("--exclude-holdout", action="store_true", help="evaluate every form but those marked holdout (to choose thresholds on)")
     held.add_argument("--final", action="store_true", help="evaluate the final holdout's forms (a dataset built with build.cjs --final)")
     parser.add_argument("--limit", type=int, default=0, help="evaluate this many decisions per task (0 = all)")
+    parser.add_argument("--task", choices=("answer", "match"), help="score only this task (default: both)")
+    parser.add_argument("--as-app-asks", action="store_true",
+                        help="noul-v1: ask what the desktop app asks (app_offers.cjs): each text box only the saved fields it offers, and only the choice questions it asks")
     parser.add_argument("--report", help="write the JSON report here")
     parser.add_argument("--errors", help="write every wrong fill at --error-threshold here (JSON lines)")
     parser.add_argument("--error-threshold", type=float, default=0.9)
@@ -271,6 +317,12 @@ def main():
     questions = json.loads((source / "questions.json").read_text())
     forms = "holdout" if args.holdout else "not-holdout" if args.exclude_holdout else "final" if args.final else "all"
     decisions = load_decisions(source, questions, args.split, forms, args.limit)
+    if args.as_app_asks:
+        if dataset_format(questions) != "noul-v1":
+            parser.error("--as-app-asks applies to noul-v1 datasets; a choice-v2 dataset already offers what the app does")
+        offers = app_offers(source, args.final)
+        decisions = as_app_asks(decisions, {task: {key: offers[task][key] for key in decisions[task]} for task in ("match", "answer")})
+    decisions = select_task(decisions, args.task)
     if args.probs:
         apply_probabilities(decisions, json.loads(Path(args.probs).read_text()))
     elif args.runtime == "onnx":
@@ -292,6 +344,7 @@ def main():
         "split": args.split,
         "holdout": args.holdout,
         "forms": forms,
+        "as_app_asks": args.as_app_asks,
         "tasks": {task: {str(t): metrics(groups, t) for t in THRESHOLDS} for task, groups in decisions.items()},
     }
     if args.runtime == "onnx":
@@ -308,7 +361,7 @@ def main():
         with open(args.errors, "w") as handle:
             for task, groups in decisions.items():
                 for rows in groups.values():
-                    chosen = fill([row["p"] for row in rows], args.error_threshold)
+                    chosen = None if rows[0].get("asked") is False else fill([row["p"] for row in rows], args.error_threshold)
                     best = rows[chosen] if chosen is not None else None
                     gold = next(row["state"]["candidate"] for row in rows if row["answers"]["correct"])
                     if best and best["state"]["candidate"] != gold:

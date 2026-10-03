@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createFieldSuggestions } = require('../desktop/field-suggestions.cjs');
-const { ABSTAIN, QUESTIONS, MATCH_CANDIDATES, NEVER_SUGGESTED, CHOICE, KEY_ABOUT, matchState } = require('../shared/laya-prompts.cjs');
+const { ABSTAIN, QUESTIONS, MATCH_CANDIDATES, NEVER_SUGGESTED, CHOICE, KEY_ABOUT, matchState, offeredFields } = require('../shared/laya-prompts.cjs');
 const { BARS } = require('../desktop/laya-decisions.cjs');
 
 // A stand-in for desktop/laya.cjs (#38) running a noul-v1 model, with its exact decision interface.
@@ -30,9 +30,21 @@ test('a text box the model matches above the bar gets that saved field; it sees 
   const suggestions = await createFieldSuggestions({ laya }).suggest([field('f0:sh-1-2', 'Where can we reach you by email?', 'email')], BUDGET);
   assert.deepEqual(suggestions, { 'f0:sh-1-2': 'email' });
   assert.equal(laya.batches.length, 1);
-  assert.deepEqual(laya.batches[0], [...MATCH_CANDIDATES.map(key => matchState('Where can we reach you by email?', key)), matchState('Where can we reach you by email?', null)]
-    .map(state => ({ state, questions: QUESTIONS })), 'every candidate plus abstain, in training order');
+  assert.deepEqual(laya.batches[0], [...['email', 'phone'].map(key => matchState('Where can we reach you by email?', key)), matchState('Where can we reach you by email?', null)]
+    .map(state => ({ state, questions: QUESTIONS })), 'the fields its label names plus abstain, in training order');
   assert.equal(laya.batches[0].at(-1).state.candidate, ABSTAIN);
+});
+
+test('each text box is asked about the saved fields its label names, every field when it names none, and a date box isn’t asked', async () => {
+  const laya = stubLaya((question, candidate) => question === 'Zip Code:' && candidate === saved('zip') ? 0.99 : 0.01);
+  const boxes = [field('a', 'Zip Code:'), field('b', 'Today’s Date', 'date'), field('c', 'Anything else?'), field('d', 'Total # of individuals living in your household:')];
+  assert.deepEqual(await createFieldSuggestions({ laya }).suggest(boxes, BUDGET), { a: 'zip' });
+  assert.deepEqual(laya.batches.map(batch => batch.map(item => item.state.question)[0]), ['Zip Code:', 'Anything else?', 'Total # of individuals living in your household:']);
+  for (const [batch, box] of [[laya.batches[0], boxes[0]], [laya.batches[1], boxes[2]], [laya.batches[2], boxes[3]]]) {
+    assert.deepEqual(batch.map(item => item.state), [...offeredFields(box).map(key => matchState(box.label, key)), matchState(box.label, null)], box.label);
+  }
+  assert.equal(laya.batches[1].length, MATCH_CANDIDATES.length + 1, 'a label that names no group is offered every field');
+  assert.equal(laya.batches[0].length, 7, 'the six address fields and abstain');
 });
 
 test('the bar is 0.95: a lower score, an abstain that wins, or two likely fields leave the box to the applicant', async () => {
@@ -70,22 +82,28 @@ test('Laya not ready fails the whole request with its code; a timeout or the thr
   const decideBatch = slow.decideBatch;
   slow.decideBatch = async items => { if (++calls === 2) throw Object.assign(new Error('Laya took too long.'), { code: 'LAYA_TIMEOUT' }); return decideBatch(items); };
   assert.deepEqual(await createFieldSuggestions({ laya: slow }).suggest([field('a', 'Email'), field('b', 'Email again'), field('c', 'Third email')], BUDGET), { a: 'email' });
-  assert.equal(calls, 2, 'nothing more is asked after a timeout');
+  assert.equal(calls, 3, 'every box was asked at once; a timeout keeps what came before it');
 
-  // A decision that finishes after the deadline is dropped, and nothing more is asked.
+  // A decision that finishes after the deadline is dropped. Laya finishes one box every `step` ms, in the order asked.
   const timed = (step, budgetMs) => {
     let clock = 0;
+    let previous = Promise.resolve();
     const laya = stubLaya((question, candidate) => candidate === saved('email') ? 0.99 : 0.01);
     const answer = laya.decideBatch;
-    laya.decideBatch = async items => { clock += step; return answer(items); };
-    return { laya, run: () => createFieldSuggestions({ laya, now: () => clock }).suggest([field('a', 'Email'), field('b', 'Email'), field('c', 'Email')], { budgetMs }) };
+    const options = [];
+    laya.decideBatch = (items, option) => {
+      options.push(option);
+      previous = previous.then(() => new Promise(resolve => setImmediate(resolve))).then(() => { clock += step; return answer(items); });
+      return previous;
+    };
+    return { laya, options, run: () => createFieldSuggestions({ laya, now: () => clock }).suggest([field('a', 'Email'), field('b', 'Email'), field('c', 'Email')], { budgetMs }) };
   };
   const full = timed(1600, 3000);
   assert.deepEqual(await full.run(), { a: 'email' }, 'the second field’s decision came at 3.2 seconds');
-  assert.equal(full.laya.batches.length, 2);
+  assert.deepEqual(full.options, Array(3).fill({ format: 'noul-v1', timeoutMs: 3000 }), 'every box is asked at once, each ending when the click’s time does');
   const short = timed(400, 1000);
   assert.deepEqual(await short.run(), { a: 'email', b: 'email' }, 'the click had only one second left');
-  assert.equal(short.laya.batches.length, 3);
+  assert.deepEqual(short.options.map(option => option.timeoutMs), [1000, 1000, 1000]);
   const capped = timed(1400, 9000);
   assert.deepEqual(await capped.run(), { a: 'email', b: 'email' }, 'never more than three seconds');
   for (const budgetMs of [0, -1, 1.5, '3000', undefined]) {

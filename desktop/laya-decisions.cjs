@@ -24,9 +24,10 @@ const BUDGET_MS = 3000;
 // running out keeps every batch decided before it.
 const CHOICE_BATCH = BATCH_SIZE;
 
-// noul-v1: the probability Laya gives each candidate of one decision, from one batch.
-async function score(laya, states) {
-  const results = await laya.decideBatch(states.map(state => ({ state, questions: QUESTIONS })), { format: 'noul-v1' });
+// noul-v1: the probability Laya gives each candidate of one decision, from one batch. `timeoutMs`,
+// when given, is the time the click has left: the request ends then.
+async function score(laya, states, { timeoutMs } = {}) {
+  const results = await laya.decideBatch(states.map(state => ({ state, questions: QUESTIONS })), { format: 'noul-v1', ...(timeoutMs === undefined ? {} : { timeoutMs }) });
   if (!Array.isArray(results) || results.length !== states.length) throw new Error('Laya returned the wrong number of answers.');
   // Each answer is desktop/laya.cjs's { type: 'noul', noul, confidence }; noul is the probability.
   return results.map(result => {
@@ -66,12 +67,28 @@ function pick(scores, threshold) {
 }
 
 // True until the click's time budget is spent: what the click has left, never more than BUDGET_MS.
+// Its left() is the whole milliseconds still left.
 function budget(budgetMs, now = Date.now) {
   if (!Number.isInteger(budgetMs) || budgetMs < 1) throw new TypeError('A Laya request needs its time budget in whole milliseconds.');
   const end = now() + Math.min(budgetMs, BUDGET_MS);
-  return () => now() < end;
+  return Object.assign(() => now() < end, { left: () => Math.max(0, Math.floor(end - now())) });
 }
 const timedOut = error => error?.code === 'LAYA_TIMEOUT';
+
+// noul-v1 asks every question of a pass at once, so each of the model's sessions has work, and Laya
+// runs them in the order asked. use(index, answer) gets each answer in that order while more() says
+// the click has time; one after the deadline is dropped. A request that fails ends the pass. Once
+// every request has ended, a failure is thrown, one other than running out of time first.
+async function inOrder(requests, more, use) {
+  const ended = requests.map(request => request.then(value => ({ value }), error => ({ error, failed: true })));
+  for (const [index, outcome] of ended.entries()) {
+    const { value, failed } = await outcome;
+    if (failed || !more()) break;
+    use(index, value);
+  }
+  const errors = (await Promise.all(ended)).filter(outcome => outcome.failed).map(outcome => outcome.error);
+  if (errors.length) throw errors.find(error => !timedOut(error)) ?? errors[0];
+}
 
 // The confidence bars for the model Laya runs now; a format this app has no bars for fails loudly.
 async function barsFor(laya) {
@@ -80,4 +97,4 @@ async function barsFor(laya) {
   return { format, bars: BARS[format] };
 }
 
-module.exports = { BARS, MIN_LEAD, BUDGET_MS, CHOICE_BATCH, score, scoreChoices, pick, budget, timedOut, barsFor };
+module.exports = { BARS, MIN_LEAD, BUDGET_MS, CHOICE_BATCH, score, scoreChoices, pick, budget, timedOut, inOrder, barsFor };

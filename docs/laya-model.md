@@ -177,7 +177,7 @@ Round 3's held-out forms were then scored once, below. Round 2's bars were chose
 
 - **"Facts don't say" fills.** Round 3 int8 filled 12 of the 351 answering questions the key marks "facts don't say". 10 are proved right; 2 (0.6%) are wrong. Round 2's 10 such fills are all proved right.
 - **Round 3's wrong answers.** "Type of Health Care Coverage" (a check-all list: Medicaid, Medicare, Private Insurance, Uninsured) is answered "Medicaid" at 0.93–0.997 whenever the facts say "The applicant is applying for Medicaid health coverage." Applying is not having coverage. No bar removes it.
-- **Round 2's matching score as the app asks** leaves out the fields the app never offers (date of birth, income, money on hand, medical costs). Scored with every field, as in #41, it is 0.902 precision and 0.787 coverage of 47 boxes.
+- **Round 2's matching score as the app asks** leaves out the fields the app never offers (date of birth, income, money on hand, medical costs). Scored with every field, as in #41, it is 0.902 precision and 0.787 coverage of 47 boxes. `decisions.py --as-app-asks` now scores what the app asks from its own code (see Speed).
 - **At a 0.97 matching bar**, round 3 int8 would reach 0.952 precision and 0.513 coverage on the held-out forms. That bar wasn't chosen, because on the other test forms it gives 0.875.
 
 Round 4's two wrong answers here are "I am filling this form out for?"; its wrong match is "Children between Ages 0 - 18".
@@ -234,7 +234,7 @@ Fifteen real forms (394 questions) collected after round 3, re-checked against t
 
 **"Facts don't say" fills.** Round 4 int8 filled 30 of the 1,173 questions the key marks "facts don't say": 13 are proved right and 17 are wrong (1.4%). Round 2 filled 15: 10 right and 5 wrong (0.4%).
 
-**Summary.** On forms neither round was tuned on, round 4 answers less precisely than round 2 (0.785 against 0.931) and matches far fewer boxes (20% against 73%), though more precisely (0.941 against 0.868). Its errors are confident answers to yes/no questions about property, income sources and other members that its facts don't settle. Round 4 is faster: a page fits the 3-second budget, which round 2's doesn't (see Speed).
+**Summary.** On forms neither round was tuned on, round 4 answers less precisely than round 2 (0.785 against 0.931) and matches far fewer boxes (20% against 73%), though more precisely (0.941 against 0.868). Its errors are confident answers to yes/no questions about property, income sources and other members that its facts don't settle. Both rounds now decide a 20-question page within the 3-second budget: round 4 in 1.6 s, and round 2 in 2.7 s since #65's speed work (see Speed).
 
 ### Round 3 on the test split (every test form, including the held-out ones: 2,016 decisions, 151 boxes)
 Round 3, ONNX int8:
@@ -246,22 +246,68 @@ On the held-out forms, int8 moves 1.1% of round 3's answering probabilities by m
 The reports are in `ML_model/eval/reports/`: `round4-3epoch.json` (MLX), `round4-onnx-int8-*.json`, and the round 2 and round 3 reports.
 
 ## Speed
-One 20-question page through the desktop's own request code (`ML_model/eval/page_latency.cjs`: `field-answers.cjs`, then `field-suggestions.cjs` with the time left) and onnxruntime-node on the CPU of an Apple M4 Max. The page is the Utica Food Pantry intake form (held out), household 0: 6 choice questions and 14 text boxes.
+One 20-question page through the desktop's own request code (`ML_model/eval/page_latency.cjs`: `field-answers.cjs`, then `field-suggestions.cjs` with the time left) and onnxruntime-node on the CPU of an Apple M4 Max (10 performance and 4 efficiency cores, 36 GB). The page is the Utica Food Pantry intake form (held out), household 0: 6 choice questions and 14 text boxes.
 
 | Model | 1-min load before (during) | Model load | p50 | p95 | Max | Pages fully decided within 3 s |
 |---|---|---|---|---|---|---|
-| Round 4 (`choice-v2`) | 2.83 (to 6.7) | 463 ms | **1,644 ms** | 1,705 ms | 1,711 ms | **30 of 30**: all 21 question passes |
-| Round 3 (`choice-v1`) | 2.99 (to 8.5) | 443 ms | **1,586 ms** | 1,603 ms | 1,624 ms | **30 of 30**: all 21 question passes |
-| Round 2 (`noul-v1`) | 8.55 (to 9.5), right after round 3 | 465 ms | 3,178 ms | 3,215 ms | 3,219 ms | 0 of 30: 9 of its 23 question passes fit |
+| **Round 2 (`noul-v1`), this app** | 2.98 (3.2–9.2) | 491 ms | **2,723 ms** | 2,820 ms | 2,954 ms | **30 of 30**: all 15 question passes |
+| Round 2 before (`c9199b3`), timed beside it | 4.23 (to 6.8) | 476 ms | 3,234 ms | 3,295 ms | 3,296 ms | 0 of 30: 8–9 of its 23 question passes fit |
+| Round 4 (`choice-v2`) | 2.83 (to 6.7) | 463 ms | 1,644 ms | 1,705 ms | 1,711 ms | 30 of 30: all 21 question passes |
+| Round 3 (`choice-v1`) | 2.99 (to 8.5) | 443 ms | 1,586 ms | 1,603 ms | 1,624 ms | 30 of 30: all 21 question passes |
+| Round 2 before, first timing | 8.55 (to 9.5), right after round 3 | 465 ms | 3,178 ms | 3,215 ms | 3,219 ms | 0 of 30: 9 of its 23 question passes fit |
 
-- Round 2's times are the 3-second budget running out: it asks one question per request, one candidate per row.
-- The load average counts the benchmark's own onnxruntime threads (one per core), which is why it rises during a run.
-- An earlier round-3 run, during which other work lifted the load to 10–11, had a p50 of 1,607 ms. 27 of its 30 pages were decided within 3 s, and the slowest took 3,481 ms.
+- Round 2's times before are the 3-second budget running out. Its whole page took 10.8 s.
+- The load average counts the benchmark's own onnxruntime threads, which is why it rises during a run. The 1-minute load was 2.4 when the run before started and 3.0 when the run after did.
 - Windows was not measured.
-- The reports are `round4-latency-page-utica.json`, `round3-latency-page-utica.json` and `round2-latency-page-utica.json`.
-- Each round-3 and round-4 page is 21 question passes: the 5 open choice questions without sensitive facts, the same 5 again with every fact (none was answered in the first pass), and 11 text boxes. "Type of ID" and the signature box never reach Laya, and the two date boxes aren't asked.
+- The reports are `round2-latency-page-utica-speed.json` and `round2-latency-page-utica-main-quiet.json`, beside `round2-latency-page-utica.json`, `round3-latency-page-utica.json` and `round4-latency-page-utica.json`.
+- A round-2 page is now 15 question passes: 2 choice questions with facts that need no permission, the same 2 again with every fact, and 11 text boxes. "New Client:", "Existing Client:" and "Is this your first time receiving food this year?" name nothing the facts cover, so they aren't asked. "Type of ID" and the signature box never reach Laya, and the two date boxes aren't asked.
+- A round-3 or round-4 page is 21 question passes: the 5 open choice questions without sensitive facts, the same 5 again with every fact (none was answered in the first pass), and 11 text boxes.
+
+### Where round 2's time went, and what changed (#65)
+Before, a 20-question page was 304 rows of about 91 tokens (61 to 281) through the model: each of 13 text boxes asked about all 19 saved fields and abstaining (260 rows), and each of the 5 choice questions asked about each option and abstaining, twice (44 rows, with the facts sheet).
+- **Profile.** Nearly all the time is onnxruntime running the model. Tokenizing all 304 rows takes 11 ms and padding them into batches 1 ms; the model process's messages and the awaits between requests are negligible.
+  - In a run, the int8 matrix products (`DynamicQuantizeMatMul`) take 55–60% of the time, layer norms 8%, and transposes, `Where`, splits and other small operators the rest.
+  - One session uses the CPU poorly. A batch of 8 short rows takes 444 ms on 1 thread and 190 ms on 10, only 2.3 times faster: its matrix products run 1.7 times faster, and its transposes slower. onnxruntime's own choice of 14 threads takes 210 ms; the efficiency cores slow it down.
+  - Padding wastes 3% of the tokens, so sorting rows by length across requests would gain little.
+
+The whole page with no budget, through the desktop runtime, adding one change at a time (the median of three runs each, at a 1-minute load of 3.1 to 4.9):
+
+| Change | Rows | Answering | Matching | Page |
+|---|---|---|---|---|
+| Before: every saved field for every text box, one session | 304 | 4.1 s | 6.7 s | 10.8 s |
+| A text box is asked only the saved fields its label names, and a date box isn't asked | 103 | 4.0 s | 1.6 s | 5.7 s |
+| Two onnxruntime sessions, 5 threads each, running batches at once | 103 | 3.0 s | 1.0 s | 4.0 s |
+| A choice question that names nothing the facts cover isn't asked | 85 | 1.7 s | 1.0 s | 2.7 s |
+
+- **Text boxes** (`offeredFields`, `shared/laya-prompts.cjs`). A box is offered the groups of saved fields its label names: names, email and phone, address, household counts, housing costs. A label that names none is offered every field, and a date box none, since date of birth is never offered. The groups were chosen on the training labels, where they keep every answerable box's field.
+- **Two sessions** (`desktop/laya.cjs`, `desktop/laya-worker.cjs`). On a Mac with 8 or more performance cores and 16 GB or more, the model process runs two sessions, each on a worker thread with half of the performance cores. Batches run in the order asked, two at a time. The noul-v1 callers ask all of a pass's questions at once, and each request ends when the click's time does. The batches are the same as before, so every score is too. A smaller Mac runs one session on its performance cores. Elsewhere one session runs with onnxruntime's own thread count, as before.
+  - 2 sessions of 7 threads, which use the efficiency cores too, take 4.7–5.0 s. 3 sessions take 3.7–4.1 s, for a third copy of the weights.
+  - The model process holds about 1 GB loaded and 2 GB while deciding, against 0.5 GB and 1.3 GB with one session.
+- **Choice questions** (`factsCover`, `shared/laya-prompts.cjs`). A question is asked only when its label or options name a topic the facts sheet covers: the household and its members' ages, veterans, disability, pregnancy, Medicare, citizenship, home and place, income, housing costs, money on hand, medical costs, and programs applied for. The facts sheet itself is unchanged. The words were chosen on the training questions, where every question with an answer rule names its topic.
+
+#### Accuracy
+The changes to text boxes and choice questions change what the model is asked, so `decisions.py --as-app-asks` scores what the app asks: `app_offers.cjs` runs the app's own `offeredFields` and `factsCover` on each decision. A choice question the app doesn't ask stays counted, and unfilled. The two-session runtime changes no input: the desktop gives the same probabilities as Python's onnxruntime on round 2's export to 1.2e-16 (`tests/laya-parity.test.cjs`).
+
+| Set | Task | Bar | Before | After |
+|---|---|---|---|---|
+| Test pool | Answering | 0.9 | 157 filled, 119 right by key, 38 wrong by key | the same |
+| Test pool | Matching | 0.95 | 68 filled, 60 right, 8 wrong (precision 0.882, coverage 60/70) | the same |
+| Final holdout | Answering | 0.9 | 72 filled, 57 right by key, 15 wrong by key (#41 precision 0.931, coverage 57/59) | the same |
+| Final holdout | Matching | 0.95 | 68 filled, 59 right, 9 wrong (precision 0.868, coverage 59/81) | the same |
+
+- **Every bar.** Answering is the same at every bar in the reports, on both sets. The questions not asked are ones the facts never settled: on the test pool and the final forms every question with an answer rule is still asked, and none of the ones left out was ever filled.
+- **The app's own rules.** With the app's two passes and its rule that the best answer must beat the runner-up by 0.5, no decision changes either, on either set. The app asks 19% fewer choice questions on the test pool and 26% fewer on the final forms. For text boxes, no candidate scoring 0.45 or more is ever left out, and matching rows fall by 63% and 58%.
+- Every text box keeps its saved field in every split: 246 of 246 in training, 27 of 27 in validation, 70 of 70 on the test pool, 81 of 81 on the final forms.
+- The reports are `round2-onnx-int8-test-app.json` and `round2-onnx-int8-final-app.json` (after), `round2-onnx-int8-test-answer.json` (the test pool's answering before) and `round2-onnx-int8-final.json` (the final's before). The test pool's matching before, and the app's own rules on both tasks, come from the same int8 scores: each text-box label's rows scored once, and the answering rows with and without sensitive facts.
+- The answering scores were made in single-thread processes, each running whole batches of 16 in dataset order, so every batch is the one `decisions.py` would run, and the reports were rebuilt from them with `--probs`. Rebuilt this way, the final's answering report matches its earlier one at every bar.
+
+#### Tried and not shipped
+Both change what the model reads, and both lose answers on the final forms (the app's two passes and rules):
+- **Every fact first.** Ask every question with every fact, then ask only the answered ones again without sensitive facts. It saves the first pass, but drops answers that only the first pass gives. On the final forms it loses "How many people do you live with" (7) and "County" (Clinton), right by key, and "Do you pay rent" (No), right by the facts: coverage 57/59 to 55/59.
+- **Each question asked with only the facts on its topics.** Rows get 4–5 times shorter, but the model needs the whole sheet. With only "Everyone in the household is a US citizen." it no longer answers "Are you a U.S. citizen?", and the same holds for disability and age. On the final forms coverage falls from 57/59 to 43/59 and precision by key from 0.770 to 0.705.
 
 ## Known weak spots
+- **Choice questions in another language only (round 2).** Round 2 asks a choice question only when its words name a topic the facts cover, and those words are English. A question written only in Spanish, say, isn't asked and goes to the applicant. Every question in the question bank that uses another language also has English, so none of the test or final forms shows the effect.
 - **Confident answers the facts don't settle (round 4, final holdout).** Yes/no questions about home ownership, income sources, "elderly and/or disabled" and other members are answered at 0.93–1.00. Its answering precision on the final forms is 0.785.
 - **Count boxes over other age ranges or groups (round 4).**
   - "Children 0-5", "Adults 19 - 64" and "children who attend a school" match the saved counts at 0.99–0.999. That's why no match bar reaches 0.95 on the pool.

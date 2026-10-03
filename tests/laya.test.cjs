@@ -8,7 +8,7 @@ const http = require('node:http');
 const https = require('node:https');
 const os = require('node:os');
 const path = require('node:path');
-const { createLaya, processRunner, forkWorker, LAYA_NOT_READY, LAYA_TIMEOUT } = require('../desktop/laya.cjs');
+const { createLaya, processRunner, sessionPlan, forkWorker, LAYA_NOT_READY, LAYA_TIMEOUT } = require('../desktop/laya.cjs');
 const { MODEL_FILES } = require('../desktop/laya-model.cjs');
 const { loadTokenizer } = require('../desktop/laya-tokenizer.cjs');
 const { encodeDecision, toQuestion, readCalibration, probabilities } = require('../desktop/laya-prompt.cjs');
@@ -23,6 +23,13 @@ const CONFIG = { max_len: 512, head_max_len: 192, temperature: [1.6, 1.25, 1.546
 const DECISION = { type: 'noul', instructions: 'Given the facts about the household, is the candidate the correct answer to the form question?' };
 const MATCH = { type: 'choice', instructions: 'Which saved answer does this form question ask for?', criteria: ['first name', 'last name', 'email address', 'none of these'] };
 const tick = () => new Promise(resolve => setImmediate(resolve));
+// Waits up to 200 turns of the event loop for `condition`; setTimeout may be mocked.
+const settles = async (condition, what) => {
+  for (let turn = 0; !condition(); turn++) {
+    if (turn > 200) throw new Error(`Never saw ${what}`);
+    await tick();
+  }
+};
 
 function temporary(t, prefix) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -58,6 +65,7 @@ function stubRunner(overrides = {}) {
       runner.loads.push(file);
       if (overrides.load) await overrides.load(file);
       return {
+        sessions: overrides.sessions ?? 1,
         async run(batch) {
           runner.runs.push(batch);
           if (overrides.run) await overrides.run(batch);
@@ -213,6 +221,63 @@ test('a request that takes longer than the timeout is rejected with LAYA_TIMEOUT
   t.mock.timers.reset();
   const later = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: { version: 1, model: null }, runner: stubRunner(), enabled: true, timeoutMs: 5000 });
   assert.equal((await later.decide(rowState('3'), { correct: DECISION })).answers.correct.type, 'noul');
+});
+
+test('a model with two sessions runs two batches at once, oldest first, and starts the next as one finishes', async t => {
+  const running = [];
+  const runner = stubRunner({ sessions: 2, run: batch => new Promise(resolve => running.push({ batch, resolve })) });
+  const laya = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: NO_MODEL, runner, enabled: true });
+  const items = count => Array.from({ length: count }, (_, index) => ({ state: rowState(`${index}`), questions: { correct: DECISION } }));
+  const first = laya.decideBatch(items(20));
+  const second = laya.decideBatch(items(3));
+  await settles(() => running.length >= 2, 'two batches running');
+  await tick();
+  assert.deepEqual(running.map(({ batch }) => batch.rows), [8, 8], 'two of the first request’s three batches start together');
+  running[1].resolve();
+  await settles(() => running.length >= 3, 'a third batch');
+  assert.equal(running[2].batch.rows, 4, 'the first request’s last batch goes before the second request');
+  running[0].resolve();
+  await settles(() => running.length >= 4, 'a fourth batch');
+  assert.equal(running[3].batch.rows, 3);
+  running[2].resolve();
+  running[3].resolve();
+  assert.equal((await first).length, 20);
+  assert.equal((await second).length, 3);
+  assert.equal(runner.runs.length, 4);
+});
+
+test('a Mac with 8 or more performance cores and 16 GB runs two sessions, splitting those cores; other computers run one', () => {
+  const GB = 2 ** 30;
+  assert.deepEqual(sessionPlan({ performanceCores: 10, memory: 36 * GB }), { sessions: 2, threads: 5 });
+  assert.deepEqual(sessionPlan({ performanceCores: 12, memory: 16 * GB }), { sessions: 2, threads: 6 });
+  assert.deepEqual(sessionPlan({ performanceCores: 10, memory: 8 * GB }), { sessions: 1, threads: 10 }, 'not enough memory for a second copy of the weights');
+  assert.deepEqual(sessionPlan({ performanceCores: 4, memory: 16 * GB }), { sessions: 1, threads: 4 });
+  assert.deepEqual(sessionPlan({ performanceCores: null, memory: 64 * GB }), { sessions: 1 }, 'elsewhere, onnxruntime picks its threads');
+  const plan = sessionPlan();
+  assert.ok(plan.sessions === 1 || plan.sessions === 2);
+  if (process.platform === 'darwin' && process.arch === 'arm64') assert.ok(Number.isInteger(plan.threads) && plan.threads > 0, 'this Mac’s performance cores are read');
+});
+
+test('a request can end sooner than the runtime’s timeout; its batches that haven’t started are dropped', async t => {
+  const running = [];
+  const runner = stubRunner({ run: batch => new Promise(resolve => running.push({ batch, resolve })) });
+  const laya = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: NO_MODEL, runner, enabled: true, timeoutMs: 3000 });
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const items = Array.from({ length: 20 }, () => ({ state: rowState('3'), questions: { correct: DECISION } }));
+  const pending = laya.decideBatch(items, { timeoutMs: 40 }).catch(caught => caught);
+  await settles(() => running.length > 0, 'the first batch');
+  t.mock.timers.tick(40);
+  const error = await pending;
+  assert.equal(error.code, LAYA_TIMEOUT);
+  assert.match(error.message, /over 40 ms/);
+  running[0].resolve();
+  await tick();
+  await tick();
+  assert.equal(runner.runs.length, 1, 'the rest of the request is not run');
+  t.mock.timers.reset();
+  for (const timeoutMs of [0, -5, 1.5, '40']) await assert.rejects(laya.decideBatch(items, { timeoutMs }), /timeout/, String(timeoutMs));
+  const capped = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: NO_MODEL, runner: stubRunner(), enabled: true, timeoutMs: 3000 });
+  assert.equal((await capped.decideBatch(items.slice(0, 1), { timeoutMs: 60000 })).length, 1, 'a longer timeout than the runtime’s is held to the runtime’s');
 });
 
 test('the model is released after 5 idle minutes and loads again on the next decision', async t => {
@@ -733,6 +798,24 @@ test('the ONNX runner runs the graph in its own process, and releasing the model
   await laya.setEnabled(true);
   await laya.decide(state, { correct: DECISION });
   assert.equal(children.length, 2, 'the next decision starts a new model process');
+});
+
+test('the ONNX runner can run several sessions in its one process, giving each decision the same scores', async t => {
+  const children = [];
+  const fork = script => { const child = forkWorker(script); children.push(child); return child; };
+  const laya = createLaya({ modelDir: tinyModelDirectory(t), modelFormat: 'noul-v1', manifest: NO_MODEL, runner: processRunner({ fork, sessions: 2, threads: 1 }), enabled: true, timeoutMs: 60000 });
+  t.after(() => laya.close());
+  const tokenizer = await loadTokenizer(small);
+  const items = Array.from({ length: 20 }, (_, index) => ({ state: rowState(`${'candidate '.repeat(index % 4)}${index}`), questions: { correct: DECISION } }));
+  const results = await Promise.all([laya.decideBatch(items.slice(0, 12)), laya.decideBatch(items.slice(12))]);
+  results.flat().forEach(({ answers }, index) => {
+    const encoded = encodeDecision(tokenizer, items[index].state, toQuestion(DECISION), { maxLen: 512, headMaxLen: 192 });
+    const expected = probabilities(encoded.markers.map(marker => marker / 100 + encoded.ids.length / 1000 + 0.2), 2, 2, readCalibration(CONFIG));
+    assert.ok(Math.abs(answers.correct.noul - expected[1]) < 1e-6, `item ${index}`);
+  });
+  assert.equal(children.length, 1, 'both sessions live in the one model process');
+  assert.throws(() => processRunner({ sessions: 0 }), /sessions/);
+  assert.throws(() => processRunner({ threads: 1.5 }), /threads/);
 });
 
 test('if the model process dies, that request is refused as not ready and the next one starts a new process', async t => {

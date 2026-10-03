@@ -5,7 +5,7 @@ const decisions = require('../desktop/laya-decisions.cjs');
 const { QUESTIONS, CHOICE } = require('../shared/laya-prompts.cjs');
 const { MODEL_FORMATS } = require('../desktop/laya-model.cjs');
 
-const { pick, score, scoreChoices, budget, BARS, MIN_LEAD, BUDGET_MS, CHOICE_BATCH } = decisions;
+const { pick, score, scoreChoices, budget, inOrder, BARS, MIN_LEAD, BUDGET_MS, CHOICE_BATCH } = decisions;
 const { answer: ANSWER_THRESHOLD, match: MATCH_THRESHOLD } = BARS['noul-v1'];
 
 test('the confidence bars live in one place, one pair per model format: to answer from the profile, and a stricter one to match a text box', () => {
@@ -49,6 +49,28 @@ test('scores come from one batch per decision with the trained question, and any
   }
   const notReady = Object.assign(new Error('Laya is off.'), { code: 'LAYA_NOT_READY' });
   await assert.rejects(score({ decideBatch: async () => { throw notReady; } }, [{ question: 'Q', candidate: 'A' }]), error => error === notReady);
+  formats.length = 0;
+  await score(laya, [{ question: 'Q', candidate: 'A' }], { timeoutMs: 1200 });
+  assert.deepEqual(formats, [{ format: 'noul-v1', timeoutMs: 1200 }], 'a request can carry the time its click has left');
+});
+
+test('inOrder uses each request’s answer in order while there is time, and fails once every request has ended', async () => {
+  const later = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
+  const timeout = Object.assign(new Error('Laya took too long.'), { code: 'LAYA_TIMEOUT' });
+  const run = async (settle, time = () => true) => {
+    const requests = [later(), later(), later()];
+    const used = [];
+    const done = inOrder(requests.map(request => request.promise), time, (index, value) => used.push([index, value])).then(() => null, error => error);
+    await settle(requests);
+    return { used, error: await done };
+  };
+  assert.deepEqual(await run(([a, b, c]) => { c.resolve('c'); b.resolve('b'); a.resolve('a'); }), { used: [[0, 'a'], [1, 'b'], [2, 'c']], error: null }, 'page order, whatever order they end in');
+  assert.deepEqual(await run(([a, b, c]) => { a.resolve('a'); b.reject(timeout); c.resolve('c'); }), { used: [[0, 'a']], error: timeout }, 'a timeout ends the pass');
+  const crash = new Error('model crashed');
+  assert.deepEqual(await run(([a, b, c]) => { a.reject(timeout); b.resolve('b'); c.reject(crash); }), { used: [], error: crash }, 'a failure other than time is the one reported');
+  let clock = 0;
+  const tick = () => new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(await run(async ([a, b, c]) => { a.resolve('a'); await tick(); clock = 5; b.resolve('b'); c.resolve('c'); }, () => clock < 5), { used: [[0, 'a']], error: null }, 'an answer after the deadline is dropped');
 });
 
 test('choice-v2 scores come from one batch, one pass per question, as each question’s probabilities in the order of its choices', async () => {
@@ -98,4 +120,10 @@ test('a request’s time budget is what the click has left, never more than thre
   clock = BUDGET_MS;
   assert.equal(capped(), false);
   for (const budgetMs of [0, -5, 2.5, '1000', undefined, NaN]) assert.throws(() => budget(budgetMs, () => 0), /budget/, String(budgetMs));
+  clock = 0;
+  const timed = budget(1200, () => clock);
+  clock = 199.6;
+  assert.equal(timed.left(), 1000, 'whole milliseconds left');
+  clock = 1300;
+  assert.equal(timed.left(), 0);
 });

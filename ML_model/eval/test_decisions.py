@@ -9,6 +9,7 @@ from decisions import (
     ABSTAIN,
     MATCH_ABSTAIN,
     agreement,
+    as_app_asks,
     apply_probabilities,
     candidates,
     dataset_format,
@@ -19,6 +20,7 @@ from decisions import (
     metrics,
     named_reference,
     probabilities,
+    select_task,
     training_precision,
 )
 
@@ -247,3 +249,56 @@ class ChoiceMetrics(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AsAppAsks(unittest.TestCase):
+    def match(self, decision, candidates, correct):
+        return [{"decision": decision, "task": "match", "state": {"question": decision, "candidate": c}, "answers": {"correct": c == correct}}
+                for c in [*candidates, ABSTAIN]]
+
+    def answer(self, decision):
+        return [{"decision": decision, "task": "answer", "state": {"question": "Q", "candidate": c}, "answers": {"correct": c == "Yes"}, "p": p}
+                for c, p in (("Yes", 0.97), ("No", 0.01), (ABSTAIN, 0.02))]
+
+    def offers(self, match, answer=None):
+        return {"match": match, "answer": answer or {}}
+
+    def test_keeps_the_offered_rows_and_the_abstain_row_in_order(self):
+        decisions = {"answer": {}, "match": {"zip": self.match("zip", ["first", "zip", "city"], "zip")}}
+        kept = as_app_asks(decisions, self.offers({"zip": ["zip", "city"]}))
+        self.assertEqual([row["state"]["candidate"] for row in kept["match"]["zip"]], ["zip", "city", ABSTAIN])
+        self.assertTrue(kept["match"]["zip"][0]["answers"]["correct"])
+
+    def test_a_box_offered_nothing_is_left_out(self):
+        decisions = {"answer": {}, "match": {"date": self.match("date", ["birth"], "birth")}}
+        self.assertEqual(as_app_asks(decisions, self.offers({"date": []}))["match"], {})
+
+    def test_a_box_whose_answer_isnt_offered_is_answered_by_abstaining(self):
+        decisions = {"answer": {}, "match": {"income": self.match("income", ["income", "rent"], "income")}}
+        rows = as_app_asks(decisions, self.offers({"income": ["rent"]}))["match"]["income"]
+        self.assertEqual([(row["state"]["candidate"], row["answers"]["correct"]) for row in rows], [("rent", False), (ABSTAIN, True)])
+
+    def test_offers_for_other_decisions_are_refused(self):
+        decisions = {"answer": {}, "match": {"zip": self.match("zip", ["zip"], "zip")}}
+        with self.assertRaisesRegex(ValueError, "zip"):
+            as_app_asks(decisions, self.offers({"city": ["zip"]}))
+        with self.assertRaisesRegex(ValueError, "isn't one of"):
+            as_app_asks(decisions, self.offers({"zip": ["phone"]}))
+        with self.assertRaisesRegex(ValueError, "choice questions"):
+            as_app_asks({"answer": {"a": self.answer("a")}, "match": {}}, self.offers({}, {"b": True}))
+
+    def test_a_choice_question_the_app_doesnt_ask_stays_counted_and_is_never_filled(self):
+        decisions = {"answer": {"asked": self.answer("asked"), "skipped": self.answer("skipped")}, "match": {}}
+        kept = as_app_asks(decisions, self.offers({}, {"asked": True, "skipped": False}))
+        result = metrics(kept["answer"], 0.9)
+        self.assertEqual((result["decisions"], result["answerable"], result["accepted"], result["right"]), (2, 2, 1, 1))
+        self.assertEqual(metrics(decisions["answer"], 0.9)["accepted"], 2, "the decisions passed in are left as they were")
+
+
+class SelectTask(unittest.TestCase):
+    def test_keeps_one_task_or_every_task(self):
+        decisions = {"answer": {"a": []}, "match": {"m": []}}
+        self.assertEqual(select_task(decisions, "match"), {"match": {"m": []}})
+        self.assertEqual(select_task(decisions, None), decisions)
+        with self.assertRaisesRegex(ValueError, "answer, match"):
+            select_task(decisions, "matching")
