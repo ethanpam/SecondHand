@@ -325,6 +325,25 @@ Both change what the model reads, and both lose answers on the final forms (the 
 - **Every fact first.** Ask every question with every fact, then ask only the answered ones again without sensitive facts. It saves the first pass, but drops answers that only the first pass gives. On the final forms it loses "How many people do you live with" (7) and "County" (Clinton), right by key, and "Do you pay rent" (No), right by the facts: coverage 57/59 to 55/59.
 - **Each question asked with only the facts on its topics.** Rows get 4–5 times shorter, but the model needs the whole sheet. With only "Everyone in the household is a US citizen." it no longer answers "Are you a U.S. citizen?", and the same holds for disability and age. On the final forms coverage falls from 57/59 to 43/59 and precision by key from 0.770 to 0.705.
 
+### The order of a click's work (#90)
+The tables above were timed with the choice questions first. A click now asks the text boxes first and the choice questions with the time left, the fewest options first, each group of equal batches through both of its passes. A text box's rows are short; each of a choice question's carries the facts sheet and takes about 3 to 6 times as long. So a long checklist can no longer use the whole budget before any text box is asked.
+
+The order was chosen on 17 of the 22 training forms that aren't live QA forms: each order run on a page of every question the bridge carries, in one 3-second budget, against a run with no budget, with round 2's int8 export and households 0 and 1 (ralph-reeder with household 0 only). 26 of those pages, from 14 forms, take over 2 s with no budget; the other 7 fit however they are asked. Over the 26, the run with no budget fills 176 and asks 367 text boxes:
+
+| Order | Filled | Text boxes asked in time |
+|---|---|---|
+| Before: choice questions, then text boxes | 84 | 147 |
+| Text boxes, then choice questions | 166 | 361 |
+| **Text boxes, then choice questions by cost (shipped)** | **168** | **361** |
+| Text boxes and choice questions interleaved by rows | 152 | 297 |
+| The same, a choice row counted as 3–6 text-box rows | 168 | 361 |
+
+- No order changed a decision: every fill matched the run with no budget.
+- Choice questions by cost add one answer on Feast of Justice for each household (7 against 6), the only difference between the text-first orders.
+- Sorting the text boxes by their rows asked no more of them, so they keep page order. Capping the options sent per question (7 or 15) filled no more, so there is no cap. Interleaving by weighted rows fills the same, but its weight came from each page's own run with no budget, and it splits the answers across requests, each with its own approval dialog.
+- The live QA forms (#89), one Laya click each: every text box is now asked in time on all five and the synthetic fixture (before, Hornets' 3 were never asked, and SFU's 3 and Brooklyn's 5 ran out). Fills are the same, 4, 4, 9, 5, 5 and 4, with no wrong fill. The choice questions now get what is left, and run out on Hornets, SFU and the Brooklyn form (alone and embedded); #89 found that round 2 declines those even with no time limit, so they went to the applicant before too.
+- The Utica page above, 10 runs: every page fully decided, p50 2,754 ms, max 2,954 ms (1-minute load 3.6–5.7).
+
 ## Known weak spots
 - **Choice questions in another language only (round 2).** Round 2 asks a choice question only when its words name a topic the facts cover, and those words are English. A question written only in Spanish, say, isn't asked and goes to the applicant. Every question in the question bank that uses another language also has English, so none of the test or final forms shows the effect.
 - **Confident answers the facts don't settle (round 4, final holdout).** Yes/no questions about home ownership, income sources, "elderly and/or disabled" and other members are answered at 0.93–1.00. Its answering precision on the final forms is 0.785.
