@@ -170,7 +170,7 @@ test('on Iowa pages the adapter has not verified, the general engine plans, fill
   const page = content(t);
   page.setKind('manual');
   const plan = page.request({ type: 'secondhand:generic:plan' });
-  assert.deepEqual(plain(plan), { token: 'plan-1', matched: [{ id: 'sh-1-0', key: 'householdAdults', confidence: 'high' }],
+  assert.deepEqual(plain(plan), { token: 'plan-1', lang: '', matched: [{ id: 'sh-1-0', key: 'householdAdults', confidence: 'high' }],
     unmatched: [{ id: 'sh-1-1', label: 'Is anyone blind?', type: 'radio', options: ['Yes', 'No'], required: true }] });
   const filled = await page.requestAsync({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [{ id: 'sh-1-0', key: 'householdAdults', guessed: false }], values: { householdAdults: '2' } });
   assert.deepEqual(plain(filled), { ok: true, filled: ['sh-1-0'], skipped: [], rejected: ['sh-1-9'] }, 'answers the page refused come back');
@@ -180,6 +180,8 @@ test('on Iowa pages the adapter has not verified, the general engine plans, fill
   assert.deepEqual(plain(page.request({ type: 'secondhand:generic:focus', id: 'sh-1-1' })), { focused: true });
   assert.equal(page.window.document.activeElement.id, 'firstName');
   assert.deepEqual(plain(page.request({ type: 'secondhand:generic:focus', id: 'sh-9-9' })), { focused: false });
+  page.window.document.documentElement.lang = 'es';
+  assert.equal(page.request({ type: 'secondhand:generic:plan' }).lang, 'es', 'the language the page declares, for reading its questions to Laya');
 });
 
 test('on Iowa pages a general fill the page interrupted by changing answers that the page changed', async t => {

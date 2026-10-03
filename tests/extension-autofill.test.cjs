@@ -6,6 +6,7 @@ const vm = require('node:vm');
 const { webcrypto } = require('node:crypto');
 const adapter = require('../extension/iowa-adapter.js');
 const strings = require('../extension/strings.js');
+const translation = require('../extension/translation.js');
 
 // Values created inside the worker's vm context have foreign prototypes.
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -20,8 +21,8 @@ const generalEngine = {
   requestKeys: keys => [...new Set(keys.flatMap(key => key === 'totalMonthlyIncome' ? ['monthlyEarnedIncome', 'monthlyOtherIncome'] : [key]))],
   deriveValues: values => ({ ...values, ...(values.monthlyEarnedIncome && values.monthlyOtherIncome ? { totalMonthlyIncome: 'Synthetic private total' } : {}) })
 };
-const nothingPlanned = () => ({ token: 'plan-0', matched: [], unmatched: [] });
-const financialPlan = () => ({ token: 'plan-1',
+const nothingPlanned = () => ({ token: 'plan-0', lang: 'en', matched: [], unmatched: [] });
+const financialPlan = () => ({ token: 'plan-1', lang: 'en',
   matched: [{ id: 'sh-1-0', key: 'householdAdults', confidence: 'high' }, { id: 'sh-1-1', key: 'totalMonthlyIncome', confidence: 'high' }, { id: 'sh-1-2', key: 'householdSeniors', confidence: 'high' }],
   unmatched: [{ id: 'sh-1-3', label: 'Is anyone blind?', type: 'radio', options: ['Yes', 'No'], required: true }] });
 const financialValues = { householdAdults: '2', monthlyEarnedIncome: 'Synthetic private 900', monthlyOtherIncome: '100' };
@@ -142,7 +143,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
     }
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../extension/background.js'), 'utf8'),
-    { chrome, SecondHandIowa: adapter, SecondHandGeneric: engine, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console });
+    { chrome, SecondHandIowa: adapter, SecondHandGeneric: engine, SecondHandStrings: strings, SecondHandTranslation: translation, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console });
   const send = (message, sender) => new Promise(resolve => { if (!listener(message, sender, resolve)) resolve(undefined); });
   return {
     calls, tab, events, filled: () => [...model.filled],
@@ -350,6 +351,15 @@ test('with Laya ready, an unknown Iowa page the rules can’t fill gets Laya’s
   assert.match(stopped.message, /doesn’t know this page yet/);
 });
 
+test('an unknown Iowa page that declares no language, with no detector to read it, keeps its questions from Laya and says why', async () => {
+  const w = worker({ kind: 'manual', engine: generalEngine, general: { ...financialPlan(), lang: '' }, desktop: { values: financialValues, ...layaAnswers(() => ({ [blind.id]: 'No' })) } });
+  const result = plain((await autofill(w)).data);
+  assert.equal(w.calls.native.some(call => call.type === 'answerFields'), false, 'Laya is asked nothing');
+  assert.equal(result.filled, 2);
+  assert.ok(result.needYou.includes(blind.id));
+  assert.equal(result.message, 'Filled 2 · 2 need you. Laya skipped questions in a language SecondHand couldn’t identify. Check your answers, then click Continue.');
+});
+
 test('launcher is bound to its own tab, needs confirmed clicks, and cannot use panel-only or unknown types', async () => {
   const w = worker();
   assert.equal(await w.launcher({ type: 'ui:autofill' }), undefined);
@@ -522,7 +532,7 @@ function journey({ screens, desktop = {}, continueStays = false, engine = noSite
     }
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../extension/background.js'), 'utf8'),
-    { chrome, SecondHandIowa: adapter, SecondHandGeneric: engine, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, setImmediate, URL, Map, Set, console });
+    { chrome, SecondHandIowa: adapter, SecondHandGeneric: engine, SecondHandStrings: strings, SecondHandTranslation: translation, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, setImmediate, URL, Map, Set, console });
   const send = (message, sender = { id: 'testextension', url: PANEL_URL }) => new Promise(resolve => { if (!listener({ tabId: 7, ...message }, sender, resolve)) resolve(undefined); });
   return { calls, vault, events, send, filled: () => [...filled], at: () => current().name,
     userContinues: () => navigate(),

@@ -1,17 +1,55 @@
 /* Chrome's built-in Translator and Language Detector, used only from SecondHand's own extension
-   pages. Both run on this computer: no request of SecondHand's leaves it, and nothing is stored. */
+   pages and its service worker. Both run on this computer: no request of SecondHand's leaves it,
+   and nothing is stored. */
 (function (root) {
   'use strict';
   const CONFIDENCE = 0.6; // the detector's lowest confidence SecondHand trusts over the page's declared language
   const STALL_MS = 20000; // a download with no progress for this long is reported as stuck
   const primary = tag => (typeof tag === 'string' ? tag.trim().toLowerCase().split(/[-_]/)[0] : '');
 
-  const languageName = (code, lang = 'en') => (typeof Intl !== 'undefined' && Intl.DisplayNames ? new Intl.DisplayNames([lang], { type: 'language' }).of(code) : code) || code;
-
   function create(scope = root, { stallMs = STALL_MS } = {}) {
     const translators = new Map(); // "en>es" -> Promise of Chrome's translator for that pair
     const translations = new Map(); // "en>es\ntext" -> text, for the page on screen
     let detector = null;
+
+    // The language Chrome's detector reads in the texts: null when the detector isn't ready, '' when it
+    // isn't sure. A failure is thrown, never hidden behind the declared language.
+    async function detected(texts) {
+      if (!texts.length || typeof scope.LanguageDetector === 'undefined' || await scope.LanguageDetector.availability() !== 'available') return null;
+      detector ||= scope.LanguageDetector.create().catch(error => { detector = null; throw error; });
+      const [best] = await (await detector).detect(texts.join('\n'));
+      return best && best.detectedLanguage !== 'und' && best.confidence >= CONFIDENCE ? primary(best.detectedLanguage) : '';
+    }
+
+    // One frame's questions for Laya, in English. They count as English only when the detector reads
+    // English, or, with no detector ready, when the frame declares English. A translator that needs a
+    // download is never asked to download: that takes the applicant's click.
+    async function englishQuestions(boxes, choices, declared) {
+      const skip = (key, params = {}) => ({ boxes: [], choices: [], reason: { key, params } });
+      try {
+        const texts = [...new Set([...boxes, ...choices].flatMap(question => [question.label, ...question.options]).filter(text => text.trim()))];
+        const found = await detected(texts);
+        const source = found === null ? primary(declared) : found;
+        if (source === 'en') return { boxes, choices, reason: null };
+        if (!source) return skip('translate.layaUnknownLanguage');
+        if (typeof scope.Translator === 'undefined') return skip('translate.layaCantTranslate');
+        const available = await service.availability(source, 'en');
+        if (available === 'unavailable') return skip('translate.layaCantTranslate');
+        if (available !== 'available') return skip('translate.layaNeedsDownload');
+        const english = await service.translate(await service.translator(source, 'en'), source, 'en', texts);
+        const clear = text => typeof english.get(text) === 'string' && english.get(text).trim() !== '';
+        const sent = {
+          boxes: boxes.filter(box => clear(box.label)).map(box => ({ ...box, label: english.get(box.label) })),
+          // Options that become the same words can't be told apart, so their question isn't sent.
+          choices: choices.filter(question => clear(question.label) && question.options.every(clear) && new Set(question.options.map(option => english.get(option))).size === question.options.length)
+            .map(question => ({ ...question, label: english.get(question.label), options: question.options.map(option => english.get(option)) }))
+        };
+        const unclear = sent.boxes.length < boxes.length || sent.choices.length < choices.length;
+        return { ...sent, reason: unclear ? { key: 'translate.layaUnclear', params: {} } : null };
+      } catch (error) {
+        return skip('translate.layaFailed', { detail: String(error?.message || error).slice(0, 240) });
+      }
+    }
 
     const service = {
       // An explicit check for the API itself: when it is missing, the panel shows one plain line.
@@ -20,11 +58,7 @@
       // Chrome's detector reads the page's own question text when it is ready. It is never
       // downloaded without the applicant asking, so until then the page's declared language is used.
       async pageLanguage(texts, declared) {
-        const fallback = primary(declared);
-        if (!texts.length || typeof scope.LanguageDetector === 'undefined' || await scope.LanguageDetector.availability() !== 'available') return fallback;
-        detector ||= scope.LanguageDetector.create().catch(error => { detector = null; throw error; });
-        const [best] = await (await detector).detect(texts.join('\n'));
-        return best && best.detectedLanguage !== 'und' && best.confidence >= CONFIDENCE ? primary(best.detectedLanguage) : fallback;
+        return await detected(texts) || primary(declared);
       },
 
       availability: (source, target) => scope.Translator.availability({ sourceLanguage: source, targetLanguage: target }),
@@ -62,97 +96,29 @@
         return out;
       },
 
-      // Prepares form questions for Laya on this computer. Non-English labels and options
-      // are translated to English, and answers map back strictly by option position.
-      // Untranslatable questions remain with the applicant with a clear reason.
-      async forLaya({ boxes = [], choices = [] } = {}, declared = '') {
-        const passThrough = { boxes, choices, mapAnswers: entries => entries, reason: null, reasons: new Map() };
-        const texts = [...new Set([...boxes.map(b => b.label), ...choices.flatMap(c => [c.label, ...c.options])].filter(text => typeof text === 'string' && text.trim() !== ''))];
-        if (!texts.length) return passThrough;
-        const source = await service.pageLanguage(texts, declared);
-        if (!source || source === 'en') return passThrough;
-
-        const allIds = [...boxes.map(b => b.id), ...choices.map(c => c.id)];
-        if (typeof scope.Translator === 'undefined') {
-          const reason = { key: 'translate.missing', params: {} };
-          return { boxes: [], choices: [], mapAnswers: entries => entries, reason, reasons: new Map(allIds.map(id => [id, reason])) };
+      // Laya reads English (#84). `groups` are each frame's questions for Laya, with the language the frame
+      // declares. Questions in another language are translated to English here, on this computer: their labels
+      // and options only, never an answer. Questions whose language can't be told, or that Chrome can't
+      // translate clearly, are not sent, and `reason` says why. `mapAnswers` turns Laya's English answers
+      // back into the page's own options, by position only.
+      async forLaya(groups) {
+        const boxes = [], choices = [], originals = new Map(); // question id -> the page's own options, in order
+        let reason = null;
+        for (const { boxes: groupBoxes = [], choices: groupChoices = [], declared = '' } of groups) {
+          if (!groupBoxes.length && !groupChoices.length) continue;
+          const english = await englishQuestions(groupBoxes, groupChoices, declared);
+          boxes.push(...english.boxes);
+          choices.push(...english.choices);
+          for (const question of english.choices) originals.set(question.id, groupChoices.find(original => original.id === question.id).options);
+          reason ||= english.reason;
         }
-        const sourceName = languageName(source, 'en');
-        const targetName = languageName('en', 'en');
-        let avail;
-        try {
-          avail = await service.availability(source, 'en');
-        } catch (error) {
-          const reason = { key: 'translate.failed', params: { detail: error.message } };
-          return { boxes: [], choices: [], mapAnswers: entries => entries, reason, reasons: new Map(allIds.map(id => [id, reason])) };
-        }
-        if (avail === 'unavailable') {
-          const reason = { key: 'translate.unavailable', params: { source: sourceName, target: targetName } };
-          return { boxes: [], choices: [], mapAnswers: entries => entries, reason, reasons: new Map(allIds.map(id => [id, reason])) };
-        }
-        if (avail !== 'available') {
-          const reason = { key: 'translate.needsDownload', params: { language: sourceName } };
-          return { boxes: [], choices: [], mapAnswers: entries => entries, reason, reasons: new Map(allIds.map(id => [id, reason])) };
-        }
-        try {
-          const trans = await service.translator(source, 'en');
-          const translatedMap = await service.translate(trans, source, 'en', texts);
-          const reasons = new Map();
-          const translatedBoxes = [];
-          for (const b of boxes) {
-            const translatedLabel = translatedMap.get(b.label);
-            if (typeof translatedLabel !== 'string' || translatedLabel.trim() === '') {
-              reasons.set(b.id, { key: 'translate.untranslated', params: {} });
-              continue;
-            }
-            translatedBoxes.push({ ...b, label: translatedLabel });
-          }
-          const translatedChoices = [];
-          for (const c of choices) {
-            const translatedLabel = translatedMap.get(c.label);
-            if (typeof translatedLabel !== 'string' || translatedLabel.trim() === '') {
-              reasons.set(c.id, { key: 'translate.untranslated', params: {} });
-              continue;
-            }
-            const translatedOptions = [];
-            let optionsOk = true;
-            for (const opt of c.options) {
-              const translatedOpt = translatedMap.get(opt);
-              if (typeof translatedOpt !== 'string' || translatedOpt.trim() === '') {
-                optionsOk = false;
-                break;
-              }
-              translatedOptions.push(translatedOpt);
-            }
-            if (!optionsOk) {
-              reasons.set(c.id, { key: 'translate.untranslated', params: {} });
-              continue;
-            }
-            if (new Set(translatedOptions).size !== translatedOptions.length) {
-              reasons.set(c.id, { key: 'translate.optionsCollided', params: {} });
-              continue;
-            }
-            translatedChoices.push({ ...c, label: translatedLabel, options: translatedOptions });
-          }
-          const mapAnswers = entries => {
-            if (!Array.isArray(entries)) return [];
-            const mapped = [];
-            for (const [id, answer] of entries) {
-              const original = choices.find(c => c.id === id);
-              const translated = translatedChoices.find(c => c.id === id);
-              if (!original || !translated) continue;
-              const idx = translated.options.indexOf(answer);
-              if (idx === -1) continue;
-              mapped.push([id, original.options[idx]]);
-            }
-            return mapped;
-          };
-          const reason = (!translatedBoxes.length && !translatedChoices.length && reasons.size) ? reasons.values().next().value : null;
-          return { boxes: translatedBoxes, choices: translatedChoices, mapAnswers, reason, reasons };
-        } catch (error) {
-          const reason = { key: 'translate.failed', params: { detail: error.message } };
-          return { boxes: [], choices: [], mapAnswers: entries => entries, reason, reasons: new Map(allIds.map(id => [id, reason])) };
-        }
+        const asked = new Map(choices.map(question => [question.id, question.options]));
+        const mapAnswers = entries => entries.map(([id, option]) => {
+          const index = asked.has(id) ? asked.get(id).indexOf(option) : -1;
+          if (index < 0) throw new Error('Laya answered a question or option it wasn’t asked.');
+          return [id, originals.get(id)[index]];
+        });
+        return { boxes, choices, reason, mapAnswers };
       },
 
       forget() { translations.clear(); }
@@ -160,7 +126,7 @@
     return service;
   }
 
-  const api = Object.freeze({ create, primary, languageName });
+  const api = Object.freeze({ create, primary });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandTranslation = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

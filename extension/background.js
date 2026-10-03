@@ -1,5 +1,5 @@
 'use strict';
-importScripts('address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'strings.js');
+importScripts('address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'strings.js', 'translation.js');
 if (typeof globalThis.SecondHandGeneric?.requestKeys !== 'function' || typeof globalThis.SecondHandGeneric.deriveValues !== 'function' || !Array.isArray(globalThis.SecondHandGeneric.GENERIC_KEYS) ||
   typeof globalThis.SecondHandGeneric.unsafeQuestion !== 'function' || typeof globalThis.SecondHandGeneric.layaQuestion !== 'function') {
   throw new Error('SecondHand could not load generic-adapter.js. Reinstall the extension.');
@@ -7,7 +7,9 @@ if (typeof globalThis.SecondHandGeneric?.requestKeys !== 'function' || typeof gl
 if (typeof globalThis.SecondHandStrings?.english !== 'function' || typeof globalThis.SecondHandStrings.describeEnglish !== 'function') {
   throw new Error('SecondHand could not load strings.js. Reinstall the extension.');
 }
-try { if (typeof globalThis.SecondHandTranslation === 'undefined') importScripts('translation.js'); } catch {}
+if (typeof globalThis.SecondHandTranslation?.create !== 'function') {
+  throw new Error('SecondHand could not load translation.js. Reinstall the extension.');
+}
 // Must match BUILD in panel.js: change both together. The panel compares them to tell
 // when Chrome is still running an older worker than the pages it loaded from disk.
 const BUILD = '2026-10-03.1';
@@ -674,7 +676,7 @@ async function planGeneral(tabId, frameId = 0, prefix = false) {
   try {
     const message = { type: 'secondhand:generic:plan' };
     const plan = prefix && frameId === 0 ? await topSiteMessage(tabId, message) : await chrome.tabs.sendMessage(tabId, message, { frameId });
-    if (!plan || typeof plan.token !== 'string' || !Array.isArray(plan.matched) || !Array.isArray(plan.unmatched) ||
+    if (!plan || typeof plan.token !== 'string' || typeof plan.lang !== 'string' || !Array.isArray(plan.matched) || !Array.isArray(plan.unmatched) ||
       plan.unmatched.some(field => typeof field?.id !== 'string' || !FIELD_ID.test(field.id) || typeof field.label !== 'string' || typeof field.type !== 'string' ||
         !strings(field.options) || typeof field.required !== 'boolean')) throw fault('worker.pageCheckUnsafe');
     if (prefix) {
@@ -743,6 +745,9 @@ async function layaReady() {
     throw error;
   }
 }
+// Chrome's Translator and LanguageDetector in this worker, for Laya's questions. It keeps one translator
+// per language pair; the words it translated are forgotten after each click.
+const questionTranslation = SecondHandTranslation.create(globalThis);
 // The open questions Laya may see, in page order: text boxes to match and choice questions to answer.
 // Questions only the applicant answers (consent, signatures, SSN…) and any past the bridge's limits stay need-you.
 function layaQuestions(frames, prefix) {
@@ -834,11 +839,11 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       layaOn = await layaReady();
       guard();
     }
-    const service = typeof globalThis.SecondHandTranslation?.forLaya === 'function' ? globalThis.SecondHandTranslation :
-      typeof globalThis.SecondHandTranslation?.create === 'function' ? globalThis.SecondHandTranslation.create() : null;
-    const prepared = service && layaOn && (open.boxes.length || open.choices.length)
-      ? await service.forLaya(open)
-      : { boxes: open.boxes, choices: open.choices, mapAnswers: entries => entries, reason: null };
+    // Laya reads English: each frame's questions in another language are translated by Chrome on this
+    // computer first, and those it can't read stay with the applicant, with the reason (#84).
+    const prepared = layaOn && (open.boxes.length || open.choices.length)
+      ? await questionTranslation.forLaya(initial.map(frame => ({ ...layaQuestions([frame], prefix), declared: languageTag(frame.plan.lang) })))
+      : { boxes: [], choices: [], mapAnswers: entries => entries, reason: null };
     guard();
     const budget = layaBudget();
     // null: Laya isn't ready; undefined: the budget was spent before this request.
@@ -915,7 +920,7 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       needYou.push(...missing.map(id => prefix ? `f${frameId}:${id}` : id));
     }
     return { filled, needYou, laya: placedByLaya, reason: prepared.reason };
-  } finally { values = null; }
+  } finally { values = null; questionTranslation.forget(); }
 }
 
 // One click on an approved site, with the plan the AI saw when the widget sends guesses.

@@ -7,6 +7,7 @@ const { webcrypto } = require('node:crypto');
 const adapter = require('../extension/iowa-adapter.js');
 const generic = require('../extension/generic-adapter.js');
 const strings = require('../extension/strings.js');
+const translation = require('../extension/translation.js');
 const plain = value => JSON.parse(JSON.stringify(value));
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
@@ -77,7 +78,7 @@ function worker({ pageKey = 'iowa-personal-information', complete = false, todo,
       } }
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../extension/background.js'), 'utf8'), {
-    chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console
+    chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, SecondHandTranslation: translation, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console
   });
   const send = message => new Promise(resolve => { listener({ tabId: 7, ...message }, { id: 'testextension', url: chrome.runtime.getURL('panel.html') }, resolve); });
   return { model, vault, tab, calls, events, start: () => send({ type: 'ui:autofill', confirmed: true }), stop: () => send({ type: 'ui:stop', confirmed: true }), poll: () => send({ type: 'ui:pageState' }) };

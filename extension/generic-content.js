@@ -69,6 +69,8 @@
     if (!plan || !Array.isArray(plan.matched) || !Array.isArray(plan.unmatched)) throw new Error('Invalid plan.');
     return {
       token: text(plan.token),
+      // The language this frame declares: with Chrome's detector, it decides how its questions are read to Laya.
+      lang: document.documentElement.lang || '',
       matched: plan.matched.map(field => ({ id: text(field.id), key: text(field.key), confidence: text(field.confidence) })),
       unmatched: plan.unmatched.map(field => ({ id: text(field.id), label: typeof field.label === 'string' ? field.label : '',
         type: typeof field.type === 'string' ? field.type : '', options: strings(field.options), required: field.required === true }))
