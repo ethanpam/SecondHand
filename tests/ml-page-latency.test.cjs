@@ -25,7 +25,7 @@ test('a complete decision of the page is two passes of the open choice questions
   const profile = { householdSize: '2', birthDate: '1985-04-12' };
   // Two open choice questions (the odd one is never asked), one answered in the first pass and one with sensitive facts.
   assert.equal(passesNeeded('choice-v2', questions, profile, { answers: { a: 'Yes', b: '2' }, sensitive: ['b'] }), 2 + 1 + 1, 'a date box isn’t asked of choice-v2');
-  assert.equal(passesNeeded('noul-v1', questions, profile, { answers: {}, sensitive: [] }), 2 + 2 + 2, 'noul-v1 asks the date box too');
+  assert.equal(passesNeeded('noul-v1', questions, profile, { answers: {}, sensitive: [] }), 2 + 2 + 1, 'a date box isn’t asked of noul-v1 either');
   assert.equal(passesNeeded('choice-v2', questions, { householdSize: '2' }, { answers: {}, sensitive: [] }), 2 + 1, 'no sensitive facts, no second pass');
   assert.equal(passesNeeded('choice-v2', questions, { birthDate: '1985-04-12' }, { answers: {}, sensitive: [] }), 2 + 1, 'only sensitive facts: one pass, with all of them');
 });

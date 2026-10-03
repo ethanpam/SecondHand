@@ -111,3 +111,42 @@ test('choice-v2: a matching decision is the training row’s question and state 
     assert.equal(JSON.stringify(prompts.CHOICE.matchQuestion(prompts.CHOICE.MATCH_SETS[type])), JSON.stringify(questions[id]), type);
   }
 });
+
+test('noul-v1: a text box is offered the groups of saved fields its label names, in training order, and every field when it names none', () => {
+  const { offeredFields, MATCH_CANDIDATES, NEVER_SUGGESTED } = prompts;
+  const box = (label, type = 'text') => offeredFields({ label, type });
+  const names = ['firstName', 'middleName', 'lastName', 'fullName', 'suffix'];
+  const address = ['addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county'];
+  const counts = ['householdSize', 'householdAdults', 'householdChildren', 'householdSeniors'];
+  assert.deepEqual(box('First Name:'), names);
+  assert.deepEqual(box('Zip Code:'), address);
+  assert.deepEqual(box('Phone:'), ['email', 'phone']);
+  assert.deepEqual(box('Total # of individuals living in your household:'), counts);
+  assert.deepEqual(box('Utility costs per month (gas, electric, water)'), ['monthlyRent', 'monthlyUtilities']);
+  assert.deepEqual(box('Name of Head of Household'), [...names, ...counts], 'two groups, in MATCH_CANDIDATES order');
+  assert.deepEqual(box('Dirección'), address, 'accents are folded');
+  assert.deepEqual(box('Teléfono', 'tel'), ['email', 'phone']);
+  assert.deepEqual(box('Anything else?'), [...MATCH_CANDIDATES]);
+  assert.deepEqual(box('Today’s Date', 'date'), [], 'date of birth is never offered, so a date box is offered nothing');
+  assert.deepEqual(box('Phone', 'date'), []);
+  for (const label of ['First Name', 'Anything else?', 'Rent', 'Email', 'City']) {
+    assert.equal(box(label).some(key => NEVER_SUGGESTED.includes(key)), false, label);
+  }
+  const grouped = new Set(['Name', 'Email', 'Address', 'Household size', 'Monthly rent'].flatMap(label => box(label)));
+  assert.deepEqual(MATCH_CANDIDATES.filter(key => !grouped.has(key)), [], 'every field the app offers is in a group');
+  assert.throws(() => offeredFields({ label: 'Name', type: 'radio' }), /text box/);
+});
+
+test('noul-v1: every answerable text box in the question bank is offered its saved field', () => {
+  const { offeredFields, MATCH_CANDIDATES } = prompts;
+  let boxes = 0;
+  for (const form of [...loadQuestionBank(), ...loadSyntheticBank()]) {
+    for (const question of form.questions) {
+      const key = question.rule.name === 'field' ? question.rule.key : null;
+      if (!prompts.TEXT_TYPES.includes(question.type) || !MATCH_CANDIDATES.includes(key)) continue;
+      boxes++;
+      assert.ok(offeredFields(question).includes(key), `${form.source.url}: ${question.label} -> ${key}`);
+    }
+  }
+  assert.ok(boxes > 100, `${boxes} answerable boxes`);
+});

@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createFieldSuggestions } = require('../desktop/field-suggestions.cjs');
-const { ABSTAIN, QUESTIONS, MATCH_CANDIDATES, NEVER_SUGGESTED, CHOICE, KEY_ABOUT, matchState } = require('../shared/laya-prompts.cjs');
+const { ABSTAIN, QUESTIONS, MATCH_CANDIDATES, NEVER_SUGGESTED, CHOICE, KEY_ABOUT, matchState, offeredFields } = require('../shared/laya-prompts.cjs');
 const { BARS } = require('../desktop/laya-decisions.cjs');
 
 // A stand-in for desktop/laya.cjs (#38) running a noul-v1 model, with its exact decision interface.
@@ -30,9 +30,21 @@ test('a text box the model matches above the bar gets that saved field; it sees 
   const suggestions = await createFieldSuggestions({ laya }).suggest([field('f0:sh-1-2', 'Where can we reach you by email?', 'email')], BUDGET);
   assert.deepEqual(suggestions, { 'f0:sh-1-2': 'email' });
   assert.equal(laya.batches.length, 1);
-  assert.deepEqual(laya.batches[0], [...MATCH_CANDIDATES.map(key => matchState('Where can we reach you by email?', key)), matchState('Where can we reach you by email?', null)]
-    .map(state => ({ state, questions: QUESTIONS })), 'every candidate plus abstain, in training order');
+  assert.deepEqual(laya.batches[0], [...['email', 'phone'].map(key => matchState('Where can we reach you by email?', key)), matchState('Where can we reach you by email?', null)]
+    .map(state => ({ state, questions: QUESTIONS })), 'the fields its label names plus abstain, in training order');
   assert.equal(laya.batches[0].at(-1).state.candidate, ABSTAIN);
+});
+
+test('each text box is asked about the saved fields its label names, every field when it names none, and a date box isn’t asked', async () => {
+  const laya = stubLaya((question, candidate) => question === 'Zip Code:' && candidate === saved('zip') ? 0.99 : 0.01);
+  const boxes = [field('a', 'Zip Code:'), field('b', 'Today’s Date', 'date'), field('c', 'Anything else?'), field('d', 'Total # of individuals living in your household:')];
+  assert.deepEqual(await createFieldSuggestions({ laya }).suggest(boxes, BUDGET), { a: 'zip' });
+  assert.deepEqual(laya.batches.map(batch => batch.map(item => item.state.question)[0]), ['Zip Code:', 'Anything else?', 'Total # of individuals living in your household:']);
+  for (const [batch, box] of [[laya.batches[0], boxes[0]], [laya.batches[1], boxes[2]], [laya.batches[2], boxes[3]]]) {
+    assert.deepEqual(batch.map(item => item.state), [...offeredFields(box).map(key => matchState(box.label, key)), matchState(box.label, null)], box.label);
+  }
+  assert.equal(laya.batches[1].length, MATCH_CANDIDATES.length + 1, 'a label that names no group is offered every field');
+  assert.equal(laya.batches[0].length, 7, 'the six address fields and abstain');
 });
 
 test('the bar is 0.95: a lower score, an abstain that wins, or two likely fields leave the box to the applicant', async () => {

@@ -14,6 +14,7 @@ questions it fills (coverage), and how often it fills one it should have left.
 
 import argparse
 import json
+import subprocess
 import sys
 import time
 from collections import defaultdict
@@ -96,6 +97,44 @@ def final_forms(final_dir):
     if not urls:
         raise ValueError(f"No final holdout form in {final_dir}")
     return urls
+
+
+def as_app_asks(decisions, offers):
+    """The decisions with each text box asked only what the desktop app asks it: the candidates in
+    `offers` ({decision: [candidate, ...]}, from app_offers.cjs) and the abstain row, in their order.
+    A box offered nothing isn't asked, so it is left out; one whose answer isn't on offer can only be
+    answered rightly by abstaining."""
+    match = decisions["match"]
+    if set(offers) != set(match):
+        raise ValueError(f"The offers cover other text boxes than the dataset: {sorted(set(offers) ^ set(match))[:3]}")
+    kept = {}
+    for key, rows in match.items():
+        if not offers[key]:
+            continue
+        candidates = [row["state"]["candidate"] for row in rows]
+        missing = [candidate for candidate in offers[key] if candidate not in candidates]
+        if missing:
+            raise ValueError(f"{key}: {missing[0]!r} isn't one of its candidates")
+        chosen = [dict(row, answers=dict(row["answers"])) for row in rows if row["state"]["candidate"] in offers[key] or row["state"]["candidate"] in ABSTAINS]
+        if not any(row["answers"]["correct"] for row in chosen):
+            chosen[-1]["answers"]["correct"] = True
+        kept[key] = chosen
+    return {**decisions, "match": kept}
+
+
+def select_task(decisions, task):
+    """Only `task`'s decisions ("answer" or "match"), or every task's when it is None."""
+    if task is None:
+        return decisions
+    if task not in decisions:
+        raise ValueError(f"The task must be one of {', '.join(decisions)}, not {task!r}")
+    return {task: decisions[task]}
+
+
+def app_offers(source, final):
+    """What the desktop app offers each text box of a noul-v1 dataset, from its own code (app_offers.cjs)."""
+    command = ["node", str(Path(__file__).with_name("app_offers.cjs")), str(source)] + (["--final"] if final else [])
+    return json.loads(subprocess.run(command, check=True, capture_output=True, text=True).stdout)
 
 
 def probabilities(decisions):
@@ -249,6 +288,9 @@ def main():
     held.add_argument("--exclude-holdout", action="store_true", help="evaluate every form but those marked holdout (to choose thresholds on)")
     held.add_argument("--final", action="store_true", help="evaluate the final holdout's forms (a dataset built with build.cjs --final)")
     parser.add_argument("--limit", type=int, default=0, help="evaluate this many decisions per task (0 = all)")
+    parser.add_argument("--task", choices=("answer", "match"), help="score only this task (default: both)")
+    parser.add_argument("--as-app-asks", action="store_true",
+                        help="noul-v1: ask each text box only the saved fields the desktop app offers it (app_offers.cjs)")
     parser.add_argument("--report", help="write the JSON report here")
     parser.add_argument("--errors", help="write every wrong fill at --error-threshold here (JSON lines)")
     parser.add_argument("--error-threshold", type=float, default=0.9)
@@ -271,6 +313,12 @@ def main():
     questions = json.loads((source / "questions.json").read_text())
     forms = "holdout" if args.holdout else "not-holdout" if args.exclude_holdout else "final" if args.final else "all"
     decisions = load_decisions(source, questions, args.split, forms, args.limit)
+    if args.as_app_asks:
+        if dataset_format(questions) != "noul-v1":
+            parser.error("--as-app-asks applies to noul-v1 datasets; a choice-v2 dataset already offers what the app does")
+        offers = app_offers(source, args.final)
+        decisions = as_app_asks(decisions, {key: offers[key] for key in decisions["match"]})
+    decisions = select_task(decisions, args.task)
     if args.probs:
         apply_probabilities(decisions, json.loads(Path(args.probs).read_text()))
     elif args.runtime == "onnx":
@@ -292,6 +340,7 @@ def main():
         "split": args.split,
         "holdout": args.holdout,
         "forms": forms,
+        "as_app_asks": args.as_app_asks,
         "tasks": {task: {str(t): metrics(groups, t) for t in THRESHOLDS} for task, groups in decisions.items()},
     }
     if args.runtime == "onnx":

@@ -15,7 +15,7 @@ const { createLaya } = require('../../desktop/laya.cjs');
 const { createFieldAnswers } = require('../../desktop/field-answers.cjs');
 const { createFieldSuggestions } = require('../../desktop/field-suggestions.cjs');
 const { BUDGET_MS } = require('../../desktop/laya-decisions.cjs');
-const { ABSTAIN, CHOICE, TEXT_TYPES, CHOICE_TYPES, unsafeQuestion } = require('../../shared/laya-prompts.cjs');
+const { ABSTAIN, CHOICE, TEXT_TYPES, CHOICE_TYPES, offeredFields, unsafeQuestion } = require('../../shared/laya-prompts.cjs');
 const { buildFacts, factsText } = require('../../shared/facts.cjs');
 const { loadQuestionBank } = require('../question-bank.cjs');
 const { generateHouseholds } = require('../profiles/generate.cjs');
@@ -41,7 +41,7 @@ function passesNeeded(format, { choices, boxes }, profile, { answers, sensitive 
   const everyday = factsText(facts.filter(fact => !fact.sensitive)), everything = factsText(facts);
   const open = choices.filter(question => !unsafeQuestion(question) && !question.options.includes(ABSTAIN));
   const firstPass = Object.keys(answers).length - sensitive.length;
-  const matched = boxes.filter(box => !unsafeQuestion(box) && (format !== 'choice-v2' || CHOICE.MATCH_SETS[box.type].length));
+  const matched = boxes.filter(box => !unsafeQuestion(box) && (format === 'choice-v2' ? CHOICE.MATCH_SETS[box.type] : offeredFields(box)).length);
   return (everyday ? open.length : 0) + (everything !== everyday ? open.length - (everyday ? firstPass : 0) : 0) + matched.length;
 }
 
