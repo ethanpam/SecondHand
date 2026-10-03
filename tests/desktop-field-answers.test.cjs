@@ -85,13 +85,14 @@ test('questions still open are tried again with sensitive facts, and those answe
   assert.deepEqual(sensitive, ['sixty', 'income'], 'the answers that needed a sensitive fact');
   assert.deepEqual(sensitiveFields, ['birthDate', 'monthlyEarnedIncome', 'monthlyOtherIncome'], 'the saved details the approval prompt names');
   const second = laya.batches.filter(batch => batch[0].state.facts === everything).map(batch => batch[0].state.question);
-  assert.deepEqual(second, ['Is anyone in your household 60 or older?', 'Is your household income under $2,000 a month?', 'Do you have a pet?'], 'only questions left open are asked again');
+  assert.deepEqual(second, ['Is anyone in your household 60 or older?', 'Is your household income under $2,000 a month?'], 'only questions left open are asked again');
+  assert.equal(laya.batches.some(batch => batch[0].state.question === 'Do you have a pet?'), false, 'a question on no topic the facts cover is never asked');
   assert.equal(JSON.stringify({ answers, sensitive, sensitiveFields }).includes('years old'), false, 'the facts sheet never leaves the answerer');
 });
 
 test('without sensitive facts there is no second pass; without any facts nothing is asked', async () => {
   const laya = stubLaya(state => state.candidate === ABSTAIN ? 0.99 : 0.01);
-  assert.deepEqual(await everydayAnswers(answerer(laya).answer({ questions: [question('pet', 'Do you have a pet?')], profile: { householdSize: '2', county: 'Polk' }, budgetMs })), {});
+  assert.deepEqual(await everydayAnswers(answerer(laya).answer({ questions: [question('vet', 'Is anyone in your household a veteran?')], profile: { householdSize: '2', county: 'Polk' }, budgetMs })), {});
   assert.equal(laya.batches.length, 1);
   const empty = stubLaya(() => 0.99);
   assert.deepEqual(await everydayAnswers(answerer(empty).answer({ questions: [question('pet', 'Do you have a pet?')], profile: {}, budgetMs })), {});

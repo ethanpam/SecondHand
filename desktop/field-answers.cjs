@@ -3,7 +3,7 @@
 // The facts sheet is built and read here only; the caller gets back option text alone, and asks
 // the applicant before any of it reaches a website.
 const { buildFacts, factsText, SENSITIVE_SOURCES } = require('../shared/facts.cjs');
-const { ABSTAIN, CHOICE, answerState, unsafeQuestion } = require('../shared/laya-prompts.cjs');
+const { ABSTAIN, CHOICE, answerState, factsCover, unsafeQuestion } = require('../shared/laya-prompts.cjs');
 const { CHOICE_BATCH, score, scoreChoices, pick, budget, timedOut, inOrder, barsFor } = require('./laya-decisions.cjs');
 
 function createFieldAnswers({ laya, now = Date.now, today } = {}) {
@@ -14,8 +14,10 @@ function createFieldAnswers({ laya, now = Date.now, today } = {}) {
   // that came after it is dropped, and nothing more is asked.
   const passes = {
     // noul-v1: one request per question, scoring each option and "the facts don't say" on its own.
-    // Every question is asked at once, each request ending when the click's time does.
+    // Every question is asked at once, each request ending when the click's time does. A question
+    // on no topic the facts cover isn't asked (factsCover).
     'noul-v1': async (facts, questions, bar, more, found) => {
+      questions = questions.filter(factsCover);
       const timeoutMs = more.left();
       if (!questions.length || !more() || timeoutMs < 1) return;
       const requests = questions.map(question => score(laya, [...question.options, ABSTAIN].map(candidate => answerState(facts, question.label, candidate)), { timeoutMs }));

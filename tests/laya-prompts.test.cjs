@@ -150,3 +150,27 @@ test('noul-v1: every answerable text box in the question bank is offered its sav
   }
   assert.ok(boxes > 100, `${boxes} answerable boxes`);
 });
+
+test('noul-v1: a choice question is asked only when its label or options name a topic the facts sheet covers', () => {
+  const { factsCover } = prompts;
+  const yesNo = ['Yes', 'No'];
+  for (const label of ['New Client:', 'Existing Client:', 'Is this your first time receiving food this year?', 'Gender', 'Preferred pickup day', 'Do you have any pets?']) {
+    assert.equal(factsCover({ label, options: yesNo }), false, label);
+  }
+  for (const [label, options] of [['Is anyone in your household 60 or older?', yesNo], ['Are you 55+?', yesNo], ['Do you live in Polk County?', yesNo], ['Is your home in Minnesota?', yesNo],
+    ['Veteran?', yesNo], ['Are you a U.S. citizen?', yesNo], ['Pick one', ['SNAP', 'WIC']],
+    ['How would you best describe your employment status?', ['Employed', 'Unemployed', 'Retired', 'Disabled', 'Student']]]) {
+    assert.equal(factsCover({ label, options }), true, label);
+  }
+});
+
+test('noul-v1: every choice question with an answer rule in the question bank names a topic the facts cover', () => {
+  let ruled = 0;
+  for (const form of [...loadQuestionBank(), ...loadSyntheticBank()]) {
+    for (const question of form.questions.filter(item => prompts.CHOICE_TYPES.includes(item.type) && !['none', 'never'].includes(item.rule.name))) {
+      ruled++;
+      assert.ok(prompts.factsCover(question), `${form.source.url || form.file}: ${question.label} (${question.rule.name})`);
+    }
+  }
+  assert.ok(ruled > 350, `${ruled} questions with a rule`);
+});

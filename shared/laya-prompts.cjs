@@ -53,7 +53,7 @@ const OFFER_GROUPS = Object.freeze([
   { keys: ['monthlyRent', 'monthlyUtilities'], words: /\b(rent|rental|mortgage|housing|utility|utilities|electric|electricity|gas|water|heat|heating|bills?|payments?|pay|costs?|expenses?|monthly|month|amount|dollars)\b/ }
 ].map(group => Object.freeze({ keys: Object.freeze(group.keys), words: group.words })));
 // A label's words, lowercased and without accents or punctuation.
-const topicText = label => String(label).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[‘’']/g, '').replace(/#/g, ' number ')
+const topicText = label => String(label).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[‘’']/g, '').replace(/#/g, ' number ')
   .replace(/[^a-z0-9+]+/g, ' ').trim();
 function offeredFields({ label, type }) {
   if (!TEXT_TYPES.includes(type)) throw new TypeError(`A ${type} field isn’t a text box Laya matches.`);
@@ -61,6 +61,35 @@ function offeredFields({ label, type }) {
   const text = topicText(label);
   const named = new Set(OFFER_GROUPS.filter(group => group.words.test(text)).flatMap(group => group.keys));
   return named.size ? MATCH_CANDIDATES.filter(key => named.has(key)) : [...MATCH_CANDIDATES];
+}
+
+// noul-v1: whether the saved facts could settle a choice question. Every question costs two passes
+// through the model, so one whose label and options name none of the topics the facts sheet covers
+// (FACT_TOPICS: the household and its members' ages, veterans, disability, pregnancy, Medicare,
+// citizenship, home and place, income, housing costs, money on hand, medical costs, and programs
+// applied for) isn't asked: pickup times, gender, pets, "New client?". The facts never settle those.
+// The words were chosen on the training questions, where every question with an answer rule names its
+// topic. The facts sheet itself is unchanged. On the test and final forms, asking only these changes
+// none of the model's answers (docs/laya-model.md, Speed).
+const STATE_WORDS = Object.values(require('./facts.cjs').STATE_NAMES).map(name => name.toLowerCase()).join('|');
+const FACT_TOPICS = Object.freeze([
+  /\b(households?|family|families|people|persons?|members?|individuals?|live with|lives with|living with|alone|size|ages?|aged|old|older|younger|born|birth|birthday|seniors?|elderly|elders?|adults?|minors?|child|children|kids?|infants?|babies|baby|teens?|youth|retired|retire\w*|parents?|hoh|head|dependents?|anyone|anybody|someone|else|others|share|sharing|with you|over \d+|under \d+)\b|\d+ ?\+/,
+  /\b(veterans?|military|armed|served|service|army|navy|marines?|air force|national guard|coast guard|active duty|discharged)\b/,
+  /\b(disab\w*|handicap\w*|impair\w*|ssi|ssdi|blind)\b/,
+  /\b(pregnan\w*|expecting|wic)\b/,
+  /\b(medicare|medicaid|insurance|insured|coverage|covered|health)\b/,
+  /\b(citizens?|citizenship|immigra\w*|legal|lawful|qualified|alien|documented|undocumented|green card|naturaliz\w*|permanent resident|refugee)\b/,
+  /\b(homeless\w*|unhoused|housed|home|house|housing|shelter|address|living situation|stay|staying|own|owns|rent|rents|renting|mortgage|lease|apartment)\b/,
+  new RegExp(`\\b(state|county|city|town|zip|zipcode|postal|live in|lives in|reside|resides|residents?|residence|located|location|area|where|${STATE_WORDS})\\b`),
+  /\b(income|incomes|earn|earns|earned|earnings|wages?|salary|paid|paycheck|jobs?|work|works|working|employ\w*|unemploy\w*|self employed|hours|money|support|pension|social security|unemployment|fpl|poverty|annual|monthly|gross|net)\b/,
+  /\b(utility|utilities|electric\w*|gas|heat\w*|water|energy|liheap|bills?|phone bill)\b/,
+  /\b(assets?|resources|savings?|bank|checking|cash|accounts?|on hand)\b/,
+  /\b(medical|medicine|prescriptions?|doctor|dental|hospital|health care|out of pocket)\b/,
+  /\b(snap|food stamps?|ebt|fip|tanf|cash assistance|apply|applying|applied|application|programs?|benefits?|assistance|hawk ?i|chip)\b/
+]);
+function factsCover({ label, options }) {
+  const words = [label, ...options].map(topicText);
+  return FACT_TOPICS.some(topic => words.some(text => topic.test(text)));
 }
 const answerState = (facts, question, candidate) => ({ facts, question, candidate });
 
@@ -101,5 +130,5 @@ const UNSAFE_QUESTION = /^social security$|\b(consent\w*|sign|signs|signed|signi
 const normal = value => String(value || '').toLowerCase().replace(/[‘’']/g, '').replace(/#/g, ' number ').replace(/\*/g, ' ').replace(/[^a-z0-9+]+/g, ' ').trim();
 const unsafeQuestion = field => [field?.label, ...(Array.isArray(field?.options) ? field.options : [])].some(text => UNSAFE_QUESTION.test(normal(text)));
 
-module.exports = { DECISION, QUESTIONS, ABSTAIN, TEXT_TYPES, CHOICE_TYPES, MATCH_KEYS, KEY_ABOUT, NEVER_SUGGESTED, MATCH_CANDIDATES, matchState, offeredFields, answerState,
+module.exports = { DECISION, QUESTIONS, ABSTAIN, TEXT_TYPES, CHOICE_TYPES, MATCH_KEYS, KEY_ABOUT, NEVER_SUGGESTED, MATCH_CANDIDATES, matchState, offeredFields, factsCover, answerState,
   CHOICE, UNSAFE_QUESTION, unsafeQuestion };

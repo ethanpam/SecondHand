@@ -100,26 +100,30 @@ def final_forms(final_dir):
 
 
 def as_app_asks(decisions, offers):
-    """The decisions with each text box asked only what the desktop app asks it: the candidates in
-    `offers` ({decision: [candidate, ...]}, from app_offers.cjs) and the abstain row, in their order.
-    A box offered nothing isn't asked, so it is left out; one whose answer isn't on offer can only be
-    answered rightly by abstaining."""
-    match = decisions["match"]
-    if set(offers) != set(match):
-        raise ValueError(f"The offers cover other text boxes than the dataset: {sorted(set(offers) ^ set(match))[:3]}")
+    """The decisions as the desktop app asks them (`offers`, from app_offers.cjs). A text box is asked only
+    the candidates in offers["match"] and the abstain row, in their order; a box offered nothing isn't asked,
+    so it is left out, and one whose answer isn't on offer can only be answered rightly by abstaining. A
+    choice question offers["answer"] marks False isn't asked: it stays counted, and is never filled."""
+    match, answer = decisions["match"], decisions["answer"]
+    if set(offers["match"]) != set(match):
+        raise ValueError(f"The offers cover other text boxes than the dataset: {sorted(set(offers['match']) ^ set(match))[:3]}")
+    if set(offers["answer"]) != set(answer):
+        raise ValueError(f"The offers cover other choice questions than the dataset: {sorted(set(offers['answer']) ^ set(answer))[:3]}")
     kept = {}
     for key, rows in match.items():
-        if not offers[key]:
+        offered = offers["match"][key]
+        if not offered:
             continue
         candidates = [row["state"]["candidate"] for row in rows]
-        missing = [candidate for candidate in offers[key] if candidate not in candidates]
+        missing = [candidate for candidate in offered if candidate not in candidates]
         if missing:
             raise ValueError(f"{key}: {missing[0]!r} isn't one of its candidates")
-        chosen = [dict(row, answers=dict(row["answers"])) for row in rows if row["state"]["candidate"] in offers[key] or row["state"]["candidate"] in ABSTAINS]
+        chosen = [dict(row, answers=dict(row["answers"])) for row in rows if row["state"]["candidate"] in offered or row["state"]["candidate"] in ABSTAINS]
         if not any(row["answers"]["correct"] for row in chosen):
             chosen[-1]["answers"]["correct"] = True
         kept[key] = chosen
-    return {**decisions, "match": kept}
+    asked = {key: rows if offers["answer"][key] else [dict(row, asked=False) for row in rows] for key, rows in answer.items()}
+    return {**decisions, "answer": asked, "match": kept}
 
 
 def select_task(decisions, task):
@@ -229,7 +233,7 @@ def metrics(decisions, threshold):
         if rows[-1]["state"]["candidate"] not in ABSTAINS:
             raise ValueError("Every decision must end with the abstain candidate.")
         gold = next(row["state"]["candidate"] for row in rows if row["answers"]["correct"])
-        chosen = fill([row["p"] for row in rows], threshold)
+        chosen = None if rows[0].get("asked") is False else fill([row["p"] for row in rows], threshold)
         answerable = gold not in ABSTAINS
         result["decisions"] += 1
         result["answerable"] += answerable
@@ -290,7 +294,7 @@ def main():
     parser.add_argument("--limit", type=int, default=0, help="evaluate this many decisions per task (0 = all)")
     parser.add_argument("--task", choices=("answer", "match"), help="score only this task (default: both)")
     parser.add_argument("--as-app-asks", action="store_true",
-                        help="noul-v1: ask each text box only the saved fields the desktop app offers it (app_offers.cjs)")
+                        help="noul-v1: ask what the desktop app asks (app_offers.cjs): each text box only the saved fields it offers, and only the choice questions it asks")
     parser.add_argument("--report", help="write the JSON report here")
     parser.add_argument("--errors", help="write every wrong fill at --error-threshold here (JSON lines)")
     parser.add_argument("--error-threshold", type=float, default=0.9)
@@ -317,7 +321,7 @@ def main():
         if dataset_format(questions) != "noul-v1":
             parser.error("--as-app-asks applies to noul-v1 datasets; a choice-v2 dataset already offers what the app does")
         offers = app_offers(source, args.final)
-        decisions = as_app_asks(decisions, {key: offers[key] for key in decisions["match"]})
+        decisions = as_app_asks(decisions, {task: {key: offers[task][key] for key in decisions[task]} for task in ("match", "answer")})
     decisions = select_task(decisions, args.task)
     if args.probs:
         apply_probabilities(decisions, json.loads(Path(args.probs).read_text()))
@@ -357,7 +361,7 @@ def main():
         with open(args.errors, "w") as handle:
             for task, groups in decisions.items():
                 for rows in groups.values():
-                    chosen = fill([row["p"] for row in rows], args.error_threshold)
+                    chosen = None if rows[0].get("asked") is False else fill([row["p"] for row in rows], args.error_threshold)
                     best = rows[chosen] if chosen is not None else None
                     gold = next(row["state"]["candidate"] for row in rows if row["answers"]["correct"])
                     if best and best["state"]["candidate"] != gold:
