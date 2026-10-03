@@ -648,7 +648,8 @@
   }
   const elementFor = id => current?.map.get(id)?.elements[0] || null;
 
-  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, GUESS_KEYS, UNSAFE_QUESTION, plan, offers, questions, requestKeys, deriveValues, fillFields, settle, focusField, elementFor,
+  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, GUESS_KEYS, UNSAFE_QUESTION, OTHER_PERSON_ROLE, MEMBER_DETAIL, CHILD_ROLE, PERSON_DETAIL,
+    COMBINED_ADDRESS_QUESTION, PERSON_NOT_AMOUNT, blockedSuggestion, plan, offers, questions, requestKeys, deriveValues, fillFields, settle, focusField, elementFor,
     canSuggest, unsafeQuestion, layaQuestion });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandGeneric = api;

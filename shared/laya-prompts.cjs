@@ -143,4 +143,4 @@ const normal = value => String(value || '').toLowerCase().replace(/[‘’']/g, 
 const unsafeQuestion = field => [field?.label, ...(Array.isArray(field?.options) ? field.options : [])].some(text => UNSAFE_QUESTION.test(normal(text)));
 
 module.exports = { DECISION, QUESTIONS, ABSTAIN, TEXT_TYPES, CHOICE_TYPES, MATCH_KEYS, KEY_ABOUT, NEVER_SUGGESTED, MATCH_CANDIDATES, matchState, matchableBox, offeredFields, factsCover, answerState,
-  CHOICE, UNSAFE_QUESTION, unsafeQuestion };
+  CHOICE, UNSAFE_QUESTION, OTHER_PERSON_ROLE, MEMBER_DETAIL, CHILD_ROLE, PERSON_DETAIL, COMBINED_ADDRESS_QUESTION, PERSON_NOT_AMOUNT, unsafeQuestion };
