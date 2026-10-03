@@ -17,6 +17,11 @@ const SITE_URL = 'https://pantry.example.org/intake?step=1';
 const ORIGIN = 'https://pantry.example.org';
 const SCRIPT_ID = 'site-pantry.example.org';
 const SITE_SCRIPT = { id: SCRIPT_ID, matches: [`${ORIGIN}/*`], js: ['generic-adapter.js', 'page-text.js', 'generic-content.js'], allFrames: true, runAt: 'document_idle', persistAcrossSessions: true };
+const ALL = 'https://*/*';
+const IOWA_ORIGIN = 'https://hhsservices.iowa.gov';
+const IOWA_HOST = `${IOWA_ORIGIN}/*`;
+// SecondHand on all websites: every https page but Iowa's site, which keeps its own scripts.
+const ALL_SCRIPT = { id: 'site-all', matches: [ALL], excludeMatches: [IOWA_HOST], js: SITE_SCRIPT.js, allFrames: true, runAt: 'document_idle', persistAcrossSessions: true };
 
 // Stand-in for generic-adapter.js's pure helpers; the real engine has its own tests.
 const { GENERIC_KEYS, unsafeQuestion, layaQuestion } = require('../extension/generic-adapter.js');
@@ -87,11 +92,13 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
   };
 }
 
-function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, desktop = {}, fields = pantryFields(), next, duringGetFields, duringStatus, frames = [], plan, keepAccess = false, discoveryError = false, topError, framesReply, pageText = { lang: 'en', text: '' }, clock } = {}) {
+function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSites = false, allGranted = allSites, desktop = {}, fields = pantryFields(), next, duringGetFields, duringStatus, frames = [], plan, keepAccess = false, discoveryError = false, topError, framesReply, pageText = { lang: 'en', text: '' }, clock, openTabs } = {}) {
   const tab = { id: 7, active: true, url };
   const log = [], native = [], content = [], injected = [], opened = [];
-  const permissions = new Set(granted ? [`${ORIGIN}/*`] : []);
-  const registered = new Map(enabled ? [[SCRIPT_ID, structuredClone(SITE_SCRIPT)]] : []);
+  const permissions = new Set([...(granted ? [`${ORIGIN}/*`] : []), ...(allGranted ? [ALL] : [])]);
+  // Iowa's site is a manifest permission. Chrome takes it back with https://*/* until it restarts.
+  const iowa = { held: true };
+  const registered = new Map([...(enabled ? [[SCRIPT_ID, structuredClone(SITE_SCRIPT)]] : []), ...(allSites ? [['site-all', structuredClone(ALL_SCRIPT)]] : [])]);
   for (const frame of frames) {
     if (frame.granted || frame.enabled) permissions.add(`${frame.origin}/*`);
     if (frame.enabled) { const id = `frame-pantry.example.org--${new URL(frame.origin).hostname}`; registered.set(id, { ...SITE_SCRIPT, id, matches: [`${frame.origin}/*`] }); }
@@ -100,7 +107,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
   for (const frame of frames) frame.page = sitePage(frame.fields || pantryFields(), { next: frame.next, tokenPrefix: `frame${frame.frameId}`, lang: frame.lang });
   const tallies = [];
   let statusChecks = 0;
-  const vault = { reachable: true, unlocked: true, accessRevision: 0, getFieldsError: null, trustError: null,
+  const vault = { reachable: true, unlocked: true, accessRevision: 0, getFieldsError: null, trustError: null, allSites,
     values: { firstName: 'Synthetic private first', lastName: 'Synthetic private last', zip: '50309' }, ...desktop };
   const events = {};
   const event = key => ({ addListener: value => { events[key] = value; } });
@@ -108,8 +115,11 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
   const chrome = {
     tabs: {
       get: async () => ({ ...tab }),
+      // Without the tabs permission Chrome gives an address only where SecondHand has access.
+      query: async () => (openTabs || [tab]).map(open => ({ ...open, url: covered(open.url) ? open.url : undefined })),
       sendMessage: async (tabId, message, options) => {
         content.push({ tabId, frameId: options?.frameId, ...plain(message) });
+        if (['secondhand:generic:formFrames', 'secondhand:generic:off'].includes(message.type)) return undefined;
         if (options?.frameId === 0 && topError) throw new Error(topError);
         if (message.type === 'secondhand:generic:frames') return framesReply === undefined ? { origins: frames.map(frame => frame.origin) } : framesReply;
         const frame = frames.find(frame => frame.frameId === options?.frameId);
@@ -130,15 +140,22 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
       onActivated: event('activated'), onRemoved: event('removed'), onUpdated: event('updated')
     },
     permissions: {
-      contains: async ({ origins }) => { log.push('permissions.contains'); return origins.every(origin => permissions.has(origin)); },
-      remove: async ({ origins }) => { log.push('permissions.remove'); if (!keepAccess) origins.forEach(origin => permissions.delete(origin)); return true; },
+      contains: async ({ origins }) => { log.push('permissions.contains'); return origins.every(origin => permissions.has(origin) || (origin === IOWA_HOST ? iowa.held : permissions.has(ALL) && origin.startsWith('https://'))); },
+      // As Chrome does, removing https://*/* also takes every https origin it covers, Iowa's included.
+      remove: async ({ origins }) => {
+        log.push('permissions.remove');
+        if (keepAccess) return true;
+        origins.forEach(origin => permissions.delete(origin));
+        if (origins.includes(ALL)) { for (const origin of [...permissions]) if (origin.startsWith('https://')) permissions.delete(origin); iowa.held = false; }
+        return true;
+      },
       request: async () => { log.push('permissions.request'); throw new Error('Only the side panel may request access, inside a click.'); }
     },
     scripting: {
       executeScript: async details => {
         if (details.func && details.target.allFrames) {
           if (discoveryError) throw new Error('Cannot access an unapproved frame');
-          return [{ frameId: 0, result: ORIGIN }, ...frames.map(frame => ({ frameId: frame.frameId, result: frame.origin }))];
+          return [{ frameId: 0, result: new URL(tab.url).origin }, ...frames.map(frame => ({ frameId: frame.frameId, result: frame.origin }))];
         }
         if (details.func) {
           tallies.push({ target: plain(details.target), func: details.func });
@@ -183,8 +200,14 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
               const fail = error => onMessage({ id: request.id, ok: false, error });
               if (request.type === 'status') {
                 duringStatus?.(vault, ++statusChecks);
-                return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: vault.accessRevision, ...(vault.layaState ? { laya: { state: vault.layaState } } : {}) });
+                return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: vault.accessRevision, allSites: vault.allSites, ...(vault.layaState ? { laya: { state: vault.layaState } } : {}) });
               }
+              if (request.type === 'trustAllSites') {
+                if (vault.trustAllError) return fail(vault.trustAllError);
+                if (vault.trustAllReply) return reply(vault.trustAllReply);
+                vault.allSites = true; return reply({ allSites: true });
+              }
+              if (request.type === 'untrustAllSites') { if (vault.untrustError) return fail(vault.untrustError); vault.allSites = false; return reply({ allSites: false }); }
               // Laya (#39, #42): readied before a click's questions; "not ready" unless a test plays it.
               if (request.type === 'warmLaya') { vault.warming?.(); return reply({ state: vault.layaState || 'unavailable' }); }
               if (request.type === 'suggestFields' || request.type === 'answerFields') {
@@ -197,6 +220,8 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
               if (request.type === 'trustSite') return (vault.trustError || request.url === vault.declineOrigin) ? fail(vault.trustError || 'Declined') : reply({ trusted: true, origin: new URL(request.url).origin });
               if (request.type === 'getFields') {
                 duringGetFields?.(tab);
+                // The app's rule: a site it doesn't trust gets nothing unless all websites is on.
+                if (vault.refuseUntrusted && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
                 if (vault.getFieldsError) return fail(vault.getFieldsError);
                 return reply({ accessRevision: vault.accessRevision, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])) });
               }
@@ -212,8 +237,13 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, deskto
     { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console,
       ...(clock ? { Date: { now: () => clock.now } } : {}) });
   const send = (message, sender) => new Promise(resolve => { if (!listener(message, sender, resolve)) resolve(undefined); });
+  // Whether Chrome lets SecondHand read this address.
+  function covered(address) {
+    try { const origin = new URL(address).origin; return permissions.has(`${origin}/*`) || (origin === IOWA_ORIGIN ? iowa.held : permissions.has(ALL) && address.startsWith('https://')); }
+    catch { return false; }
+  }
   return {
-    tab, page, vault, log, native, content, injected, tallies, opened, permissions, registered, events, send,
+    tab, page, vault, log, native, content, injected, tallies, opened, permissions, registered, events, send, iowa,
     nativeTypes: () => native.map(call => call.type),
     contentTypes: () => content.map(call => call.type),
     panel: message => send({ tabId: 7, ...message }, { id: 'testextension', url: PANEL_URL }),
@@ -1229,9 +1259,9 @@ test('Laya’s match and answer land in the embedded form they came from', async
 test('the side panel learns whether Laya is ready from the desktop status', async () => {
   for (const [desktop, laya] of [[{}, 'unavailable'], [{ layaState: 'ready' }, 'ready'], [{ layaState: 'off' }, 'off'], [{ layaState: 'downloading' }, 'downloading']]) {
     const w = siteWorker({ enabled: true, desktop });
-    assert.deepEqual(plain((await w.panel({ type: 'ui:desktopStatus' })).data), { connected: true, unlocked: true, laya });
+    assert.deepEqual(plain((await w.panel({ type: 'ui:desktopStatus' })).data), { connected: true, unlocked: true, laya, allSites: false, iowaPaused: false });
   }
-  assert.deepEqual(plain((await siteWorker({ desktop: { reachable: false } }).panel({ type: 'ui:desktopStatus' })).data), { connected: false, unlocked: false, laya: 'unavailable' });
+  assert.deepEqual(plain((await siteWorker({ desktop: { reachable: false } }).panel({ type: 'ui:desktopStatus' })).data), { connected: false, unlocked: false, laya: 'unavailable', allSites: false, iowaPaused: false });
   const odd = siteWorker({ desktop: { layaState: 'thinking' } });
   assert.equal((await odd.panel({ type: 'ui:desktopStatus' })).ok, false, 'a state SecondHand doesn’t know is an error, not a guess');
 });
@@ -1371,4 +1401,188 @@ test('a site frame answers the page-text request with its declared language and 
   assert.equal(page.request({ type: 'secondhand:generic:pageText' }, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
   delete page.window.SecondHandPageText;
   assert.equal(page.request({ type: 'secondhand:generic:pageText' }).ok, false, 'without its page reader the frame says so');
+});
+
+// SecondHand on all websites.
+const OTHER_URL = 'https://never.example.net/apply';
+const OTHER = 'https://never.example.net';
+const allSitesOn = w => w.panel({ type: 'ui:enableAllSites', confirmed: true });
+const allSitesOff = w => w.panel({ type: 'ui:disableAllSites', confirmed: true });
+
+test('turning on all websites registers one script only after Chrome and the app both approve, and loads it in the open page', async () => {
+  const w = siteWorker({ url: OTHER_URL, allGranted: true });
+  const response = await allSitesOn(w);
+  assert.equal(response.ok, true, response.error);
+  assert.equal(response.data.enabled, true);
+  assert.equal(response.data.messageKey, 'worker.allSitesOn');
+  const steps = ['permissions.contains', 'native:trustAllSites', 'scripting.registerContentScripts', 'scripting.executeScript'];
+  assert.deepEqual(w.log.filter(name => steps.includes(name)), steps);
+  assert.equal(w.log.includes('permissions.request'), false, 'only the side panel asks Chrome, inside the click');
+  assert.deepEqual(w.native.map(({ type }) => type), ['trustAllSites']);
+  assert.deepEqual(Object.keys(w.native[0]).sort(), ['id', 'type'], 'nothing about the page reaches the app');
+  assert.deepEqual([...w.registered.values()], [ALL_SCRIPT]);
+  assert.deepEqual(w.injected, [{ target: { tabId: 7, allFrames: true }, files: SITE_SCRIPT.js }]);
+
+  const again = await allSitesOn(w);
+  assert.equal(again.ok, true, again.error);
+  assert.deepEqual([...w.registered.keys()], ['site-all'], 'turning it on twice keeps one registration');
+  const iowa = siteWorker({ url: `${adapter.PORTAL}/applyForBenefits/welcome`, allGranted: true });
+  assert.equal((await allSitesOn(iowa)).ok, true);
+  assert.deepEqual(iowa.injected, [], 'Iowa’s portal keeps its own scripts');
+});
+
+test('only a confirmed side-panel request turns on all websites, and only with Chrome’s access', async () => {
+  const w = siteWorker({ allGranted: true });
+  assert.equal(await w.panel({ type: 'ui:enableAllSites' }), undefined);
+  assert.equal(await w.launcher({ type: 'ui:enableAllSites', confirmed: true }), undefined);
+  assert.equal(await w.send({ type: 'ui:enableAllSites', confirmed: true }, { id: 'testextension', url: SITE_URL, tab: { id: 7, url: SITE_URL }, frameId: 0 }), undefined);
+  assert.equal(await w.launcher({ type: 'ui:disableAllSites', confirmed: true }), undefined);
+  assert.deepEqual(w.native, []);
+  const noAccess = siteWorker();
+  const refused = await allSitesOn(noAccess);
+  assert.equal(refused.ok, false);
+  assert.equal(refused.errorKey, 'worker.chromeNotAllowedAllSites');
+  assert.deepEqual(noAccess.native, []);
+  assert.equal(noAccess.registered.size, 0);
+});
+
+test('when the app declines all websites, Chrome’s access goes back, nothing is registered, and what Chrome took with it is named', async () => {
+  const w = siteWorker({ url: OTHER_URL, allGranted: true, desktop: { trustAllError: 'You cancelled trusting all websites.' } });
+  const declined = await allSitesOn(w);
+  assert.equal(declined.ok, false);
+  assert.match(declined.error, /cancelled trusting all websites/);
+  assert.equal(w.permissions.has(ALL), false);
+  assert.equal(w.registered.size, 0);
+  assert.deepEqual(w.injected, []);
+  // A site turned on by itself keeps its registration; Chrome took its access along with all websites.
+  const site = siteWorker({ enabled: true, allGranted: true, desktop: { trustAllError: 'You cancelled trusting all websites.' } });
+  const named = await allSitesOn(site);
+  assert.equal(named.ok, false);
+  assert.equal(named.error, 'You cancelled trusting all websites. Chrome also turned SecondHand off on pantry.example.org. Turn each one on again from its page. Chrome paused SecondHand on Iowa’s site too, until you restart Chrome.');
+  assert.deepEqual([...site.registered.keys()], [SCRIPT_ID]);
+  assert.equal(site.permissions.size, 0);
+  const odd = siteWorker({ allGranted: true, desktop: { trustAllReply: { allSites: 'maybe' } } });
+  assert.match((await allSitesOn(odd)).error, /^The SecondHand app did not approve all websites\./);
+  assert.equal(odd.permissions.has(ALL), false);
+  assert.equal(odd.registered.size, 0);
+});
+
+test('siteEnabled is true for any https origin while all websites is on, and the page fills from one desktop request', async () => {
+  const w = siteWorker({ url: OTHER_URL, allSites: true });
+  const state = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.deepEqual(state.site, { origin: OTHER, enabled: true, frames: [], ready: true });
+  const response = await autofill(w);
+  assert.equal(response.ok, true, response.error);
+  assert.deepEqual(w.nativeTypes(), ['status', 'getFields', 'status']);
+  assert.equal(w.native[1].url, `${OTHER}/apply`);
+  assert.equal(response.data.state, 'done');
+  // Embedded forms are covered too: no second approval.
+  const framed = siteWorker({ url: OTHER_URL, allSites: true, frames: [secondFrame()] });
+  assert.deepEqual(plain((await framed.panel({ type: 'ui:pageState' })).data.site.frames), [{ origin: FRAME_ORIGIN, enabled: true }]);
+  // Iowa's portal stays Iowa's.
+  const iowa = siteWorker({ url: `${adapter.PORTAL}/applyForBenefits/welcome`, allSites: true });
+  assert.equal(iowa.registered.has('site-all'), true);
+  const off = siteWorker({ url: OTHER_URL });
+  assert.equal(plain((await off.panel({ type: 'ui:pageState' })).data).site.enabled, false);
+});
+
+test('turning off all websites removes its script and Chrome’s access, keeps sites turned on one at a time, names the ones Chrome took, and tells the app', async () => {
+  const pantryTab = { id: 7, active: true, url: SITE_URL };
+  const otherTab = { id: 8, active: false, url: OTHER_URL };
+  const iowaTab = { id: 9, active: false, url: `${adapter.PORTAL}/applyForBenefits/welcome` };
+  const w = siteWorker({ enabled: true, allSites: true, openTabs: [pantryTab, otherTab, iowaTab] });
+  assert.equal(await w.panel({ type: 'ui:disableAllSites' }), undefined);
+  const response = await allSitesOff(w);
+  assert.equal(response.ok, true, response.error);
+  assert.equal(response.data.enabled, false);
+  assert.deepEqual(plain(response.data.lost), ['pantry.example.org']);
+  assert.equal(response.data.message, 'SecondHand is off on all websites. Chrome also turned SecondHand off on pantry.example.org. Turn each one on again from its page. Chrome paused SecondHand on Iowa’s site too, until you restart Chrome.');
+  assert.equal(w.registered.has('site-all'), false);
+  assert.deepEqual([...w.registered.keys()], [SCRIPT_ID], 'the site turned on by itself keeps its registration');
+  assert.equal(w.permissions.has(ALL), false);
+  assert.deepEqual(w.nativeTypes(), ['untrustAllSites']);
+  // The card leaves every open page that is no longer on; Iowa's portal is not SecondHand on all websites.
+  assert.deepEqual(w.content.filter(call => call.type === 'secondhand:generic:off').map(call => call.tabId), [7, 8]);
+  assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).site.enabled, false, 'the site shows as off and can be turned on again');
+
+  // Chrome keeps a site's access when it doesn't cover it: nothing is named.
+  const plainOff = siteWorker({ allSites: true });
+  const quiet = await allSitesOff(plainOff);
+  assert.deepEqual(plain(quiet.data.lost), []);
+
+  const appClosed = siteWorker({ allSites: true, desktop: { untrustError: 'The request could not be completed.' } });
+  const closed = await allSitesOff(appClosed);
+  assert.equal(closed.ok, false);
+  assert.match(closed.error, /^SecondHand is off on all websites in Chrome, but the app couldn’t be told/);
+  assert.equal(appClosed.registered.size, 0, 'Chrome’s side is off even when the app can’t be reached');
+  assert.equal(appClosed.permissions.has(ALL), false);
+
+  const kept = siteWorker({ allSites: true, keepAccess: true });
+  assert.equal((await allSitesOff(kept)).errorKey, 'worker.chromeKeptAllSites');
+});
+
+test('when the app turns off all websites, the extension turns them off at its next desktop request', async () => {
+  const w = siteWorker({ url: OTHER_URL, allSites: true });
+  w.vault.allSites = false;
+  const status = plain((await w.panel({ type: 'ui:desktopStatus' })).data);
+  assert.equal(status.allSites, false);
+  assert.equal(w.registered.has('site-all'), false);
+  assert.equal(w.permissions.has(ALL), false);
+  assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).site.enabled, false);
+  assert.deepEqual(w.nativeTypes(), ['status'], 'the app already turned itself off');
+
+  // A click already under way: the app refuses a site it no longer trusts, and nothing is filled.
+  const filling = siteWorker({ url: OTHER_URL, allSites: true, desktop: { refuseUntrusted: true } });
+  filling.vault.allSites = false;
+  const refused = await autofill(filling);
+  assert.equal(refused.data.state, 'error');
+  assert.equal(refused.data.message, 'This site isn’t trusted. Turn on SecondHand for it first.');
+  assert.equal(filling.registered.has('site-all'), false);
+  assert.deepEqual(filling.page.answered(), []);
+});
+
+test('the side panel learns from the desktop status whether all websites is on and whether Chrome paused Iowa', async () => {
+  assert.deepEqual(plain((await siteWorker({ allSites: true }).panel({ type: 'ui:desktopStatus' })).data), { connected: true, unlocked: true, laya: 'unavailable', allSites: true, iowaPaused: false });
+  assert.deepEqual(plain((await siteWorker().panel({ type: 'ui:desktopStatus' })).data), { connected: true, unlocked: true, laya: 'unavailable', allSites: false, iowaPaused: false });
+  const closed = siteWorker({ allSites: true, desktop: { reachable: false } });
+  assert.deepEqual(plain((await closed.panel({ type: 'ui:desktopStatus' })).data), { connected: false, unlocked: false, laya: 'unavailable', allSites: true, iowaPaused: false },
+    'with the app closed, Chrome’s side is still known');
+  const paused = siteWorker();
+  paused.iowa.held = false;
+  assert.equal((await paused.panel({ type: 'ui:desktopStatus' })).data.iowaPaused, true);
+});
+
+test('a site turned on by itself can’t be turned off while all websites covers it', async () => {
+  const w = siteWorker({ enabled: true, allSites: true });
+  const refused = await w.panel({ type: 'ui:disableSite', confirmed: true });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.errorKey, 'worker.allSitesCoverSite');
+  assert.deepEqual([...w.registered.keys()], [SCRIPT_ID, 'site-all']);
+  assert.equal(w.permissions.has(ALL), true);
+});
+
+test('a host named "all" can’t take the all-websites registration', async () => {
+  const w = siteWorker({ url: 'https://all/form', allSites: true });
+  assert.equal((await w.panel({ type: 'ui:enableSite', confirmed: true })).ok, false);
+  assert.equal((await w.panel({ type: 'ui:disableSite', confirmed: true })).ok, false);
+  assert.deepEqual([...w.registered.values()], [ALL_SCRIPT]);
+});
+
+test('an embedded form tells the top frame to show the card, with a yes or no only', async () => {
+  const w = siteWorker({ url: OTHER_URL, allSites: true, frames: [secondFrame()] });
+  const report = (helps, frameId, url) => w.send({ type: 'secondhand:generic:form', helps }, { id: 'testextension', url, frameId, tab: { id: 7, url: OTHER_URL } });
+  assert.deepEqual(plain(await report(false, 0, OTHER_URL)), { frames: false });
+  assert.deepEqual(plain(await report(true, 4, `${FRAME_ORIGIN}/form`)), { frames: true });
+  assert.deepEqual(w.content.at(-1), { tabId: 7, frameId: 0, type: 'secondhand:generic:formFrames', helps: true });
+  assert.deepEqual(plain(await report(false, 0, OTHER_URL)), { frames: true }, 'a top frame that loads later asks');
+  await report(false, 4, `${FRAME_ORIGIN}/form`);
+  assert.deepEqual(w.content.at(-1), { tabId: 7, frameId: 0, type: 'secondhand:generic:formFrames', helps: false });
+  await report(true, 4, `${FRAME_ORIGIN}/form`);
+  w.events.updated(7, { status: 'loading' });
+  assert.deepEqual(plain(await report(false, 0, OTHER_URL)), { frames: false }, 'a new page starts over');
+  assert.equal(await report('yes', 4, `${FRAME_ORIGIN}/form`), undefined);
+  assert.equal(await w.send({ type: 'secondhand:generic:form', helps: true }, { id: 'other', url: OTHER_URL, frameId: 0, tab: { id: 7, url: OTHER_URL } }), undefined);
+  const off = siteWorker({ url: OTHER_URL });
+  assert.equal(await off.send({ type: 'secondhand:generic:form', helps: true }, { id: 'testextension', url: OTHER_URL, frameId: 0, tab: { id: 7, url: OTHER_URL } }), undefined, 'a site that is off gets no answer');
+  assert.deepEqual([...w.native, ...off.native], [], 'nothing reaches the desktop');
 });
