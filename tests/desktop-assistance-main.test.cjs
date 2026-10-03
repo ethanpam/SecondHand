@@ -369,6 +369,23 @@ test('money on hand and medical expenses always ask on other sites but follow Io
   assert.match(app.prompts.at(-1).detail, /money on hand, medical expenses, and your answers about/);
 });
 
+test('turning a site off in the extension drops it from the trusted list at once, even while locked, with no prompt', async () => {
+  const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org', 'https://wic.example.gov'] } });
+  let revision = (await app.request({ type: 'status' })).accessRevision;
+  await app.invoke('lock');
+  revision = (await app.request({ type: 'status' })).accessRevision;
+  assert.deepEqual(plain(await app.request({ type: 'untrustSite', url: `${PANTRY}?week=2` })), { trusted: false, origin: 'https://pantry.example.org' });
+  assert.ok((await app.request({ type: 'status' })).accessRevision > revision, 'an access receipt from before can’t fill it');
+  assert.equal(app.prompts.length, 0);
+  assert.deepEqual(app.writes.at(-1).json.trustedSites, ['https://wic.example.gov']);
+  await app.invoke('unlock', 'synthetic password');
+  await assert.rejects(app.request({ type: 'getFields', url: PANTRY, fields: ['firstName'] }), /isn’t trusted/);
+  assert.equal((await app.request({ type: 'getFields', url: 'https://wic.example.gov/apply', fields: ['firstName'] })).values.firstName, 'Synthetic');
+  const writes = app.writes.length;
+  assert.deepEqual(plain(await app.request({ type: 'untrustSite', url: PANTRY })), { trusted: false, origin: 'https://pantry.example.org' }, 'a site not in the list is already off');
+  assert.equal(app.writes.length, writes);
+});
+
 test('removing a trusted site stops field release; a locked vault cannot trust sites', async () => {
   const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org', 'https://wic.example.gov'] } });
   assert.deepEqual(plain((await app.invoke('removeTrustedSite', 'https://pantry.example.org')).trustedSites), ['https://wic.example.gov']);

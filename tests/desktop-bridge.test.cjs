@@ -126,6 +126,9 @@ test('site trust requests carry only an https site URL; the desktop decides whic
     assert.throws(() => validateRequest({ id: 'x', type: 'getFields', url, fields: ['firstName'] }), /https site/, url);
   }
   assert.throws(() => validateRequest({ id: 'trust', type: 'trustSite', url: site, fields: ['ssn'] }), /Unexpected/);
+  assert.deepEqual(validateRequest({ id: 'off', type: 'untrustSite', url: site }), { id: 'off', type: 'untrustSite', url: site });
+  for (const url of ['http://pantry.example.org/', 'https://pantry.example.org:8443/', 'not a url']) assert.throws(() => validateRequest({ id: 'off', type: 'untrustSite', url }), /https site/, url);
+  assert.throws(() => validateRequest({ id: 'off', type: 'untrustSite', url: site, fields: ['ssn'] }), /Unexpected/);
   assert.deepEqual(validateRequest({ id: 'x', type: 'getFields', url: site, fields: ['firstName'] }).fields, ['firstName']);
   assert.throws(() => validateRequest({ id: 'x', type: 'recordProgress', url: site, filledCount: 1 }), /Iowa portal/);
 });

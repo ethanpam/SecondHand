@@ -285,8 +285,17 @@ if (nativeOrigin) {
     }
     if (request.type === 'warmLaya') return warmLaya();
     if (request.type === 'suggestFields' || request.type === 'answerFields') return layaRequest(request, context);
-    // Turning all websites off only ever takes access away, so it needs no unlock or approval.
+    // Turning a site, or all websites, off only ever takes access away, so it needs no unlock or approval.
     if (request.type === 'untrustAllSites') { await turnOffAllSites(); return { allSites: false }; }
+    if (request.type === 'untrustSite') {
+      const origin = siteOrigin(request.url);
+      if (trustedSites.includes(origin)) {
+        accessRevision++;
+        trustedSites = trustedSites.filter(site => site !== origin);
+        await saveSettings();
+      }
+      return { trusted: false, origin };
+    }
     requireUnlocked();
     if (request.type === 'trustSite') {
       const origin = siteOrigin(request.url);
