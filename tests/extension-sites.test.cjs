@@ -219,6 +219,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
               }
               if (request.type === 'showApp') return reply({ shown: true });
               if (request.type === 'trustSite') return (vault.trustError || request.url === vault.declineOrigin) ? fail(vault.trustError || 'Declined') : reply({ trusted: true, origin: new URL(request.url).origin });
+              if (request.type === 'untrustSite') return vault.untrustSiteError ? fail(vault.untrustSiteError) : reply({ trusted: false, origin: new URL(request.url).origin });
               if (request.type === 'getFields') {
                 duringGetFields?.(tab);
                 // The app's rule: a site it doesn't trust gets nothing unless all websites is on.
@@ -656,7 +657,7 @@ test('need-you focus on approved sites goes to the site engine by field id', asy
   assert.equal(await w.launcher({ type: 'ui:focusField', key: 'input[type=password]', confirmed: true }), undefined);
 });
 
-test('turning a site off removes its script registration and Chrome access', async () => {
+test('turning a site off removes its script registration and Chrome access, and the app stops trusting it', async () => {
   const w = siteWorker({ enabled: true });
   assert.equal(await w.panel({ type: 'ui:disableSite' }), undefined);
   const response = await w.panel({ type: 'ui:disableSite', confirmed: true });
@@ -664,9 +665,15 @@ test('turning a site off removes its script registration and Chrome access', asy
   assert.deepEqual(plain(response.data), { enabled: false, origin: ORIGIN });
   assert.equal(w.registered.size, 0);
   assert.equal(w.permissions.size, 0);
+  assert.deepEqual(w.native.map(({ type, url }) => ({ type, url })), [{ type: 'untrustSite', url: ORIGIN }]);
   assert.equal((await w.panel({ type: 'ui:pageState' })).data.site.enabled, false);
   assert.equal((await autofill(w)).ok, false);
-  assert.deepEqual(w.native, []);
+  assert.deepEqual(w.nativeTypes(), ['untrustSite'], 'nothing more reaches the app');
+  // The app can't be reached: SecondHand is off for the site in Chrome all the same, and says the app wasn't told.
+  const closed = siteWorker({ enabled: true, desktop: { untrustSiteError: 'The request could not be completed.' } });
+  const told = await closed.panel({ type: 'ui:disableSite', confirmed: true });
+  assert.equal(told.errorKey, 'worker.siteStillTrustedInApp');
+  assert.equal(closed.registered.size, 0);
 });
 
 // The content script that hosts the widget and runs the site engine on approved pages.
@@ -825,6 +832,14 @@ test('declining a frame trust returns all pending permissions and registers noth
   assert.deepEqual([...w.registered.keys()], [SCRIPT_ID]);
   assert.deepEqual([...w.permissions], [`${ORIGIN}/*`]);
   assert.deepEqual(w.injected, []);
+  assert.deepEqual(w.native.map(({ type, url }) => ({ type, url })), [{ type: 'trustSite', url: FRAME_ORIGIN }, { type: 'trustSite', url: other }, { type: 'untrustSite', url: FRAME_ORIGIN }],
+    'the app forgets the form it approved before the other was declined');
+  // Under Chrome's kept grant for every https site there is nothing narrower to take back: the app's answer is what shows.
+  const covered = siteWorker({ enabled: true, allGranted: true, frames: [secondFrame()], desktop: { declineOrigin: FRAME_ORIGIN } });
+  const declined = await covered.panel({ type: 'ui:enableFrames', confirmed: true });
+  assert.equal(declined.error, 'Declined');
+  assert.equal(covered.log.includes('permissions.remove'), false);
+  assert.deepEqual([...covered.registered.keys()], [SCRIPT_ID]);
 });
 test('site fill requests the union once and uses each frame token', async () => {
   const w = siteWorker({ enabled: true, frames: [secondFrame({ enabled: true, fields: [{ name: 'zip', key: 'zip' }] })] });
@@ -870,8 +885,25 @@ test('disableSite revokes enabled embedded origins and detects retained access',
   assert.equal(w.registered.size, 0);
   assert.equal(w.permissions.size, 0);
   assert.deepEqual(w.injected, []);
+  assert.deepEqual(w.native.map(({ type, url }) => ({ type, url })), [{ type: 'untrustSite', url: ORIGIN }, { type: 'untrustSite', url: FRAME_ORIGIN }]);
   const kept = siteWorker({ enabled: true, keepAccess: true });
-  assert.equal((await kept.panel({ type: 'ui:disableSite', confirmed: true })).ok, false);
+  const refused = await kept.panel({ type: 'ui:disableSite', confirmed: true });
+  assert.equal(refused.errorKey, 'worker.chromeKeptAccess', 'Chrome keeping a narrow grant nothing covers is a real failure');
+});
+
+test('with Chrome’s grant for every https site kept, turning one site off unregisters it and the app drops it, without asking Chrome', async () => {
+  const w = siteWorker({ enabled: true, allGranted: true, frames: [secondFrame({ enabled: true })] });
+  const response = await w.panel({ type: 'ui:disableSite', confirmed: true });
+  assert.equal(response.ok, true, response.error);
+  assert.equal(w.registered.size, 0);
+  assert.equal(w.log.includes('permissions.remove'), false, 'still covered by the kept grant: expected, not an error');
+  assert.deepEqual(w.native.map(({ type, url }) => ({ type, url })), [{ type: 'untrustSite', url: ORIGIN }, { type: 'untrustSite', url: FRAME_ORIGIN }]);
+  assert.equal((await w.panel({ type: 'ui:pageState' })).data.site.enabled, false, 'the site is off though Chrome still allows it');
+  // Declining a site in the app leaves nothing behind either.
+  const declined = siteWorker({ allGranted: true, desktop: { trustError: 'You cancelled trusting this site.' } });
+  assert.equal((await declined.panel({ type: 'ui:enableSite', confirmed: true })).ok, false);
+  assert.equal(declined.registered.size, 0);
+  assert.equal(declined.log.includes('permissions.remove'), false);
 });
 
 test('visible iframe discovery is https only, deduplicated, and excludes the page origin', t => {
@@ -985,7 +1017,7 @@ test('disable without a receiver removes owned frame registrations and access', 
   assert.equal(w.permissions.size, 0);
   assert.deepEqual(w.content, []);
 });
-test('disable preserves frame permission while another registration uses it', async () => {
+test('disable preserves frame permission and trust while another registration uses it', async () => {
   const w = siteWorker({ enabled: true, topError: NO_RECEIVER });
   registerOwnedFrame(w);
   const other = 'frame-other.example.org--form.jotform.com';
@@ -993,6 +1025,7 @@ test('disable preserves frame permission while another registration uses it', as
   assert.equal((await w.panel({ type: 'ui:disableSite', confirmed: true })).ok, true);
   assert.deepEqual([...w.registered.keys()], [other]);
   assert.deepEqual([...w.permissions], [`${FRAME_ORIGIN}/*`]);
+  assert.deepEqual(w.native.map(({ type, url }) => ({ type, url })), [{ type: 'untrustSite', url: ORIGIN }]);
 });
 test('autofill without a top receiver asks for reload', async () => {
   const w = siteWorker({ enabled: true, topError: NO_RECEIVER });
@@ -1266,9 +1299,9 @@ test('Laya’s match and answer land in the embedded form they came from', async
 test('the side panel learns whether Laya is ready from the desktop status', async () => {
   for (const [desktop, laya] of [[{}, 'unavailable'], [{ layaState: 'ready' }, 'ready'], [{ layaState: 'off' }, 'off'], [{ layaState: 'downloading' }, 'downloading']]) {
     const w = siteWorker({ enabled: true, desktop });
-    assert.deepEqual(plain((await w.panel({ type: 'ui:desktopStatus' })).data), { connected: true, unlocked: true, laya, allSites: false, iowaPaused: false });
+    assert.deepEqual(plain((await w.panel({ type: 'ui:desktopStatus' })).data), { connected: true, unlocked: true, laya, allSites: false });
   }
-  assert.deepEqual(plain((await siteWorker({ desktop: { reachable: false } }).panel({ type: 'ui:desktopStatus' })).data), { connected: false, unlocked: false, laya: 'unavailable', allSites: false, iowaPaused: false });
+  assert.deepEqual(plain((await siteWorker({ desktop: { reachable: false } }).panel({ type: 'ui:desktopStatus' })).data), { connected: false, unlocked: false, laya: 'unavailable', allSites: false });
   const odd = siteWorker({ desktop: { layaState: 'thinking' } });
   assert.equal((await odd.panel({ type: 'ui:desktopStatus' })).ok, false, 'a state SecondHand doesn’t know is an error, not a guess');
 });
@@ -1453,24 +1486,31 @@ test('only a confirmed side-panel request turns on all websites, and only with C
   assert.equal(noAccess.registered.size, 0);
 });
 
-test('when the app declines all websites, Chrome’s access goes back, nothing is registered, and what Chrome took with it is named', async () => {
+const CHROME_STILL = 'Chrome still lists SecondHand’s access to all websites, but nothing uses it. To remove it, open chrome://extensions, then SecondHand, then Details, then Site access.';
+test('when the app declines all websites or can’t be reached, nothing is registered or trusted, Chrome’s grant is left alone, and the panel says the app didn’t approve', async () => {
   const w = siteWorker({ url: OTHER_URL, allGranted: true, desktop: { trustAllError: 'You cancelled trusting all websites.' } });
   const declined = await allSitesOn(w);
   assert.equal(declined.ok, false);
-  assert.match(declined.error, /cancelled trusting all websites/);
-  assert.equal(w.permissions.has(ALL), false);
+  assert.equal(declined.error, `The SecondHand app did not approve all websites. You cancelled trusting all websites. ${CHROME_STILL}`);
+  assert.equal(w.log.includes('permissions.remove'), false);
+  assert.equal(w.permissions.has(ALL), true);
+  assert.equal(w.iowa.held, true, 'Iowa’s site is never touched');
   assert.equal(w.registered.size, 0);
   assert.deepEqual(w.injected, []);
-  // A site turned on by itself keeps its registration; Chrome took its access along with all websites.
+  assert.equal(w.vault.allSites, false);
+  assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).site.enabled, false);
+  const closed = siteWorker({ url: OTHER_URL, allGranted: true, desktop: { reachable: false } });
+  const unreachable = await allSitesOn(closed);
+  assert.match(unreachable.error, /^The SecondHand app did not approve all websites\. Cannot reach SecondHand\./);
+  assert.equal(closed.registered.size, 0);
+  assert.equal(closed.permissions.has(ALL), true);
+  // A site turned on by itself stays on.
   const site = siteWorker({ enabled: true, allGranted: true, desktop: { trustAllError: 'You cancelled trusting all websites.' } });
-  const named = await allSitesOn(site);
-  assert.equal(named.ok, false);
-  assert.equal(named.error, 'You cancelled trusting all websites. Chrome also turned SecondHand off on pantry.example.org. Turn each one on again from its page. Chrome paused SecondHand on Iowa’s site too, until you restart Chrome.');
+  assert.equal((await allSitesOn(site)).ok, false);
   assert.deepEqual([...site.registered.keys()], [SCRIPT_ID]);
-  assert.equal(site.permissions.size, 0);
+  assert.equal(plain((await site.panel({ type: 'ui:pageState' })).data).site.enabled, true);
   const odd = siteWorker({ allGranted: true, desktop: { trustAllReply: { allSites: 'maybe' } } });
   assert.match((await allSitesOn(odd)).error, /^The SecondHand app did not approve all websites\./);
-  assert.equal(odd.permissions.has(ALL), false);
   assert.equal(odd.registered.size, 0);
 });
 
@@ -1493,7 +1533,7 @@ test('siteEnabled is true for any https origin while all websites is on, and the
   assert.equal(plain((await off.panel({ type: 'ui:pageState' })).data).site.enabled, false);
 });
 
-test('turning off all websites removes its script and Chrome’s access, keeps sites turned on one at a time, names the ones Chrome took, and tells the app', async () => {
+test('turning off all websites unregisters its script, takes the card off pages no longer on, tells the app, and leaves Chrome’s grant and Iowa alone', async () => {
   const pantryTab = { id: 7, active: true, url: SITE_URL };
   const otherTab = { id: 8, active: false, url: OTHER_URL };
   const iowaTab = { id: 9, active: false, url: `${adapter.PORTAL}/applyForBenefits/welcome` };
@@ -1501,31 +1541,58 @@ test('turning off all websites removes its script and Chrome’s access, keeps s
   assert.equal(await w.panel({ type: 'ui:disableAllSites' }), undefined);
   const response = await allSitesOff(w);
   assert.equal(response.ok, true, response.error);
-  assert.equal(response.data.enabled, false);
-  assert.deepEqual(plain(response.data.lost), ['pantry.example.org']);
-  assert.equal(response.data.message, 'SecondHand is off on all websites. Chrome also turned SecondHand off on pantry.example.org. Turn each one on again from its page. Chrome paused SecondHand on Iowa’s site too, until you restart Chrome.');
+  assert.deepEqual(plain(response.data), { enabled: false, message: `SecondHand is off on other websites. Sites you turned on one at a time stay on. ${CHROME_STILL}`,
+    messageKey: 'joined', messageParams: { first: { key: 'worker.allSitesOff', params: {} }, second: { key: 'worker.chromeStillAllows', params: {} } } });
   assert.equal(w.registered.has('site-all'), false);
   assert.deepEqual([...w.registered.keys()], [SCRIPT_ID], 'the site turned on by itself keeps its registration');
-  assert.equal(w.permissions.has(ALL), false);
+  assert.equal(w.log.includes('permissions.remove'), false, 'Chrome’s grant is kept, unused');
+  assert.equal(w.permissions.has(ALL), true);
+  assert.equal(w.iowa.held, true, 'Iowa’s site is never touched');
   assert.deepEqual(w.nativeTypes(), ['untrustAllSites']);
-  // The card leaves every open page that is no longer on; Iowa's portal is not SecondHand on all websites.
-  assert.deepEqual(w.content.filter(call => call.type === 'secondhand:generic:off').map(call => call.tabId), [7, 8]);
-  assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).site.enabled, false, 'the site shows as off and can be turned on again');
+  // The card leaves every open page that is no longer on. The site turned on by itself keeps it; Iowa's portal has its own.
+  assert.deepEqual(w.content.filter(call => call.type === 'secondhand:generic:off').map(call => call.tabId), [8]);
+  assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).site.enabled, true, 'the site turned on by itself stays on');
 
-  // Chrome keeps a site's access when it doesn't cover it: nothing is named.
-  const plainOff = siteWorker({ allSites: true });
-  const quiet = await allSitesOff(plainOff);
-  assert.deepEqual(plain(quiet.data.lost), []);
+  // With Chrome's grant already removed in Chrome's settings, there is nothing to say about it.
+  const removed = siteWorker({ allSites: true });
+  removed.permissions.delete(ALL);
+  assert.equal((await allSitesOff(removed)).data.message, 'SecondHand is off on other websites. Sites you turned on one at a time stay on.');
 
   const appClosed = siteWorker({ allSites: true, desktop: { untrustError: 'The request could not be completed.' } });
   const closed = await allSitesOff(appClosed);
   assert.equal(closed.ok, false);
-  assert.match(closed.error, /^SecondHand is off on all websites in Chrome, but the app couldn’t be told/);
+  assert.match(closed.error, /^SecondHand is off on other websites in Chrome, but the app couldn’t be told/);
   assert.equal(appClosed.registered.size, 0, 'Chrome’s side is off even when the app can’t be reached');
-  assert.equal(appClosed.permissions.has(ALL), false);
+});
 
-  const kept = siteWorker({ allSites: true, keepAccess: true });
-  assert.equal((await allSitesOff(kept)).errorKey, 'worker.chromeKeptAllSites');
+test('with Chrome’s grant kept and all websites off, a site the app doesn’t trust gets no script, no fill, and no app data', async () => {
+  const w = siteWorker({ url: OTHER_URL, allGranted: true, desktop: { refuseUntrusted: true } });
+  assert.equal(w.registered.size, 0, 'no registration: Chrome puts no script and no card on the page');
+  assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).site.enabled, false);
+  assert.equal((await autofill(w)).errorKey, 'worker.turnOnSiteFirst');
+  for (const type of ['ui:questions', 'ui:pageText']) assert.equal((await w.panel({ type })).ok, false, type);
+  assert.equal((await w.launcher({ type: 'ui:autofill', confirmed: true })).errorKey, 'worker.turnOnSiteFirst');
+  assert.equal(await w.send({ type: 'secondhand:generic:form', helps: true }, { id: 'testextension', url: OTHER_URL, frameId: 0, tab: { id: 7, url: OTHER_URL } }), undefined);
+  assert.deepEqual(w.native, [], 'nothing is asked of the app');
+  assert.deepEqual(w.content, [], 'nothing is asked of the page');
+  // The app's own gate holds even if a request got through: an untrusted site gets nothing while all websites is off.
+  w.registered.set('site-all', structuredClone(ALL_SCRIPT));
+  const refused = await autofill(w);
+  assert.equal(refused.data.message, 'This site isn’t trusted. Turn on SecondHand for it first.');
+  assert.deepEqual(w.page.answered(), []);
+});
+
+test('turning all websites back on needs no second Chrome prompt: the grant is kept', async () => {
+  const w = siteWorker({ url: OTHER_URL, allGranted: true });
+  for (let round = 0; round < 2; round++) {
+    assert.equal((await allSitesOn(w)).ok, true, `on ${round}`);
+    assert.equal(w.registered.has('site-all'), true);
+    assert.equal((await allSitesOff(w)).ok, true, `off ${round}`);
+    assert.equal(w.registered.has('site-all'), false);
+  }
+  assert.deepEqual(w.nativeTypes(), ['trustAllSites', 'untrustAllSites', 'trustAllSites', 'untrustAllSites']);
+  assert.equal(w.log.includes('permissions.request'), false);
+  assert.equal(w.log.includes('permissions.remove'), false);
 });
 
 test('when the app turns off all websites, the extension turns them off at its next desktop request', async () => {
@@ -1534,7 +1601,7 @@ test('when the app turns off all websites, the extension turns them off at its n
   const status = plain((await w.panel({ type: 'ui:desktopStatus' })).data);
   assert.equal(status.allSites, false);
   assert.equal(w.registered.has('site-all'), false);
-  assert.equal(w.permissions.has(ALL), false);
+  assert.equal(w.permissions.has(ALL), true, 'Chrome’s grant is kept, unused');
   assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).site.enabled, false);
   assert.deepEqual(w.nativeTypes(), ['status'], 'the app already turned itself off');
 
@@ -1548,15 +1615,13 @@ test('when the app turns off all websites, the extension turns them off at its n
   assert.deepEqual(filling.page.answered(), []);
 });
 
-test('the side panel learns from the desktop status whether all websites is on and whether Chrome paused Iowa', async () => {
-  assert.deepEqual(plain((await siteWorker({ allSites: true }).panel({ type: 'ui:desktopStatus' })).data), { connected: true, unlocked: true, laya: 'unavailable', allSites: true, iowaPaused: false });
-  assert.deepEqual(plain((await siteWorker().panel({ type: 'ui:desktopStatus' })).data), { connected: true, unlocked: true, laya: 'unavailable', allSites: false, iowaPaused: false });
+test('the side panel learns from the desktop status whether all websites is on, never from Chrome’s grant alone', async () => {
+  assert.deepEqual(plain((await siteWorker({ allSites: true }).panel({ type: 'ui:desktopStatus' })).data), { connected: true, unlocked: true, laya: 'unavailable', allSites: true });
+  assert.deepEqual(plain((await siteWorker().panel({ type: 'ui:desktopStatus' })).data), { connected: true, unlocked: true, laya: 'unavailable', allSites: false });
+  assert.equal((await siteWorker({ allGranted: true }).panel({ type: 'ui:desktopStatus' })).data.allSites, false, 'a kept grant without the registration is off');
   const closed = siteWorker({ allSites: true, desktop: { reachable: false } });
-  assert.deepEqual(plain((await closed.panel({ type: 'ui:desktopStatus' })).data), { connected: false, unlocked: false, laya: 'unavailable', allSites: true, iowaPaused: false },
+  assert.deepEqual(plain((await closed.panel({ type: 'ui:desktopStatus' })).data), { connected: false, unlocked: false, laya: 'unavailable', allSites: true },
     'with the app closed, Chrome’s side is still known');
-  const paused = siteWorker();
-  paused.iowa.held = false;
-  assert.equal((await paused.panel({ type: 'ui:desktopStatus' })).data.iowaPaused, true);
 });
 
 test('a site turned on by itself can’t be turned off while all websites covers it', async () => {

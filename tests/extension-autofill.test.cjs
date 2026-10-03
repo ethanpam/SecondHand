@@ -384,7 +384,7 @@ test('the worker answers a build ping from its own pages with the build the pane
 
 test('desktop status, showApp, and focusField pass through; guided and manual-fill messages are gone', async () => {
   const w = worker();
-  assert.deepEqual(plain((await w.panel({ type: 'ui:desktopStatus' })).data), { connected: true, unlocked: true, laya: 'unavailable', allSites: false, iowaPaused: false });
+  assert.deepEqual(plain((await w.panel({ type: 'ui:desktopStatus' })).data), { connected: true, unlocked: true, laya: 'unavailable', allSites: false });
   assert.deepEqual(plain((await w.launcher({ type: 'ui:showApp', confirmed: true })).data), { shown: true });
   assert.deepEqual(plain((await w.launcher({ type: 'ui:focusField', key: 'lastName', confirmed: true })).data), { focused: true });
   assert.equal(await w.launcher({ type: 'ui:focusField', key: 'input[type=password]', confirmed: true }), undefined);
@@ -392,10 +392,10 @@ test('desktop status, showApp, and focusField pass through; guided and manual-fi
     assert.equal(await w.panel({ type, confirmed: true, enabled: true }), undefined, type);
   }
   const offline = worker({ desktop: { reachable: false } });
-  assert.deepEqual(plain((await offline.panel({ type: 'ui:desktopStatus' })).data), { connected: false, unlocked: false, laya: 'unavailable', allSites: false, iowaPaused: false });
+  assert.deepEqual(plain((await offline.panel({ type: 'ui:desktopStatus' })).data), { connected: false, unlocked: false, laya: 'unavailable', allSites: false });
   // The side panel shows desktop state and can bring the app forward on any tab.
   const noTab = { id: 'testextension', url: PANEL_URL };
-  assert.deepEqual(plain((await w.send({ type: 'ui:desktopStatus' }, noTab)).data), { connected: true, unlocked: true, laya: 'unavailable', allSites: false, iowaPaused: false });
+  assert.deepEqual(plain((await w.send({ type: 'ui:desktopStatus' }, noTab)).data), { connected: true, unlocked: true, laya: 'unavailable', allSites: false });
   assert.deepEqual(plain((await w.send({ type: 'ui:showApp', confirmed: true }, noTab)).data), { shown: true });
   assert.equal(await w.send({ type: 'ui:pageState' }, noTab), undefined);
 });
@@ -411,7 +411,7 @@ const UNREACHABLE = {
 test('a native host that can’t reach the desktop app means the app is closed, the same as no host at all', async () => {
   for (const [name, unreachable] of Object.entries(UNREACHABLE)) {
     const w = worker({ desktop: { unreachable } });
-    assert.deepEqual(plain((await w.panel({ type: 'ui:desktopStatus' })).data), { connected: false, unlocked: false, laya: 'unavailable', allSites: false, iowaPaused: false }, name);
+    assert.deepEqual(plain((await w.panel({ type: 'ui:desktopStatus' })).data), { connected: false, unlocked: false, laya: 'unavailable', allSites: false }, name);
     const result = plain((await autofill(w)).data);
     assert.equal(result.state, 'offline', name);
     assert.equal(result.messageKey, 'worker.openAppThenAutofill', name);

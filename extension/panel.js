@@ -299,12 +299,10 @@
     let stopped = false;
     let status = { message: { key: 'panel.checkingTab' }, error: false };
     // The last change to all websites, kept on screen until the tab changes or another action starts:
-    // it can name sites Chrome turned off along with it.
+    // it can say how to remove the access Chrome keeps.
     let notice = null;
-    // SecondHand on all websites, as the worker last said (null until it has), and whether Chrome paused
-    // SecondHand on Iowa's site, which it does when access to every site is removed.
+    // SecondHand on all websites, as the worker last said (null until it has).
     let allSites = null;
-    let iowaPaused = false;
     let desktopLine = null;
     // What the desktop row's button does: open a closed app, or bring a locked one forward to unlock.
     let desktopAction = null;
@@ -345,8 +343,8 @@
       $('status').textContent = words(shown.message, 650);
       $('status').classList.toggle('error', shown.error);
     }
-    // On a tab SecondHand can't read: where to go, or that Chrome paused it on Iowa's site.
-    const elsewhere = () => ({ key: iowaPaused ? 'panel.iowaPaused' : allSites ? 'panel.openForm' : 'panel.openIowa' });
+    // On a tab SecondHand can't read: where to go.
+    const elsewhere = () => ({ key: allSites ? 'panel.openForm' : 'panel.openIowa' });
     function renderDesktop() {
       if (desktopLine) $('desktop-status').textContent = words(desktopLine);
       $('desktop-action').hidden = !desktopAction;
@@ -492,7 +490,6 @@
     // The desktop row for the status the worker read: closed, locked, or unlocked.
     function showDesktop(desktop) {
       allSites = typeof desktop?.allSites === 'boolean' ? desktop.allSites : null;
-      iowaPaused = desktop?.iowaPaused === true;
       desktopLine = { key: !desktop?.connected ? 'desktop.notRunning' : desktop.unlocked ? 'desktop.unlocked' : 'desktop.locked' };
       layaLine = desktop?.connected && Object.hasOwn(LAYA_LINES, desktop.laya) ? { key: LAYA_LINES[desktop.laya] } : null;
       desktopAction = !desktop?.connected ? 'open' : desktop.unlocked ? null : 'unlock';
@@ -820,7 +817,6 @@
         return null;
       } finally {
         working = false;
-        // Turning all websites on or off can change what Chrome lets SecondHand read, Iowa's site included.
         await desktopStatus();
         await refresh();
         schedulePoll();

@@ -1593,15 +1593,14 @@ test('when all websites is on, its off button shows, the per-site buttons step a
   await view.userClick('all-sites-disable'); for (let i = 0; i < 6; i++) await tick();
   assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:disableAllSites')), { type: 'ui:disableAllSites', confirmed: true });
   assert.equal(view.types().includes('permissions.request'), false, 'turning off needs no prompt');
-  assert.equal(view.get('status').textContent, 'SecondHand is off on all websites.');
+  assert.equal(view.get('status').textContent, 'SecondHand is off on other websites. Sites you turned on one at a time stay on.');
   assert.equal(view.get('all-sites-enable').hidden, false);
   assert.equal(view.get('all-sites-disable').hidden, true);
 });
 
-test('what Chrome took with all websites stays on screen until the tab changes', async t => {
-  const taken = 'SecondHand is off on all websites. Chrome also turned SecondHand off on pantry.example.org. Turn each one on again from its page. Chrome paused SecondHand on Iowa’s site too, until you restart Chrome.';
-  const params = { first: { key: 'joined', params: { first: { key: 'worker.allSitesOff', params: {} }, second: { key: 'worker.chromeTookSites', params: { hosts: 'pantry.example.org' } } } },
-    second: { key: 'worker.chromePausedIowa', params: {} } };
+test('the off message, with how to remove Chrome’s kept grant, stays on screen until the tab changes', async t => {
+  const taken = 'SecondHand is off on other websites. Sites you turned on one at a time stay on. Chrome still lists SecondHand’s access to all websites, but nothing uses it. To remove it, open chrome://extensions, then SecondHand, then Details, then Site access.';
+  const params = { first: { key: 'worker.allSitesOff', params: {} }, second: { key: 'worker.chromeStillAllows', params: {} } };
   const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, desktop: { allSites: true },
     allSitesOff: { message: taken, messageKey: 'joined', messageParams: params } });
   await view.userClick('all-sites-disable'); for (let i = 0; i < 6; i++) await tick();
@@ -1625,10 +1624,20 @@ test('an error turning all websites on or off is shown in the applicant’s lang
   assert.equal(view.get('status').classList.contains('error'), true);
 });
 
-test('with all websites on, a tab SecondHand can’t read asks for a form, and says so when Chrome paused Iowa', async t => {
+test('with all websites on, a tab SecondHand can’t read asks for a form', async t => {
   const on = await panel(t, { tab: { id: 9, url: 'chrome://newtab/' }, desktop: { allSites: true } });
   assert.equal(on.get('status').textContent, 'Open Iowa’s SNAP application or another food-assistance form in this tab.');
   assert.equal(on.get('all-sites-disable').hidden, false);
-  const paused = await panel(t, { tab: { id: 9, url: undefined }, desktop: { allSites: false, iowaPaused: true } });
-  assert.equal(paused.get('status').textContent, 'Chrome paused SecondHand on Iowa’s site. Restart Chrome to use it there again.');
+});
+
+test('turning all websites back on asks Chrome inside the click again, which answers at once from the kept grant', async t => {
+  const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, desktop: { allSites: true } });
+  await view.userClick('all-sites-disable'); for (let i = 0; i < 6; i++) await tick();
+  assert.equal(view.get('all-sites-enable').hidden, false);
+  view.clickNow('all-sites-enable');
+  assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'permissions.request', origins: ['https://*/*'] });
+  for (let i = 0; i < 8; i++) await tick();
+  assert.equal(view.types().filter(type => type === 'ui:enableAllSites').length, 1);
+  assert.equal(view.get('all-sites-disable').hidden, false);
+  assert.equal(view.get('status').textContent, ALL_ON);
 });

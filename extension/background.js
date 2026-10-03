@@ -352,6 +352,9 @@ const frameScriptPrefix = origin => `frame-${new URL(origin).hostname}--`;
 const frameScript = (topOrigin, origin) => ({ ...siteScript(origin), id: `${frameScriptPrefix(topOrigin)}${new URL(origin).hostname}` });
 // SecondHand on all websites: one registration for every https page but Iowa's site, which keeps its
 // own scripts, plus Chrome's access to every https site. The desktop keeps its own allSites setting.
+// Once given, Chrome's grant is kept: removing it would also take back every origin it covers, Iowa's
+// included until Chrome restarts. Without the registration it runs nothing, and the app trusts no site
+// for it, so a site is on only when its script is registered (or site-all is) and the app trusts it.
 const ALL_SITES = Object.freeze(['https://*/*']);
 const ALL_SITES_ID = 'site-all';
 const IOWA_HOST = `${IOWA_ORIGIN}/*`;
@@ -387,7 +390,7 @@ async function enableSite(tabId) {
     if (trust?.trusted !== true || trust.origin !== origin) throw fault('worker.appDidNotApproveSite');
   } catch (error) {
     // Nothing stays half on: without the app's approval, Chrome access goes back too.
-    await chrome.permissions.remove({ origins });
+    await dropAccess([origin]);
     throw error;
   }
   const script = siteScript(origin);
@@ -431,11 +434,31 @@ async function siteFrames(tabId, origin) {
   return Promise.all(origins.map(async origin => ({ origin, enabled: await siteEnabled(origin) })));
 }
 
-async function removeAccess(origins) {
+// Chrome access to sites SecondHand no longer uses. Under Chrome's kept grant for every https site
+// there is nothing narrower to take back, and they stay off by having no script and no trust.
+async function dropAccess(origins) {
+  if (!origins.length || await chrome.permissions.contains({ origins: [...ALL_SITES] })) return;
   const patterns = origins.map(origin => `${origin}/*`);
   const removed = await chrome.permissions.remove({ origins: patterns });
   const kept = await Promise.all(patterns.map(origin => chrome.permissions.contains({ origins: [origin] })));
   if (!removed || kept.some(Boolean)) throw fault('worker.chromeKeptAccess');
+}
+// The app stops trusting sites SecondHand turned off. It needs no unlock: it only takes access away.
+async function untrustSites(origins) {
+  for (const origin of origins) {
+    let reply;
+    try { reply = await nativeRequest('untrustSite', { url: origin }); }
+    catch (error) { throw Object.assign(fault('worker.siteStillTrustedInApp'), { cause: error }); }
+    if (reply?.trusted !== false || reply.origin !== origin) throw fault('worker.desktopUnexpected');
+  }
+}
+// Sites SecondHand no longer uses lose Chrome access and the app's trust. Both are tried, so one
+// failing doesn't leave the other on, and the first failure is reported.
+async function forgetSites(origins) {
+  let failure = null;
+  try { await dropAccess(origins); } catch (error) { failure = error; }
+  try { await untrustSites(origins); } catch (error) { failure ||= error; }
+  if (failure) throw failure;
 }
 
 async function enableFrames(tabId) {
@@ -446,15 +469,19 @@ async function enableFrames(tabId) {
     if (!(await chrome.permissions.contains({ origins: [`${frameOrigin}/*`] }))) throw fault('worker.chromeNotAllowedFrames');
   }
   // Obtain every approval before registering any of the new scripts.
+  const approved = [];
   try {
     for (const frameOrigin of pending) {
       const trust = await nativeRequest('trustSite', { url: frameOrigin });
       if (trust?.trusted !== true || trust.origin !== frameOrigin) throw fault('worker.appDidNotApproveFrames');
+      approved.push(frameOrigin);
     }
     const current = await chrome.tabs.get(tabId);
     if (current.url !== tab.url || !current.active) throw fault('worker.pageChangedTryAgain');
   } catch (error) {
-    if (pending.length) await removeAccess(pending);
+    // Nothing stays half on: Chrome access goes back, and the app forgets the forms it approved.
+    await dropAccess(pending.filter(frameOrigin => !approved.includes(frameOrigin)));
+    await forgetSites(approved);
     throw error;
   }
   for (const frameOrigin of pending) {
@@ -468,30 +495,30 @@ async function enableFrames(tabId) {
 
 async function disableSite(tabId) {
   const { origin } = await activeSite(tabId);
-  // Chrome can't take back one site from inside access to every site.
+  // All websites covers every site; one can't be turned off inside it.
   if (await allSitesOn()) throw fault('worker.allSitesCoverSite');
   // Registrations survive worker/extension restarts and identify which frames
   // this site enabled, even when no content script can answer in the open tab.
   const scripts = await chrome.scripting.getRegisteredContentScripts();
   const owned = scripts.filter(script => script.id === siteScript(origin).id || script.id.startsWith(frameScriptPrefix(origin)));
   if (owned.length) await chrome.scripting.unregisterContentScripts({ ids: owned.map(script => script.id) });
-  const remaining = await chrome.scripting.getRegisteredContentScripts();
-  const frameOrigins = owned.flatMap(script => script.matches.map(pattern => siteOrigin(pattern.slice(0, -2)))).filter(Boolean);
-  const unused = frameOrigins.filter(value => !remaining.some(script => script.matches.includes(`${value}/*`)));
-  await removeAccess([...new Set([origin, ...unused])]);
   results.delete(tabId);
   sitePlans.delete(tabId);
   forgetReads(tabId, entry => siteOrigin(entry.url) === origin);
+  // The site and the embedded forms no other site uses are forgotten.
+  const remaining = await chrome.scripting.getRegisteredContentScripts();
+  const frameOrigins = owned.flatMap(script => script.matches.map(pattern => siteOrigin(pattern.slice(0, -2)))).filter(Boolean);
+  await forgetSites([...new Set([origin, ...frameOrigins])].filter(value => !remaining.some(script => script.matches.includes(`${value}/*`))));
   return { enabled: false, origin };
 }
 
-// The words after a change Chrome made to more than was asked: removing access to every https site
-// also takes each site that access covered, Iowa's portal included until Chrome restarts.
-function withTaken(message, { lost, iowaPaused }) {
-  const notes = [...(lost.length ? [{ key: 'worker.chromeTookSites', params: { hosts: lost.join(', ') } }] : []), ...(iowaPaused ? [{ key: 'worker.chromePausedIowa', params: {} }] : [])];
-  return notes.reduce((first, second) => ({ key: 'joined', params: { first, second } }), message);
-}
+const joined = (first, second) => ({ key: 'joined', params: { first, second } });
 const messageOf = error => error?.messageKey ? { key: error.messageKey, params: error.messageParams || {} } : { key: 'detail', params: { detail: String(error?.message || '').slice(0, 240) } };
+// While Chrome still holds its unused grant for every https site, a message about all websites says so
+// and how to remove it in Chrome's settings.
+async function withChromeGrant(message) {
+  return await chrome.permissions.contains({ origins: [...ALL_SITES] }) ? joined(message, { key: 'worker.chromeStillAllows', params: {} }) : message;
+}
 
 async function enableAllSites(tabId) {
   // The side panel asks Chrome inside the user's click; the worker only confirms it happened.
@@ -500,11 +527,10 @@ async function enableAllSites(tabId) {
     const trust = await nativeRequest('trustAllSites');
     if (trust?.allSites !== true) throw fault('worker.appDidNotApproveAllSites');
   } catch (error) {
-    // Nothing stays half on: without the app's approval, Chrome access goes back too.
-    const taken = await removeAllSites();
-    if (!taken.lost.length && !taken.iowaPaused) throw error;
-    const { key, params } = withTaken(messageOf(error), taken);
-    throw fault(key, params);
+    // Nothing is registered and the app trusts nothing new. Chrome's grant stays, unused.
+    const declined = { key: 'worker.appDidNotApproveAllSites', params: {} };
+    const { key, params } = await withChromeGrant(error.messageKey === declined.key ? declined : joined(declined, messageOf(error)));
+    throw Object.assign(fault(key, params), { cause: error });
   }
   const script = allSitesScript();
   if ((await chrome.scripting.getRegisteredContentScripts({ ids: [script.id] })).length) await chrome.scripting.updateContentScripts([script]);
@@ -514,23 +540,11 @@ async function enableAllSites(tabId) {
   return { enabled: true, ...say('worker.allSitesOn') };
 }
 
-// Turns all websites off in Chrome: the registration, Chrome's access to every https site, and the card
-// on open pages that are no longer on. Sites turned on one at a time keep their registrations; the reply
-// names those whose access Chrome took too, and whether it took Iowa's.
+// Turns all websites off in Chrome: the registration, and the card on open pages that are no longer on.
+// Sites turned on one at a time keep theirs. Chrome's grant is left as it is (see ALL_SITES).
 async function removeAllSites() {
-  // Open pages' addresses, read while Chrome still allows it.
-  const open = await chrome.tabs.query({});
-  const scripts = await chrome.scripting.getRegisteredContentScripts();
-  if (scripts.some(script => script.id === ALL_SITES_ID)) await chrome.scripting.unregisterContentScripts({ ids: [ALL_SITES_ID] });
-  if (await chrome.permissions.contains({ origins: [...ALL_SITES] })) {
-    const removed = await chrome.permissions.remove({ origins: [...ALL_SITES] });
-    if (!removed || await chrome.permissions.contains({ origins: [...ALL_SITES] })) throw fault('worker.chromeKeptAllSites');
-  }
-  const kept = new Set(scripts.filter(script => script.id !== ALL_SITES_ID).flatMap(script => script.matches.map(pattern => siteOrigin(pattern.slice(0, -2)))).filter(Boolean));
-  const lost = [];
-  for (const origin of kept) if (!(await chrome.permissions.contains({ origins: [`${origin}/*`] }))) lost.push(new URL(origin).hostname);
-  const iowaPaused = !(await chrome.permissions.contains({ origins: [IOWA_HOST] }));
-  for (const tab of open) {
+  if ((await chrome.scripting.getRegisteredContentScripts({ ids: [ALL_SITES_ID] })).length) await chrome.scripting.unregisterContentScripts({ ids: [ALL_SITES_ID] });
+  for (const tab of await chrome.tabs.query({})) {
     const origin = siteOrigin(tab.url);
     if (!origin || await siteEnabled(origin)) continue;
     formFrames.delete(tab.id);
@@ -538,21 +552,20 @@ async function removeAllSites() {
     try { await chrome.tabs.sendMessage(tab.id, { type: 'secondhand:generic:off' }); }
     catch (error) { if (!NO_RECEIVER.includes(error.message)) throw error; }
   }
-  return { lost, iowaPaused };
 }
 
 async function disableAllSites() {
-  const taken = await removeAllSites();
+  await removeAllSites();
   try {
     const reply = await nativeRequest('untrustAllSites');
     if (reply?.allSites !== false) throw fault('worker.desktopUnexpected');
   } catch (error) {
     // Chrome's side is off either way; the app keeps its setting until it hears.
-    const { key, params } = withTaken({ key: 'worker.allSitesStillOnInApp', params: {} }, taken);
+    const { key, params } = await withChromeGrant({ key: 'worker.allSitesStillOnInApp', params: {} });
     throw Object.assign(fault(key, params), { cause: error });
   }
-  const { key, params } = withTaken({ key: 'worker.allSitesOff', params: {} }, taken);
-  return { enabled: false, lost: taken.lost, ...say(key, params) };
+  const { key, params } = await withChromeGrant({ key: 'worker.allSitesOff', params: {} });
+  return { enabled: false, ...say(key, params) };
 }
 
 // The desktop's status. When the app no longer allows all websites (turned off there, or an app from
@@ -1183,7 +1196,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     run = async () => {
       const desktop = await desktopStatus().then(data => ({ connected: true, unlocked: Boolean(data?.unlocked), laya: layaState(data) }),
         error => { if (error.code === 'offline') return { connected: false, unlocked: false, laya: 'unavailable' }; throw error; });
-      return { ...desktop, allSites: await allSitesOn(), iowaPaused: !(await chrome.permissions.contains({ origins: [IOWA_HOST] })) };
+      return { ...desktop, allSites: await allSitesOn() };
     };
   } else if (panel && message.type === 'ui:enableAllSites' && message.confirmed === true) run = () => enableAllSites(tabId);
   else if (panel && message.type === 'ui:disableAllSites' && message.confirmed === true) run = disableAllSites;
