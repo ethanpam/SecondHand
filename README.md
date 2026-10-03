@@ -35,7 +35,7 @@
 - **Answers the questions the rules miss.** Laya, a small AI model that runs inside the desktop app, picks an answer from your saved facts when it's confident, and marks it as a guess for you to check. When your facts don't say, it leaves the question for you.
 - **Leaves the decisions to you.** The app asks before sharing anything, unless you choose **Always allow**. CAPTCHA, consent, signatures, and final submission are always yours.
 - **Speaks your language.** The side panel works in English, Spanish, Vietnamese, Chinese, French, and Arabic. It can show Iowa's questions in your language and sum up long pages, using Chrome's built-in translator and summarizer on your computer.
-- **Helps with other food-assistance forms.** Turn SecondHand on for a food pantry's form site and it fills what it recognizes, one click at a time. It never navigates or submits on those sites.
+- **Helps with other food-assistance forms.** Turn SecondHand on for a food pantry's form site, or for every site at once with **Use SecondHand on all websites** in Chrome's side panel. It fills what it recognizes, one click at a time, and never navigates or submits on those sites. With all websites on, its card shows only on pages with a form it can help with.
 
 ## See it
 
@@ -127,7 +127,7 @@ The Select Address and Tell Us More steps and Laya are in this code but not yet 
 
 - **Your details stay in the desktop app.** Chrome's extension storage and Chrome Sync never hold applicant information.
 - **Nothing is filled without your yes.** The app asks before filling unless you chose **Always allow on this computer**, which you can turn off on its **Chrome extension** page. Locking the app, by hand or after 10 idle minutes, stops autofill.
-- **The extension stays in its lane.** It only runs on Iowa's secure portal and on sites you turn on, asks only for fields it recognizes on the current page, and never fills passwords, verification codes, signatures, or unknown household members.
+- **The extension stays in its lane.** It only runs on Iowa's secure portal and on sites you turn on, one at a time or all at once. It fills nothing until you click **Autofill**, asks only for fields it recognizes on the current page, and never fills passwords, verification codes, signatures, or unknown household members. On every site but Iowa's, sensitive details such as your Social Security number, date of birth, and income still ask each time. Turn all websites off in the side panel or on the app's **Chrome extension** page.
 - **Iowa sees what's on its form.** Iowa's site can read or save answers as they're entered, and Save and Continue sends the page's answers to Iowa.
 - **Laya runs on this computer.** Laya, SecondHand's AI model (about 429 MB), is on unless you turn it off in the **Chrome extension** view. While it's on, SecondHand downloads it in the background, checks Hugging Face for a newer version once a day, and runs it locally. No profile data is sent anywhere. See [Local AI with Laya](docs/security.md#local-ai-with-laya).
 - **Backups are yours to keep.** An encrypted backup opens with the password or recovery key it was saved with. Keep it out of cloud-synced folders if you want every copy offline.
