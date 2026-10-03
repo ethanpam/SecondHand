@@ -3,6 +3,9 @@
    passwords, payment cards, files, or CAPTCHAs. No network or storage. */
 (function (root) {
   'use strict';
+  // When two of SecondHand's registrations match a page (a site turned on by itself, and all
+  // websites), this file loads twice in the same frame: the engine and the plan it holds are made once.
+  if (typeof module === 'undefined' && root.SecondHandGeneric) return;
   // Saved profile fields a general site may receive, plus answers derived from them.
   const PROFILE_KEYS = Object.freeze(['firstName', 'middleName', 'lastName', 'suffix', 'birthDate', 'ssn', 'email', 'mobilePhone', 'homePhone', 'phone',
     'addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county', 'householdSize', 'householdAdults', 'householdChildren', 'householdSeniors',
@@ -111,6 +114,17 @@
   // shared/laya-prompts.cjs keeps an identical copy for the desktop app.
   const UNSAFE_QUESTION = /^social security$|\b(consent\w*|sign|signs|signed|signing|signature\w*|initials|attest\w*|certif\w*|agree|agrees|agreed|agreement\w*|terms|acknowledg\w*|authoriz\w*|permission|perjury|i understand|i confirm|i have read|true and (correct|accurate|complete)|privacy|social security (number|no|num|card)|ss number|ssn|itin|password|passcode|pin|cvv|cvc|card number|credit card|debit card|security code|captcha|verification code|one time)\b/;
   const unsafeQuestion = field => [field?.label, ...(Array.isArray(field?.options) ? field.options : [])].some(text => UNSAFE_QUESTION.test(normal(text)));
+  // The questions Laya, the desktop app's AI, may take, within the bridge's limits: a text box to match
+  // to a saved field ('text') or a choice question to answer ('choice'). Never one only the applicant answers.
+  const LAYA = Object.freeze({ text: Object.freeze(['text', 'textarea', 'number', 'date', 'email', 'tel']), choice: Object.freeze(['radio', 'select', 'checkbox']),
+    label: 200, options: 30, option: 100 });
+  const layaText = (value, max) => typeof value === 'string' && value.trim() !== '' && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
+  function layaQuestion({ label, type, options }) {
+    if (!layaText(label, LAYA.label) || !Array.isArray(options) || options.length > LAYA.options || options.some(option => !layaText(option, LAYA.option)) ||
+      new Set(options).size !== options.length || unsafeQuestion({ label, options })) return '';
+    if (LAYA.text.includes(type)) return 'text';
+    return LAYA.choice.includes(type) && options.length ? 'choice' : '';
+  }
   // Whether a guess (the AI step) may offer a key for a question. A birth date only goes to a
   // whole-date question about birth, never to "Date ordered", a month box, or a child's birthday.
   function canSuggest(key, field) {
@@ -338,6 +352,12 @@
     return items;
   }
 
+  // A question as the worker sees it: its label, type, choices, and whether it must be answered.
+  function fieldOf(entry) {
+    const first = entry.elements[0];
+    return { label: entry.labels[0] || '', type: entry.kind === 'input' ? (first.type || 'text') : ARIA_TYPES[entry.kind] || entry.kind, options: optionsOf(entry),
+      required: entry.required ?? (entry.elements.some(element => element.required || element.getAttribute('aria-required') === 'true') || /\*\s*$/.test(entry.labels.join(' '))) };
+  }
   function plan(doc) {
     const token = `plan-${Date.now().toString(36)}-${++sequence}`;
     const map = new Map();
@@ -347,12 +367,34 @@
       map.set(id, entry);
       const result = match(entry);
       if (result.confidence === 'high') { matched.push({ id, key: result.key, confidence: 'high' }); return; }
-      const first = entry.elements[0];
-      unmatched.push({ id, label: entry.labels[0] || '', type: entry.kind === 'input' ? (first.type || 'text') : ARIA_TYPES[entry.kind] || entry.kind, options: optionsOf(entry),
-        required: entry.required ?? (entry.elements.some(element => element.required || element.getAttribute('aria-required') === 'true') || /\*\s*$/.test(entry.labels.join(' '))) });
+      unmatched.push({ id, ...fieldOf(entry) });
     });
     current = { token, doc, map };
     return { token, matched, unmatched };
+  }
+
+  // Questions that never make SecondHand's card show: search boxes, verification codes, and the user
+  // name, email, or phone box beside a password. The rules still read them like any other question.
+  const SEARCH = /^(search|find)\b/;
+  const SEARCH_NAMES = Object.freeze(['q', 's', 'query', 'search', 'keyword', 'keywords']);
+  const CODE = /\b(otp|2fa|mfa|one time|verification|verify|authentication|confirmation|access) code\b|\b\d+ digit code\b|\bcode (that )?(we )?(sent|texted|emailed)\b|^(enter )?(the |your )?code$/;
+  const SIGN_IN = /\b(user ?name|user ?id|login|log ?in|sign ?in|account|e ?mail|phone|mobile)\b/;
+  function besideForm(entry, doc) {
+    const element = entry.elements[0];
+    const words = normal(`${entry.labels.join(' ')} ${element.getAttribute('placeholder') || ''}`);
+    if (element.type === 'search' || element.matches('[role="searchbox"]') || element.closest('search, [role="search"]') || SEARCH.test(words) ||
+      SEARCH_NAMES.includes(normal(element.getAttribute('name')))) return true;
+    if (CODE.test(words)) return true;
+    const scope = element.form || element.closest('form') || doc;
+    const password = Array.from(scope.querySelectorAll('input[type="password"]')).some(box => rendered(box));
+    return password && SIGN_IN.test(`${words} ${normal(`${element.getAttribute('name') || ''} ${element.id || ''} ${element.getAttribute('autocomplete') || ''}`)}`);
+  }
+  // Whether the page asks something SecondHand can help with, so its card shows: a question the rules
+  // match to a saved answer, or one Laya could take, answered or not. It only reads the page: the plan
+  // the worker holds stays valid.
+  function offers(doc) {
+    return questionsOn(doc).some(entry => !(ARIA_TYPES[entry.kind] && UNSAFE.test(normal(entry.labels.join(' ')))) && !besideForm(entry, doc) &&
+      (match(entry).confidence === 'high' || layaQuestion(fieldOf(entry)) !== ''));
   }
 
   function requestKeys(keys) {
@@ -576,7 +618,8 @@
   }
   const elementFor = id => current?.map.get(id)?.elements[0] || null;
 
-  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, GUESS_KEYS, UNSAFE_QUESTION, plan, questions, requestKeys, deriveValues, fillFields, settle, focusField, elementFor, canSuggest, unsafeQuestion });
+  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, GUESS_KEYS, UNSAFE_QUESTION, plan, offers, questions, requestKeys, deriveValues, fillFields, settle, focusField, elementFor,
+    canSuggest, unsafeQuestion, layaQuestion });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandGeneric = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

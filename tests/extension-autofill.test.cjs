@@ -10,13 +10,13 @@ const strings = require('../extension/strings.js');
 // Values created inside the worker's vm context have foreign prototypes.
 const plain = value => JSON.parse(JSON.stringify(value));
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
-const { GENERIC_KEYS, unsafeQuestion } = require('../extension/generic-adapter.js');
+const { GENERIC_KEYS, unsafeQuestion, layaQuestion } = require('../extension/generic-adapter.js');
 // Verified Iowa pages never use the general engine; any call there is a bug.
 const noSiteEngine = { GENERIC_KEYS, requestKeys: () => { throw new Error('Iowa used the site engine.'); }, deriveValues: () => { throw new Error('Iowa used the site engine.'); },
-  unsafeQuestion: () => { throw new Error('Iowa used the site engine.'); } };
+  unsafeQuestion: () => { throw new Error('Iowa used the site engine.'); }, layaQuestion: () => { throw new Error('Iowa used the site engine.'); } };
 // Stand-in for generic-adapter.js's pure helpers on pages the Iowa adapter hasn't verified.
 const generalEngine = {
-  GENERIC_KEYS, unsafeQuestion,
+  GENERIC_KEYS, unsafeQuestion, layaQuestion,
   requestKeys: keys => [...new Set(keys.flatMap(key => key === 'totalMonthlyIncome' ? ['monthlyEarnedIncome', 'monthlyOtherIncome'] : [key]))],
   deriveValues: values => ({ ...values, ...(values.monthlyEarnedIncome && values.monthlyOtherIncome ? { totalMonthlyIncome: 'Synthetic private total' } : {}) })
 };

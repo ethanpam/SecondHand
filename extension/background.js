@@ -1,7 +1,7 @@
 'use strict';
 importScripts('address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'strings.js');
 if (typeof globalThis.SecondHandGeneric?.requestKeys !== 'function' || typeof globalThis.SecondHandGeneric.deriveValues !== 'function' || !Array.isArray(globalThis.SecondHandGeneric.GENERIC_KEYS) ||
-  typeof globalThis.SecondHandGeneric.unsafeQuestion !== 'function') {
+  typeof globalThis.SecondHandGeneric.unsafeQuestion !== 'function' || typeof globalThis.SecondHandGeneric.layaQuestion !== 'function') {
   throw new Error('SecondHand could not load generic-adapter.js. Reinstall the extension.');
 }
 if (typeof globalThis.SecondHandStrings?.english !== 'function' || typeof globalThis.SecondHandStrings.describeEnglish !== 'function') {
@@ -54,8 +54,9 @@ const AI_KEYS = Object.freeze(SecondHandGeneric.GENERIC_KEYS.filter(key => !SENS
 // questions from the saved profile (#42). It gets question labels, types, and options only, within
 // the bridge's limits. Chrome's on-device AI runs only when Laya isn't ready.
 // Each Autofill click gives Laya `budgetMs` in all; every request carries what the click has left.
-const LAYA = Object.freeze({ textTypes: Object.freeze(['text', 'textarea', 'number', 'date', 'email', 'tel']), choiceTypes: Object.freeze(['radio', 'select', 'checkbox']),
-  fields: 40, questions: 30, label: 200, options: 30, option: 100, bytes: 48 * 1024, budgetMs: 3000 });
+// Which questions Laya may take is the site engine's rule (SecondHandGeneric.layaQuestion), so the
+// on-page card and the worker agree on it.
+const LAYA = Object.freeze({ fields: 40, questions: 30, bytes: 48 * 1024, budgetMs: 3000 });
 const LAYA_NOT_READY = 'LAYA_NOT_READY';
 const LAYA_STATES = Object.freeze(['off', 'unavailable', 'not-downloaded', 'downloading', 'ready', 'error']);
 // A native host that runs but can't reach the desktop app says so with this code. The Windows relay
@@ -600,7 +601,6 @@ function guessAssignments(stored, url, guesses) {
 }
 
 const plainEntries = value => value && typeof value === 'object' && !Array.isArray(value) ? Object.entries(value) : null;
-const layaText = (value, max) => typeof value === 'string' && value.trim() !== '' && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
 const utf8Length = text => { let bytes = 0; for (const char of text) { const code = char.codePointAt(0); bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4; } return bytes; };
 const knownLayaState = state => { if (!LAYA_STATES.includes(state)) throw fault('worker.desktopUnexpected'); return state; };
 // Laya's state as the desktop's status reports it. A desktop app from before Laya reports none.
@@ -619,12 +619,10 @@ async function layaReady() {
 function layaQuestions(frames, prefix) {
   const boxes = [], choices = [];
   for (const { frameId, plan } of frames) for (const field of plan.unmatched) {
+    const kind = SecondHandGeneric.layaQuestion(field);
+    if (!kind) continue;
     const { label, type, options } = field;
-    if (!layaText(label, LAYA.label) || options.length > LAYA.options || options.some(option => !layaText(option, LAYA.option)) ||
-      new Set(options).size !== options.length || SecondHandGeneric.unsafeQuestion(field)) continue;
-    const question = { id: prefix ? `f${frameId}:${field.id}` : field.id, label, type, options: [...options] };
-    if (LAYA.textTypes.includes(type)) boxes.push(question);
-    else if (LAYA.choiceTypes.includes(type) && options.length) choices.push(question);
+    (kind === 'text' ? boxes : choices).push({ id: prefix ? `f${frameId}:${field.id}` : field.id, label, type, options: [...options] });
   }
   return { boxes, choices };
 }

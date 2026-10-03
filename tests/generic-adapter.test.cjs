@@ -353,3 +353,55 @@ test('the question list names every question on the page, answered or not, and e
   assert.equal(doc.getElementById('lname').value, 'Example');
   assert.equal(doc.getElementById('fname').value, 'Typed by the applicant');
 });
+
+test('the card shows for a form the rules or Laya can help with, answered or not, and never disturbs a plan', () => {
+  assert.equal(generic.offers(page(forms.plainPantry)), true, 'a sign-up form with a password box still asks for a name');
+  assert.equal(generic.offers(page(forms.googleStyle)), true);
+  assert.equal(generic.offers(page('<form><label for="reach">Where can we reach you?</label><input id="reach" type="email"></form>')), true, 'a question only Laya could take');
+  assert.equal(generic.offers(page('<form><label for="day">Preferred pickup day</label><select id="day"><option value="">Choose</option><option>Monday</option><option>Friday</option></select></form>')), true);
+  const answered = page('<form><label for="fname">First name</label><input id="fname" value="Typed by the applicant"></form>');
+  assert.equal(generic.offers(answered), true, 'the card stays once the form is filled');
+  const doc = page(forms.plainPantry);
+  const plan = generic.plan(doc);
+  generic.offers(doc);
+  const lastName = plan.matched.find(item => item.key === 'lastName');
+  assert.equal(generic.fillFields(doc, plan.token, [{ id: lastName.id, key: 'lastName', guessed: false }], generic.deriveValues(profile)).ok, true, 'the plan the worker holds stays valid');
+});
+
+test('the card stays hidden on pages without inputs, search boxes, sign-in forms, verification codes, and questions only the applicant answers', () => {
+  const hidden = {
+    'no inputs': '<main><h1>Our pantry hours</h1><p>Open Monday and Friday.</p></main>',
+    'a search form': '<header><form role="search"><input type="search" name="q" aria-label="Search"><button>Go</button></form></header>',
+    'a text search box': '<header><input type="text" name="s" placeholder="Search this site"></header>',
+    'a search landmark': '<search><label for="find">Find a pantry near you</label><input id="find" type="text"></search>',
+    'a sign-in form': '<form><label for="user">Email</label><input id="user" type="email" autocomplete="username"><label for="pw">Password</label><input id="pw" type="password"><button>Sign in</button></form>',
+    'a sign-in without a form': '<label for="login">User name</label><input id="login"><label for="secret">Password</label><input id="secret" type="password">',
+    'a texted code': '<form><label for="otp">Enter the 6-digit code we sent you</label><input id="otp" inputmode="numeric"></form>',
+    'a verification code': '<form><label for="code">Verification code</label><input id="code"></form>',
+    'a one-time code': '<form><input name="token" autocomplete="one-time-code" aria-label="Code"></form>',
+    'consent only': '<form><label><input type="checkbox" name="agree"> I agree to the terms</label><label for="sig">Signature</label><input id="sig"></form>'
+  };
+  for (const [name, html] of Object.entries(hidden)) assert.equal(generic.offers(page(html)), false, name);
+});
+
+test('Laya takes text boxes and choice questions within the bridge’s limits, never a question only the applicant answers', () => {
+  const field = (extra = {}) => ({ label: 'Preferred pickup day', type: 'select', options: ['Monday', 'Friday'], ...extra });
+  assert.equal(generic.layaQuestion(field()), 'choice');
+  assert.equal(generic.layaQuestion(field({ type: 'radio' })), 'choice');
+  assert.equal(generic.layaQuestion(field({ type: 'checkbox' })), 'choice');
+  for (const type of ['text', 'textarea', 'number', 'date', 'email', 'tel']) assert.equal(generic.layaQuestion(field({ label: 'Where can we reach you?', type, options: [] })), 'text', type);
+  const refused = {
+    'a search box': field({ type: 'search', options: [] }),
+    'a listbox': field({ type: 'listbox' }),
+    'a choice without options': field({ options: [] }),
+    'no label': field({ label: '  ' }),
+    'a long label': field({ label: 'x'.repeat(201) }),
+    'a control character': field({ label: 'Pickup\nday' }),
+    'too many options': field({ options: Array.from({ length: 31 }, (_, index) => `Day ${index}`) }),
+    'a long option': field({ options: ['Monday', 'y'.repeat(101)] }),
+    'repeated options': field({ options: ['Monday', 'Monday'] }),
+    'consent': field({ label: 'Do you consent to share your answers?', type: 'radio', options: ['Yes', 'No'] }),
+    'an SSN': field({ label: 'Social Security number', type: 'text', options: [] })
+  };
+  for (const [name, question] of Object.entries(refused)) assert.equal(generic.layaQuestion(question), '', name);
+});
