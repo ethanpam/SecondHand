@@ -29,6 +29,22 @@ contextBridge.exposeInMainWorld('secondHand', Object.freeze({
     return () => ipcRenderer.removeListener('secondhand:document-progress', listener);
   },
   saveProfile: profile => invoke('saveProfile', profile),
+  // The guided first-run setup's progress: how many of its six steps are done.
+  setupProgress: () => invoke('setupProgress'),
+  startSetup: () => invoke('startSetup'),
+  saveSetupProgress: step => invoke('saveSetupProgress', step),
+  // Save to My information in Chrome changed these saved fields. Their names only, never their values.
+  onProfileChanged: callback => {
+    if (typeof callback !== 'function') throw new TypeError('A callback is required.');
+    const listener = (_event, change) => {
+      const fields = change?.fields;
+      if (!Array.isArray(fields) || !fields.length || fields.length > 40 || new Set(fields).size !== fields.length ||
+          fields.some(field => typeof field !== 'string' || !/^[A-Za-z][A-Za-z0-9]{0,59}$/.test(field))) return;
+      callback({ fields: [...fields] });
+    };
+    ipcRenderer.on('secondhand:profile-changed', listener);
+    return () => ipcRenderer.removeListener('secondhand:profile-changed', listener);
+  },
   saveApplication: application => invoke('saveApplication', application),
   deleteApplication: id => invoke('deleteApplication', id),
   openPortal: () => invoke('openPortal'),

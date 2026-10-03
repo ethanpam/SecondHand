@@ -20,7 +20,8 @@ const { createOcrEngine } = require('./ocr-engine.cjs');
 const { createDocumentReader } = require('./ocr-service.cjs');
 const { requestId: documentRequestId } = require('./ocr-limits.cjs');
 const { analyzeDocument } = require('../shared/document-parser.cjs');
-const { validateProfile, validateApplication, FIELD_LABELS, DERIVED_FIELDS, PORTAL_URL, isPortalUrl, siteOrigin } = require('../shared/schema.cjs');
+const { validateProfile, validateApplication, HOUSEHOLD_COUNT_FIELDS, YES_NO_FIELDS, PORTAL_URL, isPortalUrl, siteOrigin, isRequestField, fieldLabel, releasedValue } = require('../shared/schema.cjs');
+const household = require('../shared/household.cjs');
 
 app.setName('SecondHand');
 // The step-by-step Chrome setup guide on SecondHand's website. During
@@ -75,7 +76,13 @@ if (nativeOrigin) {
   // Released only after a named confirmation on sites other than Iowa's portal.
   const SENSITIVE_FIELDS = ['ssn', 'hasSsn', 'hasSsnAnswer', 'birthDate', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'assetsOnHand', 'monthlyMedicalExpenses',
     'usCitizen', 'disabled', 'blind', 'healthLimitation', 'medicare'];
+  // Counts worked out from household members' birth dates reveal ages, as the birth date does: band counts
+  // always, and the profile's own age counts while the household list sets them.
+  const AGE_COUNT_FIELDS = Object.freeze(['householdAdults', 'householdChildren', 'householdSeniors']);
   const MAX_TRUSTED_SITES = 50;
+  // The guided first-run setup's progress: how many of its six steps are done. Not sensitive, and kept
+  // beside the settings only while the setup is under way.
+  const SETUP_STEPS = 6;
   // A worker may survive a desktop restart. A per-process seed prevents its old
   // access receipt matching a new process; six bytes leave ample safe-integer headroom.
   let accessRevision = crypto.randomBytes(6).readUIntBE(0, 6);
@@ -168,7 +175,7 @@ if (nativeOrigin) {
   // A site other than Iowa's portal may receive saved answers when the person trusted it, or every
   // https site while all websites is on. Sensitive details still ask on each one.
   const siteAllowed = origin => trustedSites.includes(origin) || (allSites && Boolean(origin));
-  const SITE_RULES = 'Social Security number, date of birth, income, money on hand, medical expenses, and your answers about citizenship, disability, blindness, health, Medicare, and having a Social Security number still ask every time';
+  const SITE_RULES = 'Social Security number, date of birth, the ages of the people in your household, income, money on hand, medical expenses, and your answers about citizenship, disability, blindness, health, Medicare, and having a Social Security number still ask every time';
   async function turnOffAllSites() {
     if (!allSites) return;
     accessRevision++;
@@ -267,7 +274,7 @@ if (nativeOrigin) {
         message: `Fill ${count === 1 ? 'this answer' : 'these answers'} into ${iowa ? 'Iowa’s application' : origin}?`,
         items: `Laya, SecondHand’s AI on this computer, picked ${count === 1 ? 'this answer' : 'these answers'} from your saved information:\n${lines}`,
         sensitive: !iowa && needed ? { message: `Fill ${count === 1 ? 'this answer' : `these ${count} answers`} on ${origin}? ${uses} sensitive details.`,
-          detail: `${sensitiveFields.map(field => FIELD_LABELS[field]).join(', ')}\n\nLaya, SecondHand’s AI on this computer, read these saved details to pick ${which}. The details stay on this computer. Only allow this if you meant to give these answers to ${origin}:\n${lines}` } : null });
+          detail: `${sensitiveFields.map(fieldLabel).join(', ')}\n\nLaya, SecondHand’s AI on this computer, read these saved details to pick ${which}. The details stay on this computer. Only allow this if you meant to give these answers to ${origin}:\n${lines}` } : null });
       touch();
       return { answers: approved ? answers : {}, accessRevision };
     } catch (error) {
@@ -378,23 +385,26 @@ if (nativeOrigin) {
       if (!request.fields.length && !navigationOnly) throw publicError('This page does not support navigation authorization.');
       const origin = siteOrigin(request.url);
       if (!iowa && !siteAllowed(origin)) throw publicError('This site isn’t trusted. Turn on SecondHand for it first.');
-      const sensitive = iowa ? [] : request.fields.filter(field => SENSITIVE_FIELDS.includes(field));
+      if (!request.fields.every(isRequestField)) throw publicError('This page asked for something SecondHand doesn’t share.');
+      const byAge = !iowa && request.fields.some(field => AGE_COUNT_FIELDS.includes(field)) && household.listed(vault.getData().profile);
+      const sensitive = iowa ? [] : request.fields.filter(field => SENSITIVE_FIELDS.includes(field) || household.isBandKey(field) || (byAge && AGE_COUNT_FIELDS.includes(field)));
       const approved = await approveRelease({ context, iowa, origin, generation: accessRevision,
         message: navigationOnly ? 'Continue this verified Iowa step?' : `Fill these saved answers into ${iowa ? 'Iowa’s application' : origin}?`,
-        items: navigationOnly ? 'No saved profile fields will be read for this step.' : request.fields.map(field => FIELD_LABELS[field]).join(', '),
+        items: navigationOnly ? 'No saved profile fields will be read for this step.' : request.fields.map(fieldLabel).join(', '),
         sensitive: sensitive.length ? { message: `Fill sensitive details on ${origin}?`,
-          detail: `${sensitive.map(field => FIELD_LABELS[field]).join(', ')}\n\nOnly allow this if you meant to give these details to ${origin}. Other fields: ${request.fields.filter(field => !sensitive.includes(field)).map(field => FIELD_LABELS[field]).join(', ') || 'none'}.` } : null });
+          detail: `${sensitive.map(fieldLabel).join(', ')}\n\nOnly allow this if you meant to give these details to ${origin}. Other fields: ${request.fields.filter(field => !sensitive.includes(field)).map(fieldLabel).join(', ') || 'none'}.` } : null });
       if (!approved) throw publicError('You cancelled this field request.');
       if (navigationOnly) { touch(); return { values: {}, accessRevision }; }
       const profile = vault.getData().profile;
       const values = {};
       for (const field of request.fields) {
-        const value = Object.hasOwn(DERIVED_FIELDS, field) ? DERIVED_FIELDS[field](profile) : profile[field];
+        const value = releasedValue(profile, field);
         if (typeof value === 'string' && value.trim()) values[field] = value;
       }
       touch();
       return { values, accessRevision };
     }
+    if (request.type === 'saveFields') return saveAnswers(request, context);
     if (request.type === 'recordProgress') {
       await vault.update(data => {
         const current = [...data.applications].reverse().find(item => ['draft', 'in_progress'].includes(item.status));
@@ -406,6 +416,69 @@ if (nativeOrigin) {
       return { recorded: true };
     }
     throw publicError('Unsupported bridge request.');
+  }
+
+  // saveFields (Save to My information): answers the applicant gave on a page for questions SecondHand
+  // couldn't fill, saved after one confirmation that names each field and value. Only blank fields are
+  // filled in: a saved answer, or a household count the household list sets, is never replaced from a page.
+  const shown = (field, value) => YES_NO_FIELDS.includes(field) ? (value === 'yes' ? 'Yes' : 'No') : value;
+  const listing = items => items.length < 3 ? items.join(' and ') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`;
+  async function saveAnswers(request, context) {
+    const iowa = isPortalUrl(request.url);
+    const origin = siteOrigin(request.url);
+    if (!iowa && !siteAllowed(origin)) throw publicError('This site isn’t trusted. Turn on SecondHand for it first.');
+    const fields = Object.keys(request.fields);
+    const answers = Object.fromEntries(fields.map(field => [field, request.fields[field].trim()]));
+    const current = vault.getData().profile;
+    if (household.listed(current) && fields.some(field => Object.hasOwn(HOUSEHOLD_COUNT_FIELDS, field))) {
+      throw publicError('Your household list sets the household counts. Update the list in My information.');
+    }
+    const saved = fields.filter(field => typeof current[field] === 'string' && current[field].trim());
+    if (saved.length) throw publicError(`${listing(saved.map(fieldLabel))} ${saved.length === 1 ? 'is' : 'are'} already saved in My information. Change ${saved.length === 1 ? 'it' : 'them'} there.`);
+    // A plain record of the profile with the answers filled in, checked as My information checks it.
+    const filledIn = profile => Object.assign(Object.create(null), profile, answers);
+    const clean = validated(validateProfile, filledIn(current));
+    if (fieldRequestPending) throw publicError('Another request is waiting for your approval.');
+    fieldRequestPending = true;
+    const generation = accessRevision;
+    try {
+      mainWindow.show(); mainWindow.focus();
+      const sensitive = fields.filter(field => SENSITIVE_FIELDS.includes(field));
+      const one = fields.length === 1;
+      const answer = await dialog.showMessageBox(mainWindow, {
+        type: sensitive.length ? 'warning' : 'question', title: sensitive.length ? 'Save sensitive details to My information?' : 'Save to My information?',
+        message: `Save ${one ? 'this answer' : 'these answers'} from ${iowa ? 'Iowa’s application' : origin} to My information?`,
+        detail: `${fields.map(field => `${fieldLabel(field)}: ${shown(field, clean[field])}`).join('\n')}\n\n` +
+          `${sensitive.length ? `${listing(sensitive.map(fieldLabel))} ${sensitive.length === 1 ? 'is' : 'are'} sensitive. ` : ''}` +
+          `SecondHand keeps ${one ? 'it' : 'them'} on this computer and can fill ${one ? 'it' : 'them'} the next time a form asks. Save only answers about you and your household.`,
+        buttons: ['Cancel', 'Save'], defaultId: sensitive.length ? 0 : 1, cancelId: 0, noLink: true
+      });
+      if (answer.response !== 1) throw publicError('You cancelled saving to My information.');
+      requireUnlocked();
+      if (generation !== accessRevision || extensionId !== context.extensionId) throw publicError('SecondHand access changed. Try again.');
+      accessRevision++;
+      await vault.update(data => { data.profile = validateProfile(filledIn(data.profile)); });
+      accessRevision++;
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('secondhand:profile-changed', { fields });
+      touch();
+      return { saved: fields };
+    } finally { fieldRequestPending = false; }
+  }
+
+  const setupPath = path.join(userData, 'setup-progress.json');
+  async function readSetup() {
+    let text;
+    try { text = await fs.readFile(setupPath, 'utf8'); }
+    catch (error) { if (error.code === 'ENOENT') return null; throw publicError('SecondHand couldn’t read your setup progress.'); }
+    let progress;
+    try { progress = JSON.parse(text); } catch { progress = null; }
+    if (progress?.version !== 1 || !Number.isInteger(progress.step) || progress.step < 0 || progress.step >= SETUP_STEPS) throw publicError('SecondHand couldn’t read your setup progress.');
+    return progress.step;
+  }
+  async function writeSetup(step) {
+    if (step >= SETUP_STEPS) { await fs.rm(setupPath, { force: true }); return null; }
+    await atomicWrite(setupPath, Buffer.from(JSON.stringify({ version: 1, step })));
+    return { step, steps: SETUP_STEPS };
   }
 
   const methods = {
@@ -516,6 +589,26 @@ if (nativeOrigin) {
       await vault.update(data => { data.profile = clean; });
       accessRevision++;
       touch(); return clean;
+    },
+    // The guided first-run setup: how many of its six steps are done, or null when none is under way.
+    async setupProgress() {
+      requireUnlocked();
+      const step = await readSetup();
+      touch(); return step === null ? null : { step, steps: SETUP_STEPS };
+    },
+    async startSetup() {
+      requireUnlocked();
+      const progress = await writeSetup(0);
+      touch(); return progress;
+    },
+    // Steps done never go down; all six done finishes the setup.
+    async saveSetupProgress(step) {
+      requireUnlocked();
+      if (!Number.isInteger(step) || step < 0 || step > SETUP_STEPS) throw publicError('Invalid setup step.');
+      const done = await readSetup();
+      if (done === null) throw publicError('The guided setup isn’t under way.');
+      const progress = await writeSetup(Math.max(done, step));
+      touch(); return progress;
     },
     async saveApplication(application) {
       requireUnlocked();
@@ -639,6 +732,8 @@ if (nativeOrigin) {
         if (answer.response !== 1) return { cancelled: true };
       }
       await vault.importEncrypted(bytes);
+      // Setup progress belonged to the information just replaced.
+      await fs.rm(setupPath, { force: true });
       return { cancelled: false };
     }
   };
