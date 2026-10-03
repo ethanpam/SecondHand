@@ -29,10 +29,10 @@
   "programFip": "no",
   "programMedicaid": "no",
   "helpPayMedicalBills": "no",
-  "householdSize": "1",
+  "householdSize": "4",
   "householdAdults": "1",
-  "householdChildren": "0",
-  "householdSeniors": "0",
+  "householdChildren": "2",
+  "householdSeniors": "1",
   "householdVeteran": "no",
   "householdDisability": "no",
   "monthlyEarnedIncome": "0",
@@ -54,5 +54,11 @@
   "disabled": "no",
   "blind": "no",
   "healthLimitation": "no",
-  "medicare": "no"
+  "medicare": "no",
+  "householdMembers": [
+    { "id": "0f2c8d4e-1a3b-4c5d-8e6f-7a8b9c0d1e2f", "firstName": "Avery", "lastName": "Example", "birthDate": "1985-04-12", "relationship": "self", "student": "no", "grade": "" },
+    { "id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", "firstName": "Riley", "lastName": "Example", "birthDate": "2015-09-03", "relationship": "child", "student": "yes", "grade": "5th" },
+    { "id": "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e", "firstName": "Sam", "lastName": "Example", "birthDate": "2021-02-14", "relationship": "child", "student": "no", "grade": "" },
+    { "id": "3c4d5e6f-7a8b-4c9d-8e1f-2a3b4c5d6e7f", "firstName": "Morgan", "lastName": "Sample", "birthDate": "1958-11-20", "relationship": "parent", "student": "no", "grade": "" }
+  ]
 }

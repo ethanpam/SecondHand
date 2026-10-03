@@ -96,7 +96,7 @@ test('Iowa financial answers: money on hand and medical costs are dollar amounts
 test('whether a Social Security number is saved is a field pages can ask for, never one the profile saves', () => {
   assert.equal(FIELD_LABELS.hasSsn, 'Whether you have a Social Security number');
   assert.equal(PROFILE_FIELDS.includes('hasSsn'), false);
-  assert.deepEqual(REQUEST_FIELDS, [...PROFILE_FIELDS, 'hasSsn']);
+  assert.ok(REQUEST_FIELDS.includes('hasSsn'));
   assert.throws(() => validateProfile({ hasSsn: 'yes' }), /Unknown profile field/);
   assert.equal(DERIVED_FIELDS.hasSsn(validateProfile({ ssn: '123-45-6789' })), 'yes');
   assert.equal(DERIVED_FIELDS.hasSsn(validateProfile({})), '');
@@ -142,4 +142,70 @@ test('whether you have a Social Security number comes from the saved number firs
   assert.equal(DERIVED_FIELDS.hasSsn(validateProfile({ hasSsnAnswer: 'yes' })), 'yes');
   assert.equal(DERIVED_FIELDS.hasSsn(validateProfile({ hasSsnAnswer: 'no' })), 'no');
   assert.equal(DERIVED_FIELDS.hasSsn(validateProfile({})), '');
+});
+
+const MEMBER_SELF = '0f2c8d4e-1a3b-4c5d-8e6f-7a8b9c0d1e2f';
+const MEMBER_CHILD = '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d';
+const memberId = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const withMembers = (members, own = {}) => ({ firstName: 'Avery', lastName: 'Example', birthDate: '1985-04-12', ...own,
+  householdMembers: [{ id: MEMBER_SELF, relationship: 'self' }, ...members] });
+const child = (extra = {}) => ({ id: MEMBER_CHILD, firstName: ' Riley ', lastName: 'Example', birthDate: '2015-09-03', relationship: 'child', student: 'yes', grade: '5th', ...extra });
+
+test('the household list is a profile field that defaults to empty and is never a field a page may ask for', () => {
+  assert.equal(FIELD_LABELS.householdMembers, 'Household members');
+  assert.ok(PROFILE_FIELDS.includes('householdMembers'));
+  assert.equal(REQUEST_FIELDS.includes('householdMembers'), false);
+  assert.deepEqual(validateProfile({}).householdMembers, []);
+  assert.deepEqual(REQUEST_FIELDS, [...PROFILE_FIELDS.filter(field => field !== 'householdMembers'), 'hasSsn', 'studentNameGrade']);
+});
+
+test('each household member is checked like the rest of the profile: trimmed, length-limited names and real past dates', () => {
+  const saved = validateProfile(withMembers([child()]));
+  assert.deepEqual(saved.householdMembers[1], { id: MEMBER_CHILD, firstName: 'Riley', lastName: 'Example', birthDate: '2015-09-03', relationship: 'child', student: 'yes', grade: '5th' });
+  assert.deepEqual(validateProfile(withMembers([child({ birthDate: undefined, student: undefined, grade: undefined, lastName: undefined })])).householdMembers[1],
+    { id: MEMBER_CHILD, firstName: 'Riley', lastName: '', birthDate: '', relationship: 'child', student: '', grade: '' }, 'blank is unknown');
+  const refused = {
+    'an unknown member field': child({ ssn: '123-45-6789' }),
+    'a future birth date': child({ birthDate: '2999-01-01' }),
+    'an impossible birth date': child({ birthDate: '2015-02-30' }),
+    'a birth date in another format': child({ birthDate: '09/03/2015' }),
+    'a control character': child({ firstName: 'Ri\u0007ley' }),
+    'a name over 100 characters': child({ lastName: 'x'.repeat(101) }),
+    'a relationship that isn’t listed': child({ relationship: 'cousin' }),
+    'a student answer that isn’t yes or no': child({ student: 'true' }),
+    'a grade over 20 characters': child({ grade: 'x'.repeat(21) }),
+    'a grade for someone who isn’t a student': child({ student: 'no' }),
+    'a person with no first name': child({ firstName: '  ' }),
+    'an id that isn’t one': child({ id: 'child-1' }),
+    'a member that isn’t an object': 'Riley Example',
+    'a member with an inherited shape': Object.create({ id: MEMBER_CHILD })
+  };
+  for (const [name, member] of Object.entries(refused)) assert.throws(() => validateProfile(withMembers([member])), name);
+  assert.throws(() => validateProfile(withMembers([child(), child()])), /once/, 'two members can’t share an id');
+  assert.throws(() => validateProfile({ householdMembers: 'Riley' }), /household/i);
+  assert.throws(() => validateProfile({ householdMembers: { 0: child() } }), /household/i);
+  assert.equal(validateProfile(withMembers([child({ grade: 'x'.repeat(20) })])).householdMembers[1].grade.length, 20);
+});
+
+test('the household list holds up to 20 people', () => {
+  const others = count => Array.from({ length: count }, (_, n) => ({ id: memberId(n + 1), firstName: `Person${n + 1}`, relationship: 'other' }));
+  assert.equal(validateProfile(withMembers(others(19))).householdMembers.length, 20);
+  assert.throws(() => validateProfile(withMembers(others(20))), /20 people/);
+});
+
+test('the applicant is the list’s one self row, kept in sync with their own name and birth date', () => {
+  const saved = validateProfile(withMembers([child()], { firstName: ' Avery ', lastName: 'Example' }));
+  assert.deepEqual(saved.householdMembers[0], { id: MEMBER_SELF, firstName: 'Avery', lastName: 'Example', birthDate: '1985-04-12', relationship: 'self', student: '', grade: '' });
+  // A self row saved with other details takes the applicant's own.
+  const stale = validateProfile({ ...withMembers([child()]), householdMembers: [{ id: MEMBER_SELF, firstName: 'Old', lastName: 'Name', birthDate: '1990-01-01', relationship: 'self' }, child()] });
+  assert.deepEqual([stale.householdMembers[0].firstName, stale.householdMembers[0].lastName, stale.householdMembers[0].birthDate], ['Avery', 'Example', '1985-04-12']);
+  assert.throws(() => validateProfile({ ...withMembers([]), householdMembers: [child()] }), /you/, 'a list without the applicant would undercount the household');
+  assert.throws(() => validateProfile(withMembers([{ id: memberId(9), relationship: 'self' }])), /you/, 'the applicant appears once');
+  assert.deepEqual(validateProfile(withMembers([])).householdMembers.map(member => member.relationship), ['self'], 'a household of one');
+});
+
+test('the fictional fixture has a fictional household: the applicant, two children, one a student, and a parent', () => {
+  const saved = validateProfile(fictionalProfile);
+  assert.deepEqual(saved.householdMembers.map(member => [member.firstName, member.relationship, member.student]),
+    [['Avery', 'self', 'no'], ['Riley', 'child', 'yes'], ['Sam', 'child', 'no'], ['Morgan', 'parent', 'no']]);
 });

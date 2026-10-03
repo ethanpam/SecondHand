@@ -838,7 +838,8 @@
     event.preventDefault(); clearError('profile-error');
     const generation = vaultGeneration;
     const revision = profileRevision;
-    const profile = Object.fromEntries(profileFields.map((field) => [field, profileControl(field).value.trim()]));
+    const profile = { ...Object.fromEntries(profileFields.map((field) => [field, profileControl(field).value.trim()])),
+      householdMembers: (Array.isArray(data.profile.householdMembers) ? data.profile.householdMembers : []).map(member => ({ ...member })) };
     pending($('save-profile'), async () => {
       try {
         const saved = await api.saveProfile(profile);

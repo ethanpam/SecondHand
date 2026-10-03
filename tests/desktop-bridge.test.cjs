@@ -8,7 +8,7 @@ const net = require('node:net');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const { FrameReader, frame, extensionFromOrigin, validateRequest, startBridge, relayRequest, runNativeHost, appLaunch, startApp, MAX_MESSAGE_BYTES } = require('../desktop/bridge.cjs');
-const { PORTAL_URL, PROFILE_FIELDS } = require('../shared/schema.cjs');
+const { PORTAL_URL, PROFILE_FIELDS, REQUEST_FIELDS } = require('../shared/schema.cjs');
 const EXTENSION = 'a'.repeat(32);
 
 test('native frames handle split headers, split UTF-8, and multiple messages', () => {
@@ -50,7 +50,9 @@ test('Chrome native origins and Iowa portal requests use strict allowlists', () 
   for (const fields of [[], ['password'], ['firstName', 'firstName'], [null]]) assert.throws(() => validateRequest({ id: 'x', type: 'getFields', url: PORTAL_URL, fields }), /profile fields/);
   // Whether an SSN is saved is asked for like any saved field, alone or with every other one.
   assert.deepEqual(validateRequest({ id: 'x', type: 'getFields', url: PORTAL_URL, fields: ['birthDate', 'hasSsn'] }).fields, ['birthDate', 'hasSsn']);
-  assert.equal(validateRequest({ id: 'x', type: 'getFields', url: PORTAL_URL, fields: [...PROFILE_FIELDS, 'hasSsn'] }).fields.length, PROFILE_FIELDS.length + 1);
+  assert.equal(validateRequest({ id: 'x', type: 'getFields', url: PORTAL_URL, fields: [...REQUEST_FIELDS] }).fields.length, REQUEST_FIELDS.length);
+  // The household list itself is never asked for: only the answers worked out from it.
+  assert.throws(() => validateRequest({ id: 'x', type: 'getFields', url: PORTAL_URL, fields: ['householdMembers'] }), /profile fields/);
   assert.throws(() => validateRequest({ id: 'x', type: 'status', profile: {} }), /Unexpected/);
   // The extension says nothing about its own build or files: the app updates its copy from its own bundle.
   assert.throws(() => validateRequest({ id: 'x', type: 'status', build: '2026-10-03.1' }), /Unexpected/);

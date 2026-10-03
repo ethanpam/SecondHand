@@ -1,0 +1,93 @@
+'use strict';
+// The household list's derived answers: ages as of today, the counts a form asks for, and a student's
+// name and grade. Every count is worked out here in code from saved birth dates; nothing is guessed.
+// A count that needs a birth date the list doesn't have is unknown (''), never a number.
+
+const BAND_PREFIX = 'householdCount:';
+// "householdCount:0-17" or "householdCount:60+": whole numbers from 0 to 120, written without leading zeros.
+const BAND_KEY = /^householdCount:(0|[1-9]\d{0,2})(?:-(0|[1-9]\d{0,2})|(\+))$/;
+const MAX_AGE = 120;
+// The profile's fixed counts and the ages each one covers.
+const COUNT_BANDS = Object.freeze({ householdChildren: { low: 0, high: 17 }, householdAdults: { low: 18, high: 64 }, householdSeniors: { low: 65, high: null } });
+
+function calendarDate(value, what) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value));
+  const date = match && new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  if (!date || date.getUTCMonth() !== Number(match[2]) - 1 || date.getUTCDate() !== Number(match[3])) throw new Error(`${what} must be a real date written YYYY-MM-DD.`);
+  return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+}
+// Today on this computer's calendar, or the day a caller names (a Date or YYYY-MM-DD).
+function localToday(today) {
+  if (today === undefined) {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate() };
+  }
+  if (today instanceof Date) return { year: today.getFullYear(), month: today.getMonth() + 1, day: today.getDate() };
+  if (typeof today === 'object' && today && Number.isInteger(today.year)) return today;
+  return calendarDate(today, 'today');
+}
+// Whole years on `today`; a birthday counts on the day itself. Null when no birth date is saved.
+function ageOn(birthDate, today) {
+  if (typeof birthDate !== 'string' || !birthDate.trim()) return null;
+  const birth = calendarDate(birthDate.trim(), 'Birth date');
+  const now = localToday(today);
+  const age = now.year - birth.year - (now.month < birth.month || (now.month === birth.month && now.day < birth.day) ? 1 : 0);
+  if (age < 0 || age > 130) throw new Error('Birth date must be in the past 130 years.');
+  return age;
+}
+
+const members = profile => Array.isArray(profile?.householdMembers) ? profile.householdMembers : [];
+// Whether the household list is in use: then it, not the manual counts, answers household questions.
+const listed = profile => members(profile).length > 0;
+// Every member's age, or null when the list is empty or a birth date is missing.
+function memberAges(profile, { today } = {}) {
+  const list = members(profile);
+  if (!list.length) return null;
+  const ages = list.map(member => ageOn(member.birthDate, today));
+  return ages.includes(null) ? null : ages;
+}
+const within = (age, { low, high }) => age >= low && (high === null || age <= high);
+
+// The fixed counts from the list, or null without one. The size counts everyone; the age counts need every birth date.
+function householdCounts(profile, { today } = {}) {
+  if (!listed(profile)) return null;
+  const ages = memberAges(profile, { today });
+  const count = band => ages ? String(ages.filter(age => within(age, band)).length) : '';
+  return { size: String(members(profile).length), adults: count(COUNT_BANDS.householdAdults), children: count(COUNT_BANDS.householdChildren), seniors: count(COUNT_BANDS.householdSeniors) };
+}
+
+function parseBand(key) {
+  const match = typeof key === 'string' ? BAND_KEY.exec(key) : null;
+  if (!match) return null;
+  const low = Number(match[1]);
+  const high = match[3] ? null : Number(match[2]);
+  if (low > MAX_AGE || (high !== null && (high > MAX_AGE || high < low))) return null;
+  return { low, high };
+}
+const isBandKey = key => parseBand(key) !== null;
+// How many members are in the band, from their birth dates: '' when the list is empty, a birth date is missing, or the band is malformed.
+function bandCount(profile, key, { today } = {}) {
+  const band = parseBand(key);
+  const ages = band && memberAges(profile, { today });
+  return ages ? String(ages.filter(age => within(age, band)).length) : '';
+}
+function bandLabel(key) {
+  const band = parseBand(key);
+  if (!band) throw new Error('Unknown field.');
+  const ages = band.high === null ? `${band.low} or older` : band.high === band.low ? `${band.low}` : `${band.low} to ${band.high}`;
+  return `People in the household aged ${ages}`;
+}
+
+// "First Last, Grade" for the one member who is a student, when every other member is saved as not
+// one and the student's grade is saved. Otherwise '' and the question stays with the applicant.
+function studentNameGrade(profile) {
+  const list = members(profile);
+  const students = list.filter(member => member.student === 'yes');
+  if (students.length !== 1 || list.some(member => member.student !== 'yes' && member.student !== 'no')) return '';
+  const [student] = students;
+  const name = [student.firstName, student.lastName].map(part => String(part || '').trim()).filter(Boolean).join(' ');
+  const grade = String(student.grade || '').trim();
+  return name && grade ? `${name}, ${grade}` : '';
+}
+
+module.exports = { BAND_PREFIX, COUNT_BANDS, calendarDate, localToday, ageOn, listed, memberAges, householdCounts, parseBand, isBandKey, bandCount, bandLabel, studentNameGrade };

@@ -145,15 +145,15 @@ test('new profile choices default to unknown, save explicit no, and clear with a
     assert.equal(view.value(field), '', field);
     assert.deepEqual([...view.choices(field)].sort(), [...PROFILE_CHOICES[field]].sort(), field);
   }
-  for (const [field, value] of Object.entries(fictionalProfile)) view.answer(field, value);
+  for (const [field, value] of Object.entries(fictionalProfile)) if (field !== 'householdMembers') view.answer(field, value);
   view.submit('profile-form');await tick();
-  assert.deepEqual(saved[0], fictionalProfile);
+  assert.deepEqual(saved[0], { ...fictionalProfile, householdMembers: [] });
   assert.equal(view.get('programFip').value, 'no');
   assert.equal(view.get('mailingSameAsHome').value, 'no');
   assert.equal(view.get('mailingAddressLine1').value, 'PO Box 123');
   assert.equal(view.get('addressLine1').value, fictionalProfile.addressLine1);
   view.lock();
-  for (const field of PROFILE_FIELDS) assert.equal(view.value(field), '', field);
+  for (const field of PROFILE_FIELDS.filter(field => field !== 'householdMembers')) assert.equal(view.value(field), '', field);
 });
 
 test('legacy profile loading leaves all new choice fields unknown and does not populate mailing fields', async t => {
