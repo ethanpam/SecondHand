@@ -923,6 +923,21 @@ test('visible iframe discovery is https only, deduplicated, and excludes the pag
   hidden.getClientRects = () => [{ width: 300, height: 200 }]; wrapper.append(hidden); doc.body.append(wrapper);
   assert.deepEqual(plain(page.request({ type: 'secondhand:generic:frames' })), { origins: [FRAME_ORIGIN, 'https://forms.example.org'] });
 });
+test('a visible iframe whose address doesn’t parse is skipped, and the page’s other frames are still found', t => {
+  const page = siteContent(t);
+  const doc = page.window.document;
+  for (const src of ['http://[bad', 'https://pantry form.example.org/', 'https://form.jotform.com/one']) {
+    const frame = doc.createElement('iframe'); frame.setAttribute('src', src);
+    frame.getClientRects = () => [{ width: 300, height: 200 }];
+    doc.body.append(frame);
+  }
+  assert.deepEqual(plain(page.request({ type: 'secondhand:generic:frames' })), { origins: [FRAME_ORIGIN] });
+  // Anything else that goes wrong still fails the whole scan.
+  const broken = doc.createElement('iframe'); broken.src = 'https://forms.example.org/';
+  broken.getClientRects = () => { throw new Error('Synthetic layout failure'); };
+  doc.body.append(broken);
+  assert.deepEqual(plain(page.request({ type: 'secondhand:generic:frames' })), { ok: false, error: 'This page could not be checked safely. Review it manually.' });
+});
 test('an https subframe answers plans without creating a widget', t => {
   const dom = new JSDOM('<!doctype html><body></body>', { url: FRAME_ORIGIN, runScripts: 'outside-only' });
   t.after(() => dom.window.close());

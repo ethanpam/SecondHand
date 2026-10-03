@@ -138,8 +138,11 @@
             if (node.hidden || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.opacity === '0') { visible = false; break; }
           }
           if (!visible) continue;
-          // iframe.src is resolved against the document's base URL by the browser.
-          const url = new URL(frame.src);
+          // iframe.src is resolved against the document's base URL by the browser. An address that
+          // doesn't parse comes back as written: nothing loads there, so it can't hold a form. This is
+          // URL.canParse, which Chrome has only from version 120; SecondHand supports Chrome 116.
+          let url;
+          try { url = new URL(frame.src); } catch { continue; }
           if (url.protocol === 'https:' && url.origin !== location.origin) origins.add(url.origin);
         }
         respond({ origins: [...origins] });
