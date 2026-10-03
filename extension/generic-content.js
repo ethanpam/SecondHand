@@ -138,8 +138,11 @@
             if (node.hidden || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.opacity === '0') { visible = false; break; }
           }
           if (!visible) continue;
-          // iframe.src is resolved against the document's base URL by the browser.
-          const url = new URL(frame.src);
+          // iframe.src is resolved against the document's base URL by the browser. An address that
+          // doesn't parse comes back as written: nothing loads there, so it can't hold a form. This is
+          // URL.canParse, which Chrome has only from version 120; SecondHand supports Chrome 116.
+          let url;
+          try { url = new URL(frame.src); } catch { continue; }
           if (url.protocol === 'https:' && url.origin !== location.origin) origins.add(url.origin);
         }
         respond({ origins: [...origins] });
@@ -154,7 +157,8 @@
         const validIds = ids => Array.isArray(ids) && ids.every(id => typeof id === 'string');
         const settledResult = result => {
           if (!result || !validIds(result.filled) || !validIds(result.skipped) || !validIds(result.rejected)) return null;
-          return { ok: result.ok === true, filled: strings(result.filled), skipped: strings(result.skipped), rejected: strings(result.rejected) };
+          return { ok: result.ok === true, ...(result.pageChanged === true ? { pageChanged: true } : {}),
+            filled: strings(result.filled), skipped: strings(result.skipped), rejected: strings(result.rejected) };
         };
         // Some pages (Google Forms) confirm a chosen option a moment after the click: answer once it settles.
         engine.settle(document, message.token, result).then(

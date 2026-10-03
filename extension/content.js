@@ -144,7 +144,8 @@
     const result = engine.fillFields(document, message.token, message.assignments, message.values);
     // A choice the page confirms a moment after the click is settled before answering.
     return engine.settle(document, message.token, result)
-      .then(settled => ({ ok: settled?.ok === true, filled: strings(settled?.filled), skipped: strings(settled?.skipped), rejected: strings(settled?.rejected) }));
+      .then(settled => ({ ok: settled?.ok === true, ...(settled?.pageChanged === true ? { pageChanged: true } : {}),
+        filled: strings(settled?.filled), skipped: strings(settled?.skipped), rejected: strings(settled?.rejected) }));
   }
 
   ensurePanel();

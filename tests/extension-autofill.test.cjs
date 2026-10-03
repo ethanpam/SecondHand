@@ -37,6 +37,8 @@ function generalPage(message, plan) {
   }
   if (message.type === 'secondhand:generic:fill') {
     if (message.token !== plan.token) return { ok: false, filled: [], skipped: [] };
+    // The page changed while its choices settled.
+    if (plan.pageChanged) return { ok: false, pageChanged: true, filled: [], skipped: message.assignments.map(item => item.id), rejected: [] };
     const fields = [...(plan.matched || []), ...(plan.unmatched || [])];
     const refuses = new Set(fields.filter(field => field.rejects).map(field => field.id));
     // Laya's answer (#42) is one of the question's own options; everything else is a saved value.
@@ -306,6 +308,12 @@ test('a locked, cancelled, or unreadable general fill on an unknown Iowa page st
   }
   // Once the engine found fields, the page offers Autofill again, for example after unlocking.
   assert.equal((await locked.panel({ type: 'ui:pageState' })).data.page.todo, 'Check your answers, then click Continue.');
+});
+
+test('a general fill the page interrupted by changing asks for Autofill again on an unknown Iowa page', async () => {
+  const w = worker({ kind: 'manual', engine: generalEngine, general: { ...financialPlan(), pageChanged: true }, desktop: { values: financialValues } });
+  const { state, message, messageKey } = plain((await autofill(w)).data);
+  assert.deepEqual({ state, message, messageKey }, { state: 'error', message: 'The page changed. Click Autofill again.', messageKey: 'worker.pageChangedAutofill' });
 });
 
 // Laya on Iowa pages the adapter doesn't know (#39, #42). Iowa's portal needs no site approval.
