@@ -2,7 +2,7 @@
 // #39: which saved field a text box on a form asks for, decided by Laya on this computer.
 // The model reads the question's label and a description of each saved field, never a saved value.
 const { CHOICE, matchState, offeredFields, unsafeQuestion } = require('../shared/laya-prompts.cjs');
-const { CHOICE_BATCH, score, scoreChoices, pick, budget, timedOut, barsFor } = require('./laya-decisions.cjs');
+const { CHOICE_BATCH, score, scoreChoices, pick, budget, timedOut, inOrder, barsFor } = require('./laya-decisions.cjs');
 
 function createFieldSuggestions({ laya, now = Date.now } = {}) {
   if (typeof laya?.decideBatch !== 'function' || typeof laya?.format !== 'function') throw new TypeError('Field suggestions need a Laya runtime.');
@@ -10,17 +10,18 @@ function createFieldSuggestions({ laya, now = Date.now } = {}) {
   // decided before the deadline; a decision that came after it is dropped, and nothing more is asked.
   const passes = {
     // noul-v1: one request per field, scoring each saved field its label names (offeredFields) and
-    // abstaining on its own. A box with none on offer (a date) isn't asked.
+    // abstaining on its own. A box with none on offer (a date) isn't asked. Every box is asked at
+    // once, each request ending when the click's time does.
     'noul-v1': async (fields, bar, more, found) => {
-      for (const field of fields) {
-        const keys = offeredFields(field);
-        if (!keys.length) continue;
-        if (!more()) return;
-        const scores = await score(laya, [...keys.map(key => matchState(field.label, key)), matchState(field.label, null)]);
-        if (!more()) return;
+      const asked = fields.map(field => ({ field, keys: offeredFields(field) })).filter(({ keys }) => keys.length);
+      const timeoutMs = more.left();
+      if (!asked.length || !more() || timeoutMs < 1) return;
+      const requests = asked.map(({ field, keys }) => score(laya, [...keys.map(key => matchState(field.label, key)), matchState(field.label, null)], { timeoutMs }));
+      await inOrder(requests, more, (index, scores) => {
+        const { field, keys } = asked[index];
         const best = pick(scores, bar);
         found(field, best >= 0 ? keys[best] : null);
-      }
+      });
     },
     // choice-v2 (#65): every field offered for the box's type in one pass, with the box's label and
     // type, CHOICE_BATCH boxes per request. A box whose type has none on offer (a date: date of

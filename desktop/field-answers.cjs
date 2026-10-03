@@ -4,7 +4,7 @@
 // the applicant before any of it reaches a website.
 const { buildFacts, factsText, SENSITIVE_SOURCES } = require('../shared/facts.cjs');
 const { ABSTAIN, CHOICE, answerState, unsafeQuestion } = require('../shared/laya-prompts.cjs');
-const { CHOICE_BATCH, score, scoreChoices, pick, budget, timedOut, barsFor } = require('./laya-decisions.cjs');
+const { CHOICE_BATCH, score, scoreChoices, pick, budget, timedOut, inOrder, barsFor } = require('./laya-decisions.cjs');
 
 function createFieldAnswers({ laya, now = Date.now, today } = {}) {
   if (typeof laya?.decideBatch !== 'function' || typeof laya?.format !== 'function') throw new TypeError('Field answers need a Laya runtime.');
@@ -14,13 +14,12 @@ function createFieldAnswers({ laya, now = Date.now, today } = {}) {
   // that came after it is dropped, and nothing more is asked.
   const passes = {
     // noul-v1: one request per question, scoring each option and "the facts don't say" on its own.
+    // Every question is asked at once, each request ending when the click's time does.
     'noul-v1': async (facts, questions, bar, more, found) => {
-      for (const question of questions) {
-        if (!more()) return;
-        const scores = await score(laya, [...question.options, ABSTAIN].map(candidate => answerState(facts, question.label, candidate)));
-        if (!more()) return;
-        found(question, optionFor(question, scores, bar));
-      }
+      const timeoutMs = more.left();
+      if (!questions.length || !more() || timeoutMs < 1) return;
+      const requests = questions.map(question => score(laya, [...question.options, ABSTAIN].map(candidate => answerState(facts, question.label, candidate)), { timeoutMs }));
+      await inOrder(requests, more, (index, scores) => found(questions[index], optionFor(questions[index], scores, bar)));
     },
     // choice-v2 (#65): every option of a question in one pass, CHOICE_BATCH questions per request.
     'choice-v2': async (facts, questions, bar, more, found) => {

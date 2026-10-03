@@ -109,20 +109,27 @@ test('Laya not ready fails loudly with its code; a timeout or the click’s budg
   const batch = slow.decideBatch;
   slow.decideBatch = async items => { if (++calls === 2) throw Object.assign(new Error('Laya took too long.'), { code: 'LAYA_TIMEOUT' }); return batch(items); };
   assert.deepEqual((await answerer(slow).answer({ questions: [question('a', 'Veteran?'), question('b', 'Veteran again?'), question('c', 'Veteran third?')], profile, budgetMs })).answers, { a: 'No' });
-  assert.equal(calls, 2);
+  assert.equal(calls, 3, 'the pass’s questions were all asked at once; nothing is asked after the timeout');
 
-  // Both passes share the click's budget: 1.1 seconds a decision.
+  // Both passes share the click's budget. Laya finishes one decision every 1.1 seconds, in the order asked.
   const timed = limit => {
     let clock = 0;
+    let previous = Promise.resolve();
     const laya = stubLaya(vet);
     const answer = laya.decideBatch;
-    laya.decideBatch = async items => { clock += 1100; return answer(items); };
+    const options = [];
+    laya.decideBatch = (items, option) => {
+      options.push(option);
+      previous = previous.then(() => new Promise(resolve => setImmediate(resolve))).then(() => { clock += 1100; return answer(items); });
+      return previous;
+    };
     const questions = Array.from({ length: 5 }, (_, index) => question(`q${index}`, `Veteran ${index}?`));
-    return { laya, run: () => createFieldAnswers({ laya, today: TODAY, now: () => clock }).answer({ questions, profile, budgetMs: limit }) };
+    return { laya, options, run: () => createFieldAnswers({ laya, today: TODAY, now: () => clock }).answer({ questions, profile, budgetMs: limit }) };
   };
   const full = timed(3000);
   assert.deepEqual((await full.run()).answers, { q0: 'No', q1: 'No' }, 'the third decision came at 3.3 seconds and is dropped');
-  assert.equal(full.laya.batches.length, 3, 'nothing is asked past the deadline');
+  assert.equal(full.laya.batches.length, 5, 'the first pass asked every question at once; the second pass, past the deadline, asked nothing');
+  assert.deepEqual(full.options, Array(5).fill({ format: 'noul-v1', timeoutMs: 3000 }), 'each request ends when the click’s time does');
   const short = timed(1500);
   assert.deepEqual((await short.run()).answers, { q0: 'No' }, 'the click had a second and a half left');
   assert.deepEqual((await timed(60000).run()).answers, { q0: 'No', q1: 'No' }, 'never more than three seconds');

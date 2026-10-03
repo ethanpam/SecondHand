@@ -82,22 +82,28 @@ test('Laya not ready fails the whole request with its code; a timeout or the thr
   const decideBatch = slow.decideBatch;
   slow.decideBatch = async items => { if (++calls === 2) throw Object.assign(new Error('Laya took too long.'), { code: 'LAYA_TIMEOUT' }); return decideBatch(items); };
   assert.deepEqual(await createFieldSuggestions({ laya: slow }).suggest([field('a', 'Email'), field('b', 'Email again'), field('c', 'Third email')], BUDGET), { a: 'email' });
-  assert.equal(calls, 2, 'nothing more is asked after a timeout');
+  assert.equal(calls, 3, 'every box was asked at once; a timeout keeps what came before it');
 
-  // A decision that finishes after the deadline is dropped, and nothing more is asked.
+  // A decision that finishes after the deadline is dropped. Laya finishes one box every `step` ms, in the order asked.
   const timed = (step, budgetMs) => {
     let clock = 0;
+    let previous = Promise.resolve();
     const laya = stubLaya((question, candidate) => candidate === saved('email') ? 0.99 : 0.01);
     const answer = laya.decideBatch;
-    laya.decideBatch = async items => { clock += step; return answer(items); };
-    return { laya, run: () => createFieldSuggestions({ laya, now: () => clock }).suggest([field('a', 'Email'), field('b', 'Email'), field('c', 'Email')], { budgetMs }) };
+    const options = [];
+    laya.decideBatch = (items, option) => {
+      options.push(option);
+      previous = previous.then(() => new Promise(resolve => setImmediate(resolve))).then(() => { clock += step; return answer(items); });
+      return previous;
+    };
+    return { laya, options, run: () => createFieldSuggestions({ laya, now: () => clock }).suggest([field('a', 'Email'), field('b', 'Email'), field('c', 'Email')], { budgetMs }) };
   };
   const full = timed(1600, 3000);
   assert.deepEqual(await full.run(), { a: 'email' }, 'the second field’s decision came at 3.2 seconds');
-  assert.equal(full.laya.batches.length, 2);
+  assert.deepEqual(full.options, Array(3).fill({ format: 'noul-v1', timeoutMs: 3000 }), 'every box is asked at once, each ending when the click’s time does');
   const short = timed(400, 1000);
   assert.deepEqual(await short.run(), { a: 'email', b: 'email' }, 'the click had only one second left');
-  assert.equal(short.laya.batches.length, 3);
+  assert.deepEqual(short.options.map(option => option.timeoutMs), [1000, 1000, 1000]);
   const capped = timed(1400, 9000);
   assert.deepEqual(await capped.run(), { a: 'email', b: 'email' }, 'never more than three seconds');
   for (const budgetMs of [0, -1, 1.5, '3000', undefined]) {

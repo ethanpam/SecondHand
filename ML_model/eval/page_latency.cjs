@@ -8,10 +8,11 @@
 // and whether every question was decided within the click's 3-second budget.
 //
 //   node ML_model/eval/page_latency.cjs --model <export folder> --format <format> --form <form url> \
-//     [--questions 20] [--runs 30] [--out <report.json>]
+//     [--questions 20] [--runs 30] [--sessions N --threads T] [--out <report.json>]
+// Without --sessions, the model process runs the sessions the app would run on this computer (sessionPlan).
 const fs = require('node:fs');
 const os = require('node:os');
-const { createLaya } = require('../../desktop/laya.cjs');
+const { createLaya, processRunner, sessionPlan } = require('../../desktop/laya.cjs');
 const { createFieldAnswers } = require('../../desktop/field-answers.cjs');
 const { createFieldSuggestions } = require('../../desktop/field-suggestions.cjs');
 const { BUDGET_MS } = require('../../desktop/laya-decisions.cjs');
@@ -47,11 +48,12 @@ function passesNeeded(format, { choices, boxes }, profile, { answers, sensitive 
 
 async function main() {
   const modelDir = arg('model'), format = arg('format'), url = arg('form');
-  if (!modelDir || !format || !url) throw new Error('Usage: node ML_model/eval/page_latency.cjs --model <export folder> --format <format> --form <form url> [--questions 20] [--runs 30] [--out <report.json>]');
+  if (!modelDir || !format || !url) throw new Error('Usage: node ML_model/eval/page_latency.cjs --model <export folder> --format <format> --form <form url> [--questions 20] [--runs 30] [--sessions N --threads T] [--out <report.json>]');
   const count = Number(arg('questions', '20')), runs = Number(arg('runs', '30'));
   const questions = page(url, count);
   const [profile] = generateHouseholds({ count: 400, seed: 11, today: TODAY });
-  const laya = createLaya({ modelDir, modelFormat: format, manifest: { version: 1, model: null }, enabled: true, timeoutMs: BUDGET_MS });
+  const plan = arg('sessions') ? { sessions: Number(arg('sessions')), threads: arg('threads') ? Number(arg('threads')) : undefined } : sessionPlan();
+  const laya = createLaya({ modelDir, modelFormat: format, manifest: { version: 1, model: null }, runner: processRunner(plan), enabled: true, timeoutMs: BUDGET_MS });
   // Counts the question passes the model finished: a noul-v1 request is one question, a choice-v2 request one per item.
   let passes = 0;
   const counted = { ...laya, decideBatch: async (items, options) => {
@@ -83,7 +85,8 @@ async function main() {
   const times = timed.map(run => run.ms);
   const report = {
     machine: `${os.cpus()[0].model}, ${os.cpus().length} cores`, platform: `${os.platform()} ${os.release()}`, node: process.version,
-    model: modelDir, format, form: url, household: 0, questions: count, choiceQuestions: questions.choices.length, textBoxes: questions.boxes.length,
+    model: modelDir, format, sessions: plan.sessions, threadsPerSession: plan.threads ?? 'onnxruntime default',
+    form: url, household: 0, questions: count, choiceQuestions: questions.choices.length, textBoxes: questions.boxes.length,
     budgetMs: BUDGET_MS, loadMs: Math.round(loadMs), firstPage: first,
     p50Ms: percentile(times, 0.5), p95Ms: percentile(times, 0.95), minMs: Math.min(...times), maxMs: Math.max(...times),
     load1mRange: [Math.min(...timed.map(run => run.load1m)), Math.max(...timed.map(run => run.load1m))],
