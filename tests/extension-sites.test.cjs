@@ -9,6 +9,7 @@ const { JSDOM } = require('jsdom');
 const adapter = require('../extension/iowa-adapter.js');
 const strings = require('../extension/strings.js');
 const forms = require('./fixtures/pantry-forms.cjs');
+const translation = require('../extension/translation.js');
 
 // Values created inside the worker's vm context have foreign prototypes.
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -63,7 +64,7 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
         else unmatched.push({ id, label: field.label, type: field.type, options: field.options || [], required: field.required === true });
       });
       current = { token: `${tokenPrefix}-${sequence}`, ids };
-      return { token: current.token, matched, unmatched };
+      return { token: current.token, lang, matched, unmatched };
     },
     fill({ token, assignments, values }) {
       if (token !== current?.token) return { ok: false, filled: [], skipped: [] };
@@ -93,7 +94,7 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
   };
 }
 
-function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSites = false, allGranted = allSites, desktop = {}, fields = pantryFields(), next, duringGetFields, duringStatus, frames = [], plan, keepAccess = false, discoveryError = false, topError, framesReply, pageText = { lang: 'en', text: '' }, clock, openTabs } = {}) {
+function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSites = false, allGranted = allSites, desktop = {}, fields = pantryFields(), next, duringGetFields, duringStatus, frames = [], plan, keepAccess = false, discoveryError = false, topError, framesReply, pageText = { lang: 'en', text: '' }, clock, openTabs, lang = 'en', ai = {} } = {}) {
   const tab = { id: 7, active: true, url };
   const log = [], native = [], content = [], injected = [], opened = [];
   const permissions = new Set([...(granted ? [`${ORIGIN}/*`] : []), ...(allGranted ? [ALL] : [])]);
@@ -104,7 +105,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
     if (frame.granted || frame.enabled) permissions.add(`${frame.origin}/*`);
     if (frame.enabled) { const id = `frame-pantry.example.org--${new URL(frame.origin).hostname}`; registered.set(id, { ...SITE_SCRIPT, id, matches: [`${frame.origin}/*`] }); }
   }
-  const page = sitePage(fields, { next });
+  const page = sitePage(fields, { next, lang });
   for (const frame of frames) frame.page = sitePage(frame.fields || pantryFields(), { next: frame.next, tokenPrefix: `frame${frame.frameId}`, lang: frame.lang });
   const tallies = [];
   let statusChecks = 0;
@@ -234,10 +235,11 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
       }
     }
   };
-  // A test may run the worker's clock itself: `clock.now` is what Date.now() returns.
+  // A test may run the worker's clock itself: `clock.now` is what Date.now() returns. `ai` holds the
+  // stand-ins for Chrome's Translator and LanguageDetector a test gives the worker; by default it has neither.
   vm.runInNewContext(source('background.js'),
-    { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console,
-      ...(clock ? { Date: { now: () => clock.now } } : {}) });
+    { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, SecondHandTranslation: translation, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console,
+      ...ai, ...(clock ? { Date: { now: () => clock.now } } : {}) });
   const send = (message, sender) => new Promise(resolve => { if (!listener(message, sender, resolve)) resolve(undefined); });
   // Whether Chrome lets SecondHand read this address.
   function covered(address) {
@@ -255,12 +257,14 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
 const autofill = w => w.panel({ type: 'ui:autofill', confirmed: true });
 const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(resolve => setImmediate(resolve)); };
 
-test('the worker loads the site engine and its text next to the Iowa adapter and refuses to start without either', () => {
+test('the worker loads the site engine, its text, and its translator next to the Iowa adapter and refuses to start without any of them', () => {
   const imported = [];
   const chrome = { runtime: { onMessage: { addListener: () => {} } }, tabs: {}, sidePanel: { setPanelBehavior: async () => {} } };
   assert.throws(() => vm.runInNewContext(source('background.js'), { chrome, SecondHandIowa: adapter, importScripts: (...files) => imported.push(...files), crypto: webcrypto, URL, Map, Set }), /generic-adapter\.js/);
-  assert.deepEqual(imported, ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'strings.js']);
+  assert.deepEqual(imported, ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'strings.js', 'translation.js']);
   assert.throws(() => vm.runInNewContext(source('background.js'), { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }), /strings\.js/);
+  assert.throws(() => vm.runInNewContext(source('background.js'), { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }),
+    /translation\.js/, 'a worker that can’t translate questions for Laya doesn’t start');
   const { layaQuestion: _, ...older } = generic;
   assert.throws(() => vm.runInNewContext(source('background.js'), { chrome, SecondHandIowa: adapter, SecondHandGeneric: older, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }),
     /generic-adapter\.js/, 'an engine without Laya’s question rule is refused');
@@ -752,7 +756,7 @@ test('on approved sites the widget is a closed, full-size extension iframe in th
 test('site plans and fills answer with field metadata only, never values or elements', async t => {
   const page = siteContent(t);
   const plan = page.request({ type: 'secondhand:generic:plan' });
-  assert.deepEqual(plain(plan), { token: 'plan-1', matched: [{ id: 'sh-1', key: 'fullName', confidence: 'high' }],
+  assert.deepEqual(plain(plan), { token: 'plan-1', lang: '', matched: [{ id: 'sh-1', key: 'fullName', confidence: 'high' }],
     unmatched: [{ id: 'sh-2', label: 'Pickup day', type: 'select-one', options: ['Monday'], required: true }] });
   const filled = await page.requestAsync({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [{ id: 'sh-1', key: 'fullName', guessed: false }], values: { fullName: 'Synthetic private name' } });
   assert.deepEqual(plain(filled), { ok: true, filled: ['sh-1'], skipped: [], rejected: ['sh-2'] }, 'answers the page refused come back');
@@ -762,6 +766,8 @@ test('site plans and fills answer with field metadata only, never values or elem
   assert.deepEqual(plain(page.request({ type: 'secondhand:generic:focus', id: 'sh-2' })), { focused: true });
   assert.equal(page.window.document.activeElement.id, 'day');
   assert.deepEqual(plain(page.request({ type: 'secondhand:generic:focus', id: 'sh-9' })), { focused: false });
+  page.window.document.documentElement.lang = 'es-MX';
+  assert.equal(page.request({ type: 'secondhand:generic:plan' }).lang, 'es-MX', 'the language the frame declares, for reading its questions to Laya');
 });
 
 test('a fill answers only after the engine settles choices the page confirms a moment later', async t => {
@@ -873,7 +879,7 @@ test('rejected ids are need-you even when also reported filled', async () => {
   assert.ok(result.needYou.includes(`f4:${child.page.idOf('zip')}`));
 });
 test('pending embedded forms explain the second approval step', async () => {
-  const w = siteWorker({ enabled: true, plan: { token: 'empty', matched: [], unmatched: [] }, frames: [secondFrame()] });
+  const w = siteWorker({ enabled: true, plan: { token: 'empty', lang: 'en', matched: [], unmatched: [] }, frames: [secondFrame()] });
   const result = (await autofill(w)).data;
   assert.equal(result.message, 'This form is inside form.jotform.com. Click “Also turn on the embedded form” in the SecondHand side panel.');
   assert.equal(w.content.some(call => call.frameId === 4), false);
@@ -995,7 +1001,7 @@ test('a fill the page interrupted by changing asks for Autofill again, on the pa
 });
 
 test('a pending form explains approval before attempting all-frame script execution', async () => {
-  const w = siteWorker({ enabled: true, plan: { token: 'empty', matched: [], unmatched: [] }, frames: [secondFrame()], discoveryError: true });
+  const w = siteWorker({ enabled: true, plan: { token: 'empty', lang: 'en', matched: [], unmatched: [] }, frames: [secondFrame()], discoveryError: true });
   const result = (await autofill(w)).data;
   assert.match(result.message, /Click “Also turn on the embedded form”/);
   assert.deepEqual(w.injected, []);
@@ -1800,4 +1806,97 @@ test('when SecondHand is turned off for the page, its card goes and the page ans
   await wait(CHECK_WAIT);
   assert.equal(page.host(), null, 'nothing brings it back');
   assert.deepEqual(page.calls, []);
+});
+
+// Laya reads English (#84): a Spanish form's questions reach it translated by Chrome on this computer.
+const en = (key, params) => strings.english(key, params);
+const SPANISH = new Map([['¿Hay alguien en su hogar de 60 años o más?', 'Is anyone in your household 60 or older?'], ['Sí', 'Yes'], ['No', 'No'],
+  ['¿Dónde podemos contactarle?', 'Where can we reach you?'], ['Número de Seguro Social', 'Social Security number'],
+  [`Describa ${'muy '.repeat(40)}brevemente su hogar`, `Describe ${'very '.repeat(40)}briefly your household, please`]]);
+// Chrome's Translator and LanguageDetector in the worker, as a test table. Every call is recorded.
+function workerAI({ translator = 'available', detected = null } = {}) {
+  const calls = { availability: [], create: [], translate: [] };
+  const ai = { Translator: {
+    async availability(options) { calls.availability.push(plain(options)); return translator; },
+    async create(options) {
+      calls.create.push({ sourceLanguage: options.sourceLanguage, targetLanguage: options.targetLanguage });
+      return { async translate(text) { calls.translate.push(text); if (!SPANISH.has(text)) throw new Error(`Synthetic table has no ${text}`); return SPANISH.get(text); } };
+    } } };
+  if (detected) ai.LanguageDetector = { availability: async () => 'available', create: async () => ({ detect: async () => detected }) };
+  return { ai, calls };
+}
+const SIXTY_ES = { name: 'sixty', label: '¿Hay alguien en su hogar de 60 años o más?', type: 'radio', options: ['Sí', 'No'], required: true };
+
+test('Laya gets a Spanish form’s question in English, and its answer fills the page’s own option, found by position', async () => {
+  let asked;
+  const { ai, calls } = workerAI();
+  const w = siteWorker({ enabled: true, lang: 'es', ai, fields: [{ name: 'name', key: 'fullName' }, { ...SIXTY_ES }], desktop: layaDesktop({
+    answerFields: (request, vault) => { asked = request.questions; return { answers: { [request.questions[0].id]: 'Yes' }, accessRevision: vault.accessRevision }; } }) });
+  const result = plain((await autofill(w)).data);
+  assert.deepEqual(asked, [{ id: asked[0].id, label: 'Is anyone in your household 60 or older?', type: 'radio', options: ['Yes', 'No'] }]);
+  assert.deepEqual(w.content.find(call => call.type === 'secondhand:generic:fill').assignments,
+    [{ id: 'sh-1-0', key: 'fullName', guessed: false }, { id: 'sh-1-1', option: 'Sí', guessed: true }], 'the page’s own option, at the position Laya chose');
+  assert.deepEqual(w.page.answered(), ['name', 'sixty']);
+  assert.deepEqual([result.filled, result.guessed, result.laya, result.needYou], [2, 1, 1, []]);
+  // Only the page's question words went to Chrome's translator, before any saved value was read.
+  assert.deepEqual(calls.availability, [{ sourceLanguage: 'es', targetLanguage: 'en' }]);
+  assert.deepEqual(calls.translate.sort(), ['¿Hay alguien en su hogar de 60 años o más?', 'Sí', 'No'].sort());
+  assert.deepEqual(w.nativeTypes(), ['warmLaya', 'answerFields', 'status', 'getFields', 'status']);
+});
+
+test('a Spanish question Chrome can’t translate yet stays under need you, Laya is asked nothing, and the result says why', async () => {
+  const { ai, calls } = workerAI({ translator: 'downloadable' });
+  const w = siteWorker({ enabled: true, lang: 'es', ai, fields: [{ name: 'name', key: 'fullName' }, { ...SIXTY_ES }], desktop: layaDesktop() });
+  const result = plain((await autofill(w)).data);
+  assert.deepEqual(layaCalls(w), []);
+  assert.deepEqual(calls.create, [], 'nothing is downloaded without the applicant asking');
+  assert.deepEqual([result.filled, result.guessed, result.needYou], [1, 0, [idOf(w, 'sixty')]]);
+  assert.equal(result.message, `${en('result.siteFilledNeedYou', { count: 1, needYou: 1 })} ${en('translate.layaNeedsDownload')}`);
+  assert.deepEqual([result.messageKey, plain(result.messageParams.reason)], ['result.withReason', { key: 'translate.layaNeedsDownload', params: {} }]);
+});
+
+test('Spanish words with no detector and no declared language never reach Laya as if they were English', async () => {
+  const { ai, calls } = workerAI();
+  const w = siteWorker({ enabled: true, lang: '', ai, fields: [{ ...SIXTY_ES }, { name: 'reach', label: '¿Dónde podemos contactarle?', type: 'email' }], desktop: layaDesktop() });
+  const result = plain((await autofill(w)).data);
+  assert.deepEqual(layaCalls(w), [], 'Laya gets nothing');
+  assert.deepEqual([calls.availability, calls.translate], [[], []]);
+  assert.deepEqual(result.needYou.sort(), [idOf(w, 'sixty'), idOf(w, 'reach')].sort());
+  assert.equal(result.message, `${en('result.nothingMatchesNeedYou', { count: 2 })} ${en('translate.layaUnknownLanguage')}`);
+});
+
+test('English pages make no translator calls, and a detector reading Spanish under an English declaration translates', async () => {
+  const english = workerAI({ detected: [{ detectedLanguage: 'en', confidence: 0.98 }] });
+  let asked;
+  const w = siteWorker({ enabled: true, ai: english.ai, fields: [{ name: 'name', key: 'fullName' }, { name: 'sixty', label: 'Is anyone in your household 60 or older?', type: 'radio', options: ['Yes', 'No'] }],
+    desktop: layaDesktop({ answerFields: (request, vault) => { asked = request.questions; return { answers: { [request.questions[0].id]: 'No' }, accessRevision: vault.accessRevision }; } }) });
+  assert.equal(plain((await autofill(w)).data).laya, 1);
+  assert.deepEqual(asked.map(({ label, options }) => ({ label, options })), [{ label: 'Is anyone in your household 60 or older?', options: ['Yes', 'No'] }]);
+  assert.deepEqual(english.calls, { availability: [], create: [], translate: [] });
+
+  const templated = workerAI({ detected: [{ detectedLanguage: 'es', confidence: 0.93 }] });
+  const t = siteWorker({ enabled: true, lang: 'en', ai: templated.ai, fields: [{ ...SIXTY_ES }], desktop: layaDesktop({
+    answerFields: (request, vault) => { asked = request.questions; return { answers: {}, accessRevision: vault.accessRevision }; } }) });
+  await autofill(t);
+  assert.deepEqual(asked.map(question => question.options), [['Yes', 'No']]);
+});
+
+test('a translated question meets Laya’s question rule as a written one does: an SSN question, or one too long in English, stays with the applicant', async () => {
+  const { ai } = workerAI();
+  const long = `Describa ${'muy '.repeat(40)}brevemente su hogar`;
+  assert.ok(long.length <= 200 && SPANISH.get(long).length > 200, 'fits in Spanish, not in English');
+  const w = siteWorker({ enabled: true, lang: 'es', ai, fields: [{ ...SIXTY_ES }, { name: 'ssn', label: 'Número de Seguro Social', type: 'text' }, { name: 'about', label: long, type: 'text' }],
+    desktop: layaDesktop({ answerFields: (request, vault) => ({ answers: {}, accessRevision: vault.accessRevision }) }) });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.state, 'done');
+  assert.deepEqual(layaCalls(w).map(call => call.type), ['answerFields'], 'no text box is sent to Laya');
+  assert.deepEqual(layaCalls(w)[0].questions.map(question => question.label), ['Is anyone in your household 60 or older?']);
+  assert.equal(result.message, en('result.nothingMatchesNeedYou', { count: 3 }), 'like a written question of the same kind, with no translation reason');
+});
+
+test('a frame’s plan must say which language it declares', async () => {
+  const w = siteWorker({ enabled: true, plan: { token: 'plan-1', matched: [], unmatched: [] } });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.state, 'error');
+  assert.equal(result.messageKey, 'worker.frameUnsafe');
 });

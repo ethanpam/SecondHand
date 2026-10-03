@@ -6,6 +6,8 @@
 // pantry origin as a host permission (same key, so the same extension ID), so no Chrome prompt is
 // needed; the site is then turned on through the worker's own enableSite path. All fixtures and
 // profile data are synthetic, DNS is disabled, and nothing is ever submitted.
+// A Spanish form (#84) goes through Chrome's own Translator and LanguageDetector in the worker, as this
+// Chromium has them: translated for Laya when Chrome has the Spanish model, else kept from Laya with the reason.
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -19,12 +21,14 @@ const root = path.join(__dirname, '..');
 const ORIGIN = 'https://pantry.example.org';
 const CONTACT = `${ORIGIN}/intake/contact`;
 const HOUSEHOLD = `${ORIGIN}/intake/household`;
+const SPANISH = `${ORIGIN}/intake/es`;
 const en = (key, params) => strings.text('en', key, params);
 
-const radios = (name, question) => `<fieldset><legend>${question}</legend><label><input type="radio" name="${name}" value="yes">Yes</label>` +
-  `<label><input type="radio" name="${name}" value="no">No</label></fieldset>`;
-function pantryPage(title, questions) {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title} · synthetic test only</title>
+const radios = (name, question, [yes, no] = ['Yes', 'No']) => `<fieldset><legend>${question}</legend><label><input type="radio" name="${name}" value="yes">${yes}</label>` +
+  `<label><input type="radio" name="${name}" value="no">${no}</label></fieldset>`;
+const SIXTY_ES = '¿Hay alguien en su hogar de 60 años o más?';
+function pantryPage(title, questions, lang = 'en') {
+  return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><title>${title} · synthetic test only</title>
     <style>body{font:16px system-ui;background:#f7f8f2;color:#294035;margin:0;padding:30px}main{max-width:640px}label{display:block;margin:12px 0 4px}
     input:not([type=radio]){display:block;width:300px;height:32px}fieldset{border:1px solid #ced7c5;margin:16px 0;padding:12px}fieldset label{display:inline-block;margin-right:12px}</style></head>
     <body><main><p>SYNTHETIC PANTRY FIXTURE. No real organization or applicant data.</p><h1>${title}</h1>
@@ -33,7 +37,8 @@ function pantryPage(title, questions) {
 }
 const pages = {
   [CONTACT]: pantryPage('Pantry intake: contact', '<label for="name">Full name</label><input id="name" name="name"><label for="reach">Where can we reach you?</label><input id="reach" name="reach" type="email">'),
-  [HOUSEHOLD]: pantryPage('Pantry intake: household', `<label for="name">Full name</label><input id="name" name="name">${radios('sixty', 'Is anyone in your household 60 or older?')}${radios('pet', 'Do you have a pet?')}`)
+  [HOUSEHOLD]: pantryPage('Pantry intake: household', `<label for="name">Full name</label><input id="name" name="name">${radios('sixty', 'Is anyone in your household 60 or older?')}${radios('pet', 'Do you have a pet?')}`),
+  [SPANISH]: pantryPage('Registro de la despensa', `<label for="name">Nombre completo</label><input id="name" name="name" autocomplete="name">${radios('sixty', SIXTY_ES, ['Sí', 'No'])}`, 'es')
 };
 
 // The desktop app with Laya, as the worker sees it over native messaging, with Always allow on. Laya's
@@ -56,7 +61,7 @@ async function installDesktop(worker, profile) {
         if (desktop.laya !== 'ready') throw Object.assign(new Error('Laya isn’t ready on this computer.'), { code: 'LAYA_NOT_READY' });
         if (type === 'suggestFields') return { suggestions: Object.fromEntries(payload.fields.filter(field => /reach you/i.test(field.label) && field.type === 'email').map(field => [field.id, 'email'])) };
         const noSeniors = desktop.profile.householdSize === '1' && desktop.profile.householdSeniors === '0';
-        return { accessRevision: 0, answers: Object.fromEntries(payload.questions.filter(question => /60 or older/.test(question.label) && noSeniors && question.options.includes('No')).map(question => [question.id, 'No'])) };
+        return { accessRevision: 0, answers: Object.fromEntries(payload.questions.filter(question => /\b60 (years )?or older/i.test(question.label) && noSeniors && question.options.includes('No')).map(question => [question.id, 'No'])) };
       }
       throw new Error(`Unexpected native request in the Laya smoke: ${type}`);
     };
@@ -163,6 +168,35 @@ async function main() {
       for (const value of savedValues) assert.equal(JSON.stringify(call).includes(value), false, `${call.type} carried a saved value`);
     }
 
+    // #84: a Spanish form. Laya reads English, so the worker reads the question with Chrome's own LanguageDetector and
+    // Translator, here in this Chromium's service worker, before Laya sees it. What they report decides the path.
+    const chromeAI = await worker.evaluate(async () => ({
+      translator: typeof Translator === 'undefined' ? 'missing' : await Translator.availability({ sourceLanguage: 'es', targetLanguage: 'en' }),
+      detector: typeof LanguageDetector === 'undefined' ? 'missing' : await LanguageDetector.availability()
+    }));
+    console.log(`#84: in this Chromium's worker, Chrome's Translator (Spanish to English) is ${chromeAI.translator} and its LanguageDetector is ${chromeAI.detector}.`);
+    widget = await open(SPANISH, 'ready');
+    await widget.locator('#autofill').click();
+    await expect(page.locator('#name')).toHaveValue(`${syntheticProfile.firstName} ${syntheticProfile.lastName}`, { timeout: 20000 });
+    const spanishLaya = await layaRequests();
+    assert.equal(JSON.stringify(spanishLaya).includes('años'), false, 'Laya never gets the Spanish words as if they were English');
+    let spanishLine = null;
+    if (chromeAI.translator === 'available') {
+      await expect(page.locator('input[name="sixty"][value="no"]')).toBeChecked({ timeout: 20000 });
+      assert.equal(await mark('input[name="sixty"][value="no"]'), 'guess');
+      const asked = spanishLaya.find(call => call.type === 'answerFields').questions;
+      assert.deepEqual(asked.map(question => question.options), [['Yes', 'No']]);
+      console.log(`#84: Chrome translated the question on this computer to "${asked[0].label}", and Laya's "No" checked the page's own "No".`);
+    } else {
+      const reason = chromeAI.translator === 'missing' || chromeAI.translator === 'unavailable' ? 'translate.layaCantTranslate' : 'translate.layaNeedsDownload';
+      const line = spanishLine = en('result.withReason', { summary: { key: 'result.siteFilledNeedYou', params: { count: 1, needYou: 1 } }, reason: { key: reason, params: {} } });
+      await expect(widget.locator('#widget-text')).toHaveAttribute('title', line, { timeout: 20000 });
+      await expect(widget.locator('#need-you')).toHaveText(en('widget.needYou', { count: 1 }));
+      assert.equal(await page.locator('input[name="sixty"]:checked').count(), 0);
+      assert.deepEqual(spanishLaya, [], 'Laya is asked nothing it can’t read');
+      console.log(`#84: Chrome can't translate Spanish here (${chromeAI.translator}), so the question stays under need you and the result says why: "${line}"`);
+    }
+
     // Laya not ready: exactly today's click. Rules only (Chrome's AI isn't available in headless Chromium), and Laya is asked nothing.
     widget = await open(CONTACT, 'off');
     await widget.locator('#autofill').click();
@@ -193,6 +227,15 @@ async function main() {
     await expect.poll(() => panel.text('#laya-status'), { timeout: 15000 }).toBe(en('desktop.layaReady'));
     assert.deepEqual((await layaRequests()).map(call => call.type), ['answerFields']);
     console.log(`Side panel Autofill with Laya ready: "${await panel.text('#status')}" and "${en('desktop.layaReady')}"`);
+
+    // The side panel says why the Spanish question stayed with the applicant.
+    if (spanishLine) {
+      await page.goto(SPANISH, { waitUntil: 'domcontentloaded' });
+      await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+      await panel.click('#panel-autofill');
+      await expect.poll(() => panel.text('#status'), { timeout: 15000 }).toBe(spanishLine);
+      console.log(`#84: the side panel's Autofill on the Spanish form says: "${await panel.text('#status')}"`);
+    }
 
     assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing was submitted');
     const outside = requests.filter(url => !url.startsWith(`chrome-extension://${extensionId}/`) && !Object.hasOwn(pages, url) && url !== 'about:blank');
