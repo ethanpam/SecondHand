@@ -41,6 +41,6 @@ The runtime comparison for #37 is in `docs/superpowers/specs/2026-09-27-laya-run
 
 ```
 SECONDHAND_LAYA_NOUL_MODEL_DIR=<LayaStudio>/workspace/exports/round2-lora-proper-1790530553-onnx-int8 \
-SECONDHAND_LAYA_CHOICE_MODEL_DIR=<the choice-v2 export the fixture names> \
+SECONDHAND_LAYA_CHOICE_MODEL_DIR=<LayaStudio>/workspace/exports/round4-lora-proper-1790727905-onnx-int8 \
   node --test tests/laya-parity.test.cjs
 ```

@@ -10,7 +10,7 @@ SecondHand's local decision model: [Laya](https://huggingface.co/convaiinnovatio
 | Dataset | `round2-1790530494`, SHA-256 `1064fcfe…` | `round3-1790708973`, SHA-256 `08e5410f…` | `round4-1790727902`, SHA-256 `6b5b9279…` |
 | Status | Published; the desktop app ships pinned to it | Retired: never published, and the app no longer runs `choice-v1` | Exported, not published: below round 2 on the final holdout |
 
-Both are fine-tuned from `aac6fef/laya-mlx` (revision `20aed815…`) with LayaStudio on an Apple M4 Max. The desktop app asks a model in its own format (`MODEL_FORMATS` in `desktop/laya-model.cjs`), with that format's prompts in `shared/laya-prompts.cjs` and its confidence bars in `desktop/laya-decisions.cjs`. A question is answered only when its best candidate clears the bar and beats "None of these, or the facts don't say" (text boxes: "None of these").
+All three are fine-tuned from `aac6fef/laya-mlx` (revision `20aed815…`) with LayaStudio on an Apple M4 Max. The desktop app asks a model in its own format (`MODEL_FORMATS` in `desktop/laya-model.cjs`), with that format's prompts in `shared/laya-prompts.cjs` and its confidence bars in `desktop/laya-decisions.cjs`. A question is answered only when its best candidate clears the bar and beats "None of these, or the facts don't say" (text boxes: "None of these").
 
 ### Round 2 (`noul-v1`, published)
 Every candidate is asked the same question: "Given the facts about the household, is the candidate the correct answer to the form question?"
@@ -34,7 +34,7 @@ The int8 ONNX export (409 MB) is published at [huggingface.co/JacobTDang/secondh
   - Text boxes are offered every field AI may suggest; number boxes the counts, costs, phone and ZIP; email and phone boxes their one field.
   - A date box is never asked, since date of birth is never offered.
 
-The int8 ONNX export is 425.1 MB of graph and weights (428.7 MB for the folder), at `<LayaStudio>/workspace/exports/round3-lora-proper-1790708976-onnx-int8`. It was exported with `uv run --project ~/Projects/LayaStudio python ML_model/train/export.py --run round3-lora-proper-1790708976 --precision int8`.
+The int8 ONNX export was 425.1 MB of graph and weights (428.7 MB for the folder). That local copy is not kept. Use the round 2 or round 4 export in [Local workspace](#local-workspace).
 - The exporter checked one question of each task and option-count bucket against the trained model, 80 decisions in all. All gave the same answer, with probabilities within 0.014.
 - The desktop runtime gave the same probabilities as Python's onnxruntime on 50 `choice-v1` decisions, to 3e-16. Round 4's `choice-v2` fixture has since replaced that one.
 
@@ -62,6 +62,12 @@ The int8 ONNX export is 425.1 MB of graph and weights (428.7 MB for the folder),
 | `tokenizer/tokenizer_config.json` | 308 | `50044de60daaa73df97d262e15a40d4faf0160e7d742df64b377877a1320dd12` |
 | `rl_agent_config.json` | 977 | `01e49ea92e388f7f9e63b306476ed69c92dbcbe386efe36b5f53fc95bea13aa6` |
 
+### Local workspace
+Kept files are under `~/Projects/LayaStudio/workspace`:
+- Exports: `exports/round2-lora-proper-1790530553-onnx-int8` (shipped `noul-v1`) and `exports/round4-lora-proper-1790727905-onnx-int8` (`choice-v2`, not published).
+- Runs: `runs/round2-lora-proper-1790530553` and `runs/round4-lora-proper-1790727905`.
+- Datasets: `datasets/round2-1790530494-1064fcfe` and `datasets/round4-1790727902-6b5b9279`.
+
 ## Data
 Public form questions only. Households are fictional and generated in code; no real person's data is used.
 
@@ -75,7 +81,7 @@ Public form questions only. Households are fictional and generated in code; no r
 
 - Every label is computed by code from the question's answer rule and the facts sheet (`shared/facts.cjs`). No label is written by hand.
 - Tests keep every held-out and test form out of training and validation (`tests/ml-dataset-choice.test.cjs`), and keep synthetic questions from repeating a test or held-out label (`tests/ml-question-bank.test.cjs`).
-- Both rounds use the same question bank, households, decisions and splits (`node ML_model/dataset/build.cjs --format <format> --today 2026-09-26 --households 2000 --seed 7 --per-question 24`). Round 3 adds training-only matching rows that offer fixed groups of fields, so the model learns to answer "None of these" when a box's field isn't on offer.
+- The three rounds use the same question bank, households, decisions and splits (`node ML_model/dataset/build.cjs --format <format> --today 2026-09-26 --households 2000 --seed 7 --per-question 24`). Round 3 adds training-only matching rows that offer fixed groups of fields, so the model learns to answer "None of these" when a box's field isn't on offer.
 - Round 4 adds 126 training-only rewordings, each tag reviewed, in four files:
   - `coverage-vs-applying.json` (34): coverage and benefits held now, which the facts never settle, next to programs applied for;
   - `applicant-vs-household.json` (36): the applicant alone, the whole household, or one other member (veteran, disability, citizen, age);
@@ -234,7 +240,7 @@ Fifteen real forms (394 questions) collected after round 3, re-checked against t
 
 **"Facts don't say" fills.** Round 4 int8 filled 30 of the 1,173 questions the key marks "facts don't say": 13 are proved right and 17 are wrong (1.4%). Round 2 filled 15: 10 right and 5 wrong (0.4%).
 
-**Summary.** On forms neither round was tuned on, round 4 answers less precisely than round 2 (0.785 against 0.931) and matches far fewer boxes (20% against 73%), though more precisely (0.941 against 0.868). Its errors are confident answers to yes/no questions about property, income sources and other members that its facts don't settle. Both rounds now decide a 20-question page within the 3-second budget: round 4 in 1.6 s, and round 2 in 2.7 s since #65's speed work (see Speed).
+**Summary.** On forms neither round was tuned on, round 4 answers less precisely than round 2 (0.785 against 0.931) and matches far fewer boxes (20% against 73%), though more precisely (0.941 against 0.868). Its errors are confident answers to yes/no questions about property, income sources and other members that its facts don't settle. Both rounds now decide a 20-question page within the 3-second budget: round 4 in 1.6 s, and round 2 in 2.7 s since #81's speed work (see Speed).
 
 ### Round 3 on the test split (every test form, including the held-out ones: 2,016 decisions, 151 boxes)
 Round 3, ONNX int8:
@@ -263,7 +269,7 @@ One 20-question page through the desktop's own request code (`ML_model/eval/page
 - A round-2 page is now 15 question passes: 2 choice questions with facts that need no permission, the same 2 again with every fact, and 11 text boxes. "New Client:", "Existing Client:" and "Is this your first time receiving food this year?" name nothing the facts cover, so they aren't asked. "Type of ID" and the signature box never reach Laya, and the two date boxes aren't asked.
 - A round-3 or round-4 page is 21 question passes: the 5 open choice questions without sensitive facts, the same 5 again with every fact (none was answered in the first pass), and 11 text boxes.
 
-### Where round 2's time went, and what changed (#65)
+### Where round 2's time went, and what changed (#81)
 Before, a 20-question page was 304 rows of about 91 tokens (61 to 281) through the model: each of 13 text boxes asked about all 19 saved fields and abstaining (260 rows), and each of the 5 choice questions asked about each option and abstaining, twice (44 rows, with the facts sheet).
 - **Profile.** Nearly all the time is onnxruntime running the model. Tokenizing all 304 rows takes 11 ms and padding them into batches 1 ms; the model process's messages and the awaits between requests are negligible.
   - In a run, the int8 matrix products (`DynamicQuantizeMatMul`) take 55–60% of the time, layer norms 8%, and transposes, `Where`, splits and other small operators the rest.
