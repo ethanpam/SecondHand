@@ -28,6 +28,8 @@ async function desktop(options = {}) {
   const prompts = [];
   const notifications = [];
   const powerEvents = new Map();
+  const opened = [];
+  let registrations = 0;
   class Vault {
     constructor() { this.unlocked = true; this.data = { profile: { firstName: 'Synthetic', lastName: '' }, applications: [] }; }
     async exists() { return true; }
@@ -50,15 +52,15 @@ async function desktop(options = {}) {
     requestSingleInstanceLock: () => true, whenReady: () => Promise.resolve(), on() {} };
   const electron = { app, BrowserWindow, ipcMain: { handle(_name, handler) { invoke = handler; } },
     dialog: { async showMessageBox(_parent, options) { prompts.push(options); return answer(); }, showErrorBox() { assert.fail('Desktop setup failed'); } },
-    shell: {}, clipboard: {}, powerMonitor: { on(name, handler) { powerEvents.set(name, handler); } },
+    shell: { async openPath(folder) { opened.push(folder); return ''; } }, clipboard: {}, powerMonitor: { on(name, handler) { powerEvents.set(name, handler); } },
     session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, webRequest: { onBeforeRequest() {} } } } };
   const overrides = {
     electron,
     'node:fs/promises': { mkdir: async () => {}, stat: async () => ({ size: 10 }), readFile: async () => JSON.stringify(options.settings ?? { extensionId }) },
     './vault.cjs': { Vault, atomicWrite: async (file, bytes) => { writes.push({ file, json: JSON.parse(bytes.toString()) }); }, MAX_VAULT_BYTES: 1000 },
     './bridge.cjs': { ...require('../desktop/bridge.cjs'), startBridge: async (_directory, _getId, handler) => { bridge = handler; return { close: async () => {} }; } },
-    './extension-setup.cjs': { getExtensionSetup: async () => ({ prepared: true }) },
-    './registration.cjs': { registerHost: async () => ({}) },
+    './extension-setup.cjs': options.extensionCopy?.module ?? { getExtensionSetup: async () => ({ prepared: true }) },
+    './registration.cjs': { registerHost: async () => { registrations++; return {}; } },
     './test-storage-path.cjs': { testStoragePath: () => null },
     // The app's one Laya runtime (#38). Without an override it is the real one with the shipped model,
     // minus its background download and update checks (tests/desktop-laya-main.test.cjs covers those).
@@ -75,6 +77,8 @@ async function desktop(options = {}) {
     prompts, notifications, writes,
     get shows() { return shows; },
     get dataReads() { return dataReads; },
+    get registrations() { return registrations; },
+    opened,
     answer: callback => { answer = callback; },
     request: request => bridge({ id: 'synthetic', url: PORTAL_URL, ...request }, context),
     invoke: (method, argument) => invoke({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, method, ...(argument === undefined ? [] : [argument])),
@@ -733,4 +737,84 @@ test('warmLaya loads Laya’s model before a click’s questions are asked and a
   assert.deepEqual(plain(await (await desktop({ laya: broken })).request({ type: 'warmLaya' })), { state: 'error' });
   const crashing = { ...stubLaya(), warm: async () => { throw new Error('synthetic bug'); } };
   await assert.rejects((await desktop({ laya: crashing })).request({ type: 'warmLaya' }), /synthetic bug/, 'anything else fails loudly');
+});
+
+// The app's prepared copy of its extension, as extension-setup.cjs reports it. `refresh` plays
+// prepareBundledExtension, which copies only the app's own bundle; every call is counted.
+const SHIPPED = '2026-10-05.1';
+function extensionCopy({ exists = true, prepared = true, refresh = async () => {} } = {}) {
+  const copy = { exists, prepared, refreshes: 0 };
+  const setup = () => ({ directory: '/synthetic-local-data/chrome-extension', extensionId: 'jogldddafjfbmfjnjlbjloakjbecnjpl', version: '0.4.0', build: SHIPPED, exists: copy.exists, prepared: copy.prepared });
+  copy.module = {
+    getExtensionSetup: async () => setup(),
+    prepareBundledExtension: async () => { copy.refreshes++; await refresh(copy); copy.exists = true; copy.prepared = true; return setup(); }
+  };
+  return copy;
+}
+const shipped = async app => plain(await app.request({ type: 'status' })).extension;
+const until = async condition => { for (let i = 0; i < 100 && !condition(); i++) await tick(); assert.ok(condition(), 'timed out'); };
+
+test('status reports the extension build the app ships and that the copy it prepared for Chrome has it', async () => {
+  const copy = extensionCopy();
+  const app = await desktop({ extensionCopy: copy });
+  assert.deepEqual(await shipped(app), { build: SHIPPED, copy: 'ready' });
+  assert.equal(copy.refreshes, 0);
+  await app.invoke('lock');
+  assert.deepEqual(await shipped(app), { build: SHIPPED, copy: 'ready' }, 'it needs no unlock: it carries no saved information');
+});
+
+test('with no prepared copy, status says so and the app writes nothing', async () => {
+  const copy = extensionCopy({ exists: false, prepared: false });
+  const app = await desktop({ extensionCopy: copy });
+  assert.deepEqual(await shipped(app), { build: SHIPPED, copy: 'absent' });
+  assert.equal(copy.refreshes, 0);
+});
+
+test('a prepared copy from another build is refreshed from the app’s bundle once, without registering Chrome again or opening the folder', async () => {
+  const copy = extensionCopy({ prepared: false });
+  const app = await desktop({ extensionCopy: copy });
+  assert.deepEqual(await shipped(app), { build: SHIPPED, copy: 'ready' });
+  assert.deepEqual(await shipped(app), { build: SHIPPED, copy: 'ready' });
+  assert.equal(copy.refreshes, 1);
+  assert.equal(app.registrations, 0);
+  assert.deepEqual(app.opened, []);
+});
+
+test('one refresh runs at a time: status requests, and the Chrome extension page’s refresh, share it', async () => {
+  let release;
+  const copy = extensionCopy({ prepared: false, refresh: () => new Promise(resolve => { release = resolve; }) });
+  const app = await desktop({ extensionCopy: copy });
+  const first = shipped(app), second = shipped(app);
+  await until(() => release);
+  for (let i = 0; i < 5; i++) await tick();
+  release();
+  assert.deepEqual(await Promise.all([first, second]), [{ build: SHIPPED, copy: 'ready' }, { build: SHIPPED, copy: 'ready' }]);
+  assert.equal(copy.refreshes, 1);
+
+  const page = extensionCopy({ prepared: false, refresh: () => new Promise(resolve => { release = resolve; }) });
+  const other = await desktop({ extensionCopy: page });
+  release = null;
+  const prepared = other.invoke('prepareExtension');
+  await until(() => release);
+  const status = shipped(other);
+  for (let i = 0; i < 5; i++) await tick();
+  release();
+  await prepared;
+  assert.deepEqual(await status, { build: SHIPPED, copy: 'ready' }, 'status waits for the page’s refresh instead of starting another');
+  assert.equal(page.refreshes, 1);
+});
+
+test('a refresh that fails is reported, and isn’t tried again until the files are refreshed on the Chrome extension page', async () => {
+  let failing = true;
+  const copy = extensionCopy({ prepared: false, refresh: async () => { if (failing) throw new Error('synthetic disk failure'); } });
+  const app = await desktop({ extensionCopy: copy });
+  assert.deepEqual(await shipped(app), { build: SHIPPED, copy: 'failed' });
+  assert.deepEqual(await shipped(app), { build: SHIPPED, copy: 'failed' });
+  assert.equal(copy.refreshes, 1, 'no refresh loop');
+  await assert.rejects(app.invoke('prepareExtension'), /could not be completed/);
+  assert.equal(copy.refreshes, 2);
+  failing = false;
+  await app.invoke('prepareExtension');
+  assert.equal(copy.refreshes, 3);
+  assert.deepEqual(await shipped(app), { build: SHIPPED, copy: 'ready' });
 });

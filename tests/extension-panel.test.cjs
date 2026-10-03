@@ -317,7 +317,7 @@ async function panel(t, initial = {}) {
   }, permissions: { request: async permissions => {
     requests.push({ type: 'permissions.request', ...structuredClone(permissions) });
     return initial.grant ?? true;
-  } }, runtime: { getPlatformInfo: async () => ({ os: initial.os ?? 'mac' }), sendMessage: async payload => {
+  } }, runtime: { id: extensionId, getPlatformInfo: async () => ({ os: initial.os ?? 'mac' }), sendMessage: async payload => {
     requests.push(structuredClone(payload));
     // An outdated worker ignores messages it doesn't know: Chrome resolves with no response.
     if (initial.silent === true || initial.silent?.includes(payload.type)) return undefined;
@@ -1650,4 +1650,80 @@ test('turning all websites back on asks Chrome inside the click again, which ans
   assert.equal(view.types().filter(type => type === 'ui:enableAllSites').length, 1);
   assert.equal(view.get('all-sites-disable').hidden, false);
   assert.equal(view.get('status').textContent, ALL_ON);
+});
+
+// Updating itself (#85): the side panel says once that SecondHand was updated, and shows the steps
+// when the worker can't update itself.
+const BUILD_KEY = 'secondhand.build';
+const noteOf = view => view.get('update-note').hidden ? null : view.get('update-note').textContent;
+
+test('after an update, the side panel says once that SecondHand was updated', async t => {
+  const storage = new Map([[BUILD_KEY, '2026-01-01.1']]);
+  const view = await panel(t, { storage });
+  await settle();
+  assert.equal(noteOf(view), strings.english('panel.updated'));
+  assert.equal(view.get('update-note').classList.contains('error'), false);
+  assert.equal(storage.get(BUILD_KEY), BUILD);
+  const again = await panel(t, { storage });
+  await settle();
+  assert.equal(noteOf(again), null, 'said once');
+  const spanish = await panel(t, { storage: new Map([[BUILD_KEY, '2026-01-01.1'], ['secondhand.language', 'es']]) });
+  await settle();
+  assert.equal(noteOf(spanish), strings.text('es', 'panel.updated'));
+});
+
+test('the first side panel says nothing and remembers the build; the widget and an outdated worker leave it alone', async t => {
+  const storage = new Map();
+  const first = await panel(t, { storage });
+  await settle();
+  assert.equal(noteOf(first), null);
+  assert.equal(storage.get(BUILD_KEY), BUILD);
+  const earlier = new Map([[BUILD_KEY, '2026-01-01.1']]);
+  await panel(t, { storage: earlier, launcher: true });
+  await settle();
+  assert.equal(earlier.get(BUILD_KEY), '2026-01-01.1', 'the widget neither says nor remembers it');
+  const outdated = await panel(t, { storage: earlier, build: 'older-build' });
+  await settle();
+  assert.equal(noteOf(outdated), null);
+  assert.equal(earlier.get(BUILD_KEY), '2026-01-01.1', 'not updated until Chrome runs the new worker');
+});
+
+test('when SecondHand can’t update itself, the side panel shows the steps to do it by hand', async t => {
+  const failed = await panel(t, { desktop: { update: 'failed' } });
+  await settle();
+  assert.equal(noteOf(failed), strings.english('panel.updateFailed'));
+  assert.equal(failed.get('update-note').classList.contains('error'), true);
+  const elsewhere = await panel(t, { desktop: { update: 'elsewhere' }, storage: new Map([[BUILD_KEY, '2026-01-01.1']]) });
+  await settle();
+  assert.equal(noteOf(elsewhere), strings.english('panel.updateElsewhere'), 'the steps come before the note that it was updated');
+  const vietnamese = await panel(t, { desktop: { update: 'failed' }, language: 'vi-VN' });
+  await settle();
+  assert.equal(noteOf(vietnamese), strings.text('vi', 'panel.updateFailed'));
+  // Once the worker no longer reports it, the line goes.
+  failed.desktop.update = undefined;
+  failed.window.document.dispatchEvent(new failed.window.Event('visibilitychange'));
+  await settle();
+  assert.equal(noteOf(failed), null);
+});
+
+test('a widget left on a page when SecondHand reloaded asks for the page to be reloaded, and stops asking the worker', async t => {
+  const widget = await panel(t, { launcher: true });
+  assert.equal(widget.get('widget-text').textContent, 'Iowa · uses first home address suggestion');
+  // As Chrome leaves an extension frame whose extension reloaded: no id, and every message refused.
+  const runtime = widget.window.chrome.runtime;
+  delete runtime.id;
+  runtime.sendMessage = async () => { throw new Error('Extension context invalidated.'); };
+  await widget.userClick('autofill');
+  assert.equal(widget.get('widget-text').textContent, strings.english('panel.reloadPage'));
+  assert.equal(widget.get('widget').classList.contains('outdated'), true);
+  const spanish = await panel(t, { launcher: true, language: 'es-ES' });
+  delete spanish.window.chrome.runtime.id;
+  spanish.window.chrome.runtime.sendMessage = async () => { throw new Error('Extension context invalidated.'); };
+  await spanish.userClick('autofill');
+  assert.equal(spanish.get('widget-text').textContent, strings.text('es', 'panel.reloadPage'));
+  // Any other failure is shown as it is.
+  const other = await panel(t, { launcher: true });
+  other.window.chrome.runtime.sendMessage = async () => { throw new Error('Synthetic Chrome failure.'); };
+  await other.userClick('autofill');
+  assert.equal(other.get('widget-text').textContent, 'Synthetic Chrome failure.');
 });

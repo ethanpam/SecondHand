@@ -10,9 +10,10 @@ if (typeof globalThis.SecondHandStrings?.english !== 'function' || typeof global
 if (typeof globalThis.SecondHandTranslation?.create !== 'function') {
   throw new Error('SecondHand could not load translation.js. Reinstall the extension.');
 }
-// Must match BUILD in panel.js: change both together. The panel compares them to tell
-// when Chrome is still running an older worker than the pages it loaded from disk.
-const BUILD = '2026-10-03.1';
+// Must match BUILD in panel.js: change both together, with every change to the extension. The panel
+// compares them to tell when Chrome is still running an older worker than the pages it loaded from
+// disk, and the worker compares it with the build the desktop app ships to update itself (#85).
+const BUILD = '2026-10-03.2';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
@@ -576,7 +577,48 @@ async function disableAllSites() {
 async function desktopStatus() {
   const status = await nativeRequest('status');
   if (status?.allSites !== true && (await chrome.scripting.getRegisteredContentScripts({ ids: [ALL_SITES_ID] })).length) await removeAllSites();
+  await noteUpdate(status?.extension);
   return status;
+}
+
+// Updating itself (#85). Each status says which extension build the app ships and whether the copy it
+// prepared for Chrome has it. When that build is newer than this one, SecondHand reloads once nothing is
+// under way, and only if the files Chrome would load on a reload are that build: a copy that didn't
+// change is never reloaded again. Otherwise the side panel shows the steps to update by hand.
+const BUILD_FORMAT = /^(\d{4})-(\d{2})-(\d{2})\.(\d+)$/;
+const COPY_STATES = Object.freeze(['ready', 'failed', 'absent']);
+// { build, state }: 'due' (reload when nothing is under way), 'failed' (the app couldn't refresh its
+// copy), or 'elsewhere' (Chrome runs files the app doesn't update). Null when there is no newer build.
+let selfUpdate = null;
+// Clicks under way: every request a click sends carries confirmed.
+let clicksUnderway = 0;
+// Dates, then the number after the dot, as numbers: 2026-10-03.10 is newer than 2026-10-03.9.
+function newerBuild(candidate, running) {
+  const [next, current] = [candidate, running].map(build => BUILD_FORMAT.exec(build).slice(1).map(Number));
+  const at = next.findIndex((part, index) => part !== current[index]);
+  return at >= 0 && next[at] > current[at];
+}
+// The build in the files Chrome would load on a reload, read from disk; null when they can't be read
+// (the folder was moved or deleted), so SecondHand doesn't reload from it.
+async function diskBuild() {
+  let source;
+  try { source = await (await fetch(chrome.runtime.getURL('background.js'), { cache: 'no-store' })).text(); }
+  catch { return null; }
+  return /^const BUILD = '([^']+)';$/m.exec(source)?.[1] ?? null;
+}
+async function noteUpdate(shipped) {
+  // An app from before #85 says nothing about the extension.
+  if (shipped === undefined) { selfUpdate = null; return; }
+  if (!shipped || typeof shipped !== 'object' || !BUILD_FORMAT.test(shipped.build) || !COPY_STATES.includes(shipped.copy)) throw fault('worker.desktopUnexpected');
+  if (!newerBuild(shipped.build, BUILD)) { selfUpdate = null; return; }
+  selfUpdate = { build: shipped.build, state: shipped.copy === 'failed' ? 'failed' : await diskBuild() === shipped.build ? 'due' : 'elsewhere' };
+}
+// Nothing under way: no click, no Autofill left on, no site fill, and no plan waiting for its fill.
+// Approval prompts belong to a click or a fill.
+function reloadWhenIdle() {
+  if (selfUpdate?.state !== 'due' || clicksUnderway || autopilots.size || siteRuns.size || sitePlans.size) return;
+  selfUpdate = null;
+  chrome.runtime.reload();
 }
 
 // tabId -> ids of embedded frames whose page has a form SecondHand can help with, so the top page shows
@@ -1213,7 +1255,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   else if (message.type === 'ui:openApp' && message.confirmed === true) run = openApp;
   else if (panel && message.type === 'ui:desktopStatus') {
     run = async () => {
-      const desktop = await desktopStatus().then(data => ({ connected: true, unlocked: Boolean(data?.unlocked), laya: layaState(data) }),
+      const desktop = await desktopStatus().then(data => ({ connected: true, unlocked: Boolean(data?.unlocked), laya: layaState(data),
+        ...(selfUpdate?.state === 'failed' || selfUpdate?.state === 'elsewhere' ? { update: selfUpdate.state } : {}) }),
         error => { if (error.code === 'offline') return { connected: false, unlocked: false, laya: 'unavailable' }; throw error; });
       return { ...desktop, allSites: await allSitesOn() };
     };
@@ -1234,9 +1277,13 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   else if (panel && message.type === 'ui:keepSummary' && typeof message.id === 'string') run = async () => keepSummary(tabId, message.id, message.summary);
   else if (launcher && message.type === 'ui:widgetSize' && typeof message.line === 'boolean' && (message.width === undefined || cardWidth(message.width))) run = () => widgetSize(tabId, message.line, message.width);
   else return;
+  // A click holds off an update until it settles; after any request, a waiting update may reload.
+  const action = message.confirmed === true;
+  if (action) clicksUnderway++;
   // A widget on another site is honored only while that site is turned on.
   const work = route === 'site' ? requireSite(siteOrigin(sender.tab.url)).then(run) : run();
-  work.then(data => respond({ ok: true, data }), error => respond(errorReply(error)));
+  work.then(data => respond({ ok: true, data }), error => respond(errorReply(error)))
+    .finally(() => { if (action) clicksUnderway--; reloadWhenIdle(); });
   return true;
 });
 chrome.tabs.onActivated?.addListener(info => {
