@@ -314,7 +314,7 @@
   }
 
   const memberRows = () => Array.from($('household-members').querySelectorAll('.household-member'));
-  function memberField(row, member, field, label, control) {
+  function memberField(member, field, label, control) {
     const wrap = element('div', 'field');
     const id = `member-${member.id}-${field}`;
     const name = element('label', '', label); name.htmlFor = id;
@@ -336,18 +336,18 @@
     row.dataset.memberId = member.id;
     row.dataset.self = String(self);
     const grid = element('div', 'field-grid three');
-    const text = (field, max, type = 'text') => {
+    // `mirrored`: the applicant's own name and birth date, shown read-only from About you.
+    const text = (field, max, type = 'text', mirrored = false) => {
       const input = element('input'); input.type = type; input.value = member[field] || ''; input.autocomplete = 'off';
       if (max) input.maxLength = max;
-      if (self) { input.readOnly = true; input.tabIndex = -1; }
+      if (mirrored) { input.readOnly = true; input.tabIndex = -1; }
       return input;
     };
-    grid.append(memberField(row, member, 'firstName', 'First name', text('firstName', 100)), memberField(row, member, 'lastName', 'Last name', text('lastName', 100)),
-      memberField(row, member, 'birthDate', 'Date of birth', text('birthDate', 0, 'date')));
-    if (!self) grid.append(memberField(row, member, 'relationship', 'How they are related to you', choice([['', 'Choose one'], ...RELATIONSHIPS], member.relationship || '')));
-    const student = memberField(row, member, 'student', 'A student?', choice([['', 'Not answered yet'], ['yes', 'Yes'], ['no', 'No']], member.student || ''));
-    const grade = memberField(row, member, 'grade', 'Grade (for example 3rd, K, or College)', text('grade', 20));
-    grade.querySelector('input').readOnly = false; grade.querySelector('input').tabIndex = 0;
+    grid.append(memberField(member, 'firstName', 'First name', text('firstName', 100, 'text', self)), memberField(member, 'lastName', 'Last name', text('lastName', 100, 'text', self)),
+      memberField(member, 'birthDate', 'Date of birth', text('birthDate', 0, 'date', self)));
+    if (!self) grid.append(memberField(member, 'relationship', 'How they are related to you', choice([['', 'Choose one'], ...RELATIONSHIPS], member.relationship || '')));
+    const student = memberField(member, 'student', 'A student?', choice([['', 'Not answered yet'], ['yes', 'Yes'], ['no', 'No']], member.student || ''));
+    const grade = memberField(member, 'grade', 'Grade (for example 3rd, K, or College)', text('grade', 20));
     grade.hidden = member.student !== 'yes';
     student.querySelector('select').addEventListener('change', () => {
       const yes = student.querySelector('select').value === 'yes';
