@@ -886,9 +886,11 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
           result = prefix && frameId === 0 ? await topSiteMessage(tabId, message) : await chrome.tabs.sendMessage(tabId, message, { frameId });
           const assigned = new Set(assignments.map(item => item.id));
           const validIds = ids => Array.isArray(ids) && ids.every(id => typeof id === 'string' && assigned.has(id)) && new Set(ids).size === ids.length;
+          // The page changed while its choices settled: the fill starts over from a new click.
+          if (result?.pageChanged === true) throw Object.assign(fault('worker.pageChangedAutofill'), { code: 'page-changed' });
           if (!result?.ok || !validIds(result.filled) || !validIds(result.rejected) || (result.skipped !== undefined && !validIds(result.skipped))) throw fault('worker.pageUnsafe');
         } catch (error) {
-          if (!prefix || error.code === 'site-not-ready') throw error;
+          if (!prefix || error.code === 'site-not-ready' || error.code === 'page-changed') throw error;
           throw fault(FRAME_ERROR);
         }
         for (const { id, key } of assignments) if (result.rejected.includes(id)) refused.set(key ?? `option:${id}`, id);

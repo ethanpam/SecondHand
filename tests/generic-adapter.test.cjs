@@ -139,6 +139,34 @@ test('number words and "or more" choices pick the right count; a click Google ig
   assert.deepEqual(filled.filled, [], 'without Google registering the click, nothing counts as filled');
 });
 
+test('a document that loses its window while choices settle stops waiting and reports that the page changed', async () => {
+  // Google never confirms these clicks, so each choice waits to settle.
+  const pendingFill = () => {
+    const doc = page(forms.googleChoices);
+    const result = generic.plan(doc);
+    const size = result.matched.find(item => item.key === 'householdSize');
+    const filled = generic.fillFields(doc, result.token, [{ id: size.id, key: 'householdSize', guessed: false }], { householdSize: '3' });
+    assert.deepEqual(filled.pending, [size.id]);
+    return { doc, token: result.token, filled, id: size.id };
+  };
+  // Chrome gives a document its page left behind no window; jsdom keeps it, so the test takes it away.
+  const detach = doc => Object.defineProperty(doc, 'defaultView', { value: null, configurable: true });
+
+  const during = pendingFill();
+  const started = Date.now();
+  const settling = generic.settle(during.doc, during.token, during.filled, { timeoutMs: 5000 });
+  await new Promise(resolve => setTimeout(resolve, 30));
+  detach(during.doc);
+  assert.deepEqual(await settling, { ok: false, pageChanged: true, filled: [], skipped: [during.id], rejected: [], pending: [] });
+  assert.ok(Date.now() - started < 1000, 'it stops waiting once the page is gone');
+  assert.equal(during.doc.querySelector('[data-secondhand-filled]'), null, 'nothing on the old page is marked as filled');
+
+  const before = pendingFill();
+  detach(before.doc);
+  assert.deepEqual(await generic.settle(before.doc, before.token, before.filled), { ok: false, pageChanged: true, filled: [], skipped: [before.id], rejected: [], pending: [] },
+    'a page already gone is not waited on');
+});
+
 test('age-band household questions map only when the band is exactly what the profile counts', () => {
   const questions = {
     kids017: '# of people in your household 0 - 17 yrs old', kidsUnder18: 'Number of children under 18', kidsAges: 'Number of household members ages 0 to 17',

@@ -157,7 +157,8 @@
         const validIds = ids => Array.isArray(ids) && ids.every(id => typeof id === 'string');
         const settledResult = result => {
           if (!result || !validIds(result.filled) || !validIds(result.skipped) || !validIds(result.rejected)) return null;
-          return { ok: result.ok === true, filled: strings(result.filled), skipped: strings(result.skipped), rejected: strings(result.rejected) };
+          return { ok: result.ok === true, ...(result.pageChanged === true ? { pageChanged: true } : {}),
+            filled: strings(result.filled), skipped: strings(result.skipped), rejected: strings(result.rejected) };
         };
         // Some pages (Google Forms) confirm a chosen option a moment after the click: answer once it settles.
         engine.settle(document, message.token, result).then(

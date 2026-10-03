@@ -18,7 +18,7 @@ const plain = value => JSON.parse(JSON.stringify(value));
 
 // Stand-in for generic-adapter.js; the real engine has its own tests. Plans carry
 // elements and values so the tests can prove only metadata leaves the page.
-function generalEngine(window, calls, { matched = true } = {}) {
+function generalEngine(window, calls, { matched = true, settled = null } = {}) {
   const element = () => window.document.getElementById('firstName');
   return {
     plan: () => {
@@ -28,12 +28,12 @@ function generalEngine(window, calls, { matched = true } = {}) {
         unmatched: [{ id: 'sh-1-1', label: 'Is anyone blind?', type: 'radio', options: ['Yes', 'No'], required: true, element: element(), value: 'Synthetic private value' }] };
     },
     fillFields: (_doc, token, assignments, values) => { calls.push({ token, assignments: plain(assignments), values: plain(values) }); return { ok: true, filled: ['sh-1-0'], skipped: [], rejected: ['sh-1-9'], pending: [], values }; },
-    settle: async (_doc, token, result) => { calls.push(`settle:${token}`); return result; },
+    settle: async (_doc, token, result) => { calls.push(`settle:${token}`); return settled ? settled(result) : result; },
     focusField: (_doc, id) => { calls.push(`focus:${id}`); if (id !== 'sh-1-1') return false; element().focus(); return true; }
   };
 }
 
-function content(t, url = `${adapter.PORTAL}/applicant`, { engine = true, matched = true, navigation = false } = {}) {
+function content(t, url = `${adapter.PORTAL}/applicant`, { engine = true, matched = true, navigation = false, settled = null } = {}) {
   const dom = new JSDOM('<!doctype html><body><form><input id="firstName"><button type="button">Save and Continue</button></form></body>', { url, runScripts: 'outside-only' });
   t.after(() => dom.window.close());
   const window = dom.window;
@@ -48,7 +48,7 @@ function content(t, url = `${adapter.PORTAL}/applicant`, { engine = true, matche
   const privateNavigation = { answer: 'Synthetic private address' };
   const calls = [];
   window.chrome = { runtime: { id: extensionId, getURL: extensionURL, onMessage: { addListener: callback => { listener = callback; } } } };
-  if (engine) window.SecondHandGeneric = generalEngine(window, calls, { matched });
+  if (engine) window.SecondHandGeneric = generalEngine(window, calls, { matched, settled });
   window.SecondHandIowa = {
     isSupportedUrl: adapter.isSupportedUrl,
     scan: () => {
@@ -180,6 +180,14 @@ test('on Iowa pages the adapter has not verified, the general engine plans, fill
   assert.deepEqual(plain(page.request({ type: 'secondhand:generic:focus', id: 'sh-1-1' })), { focused: true });
   assert.equal(page.window.document.activeElement.id, 'firstName');
   assert.deepEqual(plain(page.request({ type: 'secondhand:generic:focus', id: 'sh-9-9' })), { focused: false });
+});
+
+test('on Iowa pages a general fill the page interrupted by changing answers that the page changed', async t => {
+  const page = content(t, undefined, { settled: result => ({ ...result, ok: false, pageChanged: true, pending: [] }) });
+  page.setKind('manual');
+  page.request({ type: 'secondhand:generic:plan' });
+  const filled = await page.requestAsync({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [{ id: 'sh-1-0', key: 'householdAdults', guessed: false }], values: { householdAdults: '2' } });
+  assert.deepEqual(plain(filled), { ok: false, pageChanged: true, filled: ['sh-1-0'], skipped: [], rejected: ['sh-1-9'] });
 });
 
 test('verified Iowa pages and pages with Iowa instructions never reach the general engine', t => {

@@ -603,12 +603,18 @@
   }
   // Waits for the choices fillFields left pending to show as checked. One the page never
   // checks (or a stale plan's) is reported as skipped; only confirmed choices count as filled.
+  // A document without a window was left behind by a page change: the wait stops there, and
+  // the fill is reported as interrupted, with nothing on it confirmed.
   async function settle(doc, token, result, { timeoutMs = 500 } = {}) {
     if (!result?.pending?.length) return result;
     const live = current && current.token === token && current.doc === doc ? current.pending : new Map();
     const checked = id => live.get(id)?.option.getAttribute('aria-checked') === 'true';
     const started = Date.now();
-    while (!result.pending.every(checked) && Date.now() - started < timeoutMs) await new Promise(resolve => doc.defaultView.setTimeout(resolve, 10));
+    while (doc.defaultView && !result.pending.every(checked) && Date.now() - started < timeoutMs) await new Promise(resolve => doc.defaultView.setTimeout(resolve, 10));
+    if (!doc.defaultView) {
+      for (const id of result.pending) live.delete(id);
+      return { ...result, ok: false, pageChanged: true, filled: [...result.filled], skipped: [...result.skipped, ...result.pending], rejected: [...result.rejected], pending: [] };
+    }
     const settled = { ...result, filled: [...result.filled], skipped: [...result.skipped], rejected: [...result.rejected], pending: [] };
     for (const id of result.pending) {
       const item = live.get(id);

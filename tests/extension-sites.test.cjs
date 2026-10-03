@@ -772,6 +772,13 @@ test('a fill answers only after the engine settles choices the page confirms a m
   assert.equal(page.calls.at(-1), 'settle:plan-1');
 });
 
+test('a fill the page interrupted by changing answers that the page changed', async t => {
+  const page = siteContent(t, { settled: result => ({ ...result, ok: false, pageChanged: true, pending: [] }) });
+  page.request({ type: 'secondhand:generic:plan' });
+  const filled = await page.requestAsync({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [{ id: 'sh-1', key: 'fullName', guessed: false }], values: { fullName: 'Synthetic' } });
+  assert.deepEqual(plain(filled), { ok: false, pageChanged: true, filled: ['sh-1'], skipped: [], rejected: ['sh-2'] });
+});
+
 test('other extensions, malformed fills, and Iowa messages reach nothing on approved sites', t => {
   const page = siteContent(t);
   const foreign = { id: 'b'.repeat(32) };
@@ -975,6 +982,16 @@ test('malformed engine fill arrays fail visibly instead of becoming an empty suc
 test('a malformed rejected list makes a frame fill fail', async () => {
   const w = siteWorker({ enabled: true, frames: [secondFrame({ enabled: true, fillResult: { ok: true, filled: [], rejected: null } })] });
   assert.equal((await autofill(w)).data.state, 'error');
+});
+test('a fill the page interrupted by changing asks for Autofill again, on the page or in an embedded form', async () => {
+  const changed = { ok: false, pageChanged: true, filled: [], skipped: [], rejected: [] };
+  const top = siteWorker({ enabled: true });
+  top.page.fill = () => changed;
+  const embedded = siteWorker({ enabled: true, frames: [secondFrame({ enabled: true, fillResult: changed })] });
+  for (const w of [top, embedded]) {
+    const { state, message, messageKey } = plain((await autofill(w)).data);
+    assert.deepEqual({ state, message, messageKey }, { state: 'error', message: 'The page changed. Click Autofill again.', messageKey: 'worker.pageChangedAutofill' });
+  }
 });
 
 test('a pending form explains approval before attempting all-frame script execution', async () => {
