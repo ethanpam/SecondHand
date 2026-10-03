@@ -9,7 +9,7 @@
   // One copy per frame, even when two registrations match the page.
   if (location.protocol !== 'https:' || !engine || globalThis.secondHandGenericInstalled) return;
   globalThis.secondHandGenericInstalled = true;
-  const top = window === window.top;
+  const topFrame = window === window.top;
 
   let panelHost = null;
   // Whether this frame's page has a form SecondHand can help with, and on the top page, whether a form
@@ -38,7 +38,7 @@
   }
 
   function ensurePanel() {
-    if (!top || !document.body) return;
+    if (!topFrame || !document.body) return;
     if (!panelHost) {
       panelHost = document.createElement('div');
       panelHost.setAttribute('data-secondhand-assistant', '');
@@ -76,7 +76,7 @@
   }
 
   function placeCard() {
-    if (!top || off) return;
+    if (!topFrame || off) return;
     if (helps || framesHelp) ensurePanel();
     else panelHost?.remove();
   }
@@ -87,7 +87,7 @@
     const now = engine.offers(document) === true;
     const changed = now !== helps;
     helps = now;
-    if (top) placeCard();
+    if (topFrame) placeCard();
     else if (changed) chrome.runtime.sendMessage({ type: 'secondhand:generic:form', helps });
   }
   function stop() {
@@ -98,7 +98,7 @@
 
   check();
   // A form embedded before this page loaded was reported to the worker already.
-  if (top) chrome.runtime.sendMessage({ type: 'secondhand:generic:form', helps }).then(reply => { framesHelp = reply?.frames === true; placeCard(); });
+  if (topFrame) chrome.runtime.sendMessage({ type: 'secondhand:generic:form', helps }).then(reply => { framesHelp = reply?.frames === true; placeCard(); });
   document.addEventListener('DOMContentLoaded', check, { once: true });
   // Forms that load late or change: check again once the page settles. SecondHand's own card doesn't count.
   const observer = new MutationObserver(records => {
@@ -107,10 +107,10 @@
   });
   observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true });
   // Pages that rebuild their body (single-page forms) get the widget back.
-  const watch = top ? setInterval(placeCard, 1000) : null;
+  const watch = topFrame ? setInterval(placeCard, 1000) : null;
   window.addEventListener('pagehide', () => {
     stop();
-    if (!top && helps && !off) chrome.runtime.sendMessage({ type: 'secondhand:generic:form', helps: false });
+    if (!topFrame && helps && !off) chrome.runtime.sendMessage({ type: 'secondhand:generic:form', helps: false });
   }, { once: true });
 
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
@@ -122,13 +122,13 @@
       panelHost = null;
       return;
     }
-    if (message.type === 'secondhand:generic:formFrames' && typeof message.helps === 'boolean' && top) {
+    if (message.type === 'secondhand:generic:formFrames' && typeof message.helps === 'boolean' && topFrame) {
       framesHelp = message.helps;
       placeCard();
       return;
     }
     try {
-      if (message.type === 'secondhand:generic:frames' && window === window.top) {
+      if (message.type === 'secondhand:generic:frames' && topFrame) {
         const origins = new Set();
         for (const frame of document.querySelectorAll('iframe[src]')) {
           if (![...frame.getClientRects()].some(rect => rect.width > 0 && rect.height > 0)) continue;
@@ -169,7 +169,7 @@
         // Every question's label for the applicant's translated list, and the language this document declares.
         const listed = withOwnPanelHidden(() => engine.questions(document));
         respond({ lang: document.documentElement.lang || '', questions: listed.map(({ id, label }) => ({ id, label })) });
-      } else if (message.type === 'secondhand:widgetSize' && typeof message.line === 'boolean' && (message.width === undefined || fits(message.width)) && window === window.top) {
+      } else if (message.type === 'secondhand:widgetSize' && typeof message.line === 'boolean' && (message.width === undefined || fits(message.width)) && topFrame) {
         // As wide as the widget, and one row taller while it shows a line the reader must act on.
         if (panelHost) {
           panelHost.style.setProperty('width', frameWidth(message.width), 'important');

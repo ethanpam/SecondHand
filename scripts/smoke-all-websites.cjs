@@ -19,6 +19,8 @@ const root = path.join(__dirname, '..');
 const PANTRY = 'https://pantry.example.org/intake';
 const WIC = 'https://wic.example.org/apply';
 const SEARCH = 'https://search.example.org/';
+const FORMS = 'https://forms.example.net/embed';
+const EMBEDDING = 'https://pantry.example.org/sign-up';
 const IOWA_HOST = 'https://hhsservices.iowa.gov/*';
 const en = (key, params) => strings.text('en', key, params);
 
@@ -32,7 +34,10 @@ const pages = {
   [PANTRY]: formPage('Pantry sign-up', '<form><label for="fname">First name</label><input id="fname" name="fname"><label for="lname">Last name</label><input id="lname" name="lname">' +
     '<label for="zip">ZIP code</label><input id="zip" name="zip"><label for="email">Email</label><input id="email" name="email" type="email">' +
     '<label for="hh">Household size</label><input id="hh" name="hh" type="number"><button type="submit">Submit</button></form>'),
-  [WIC]: formPage('WIC pre-screening', '<form><label for="name">Full name</label><input id="name" name="name"><button type="submit">Submit</button></form>'),
+  [WIC]: formPage('WIC pre-screening', '<form><label for="name">Full name</label><input id="name" name="name"><button type="submit">Submit</button></form>' +
+    `<iframe src="${FORMS}" title="Embedded sign-up" style="width:420px;height:180px;border:1px solid #ced7c5"></iframe>`),
+  [EMBEDDING]: formPage('Sign up below', `<iframe src="${FORMS}" title="Embedded sign-up" style="width:420px;height:180px;border:1px solid #ced7c5"></iframe>`),
+  [FORMS]: formPage('Embedded sign-up', '<form><label for="city">City</label><input id="city" name="city"><button type="submit">Submit</button></form>'),
   [SEARCH]: formPage('Find a pantry', '<form role="search"><input type="search" name="q" aria-label="Search"><button>Search</button></form>')
 };
 
@@ -127,16 +132,26 @@ async function main() {
       { enabled: true, origin: new URL(WIC).origin });
     console.log('Per-site: wic.example.org is turned on by itself.');
 
-    // Open the side panel from Iowa's widget, then turn on all websites with a trusted click.
+    // Open the side panel from Iowa's widget. Then, on the site turned on by itself (its card and an embedded
+    // form from another site on screen), turn on all websites with a trusted click.
     await page.goto(`${applicant}?next=stay`, { waitUntil: 'domcontentloaded' });
     await page.bringToFront();
     await (await launcherFrame()).locator('#details').click();
     panel = await attachNativePanel(context, page, extensionId);
+    await page.goto(WIC, { waitUntil: 'domcontentloaded' });
+    await launcherFrame();
     await expect.poll(() => panel.visible('#all-sites-enable'), { timeout: 15000 }).toBe(true);
     assert.equal(await panel.text('#all-sites-enable'), en('panel.allSitesEnable'));
+    await expect.poll(() => panel.text('#frames-enable'), { timeout: 15000 }).toContain('forms.example.net');
+    assert.equal(await panel.visible('#frames-enable'), true, 'before, the embedded form needs its own approval');
     await panel.click('#all-sites-enable');
     await expect.poll(() => panel.visible('#all-sites-disable'), { timeout: 15000 }).toBe(true);
+    assert.equal(await panel.evaluate(() => document.getElementById('status').classList.contains('error')), false, await panel.text('#status'));
     assert.equal(await worker.evaluate(() => allSitesOn()), true);
+    await expect.poll(() => panel.visible('#frames-enable'), { timeout: 15000 }).toBe(false);
+    assert.equal(await cards(), 1, 'the page keeps one card when both registrations match');
+    const embedded = page.frames().find(frame => frame.url() === FORMS);
+    assert.equal(await embedded.evaluate(() => document.querySelectorAll('[data-secondhand-assistant]').length), 0, 'an embedded form makes no card of its own');
     assert.deepEqual((await calls('trustAllSites')).length, 1);
     const registered = await worker.evaluate(() => chrome.scripting.getRegisteredContentScripts({ ids: ['site-all'] }));
     assert.deepEqual(registered.map(script => [script.matches, script.excludeMatches, script.allFrames]), [[['https://*/*'], [IOWA_HOST], true]]);
@@ -167,6 +182,16 @@ async function main() {
     await page.waitForTimeout(1500);
     assert.equal(await cards(), 0, 'no card on a search-only page');
     console.log('All websites: no card on a search-only page.');
+
+    // A page whose only form is embedded from another site gets the card through the worker.
+    await page.goto(EMBEDDING, { waitUntil: 'domcontentloaded' });
+    await expect.poll(cards, { timeout: 15000 }).toBe(1);
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+    await panel.click('#panel-autofill');
+    const signUp = page.frames().find(frame => frame.url() === FORMS);
+    await expect(signUp.locator('#city')).toHaveValue(syntheticProfile.city, { timeout: 20000 });
+    assert.equal(await signUp.evaluate(() => window.__submits), 0);
+    console.log('All websites: a form embedded from another site brought the card and filled with no second approval.');
 
     // Turn it off from the side panel: the card leaves the open page at once and doesn't come back.
     await page.goto(PANTRY, { waitUntil: 'domcontentloaded' });
