@@ -14,7 +14,9 @@ const os = require('node:os');
 const path = require('node:path');
 const { chromium, expect } = require('@playwright/test');
 const strings = require('../extension/strings.js');
-const syntheticProfile = require('../tests/fixtures/applicant-profile.json');
+// The fictional applicant as a household of one with no seniors, the household these stand-in decisions read (#98
+// gives the shared fixture a fictional household list; Laya's side of a household list is in tests/facts.test.cjs).
+const syntheticProfile = { ...require('../tests/fixtures/applicant-profile.json'), householdSize: '1', householdAdults: '1', householdChildren: '0', householdSeniors: '0', householdMembers: [] };
 const { attachNativePanel } = require('./smoke-extension.cjs');
 
 const root = path.join(__dirname, '..');

@@ -14,6 +14,7 @@ const path = require('node:path');
 const { chromium, expect } = require('@playwright/test');
 const strings = require('../extension/strings.js');
 const { attachNativePanel, fixture, applicant, syntheticProfile } = require('./smoke-extension.cjs');
+const { validateProfile, releasedValue } = require('../shared/schema.cjs');
 
 const root = path.join(__dirname, '..');
 const PANTRY = 'https://pantry.example.org/intake';
@@ -22,6 +23,13 @@ const SEARCH = 'https://search.example.org/';
 const FORMS = 'https://forms.example.net/embed';
 const EMBEDDING = 'https://pantry.example.org/sign-up';
 const NEVER = 'https://never.example.net/apply';
+// #98: the household questions the live QA (#89) found on a pantry form, plus one the fictional profile has no answer for.
+const HOUSEHOLD = 'https://pantry.example.org/household';
+const HOUSEHOLD_QUESTIONS = { young: '# of people in your household 0 - 17 yrs old', middle: '# of people in your household 18 - 59 yrs old', older: '# of people in your household 60 + yrs',
+  student: 'Student name and grade. Order will be assigned to(first and Last)', guardian: 'Guardian first and last name', apt: 'Apartment number' };
+// What the desktop works out from the fictional household list, as the app does: band counts and the one student's name and grade.
+const listed = validateProfile(syntheticProfile);
+const desktopProfile = { ...syntheticProfile, ...Object.fromEntries(['householdCount:18-59', 'householdCount:60+', 'studentNameGrade'].map(key => [key, releasedValue(listed, key)])) };
 const IOWA_HOST = 'https://hhsservices.iowa.gov/*';
 const en = (key, params) => strings.text('en', key, params);
 
@@ -40,14 +48,16 @@ const pages = {
   [EMBEDDING]: formPage('Sign up below', `<iframe src="${FORMS}" title="Embedded sign-up" style="width:420px;height:180px;border:1px solid #ced7c5"></iframe>`),
   [FORMS]: formPage('Embedded sign-up', '<form><label for="city">City</label><input id="city" name="city"><button type="submit">Submit</button></form>'),
   [SEARCH]: formPage('Find a pantry', '<form role="search"><input type="search" name="q" aria-label="Search"><button>Search</button></form>'),
-  [NEVER]: formPage('Never trusted', '<form><label for="first">First name</label><input id="first" name="first"><button type="submit">Submit</button></form>')
+  [NEVER]: formPage('Never trusted', '<form><label for="first">First name</label><input id="first" name="first"><button type="submit">Submit</button></form>'),
+  [HOUSEHOLD]: formPage('Pantry order: household', `<form>${Object.entries(HOUSEHOLD_QUESTIONS).map(([id, label]) => `<label for="${id}">${label}</label><input id="${id}" name="${id}">`).join('')}` +
+    '<button type="submit">Submit</button></form>')
 };
 
 // The desktop app as the worker sees it over native messaging, with Always allow on. It keeps its own
 // all-websites setting, as the real app does, and reports it in status.
 async function installDesktop(worker, profile) {
   await worker.evaluate(profile => {
-    globalThis.__desktop = { allSites: false, calls: [], profile };
+    globalThis.__desktop = { allSites: false, calls: [], saves: [], profile };
     nativeRequest = async (type, payload = {}) => {
       const desktop = globalThis.__desktop;
       desktop.calls.push({ type, url: payload.url || '', fields: payload.fields || [] });
@@ -61,6 +71,8 @@ async function installDesktop(worker, profile) {
       if (type === 'suggestFields' || type === 'answerFields') throw Object.assign(new Error('Laya isn’t ready on this computer.'), { code: 'LAYA_NOT_READY' });
       if (type === 'getFields') return { accessRevision: 0, values: Object.fromEntries(payload.fields.filter(field => desktop.profile[field]).map(field => [field, desktop.profile[field]])) };
       if (type === 'recordProgress') return { recorded: true };
+      // Save to My information (#98): the app's confirmation and save, as Allow.
+      if (type === 'saveFields') { desktop.saves.push({ url: payload.url, fields: payload.fields }); return { saved: Object.keys(payload.fields) }; }
       throw new Error(`Unexpected native request in the all-websites smoke: ${type}`);
     };
   }, profile);
@@ -111,7 +123,7 @@ async function main() {
     await fs.writeFile(manifestPath, shipped);
     let worker;
     ({ context, worker } = await launch(userData, extensionDirectory, requests));
-    await installDesktop(worker, syntheticProfile);
+    await installDesktop(worker, desktopProfile);
     assert.equal(await worker.evaluate(() => allSitesOn()), false, 'all websites starts off');
     const calls = type => worker.evaluate(type => globalThis.__desktop.calls.filter(call => call.type === type), type);
     page = context.pages()[0] || await context.newPage();
@@ -179,6 +191,39 @@ async function main() {
       [{ url: PANTRY, fields: ['firstName', 'lastName', 'zip', 'email', 'householdSize'] }], 'one desktop request for this page');
     await page.screenshot({ path: path.join(root, 'artifacts/all-websites/all-websites-filled.png') });
     console.log('All websites: a form on a site never turned on filled from the fictional profile with one click; nothing was submitted.');
+
+    // #98: the live QA's household questions fill from the fictional household list: counts by age and the one
+    // student's name and grade. The guardian's name is never filled. The apartment, which the profile lacks, is
+    // offered to Save to My information once the applicant types it, and read only after the Save click.
+    await page.goto(HOUSEHOLD, { waitUntil: 'domcontentloaded' });
+    await launcherFrame();
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+    await panel.click('#panel-autofill');
+    await expect(page.locator('#young')).toHaveValue(syntheticProfile.householdChildren, { timeout: 20000 });
+    await expect(page.locator('#middle')).toHaveValue(desktopProfile['householdCount:18-59']);
+    await expect(page.locator('#older')).toHaveValue(desktopProfile['householdCount:60+']);
+    await expect(page.locator('#student')).toHaveValue('Riley Example, 5th');
+    assert.deepEqual([syntheticProfile.householdChildren, desktopProfile['householdCount:18-59'], desktopProfile['householdCount:60+']], ['2', '1', '1'], 'the fictional household: two children, the applicant, and a parent over 60');
+    assert.equal(await page.locator('#guardian').inputValue(), '', 'a guardian’s name is never filled');
+    assert.equal(await page.locator('#apt').inputValue(), '');
+    assert.deepEqual((await calls('getFields')).filter(call => call.url === HOUSEHOLD).map(call => call.fields),
+      [['householdChildren', 'householdCount:18-59', 'householdCount:60+', 'studentNameGrade', 'addressLine2']]);
+    await expect.poll(() => panel.visible('#save-section'), { timeout: 15000 }).toBe(true);
+    await expect.poll(() => panel.text('#save-list')).toBe(`${HOUSEHOLD_QUESTIONS.apt}${en('save.answerFirst')}`);
+    await page.locator('#apt').fill('Unit 5');
+    await expect.poll(() => panel.visible('[data-save-id] button'), { timeout: 15000 }).toBe(true);
+    assert.equal(await panel.text('[data-save-id] button'), en('save.button'));
+    assert.equal(await panel.evaluate(() => document.getElementById('save-section').textContent.includes('Unit 5')), false, 'the panel never shows the answer');
+    assert.deepEqual(await worker.evaluate(() => globalThis.__desktop.saves), [], 'nothing is saved before the click');
+    await panel.screenshot(path.join(root, 'artifacts/household/side-panel-save.png'));
+    await page.screenshot({ path: path.join(root, 'artifacts/household/household-form-filled.png') });
+    await panel.click('[data-save-id] button');
+    await expect.poll(() => panel.text('#status'), { timeout: 15000 }).toBe(en('save.saved'));
+    assert.deepEqual(await worker.evaluate(() => globalThis.__desktop.saves), [{ url: HOUSEHOLD, fields: { addressLine2: 'Unit 5' } }]);
+    await expect.poll(() => panel.visible('#save-section'), { timeout: 15000 }).toBe(false);
+    await page.waitForTimeout(1000);
+    assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
+    console.log('#98: a pantry form’s household questions filled from the fictional household list (0-17, 18-59, 60+, and the student’s name and grade); the guardian stayed blank; the typed apartment was saved to My information after the Save click.');
 
     // A page whose only input is a search box gets no card.
     await page.goto(SEARCH, { waitUntil: 'domcontentloaded' });
