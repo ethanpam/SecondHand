@@ -518,6 +518,7 @@
     $('extension-id').value = vaultStatus.extensionId || '';
     $('autofill-trust').checked = Boolean(vaultStatus.autofillWithoutAsking);
     renderTrustedSites();
+    renderAllSites();
     renderLaya();
     $('extension-status').textContent = bundled ? (setup.prepared ? 'Ready to load in Chrome' : 'Setup needs refresh') : connected ? 'Custom connection registered' : 'Needs setup';
     $('extension-status').classList.toggle('connected', connected);
@@ -595,6 +596,16 @@
       return row;
     }));
     $('trusted-sites-empty').hidden = sites.length > 0;
+  }
+
+  // SecondHand on all websites. Only the extension can turn it on: Chrome asks for access to every
+  // site inside a click in its side panel. This app can turn it off.
+  function renderAllSites() {
+    const on = vaultStatus.allSites === true;
+    $('all-sites-status').textContent = on
+      ? 'All websites: on. SecondHand can fill forms on any website after you click Autofill there. Sensitive details still ask on each site.'
+      : 'All websites: off. To turn it on, open SecondHand’s side panel in Chrome and choose Use SecondHand on all websites.';
+    $('all-sites-off').hidden = !on;
   }
 
   function renderSummary() {
@@ -942,6 +953,18 @@
       $('autofill-trust').checked = !wanted;
       showError('autofill-trust-error', error);
     }).finally(() => { $('autofill-trust').disabled = false; });
+  });
+  $('all-sites-off').addEventListener('click', () => {
+    clearError('autofill-trust-error');
+    const generation = vaultGeneration;
+    pending($('all-sites-off'), async () => {
+      try {
+        const status = await api.turnOffAllSites();
+        if (generation !== vaultGeneration) return;
+        vaultStatus = { ...vaultStatus, ...status }; renderAllSites();
+        toast('SecondHand will no longer fill forms on every website. Sites you trusted one by one stay on.');
+      } catch (error) { if (generation === vaultGeneration) showError('autofill-trust-error', error); }
+    });
   });
   $('laya-toggle').addEventListener('change', () => {
     clearError('laya-error');

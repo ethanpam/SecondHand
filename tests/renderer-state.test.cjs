@@ -697,6 +697,31 @@ test('trusted sites are listed with a Remove button that calls the desktop', asy
   assert.equal(view.get('trusted-sites-empty').hidden, false);
 });
 
+test('the Chrome extension view says whether all websites is on and turns it off through the desktop; sites trusted one by one stay', async t => {
+  const calls = [];
+  let status = { exists: true, unlocked: true, extensionId: '', bridgeRunning: true, trustedSites: ['https://pantry.example.org'], allSites: true };
+  const view = await renderer(t, {
+    status: async () => status,
+    turnOffAllSites: async () => { calls.push('off'); status = { ...status, allSites: false }; return status; }
+  });
+  assert.equal(view.get('all-sites-status').textContent, 'All websites: on. SecondHand can fill forms on any website after you click Autofill there. Sensitive details still ask on each site.');
+  assert.equal(view.get('all-sites-off').hidden, false);
+  assert.equal(view.get('all-sites-off').textContent, 'Turn off');
+  view.get('all-sites-off').click();
+  await tick(); await tick();
+  assert.deepEqual(calls, ['off']);
+  assert.equal(view.get('all-sites-status').textContent, 'All websites: off. To turn it on, open SecondHand’s side panel in Chrome and choose Use SecondHand on all websites.');
+  assert.equal(view.get('all-sites-off').hidden, true);
+  assert.match(view.get('toast').textContent, /no longer fill forms on every website/);
+  assert.deepEqual(Array.from(view.get('trusted-sites').querySelectorAll('code'), code => code.textContent), ['https://pantry.example.org']);
+
+  const failing = await renderer(t, { status: async () => ({ ...status, allSites: true }), turnOffAllSites: async () => { throw new Error('Unlock SecondHand first.'); } });
+  failing.get('all-sites-off').click();
+  await tick(); await tick();
+  assert.match(failing.get('autofill-trust-error').textContent, /Unlock SecondHand first\./);
+  assert.equal(failing.get('all-sites-off').hidden, false);
+});
+
 test('creating a password shows the recovery key once and requires acknowledgement before continuing', async t => {
   const created = [];
   const recoveryKey = 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789';
