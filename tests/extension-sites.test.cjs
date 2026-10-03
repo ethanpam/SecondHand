@@ -1811,7 +1811,8 @@ test('when SecondHand is turned off for the page, its card goes and the page ans
 // Laya reads English (#84): a Spanish form's questions reach it translated by Chrome on this computer.
 const en = (key, params) => strings.english(key, params);
 const SPANISH = new Map([['¿Hay alguien en su hogar de 60 años o más?', 'Is anyone in your household 60 or older?'], ['Sí', 'Yes'], ['No', 'No'],
-  ['¿Dónde podemos contactarle?', 'Where can we reach you?']]);
+  ['¿Dónde podemos contactarle?', 'Where can we reach you?'], ['Número de Seguro Social', 'Social Security number'],
+  [`Describa ${'muy '.repeat(40)}brevemente su hogar`, `Describe ${'very '.repeat(40)}briefly your household, please`]]);
 // Chrome's Translator and LanguageDetector in the worker, as a test table. Every call is recorded.
 function workerAI({ translator = 'available', detected = null } = {}) {
   const calls = { availability: [], create: [], translate: [] };
@@ -1878,6 +1879,19 @@ test('English pages make no translator calls, and a detector reading Spanish und
     answerFields: (request, vault) => { asked = request.questions; return { answers: {}, accessRevision: vault.accessRevision }; } }) });
   await autofill(t);
   assert.deepEqual(asked.map(question => question.options), [['Yes', 'No']]);
+});
+
+test('a translated question meets Laya’s question rule as a written one does: an SSN question, or one too long in English, stays with the applicant', async () => {
+  const { ai } = workerAI();
+  const long = `Describa ${'muy '.repeat(40)}brevemente su hogar`;
+  assert.ok(long.length <= 200 && SPANISH.get(long).length > 200, 'fits in Spanish, not in English');
+  const w = siteWorker({ enabled: true, lang: 'es', ai, fields: [{ ...SIXTY_ES }, { name: 'ssn', label: 'Número de Seguro Social', type: 'text' }, { name: 'about', label: long, type: 'text' }],
+    desktop: layaDesktop({ answerFields: (request, vault) => ({ answers: {}, accessRevision: vault.accessRevision }) }) });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.state, 'done');
+  assert.deepEqual(layaCalls(w).map(call => call.type), ['answerFields'], 'no text box is sent to Laya');
+  assert.deepEqual(layaCalls(w)[0].questions.map(question => question.label), ['Is anyone in your household 60 or older?']);
+  assert.equal(result.message, en('result.nothingMatchesNeedYou', { count: 3 }), 'like a written question of the same kind, with no translation reason');
 });
 
 test('a frame’s plan must say which language it declares', async () => {

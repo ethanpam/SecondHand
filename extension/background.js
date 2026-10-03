@@ -840,11 +840,15 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       guard();
     }
     // Laya reads English: each frame's questions in another language are translated by Chrome on this
-    // computer first, and those it can't read stay with the applicant, with the reason (#84).
-    const prepared = layaOn && (open.boxes.length || open.choices.length)
+    // computer first, and those it can't read stay with the applicant, with the reason (#84). A translated
+    // question then meets Laya's question rule as a written one does (an English SSN question, or one too
+    // long, stays with the applicant).
+    const english = layaOn && (open.boxes.length || open.choices.length)
       ? await questionTranslation.forLaya(initial.map(frame => ({ ...layaQuestions([frame], prefix), declared: languageTag(frame.plan.lang) })))
       : { boxes: [], choices: [], mapAnswers: entries => entries, reason: null };
     guard();
+    const prepared = { ...english, boxes: english.boxes.filter(box => SecondHandGeneric.layaQuestion(box) === 'text'),
+      choices: english.choices.filter(question => SecondHandGeneric.layaQuestion(question) === 'choice') };
     const budget = layaBudget();
     // null: Laya isn't ready; undefined: the budget was spent before this request.
     let answers;
