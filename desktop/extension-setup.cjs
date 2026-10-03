@@ -29,30 +29,44 @@ function bundledDirectory(app, resourcesPath = process.resourcesPath) {
   return app.isPackaged ? path.join(resourcesPath, 'extension') : path.join(app.getAppPath(), 'extension');
 }
 
-async function bundledManifest(app, resourcesPath) {
-  const manifest = JSON.parse(await fs.readFile(path.join(bundledDirectory(app, resourcesPath), 'manifest.json'), 'utf8'));
+// The extension's build: the BUILD line in background.js (panel.js carries the same one). The
+// extension compares it with the build the app ships to update itself (#85).
+const BUILD_LINE = /^const BUILD = '(\d{4}-\d{2}-\d{2}\.\d+)';$/m;
+const buildOf = source => BUILD_LINE.exec(source)?.[1] ?? null;
+// background.js is written last, so its build marker also says every other file is from that build.
+const MARKER_FILE = 'background.js';
+
+async function bundledExtension(app, resourcesPath) {
+  const directory = bundledDirectory(app, resourcesPath);
+  const manifest = JSON.parse(await fs.readFile(path.join(directory, 'manifest.json'), 'utf8'));
   if (manifest.manifest_version !== 3 || typeof manifest.version !== 'string') throw new Error('The bundled extension is invalid.');
-  return { manifest, extensionId: extensionIdFromKey(manifest.key) };
+  const build = buildOf(await fs.readFile(path.join(directory, MARKER_FILE), 'utf8'));
+  if (!build) throw new Error('The bundled extension has no build marker.');
+  return { manifest, extensionId: extensionIdFromKey(manifest.key), build };
 }
 
+// `exists`: something is at the prepared folder's path. `prepared`: it is a copy of this bundle.
 async function getExtensionSetup(app, resourcesPath) {
-  const { manifest, extensionId } = await bundledManifest(app, resourcesPath);
+  const { manifest, extensionId, build } = await bundledExtension(app, resourcesPath);
   const directory = extensionDirectory(app);
+  let exists = false;
   let prepared = false;
   try {
     const stat = await fs.lstat(directory);
+    exists = true;
     if (stat.isDirectory() && !stat.isSymbolicLink()) {
       const installed = JSON.parse(await fs.readFile(path.join(directory, 'manifest.json'), 'utf8'));
       const files = await Promise.all(EXTENSION_FILES.map(file => fs.lstat(path.join(directory, file))));
-      prepared = installed.key === manifest.key && installed.version === manifest.version && files.every(file => file.isFile() && !file.isSymbolicLink());
+      prepared = installed.key === manifest.key && installed.version === manifest.version && files.every(file => file.isFile() && !file.isSymbolicLink()) &&
+        buildOf(await fs.readFile(path.join(directory, MARKER_FILE), 'utf8')) === build;
     }
   } catch { /* Setup has not run yet, or its copied files need to be restored. */ }
-  return { directory, extensionId, version: manifest.version, prepared };
+  return { directory, extensionId, version: manifest.version, build, exists, prepared };
 }
 
 async function prepareBundledExtension(app, resourcesPath) {
   const source = bundledDirectory(app, resourcesPath);
-  const { manifest, extensionId } = await bundledManifest(app, resourcesPath);
+  const { manifest, extensionId, build } = await bundledExtension(app, resourcesPath);
   const directory = extensionDirectory(app);
   // Read and validate all assets before changing the user's existing copy.
   const assets = await Promise.all(EXTENSION_FILES.map(async name => {
@@ -64,10 +78,13 @@ async function prepareBundledExtension(app, resourcesPath) {
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   const target = await fs.lstat(directory);
   if (!target.isDirectory() || target.isSymbolicLink()) throw new Error('The extension setup directory must be a local folder.');
-  // Manifest is last, so the new version is exposed after its assets are written.
-  for (const asset of assets) await atomicWrite(path.join(directory, asset.name), asset.bytes);
+  // The manifest, then background.js, are last: a new version and build show only once every
+  // other file is written. A refresh that stops part way leaves the old build marker.
+  const order = [...assets.filter(asset => asset.name !== 'manifest.json' && asset.name !== MARKER_FILE),
+    ...assets.filter(asset => asset.name === 'manifest.json'), ...assets.filter(asset => asset.name === MARKER_FILE)];
+  for (const asset of order) await atomicWrite(path.join(directory, asset.name), asset.bytes);
   await removeReplacedExtensionFiles(directory);
-  return { directory, extensionId, version: manifest.version, prepared: true };
+  return { directory, extensionId, version: manifest.version, build, exists: true, prepared: true };
 }
 
 // Only top-level regular files that the current bundle no longer ships. Links and

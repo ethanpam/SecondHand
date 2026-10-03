@@ -276,8 +276,33 @@ if (nativeOrigin) {
       throw Object.assign(publicError('Laya couldn’t check this form. Fill the remaining questions yourself.'), { cause: error });
     }
   }
+  // The extension this app ships, for the extension's own update (#85): its build, and whether the
+  // copy prepared for Chrome has it ('ready'), couldn't be refreshed ('failed'), or doesn't exist
+  // ('absent'). A copy from another build is refreshed from the app's own bundle only, never from
+  // anything in a request. A failed refresh isn't tried again by itself: the extension shows the
+  // steps, and the Chrome extension page's refresh tries again.
+  let copyRefresh = null;
+  let copyFailed = false;
+  function refreshCopy() {
+    copyRefresh ||= prepareBundledExtension(app)
+      .then(setup => { copyFailed = false; return setup; }, error => { copyFailed = true; throw error; })
+      .finally(() => { copyRefresh = null; });
+    return copyRefresh;
+  }
+  async function shippedExtension() {
+    // A refresh under way finishes first; its own caller reports how it went.
+    if (copyRefresh) await Promise.allSettled([copyRefresh]);
+    const setup = await getExtensionSetup(app);
+    if (setup.prepared) return { build: setup.build, copy: 'ready' };
+    if (!setup.exists) return { build: setup.build, copy: 'absent' };
+    if (copyFailed) return { build: setup.build, copy: 'failed' };
+    try { await refreshCopy(); }
+    catch { return { build: setup.build, copy: 'failed' }; }
+    return { build: setup.build, copy: 'ready' };
+  }
   async function bridgeRequest(request, context) {
-    if (request.type === 'status') return { unlocked: vault.unlocked, applicationCount: vault.unlocked ? vault.getData().applications.length : 0, accessRevision, allSites, laya: await extensionLayaState() };
+    if (request.type === 'status') return { unlocked: vault.unlocked, applicationCount: vault.unlocked ? vault.getData().applications.length : 0, accessRevision, allSites,
+      laya: await extensionLayaState(), extension: await shippedExtension() };
     // On Windows the native relay passes openApp on as it is; the app is running, so it comes forward.
     if (request.type === 'showApp' || request.type === 'openApp') {
       if (mainWindow) { if (mainWindow.isMinimized?.()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); }
@@ -564,7 +589,7 @@ if (nativeOrigin) {
       if (extensionSetupPending) throw publicError('Extension setup is already running.');
       extensionSetupPending = true;
       try {
-        const setup = await prepareBundledExtension(app);
+        const setup = await refreshCopy();
         const registration = await saveExtensionRegistration(setup.extensionId);
         const openError = await shell.openPath(setup.directory);
         return { ...setup, ...registration, folderOpened: !openError };

@@ -52,6 +52,8 @@ test('Chrome native origins and Iowa portal requests use strict allowlists', () 
   assert.deepEqual(validateRequest({ id: 'x', type: 'getFields', url: PORTAL_URL, fields: ['birthDate', 'hasSsn'] }).fields, ['birthDate', 'hasSsn']);
   assert.equal(validateRequest({ id: 'x', type: 'getFields', url: PORTAL_URL, fields: [...PROFILE_FIELDS, 'hasSsn'] }).fields.length, PROFILE_FIELDS.length + 1);
   assert.throws(() => validateRequest({ id: 'x', type: 'status', profile: {} }), /Unexpected/);
+  // The extension says nothing about its own build or files: the app updates its copy from its own bundle.
+  assert.throws(() => validateRequest({ id: 'x', type: 'status', build: '2026-10-03.1' }), /Unexpected/);
   assert.throws(() => validateRequest({ id: 'x', type: 'submit' }), /Unsupported/);
   for (const filledCount of [-1, 0, 1.5, 101, '2']) assert.throws(() => validateRequest({ id: 'x', type: 'recordProgress', url: PORTAL_URL, filledCount }), /count/);
 });

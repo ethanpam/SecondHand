@@ -17,6 +17,73 @@ async function fixture(t) {
   return { directory, userData, app: { isPackaged: false, getAppPath: () => root, getPath: name => { assert.equal(name, 'userData'); return userData; } } };
 }
 
+const OLD_BUILD = '2026-01-01.1';
+const markerOf = source => /^const BUILD = '([^']+)';$/m.exec(source)[1];
+const CURRENT_BUILD = markerOf(require('node:fs').readFileSync(path.join(root, 'extension/background.js'), 'utf8'));
+// A packaged app's resources holding this extension under an older build marker.
+async function olderBundle(directory) {
+  const resources = path.join(directory, 'older-resources');
+  await fs.cp(path.join(root, 'extension'), path.join(resources, 'extension'), { recursive: true });
+  for (const file of ['background.js', 'panel.js']) {
+    const target = path.join(resources, 'extension', file);
+    await fs.writeFile(target, (await fs.readFile(target, 'utf8')).replace(`const BUILD = '${CURRENT_BUILD}';`, `const BUILD = '${OLD_BUILD}';`));
+  }
+  return resources;
+}
+
+test('setup reports the build the app ships, read from its bundled background.js', async t => {
+  const { app } = await fixture(t);
+  const setup = await getExtensionSetup(app);
+  assert.match(CURRENT_BUILD, /^\d{4}-\d{2}-\d{2}\.\d+$/);
+  assert.equal(setup.build, CURRENT_BUILD);
+  assert.equal(setup.exists, false, 'nothing prepared yet');
+  assert.equal(setup.prepared, false);
+  const prepared = await prepareBundledExtension(app);
+  assert.equal(prepared.build, CURRENT_BUILD);
+  assert.deepEqual({ exists: (await getExtensionSetup(app)).exists, prepared: (await getExtensionSetup(app)).prepared }, { exists: true, prepared: true });
+});
+
+test('a prepared copy from another build is not prepared until it is refreshed', async t => {
+  const { app, directory } = await fixture(t);
+  const older = { ...app, isPackaged: true };
+  const resources = await olderBundle(directory);
+  assert.equal((await prepareBundledExtension(older, resources)).build, OLD_BUILD);
+  assert.equal((await getExtensionSetup(older, resources)).prepared, true, 'the older app sees its own copy as current');
+  const stale = await getExtensionSetup(app);
+  assert.deepEqual({ build: stale.build, exists: stale.exists, prepared: stale.prepared }, { build: CURRENT_BUILD, exists: true, prepared: false });
+  await prepareBundledExtension(app);
+  assert.equal((await getExtensionSetup(app)).prepared, true);
+  assert.equal(markerOf(await fs.readFile(path.join(stale.directory, 'background.js'), 'utf8')), CURRENT_BUILD);
+});
+
+test('a refresh writes background.js last, so its build marker means every other file is already new', async t => {
+  const { app, directory } = await fixture(t);
+  const resources = await olderBundle(directory);
+  const { directory: copy } = await prepareBundledExtension({ ...app, isPackaged: true }, resources);
+  // A file Chrome loads that can't be replaced: the refresh stops there.
+  await fs.rm(path.join(copy, 'panel.css'));
+  await fs.mkdir(path.join(copy, 'panel.css'));
+  await fs.writeFile(path.join(copy, 'panel.css', 'blocker'), 'synthetic');
+  await assert.rejects(prepareBundledExtension(app));
+  assert.equal(markerOf(await fs.readFile(path.join(copy, 'background.js'), 'utf8')), OLD_BUILD, 'background.js keeps the old build while any file is old');
+  assert.equal((await getExtensionSetup(app)).prepared, false);
+  await fs.rm(path.join(copy, 'panel.css'), { recursive: true });
+  await prepareBundledExtension(app);
+  assert.equal(markerOf(await fs.readFile(path.join(copy, 'background.js'), 'utf8')), CURRENT_BUILD);
+  assert.equal((await getExtensionSetup(app)).prepared, true);
+});
+
+test('a bundle without a build marker is refused before anything is copied', async t => {
+  const { app, directory, userData } = await fixture(t);
+  const resources = await olderBundle(directory);
+  const worker = path.join(resources, 'extension', 'background.js');
+  await fs.writeFile(worker, (await fs.readFile(worker, 'utf8')).replace(/^const BUILD = .*$/m, ''));
+  const packaged = { ...app, isPackaged: true };
+  await assert.rejects(getExtensionSetup(packaged, resources), /build marker/);
+  await assert.rejects(prepareBundledExtension(packaged, resources), /build marker/);
+  await assert.rejects(fs.lstat(path.join(userData, 'chrome-extension')), { code: 'ENOENT' });
+});
+
 test('bundled public key pins the same Chrome ID on every platform and copy location', async () => {
   const manifest = JSON.parse(await fs.readFile(path.join(root, 'extension/manifest.json'), 'utf8'));
   assert.equal(extensionIdFromKey(manifest.key), 'jogldddafjfbmfjnjlbjloakjbecnjpl');
