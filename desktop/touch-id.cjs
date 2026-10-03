@@ -208,4 +208,4 @@ function createTouchIdUnlock({ vault, platform, filePath, now, revision }) {
   return { state, turnOn, turnOff, passwordUnlocked, forget, removeSealed, unlock, supported: () => platform.supported(), get notice() { return notice; } };
 }
 
-module.exports = { touchIdPlatform, createTouchIdUnlock, PASSWORD_EVERY_MS };
+module.exports = { touchIdPlatform, createTouchIdUnlock };
