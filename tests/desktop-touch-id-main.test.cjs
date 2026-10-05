@@ -251,9 +251,11 @@ test('turning Touch ID off removes its slot and the sealed key; the other slots 
   await assert.rejects(app.invoke('setTouchIdUnlock', { enabled: false }), /Unlock SecondHand first/);
 });
 
-test('an unreadable sealed key turns Touch ID off with the reason, asks for the password, and the password removes the slot', async t => {
+// Only a damaged key file (its format or size) or a damaged Touch ID slot turns Touch ID off (#140).
+test('a damaged key file or Touch ID slot turns Touch ID off with the reason, asks for the password, and the password removes the slot', async t => {
   const cases = [
-    ['not sealed by this Mac', () => Buffer.from('tampered'), /because this Mac’s Keychain couldn’t open its key/],
+    ['empty', () => Buffer.alloc(0), /because its key file on this Mac is damaged/],
+    ['too large', () => Buffer.alloc(4097, 'a'), /because its key file on this Mac is damaged/],
     ['damaged inside', () => Buffer.from(`sealed:${Buffer.from('{"version":1').toString('hex')}`), /because its key file on this Mac is damaged/],
     ['the wrong shape', () => Buffer.from(`sealed:${Buffer.from(JSON.stringify({ version: 3, key: crypto.randomBytes(32).toString('base64') })).toString('hex')}`), /because its key file on this Mac is damaged/],
     ['a short key', () => Buffer.from(`sealed:${Buffer.from(JSON.stringify({ version: 2, key: crypto.randomBytes(16).toString('base64') })).toString('hex')}`), /because its key file on this Mac is damaged/],
@@ -278,15 +280,53 @@ test('an unreadable sealed key turns Touch ID off with the reason, asks for the 
   }
 });
 
+// A Keychain that can't open the key now, or a key file that can't be read now, may work next time (#140).
+test('a Keychain or file error doesn’t turn Touch ID off: Touch ID didn’t work this time, the key and slot stay, and it works next time', async t => {
+  const cases = [
+    ['the Keychain refuses', async app => { app.unsealing(() => { throw new Error('The Keychain is locked.'); }); }, async app => { app.unsealing(() => {}); },
+      /^Error: Touch ID didn’t work this time \(this Mac’s Keychain couldn’t open its key\)\. Use your password\.$/],
+    ['not sealed by this Mac', async app => { await fsp.writeFile(app.sealedPath, 'tampered'); }, async (app, sealed) => { await fsp.writeFile(app.sealedPath, sealed); },
+      /^Error: Touch ID didn’t work this time \(this Mac’s Keychain couldn’t open its key\)\. Use your password\.$/],
+    ['the key file can’t be read', async app => { await fsp.rm(app.sealedPath); await fsp.mkdir(app.sealedPath); },
+      async (app, sealed) => { await fsp.rmdir(app.sealedPath); await fsp.writeFile(app.sealedPath, sealed); },
+      /^Error: Touch ID didn’t work this time \(its key file on this Mac couldn’t be read \(EISDIR\)\)\. Use your password\.$/]
+  ];
+  for (const [name, fail, recover, message] of cases) {
+    const { app } = await withTouchId(t);
+    await app.invoke('lock');
+    const sealed = await fsp.readFile(app.sealedPath);
+    const slot = (await app.slots()).touchId;
+    await fail(app);
+    await assert.rejects(app.invoke('unlockWithTouchId'), message, name);
+    assert.deepEqual(plain(await app.request('unlockWithTouchId')), { unlocked: false, reason: 'cancelled' }, `${name}: Chrome’s side panel offers Touch ID again`);
+    const status = await app.invoke('status');
+    assert.equal(status.unlocked, false, name);
+    assert.equal(status.touchId, 'ready', `${name}: Touch ID stays on`);
+    assert.equal(status.touchIdNotice, null, name);
+    // The password unlock finds the same problem and keeps Touch ID on too.
+    const unlocked = await app.invoke('unlock', PASSWORD);
+    assert.equal(unlocked.unlocked, true, name);
+    assert.equal(unlocked.touchId, 'ready', name);
+    assert.equal(unlocked.touchIdNotice, null, name);
+    assert.deepEqual((await app.slots()).touchId, slot, `${name}: the slot stays`);
+    await fsp.access(app.sealedPath);
+    if (name === 'the Keychain refuses') assert.deepEqual(await fsp.readFile(app.sealedPath), sealed, 'the key is kept');
+    await app.invoke('lock');
+    await recover(app, sealed);
+    assert.equal((await app.invoke('unlockWithTouchId')).unlocked, true, `${name}: Touch ID works next time`);
+    assert.equal(app.prompts.length, 3, name);
+  }
+});
+
 test('a damaged sealed key found by a password unlock turns Touch ID off and says so, and the unlock still works', async t => {
   const first = await withTouchId(t);
   await first.app.invoke('lock');
-  await fsp.writeFile(first.app.sealedPath, 'tampered');
+  await fsp.writeFile(first.app.sealedPath, `sealed:${Buffer.from('not a key').toString('hex')}`);
   const app = await desktop(t, { userData: first.app.userData });
   const unlocked = await app.invoke('unlock', PASSWORD);
   assert.equal(unlocked.unlocked, true);
   assert.equal(unlocked.touchId, 'off');
-  assert.match(unlocked.touchIdNotice, /^Touch ID was turned off because this Mac’s Keychain couldn’t open its key\.$/);
+  assert.match(unlocked.touchIdNotice, /^Touch ID was turned off because its key file on this Mac is damaged\.$/);
   await assert.rejects(fsp.access(app.sealedPath));
   assert.deepEqual(Object.keys(await app.slots()).sort(), ['device', 'password', 'recovery']);
   // Turning it on again clears the notice.

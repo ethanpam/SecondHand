@@ -194,6 +194,24 @@ test('a cancelled Touch ID prompt says why and leaves the password field ready',
   assert.equal(view.shown('workspace'), true);
 });
 
+test('when Touch ID didn’t work this time, the lock screen says so, keeps Touch ID beside the password, and it works next time', async t => {
+  const message = 'Touch ID didn’t work this time (this Mac’s Keychain couldn’t open its key). Use your password.';
+  const view = await renderer(t, { unlocked: false, touchId: 'ready' });
+  const unlockWithTouchId = view.window.secondHand.unlockWithTouchId;
+  let fail = true;
+  view.window.secondHand.unlockWithTouchId = async () => { if (fail) throw new view.window.Error(message); return unlockWithTouchId(); };
+  await view.click('touch-id-unlock');
+  assert.equal(view.get('auth-error').textContent, message);
+  assert.equal(view.shown('auth-error'), true);
+  assert.equal(view.shown('touch-id-unlock'), true, 'Touch ID stays on');
+  assert.equal(view.get('touch-id-unlock').disabled, false);
+  assert.equal(view.shown('touch-id-note'), false, 'nothing was turned off');
+  assert.equal(view.window.document.activeElement, view.get('passphrase'));
+  fail = false;
+  await view.click('touch-id-unlock');
+  assert.equal(view.shown('workspace'), true);
+});
+
 test('when Touch ID is turned off because its key can’t be used, the lock screen says why and asks for the password', async t => {
   const notice = 'Touch ID was turned off because this Mac’s Keychain couldn’t open its key.';
   const view = await renderer(t, { unlocked: false, touchId: 'ready' });
