@@ -14,7 +14,7 @@ if (typeof globalThis.SecondHandTranslation?.create !== 'function') {
 // Must match BUILD in panel.js: change both together, with every change to the extension. The panel
 // compares them to tell when Chrome is still running an older worker than the pages it loaded from
 // disk, and the worker compares it with the build the desktop app ships to update itself (#85).
-const BUILD = '2026-10-05.1';
+const BUILD = '2026-10-05.2';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
@@ -137,6 +137,12 @@ function failed(error) {
   return { state: 'error', message: text, messageKey: 'detail', messageParams: { detail: text } };
 }
 
+// Why the desktop left saved answers out (#135): a saved date of birth it can't use. Null when it left none out.
+function desktopReason(response) {
+  if (response?.reason === undefined) return null;
+  if (response.reason !== 'birthDate') throw fault('worker.desktopUnexpected');
+  return { key: 'worker.birthDateUnusable', params: {} };
+}
 // Desktop receipt revisions are authorization metadata, never profile values.
 function receiptRevision(response) {
   if (!Number.isSafeInteger(response?.accessRevision) || response.accessRevision < 0) throw fault('worker.authorizationOutdated');
@@ -167,6 +173,7 @@ async function fillPage(tabId, state, pilot) {
     currentPilot(tabId, pilot);
     const revision = receiptRevision(response);
     if (!response?.values || typeof response.values !== 'object' || Array.isArray(response.values)) throw fault('worker.noProfileFields');
+    const reason = desktopReason(response);
     values = SecondHandIowa.pageValues(pageKey, response.values);
     let filled = 0;
     const attempted = pilot.attempted;
@@ -203,8 +210,8 @@ async function fillPage(tabId, state, pilot) {
     if (filled > 0) await nativeRequest('recordProgress', { url: safeUrl(url), filledCount: Math.min(filled, 100) }).catch(() => {});
     currentPilot(tabId, pilot);
     const missing = needYou(after.page);
-    const summary = filled ? filledSummary(filled, missing)
-      : missing.length ? { key: 'result.needYouNotSaved', params: { count: missing.length } } : { key: 'result.nothingNew', params: {} };
+    const summary = withReason(filled ? filledSummary(filled, missing)
+      : missing.length ? { key: 'result.needYouNotSaved', params: { count: missing.length } } : { key: 'result.nothingNew', params: {} }, reason);
     // This receipt stays only in the worker. It never reaches a panel result.
     pilot.accessRevision = revision;
     const todo = after.page.todo ? adapterSays(after.page.todo, 'todo') : { todo: '' };
@@ -708,6 +715,9 @@ async function tallySite(tabId, frames) {
 // A summary that says when Laya suggested the guesses.
 const withLaya = (summary, laya) => laya ? { key: 'result.suggestedByLaya', params: { summary } } : summary;
 const withReason = (summary, reason) => reason ? { key: 'result.withReason', params: { summary, reason } } : summary;
+// A click's reasons as one, each said once.
+const reasons = (...list) => list.filter((reason, index) => reason && list.findIndex(other => other?.key === reason.key) === index)
+  .reduce((all, next) => all ? joined(all, next) : next, null);
 function siteSummary(filled, guessed, needYou, next, laya, reason = null) {
   let summary;
   if (filled) {
@@ -861,7 +871,7 @@ async function layaAnswers(url, choices, budgetMs) {
   const sent = new Map(payload.questions.map(question => [question.id, question.options]));
   const entries = plainEntries(reply?.answers);
   if (!entries || entries.some(([id, option]) => !sent.has(id) || typeof option !== 'string' || !sent.get(id).includes(option))) throw fault('worker.layaUnusable');
-  return { entries, revision: receiptRevision(reply) };
+  return { entries, revision: receiptRevision(reply), reason: desktopReason(reply) };
 }
 
 // Fills from a general-engine plan: one desktop request for the keys planned first (the rules'
@@ -876,6 +886,7 @@ async function layaAnswers(url, choices, budgetMs) {
 async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, laya = null } = {}) {
   let revision = null;
   let values = null;
+  let fieldsReason = null;
   try {
     const initial = frames.map(frame => ({ ...frame, planned: frame.planned || ruleAssignments(frame.plan) }));
     const open = laya === false ? { boxes: [], choices: [] } : layaQuestions(initial, prefix);
@@ -925,6 +936,7 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       if (!response?.values || typeof response.values !== 'object' || Array.isArray(response.values)) throw fault('worker.noProfileFields');
       guard();
       revision = receiptRevision(response);
+      fieldsReason = desktopReason(response);
       values = SecondHandGeneric.deriveValues(response.values);
     }
     // The answers came before getFields: an Always allow in its prompt outdates their receipt, and
@@ -983,7 +995,7 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
           label: typeof field.label === 'string' ? field.label.trim().slice(0, LABEL_LIMIT) : '' });
       }
     }
-    return { filled, needYou, savable, laya: placedByLaya, reason: prepared.reason };
+    return { filled, needYou, savable, laya: placedByLaya, reason: reasons(prepared.reason, answers?.reason, fieldsReason) };
   } finally { values = null; questionTranslation.forget(); }
 }
 

@@ -149,7 +149,9 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
               if (request.type === 'getFields') {
                 duringGetFields?.(tab);
                 if (vault.getFieldsError) return fail(vault.getFieldsError);
-                return reply({ accessRevision: 0, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])) });
+                // `fieldsReason`: why the app left saved answers out (#135).
+                return reply({ accessRevision: 0, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])),
+                  ...(vault.fieldsReason !== undefined ? { reason: vault.fieldsReason } : {}) });
               }
               fail('Unsupported bridge request.');
             });
@@ -1027,4 +1029,12 @@ test('an approval prompt in a click holds the reload until the click is answered
   await w.panel({ type: 'ui:stop', confirmed: true });
   await settle();
   assert.equal(w.reloads(), 1);
+});
+
+test('on a verified Iowa page, an answer the app left out because of a saved date of birth is said, and the rest still fill (#135)', async () => {
+  const w = worker({ desktop: { fieldsReason: 'birthDate' } });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.state, 'done');
+  assert.deepEqual(w.filled(), ['firstName', 'hasHomeAddress', 'mailingCity']);
+  assert.match(result.message, /^Filled 3 · 1 need you\. .*SecondHand left the answers that need a date of birth for you: a date of birth in My information is after today or more than 130 years ago\. Check it in the SecondHand app\./);
 });

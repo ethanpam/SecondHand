@@ -294,13 +294,20 @@
     return result;
   }
 
+  // A date of birth Iowa may get, checked as the app checks it (#135): today or earlier and no more than
+  // 130 years ago, on this computer's own calendar, never the UTC date.
+  function usableBirthDate(value) {
+    const now = new Date();
+    const day = (year, month, date) => `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(date).padStart(2, '0')}`;
+    return value <= day(now.getFullYear(), now.getMonth() + 1, now.getDate()) && value >= day(now.getFullYear() - 130, now.getMonth() + 1, now.getDate());
+  }
   function formatValue(key, raw, element) {
     if (typeof raw !== 'string' || !raw.trim() || raw.length > 250 || /[\u0000-\u001f]/.test(raw)) return null;
     let value = raw.trim();
     if (key === 'birthDate') {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
       const date = new Date(`${value}T00:00:00.000Z`);
-      if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value || value > new Date().toISOString().slice(0, 10)) return null;
+      if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value || !usableBirthDate(value)) return null;
       value = `${value.slice(5, 7)}/${value.slice(8, 10)}/${value.slice(0, 4)}`;
     }
     if (key === 'homePhone' || key === 'mobilePhone') {

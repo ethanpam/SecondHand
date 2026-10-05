@@ -247,7 +247,9 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
                 // The app's rule: a site it doesn't trust gets nothing unless all websites is on.
                 if (vault.refuseUntrusted && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
                 if (vault.getFieldsError) return fail(vault.getFieldsError);
-                return reply({ accessRevision: vault.accessRevision, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])) });
+                // `fieldsReason`: why the app left saved answers out (#135).
+                return reply({ accessRevision: vault.accessRevision, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])),
+                  ...(vault.fieldsReason !== undefined ? { reason: vault.fieldsReason } : {}) });
               }
               fail('Unsupported bridge request.');
             });
@@ -2104,4 +2106,50 @@ test('a site frame says which listed boxes hold an answer, by id, and reads one 
   }
   assert.equal(page.request({ type: 'secondhand:generic:read', token: 'plan-1', id: 'sh-1', key: 'county' }, { id: 'another-extension' }), undefined);
   assert.deepEqual(page.calls.filter(call => typeof call === 'string' && call.startsWith('read:')), ['read:plan-1:sh-1:county', 'read:plan-1:sh-2:county']);
+});
+
+// #135: answers the app left out because a saved date of birth is after today or more than 130 years ago.
+const BIRTH_DATE_REASON = 'SecondHand left the answers that need a date of birth for you: a date of birth in My information is after today or more than 130 years ago. Check it in the SecondHand app.';
+test('when the app leaves answers out because of a saved date of birth, the click still fills the rest and says why', async () => {
+  const w = siteWorker({ enabled: true, desktop: { fieldsReason: 'birthDate' } });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.state, 'done');
+  assert.equal(result.filled, 2);
+  assert.equal(result.message, `Filled 2 · 2 need you. Check your answers before you submit. ${BIRTH_DATE_REASON}`);
+  assert.equal(strings.english('worker.birthDateUnusable'), BIRTH_DATE_REASON);
+  for (const language of ['es', 'vi', 'zh', 'fr', 'ar']) assert.notEqual(strings.text(language, 'worker.birthDateUnusable'), BIRTH_DATE_REASON, language);
+});
+
+test('when Laya answers without a saved date of birth it can’t use, the click says why, once, with the app’s own reason too', async () => {
+  const play = { answerFields: (request, vault) => ({ answers: { [request.questions[0].id]: 'No' }, accessRevision: vault.accessRevision, reason: 'birthDate' }) };
+  const w = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...SIXTY }, { ...PET }], desktop: layaDesktop(play) });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.filled, 2);
+  assert.equal(result.message, `Filled 2 · 1 guessed · 1 need you. Check your answers before you submit. Guesses were suggested by Laya on this computer. ${BIRTH_DATE_REASON}`);
+  const both = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...SIXTY }, { ...PET }], desktop: { ...layaDesktop(play), fieldsReason: 'birthDate' } });
+  assert.equal(plain((await autofill(both)).data).message.split(BIRTH_DATE_REASON).length, 2, 'the same reason is said once');
+});
+
+test('a reason the worker doesn’t know fills nothing and shows a fixed error', async () => {
+  const w = siteWorker({ enabled: true, desktop: { fieldsReason: 'somethingElse' } });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.state, 'error');
+  assert.equal(result.messageKey, 'worker.desktopUnexpected');
+  assert.deepEqual(w.page.answered(), []);
+  const laya = siteWorker({ enabled: true, fields: [{ ...SIXTY }], desktop: layaDesktop({ answerFields: (request, vault) => ({ answers: {}, accessRevision: vault.accessRevision, reason: 7 }) }) });
+  assert.equal(plain((await autofill(laya)).data).messageKey, 'worker.desktopUnexpected');
+});
+
+test('when the app refuses to save because of a saved date of birth, the side panel shows its words: whose date, and to fix it in My information', async () => {
+  const w = siteWorker({ enabled: true, desktop: { values: {} } });
+  await autofill(w);
+  const size = `f0:${w.page.idOf('size')}`;
+  w.page.type('size', '3');
+  const refusal = 'Person 3’s date of birth can’t be after today (2026-10-05 on this computer). Fix the date in My information, then save this answer again.';
+  w.vault.saveError = refusal;
+  const refused = plain(await saveAnswer(w, size));
+  assert.equal(refused.ok, false);
+  assert.deepEqual([refused.errorKey, refused.errorParams], ['detail', { detail: refusal }], 'the app’s own words, not a fixed error');
+  assert.equal(strings.text('en', refused.errorKey, refused.errorParams), refusal);
+  assert.ok((await savable(w)).some(item => item.id === size), 'the answer stays on the list to save once the date is fixed');
 });
