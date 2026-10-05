@@ -1331,6 +1331,7 @@ test('the guided setup shows one step at a time, saves each step as the applican
   assert.equal(view.get('setup-step-count').textContent, 'Step 1 of 6');
   assert.equal(view.get('setup-step-title').textContent, 'You');
   assert.equal(view.window.document.activeElement, view.get('setup-step-title'), 'the step’s heading is read first');
+  assert.ok(view.get('setup-step-title').compareDocumentPosition(view.get('setup-step-count')) & view.window.Node.DOCUMENT_POSITION_FOLLOWING, 'the step’s heading comes before the step count, with no line above it');
   assert.deepEqual(shownSteps(), ['1']);
   assert.equal(view.get('save-profile').closest('.form-save-bar').hidden, true);
   assert.equal(view.get('setup-back').disabled, true);
