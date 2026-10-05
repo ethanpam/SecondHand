@@ -657,6 +657,10 @@ test('Privacy & backups names everything autofill fills or clicks today and keep
   assert.match(chrome, /on this computer/);
   assert.match(chrome, /marked to check/);
   assert.doesNotMatch(card, /—|passphrase|vault/i);
+  // The one value SecondHand picks for the applicant gets its own paragraph, ending on the instruction to check it.
+  const address = Array.from(view.window.document.querySelectorAll('#view-privacy .autofill-card p'), text).filter(paragraph => paragraph.includes('first suggested home address'));
+  assert.equal(address.length, 1);
+  assert.match(address[0], /^On the verified home-address page, .*\. Check that this address is yours before you submit\.$/);
 });
 
 test('the document review card opens with the file name as its heading, with no line above it', async t => {
