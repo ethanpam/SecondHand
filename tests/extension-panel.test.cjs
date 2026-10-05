@@ -493,7 +493,6 @@ test('when the app says Touch ID is ready, Unlock asks the app for Touch ID and 
 
 test('when Touch ID doesn’t unlock, Unlock does what it does today: brings SecondHand forward, and says why', async t => {
   const lines = { cancelled: 'Touch ID didn’t unlock SecondHand. Enter your password in SecondHand, then click Autofill.',
-    password: 'SecondHand needs your password after it restarts or every 14 days. Enter it in SecondHand, then click Autofill.',
     off: 'Unlock SecondHand, then click Autofill.' };
   for (const [reason, line] of Object.entries(lines)) {
     const view = await panel(t, { desktop: { unlocked: false, touchId: 'ready' }, unlockWithTouchId: () => ({ unlocked: false, reason }) });
@@ -509,8 +508,8 @@ test('when Touch ID doesn’t unlock, Unlock does what it does today: brings Sec
   assert.equal(failing.types().includes('ui:showApp'), false);
 });
 
-test('when Touch ID needs the password or is off, Unlock only brings SecondHand forward, as before', async t => {
-  for (const touchId of ['password', 'off', undefined]) {
+test('when Touch ID is off, or the app says nothing about it, Unlock only brings SecondHand forward, as before', async t => {
+  for (const touchId of ['off', undefined]) {
     const view = await panel(t, { desktop: { unlocked: false, ...(touchId ? { touchId } : {}) }, unlockWithTouchId: () => assert.fail('Touch ID was asked for') });
     assert.equal(view.get('desktop-action').textContent, 'Unlock', String(touchId));
     await view.userClick('desktop-action');

@@ -14,7 +14,7 @@ if (typeof globalThis.SecondHandTranslation?.create !== 'function') {
 // Must match BUILD in panel.js: change both together, with every change to the extension. The panel
 // compares them to tell when Chrome is still running an older worker than the pages it loaded from
 // disk, and the worker compares it with the build the desktop app ships to update itself (#85).
-const BUILD = '2026-10-03.3';
+const BUILD = '2026-10-03.4';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
@@ -1283,11 +1283,11 @@ function summaryLine(tabId, url) {
   return summary?.points.length ? { summary: { language: summary.language, point: summary.points[0], english: summary.english } } : {};
 }
 
-// Unlock with Touch ID (#99). The desktop's status says whether it's ready, needs the password, or
-// is off; an app from before it says nothing. Asked from a click in the side panel, the app shows its
-// own Touch ID prompt and answers whether it unlocked, or why not. No password ever passes through Chrome.
-const TOUCH_ID_STATES = Object.freeze(['ready', 'password', 'off']);
-const TOUCH_ID_REFUSALS = Object.freeze(['off', 'password', 'cancelled']);
+// Unlock with Touch ID (#99). The desktop's status says whether it's ready or off; an app from before
+// it says nothing. Asked from a click in the side panel, the app shows its own Touch ID prompt and
+// answers whether it unlocked, or why not. No password ever passes through Chrome.
+const TOUCH_ID_STATES = Object.freeze(['ready', 'off']);
+const TOUCH_ID_REFUSALS = Object.freeze(['off', 'cancelled']);
 const knownTouchId = state => { if (!TOUCH_ID_STATES.includes(state)) throw fault('worker.desktopUnexpected'); return state; };
 async function unlockWithTouchId() {
   const reply = await nativeRequest('unlockWithTouchId');
