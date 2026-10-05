@@ -85,6 +85,8 @@ if (nativeOrigin) {
   let allSites = false;
   // Laya is on unless the person turned it off. Until they choose, this is undefined and not saved.
   let layaEnabled;
+  // What was reset because settings.json couldn't be read at startup, until a setting is saved (#139).
+  let settingsNotice = null;
   // Released only after a named confirmation on sites other than Iowa's portal.
   const SENSITIVE_FIELDS = ['ssn', 'hasSsn', 'hasSsnAnswer', 'birthDate', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'assetsOnHand', 'monthlyMedicalExpenses',
     'usCitizen', 'disabled', 'blind', 'healthLimitation', 'medicare'];
@@ -164,7 +166,7 @@ if (nativeOrigin) {
     const details = await vault.inspect().catch(() => null);
     return { exists: await vault.exists(), unlocked: vault.unlocked, lockRevision, recoveryKey: Boolean(details?.recoveryKey),
       deviceReset: Boolean(details?.deviceReset) && await hasDeviceSecret(), deviceResetSupported, extensionId, autofillWithoutAsking, trustedSites: [...trustedSites], allSites,
-      touchId: await touchIdUnlock.state(), touchIdSupported: touchIdUnlock.supported(), touchIdNotice: touchIdUnlock.notice,
+      touchId: await touchIdUnlock.state(), touchIdSupported: touchIdUnlock.supported(), touchIdNotice: touchIdUnlock.notice, settingsNotice,
       bridgeRunning: Boolean(bridge), platform: process.platform, laya: await layaStatus(),
       extensionSetup: await getExtensionSetup(app).catch(() => ({ prepared: false, available: false })) };
   }
@@ -187,6 +189,28 @@ if (nativeOrigin) {
   }
   async function saveSettings() {
     await atomicWrite(configPath, Buffer.from(JSON.stringify({ extensionId, autofillWithoutAsking, trustedSites, layaEnabled, ...(allSites && { allSites }) })));
+    settingsNotice = null;
+  }
+  // settings.json at startup. None is a new install. A file that can't be read, or isn't settings, leaves
+  // every setting at its default, and the app says so. Only Laya's off choice is kept, when it can still be
+  // read: it gives no access, and it keeps the model's download away.
+  async function loadSettings() {
+    let text = null;
+    try {
+      if ((await fs.stat(configPath)).size <= 4096) text = await fs.readFile(configPath, 'utf8');
+    } catch (error) { if (error.code === 'ENOENT') return; }
+    let config;
+    try { config = JSON.parse(text); } catch { config = null; }
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      if (/"layaEnabled"\s*:\s*false\b/.test(text ?? '')) layaEnabled = false;
+      settingsNotice = 'SecondHand couldn’t read its settings file, so it reset the Chrome connection, Always allow, your trusted sites, and all websites. Set them up again on the Chrome extension page.' +
+        (layaEnabled === false ? ' Laya stays off.' : ' Laya is on again. If you had turned it off, turn it off again on that page.');
+      return;
+    }
+    if (EXTENSION_ID.test(config.extensionId || '')) { extensionId = config.extensionId; autofillWithoutAsking = config.autofillWithoutAsking === true; }
+    if (Array.isArray(config.trustedSites)) trustedSites = [...new Set(config.trustedSites.filter(origin => typeof origin === 'string' && siteOrigin(origin) === origin))].slice(0, MAX_TRUSTED_SITES);
+    if (typeof config.layaEnabled === 'boolean') layaEnabled = config.layaEnabled;
+    allSites = config.allSites === true;
   }
   // A site other than Iowa's portal may receive saved answers when the person trusted it, or every
   // https site while all websites is on. Sensitive details still ask on each one.
@@ -834,13 +858,7 @@ if (nativeOrigin) {
     // Packaged builds get the icon from electron-builder; show it in development too.
     if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(path.join(__dirname, 'icon.png'));
     await fs.mkdir(userData, { recursive: true, mode: 0o700 });
-    try {
-      const stat = await fs.stat(configPath);
-      if (stat.size <= 4096) { const config = JSON.parse(await fs.readFile(configPath, 'utf8')); if (EXTENSION_ID.test(config.extensionId || '')) { extensionId = config.extensionId; autofillWithoutAsking = config.autofillWithoutAsking === true; }
-      if (Array.isArray(config.trustedSites)) trustedSites = [...new Set(config.trustedSites.filter(origin => typeof origin === 'string' && siteOrigin(origin) === origin))].slice(0, MAX_TRUSTED_SITES);
-      if (typeof config.layaEnabled === 'boolean') layaEnabled = config.layaEnabled;
-      allSites = config.allSites === true; }
-    } catch { /* Missing or invalid non-sensitive setup settings are reset. */ }
+    await loadSettings();
     await laya.setEnabled(layaEnabled !== false);
     // Downloads the model if it's missing, then checks for a newer one now and every 24 hours.
     // It needs no unlock: it touches no saved information. It does nothing while Laya is off.

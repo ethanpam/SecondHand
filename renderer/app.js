@@ -55,6 +55,8 @@
   let setupStep = null;
   // A new password offers the setup once its recovery key is saved.
   let offerSetup = false;
+  // The desktop's note that it reset its settings is shown once while the app is open.
+  let settingsNoticeShown = false;
 
   function icon(name) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -922,10 +924,12 @@
     fillProfile(); renderSummary();
     showView('overview', { skipConfirmation: true });
     renderSetupResume();
-    // Problems found while opening, in one toast so neither hides the other: setup progress that
-    // couldn't be read, and Touch ID turned off while unlocking (and why).
+    // Problems found while opening, in one toast so none hides another: setup progress that couldn't
+    // be read, Touch ID turned off while unlocking (and why), and settings the desktop had to reset.
+    const settingsNotice = !settingsNoticeShown && typeof status.settingsNotice === 'string' && status.settingsNotice;
+    if (settingsNotice) settingsNoticeShown = true;
     const problems = [progress.error && (progress.error.message || 'SecondHand couldn’t read your setup progress.'),
-      typeof status.touchIdNotice === 'string' && status.touchIdNotice].filter(Boolean);
+      typeof status.touchIdNotice === 'string' && status.touchIdNotice, settingsNotice].filter(Boolean);
     if (problems.length) toast(problems.join(' '), true);
   }
 
