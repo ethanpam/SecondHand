@@ -84,20 +84,31 @@ test('the desktop and extension keep identical applicant-only box guards', () =>
     assert.equal(prompts[name].source, generic[name].source, `${name} source`);
     assert.equal(prompts[name].flags, generic[name].flags, `${name} flags`);
   }
+  // #136: possessives with ’ and ', dependents, household members with or without a number, and labels under
+  // another person's section heading (read as "<heading>: <label>").
+  const others = ['Child’s name', "Child's date of birth", 'Childs phone', 'Children’s Names, Schools and Grades', 'Grandchild’s birthdate', 'Partner’s phone',
+    "Partner's first name", 'Spouse’s email', 'Husband’s name', 'Wife’s phone number', 'Landlord’s phone number', 'Proxy’s address', "Representative's last name",
+    'Emergency contact’s phone', 'Household member’s name', "Family member's name", 'Dependent name', 'Dependent 1 date of birth', 'Dependent’s relationship to you',
+    'Household member name', 'Household member phone', 'Household member', 'Household member 2 name', 'Household member #3: First name',
+    'Other members of the household: Full name', 'Additional household member: Email', 'Nombre del miembro del hogar', 'Child 1: First name', 'Dependent: Name',
+    'Household member: Phone', 'Partner’s information: Email', 'Additional household members: Last name', 'Other adults in the home: Full name'];
+  // #83's exceptions and ordinary applicant boxes, still matched.
+  const applicant = ['Household Representative: First', 'Household representative: First name', 'Number of children', 'How many children under 18?', 'Number of dependents',
+    'How many household members?', 'Number of household members ages 18 to 64', 'Name (Head of Household)', 'Name of household member', 'Applicant phone',
+    'Are you a student?', 'Full name'];
   const labels = [
     "Spouse's first name", 'Family Member: First Name', 'Household Members: First Name', 'Name of Proxy', 'Address of Proxy',
     'Emergency contact phone', 'Landlord name', 'Spouse Name Etan Karejeram̗ Nombre del cónyuge: First', 'Nombre del representante autorizado',
     'City/State', 'City and Zip Code', 'City, State and Zip code', 'Complete Physical Address (including Town/City!)',
     'Ciudad/Estado', 'Ciudad y Código Postal', 'Dirección completa', 'Who pays the rent?', '¿Quién paga?',
-    'Household Representative: First', 'Number of children', 'How many children under 18?', 'Applicant phone',
-    'Guardian first and last name', 'Parent/Guardian Name', 'Student name and grade', 'Student name', 'Are you a student?'
+    'Guardian first and last name', 'Parent/Guardian Name', 'Student name and grade', 'Student name', ...others, ...applicant
   ];
   for (const label of labels) {
     const matchable = prompts.matchableBox({ label });
     assert.equal(generic.blockedSuggestion(label), !matchable, label);
   }
-  assert.equal(prompts.matchableBox({ label: 'Household Representative: First' }), true);
-  assert.equal(prompts.matchableBox({ label: 'Number of children' }), true);
+  for (const label of others) assert.deepEqual(prompts.offeredFields({ label, type: 'text' }), [], label);
+  for (const label of applicant) assert.equal(prompts.matchableBox({ label }), true, label);
 });
 
 test('choice-v2: a box of a type the model wasn’t trained on is refused, not described', () => {

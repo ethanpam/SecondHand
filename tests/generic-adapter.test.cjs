@@ -330,6 +330,50 @@ test('applicant details never match boxes that name another person in English or
   for (const item of result.unmatched) assert.equal(generic.canSuggest('fullName', item), false, item.label);
 });
 
+// Boxes that ask for another person's details (#136, after #83): possessives with ’ and ', dependents, and
+// household members with or without a number.
+const OTHER_PERSON_LABELS = ['Child’s name', "Child's date of birth", 'Childs phone', 'Children’s Names, Schools and Grades', 'Grandchild’s birthdate',
+  'Partner’s phone', "Partner's first name", 'Spouse’s email', 'Husband’s name', 'Wife’s phone number', 'Landlord’s phone number', 'Proxy’s address',
+  "Representative's last name", 'Emergency contact’s phone', 'Household member’s name', "Family member's name", 'Dependent name', 'Dependent 1 date of birth',
+  'Dependent’s relationship to you', 'Household member name', 'Household member phone', 'Household member', 'Household member 2 name',
+  'Household member #3: First name', 'Other members of the household: Full name', 'Additional household member: Email', 'Nombre del miembro del hogar'];
+// The same details under another person's section heading, read as "<heading>: <label>".
+const OTHER_PERSON_SECTIONS = [['Child 1', 'First name', 'given-name'], ['Child 1', 'Date of birth', 'bday'], ['Dependent', 'Name', 'name'], ['Household member', 'Phone', 'tel'],
+  ['Partner’s information', 'Email', 'email'], ['Additional household members', 'Last name', 'family-name'], ['Other adults in the home', 'Full name', 'name']];
+
+test('another person’s boxes get none of the applicant’s details: possessives, dependents, household members and their sections (#136)', () => {
+  const doc = page(OTHER_PERSON_LABELS.map((label, index) => `<label for="o${index}">${label}</label><input id="o${index}" autocomplete="name">`).join('') +
+    OTHER_PERSON_SECTIONS.map(([heading, label, hint], index) => `<fieldset><legend>${heading}</legend><label for="s${index}">${label}</label><input id="s${index}" autocomplete="${hint}"></fieldset>`).join(''));
+  const result = generic.plan(doc);
+  assert.deepEqual(result.matched, [], 'not by the rules, nor by the box’s autocomplete hint');
+  assert.deepEqual(result.unmatched.map(field => field.label), [...OTHER_PERSON_LABELS, ...OTHER_PERSON_SECTIONS.map(([heading, label]) => `${heading}: ${label}`)]);
+  for (const field of result.unmatched) {
+    assert.equal(generic.blockedSuggestion(field.label), true, field.label);
+    assert.equal(generic.layaQuestion(field), '', `${field.label}: never sent to Laya`);
+    for (const key of generic.GENERIC_KEYS) assert.equal(generic.canSuggest(key, field), false, `${field.label}: ${key}`);
+  }
+  const guesses = result.unmatched.flatMap(({ id }) => ['fullName', 'firstName', 'lastName', 'phone', 'email', 'addressLine1'].map(key => ({ id, key, guessed: true })));
+  assert.deepEqual(generic.fillFields(doc, result.token, guesses, generic.deriveValues(profile)).filled, [], 'a guess, from Chrome’s AI or from Laya, is refused');
+});
+
+test('#83’s exceptions stay the applicant’s: the household representative, counts of children, dependents and members, the head of household and TEFAP’s household member (#136)', () => {
+  const kept = { rep: ['Household representative: First name', null], kids: ['Number of children', 'householdChildren'], under: ['How many children under 18?', 'householdChildren'],
+    deps: ['Number of dependents', null], members: ['How many household members?', 'householdSize'], adults: ['Number of household members ages 18 to 64', 'householdAdults'],
+    head: ['Name (Head of Household)', 'fullName'], full: ['Full name', 'fullName'],
+    // How USDA TEFAP forms ask for the applicant: the question bank keys it to the applicant's full name.
+    tefap: ['Name of household member', null] };
+  const doc = page(Object.entries(kept).map(([id, [label]]) => `<label for="${id}">${label}</label><input id="${id}">`).join('') +
+    '<fieldset><legend>Children</legend><label for="many">How many children under 18?</label><input id="many"></fieldset>');
+  const result = generic.plan(doc);
+  assert.deepEqual(byElement(doc, result), { ...Object.fromEntries(Object.entries(kept).filter(([, [, key]]) => key).map(([id, [, key]]) => [id, key])), many: 'householdChildren' });
+  for (const [label] of Object.values(kept)) {
+    assert.equal(generic.blockedSuggestion(label), false, label);
+    assert.equal(generic.layaQuestion({ label, type: 'text', options: [] }), 'text', label);
+  }
+  assert.equal(generic.canSuggest('firstName', { label: kept.rep[0] }), true);
+  assert.equal(generic.canSuggest('householdChildren', { label: kept.deps[0] }), true);
+});
+
 test('a field inside another person section is not matched from its short label', () => {
   const doc = page('<fieldset><legend>Emergency Contact</legend><label for="name">Name</label><input id="name" autocomplete="name"><label for="phone">Phone</label><input id="phone" autocomplete="tel"></fieldset>');
   const result = generic.plan(doc);
