@@ -381,13 +381,13 @@ test('unlockWithTouchId carries nothing but its id: the app shows its own Touch 
 test('the app’s unlockWithTouchId answer reaches the extension as it is, through the bridge and the native host', async t => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-bridge-touch-id-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
-  const answers = [{ unlocked: false, reason: 'password' }, { unlocked: true }];
+  const answers = [{ unlocked: false, reason: 'cancelled' }, { unlocked: true }];
   const bridge = await startBridge(directory, () => EXTENSION, async request => {
     assert.equal(request.type, 'unlockWithTouchId');
     return answers.shift();
   });
   t.after(() => bridge.close());
-  assert.deepEqual(await relayRequest(directory, EXTENSION, { id: 'touch-1', type: 'unlockWithTouchId' }), { id: 'touch-1', ok: true, data: { unlocked: false, reason: 'password' } });
+  assert.deepEqual(await relayRequest(directory, EXTENSION, { id: 'touch-1', type: 'unlockWithTouchId' }), { id: 'touch-1', ok: true, data: { unlocked: false, reason: 'cancelled' } });
   const responses = await hostSession(directory, [{ id: 'touch-2', type: 'unlockWithTouchId' }]);
   assert.deepEqual(responses, [{ id: 'touch-2', ok: true, data: { unlocked: true } }]);
 });

@@ -17,7 +17,6 @@ const source = fs.readFileSync(path.join(root, 'desktop/main.cjs'), 'utf8');
 const PASSWORD = 'synthetic touch password';
 const DAY = 24 * 60 * 60 * 1000;
 const START = Date.UTC(2026, 9, 3, 12);
-const NEEDED = /Enter your password: it’s needed after SecondHand restarts or every 14 days\./;
 // Values created inside the vm context have foreign prototypes.
 const plain = value => JSON.parse(JSON.stringify(value));
 
@@ -104,7 +103,7 @@ async function withTouchId(t, options) {
   return { app, recoveryKey: created.recoveryKey };
 }
 
-test('turning Touch ID on asks for the password, adds a Touch ID slot, and seals only a random key and when the password was used', async t => {
+test('turning Touch ID on asks for the password, adds a Touch ID slot, and seals only a random key', async t => {
   const app = await desktop(t);
   const created = await app.invoke('createVault', { password: PASSWORD, allowDeviceReset: true });
   assert.equal(created.status.touchIdSupported, true);
@@ -121,9 +120,8 @@ test('turning Touch ID on asks for the password, adds a Touch ID slot, and seals
   const on = await app.invoke('setTouchIdUnlock', { enabled: true, password: PASSWORD });
   assert.equal(on.touchId, 'ready');
   const sealed = await app.sealed();
-  assert.deepEqual(Object.keys(sealed).sort(), ['key', 'passwordAt', 'version']);
-  assert.equal(sealed.version, 1);
-  assert.equal(sealed.passwordAt, START);
+  assert.deepEqual(Object.keys(sealed).sort(), ['key', 'version']);
+  assert.equal(sealed.version, 2);
   assert.equal(Buffer.from(sealed.key, 'base64').length, 32);
   const slots = await app.slots();
   assert.deepEqual(Object.keys(slots).sort(), ['device', 'password', 'recovery', 'touchId']);
@@ -149,63 +147,46 @@ test('Touch ID unlocks like a password unlock: the same lock revision, the idle 
   assert.equal((await app.invoke('status')).touchId, 'ready');
 });
 
-test('a restart needs the password before Touch ID; a password unlock renews when it was used', async t => {
+// Touch ID stays available until it's turned off (the owner's choice): no password after a
+// restart, and no time limit.
+test('after a restart, Touch ID is ready and unlocks without the password first', async t => {
   const first = await withTouchId(t);
   await first.app.invoke('lock');
-  const clock = { now: START + DAY };
-  const app = await desktop(t, { userData: first.app.userData, clock });
+  const app = await desktop(t, { userData: first.app.userData, clock: { now: START + DAY } });
   const status = await app.invoke('status');
-  assert.equal(status.touchId, 'password');
   assert.equal(status.unlocked, false);
-  await assert.rejects(app.invoke('unlockWithTouchId'), NEEDED);
-  assert.deepEqual(plain(await app.request('unlockWithTouchId')), { unlocked: false, reason: 'password' });
-  assert.deepEqual(app.prompts, [], 'no prompt when the password is needed');
-  assert.equal((await app.invoke('status')).unlocked, false);
-
-  const unlocked = await app.invoke('unlock', PASSWORD);
-  assert.equal(unlocked.touchId, 'ready');
-  assert.equal((await app.sealed()).passwordAt, START + DAY, 'the password unlock renewed when it was used');
+  assert.equal(status.touchId, 'ready');
+  assert.equal(plain(await app.request('status')).touchId, 'ready');
+  const unlocked = await app.invoke('unlockWithTouchId');
+  assert.equal(unlocked.unlocked, true);
+  assert.deepEqual(app.prompts, ['unlock SecondHand']);
   await app.invoke('lock');
-  assert.equal((await app.invoke('unlockWithTouchId')).unlocked, true);
+  assert.deepEqual(plain(await app.request('unlockWithTouchId')), { unlocked: true }, 'from Chrome too');
 });
 
-test('after 14 days since the password was used, Touch ID refuses until the password is used again', async t => {
+test('Touch ID has no time limit, whatever the clock says', async t => {
   const { app } = await withTouchId(t);
-  await app.invoke('lock');
-  app.clock.now = START + 14 * DAY;
-  assert.equal((await app.invoke('status')).touchId, 'ready', 'exactly 14 days still works');
-  app.clock.now = START + 14 * DAY + 1;
-  assert.equal((await app.invoke('status')).touchId, 'password');
-  await assert.rejects(app.invoke('unlockWithTouchId'), NEEDED);
-  assert.deepEqual(plain(await app.request('unlockWithTouchId')), { unlocked: false, reason: 'password' });
-  assert.deepEqual(app.prompts, []);
-
-  // A Touch ID unlock doesn't renew the 14 days; only the password does.
-  app.clock.now = START + 15 * DAY;
-  await app.invoke('unlock', PASSWORD);
-  await app.invoke('lock');
-  app.clock.now = START + 28 * DAY;
-  assert.equal((await app.invoke('unlockWithTouchId')).unlocked, true);
-  await app.invoke('lock');
-  app.clock.now = START + 29 * DAY + 1;
-  assert.equal((await app.invoke('status')).touchId, 'password');
-
-  // A clock set back before the password was last used also asks for the password.
-  await app.invoke('unlock', PASSWORD);
-  await app.invoke('lock');
-  app.clock.now = START + 29 * DAY;
-  assert.equal((await app.invoke('status')).touchId, 'password');
-  await assert.rejects(app.invoke('unlockWithTouchId'), NEEDED);
+  for (const now of [START + 15 * DAY, START + 400 * DAY, START - 30 * DAY]) {
+    await app.invoke('lock');
+    app.clock.now = now;
+    assert.equal((await app.invoke('status')).touchId, 'ready', new Date(now).toISOString());
+    assert.equal((await app.invoke('unlockWithTouchId')).unlocked, true, new Date(now).toISOString());
+  }
+  assert.equal(app.prompts.length, 3);
 });
 
-test('the time sealed with the key is checked too: a sealed key older than 14 days needs the password', async t => {
-  const { app } = await withTouchId(t);
+test('a key sealed in the earlier format, with when the password was used, still unlocks and is never renewed', async t => {
+  const first = await withTouchId(t);
+  const { key } = await first.app.sealed();
+  await first.app.invoke('lock');
+  const earlier = { version: 1, passwordAt: START - 60 * DAY, key };
+  await fsp.writeFile(first.app.sealedPath, `sealed:${Buffer.from(JSON.stringify(earlier)).toString('hex')}`);
+  const app = await desktop(t, { userData: first.app.userData });
+  assert.equal((await app.invoke('status')).touchId, 'ready');
+  assert.equal((await app.invoke('unlockWithTouchId')).unlocked, true);
   await app.invoke('lock');
-  const sealed = await app.sealed();
-  await fsp.writeFile(app.sealedPath, `sealed:${Buffer.from(JSON.stringify({ ...sealed, passwordAt: START - 14 * DAY - 1 })).toString('hex')}`);
-  await assert.rejects(app.invoke('unlockWithTouchId'), NEEDED);
-  assert.equal((await app.invoke('status')).unlocked, false);
-  assert.equal(app.prompts.length, 1);
+  await app.invoke('unlock', PASSWORD);
+  assert.deepEqual(await app.sealed(), earlier, 'a password unlock leaves the sealed key as it is');
 });
 
 test('a cancelled or failed prompt doesn’t unlock, says why, and keeps Touch ID on', async t => {
@@ -274,8 +255,9 @@ test('an unreadable sealed key turns Touch ID off with the reason, asks for the 
   const cases = [
     ['not sealed by this Mac', () => Buffer.from('tampered'), /because this Mac’s Keychain couldn’t open its key/],
     ['damaged inside', () => Buffer.from(`sealed:${Buffer.from('{"version":1').toString('hex')}`), /because its key file on this Mac is damaged/],
-    ['the wrong shape', () => Buffer.from(`sealed:${Buffer.from(JSON.stringify({ version: 2, passwordAt: START, key: crypto.randomBytes(32).toString('base64') })).toString('hex')}`), /because its key file on this Mac is damaged/],
-    ['a key for other information', () => Buffer.from(`sealed:${Buffer.from(JSON.stringify({ version: 1, passwordAt: START, key: crypto.randomBytes(32).toString('base64') })).toString('hex')}`), /because its key doesn’t open your saved information/]
+    ['the wrong shape', () => Buffer.from(`sealed:${Buffer.from(JSON.stringify({ version: 3, key: crypto.randomBytes(32).toString('base64') })).toString('hex')}`), /because its key file on this Mac is damaged/],
+    ['a short key', () => Buffer.from(`sealed:${Buffer.from(JSON.stringify({ version: 2, key: crypto.randomBytes(16).toString('base64') })).toString('hex')}`), /because its key file on this Mac is damaged/],
+    ['a key for other information', () => Buffer.from(`sealed:${Buffer.from(JSON.stringify({ version: 2, key: crypto.randomBytes(32).toString('base64') })).toString('hex')}`), /because its key doesn’t open your saved information/]
   ];
   for (const [name, bytes, reason] of cases) {
     const { app } = await withTouchId(t);
@@ -325,17 +307,21 @@ test('a sealed key left without a Touch ID slot turns Touch ID off at the next p
   await assert.rejects(fsp.access(app.sealedPath));
 });
 
-test('a password reset with the recovery key or this computer removes the Touch ID slot and key', async t => {
+test('a password reset with the recovery key or this computer keeps Touch ID: the slot and key stay, and it unlocks', async t => {
   for (const method of ['recovery', 'device']) {
     const { app, recoveryKey } = await withTouchId(t);
+    const sealed = await fsp.readFile(app.sealedPath);
+    const touchIdSlot = (await app.slots()).touchId;
     await app.invoke('lock');
     const reset = await app.invoke('resetPassword', method === 'device' ? { method, password: 'synthetic new password' } : { recoveryKey, password: 'synthetic new password' });
     assert.equal(reset.unlocked, true, method);
-    assert.equal(reset.touchId, 'off', method);
-    await assert.rejects(fsp.access(app.sealedPath), method);
-    assert.deepEqual(Object.keys(await app.slots()).sort(), ['device', 'password', 'recovery'], method);
+    assert.equal(reset.touchId, 'ready', method);
+    assert.deepEqual(await fsp.readFile(app.sealedPath), sealed, `${method}: the sealed key is unchanged`);
+    assert.deepEqual((await app.slots()).touchId, touchIdSlot, `${method}: the Touch ID slot is unchanged`);
     await app.invoke('lock');
-    await assert.rejects(app.invoke('unlockWithTouchId'), /Touch ID is off/, method);
+    assert.equal((await app.invoke('unlockWithTouchId')).unlocked, true, method);
+    await app.invoke('lock');
+    assert.equal((await app.invoke('unlock', 'synthetic new password')).unlocked, true, `${method}: the new password works`);
   }
 });
 
@@ -406,7 +392,7 @@ test('without Touch ID, on another system, or without the Keychain, Touch ID sta
   assert.deepEqual(Object.keys(await noKeychain.slots()).sort(), ['password', 'recovery']);
 });
 
-test('from Chrome: status says only ready, password or off, and unlockWithTouchId unlocks and tells the window', async t => {
+test('from Chrome: status says only ready or off, and unlockWithTouchId unlocks and tells the window', async t => {
   const app = await desktop(t);
   await app.invoke('createVault', { password: PASSWORD, allowDeviceReset: false });
   assert.equal(plain(await app.request('status')).touchId, 'off');

@@ -104,7 +104,7 @@ if (nativeOrigin) {
   const fieldAnswers = createFieldAnswers({ laya });
   const vault = new Vault(path.join(userData, 'vault.secondhand'));
   // Unlock with Touch ID on a Mac (#99). Its key is sealed in this Mac's Keychain in touch-unlock.bin.
-  const touchIdUnlock = createTouchIdUnlock({ vault, filePath: path.join(userData, 'touch-unlock.bin'), now: () => Date.now(), revision: () => accessRevision,
+  const touchIdUnlock = createTouchIdUnlock({ vault, filePath: path.join(userData, 'touch-unlock.bin'), revision: () => accessRevision,
     platform: touchIdPlatform({ systemPreferences, safeStorage, platform: process.platform, packaged: app.isPackaged, env: process.env }) });
   const configPath = path.join(userData, 'settings.json');
   const deviceSecretPath = path.join(userData, 'device-reset.bin');
@@ -531,8 +531,7 @@ if (nativeOrigin) {
         } else await vault.resetWithRecoveryKey(request?.recoveryKey, request?.password);
       }
       catch (error) { throw publicError(/password|recovery key|already unlocked/.test(error.message) ? error.message : 'Could not reset your password. Please try again.'); }
-      // The reset removed the Touch ID slot; its key goes too.
-      await touchIdUnlock.forget();
+      // A reset keeps the data key, so Touch ID stays on.
       touch(); return status();
     },
     // For someone who has lost both their password and recovery key: erase the

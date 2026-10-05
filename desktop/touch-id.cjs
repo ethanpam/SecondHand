@@ -2,17 +2,15 @@
 
 // Unlock with Touch ID on macOS (#99). A random 32-byte key wraps the vault's data key in its
 // `touchId` slot. This Mac's Keychain keeps that key through Electron's safeStorage, in
-// `touch-unlock.bin`, sealed together with when the password was last used. The app releases the
-// key only after systemPreferences.promptTouchID succeeds, and only while the password has been
-// used since the app started and within the last 14 days.
+// `touch-unlock.bin`. The app releases the key only after systemPreferences.promptTouchID succeeds.
+// Touch ID stays available until it's turned off, the information is erased or replaced, or its key
+// can't be used: there is no password-first rule after a restart and no time limit (the owner's choice).
 const fs = require('node:fs/promises');
 const crypto = require('node:crypto');
 const { atomicWrite } = require('./vault.cjs');
 
-const PASSWORD_EVERY_MS = 14 * 24 * 60 * 60 * 1000;
 const PROMPT_REASON = 'unlock SecondHand';
 const MAX_SEALED_BYTES = 4096;
-const PASSWORD_NEEDED = 'Enter your password: it’s needed after SecondHand restarts or every 14 days.';
 const publicError = message => Object.assign(new Error(message), { publicMessage: message });
 // Why Touch ID can't go on: its message ends a sentence that starts "Touch ID was turned off because".
 const reasonError = reason => Object.assign(new Error(reason), { touchIdReason: true });
@@ -49,13 +47,9 @@ function touchIdPlatform({ systemPreferences, safeStorage, platform, packaged, e
   };
 }
 
-// `now` and `revision` come from main.cjs: its clock, and a number that moves on as soon as a lock
-// starts (its access revision), so a lock while Touch ID asks is never undone by the unlock.
-function createTouchIdUnlock({ vault, platform, filePath, now, revision }) {
-  // When the password was last used, in memory: null at every start of the app, and set only by
-  // the password (an unlock, or turning Touch ID on) while Touch ID is on. Until then Touch ID asks
-  // for the password. The sealed file keeps the same time, and it is checked too.
-  let passwordAt = null;
+// `revision` comes from main.cjs: a number that moves on as soon as a lock starts (its access
+// revision), so a lock while Touch ID asks is never undone by the unlock.
+function createTouchIdUnlock({ vault, platform, filePath, revision }) {
   // Why Touch ID was turned off, shown until the password is used again or it is turned back on.
   let notice = null;
   // The Touch ID prompt under way: a second request waits for the same one.
@@ -65,13 +59,9 @@ function createTouchIdUnlock({ vault, platform, filePath, now, revision }) {
     try { await fs.access(filePath); return true; }
     catch (error) { if (error.code === 'ENOENT') return false; throw error; }
   }
-  const passwordNeeded = at => {
-    const age = now() - at;
-    return !Number.isSafeInteger(at) || age < 0 || age > PASSWORD_EVERY_MS;
-  };
-  function seal(key, at) {
-    return platform.seal(JSON.stringify({ version: 1, passwordAt: at, key: key.toString('base64') }));
-  }
+  // Version 2 seals only the key. Version 1, written by an earlier build of this branch, also carried
+  // when the password was last used; that time is no longer needed, so it is read and ignored.
+  const seal = key => platform.seal(JSON.stringify({ version: 2, key: key.toString('base64') }));
   async function readSealed() {
     let bytes;
     try {
@@ -86,16 +76,13 @@ function createTouchIdUnlock({ vault, platform, filePath, now, revision }) {
     let record;
     try { record = JSON.parse(text); } catch { throw reasonError('its key file on this Mac is damaged'); }
     const key = typeof record?.key === 'string' ? Buffer.from(record.key, 'base64') : null;
-    if (record?.version !== 1 || !Number.isSafeInteger(record.passwordAt) || key?.length !== 32 || key.toString('base64') !== record.key) {
+    if (![1, 2].includes(record?.version) || key?.length !== 32 || key.toString('base64') !== record.key) {
       key?.fill(0);
       throw reasonError('its key file on this Mac is damaged');
     }
-    return { key, passwordAt: record.passwordAt };
+    return { key };
   }
-  async function removeSealed() {
-    await fs.rm(filePath, { force: true });
-    passwordAt = null;
-  }
+  const removeSealed = () => fs.rm(filePath, { force: true });
   // Turns Touch ID off because its key or slot can't be used. While locked, the slot stays until
   // the next password unlock removes it; without the key it opens nothing.
   async function turnOffBecause(reason) {
@@ -106,9 +93,9 @@ function createTouchIdUnlock({ vault, platform, filePath, now, revision }) {
     } catch (error) { notice += ` Its key couldn’t be removed (${error.message}). Turn Touch ID off in Privacy & backups.`; }
   }
 
+  // 'ready' or 'off'.
   async function state() {
-    if (!platform.supported() || !await sealedExists()) return 'off';
-    return passwordNeeded(passwordAt) ? 'password' : 'ready';
+    return platform.supported() && await sealedExists() ? 'ready' : 'off';
   }
 
   // While unlocked, after the password is checked again.
@@ -118,9 +105,8 @@ function createTouchIdUnlock({ vault, platform, filePath, now, revision }) {
     catch (error) { throw publicError(/password/.test(error.message) ? error.message : 'Could not check your password. Please try again.'); }
     if (!platform.sealingAvailable()) throw publicError('This Mac’s Keychain isn’t available, so Touch ID can’t be turned on.');
     const key = crypto.randomBytes(32);
-    const at = now();
     try {
-      const sealed = seal(key, at);
+      const sealed = seal(key);
       await vault.setTouchIdKey(key);
       try { await atomicWrite(filePath, sealed); }
       catch (error) {
@@ -132,7 +118,7 @@ function createTouchIdUnlock({ vault, platform, filePath, now, revision }) {
       if (error.publicMessage) throw error;
       throw publicError(`Touch ID couldn’t be turned on (${error.message}). Your password still works.`);
     } finally { key.fill(0); }
-    passwordAt = at; notice = null;
+    notice = null;
   }
 
   // While unlocked: the key first, so Touch ID can't unlock even if removing the slot fails.
@@ -144,29 +130,24 @@ function createTouchIdUnlock({ vault, platform, filePath, now, revision }) {
     notice = null;
   }
 
-  // After a password unlock: renews when the password was used, or finishes turning Touch ID off.
-  // Problems turn it off and become the notice; they never undo the unlock.
+  // After a password unlock: checks that the sealed key can still be read and has a slot, or finishes
+  // turning Touch ID off. Problems turn it off and become the notice; they never undo the unlock.
   async function passwordUnlocked() {
     notice = null;
     let record;
     try {
       if (!await sealedExists()) {
-        passwordAt = null;
         if (vault.hasTouchIdSlot) await vault.setTouchIdKey(null);
         return;
       }
       record = await readSealed();
       if (!vault.hasTouchIdSlot) throw reasonError('your saved information has no Touch ID key');
-      const at = now();
-      try { await atomicWrite(filePath, seal(record.key, at)); }
-      catch (error) { throw reasonError(`its key couldn’t be saved again (${error.message})`); }
-      passwordAt = at;
     } catch (error) {
       await turnOffBecause(error.touchIdReason ? error.message : `of an error (${error.message})`);
     } finally { record?.key.fill(0); }
   }
 
-  // A password reset, restored backup or new password: the key goes, so the password comes first.
+  // A restored backup or a new password: the information is a different one, so the key goes.
   async function forget() {
     try { await removeSealed(); }
     catch (error) { notice = `Touch ID’s key on this Mac couldn’t be removed (${error.message}). Turn Touch ID off in Privacy & backups.`; }
@@ -176,7 +157,6 @@ function createTouchIdUnlock({ vault, platform, filePath, now, revision }) {
   async function attempt() {
     if (vault.unlocked) return { unlocked: true };
     if (!platform.supported() || !await sealedExists()) return refuse('off', 'Touch ID is off. Enter your password.');
-    if (passwordNeeded(passwordAt)) return refuse('password', PASSWORD_NEEDED);
     const asked = revision();
     try { await platform.prompt(PROMPT_REASON); }
     catch (error) { return refuse('cancelled', `Touch ID didn’t unlock SecondHand (${error.message}). Enter your password.`); }
@@ -184,7 +164,6 @@ function createTouchIdUnlock({ vault, platform, filePath, now, revision }) {
     let record;
     try {
       record = await readSealed();
-      if (passwordNeeded(record.passwordAt)) return refuse('password', PASSWORD_NEEDED);
       // Checked right before the unlock is queued: a lock that starts later is queued after it.
       if (revision() !== asked) return refuse('cancelled', 'SecondHand locked while Touch ID was asking. Try again, or enter your password.');
       await vault.unlockWithTouchIdKey(record.key);
@@ -199,7 +178,7 @@ function createTouchIdUnlock({ vault, platform, filePath, now, revision }) {
     } finally { record?.key.fill(0); }
     return { unlocked: true };
   }
-  // { unlocked: true }, or { unlocked: false, reason: 'off' | 'password' | 'cancelled', message }.
+  // { unlocked: true }, or { unlocked: false, reason: 'off' | 'cancelled', message }.
   function unlock() {
     pending ||= attempt().finally(() => { pending = null; });
     return pending;
