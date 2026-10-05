@@ -12,7 +12,9 @@ const extensionURL = file => `chrome-extension://${extensionId}/${file}`;
 const source = file => fs.readFileSync(path.join(__dirname, '../extension', file), 'utf8');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const BUILD = source('panel.js').match(/const BUILD = '([^']+)'/)[1];
-const OUTDATED = 'SecondHand was updated. Open chrome://extensions and click the reload arrow on SecondHand, then reload this page.';
+// An outdated worker: the widget's line beside its Restart button, and the side panel's notice above its own.
+const OUTDATED = 'SecondHand was updated.';
+const OUTDATED_PANEL = 'SecondHand was updated and needs to restart. This side panel will close. To use SecondHand again, reload the page with your form or go on to its next page.';
 
 const plain = value => JSON.parse(JSON.stringify(value));
 
@@ -788,16 +790,27 @@ test('side panel turns its button into Stop while autofill is on', async t => {
   assert.equal(view.get('panel-autofill').textContent, 'Autofill this page');
 });
 
-test('a worker that never answers gets exact reload steps in the widget and the side panel', async t => {
+test('a worker that never answers gets a plain notice and a Restart button in the widget and the side panel', async t => {
   const widget = await panel(t, { launcher: true, silent: true });
-  assert.equal(widget.get('widget').hidden, false, 'the steps stay readable instead of a pill');
+  assert.equal(widget.get('widget').hidden, false, 'the notice stays readable instead of a pill');
   assert.equal(widget.get('pill').hidden, true);
   assert.equal(widget.get('widget-text').textContent, OUTDATED);
+  assert.equal(widget.get('widget-text').classList.contains('visually-hidden'), false);
   assert.equal(widget.get('widget').classList.contains('outdated'), true);
+  assert.equal(widget.get('restart').hidden, false);
+  assert.equal(widget.get('restart').textContent, 'Restart');
+  assert.equal(widget.get('restart').title, EN['widget.restartTitle']);
+  for (const id of ['autofill', 'stop', 'unlock', 'open-app', 'need-you', 'translate-offer', 'hide']) assert.equal(widget.get(id).hidden, true, `${id} is not offered`);
   const side = await panel(t, { silent: true });
-  assert.equal(side.get('status').textContent, OUTDATED);
+  assert.equal(side.get('desktop-status').textContent, OUTDATED_PANEL);
+  assert.equal(side.get('desktop-status').parentElement.hidden, false);
+  assert.equal(side.get('desktop-status').parentElement.classList.contains('error'), false, 'an update is not an error');
+  assert.equal(side.get('desktop-action').hidden, false);
+  assert.equal(side.get('desktop-action').textContent, 'Restart SecondHand');
+  assert.equal(side.get('status').textContent, '');
   assert.equal(side.get('panel-autofill').disabled, true);
-  assert.equal(side.get('panel-autofill').hidden, true, 'only the reload steps are offered');
+  assert.equal(side.get('panel-autofill').hidden, true, 'only the restart is offered');
+  assert.doesNotMatch(`${OUTDATED} ${OUTDATED_PANEL} ${EN['widget.restartTitle']}`, /chrome:\/\/|reload arrow/, 'no address to type and no arrow to find');
 
   // A worker that answers page state but not a newer message is outdated too.
   const partial = await panel(t, { launcher: true, silent: ['ui:autofill'], build: BUILD });
@@ -810,21 +823,62 @@ test('a worker that never answers gets exact reload steps in the widget and the 
   assert.equal(partial.requests.length, before, 'an outdated worker is not polled again');
 });
 
-test('a worker from another build gets the same reload steps even though it answers', async t => {
+test('a worker from another build gets the same notice even though it answers, and Restart reloads SecondHand', async t => {
   const widget = await panel(t, { launcher: true, build: 'older-build' });
+  let reloads = 0;
+  widget.window.chrome.runtime.reload = () => { reloads++; };
   assert.deepEqual(plainRequests(widget.requests), [{ type: 'ui:ping' }]);
   assert.equal(widget.get('widget-text').textContent, OUTDATED);
   assert.equal(widget.get('widget-text').title, OUTDATED);
   await widget.userClick('autofill');
   assert.equal(widget.types().includes('ui:autofill'), false);
+  widget.get('restart').click(); await tick();
+  assert.equal(reloads, 0, 'a click the page made up restarts nothing');
+  await widget.userClick('restart');
+  assert.equal(reloads, 1);
+  // The frame is now left behind by the reload: it says how to get SecondHand back on this page.
+  assert.equal(widget.get('widget-text').textContent, EN['panel.reloadPage']);
+  assert.equal(widget.get('restart').hidden, true);
+  assert.deepEqual(plainRequests(widget.requests), [{ type: 'ui:ping' }], 'the outdated worker is asked nothing more');
+
   const side = await panel(t, { build: 'older-build' });
+  let restarts = 0;
+  side.window.chrome.runtime.reload = () => { restarts++; };
   assert.deepEqual(plainRequests(side.requests), [{ type: 'ui:ping' }]);
-  assert.equal(side.get('status').textContent, OUTDATED);
-  assert.equal(side.get('status').classList.contains('error'), true);
+  assert.equal(side.get('desktop-status').textContent, OUTDATED_PANEL);
+  assert.equal(side.get('status').textContent, '');
+  assert.equal(side.get('status').classList.contains('error'), false);
   assert.equal(side.get('panel-autofill').disabled, true);
   side.listeners.activated({ tabId: 7 }); await tick(); await tick();
-  assert.equal(side.get('status').textContent, OUTDATED, 'switching tabs keeps the reload steps');
+  assert.equal(side.get('desktop-status').textContent, OUTDATED_PANEL, 'switching tabs keeps the notice');
+  assert.equal(side.get('desktop-action').textContent, 'Restart SecondHand');
   assert.equal(side.types().includes('ui:pageState'), false);
+  side.get('desktop-action').click(); await tick();
+  assert.equal(restarts, 0);
+  await side.userClick('desktop-action');
+  assert.equal(restarts, 1);
+  assert.deepEqual(plainRequests(side.requests), [{ type: 'ui:ping' }], 'restarting asks the outdated worker nothing');
+});
+
+test('a worker that stops answering while the side panel is open leaves only the notice and Restart', async t => {
+  const view = await panel(t, { silent: ['ui:autofill'], build: BUILD });
+  assert.ok(view.get('page-checklist').children.length > 0);
+  await view.userClick('panel-autofill'); await settle();
+  assert.equal(view.get('desktop-status').textContent, OUTDATED_PANEL);
+  assert.equal(view.get('desktop-action').textContent, 'Restart SecondHand');
+  assert.equal(view.get('status').textContent, '', 'the notice is said once, not again as an error');
+  assert.equal(view.get('panel-autofill').hidden, true);
+  assert.equal(view.get('page-checklist').children.length, 0);
+  const asked = view.requests.length;
+  view.window.document.dispatchEvent(new view.window.Event('visibilitychange'));
+  await settle();
+  assert.equal(view.requests.length, asked, 'an outdated worker is not asked again');
+  // The notice follows the language picker like everything else.
+  view.get('language').value = 'es';
+  view.get('language').dispatchEvent(new view.window.Event('change'));
+  await settle();
+  assert.equal(view.get('desktop-status').textContent, strings.text('es', 'panel.outdated'));
+  assert.equal(view.get('desktop-action').textContent, strings.text('es', 'panel.restart'));
 });
 
 test('the pill is a fixed circle that cannot stretch into an oval', () => {
@@ -960,7 +1014,7 @@ test('the widget asks the on-device AI once per click, with a time limit, and on
   assert.deepEqual(plainRequests(answered.requests.at(-1)), { type: 'ui:autofill', confirmed: true });
 });
 
-test('a worker too old to plan for the AI gets the reload steps, not a fill', async t => {
+test('a worker too old to plan for the AI gets the update notice, not a fill', async t => {
   const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, silent: ['ui:plan'], LanguageModel: languageModel().LanguageModel });
   await view.userClick('autofill');
   assert.equal(view.get('widget-text').textContent, OUTDATED);
@@ -1863,7 +1917,24 @@ test('a widget left on a page when SecondHand reloaded asks for the page to be r
   runtime.sendMessage = async () => { throw new Error('Extension context invalidated.'); };
   await widget.userClick('autofill');
   assert.equal(widget.get('widget-text').textContent, strings.english('panel.reloadPage'));
+  assert.equal(widget.get('widget-text').textContent, 'Reload this page to use SecondHand. That clears what you typed here.');
   assert.equal(widget.get('widget').classList.contains('outdated'), true);
+  assert.equal(widget.get('restart').hidden, true, 'SecondHand already restarted: only the page is left to reload');
+  // A frame too small for both sentences keeps the one that says what to do; the tooltip has both.
+  const small = await panel(t, { launcher: true });
+  delete small.window.chrome.runtime.id;
+  small.window.chrome.runtime.sendMessage = async () => { throw new Error('Extension context invalidated.'); };
+  Object.defineProperties(small.get('widget-text'), { scrollHeight: { get() { return this.textContent === EN['panel.reloadPage'] ? 56 : 28; } }, clientHeight: { get: () => 42 } });
+  await small.userClick('autofill');
+  assert.equal(small.get('widget-text').textContent, 'Reload this page to use SecondHand.');
+  assert.equal(small.get('widget-text').title, EN['panel.reloadPage']);
+  // Letters that overhang their line by a pixel are not a line cut off.
+  const snug = await panel(t, { launcher: true });
+  delete snug.window.chrome.runtime.id;
+  snug.window.chrome.runtime.sendMessage = async () => { throw new Error('Extension context invalidated.'); };
+  Object.defineProperties(snug.get('widget-text'), { scrollHeight: { get: () => 43 }, clientHeight: { get: () => 42 } });
+  await snug.userClick('autofill');
+  assert.equal(snug.get('widget-text').textContent, EN['panel.reloadPage']);
   const spanish = await panel(t, { launcher: true, language: 'es-ES' });
   delete spanish.window.chrome.runtime.id;
   spanish.window.chrome.runtime.sendMessage = async () => { throw new Error('Extension context invalidated.'); };

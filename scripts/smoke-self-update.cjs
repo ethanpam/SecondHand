@@ -135,15 +135,19 @@ async function main() {
     for (const file of EXTENSION_FILES) assert.deepEqual(await fs.readFile(path.join(copy, file)), await fs.readFile(path.join(root, 'extension', file)), file);
     console.log(`SecondHand reloaded itself once and runs ${newBuild}; the app’s folder matches its bundle.`);
     // The widget the old SecondHand left on the open page asks for the page to be reloaded.
-    await expect.poll(() => widget.locator('#widget-text').textContent(), { timeout: 15000 }).toBe(strings.english('panel.reloadPage'));
-    console.log('The widget left on the open page asks for the page to be reloaded.');
+    // Its frame can't grow anymore: it says so in full where that fits, and in one short sentence where it doesn't.
+    const reloadLines = [strings.english('panel.reloadPage'), strings.english('panel.reloadPageShort')];
+    await expect.poll(async () => reloadLines.includes(await widget.locator('#widget-text').textContent()), { timeout: 15000 }).toBe(true);
+    assert.ok(await widget.evaluate(() => { const line = document.getElementById('widget-text'); return line.scrollHeight - line.clientHeight <= 7; }), 'no line of it is cut off in the frame the widget was left with');
+    await expect(widget.locator('#restart')).toBeHidden();
+    console.log(`The widget left on the open page says: ${await widget.locator('#widget-text').textContent()}`);
 
     // The next side panel says once that SecondHand was updated, and asking the app again reloads nothing.
     await updated.evaluate(() => { globalThis.__selfUpdateSmoke = 'same worker'; });
     ({ panel } = await openPanel());
     await expect.poll(() => panel.text('#update-note'), { timeout: 15000 }).toBe(strings.english('panel.updated'));
     await expect.poll(() => panel.text('#desktop-status'), { timeout: 30000 }).toBe(strings.english('desktop.locked'));
-    assert.equal(await panel.text('#status') === strings.english('panel.outdated'), false, 'the side panel and the worker agree on the build');
+    assert.equal(await panel.visible('#desktop-action') && await panel.text('#desktop-action') === strings.english('panel.restart'), false, 'the side panel and the worker agree on the build');
     await panel.screenshot(path.join(root, 'artifacts/self-update/self-update-panel.png'));
     await page.waitForTimeout(3000);
     assert.equal(await updated.evaluate(() => globalThis.__selfUpdateSmoke), 'same worker', 'no second reload');

@@ -23,7 +23,7 @@
   const keyedError = (key, params = {}) => Object.assign(new Error(strings.english(key, params)), { messageKey: key, messageParams: params });
   const trusted = callback => event => { if (event.isTrusted) return callback(event); };
   const outdatedError = (key = 'panel.outdated') => Object.assign(keyedError(key), { outdated: true });
-  const send = async payload => {
+  const ask = async payload => {
     let response;
     try { response = await chrome.runtime.sendMessage(payload); }
     catch (error) {
@@ -40,6 +40,12 @@
       throw keyedError('panel.assistantUnavailable');
     }
     return response.data;
+  };
+  // What a surface does the moment the worker turns out to be outdated; the side panel sets it.
+  let whenOutdated = () => {};
+  const send = async payload => {
+    try { return await ask(payload); }
+    catch (error) { if (error.outdated) whenOutdated(error); throw error; }
   };
   // An older worker that still answers is caught by its build.
   const checkBuild = async () => { if ((await send({ type: 'ui:ping' }))?.build !== BUILD) throw outdatedError(); };
@@ -92,7 +98,8 @@
     let outdated = false;
     // The reader hid the card: only the logo shows, until they click it or the page changes.
     let collapsed = false;
-    // What an outdated widget says: reload SecondHand, or reload this page after SecondHand updated itself.
+    // Why the widget is outdated: its worker is older than this page (panel.outdated), which Restart
+    // fixes, or SecondHand reloaded and left this frame behind (panel.reloadPage).
     let outdatedKey = 'panel.outdated';
     let ai = { note: null, reason: '' };
     let cursor = 0;
@@ -105,11 +112,11 @@
     // widget's own width and height (0 until it has measured itself), and whether it is only the logo.
     let frame = { line: false, width: 0, height: 0, pill: false };
     const AI_TIMEOUT_MS = 8000;
-    // An outdated worker keeps its reload steps on screen and is not polled again.
+    // An outdated worker keeps its notice on screen and is not polled again.
     const trouble = error => { if (error.outdated) { outdated = true; outdatedKey = error.messageKey; } return problem(error); };
 
     function statusText() {
-      if (outdated) return t(outdatedKey);
+      if (outdated) return t(outdatedKey === 'panel.reloadPage' ? 'panel.reloadPage' : 'widget.outdated');
       if (working) return t('widget.working');
       if (note) return words(note, 120);
       if (!result) return !site ? t('widget.iowaReady') : languageTrouble ? t('widget.languageCheckFailed') : t('widget.siteReady', { host: hostOf(site.origin) });
@@ -140,10 +147,12 @@
       // A locked app offers Unlock, and a closed one Open SecondHand, in Autofill's place.
       const locked = result?.state === 'locked';
       const closed = result?.state === 'offline';
-      $('stop').hidden = !autopilot;
-      $('autofill').hidden = autopilot || locked || closed;
-      $('unlock').hidden = autopilot || !locked;
-      $('open-app').hidden = autopilot || !closed;
+      $('stop').hidden = outdated || !autopilot;
+      $('autofill').hidden = outdated || autopilot || locked || closed;
+      $('unlock').hidden = outdated || autopilot || !locked;
+      $('open-app').hidden = outdated || autopilot || !closed;
+      $('restart').hidden = !outdated || outdatedKey === 'panel.reloadPage';
+      $('hide').hidden = outdated;
       $('autofill').disabled = working;
       // Answers still to give show as a link that finds each one in the form.
       const needYou = ['done', 'waiting'].includes(result?.state) ? fieldKeys(result.needYou) : [];
@@ -152,7 +161,7 @@
       $('widget-text').textContent = statusText();
       $('autofill').title = site ? t('widget.autofillSiteTitle') : t('widget.autofillIowaTitle');
       const details = [hasMessage(result) ? words(fromResult(result)) : '', ai.note ? words(ai.note) : '', ai.reason, fixedText(languageTrouble?.message, 160)];
-      $('widget-text').title = outdated ? t(outdatedKey) : fixedText(details.filter(Boolean).join(' '), 240);
+      $('widget-text').title = outdated ? statusText() : fixedText(details.filter(Boolean).join(' '), 240);
       // The status is always read to screen readers, and shown as a line whenever it says something the
       // buttons don't: on Iowa, what Autofill will do before it is clicked; then what it did and what it
       // waits for; a problem; an outdated extension. Unlock and Open SecondHand say their own step, and
@@ -161,8 +170,11 @@
       $('widget-text').classList.toggle('visually-hidden', !message);
       // The translated view is offered until Autofill has something to report.
       $('translate-offer').hidden = outdated || Boolean(note) || working || Boolean(result) || !known || !pageLanguage || pageLanguage === language;
+      // A frame left behind can't grow: when it can't hold the whole line, the short one says what to do.
+      // Letters overhang their line by a pixel or so; a line cut off is 14px more.
+      if (outdated && outdatedKey === 'panel.reloadPage' && $('widget-text').scrollHeight - $('widget-text').clientHeight > 7) $('widget-text').textContent = t('panel.reloadPageShort');
       // The widget is as wide and as tall as what it shows, up to 272px by 130px (see panel.css). An outdated
-      // worker is not asked for anything more; its steps fill the frame the widget already has.
+      // worker is not asked for anything more; its notice fills the frame the widget already has.
       const room = message || !$('translate-offer').hidden;
       const box = outdated || $('widget').hidden ? null : $('widget').getBoundingClientRect();
       const width = box ? Math.ceil(box.width) || 0 : frame.width;
@@ -285,6 +297,9 @@
         send({ type: 'ui:openPanel', confirmed: true }).catch(error => { note = trouble(error); render(); });
       }));
     }
+    // Restart reloads SecondHand, which starts the worker that matches this page. This frame is then left
+    // behind, like any page open during an update, so it says at once how to get SecondHand back here.
+    $('restart').addEventListener('click', trusted(() => { outdatedKey = 'panel.reloadPage'; render(); chrome.runtime.reload(); }));
     // Hiding is the reader's choice for this page only: nothing is saved, and the next page shows the card again.
     $('hide').addEventListener('click', trusted(() => { collapsed = true; render(); $('pill').focus(); }));
     // The offer opens the side panel straight on the page's questions.
@@ -334,7 +349,7 @@
     let desktopLine = null;
     // What the desktop row's button does: open a closed app, or bring a locked one forward to unlock.
     let desktopAction = null;
-    const ACTIONS = { open: 'desktop.open', unlock: 'panel.unlock' };
+    const ACTIONS = { open: 'desktop.open', unlock: 'panel.unlock', restart: 'panel.restart' };
     // While SecondHand opens, the panel checks about once a second for about 20 seconds.
     let opening = false;
     let desktopRun = 0;
@@ -369,8 +384,10 @@
     let summaryRun = 0;
     const SCREENS = { 'iowa-before-start': 'summary.iowaBeforeStart', 'iowa-information': 'summary.iowaInformation', 'iowa-instructions': 'summary.iowaInstructions' };
     const STATUS = { complete: 'checklist.complete', missing: 'checklist.missing', optional: 'checklist.optional', manual: 'checklist.manual' };
+    // An outdated worker ends the panel's work: its notice and Restart button stay, and nothing more is said or asked.
+    let halted = false;
     // A message, or null for nothing to say.
-    const show = (message, error = false) => { status = { message, error }; renderStatus(); };
+    const show = (message, error = false) => { if (halted) return; status = { message, error }; renderStatus(); };
     // A closed app is said once, by the desktop row and its Open SecondHand button, not again under Autofill.
     const reported = result => hasMessage(result) && result.state !== 'offline';
     function renderStatus() {
@@ -579,6 +596,7 @@
     }
     // The desktop row for the status the worker read: closed, locked, or unlocked.
     function showDesktop(desktop) {
+      if (halted) return;
       allSites = typeof desktop?.allSites === 'boolean' ? desktop.allSites : null;
       updateSteps = Object.hasOwn(UPDATE_STEPS, desktop?.update) ? UPDATE_STEPS[desktop.update] : null;
       desktopLine = !desktop?.connected ? { key: 'desktop.notRunning' } : desktop.unlocked ? null : { key: 'desktop.locked' };
@@ -587,6 +605,7 @@
       $('desktop-status').parentElement.classList.remove('error');
     }
     function desktopProblem(message) {
+      if (halted) return;
       desktopLine = message; layaLine = null; desktopAction = null;
       $('desktop-status').parentElement.classList.add('error');
     }
@@ -948,6 +967,8 @@
       if (result && !result.enabled) show({ key: 'panel.siteOffDone' });
     }));
     $('desktop-action').addEventListener('click', trusted(async () => {
+      // Reloading SecondHand closes this side panel and starts the worker that matches it.
+      if (desktopAction === 'restart') { chrome.runtime.reload(); return; }
       if (desktopAction === 'open') return openApp();
       try { await send({ type: 'ui:showApp', confirmed: true }); desktopLine = { key: 'desktop.unlockThenAutofill' }; }
       catch (error) { desktopLine = problem(error); }
@@ -974,7 +995,16 @@
       relabel();
     });
     followLanguage(relabel);
-    // An outdated worker stops the panel with its reload steps on screen.
+    function halt(error) {
+      if (halted) return;
+      show(null);
+      halted = true; stopped = true; target = null; nowhere = true; notice = null; updateSteps = null; updated = false;
+      clearTimeout(pollTimer); clearPage(); controls();
+      desktopLine = problem(error); layaLine = null; desktopAction = error.messageKey === 'panel.outdated' ? 'restart' : null;
+      $('desktop-status').parentElement.classList.remove('error');
+      renderDesktop();
+    }
+    whenOutdated = halt;
     async function start() {
       try {
         await checkBuild();
@@ -985,11 +1015,7 @@
         localStorage.setItem(BUILD_KEY, BUILD);
         renderDesktop();
       } catch (error) {
-        if (error.outdated) {
-          stopped = true; target = null; nowhere = true; clearPage(); controls(); show(problem(error), true);
-          $('desktop-status').parentElement.hidden = true;
-          return;
-        }
+        if (error.outdated) { halt(error); return; }
         show(problem(error), true);
       }
       refresh().then(desktopStatus);

@@ -405,7 +405,8 @@ async function sites() {
   });
 }
 
-// Pages from a newer build than the worker Chrome still runs: both surfaces show the steps to reload.
+// Pages from a newer build than the worker Chrome still runs: both surfaces say so and offer to restart SecondHand.
+// Restart then leaves the card behind on the page, as any update does: it asks for the page to be reloaded.
 async function outdated() {
   await withCopy(async copy => {
     const file = path.join(copy, 'panel.js');
@@ -416,12 +417,16 @@ async function outdated() {
     const frame = await card();
     await expect(frame.locator('#widget')).toHaveClass(/outdated/, { timeout: 20000 });
     await cardShot(session, 'card-outdated');
-    // An outdated card hides its buttons. Show the logo again for one click, which opens the side panel.
-    await frame.evaluate(() => { document.querySelector('.widget-row').style.display = 'flex'; });
     const panel = await openPanel(session);
-    await frame.evaluate(() => { document.querySelector('.widget-row').style.display = ''; });
-    await panelShot(session, panel, 'panel-outdated', () => document.getElementById('status').classList.contains('error'));
+    await panelShot(session, panel, 'panel-outdated', () => !document.getElementById('desktop-action').hidden);
     await panel.close();
+    if (!wanted('card-reload')) return;
+    // The side panel still covers the page's corner here, so the keyboard presses Restart.
+    await frame.locator('#restart').focus();
+    await session.page.keyboard.press('Enter');
+    // The frame has lost its extension once SecondHand reloaded.
+    await expect.poll(() => frame.evaluate(() => chrome.runtime?.id), { timeout: 20000 }).toBe(undefined);
+    await cardShot(session, 'card-reload');
   }));
 }
 
@@ -475,7 +480,7 @@ const sessions = [
   [iowaCard, ['card-ready', 'card-focus', 'card-hidden', 'card-need-you', 'card-message', 'card-locked', 'card-closed', 'card-pill']],
   [iowaPanel, ['panel-iowa', 'panel-header', 'panel-focus', 'panel-iowa-filled', 'panel-checklist', 'panel-locked', 'panel-closed', 'panel-info', 'panel-elsewhere', 'panel-arabic', 'panel-questions']],
   [sites, ['panel-site-off', 'panel-site-filled', 'panel-laya-off', 'panel-save', 'panel-all-sites-off', 'card-site', 'card-offer']],
-  [outdated, ['card-outdated', 'panel-outdated']],
+  [outdated, ['card-outdated', 'panel-outdated', 'card-reload']],
   [recording, ['card-autofill']]
 ];
 
