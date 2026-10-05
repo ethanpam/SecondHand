@@ -191,13 +191,13 @@ test('Laya requests outside the limits, with the wrong question type, or with an
 // Characters that reorder, hide, or break the words around them. A label or option is shown in the desktop's
 // approval dialog (“label”: option), and an option is the exact text the extension fills.
 const UNSEEN = Object.freeze({
-  'right-to-left override': '‮', 'left-to-right override': '‭', 'right-to-left embedding': '‫', 'pop directional formatting': '‬',
-  'right-to-left isolate': '⁧', 'first strong isolate': '⁨', 'pop directional isolate': '⁩',
-  'right-to-left mark': '‏', 'left-to-right mark': '‎', 'Arabic letter mark': '؜',
-  'zero-width space': '​', 'zero-width non-joiner': '‌', 'zero-width joiner': '‍', 'word joiner': '⁠', 'invisible separator': '⁣',
-  'byte order mark': '﻿', 'soft hyphen': '­', 'combining grapheme joiner': '͏', 'Hangul filler': 'ㅤ', 'variation selector': '️',
-  'interlinear annotation anchor': '￹', 'tag letter': '\u{E0041}', 'language tag': '\u{E0001}',
-  'line separator': ' ', 'paragraph separator': ' ', 'next line (C1)': '\u0085', 'control sequence introducer (C1)': '\u009B'
+  'right-to-left override': '\u202E', 'left-to-right override': '\u202D', 'right-to-left embedding': '\u202B', 'pop directional formatting': '\u202C',
+  'right-to-left isolate': '\u2067', 'first strong isolate': '\u2068', 'pop directional isolate': '\u2069',
+  'right-to-left mark': '\u200F', 'left-to-right mark': '\u200E', 'Arabic letter mark': '\u061C',
+  'zero-width space': '\u200B', 'zero-width non-joiner': '\u200C', 'zero-width joiner': '\u200D', 'word joiner': '\u2060', 'invisible separator': '\u2063',
+  'byte order mark': '\uFEFF', 'soft hyphen': '\u00AD', 'combining grapheme joiner': '\u034F', 'Hangul filler': '\u3164', 'variation selector': '\uFE0F',
+  'interlinear annotation anchor': '\uFFF9', 'tag letter': '\u{E0041}', 'language tag': '\u{E0001}',
+  'line separator': '\u2028', 'paragraph separator': '\u2029', 'next line (C1)': '\u0085', 'control sequence introducer (C1)': '\u009B'
 });
 
 test('labels and options with bidi controls, invisible characters, or line breaks are refused, so a page can’t reorder or hide words in a desktop dialog', () => {
@@ -209,7 +209,7 @@ test('labels and options with bidi controls, invisible characters, or line break
   }
   // Words in any language, with accents, typographic punctuation, no-break spaces, and emoji, are asked as they are.
   for (const text of ['¿Cuántas personas viven en su hogar?', 'Số người trong hộ gia đình', 'كم عدد الأشخاص في أسرتك؟', 'כמה אנשים גרים בבית?',
-    'Household size (people)', '“Monthly” income – before taxes', '📧 Email']) {
+    'Household size\u00A0(people)', '“Monthly” income – before taxes', '📧 Email']) {
     assert.equal(validateRequest(suggest([box({ label: text })])).fields[0].label, text, text);
     assert.deepEqual(validateRequest(answer([choice({ options: [text, 'No'] })])).questions[0].options, [text, 'No'], text);
   }
@@ -438,8 +438,8 @@ test('the desktop refuses a label or option with a bidi control or invisible cha
   const bridge = await startBridge(directory, () => EXTENSION, async () => { reached++; return { answers: {}, accessRevision: 1 }; });
   t.after(() => bridge.close());
   const refused = { id: 'laya-2', ok: false, error: 'The request could not be completed. Check the desktop app.' };
-  assert.deepEqual(await unchecked(directory, answer([choice({ label: 'Can we share your answers?‮' })])), refused);
-  assert.deepEqual(await unchecked(directory, answer([choice({ options: ['Yes', 'Ye​s'] })])), refused);
+  assert.deepEqual(await unchecked(directory, answer([choice({ label: 'Can we share your answers?\u202E' })])), refused);
+  assert.deepEqual(await unchecked(directory, answer([choice({ options: ['Yes', 'Ye\u200Bs'] })])), refused);
   assert.equal(reached, 0);
   assert.deepEqual(await unchecked(directory, answer([choice()])), { id: 'laya-2', ok: true, data: { answers: {}, accessRevision: 1 } });
 });
