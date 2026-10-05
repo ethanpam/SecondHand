@@ -7,7 +7,7 @@
   const summary = globalThis.SecondHandSummary;
   // Must match BUILD in background.js: change both together. Chrome loads these pages
   // from disk right away but keeps running the old worker until SecondHand is reloaded.
-  const BUILD = '2026-10-03.3';
+  const BUILD = '2026-10-03.4';
   // The applicant's language: the choice saved in this extension's storage, else the browser's.
   let language = strings.language();
   const t = (key, params = {}) => strings.text(language, key, params);
@@ -317,9 +317,12 @@
     // SecondHand on all websites, as the worker last said (null until it has).
     let allSites = null;
     let desktopLine = null;
-    // What the desktop row's button does: open a closed app, or bring a locked one forward to unlock.
+    // What the desktop row's button does: open a closed app, bring a locked one forward to unlock, or
+    // ask it for Touch ID when its status says Touch ID is ready (#99).
     let desktopAction = null;
-    const ACTIONS = { open: 'desktop.open', unlock: 'panel.unlock' };
+    const ACTIONS = { open: 'desktop.open', unlock: 'panel.unlock', touchId: 'panel.unlockTouchId' };
+    // Why Touch ID didn't unlock, said as SecondHand comes forward for the password.
+    const TOUCH_ID_LINES = { cancelled: 'desktop.touchIdDidntUnlock', off: 'desktop.unlockThenAutofill' };
     // While SecondHand opens, the panel checks about once a second for about 20 seconds.
     let opening = false;
     let desktopRun = 0;
@@ -556,7 +559,7 @@
       updateSteps = Object.hasOwn(UPDATE_STEPS, desktop?.update) ? UPDATE_STEPS[desktop.update] : null;
       desktopLine = { key: !desktop?.connected ? 'desktop.notRunning' : desktop.unlocked ? 'desktop.unlocked' : 'desktop.locked' };
       layaLine = desktop?.connected && Object.hasOwn(LAYA_LINES, desktop.laya) ? { key: LAYA_LINES[desktop.laya] } : null;
-      desktopAction = !desktop?.connected ? 'open' : desktop.unlocked ? null : 'unlock';
+      desktopAction = !desktop?.connected ? 'open' : desktop.unlocked ? null : desktop.touchId === 'ready' ? 'touchId' : 'unlock';
       $('desktop-status').parentElement.classList.toggle('error', !(desktop?.connected && desktop.unlocked));
     }
     function desktopProblem(message) {
@@ -599,6 +602,23 @@
         if (desktop?.connected) return desktop;
       }
       return null;
+    }
+    // Unlock with Touch ID: the app shows macOS's prompt over Chrome. While it asks, the row keeps its
+    // line (as while SecondHand opens). When it doesn't unlock, Unlock does what it always did: SecondHand
+    // comes forward for the password, and the line says why.
+    async function unlockWithTouchId() {
+      opening = true; desktopRun++;
+      desktopLine = { key: 'desktop.touchIdWaiting' }; desktopAction = null;
+      renderDesktop();
+      let reply;
+      try { reply = await send({ type: 'ui:unlockWithTouchId', confirmed: true }); }
+      catch (error) { desktopLine = problem(error); desktopAction = 'touchId'; renderDesktop(); return; }
+      finally { opening = false; }
+      if (reply.unlocked) { await desktopStatus(); return; }
+      desktopAction = reply.reason === 'cancelled' ? 'touchId' : 'unlock';
+      try { await send({ type: 'ui:showApp', confirmed: true }); desktopLine = { key: TOUCH_ID_LINES[reply.reason] }; }
+      catch (error) { desktopLine = problem(error); }
+      renderDesktop();
     }
     // Every action re-reads the active tab so a stale checklist can never act on another page.
     async function act(payload, waiting) {
@@ -922,6 +942,7 @@
     }));
     $('desktop-action').addEventListener('click', trusted(async () => {
       if (desktopAction === 'open') return openApp();
+      if (desktopAction === 'touchId') return unlockWithTouchId();
       try { await send({ type: 'ui:showApp', confirmed: true }); desktopLine = { key: 'desktop.unlockThenAutofill' }; }
       catch (error) { desktopLine = problem(error); }
       renderDesktop();

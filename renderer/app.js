@@ -164,12 +164,13 @@
     $('reset-form').reset();
     if ($('recovery-dialog').open) $('recovery-dialog').close();
     clearRecoveryKey();
+    closeTouchIdDialog();
     $('application-list').replaceChildren();
     $('overview-applications').replaceChildren();
         $('application-count').textContent = '0';
     if ($('application-dialog').open) $('application-dialog').close();
     clearTimeout(layaPoll);
-    for (const id of ['auth-error', 'reset-error', 'profile-error', 'application-error', 'extension-error', 'extension-prepare-error', 'autofill-trust-error', 'laya-error']) clearError(id);
+    for (const id of ['auth-error', 'reset-error', 'profile-error', 'application-error', 'extension-error', 'extension-prepare-error', 'autofill-trust-error', 'laya-error', 'touch-id-error']) clearError(id);
     setProfileDirty(false);
     clearTimeout(toastTimer);
     $('toast').hidden = true;
@@ -200,7 +201,40 @@
     $('device-reset-field').hidden = exists || !vaultStatus.deviceResetSupported;
     $('allow-device-reset').checked = true;
     setResetMode(false);
+    renderTouchIdUnlock();
     if (api) $('passphrase').focus();
+  }
+
+  // The lock screen's Unlock with Touch ID, when it's ready, or a line saying why Touch ID was turned off.
+  function renderTouchIdUnlock() {
+    const locked = Boolean(vaultStatus.exists) && !vaultStatus.unlocked;
+    $('touch-id-unlock').hidden = !(locked && vaultStatus.touchId === 'ready');
+    const notice = locked && typeof vaultStatus.touchIdNotice === 'string' ? vaultStatus.touchIdNotice : '';
+    $('touch-id-note').textContent = notice;
+    $('touch-id-note').hidden = !notice;
+  }
+
+  // Touch ID's state can change while the lock screen shows (an auto-lock, a failed attempt).
+  async function refreshTouchIdUnlock() {
+    const generation = vaultGeneration;
+    try {
+      const status = await api.status();
+      if (generation !== vaultGeneration || vaultStatus.unlocked || status.unlocked) return;
+      vaultStatus = { ...vaultStatus, touchId: status.touchId, touchIdSupported: status.touchIdSupported, touchIdNotice: status.touchIdNotice };
+      renderTouchIdUnlock();
+    } catch (error) { if (generation === vaultGeneration) showError('auth-error', error); }
+  }
+
+  // Unlock with Touch ID in Privacy & backups: shown only on a Mac that can use it.
+  function renderTouchId() {
+    $('touch-id-setting').hidden = !vaultStatus.touchIdSupported;
+    $('touch-id-toggle').checked = vaultStatus.touchId === 'ready';
+  }
+
+  function closeTouchIdDialog() {
+    if ($('touch-id-dialog').open) $('touch-id-dialog').close();
+    $('touch-id-form').reset();
+    clearError('touch-id-error');
   }
 
   function resetWithDevice() {
@@ -846,7 +880,7 @@
   function renderSummary() {
     const hasProfile = profileFields.some((field) => Boolean(data.profile[field]));
     $('profile-step-label').replaceChildren(document.createTextNode(hasProfile ? 'Review my profile ' : 'Set up my profile '), icon('arrow'));
-    renderApplications(); renderSetup(); renderRecovery();
+    renderApplications(); renderSetup(); renderRecovery(); renderTouchId();
   }
 
   async function loadUnlocked(status) {
@@ -868,7 +902,11 @@
     fillProfile(); renderSummary();
     showView('overview', { skipConfirmation: true });
     renderSetupResume();
-    if (progress.error) toast(progress.error.message || 'SecondHand couldn’t read your setup progress.', true);
+    // Problems found while opening, in one toast so neither hides the other: setup progress that
+    // couldn't be read, and Touch ID turned off while unlocking (and why).
+    const problems = [progress.error && (progress.error.message || 'SecondHand couldn’t read your setup progress.'),
+      typeof status.touchIdNotice === 'string' && status.touchIdNotice].filter(Boolean);
+    if (problems.length) toast(problems.join(' '), true);
   }
 
   async function lockVault() {
@@ -944,6 +982,25 @@
     });
   });
 
+  // The prompt is macOS's own. A refusal says why and leaves the password field ready.
+  $('touch-id-unlock').addEventListener('click', () => {
+    if (!api) return;
+    clearError('auth-error');
+    const generation = vaultGeneration;
+    pending($('touch-id-unlock'), async () => {
+      try {
+        const status = await api.unlockWithTouchId();
+        if (generation !== vaultGeneration) return;
+        await loadUnlocked(status);
+      } catch (error) {
+        if (generation !== vaultGeneration) return;
+        showError('auth-error', error);
+        $('passphrase').focus();
+        await refreshTouchIdUnlock();
+      }
+    });
+  });
+
   $('forgot-password').addEventListener('click', () => setResetMode(true));
   $('reset-cancel').addEventListener('click', () => showLocked(vaultStatus, { refresh: true }));
   $('start-over').addEventListener('click', () => setStartOverMode(true));
@@ -1008,6 +1065,48 @@
       toast(error.message || 'Unable to change this setting.', true);
     }).finally(() => { if (generation === vaultGeneration) $('device-reset-toggle').disabled = false; });
   });
+  // Turning Touch ID on asks for the password first, in the app's own dialog; turning it off doesn't.
+  $('touch-id-toggle').addEventListener('change', () => {
+    const enabled = $('touch-id-toggle').checked;
+    if (enabled) {
+      $('touch-id-toggle').checked = false;
+      closeTouchIdDialog();
+      $('touch-id-dialog').showModal();
+      $('touch-id-password').focus();
+      return;
+    }
+    const generation = vaultGeneration;
+    $('touch-id-toggle').disabled = true;
+    api.setTouchIdUnlock({ enabled: false }).then((status) => {
+      if (generation !== vaultGeneration) return;
+      vaultStatus = status; renderTouchId();
+      toast('Touch ID is off. Unlock with your password.');
+    }).catch((error) => {
+      if (generation !== vaultGeneration) return;
+      $('touch-id-toggle').checked = true;
+      toast(error.message || 'Unable to change this setting.', true);
+    }).finally(() => { if (generation === vaultGeneration) $('touch-id-toggle').disabled = false; });
+  });
+  $('touch-id-form').addEventListener('submit', (event) => {
+    event.preventDefault(); clearError('touch-id-error');
+    if (!api) return;
+    const generation = vaultGeneration;
+    pending($('touch-id-confirm'), async () => {
+      try {
+        const status = await api.setTouchIdUnlock({ enabled: true, password: $('touch-id-password').value });
+        if (generation !== vaultGeneration) return;
+        vaultStatus = status; renderTouchId();
+        closeTouchIdDialog();
+        toast('Touch ID is on. Use it on the lock screen or from SecondHand’s side panel in Chrome.');
+      } catch (error) {
+        if (generation !== vaultGeneration) return;
+        showError('touch-id-error', error);
+        $('touch-id-password').select();
+      }
+    });
+  });
+  $('touch-id-cancel').addEventListener('click', closeTouchIdDialog);
+  $('touch-id-dialog').addEventListener('close', () => { $('touch-id-form').reset(); clearError('touch-id-error'); });
   $('recovery-saved').addEventListener('change', () => { $('recovery-done').disabled = !$('recovery-saved').checked; });
   $('recovery-done').addEventListener('click', () => $('recovery-dialog').close());
   $('recovery-dialog').addEventListener('cancel', (event) => { if (!$('recovery-saved').checked) event.preventDefault(); });
@@ -1297,8 +1396,21 @@
     // revision lets showLocked skip a repeat of a lock already shown, so a late notice
     // cannot reset an unlock attempt the person has started, while a newer lock still
     // cancels any pending unlock or profile load.
-    api.onLocked(notification => showLocked({ ...vaultStatus, exists: true, unlocked: false, lockRevision: notification?.lockRevision }));
+    api.onLocked(notification => {
+      showLocked({ ...vaultStatus, exists: true, unlocked: false, lockRevision: notification?.lockRevision });
+      refreshTouchIdUnlock();
+    });
     api.onProfileChanged(change => profileChangedElsewhere(change.fields));
+    // Unlocked from Chrome's side panel with Touch ID: show the saved information here too.
+    api.onUnlocked(async () => {
+      if (vaultStatus.unlocked) return;
+      const generation = vaultGeneration;
+      try {
+        const status = await api.status();
+        if (generation !== vaultGeneration || vaultStatus.unlocked || !status.unlocked) return;
+        await loadUnlocked(status);
+      } catch (error) { if (generation === vaultGeneration) showError('auth-error', error); }
+    });
     try {
       const status = await api.status();
       if (status.unlocked) await loadUnlocked(status); else showLocked(status);

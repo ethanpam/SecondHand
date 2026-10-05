@@ -44,6 +44,8 @@ async function desktop(t, { encryptionAvailable = true, shell = {}, env = {}, is
     dialog: { showErrorBox() { assert.fail('Desktop setup failed'); } },
     shell, clipboard: {}, powerMonitor: { on() {} },
     session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, webRequest: { onBeforeRequest() {} } } } };
+  // A Mac without Touch ID; tests/desktop-touch-id-main.test.cjs covers Touch ID.
+  electron.systemPreferences = { canPromptTouchID: () => false };
   const overrides = {
     electron,
     './bridge.cjs': { ...require('../desktop/bridge.cjs'), startBridge: async () => ({ close: async () => {} }) },

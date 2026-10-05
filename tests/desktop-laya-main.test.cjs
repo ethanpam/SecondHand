@@ -89,6 +89,8 @@ async function desktop(t, { settings = { extensionId }, manifest, updateUrl = nu
   const electron = { app, BrowserWindow, ipcMain: { handle(_name, handler) { invoke = handler; } },
     dialog: { showErrorBox() { assert.fail('Desktop setup failed'); } }, shell: {}, clipboard: {}, powerMonitor: { on() {} },
     session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, webRequest: { onBeforeRequest() {} } } } };
+  // A Mac without Touch ID; tests/desktop-touch-id-main.test.cjs covers Touch ID.
+  electron.systemPreferences = { canPromptTouchID: () => false };
   const overrides = {
     electron,
     './vault.cjs': { ...require('../desktop/vault.cjs'), Vault, atomicWrite: async (file, bytes) => { writes.push({ file, json: JSON.parse(bytes.toString()) }); } },
