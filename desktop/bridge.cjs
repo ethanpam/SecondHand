@@ -118,25 +118,28 @@ function validateFieldScope(fields) {
   return fields;
 }
 
+// Page text the desktop shows in its dialogs: a Laya question's label and options (“label”: option, where the option
+// is the exact text the extension fills) and an answer to save (“Field: answer”). Refused, not stripped, when it has
+// a character that reorders, hides, or breaks the words around it: controls (C0, DEL, C1), format characters (bidi
+// controls, zero-width characters, tags), line and paragraph separators, and other invisible characters (variation
+// selectors, fillers). Stripped text would no longer be the page's own, and two options that differ only by such a
+// character would look the same in the dialog. U+200C ZERO WIDTH NON-JOINER and U+200D ZERO WIDTH JOINER are allowed:
+// Persian, Arabic, and Indic words need them. extension/generic-adapter.js (layaText) keeps the same rule.
+const UNSEEN = /[[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]--[\u200C\u200D]]/v;
+
 // saveFields { url, fields: { key: value } }: like getFields, any HTTPS site (the desktop decides whether it is
 // trusted), and saved profile fields the side panel may offer, each the applicant's own answer from one box: a
-// nonblank string of at most 200 characters without control characters. The desktop still checks each value
-// against the schema and asks the applicant before saving.
+// nonblank string of at most 200 characters without a character UNSEEN refuses. The desktop still checks each
+// value against the schema and asks the applicant before saving.
 function validateSave(request) {
   if (!isHttpsSiteUrl(request.url)) throw new Error('Only an https site without credentials or a custom port is allowed.');
   const { fields } = request;
   const entries = fields && typeof fields === 'object' && !Array.isArray(fields) && Object.getPrototypeOf(fields) === Object.prototype ? Object.entries(fields) : [];
   if (!entries.length || entries.length > SAVE_FIELDS.length || entries.some(([key, value]) => !SAVE_FIELDS.includes(key) || typeof value !== 'string' ||
-      !value.trim() || value.length > MAX_SAVED_VALUE || /[\u0000-\u001f\u007f]/.test(value))) throw new Error('Invalid answers to save.');
+      !value.trim() || value.length > MAX_SAVED_VALUE || UNSEEN.test(value))) throw new Error('Invalid answers to save.');
   return request;
 }
 
-// Page text the desktop shows in its approval dialog (“label”: option), and an option is the exact text the
-// extension fills. Refused, not stripped, when it has a character that reorders, hides, or breaks the words around
-// it: controls (C0, DEL, C1), format characters (bidi controls, zero-width characters, tags), line and paragraph
-// separators, and other invisible characters. Stripped text would no longer be the page's own, and two options
-// that differ only by such a character would look the same in the dialog.
-const UNSEEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/u;
 const questionText = (value, max) => typeof value === 'string' && value.trim() !== '' && value.length <= max && !UNSEEN.test(value);
 function validateQuestions(items, { max, types, choices }) {
   if (!Array.isArray(items) || !items.length || items.length > max) throw new Error('Invalid questions for Laya.');

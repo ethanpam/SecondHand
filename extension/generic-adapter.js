@@ -198,7 +198,11 @@
   // the desktop's matchableBox refuses too.
   const LAYA = Object.freeze({ text: Object.freeze(['text', 'textarea', 'number', 'date', 'email', 'tel']), choice: Object.freeze(['radio', 'select', 'checkbox']),
     label: 200, options: 30, option: 100 });
-  const layaText = (value, max) => typeof value === 'string' && value.trim() !== '' && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
+  // The bridge's rule for page text (UNSEEN in desktop/bridge.cjs): no character that reorders, hides, or breaks the
+  // words around it, but the non-joiner and joiner Persian, Arabic, and Indic words need. A question with one stays
+  // with the applicant: the bridge would refuse the whole request.
+  const UNSEEN = /[[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]--[\u200C\u200D]]/v;
+  const layaText = (value, max) => typeof value === 'string' && value.trim() !== '' && value.length <= max && !UNSEEN.test(value);
   function layaQuestion({ label, type, options }) {
     if (!layaText(label, LAYA.label) || !Array.isArray(options) || options.length > LAYA.options || options.some(option => !layaText(option, LAYA.option)) ||
       new Set(options).size !== options.length || unsafeQuestion({ label, options })) return '';
