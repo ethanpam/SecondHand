@@ -2139,3 +2139,17 @@ test('a reason the worker doesn’t know fills nothing and shows a fixed error',
   const laya = siteWorker({ enabled: true, fields: [{ ...SIXTY }], desktop: layaDesktop({ answerFields: (request, vault) => ({ answers: {}, accessRevision: vault.accessRevision, reason: 7 }) }) });
   assert.equal(plain((await autofill(laya)).data).messageKey, 'worker.desktopUnexpected');
 });
+
+test('when the app refuses to save because of a saved date of birth, the side panel shows its words: whose date, and to fix it in My information', async () => {
+  const w = siteWorker({ enabled: true, desktop: { values: {} } });
+  await autofill(w);
+  const size = `f0:${w.page.idOf('size')}`;
+  w.page.type('size', '3');
+  const refusal = 'Person 3’s date of birth can’t be after today (2026-10-05 on this computer). Fix the date in My information, then save this answer again.';
+  w.vault.saveError = refusal;
+  const refused = plain(await saveAnswer(w, size));
+  assert.equal(refused.ok, false);
+  assert.deepEqual([refused.errorKey, refused.errorParams], ['detail', { detail: refusal }], 'the app’s own words, not a fixed error');
+  assert.equal(strings.text('en', refused.errorKey, refused.errorParams), refusal);
+  assert.ok((await savable(w)).some(item => item.id === size), 'the answer stays on the list to save once the date is fixed');
+});

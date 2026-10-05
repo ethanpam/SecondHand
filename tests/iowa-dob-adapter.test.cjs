@@ -156,3 +156,29 @@ test('observed final E-Signature controls never receive saved facts, certificati
   doc.querySelector('#submitAnchorId').disabled = false;
   assert.equal(adapter.captureNavigation(doc, url), null); assert.equal(adapter.advance(doc, url, {}).advanced, false); assert.equal(clicks, 0);
 });
+
+// #135: the date of birth is checked against today on this computer's calendar, as the app checks it:
+// today or earlier, and no more than 130 years ago. Each test pins the clock and the timezone.
+function inZone(t, zone, instant) {
+  const before = process.env.TZ;
+  process.env.TZ = zone;
+  t.after(() => { if (before === undefined) delete process.env.TZ; else process.env.TZ = before; });
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse(instant) });
+}
+const fillDate = value => { const doc = page(); adapter.fill(doc, fixture.URL, adapter.scan(doc, fixture.URL).bindings, { birthDate: value }); return input(doc).value; };
+
+test('on an Iowa evening, a date of birth of tomorrow is never filled, though it is already that date in UTC', t => {
+  // 8:30 pm on October 5 in Iowa is 01:30 on October 6 in UTC.
+  inZone(t, 'America/Chicago', '2026-10-06T01:30:00Z');
+  assert.equal(fillDate('2026-10-06'), '');
+  assert.equal(fillDate('2026-10-05'), '10/05/2026', 'born today');
+  assert.equal(fillDate('1896-10-05'), '10/05/1896', 'exactly 130 years ago');
+  assert.equal(fillDate('1896-10-04'), '', 'more than 130 years ago');
+  assert.equal(fillDate('1825-06-01'), '');
+});
+
+test('just after midnight in UTC+14, today’s date of birth is filled while UTC is still on the day before', t => {
+  inZone(t, 'Pacific/Kiritimati', '2026-10-05T10:00:00Z');
+  assert.equal(fillDate('2026-10-06'), '10/06/2026');
+  assert.equal(fillDate('2026-10-07'), '');
+});

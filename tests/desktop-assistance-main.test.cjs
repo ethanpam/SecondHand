@@ -1074,3 +1074,19 @@ test('a saved birth date the app can’t use never fails Laya: it answers from t
   const answered = plain(await fine.request(answerRequest([sixty, veteran])));
   assert.equal(answered.reason, undefined);
 });
+
+test('Save to My information is refused while a saved birth date can’t be used, naming whose date to fix in My information', async () => {
+  const app = await desktop({ settings: trusted, profile: unusableDates });
+  app.answer(async () => ({ response: 1 }));
+  await assert.rejects(app.request({ type: 'saveFields', url: PANTRY, fields: { county: 'Story' } }), error => error.publicMessage ===
+    'Person 3’s date of birth can’t be after today (2026-10-05 on this computer). Fix the date in My information, then save this answer again.');
+  const own = await desktop({ settings: trusted, profile: { firstName: 'Synthetic', birthDate: '1825-06-01' } });
+  await assert.rejects(own.request({ type: 'saveFields', url: PANTRY, fields: { county: 'Story' } }), error => error.publicMessage ===
+    'Your date of birth can’t be more than 130 years ago. Fix the date in My information, then save this answer again.');
+  assert.equal(app.prompts.length + own.prompts.length, 0, 'nothing is offered for confirmation');
+  assert.equal(plain(await app.invoke('getData')).profile.county, undefined);
+  // A date of birth saved from the page is that answer’s own problem, not My information’s.
+  const fresh = await desktop({ settings: trusted, profile: { firstName: 'Synthetic' } });
+  await assert.rejects(fresh.request({ type: 'saveFields', url: PANTRY, fields: { birthDate: '2026-10-06' } }), error => error.publicMessage ===
+    'Your date of birth can’t be after today (2026-10-05 on this computer).');
+});
