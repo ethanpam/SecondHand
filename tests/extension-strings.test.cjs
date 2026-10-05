@@ -225,6 +225,40 @@ test('on Enter Personal Information, SecondHand says plainly what needs the appl
   assert.equal(en['iowa.manualReview'], 'Check the questions and any Iowa error messages on this page, because something here isn’t what SecondHand expects');
 });
 
+test('on Enter Personal Information, when SecondHand will not save and continue, it does not say it will', () => {
+  const url = `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo`;
+  const filled = () => {
+    const doc = onScreen(personal.html, url);
+    personal.attachConditionalHandlers(doc);
+    for (let pass = 0; pass < 3; pass++) adapter.fill(doc, url, adapter.scan(doc, url).bindings, syntheticProfile);
+    assert.equal(adapter.probePage(doc, url).canAdvance, true, 'the filled page is ready before the change');
+    return doc;
+  };
+  const waiting = (doc, why) => {
+    const page = adapter.probePage(doc, url);
+    assert.equal(page.canAdvance, false, why);
+    assert.equal(strings.describeEnglish(page.todo).key, 'iowa.reviewSaveContinue', why);
+  };
+  // Iowa turns Save and Continue off, either way it can.
+  const disabled = filled();
+  disabled.querySelector('.saveAndContinueButton').setAttribute('disabled', '');
+  waiting(disabled, 'disabled');
+  const ariaDisabled = filled();
+  ariaDisabled.querySelector('.saveAndContinueButton').setAttribute('aria-disabled', 'true');
+  waiting(ariaDisabled, 'aria-disabled');
+  // A field found twice: outside the form, a second element carries the id of a question this page hides
+  // (Medicaid isn't chosen, so its medical bills follow-up is not shown). Nothing is missing, yet SecondHand won't continue.
+  const twice = filled();
+  assert.equal(twice.querySelector('#faDiv').style.display, 'none');
+  twice.querySelector('main').append(Object.assign(twice.createElement('input'), { type: 'radio', id: 'helpPayMedBill1' }));
+  assert.ok(adapter.scan(twice, url).ambiguous.length > 0);
+  const page = adapter.probePage(twice, url);
+  assert.equal(page.requiredRemaining, 0);
+  assert.equal(page.manualRemaining, 0);
+  waiting(twice, 'a field found twice');
+  assert.equal(en['iowa.reviewSaveContinue'], 'Review your answers, then click Save and Continue in Iowa’s form.');
+});
+
 test('no Iowa English says "verified", "controls", "context", or "facts"', () => {
   const jargon = /verified|controls|context|facts/i;
   const found = Object.entries(en).filter(([key, value]) => key.startsWith('iowa.') && jargon.test(typeof value === 'string' ? value : `${value.one} ${value.other}`))
