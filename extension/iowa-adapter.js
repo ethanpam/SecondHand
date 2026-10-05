@@ -890,9 +890,10 @@
       const scanResult = scan(doc, rawUrl);
       const issues = personalIssues(doc.querySelector(forms.personal), doc);
       const next = navigationButton(doc, rawUrl);
-      return { ...result, ...issues, kind: 'fillable', pageKey: 'iowa-personal-information', heading: 'Enter Personal Information', fields: scanResult.fields,
-        canAdvance: Boolean(next && issues.requiredRemaining === 0 && issues.manualRemaining === 0 && scanResult.ambiguous.length === 0),
-        todo: issues.requiredRemaining || issues.manualRemaining ? 'Complete the missing answers in Iowa’s form. SecondHand will check again before continuing.' : 'SecondHand can save this page and continue. Review every answer before final submission.',
+      const canAdvance = Boolean(next && issues.requiredRemaining === 0 && issues.manualRemaining === 0 && scanResult.ambiguous.length === 0);
+      return { ...result, ...issues, kind: 'fillable', pageKey: 'iowa-personal-information', heading: 'Enter Personal Information', fields: scanResult.fields, canAdvance,
+        todo: issues.requiredRemaining || issues.manualRemaining ? 'Complete the missing answers in Iowa’s form. SecondHand will check again before continuing.'
+          : canAdvance ? 'SecondHand can save this page and continue. Review every answer before final submission.' : 'Review your answers, then click Save and Continue in Iowa’s form.',
         reason: issues.manualRemaining ? 'Answer the remaining questions and correct any errors in Iowa’s form.' : issues.requiredRemaining ? 'Complete the required applicant fields in Iowa’s form.' : 'Review your answers, then click Save and Continue in Iowa’s form.' };
     }
     if (rawUrl === `${PORTAL}/applyForBenefits/enterPersonalInfo` || headings.includes('enter personal information')) return { ...result, pageKey: 'iowa-personal-unverified', todo: 'Fill in this page yourself, then click Save and Continue in Iowa’s form.', reason: 'This page doesn’t look like the applicant page SecondHand knows, so it fills nothing here.' };
