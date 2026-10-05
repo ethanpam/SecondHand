@@ -423,7 +423,10 @@ test('trusted side-panel Autofill targets the active tab, shows the result, and 
 test('checklist uses plain labels and a trusted row click finds the field', async t => {
   const view = await panel(t);
   assert.match(view.row('firstName').textContent, /First name.*Needs you/);
-  assert.match(view.row('lastName').textContent, /✓.*Done/);
+  assert.equal(view.row('lastName').textContent, 'Last nameDone');
+  // A finished row carries the drawn check mark; the others an empty ring.
+  assert.equal(view.row('lastName').querySelectorAll('.checklist-mark svg path').length, 1);
+  for (const key of ['firstName', 'middleName', 'unverified']) assert.equal(view.row(key).querySelector('.checklist-mark').childNodes.length, 0, key);
   assert.match(view.row('middleName').textContent, /Optional/);
   assert.match(view.row('unverified').textContent, /Do it yourself/);
   assert.equal(view.get('checklist-summary').textContent, '1 of 4 done');
@@ -439,15 +442,15 @@ test('after Autofill, a question whose answer isn’t saved says so and points t
   const detail = key => view.row(key).querySelector('.checklist-detail').textContent;
   assert.equal(detail('firstName'), 'Needs you');
   await view.userClick('panel-autofill');
-  assert.equal(detail('firstName'), 'Not saved in SecondHand: add it in My information');
-  assert.equal(detail('middleName'), 'Not saved in SecondHand: add it in My information');
-  assert.equal(view.row('firstName').getAttribute('aria-label'), 'First name: Not saved in SecondHand: add it in My information. Find it in Iowa’s form.');
+  assert.equal(detail('firstName'), 'Not saved. Add it in My information');
+  assert.equal(detail('middleName'), 'Not saved. Add it in My information');
+  assert.equal(view.row('firstName').getAttribute('aria-label'), 'First name: Not saved. Add it in My information. Find it in Iowa’s form.');
   // A question answered since shows as done; one SecondHand can't fill still says to do it yourself.
   assert.equal(detail('lastName'), 'Done');
   assert.equal(detail('unverified'), 'Do it yourself');
   const spanish = await panel(t, { language: 'es', autofill });
   await spanish.userClick('panel-autofill');
-  assert.equal(spanish.row('firstName').querySelector('.checklist-detail').textContent, 'No está guardado en SecondHand: agréguelo en “My information”');
+  assert.equal(spanish.row('firstName').querySelector('.checklist-detail').textContent, 'No está guardado. Agréguelo en “My information”');
   // Only a list of question keys is read from the worker's result.
   const malformed = await panel(t, { autofill: { ...doneResult, notSaved: 'firstName' } });
   await malformed.userClick('panel-autofill');

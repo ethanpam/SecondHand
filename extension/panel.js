@@ -358,7 +358,6 @@
     let summaryRun = 0;
     const SCREENS = { 'iowa-before-start': 'summary.iowaBeforeStart', 'iowa-information': 'summary.iowaInformation', 'iowa-instructions': 'summary.iowaInstructions' };
     const STATUS = { complete: 'checklist.complete', missing: 'checklist.missing', optional: 'checklist.optional', manual: 'checklist.manual' };
-    const MARKS = { complete: '✓', manual: '!', missing: '○', optional: '○' };
     // A message, or null for nothing to say.
     const show = (message, error = false) => { status = { message, error }; renderStatus(); };
     // A closed app is said once, by the desktop row and its Open SecondHand button, not again under Autofill.
@@ -439,6 +438,15 @@
       clearPage(); controls();
       show({ key: 'panel.checkingTab' });
     }
+    // The website's check mark, for a row that is done. panel.css draws the other rows' rings.
+    function checkMark() {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', '0 0 24 24');
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', 'm5 12 4 4L19 6');
+      svg.append(path);
+      return svg;
+    }
     function renderChecklist() {
       const entries = Array.isArray(page.checklist) ? page.checklist.filter(item => item && fieldKeys([item.key]).length && typeof item.label === 'string' && Object.hasOwn(STATUS, item.status)).slice(0, 80) : [];
       const signature = JSON.stringify([language, entries, notSaved]);
@@ -449,7 +457,7 @@
         const button = document.createElement('button');
         button.type = 'button'; button.className = `checklist-item ${item.status}`; button.dataset.key = item.key;
         const mark = document.createElement('span'); mark.className = 'checklist-mark'; mark.setAttribute('aria-hidden', 'true');
-        mark.textContent = MARKS[item.status];
+        if (item.status === 'complete') mark.append(checkMark());
         const copy = document.createElement('span'); copy.className = 'checklist-copy';
         const text = words({ key: item.labelKey, params: item.labelParams, text: item.label }, 100);
         const label = document.createElement('span'); label.className = 'checklist-label'; label.textContent = text;
