@@ -283,20 +283,31 @@ if (nativeOrigin) {
       if (!chosen.length) return { answers: {}, accessRevision, ...reason };
       // Answers are profile information: they follow getFields' approval, each question listed
       // with the option that would be filled. Iowa's portal keeps its rule of no sensitive prompt.
+      const lines = list => list.map(question => `“${question.label}”: ${answers[question.id]}`).join('\n');
+      const these = list => list.length === 1 ? 'this answer' : 'these answers';
+      const approve = (list, sensitivePrompt = null) => approveRelease({ context, iowa, origin, generation,
+        message: `Fill ${these(list)} into ${iowa ? 'Iowa’s application' : origin}?`,
+        items: `Laya, SecondHand’s AI on this computer, picked ${these(list)} from your saved information:\n${lines(list)}`, sensitive: sensitivePrompt });
       const count = chosen.length;
-      const lines = chosen.map(question => `“${question.label}”: ${answers[question.id]}`).join('\n');
       // Laya reads every sensitive fact at once, so the prompt names them all and says how many
       // answers needed them; which fact decided an answer is not known.
       const needed = sensitive.length;
-      const which = needed === count ? (count === 1 ? 'this answer' : 'these answers') : `${needed} of these answers`;
+      const which = needed === count ? these(chosen) : `${needed} of these answers`;
       const uses = needed === count ? (count === 1 ? 'It uses' : 'They use') : `${needed} of them ${needed === 1 ? 'uses' : 'use'}`;
-      const approved = await approveRelease({ context, iowa, origin, generation,
-        message: `Fill ${count === 1 ? 'this answer' : 'these answers'} into ${iowa ? 'Iowa’s application' : origin}?`,
-        items: `Laya, SecondHand’s AI on this computer, picked ${count === 1 ? 'this answer' : 'these answers'} from your saved information:\n${lines}`,
-        sensitive: !iowa && needed ? { message: `Fill ${count === 1 ? 'this answer' : `these ${count} answers`} on ${origin}? ${uses} sensitive details.`,
-          detail: `${sensitiveFields.map(fieldLabel).join(', ')}\n\nLaya, SecondHand’s AI on this computer, read these saved details to pick ${which}. The details stay on this computer. Only allow this if you meant to give these answers to ${origin}:\n${lines}` } : null });
+      const asksSensitive = !iowa && needed > 0;
+      const approved = await approve(chosen, asksSensitive ? { message: `Fill ${count === 1 ? 'this answer' : `these ${count} answers`} on ${origin}? ${uses} sensitive details.`,
+        detail: `${sensitiveFields.map(fieldLabel).join(', ')}\n\nLaya, SecondHand’s AI on this computer, read these saved details to pick ${which}. The details stay on this computer. Only allow this if you meant to give these answers to ${origin}:\n${lines(chosen)}` } : null);
       touch();
-      return { answers: approved ? answers : {}, accessRevision, ...reason };
+      if (approved) return { answers, accessRevision, ...reason };
+      // Cancel on "Share sensitive details?" drops only the answers that needed sensitive details (#42).
+      // The others follow their own rule: no prompt with Always allow, else "Let Chrome fill this form?".
+      const everyday = asksSensitive ? chosen.filter(question => !sensitive.includes(question.id)) : [];
+      if (!everyday.length) return { answers: {}, accessRevision, ...reason };
+      requireUnlocked();
+      if (generation !== accessRevision) throw publicError('SecondHand access changed. Click Autofill again.');
+      const kept = await approve(everyday);
+      touch();
+      return { answers: kept ? Object.fromEntries(everyday.map(question => [question.id, answers[question.id]])) : {}, accessRevision, ...reason };
     } catch (error) {
       if (error.publicMessage) throw error;
       if (error.code === 'LAYA_NOT_READY') throw layaNotReady();
