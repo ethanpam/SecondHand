@@ -19,6 +19,7 @@ const LAYA_TIMEOUT = 'LAYA_TIMEOUT';
 const BATCH_SIZE = 8;
 const UNAVAILABLE = 'No Laya model is available to download yet.';
 const INCOMPATIBLE = 'A newer Laya model is available, but it needs a newer version of SecondHand.';
+const REPLACED = 'The update list names a Laya model SecondHand already replaced with a newer one, so SecondHand keeps the one it has.';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const UNSUPPORTED = 'Laya can’t run on this computer. It needs Windows, Linux, or a Mac with Apple silicon.';
 // Platforms onnxruntime-node ships a native build for.
@@ -146,6 +147,8 @@ function createLaya({ userDataDir, manifest, modelDir, modelFormat, updateUrl = 
   // The model in use: the installed one (models/laya/installed.json) once read, else the shipped one.
   let store = !modelDir && shipped ? storeFor(shipped) : null;
   let installedRead = null;
+  // The revisions updates replaced, kept in installed.json: latest.json naming one is refused.
+  let replaced = new Set();
   // An update: downloading beside the model in use (candidate), then verified and waiting for
   // running decisions to finish (pending).
   let candidate = null;
@@ -181,8 +184,10 @@ function createLaya({ userDataDir, manifest, modelDir, modelFormat, updateUrl = 
   function init() {
     if (!store) return Promise.resolve();
     const before = store;
-    installedRead ??= readInstalled(userDataDir).then(model => {
-      if (!model || store !== before) return;
+    installedRead ??= readInstalled(userDataDir).then(record => {
+      if (!record || store !== before) return;
+      replaced = new Set(record.replaced);
+      const { model } = record;
       if (MODEL_FORMATS.includes(model.format)) store = storeFor(model);
       else recordNote = { state: 'incompatible', message: 'The installed Laya model needs a newer version of SecondHand, so SecondHand uses one it can run.' };
     }, error => {
@@ -376,7 +381,11 @@ function createLaya({ userDataDir, manifest, modelDir, modelFormat, updateUrl = 
       if (!on || closed) return;
       await target.startDownload();
       if (target !== store || (await target.state()).state !== 'ready') return;
-      await target.install();
+      // The shipped model, used when the installed one needs a newer app, may be one an update replaced.
+      const kept = new Set(replaced);
+      kept.delete(target.model.revision);
+      await target.install([...kept]);
+      replaced = kept;
       recordNote = null;
       await prune();
     })().catch(error => {
@@ -386,13 +395,14 @@ function createLaya({ userDataDir, manifest, modelDir, modelFormat, updateUrl = 
   }
 
   // Reads latest.json: { model }, the model null when there's no update URL, when latest.json names
-  // none, or when its model is in a format this app can't run (the note says so). Null when the
-  // check failed; the note says why.
+  // none, or when its model is in a format this app can't run or is one an update replaced (the note
+  // says so). Null when the check failed; the note says why.
   async function checkLatest(signal) {
     if (!updateUrl) return { model: null };
     try {
       const { model } = await fetchManifest(updateUrl, signal);
-      note = model && !MODEL_FORMATS.includes(model.format) ? { state: 'incompatible', message: INCOMPATIBLE } : null;
+      note = !model ? null : !MODEL_FORMATS.includes(model.format) ? { state: 'incompatible', message: INCOMPATIBLE } :
+        replaced.has(model.revision) ? { state: 'error', message: REPLACED } : null;
       return { model: note ? null : model };
     } catch (error) {
       if (!signal.aborted) note = { state: 'error', message: error.publicMessage || `Update check failed: ${error.message}` };
@@ -420,7 +430,10 @@ function createLaya({ userDataDir, manifest, modelDir, modelFormat, updateUrl = 
       return;
     }
     if (next !== candidate || !on || closed) return;
-    await next.install();
+    // The installed model, in use or waiting to be switched to, is replaced and never installed again.
+    const after = new Set(replaced).add((pending ?? store).model.revision);
+    await next.install([...after]);
+    replaced = after;
     recordNote = null;
     candidate = null;
     pending = next;
@@ -464,8 +477,9 @@ function createLaya({ userDataDir, manifest, modelDir, modelFormat, updateUrl = 
 
   // Brings the model up to date, one run at a time, and only while Laya is on: reads latest.json;
   // downloads a model when none is installed (the newest this app can run, else the shipped one);
-  // otherwise downloads a newer model beside the installed one and switches to it. It never
-  // rejects: failures show in status(), and the installed model keeps working.
+  // otherwise downloads a newer model beside the installed one and switches to it. Newer means
+  // another revision than the installed one, and not one an update replaced. It never rejects:
+  // failures show in status(), and the installed model keeps working.
   function update() {
     if (unavailableReason() || !store || !on || closed) return Promise.resolve();
     if (!updating) {
@@ -558,6 +572,7 @@ function createLaya({ userDataDir, manifest, modelDir, modelFormat, updateUrl = 
       pending = null;
       note = null;
       recordNote = null;
+      replaced = new Set();
       if (!store) return;
       const removing = store;
       store = storeFor(shipped);

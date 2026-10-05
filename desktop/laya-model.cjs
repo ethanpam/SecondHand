@@ -7,6 +7,9 @@
 //     { "path": "model.onnx", "url": "https://huggingface.co/<repo>/resolve/<revision>/model.onnx", "size": <bytes>, "sha256": "<hex>" }, … ] } }
 // listing every path in MODEL_FILES. desktop/laya-model.json is the one the app ships with, the
 // model repo's latest.json names the newest model, and models/laya/installed.json the installed one.
+// installed.json also has "replaced": the revisions updates replaced. Revisions are commits, which
+// have no order, so that list is how Laya tells an older model from a newer one: it never installs
+// a replaced revision from latest.json again. A rollback is published as a new commit.
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
 const { createReadStream, createWriteStream } = require('node:fs');
@@ -24,6 +27,7 @@ const MODEL_FILES = Object.freeze(['model.onnx', 'model.onnx.data', 'tokenizer/t
 // A model trained on other prompts gets a new format, so an app that can't ask them never installs it.
 const MODEL_FORMATS = Object.freeze(['noul-v1', 'choice-v2']);
 const INSTALLED = 'installed.json';
+const REVISION = /^[0-9a-f]{40}$/;
 const MAX_MANIFEST_BYTES = 1024 * 1024;
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const DISK_ERRORS = new Set(['ENOSPC', 'EDQUOT', 'EACCES', 'EPERM', 'EROFS', 'EIO', 'EISDIR', 'ENOTDIR']);
@@ -59,7 +63,7 @@ function validateManifest(manifest) {
   if (!Object.hasOwn(manifest, 'model')) fail('it needs a model entry, or null when no model is published');
   if (manifest.model === null) return { model: null };
   const { revision, format, files } = manifest.model;
-  if (typeof revision !== 'string' || !/^[0-9a-f]{40}$/.test(revision)) fail('the revision must be a 40-character commit hash');
+  if (typeof revision !== 'string' || !REVISION.test(revision)) fail('the revision must be a 40-character commit hash');
   if (typeof format !== 'string' || !/^[a-z0-9][a-z0-9.-]{0,31}$/.test(format)) fail('the format must name the model’s prompt format, such as noul-v1');
   if (!Array.isArray(files)) fail('it must list its files');
   const seen = new Set();
@@ -80,15 +84,28 @@ function validateManifest(manifest) {
   return { model: Object.freeze({ revision, format, files: ordered.map(file => Object.freeze({ ...file })), sizeBytes: ordered.reduce((sum, file) => sum + file.size, 0) }) };
 }
 
-// The installed model: models/laya/installed.json, written once all its files were verified.
-// Null when there is none; a damaged record is refused with the reason.
+// What is wrong with `replaced` as the revisions replaced before `revision` was installed, or null.
+function replacedProblem(replaced, revision) {
+  if (!Array.isArray(replaced) || !replaced.every(item => typeof item === 'string' && REVISION.test(item))) return 'must list 40-character commit hashes';
+  if (replaced.includes(revision)) return 'must not list the installed revision';
+  return null;
+}
+
+// The installed model: models/laya/installed.json, written once all its files were verified, as
+// { model, replaced } (a record written before the replaced list replaced none). Null when there is
+// none; a damaged record is refused with the reason.
 async function readInstalled(userDataDir) {
   let text;
   try { text = await fs.readFile(path.join(userDataDir, 'models', 'laya', INSTALLED), 'utf8'); }
   catch (error) { if (error.code === 'ENOENT') return null; throw error; }
   let manifest;
   try { manifest = JSON.parse(text); } catch { throw new Error('installed.json isn’t valid JSON'); }
-  return validateManifest(manifest).model;
+  const { model } = validateManifest(manifest);
+  if (!model) return null;
+  const replaced = manifest.replaced ?? [];
+  const problem = replacedProblem(replaced, model.revision);
+  if (problem) throw new Error(`installed.json is invalid: replaced ${problem}`);
+  return { model, replaced: Object.freeze([...replaced]) };
 }
 
 async function sizeOf(file) {
@@ -206,11 +223,14 @@ class ModelStore {
     await fs.rm(this.root, { recursive: true, force: true });
   }
 
-  // Records this revision as the installed model, once every file was verified.
-  async install() {
+  // Records this revision as the installed model, once every file was verified, with the revisions
+  // updates replaced.
+  async install(replaced = []) {
     const { revision, format, files } = this.model;
+    const problem = replacedProblem(replaced, revision);
+    if (problem) throw new TypeError(`The replaced Laya revisions ${problem}.`);
     const model = { revision, format, files: files.map(({ path: file, url, size, sha256 }) => ({ path: file, url, size, sha256 })) };
-    await atomicWrite(path.join(this.root, INSTALLED), Buffer.from(`${JSON.stringify({ version: 1, model }, null, 2)}\n`));
+    await atomicWrite(path.join(this.root, INSTALLED), Buffer.from(`${JSON.stringify({ version: 1, model, replaced }, null, 2)}\n`));
   }
 
   // Deletes everything else under models/laya: other revisions and partial downloads, but not
