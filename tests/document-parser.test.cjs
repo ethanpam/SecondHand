@@ -140,6 +140,28 @@ test('foreign-address values suppress all domestic-address suggestions', () => {
   assert.equal(profile(result).firstName, 'RIVER');
 });
 
+test('a mark split off inside a header word does not hide the address', () => {
+  const doc = fixture();
+  // OCR can report the dot of an "i" as its own tiny word inside the word it
+  // came from, here inside "City" of "City, town or post office".
+  doc.pages[0].words.push({ text: 'p', confidence: 1, bbox: { x0: 118, y0: 291, x1: 121, y1: 294 } });
+  const values = profile(analyzeDocument(doc));
+  assert.deepEqual([values.addressLine1, values.addressLine2, values.city, values.state, values.zip],
+    ['42 FICTIONAL ROAD', '7C', 'CEDAR RAPIDS', 'IA', '52401-1234']);
+  assert.deepEqual(values, profile(analyzeDocument(fixture())));
+});
+
+test('a mark split off inside a value word is not read into that value', () => {
+  const doc = fixture();
+  for (const [x0, y0] of [[160, 251], [118, 111]]) {
+    doc.pages[0].words.push({ text: 'p', confidence: 1, bbox: { x0, y0, x1: x0 + 3, y1: y0 + 3 } });
+  }
+  const values = profile(analyzeDocument(doc));
+  assert.equal(values.addressLine1, '42 FICTIONAL ROAD');
+  assert.equal(values.firstName, 'RIVER');
+  assert.equal(values.middleName, 'Q');
+});
+
 test('multiple tax returns do not combine applicant identities', () => {
   const doc = fixture(); doc.pages.push(structuredClone(doc.pages[0]));
   const result = analyzeDocument(doc);
