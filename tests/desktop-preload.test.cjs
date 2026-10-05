@@ -34,7 +34,7 @@ test('preload forwards only valid lock revisions and treats malformed or legacy 
   assert.equal(removed.callback, listener);
 });
 
-test('preload exposes the Laya settings actions as named desktop calls and nothing that runs the model', () => {
+test('preload exposes the Laya settings actions without an arbitrary model decision endpoint', () => {
   let api;
   const calls = [];
   vm.runInNewContext(fs.readFileSync(require.resolve('../desktop/preload.cjs'), 'utf8'), {
@@ -50,7 +50,22 @@ test('preload exposes the Laya settings actions as named desktop calls and nothi
   api.removeLaya();
   assert.deepEqual(calls, [['secondhand:invoke', 'layaStatus'], ['secondhand:invoke', 'setLayaEnabled', true], ['secondhand:invoke', 'downloadLaya'],
     ['secondhand:invoke', 'cancelLayaDownload'], ['secondhand:invoke', 'removeLaya']]);
-  assert.equal(Object.keys(api).some(name => /decide/i.test(name)), false, 'the renderer cannot ask Laya for decisions');
+  assert.equal(Object.keys(api).some(name => /decide/i.test(name)), false, 'the renderer cannot ask arbitrary model questions');
+});
+
+test('preload exposes bounded field review and cancellation without saving', () => {
+  let api;
+  const calls = [];
+  vm.runInNewContext(fs.readFileSync(require.resolve('../desktop/preload.cjs'), 'utf8'), {
+    require: () => ({
+      contextBridge: { exposeInMainWorld(_name, value) { api = value; } },
+      ipcRenderer: { invoke: (...args) => { calls.push(args); return Promise.resolve(); } }
+    })
+  });
+  const request = { profile: { firstName: 'Synthetic' }, useLaya: false };
+  api.reviewFields(request);
+  api.cancelFieldReview();
+  assert.deepEqual(calls, [['secondhand:invoke', 'reviewFields', request], ['secondhand:invoke', 'cancelFieldReview']]);
 });
 
 test('preload lets the app turn all websites off, never on: Chrome’s prompt can only come from the extension', () => {

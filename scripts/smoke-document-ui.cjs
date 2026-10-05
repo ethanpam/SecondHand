@@ -112,6 +112,18 @@ async function main() {
     assert.equal(rows.filter(row => row.key).some(row => /Income|birthDate|ssn|middleName/i.test(row.key)), false, 'Conflicting identity readings and historical amounts must not become selectable suggestions.');
     assert.deepEqual(Object.fromEntries(rows.filter(row => !row.key).map(row => [row.id, row.value])),
       { taxLine1a: '68450', taxLine2b: '460' }, 'Only consistently recognized, correct historical amounts remain review-only.');
+    await expect(page.locator('#document-review-summary')).toContainText('fields checked');
+    await expect(page.locator('#document-fields .field-review-result')).toHaveCount(rows.length);
+    await expect(page.locator('[data-field-id="applicantFirstName"] .field-review-result')).toHaveClass(/needs-review/);
+    await expect(page.locator('[data-field-id="taxLine1a"] .field-review-result')).toContainText(/historical|annual|current income/i);
+    await expect(page.locator('#document-review-laya')).not.toBeChecked();
+    // Explicitly requesting model feedback never turns on a disabled model.
+    await page.locator('#document-review-laya').check();
+    await page.locator('#check-document-fields').click();
+    await expect(page.locator('#document-review-summary')).toContainText('fields checked');
+    await expect(page.locator('#document-review-laya-status')).toContainText(/off|unavailable|not ready/i);
+    assert.equal((await page.evaluate(() => window.secondHand.status())).laya.enabled, false);
+    await expect(page.locator('#apply-document-fields')).toBeDisabled();
     const progress = await page.evaluate(() => window.__documentUiSmokeProgress);
     assert.ok(progress.some(event => event.phase === 'recognizing' && event.page === 1 && event.total === 1));
     await page.screenshot({ path: path.join(output, 'document-ui-review.png'), fullPage: true });
@@ -135,6 +147,17 @@ async function main() {
     assert.deepEqual(await page.evaluate(async () => (await window.secondHand.getData()).profile), savedBeforeRead, 'Applying reviewed fields still must not save the draft.');
     for (const id of ['document-name', 'document-fields', 'document-pages']) assert.equal(await page.locator(`#${id}`).textContent(), '');
     await page.screenshot({ path: path.join(output, 'document-ui-draft.png') });
+    // A structurally impossible SSN is flagged without changing it or saving anything.
+    await page.locator('#ssn').fill('000-12-0000');
+    await page.locator('#check-profile-fields').click();
+    await expect(page.locator('#profile-review-summary')).toContainText('fields checked');
+    await expect(page.locator('[data-review-scope="profile"][data-review-key="ssn"]')).toHaveClass(/needs-review/);
+    await expect(page.locator('#ssn')).toHaveValue('000-12-0000');
+    assert.deepEqual(await page.evaluate(async () => (await window.secondHand.getData()).profile), savedBeforeRead);
+    await expect(page.locator('#toast')).toBeHidden({ timeout: 10000 });
+    await page.screenshot({ path: path.join(output, 'field-review-profile.png'), fullPage: true });
+    await page.locator('#ssn').fill('');
+    await expect(page.locator('#profile-review-summary')).toBeEmpty();
     await page.locator('#save-profile').click();
     await expect(page.locator('#profile-save-state')).toBeHidden();
     const saved = await page.evaluate(async () => (await window.secondHand.getData()).profile);
@@ -170,8 +193,8 @@ async function main() {
       stubbed: ['native file-picker response selects the explicit synthetic fixture'],
       selectedKeys: Object.keys(expected), reviewOnlyFieldCount: rows.filter(row => !row.key).length,
       progressPhases: [...new Set(progress.map(event => event.phase))],
-      assertions: ['all suggestions unchecked', 'reading and apply never auto-save', 'applicant attestation required', 'unrelated unsaved edits preserved', 'annual income not converted', 'OCR review cleared on leaving and lock', 'saved values persist after unlock', 'Laya disabled'],
-      screenshots: ['document-ui-empty.png', 'document-ui-review.png', 'document-ui-text.png', 'document-ui-draft.png'],
+      assertions: ['all suggestions unchecked', 'reading and apply never auto-save', 'applicant attestation required', 'unrelated unsaved edits preserved', 'annual income not converted', 'OCR review cleared on leaving and lock', 'saved values persist after unlock', 'Laya disabled', 'every OCR candidate gets a rule result', 'optional model review does not enable Laya', 'impossible SSN flagged without correction or saving', 'edits clear previous review'],
+      screenshots: ['document-ui-empty.png', 'document-ui-review.png', 'document-ui-text.png', 'document-ui-draft.png', 'field-review-profile.png'],
       limitations: 'Synthetic document only. This does not establish recognition accuracy on arbitrary real tax returns; every selected answer requires review.'
     };
     await fs.writeFile(path.join(output, 'document-ui-report.json'), JSON.stringify(report, null, 2) + '\n');

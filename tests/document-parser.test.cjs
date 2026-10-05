@@ -70,6 +70,25 @@ test('blank primary cells never fall back to a spouse or dependent', () => {
   assert.equal(byId(result).spouseSsn, '000-22-8888');
 });
 
+test('review evidence preserves printed OCR labels and person roles separately from display labels and values', () => {
+  const source = fixture();
+  const before = structuredClone(source);
+  const fields = Object.fromEntries(analyzeDocument(source).fields.map(field => [field.id, field]));
+  assert.equal(fields.applicantFirstName.sourceLabel, 'Your first name and middle initial');
+  assert.equal(fields.applicantFirstName.sourceRole, 'applicant');
+  assert.equal(fields.spouseLastName.sourceLabel, 'Last name');
+  assert.equal(fields.spouseLastName.sourceRole, 'spouse');
+  assert.equal(fields.addressLine1.sourceLabel, 'Home address');
+  assert.equal(fields.addressLine1.label, 'Address on tax return');
+  assert.equal(fields.addressLine1.sourceRole, 'document');
+  assert.equal(fields.taxLine1a.sourceLabel, 'Total amount from');
+  for (const field of Object.values(fields)) {
+    assert.ok(field.sourceLabel.length <= 150);
+    assert.equal(field.sourceLabel.includes(field.value), false, 'Evidence contains label words only.');
+  }
+  assert.deepEqual(source, before, 'Adding review evidence must not alter OCR output.');
+});
+
 test('a blank amount stays blank and conflicting recognition removes only that amount', () => {
   const doc = fixture();
   doc.pages[0].words = doc.pages[0].words.filter(word => word.text !== '789');

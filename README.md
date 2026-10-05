@@ -70,6 +70,8 @@ Open **Documents** in the unlocked desktop app to read a PDF, PNG, or JPEG on yo
 
 For recognizable 1040/1040-SR layouts, review suggested primary-applicant names, home address, and Social Security number against the original. Choose which details to put in your profile draft, then review **My information** and click **Save my information**. SSNs and tax amounts are omitted when two OCR passes disagree. Tax-year amounts and spouse/dependent details are for review only; they never become current income, household answers, or eligibility decisions automatically. Other documents show extracted text without tax-form suggestions.
 
+**Check information** reviews the profile draft for format issues and conflicting answers. Extracted document fields are also checked locally. Optional experimental Laya feedback can flag a printed document label mapped to an unexpected field; it receives labels, not your values, and never verifies or corrects a value. [Local field review](docs/field-review.md) explains the statuses and limits.
+
 The original stays in place. SecondHand keeps no document database or copied original, and clears temporary review text when you discard it, leave Documents, or lock the app. This feature is in source; availability in a public installer is separate. See [local document reading](docs/document-ocr.md) for limits and QA scope.
 
 ## Local AI with Laya

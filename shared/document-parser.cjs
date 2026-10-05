@@ -98,13 +98,17 @@ function money(raw) {
 function parseTaxPage(page, type) {
   const rows = wordRows(page), fields = [], warnings = [];
   const pageNumber = Number.isSafeInteger(page.pageNumber) && page.pageNumber > 0 ? page.pageNumber : 1;
-  const add = (id, label, value, words, profileKey) => {
+  const add = (id, label, value, words, profileKey, source, sourceRole = 'document') => {
     if (!value || !words.length || value.length > 200 || /[\u0000-\u001f]/.test(value)) return;
     if (profileKey) {
       if (!PROFILE_KEYS.has(profileKey)) return;
       try { value = validateProfile({ [profileKey]: value })[profileKey]; } catch { return; }
     }
-    fields.push({ id, label, value, page: pageNumber, confidence: meanConfidence(words), ...(profileKey ? { profileKey } : {}) });
+    // Preserve the printed label separately from our display label. A model
+    // comparing our own display label to our own mapping would check no evidence.
+    const sourceLabel = source?.words ? content(source.words).slice(0, 150) : '';
+    fields.push({ id, label, value, page: pageNumber, confidence: meanConfidence(words),
+      ...(profileKey ? { profileKey } : {}), ...(sourceLabel ? { sourceLabel, sourceRole } : {}) });
   };
   const one = label => {
     const found = matches(rows, label);
@@ -133,13 +137,13 @@ function parseTaxPage(page, type) {
     // name. Preserve a multiword first name unless the final token is one letter.
     if (/^[\p{L}][\p{L} .'-]{0,99}$/u.test(first)) {
       const parts = first.split(/\s+/), initial = parts.length > 1 && /^[\p{L}]\.?$/u.test(parts.at(-1)) ? parts.pop().replace('.', '') : '';
-      add(`${prefix}FirstName`, primaryPerson ? 'First name' : 'Spouse first name', parts.join(' '), firstWords, primaryPerson ? 'firstName' : undefined);
-      if (initial) add(`${prefix}MiddleName`, primaryPerson ? 'Middle initial' : 'Spouse middle initial', initial, firstWords, primaryPerson ? 'middleName' : undefined);
+      add(`${prefix}FirstName`, primaryPerson ? 'First name' : 'Spouse first name', parts.join(' '), firstWords, primaryPerson ? 'firstName' : undefined, start, primaryPerson ? 'applicant' : 'spouse');
+      if (initial) add(`${prefix}MiddleName`, primaryPerson ? 'Middle initial' : 'Spouse middle initial', initial, firstWords, primaryPerson ? 'middleName' : undefined, start, primaryPerson ? 'applicant' : 'spouse');
     }
     const lastWords = afterLabel(rows, last, end, last.x0, social.x0), surname = content(lastWords);
-    if (/^[\p{L}][\p{L} .'-]{0,99}$/u.test(surname)) add(`${prefix}LastName`, primaryPerson ? 'Last name' : 'Spouse last name', surname, lastWords, primaryPerson ? 'lastName' : undefined);
+    if (/^[\p{L}][\p{L} .'-]{0,99}$/u.test(surname)) add(`${prefix}LastName`, primaryPerson ? 'Last name' : 'Spouse last name', surname, lastWords, primaryPerson ? 'lastName' : undefined, last, primaryPerson ? 'applicant' : 'spouse');
     const ssnWords = afterLabel(rows, social, end, social.x0, page.width), ssn = content(ssnWords).replace(/\s+/g, '');
-    if (/^\d{3}-?\d{2}-?\d{4}$/.test(ssn)) add(`${prefix}Ssn`, primaryPerson ? 'Social Security number' : 'Spouse Social Security number', ssn, ssnWords, primaryPerson ? 'ssn' : undefined);
+    if (/^\d{3}-?\d{2}-?\d{4}$/.test(ssn)) add(`${prefix}Ssn`, primaryPerson ? 'Social Security number' : 'Spouse Social Security number', ssn, ssnWords, primaryPerson ? 'ssn' : undefined, social, primaryPerson ? 'applicant' : 'spouse');
   };
   names(primary, spouse, 'applicant', true);
   names(spouse, home, 'spouse', false);
@@ -154,21 +158,21 @@ function parseTaxPage(page, type) {
     else {
       const addressWords = apt ? afterLabel(rows, home, city, home.x0, apt.x0) : [];
       const street = content(addressWords);
-      if (/\d/.test(street) && /[a-z]/i.test(street)) add('addressLine1', 'Address on tax return', street, addressWords, 'addressLine1');
+      if (/\d/.test(street) && /[a-z]/i.test(street)) add('addressLine1', 'Address on tax return', street, addressWords, 'addressLine1', home);
       if (apt) {
         const apartmentWords = afterLabel(rows, apt, city, apt.x0, rightColumn.x0);
         const apartment = content(apartmentWords);
-        if (/^[a-z0-9 #./-]{1,30}$/i.test(apartment)) add('addressLine2', 'Apartment or unit', apartment, apartmentWords, 'addressLine2');
+        if (/^[a-z0-9 #./-]{1,30}$/i.test(apartment)) add('addressLine2', 'Apartment or unit', apartment, apartmentWords, 'addressLine2', apt);
       }
       if (state && zip && city.x0 < state.x0 && state.x0 < zip.x0) {
         const cityWords = afterLabel(rows, city, foreign, city.x0, state.x0), town = content(cityWords);
-        if (/^[\p{L}][\p{L} .'-]{0,99}$/u.test(town)) add('city', 'City', town, cityWords, 'city');
+        if (/^[\p{L}][\p{L} .'-]{0,99}$/u.test(town)) add('city', 'City', town, cityWords, 'city', city);
         const stateWords = afterLabel(rows, state, foreign, state.x0, zip.x0);
-        add('state', 'State', content(stateWords), stateWords, 'state');
+        add('state', 'State', content(stateWords), stateWords, 'state', state);
       }
       if (zip) {
         const zipWords = afterLabel(rows, zip, foreign, zip.x0, rightColumn.x0);
-        add('zip', 'ZIP code', content(zipWords).replace(/\s+/g, ''), zipWords, 'zip');
+        add('zip', 'ZIP code', content(zipWords).replace(/\s+/g, ''), zipWords, 'zip', zip);
       }
     }
   }
@@ -204,7 +208,7 @@ function parseTaxPage(page, type) {
     const numbers = words.filter(word => /[\d]/.test(word.text));
     if (words.some(word => /[a-z]/i.test(word.text)) || numbers.length !== 1) return;
     const value = money(numbers[0].text);
-    if (value !== null) add(`taxLine${code}`, `${label}${taxYear ? ` — ${taxYear}` : ''}`, value, numbers);
+    if (value !== null) add(`taxLine${code}`, `${label}${taxYear ? ` — ${taxYear}` : ''}`, value, numbers, undefined, anchor);
   };
   for (const [code, label, caption, left] of taxLines) amount(code, label, one(caption), left);
   for (const [code, caption, label] of [

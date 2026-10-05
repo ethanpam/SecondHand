@@ -36,6 +36,8 @@ Spouse and dependent information stays in the document review; it is not substit
 
 Other documents can still show extracted text. They do not receive tax-form field suggestions merely because they contain a name, an address, or a nine-digit number. Structured extraction is a limited set of layout rules, not a general document-understanding model. Different revisions, handwriting, damage, rotation, or poor scans can require manual entry.
 
+Extracted candidates now receive [local field review](field-review.md): exact format checks and warnings for conflicting draft values, low confidence, or inconsistent context. **Check extracted fields** reruns these checks after edits. The optional experimental Laya checkbox checks eligible printed labels against their field mapping; it sends no values to the model and does not verify the reading. OCR itself still runs without Laya. Neither review path changes or saves values.
+
 ## Limits and local processing
 
 - One selected PDF, PNG, or JPEG, no larger than **30 MiB**.
