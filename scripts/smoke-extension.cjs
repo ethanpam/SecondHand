@@ -458,7 +458,10 @@ async function main() {
     await widget.locator('#details').click();
     panel = await attachNativePanel(context, page, extensionId);
     await expect.poll(() => panel.text('[data-key="lastName"]'), { timeout: 15000 }).toContain('Done');
-    await expect.poll(() => panel.text('#desktop-status')).toContain('unlocked');
+    // An unlocked app needs nothing from the applicant, so the panel's desktop row stays out of the way.
+    assert.deepEqual(await panel.evaluate(async () => { const { data } = await chrome.runtime.sendMessage({ type: 'ui:desktopStatus' }); return [data.connected, data.unlocked]; }), [true, true]);
+    assert.equal(await panel.visible('#desktop-status'), false);
+    assert.equal(await panel.text('#desktop-status'), '');
     const sidebarText = await panel.evaluate(() => document.body.innerText);
     const sidebarMessage = await panel.evaluate(async () => {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -477,7 +480,7 @@ async function main() {
     await worker.evaluate(() => { globalThis.__nativeSmoke.closed = true; });
     await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
     await panel.click('#panel-autofill');
-    await expect.poll(() => panel.text('#desktop-status'), { timeout: 15000 }).toBe('SecondHand isn’t running. Open the app on this computer.');
+    await expect.poll(() => panel.text('#desktop-status'), { timeout: 15000 }).toBe('SecondHand isn’t running.');
     await expect.poll(() => panel.text('#desktop-action')).toBe('Open SecondHand');
     assert.equal(await panel.visible('#desktop-action'), true);
     await expect.poll(() => panel.text('#status')).toBe('Click Autofill. SecondHand fills what it can and tells you what it needs.');

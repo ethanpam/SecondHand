@@ -406,7 +406,9 @@ test('side panel reads page and desktop state, has no guided or field-picker con
   view.window.postMessage({ type: 'ui:autofill', confirmed: true }, '*');
   await tick();
   assert.equal(view.types().includes('ui:autofill'), false);
-  assert.match(view.get('desktop-status').textContent, /unlocked/);
+  // An unlocked app needs nothing from the reader: its row stays out of the way and says nothing.
+  assert.equal(view.get('desktop-status').parentElement.hidden, true);
+  assert.equal(view.get('desktop-status').textContent, '');
   assert.equal(view.get('desktop-action').hidden, true);
 });
 
@@ -460,7 +462,7 @@ test('desktop line shows locked with Unlock, and not running with Open SecondHan
   await locked.userClick('desktop-action');
   assert.deepEqual(plainRequests(locked.requests.find(request => request.type === 'ui:showApp')), { type: 'ui:showApp', confirmed: true });
   const offline = await panel(t, { desktop: { connected: false, unlocked: false } });
-  assert.equal(offline.get('desktop-status').textContent, 'SecondHand isn’t running. Open the app on this computer.');
+  assert.equal(offline.get('desktop-status').textContent, 'SecondHand isn’t running.');
   assert.equal(offline.get('desktop-action').hidden, false);
   assert.equal(offline.get('desktop-action').textContent, 'Open SecondHand');
 });
@@ -524,7 +526,7 @@ test('with SecondHand closed, Autofill leaves the one desktop line and its butto
   await settle();
   assert.equal(view.get('status').textContent, 'Click Autofill. SecondHand fills what it can and tells you what it needs.');
   assert.equal(view.get('status').classList.contains('error'), false);
-  assert.equal(view.get('desktop-status').textContent, 'SecondHand isn’t running. Open the app on this computer.');
+  assert.equal(view.get('desktop-status').textContent, 'SecondHand isn’t running.');
   assert.equal(view.get('desktop-action').textContent, 'Open SecondHand');
   // The worker's remembered result isn't repeated when the panel opens again either.
   const reopened = await panel(t, { desktop: CLOSED, result: offlineResult });
@@ -1081,7 +1083,7 @@ test('with Spanish as the browser language, the side panel shows none of SecondH
   assert.equal(view.window.document.title, spanish('app.title'));
   assert.equal(view.get('panel-autofill').textContent, spanish('panel.autofill'));
   assert.equal(view.get('status').textContent, spanish('panel.iowaHint'));
-  assert.equal(view.get('desktop-status').textContent, spanish('desktop.unlocked'));
+  assert.equal(view.get('desktop-status').parentElement.hidden, true);
   assert.match(view.row('firstName').textContent, new RegExp(`${spanish('iowa.firstName')}.*${spanish('checklist.missing')}`));
   assert.equal(view.get('checklist-summary').textContent, strings.text('es', 'checklist.summary', { done: 1, total: 3 }));
   assert.equal(view.get('language').value, 'es');

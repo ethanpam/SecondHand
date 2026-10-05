@@ -367,8 +367,10 @@
     }
     // On a tab SecondHand can't read: where to go.
     const elsewhere = () => ({ key: allSites ? 'panel.openForm' : 'panel.openIowa' });
+    // The desktop row shows only while the app needs opening or unlocking, or can't be reached.
     function renderDesktop() {
-      if (desktopLine) $('desktop-status').textContent = words(desktopLine);
+      $('desktop-status').parentElement.hidden = !desktopLine;
+      $('desktop-status').textContent = desktopLine ? words(desktopLine) : '';
       $('desktop-action').hidden = !desktopAction;
       $('desktop-action').textContent = desktopAction ? t(ACTIONS[desktopAction]) : '';
       $('laya-status').hidden = !layaLine;
@@ -556,10 +558,10 @@
     function showDesktop(desktop) {
       allSites = typeof desktop?.allSites === 'boolean' ? desktop.allSites : null;
       updateSteps = Object.hasOwn(UPDATE_STEPS, desktop?.update) ? UPDATE_STEPS[desktop.update] : null;
-      desktopLine = { key: !desktop?.connected ? 'desktop.notRunning' : desktop.unlocked ? 'desktop.unlocked' : 'desktop.locked' };
+      desktopLine = !desktop?.connected ? { key: 'desktop.notRunning' } : desktop.unlocked ? null : { key: 'desktop.locked' };
       layaLine = desktop?.connected && Object.hasOwn(LAYA_LINES, desktop.laya) ? { key: LAYA_LINES[desktop.laya] } : null;
       desktopAction = !desktop?.connected ? 'open' : desktop.unlocked ? null : 'unlock';
-      $('desktop-status').parentElement.classList.toggle('error', !(desktop?.connected && desktop.unlocked));
+      $('desktop-status').parentElement.classList.remove('error');
     }
     function desktopProblem(message) {
       desktopLine = message; layaLine = null; desktopAction = null;
