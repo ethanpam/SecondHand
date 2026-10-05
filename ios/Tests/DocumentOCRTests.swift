@@ -21,6 +21,38 @@ final class DocumentOCRTests: XCTestCase {
         add(attachment)
     }
 
+    func test1040ProfileImportUsesPrimaryIdentityAndPreservesOtherDetails() throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "synthetic_1040sr_realistic_scan", withExtension: "pdf"))
+        let result = try DocumentOCR.recognize(data: Data(contentsOf: url), isPDF: true, includeLayout: true)
+        var analysis = try ProfileDocumentParser.analyze(result)
+        let values = Dictionary(uniqueKeysWithValues: analysis.fields.compactMap { field in field.profileKey.map { ($0, field.value) } })
+        XCTAssertEqual(values["firstName"], "ALEXANDER")
+        XCTAssertEqual(values["lastName"], "SAMPLE")
+        XCTAssertEqual(values["addressLine1"], "1847 TEST DATA AVE")
+        XCTAssertEqual(values["city"], "DES MOINES")
+        XCTAssertEqual(values["state"], "IA")
+        XCTAssertEqual(values["zip"], "50309")
+        var profile = PersonalProfile()
+        profile.email = "saved@example.com"
+        profile.monthlyIncome = "1000"
+        profile.hasHomeAddress = .unanswered
+        profile.lastName = "Existing"
+        profile.reviewedAt = Date()
+        for index in analysis.fields.indices where analysis.fields[index].profileKey == "lastName" { analysis.fields[index].selected = false }
+        let draft = analysis.applying(to: profile)
+        XCTAssertEqual(draft.firstName, "ALEXANDER")
+        XCTAssertEqual(draft.lastName, "Existing")
+        XCTAssertEqual(draft.email, "saved@example.com")
+        XCTAssertEqual(draft.monthlyIncome, "1000")
+        XCTAssertEqual(draft.hasHomeAddress, .unanswered)
+        XCTAssertNil(draft.reviewedAt)
+        var duplicate = result
+        duplicate.layoutPages += result.layoutPages
+        XCTAssertTrue(try ProfileDocumentParser.analyze(duplicate).fields.isEmpty)
+        let unknown = RecognizedDocument(pages: ["Hello"], layoutPages: [OCRPage(text: "Hello", words: [])])
+        XCTAssertTrue(try ProfileDocumentParser.analyze(unknown).fields.isEmpty)
+    }
+
     func testImageRecognitionAndNoTextFailure() throws {
         let size = CGSize(width: 1200, height: 500)
         let format = UIGraphicsImageRendererFormat()

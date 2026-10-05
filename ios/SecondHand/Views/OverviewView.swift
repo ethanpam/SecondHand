@@ -13,11 +13,11 @@ struct OverviewView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    VStack(alignment: .leading, spacing: 8) {
+                    if !store.data.profile.displayName.isEmpty {
                         Text(store.data.profile.displayName)
                             .font(.title.bold()).foregroundStyle(AppTheme.ink)
+                            .padding(.top, 8)
                     }
-                    .padding(.top, 8)
 
                     renewalCard
 
@@ -28,10 +28,6 @@ struct OverviewView: View {
                         }
                         Divider()
                         checklistRow(symbol: "calendar", title: "Add dates from your notice", detail: "Your notice sets your return-by date.", complete: plan.dueDate != nil) {
-                            editingRenewal = true
-                        }
-                        Divider()
-                        checklistRow(symbol: "doc.text", title: "Keep track after you send it", detail: "Record your confirmation and follow-up tasks.", complete: plan.status != .preparing) {
                             editingRenewal = true
                         }
                     }

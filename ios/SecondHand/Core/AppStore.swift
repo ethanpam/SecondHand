@@ -288,7 +288,8 @@ final class AppStore: ObservableObject {
         autofillExpiresAt = nil
     }
 
-    func importDocument(from url: URL) async throws {
+    @discardableResult
+    func importDocument(from url: URL) async throws -> SavedDocument {
         _ = try storage()
         let allowed = url.startAccessingSecurityScopedResource()
         defer { if allowed { url.stopAccessingSecurityScopedResource() } }
@@ -297,7 +298,7 @@ final class AppStore: ObservableObject {
               let type = values.contentType, type.conforms(to: .pdf) || type.conforms(to: .image) else { throw VaultError.invalidFile }
         let bytes = try Data(contentsOf: url)
         guard bytes.count <= 20 * 1_024 * 1_024 else { throw VaultError.invalidFile }
-        try saveDocument(bytes: bytes, name: url.lastPathComponent, fileExtension: type.preferredFilenameExtension ?? "dat")
+        return try saveDocument(bytes: bytes, name: url.lastPathComponent, fileExtension: type.preferredFilenameExtension ?? "dat")
     }
 
     @discardableResult
@@ -321,13 +322,13 @@ final class AppStore: ObservableObject {
         return document
     }
 
-    func recognizeDocument(_ document: SavedDocument) async throws -> RecognizedDocument {
+    func recognizeDocument(_ document: SavedDocument, includeLayout: Bool = false) async throws -> RecognizedDocument {
         let vault = try storage()
         let generation = unlockGeneration
         guard data.documents.contains(where: { $0.id == document.id }),
               let bytes = try vault.read(named: "\(document.id.uuidString).sealed") else { throw VaultError.invalidFile }
         let worker = Task.detached(priority: .userInitiated) {
-            try DocumentOCR.recognize(data: bytes, isPDF: document.fileExtension.lowercased() == "pdf")
+            try DocumentOCR.recognize(data: bytes, isPDF: document.fileExtension.lowercased() == "pdf", includeLayout: includeLayout)
         }
         let result = try await withTaskCancellationHandler(operation: { try await worker.value }, onCancel: { worker.cancel() })
         try Task.checkCancellation()

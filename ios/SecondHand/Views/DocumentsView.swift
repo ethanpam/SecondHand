@@ -18,11 +18,6 @@ struct DocumentsView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("Keep a copy close by.")
-                        .font(.title2.weight(.semibold)).foregroundStyle(AppTheme.ink)
-                    Text("Save notices, supporting documents, and confirmations so they’re easy to find when you need them.")
-                        .font(.subheadline).foregroundStyle(.secondary).lineSpacing(3)
-
                     if VNDocumentCameraViewController.isSupported {
                         Button { startScan() } label: { Label("Scan a document", systemImage: "doc.viewfinder") }
                             .buttonStyle(PrimaryButtonStyle()).disabled(isImporting)
@@ -95,15 +90,6 @@ struct DocumentsView: View {
                         ProgressView("Saving a protected copy…").frame(maxWidth: .infinity).padding()
                     }
 
-                    AppCard {
-                        Label("A saved copy, ready for you", systemImage: "lock.doc")
-                            .font(.subheadline.weight(.semibold)).foregroundStyle(AppTheme.ink)
-                        Text("Adding a document doesn’t send it to Iowa HHS. Submit requested documents using the instructions on your notice.")
-                            .font(.subheadline).foregroundStyle(.secondary)
-                        Text("If a file is stored in iCloud or another provider, downloading it first may require internet.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    LocalStorageNote()
                 }
                 .padding(20)
                 .frame(maxWidth: 700)

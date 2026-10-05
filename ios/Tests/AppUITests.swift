@@ -2,6 +2,33 @@ import XCTest
 
 final class AppUITests: XCTestCase {
     @MainActor
+    func testProfileSetupOffersDocumentImportAndPreservesDraftOnCancel() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Profile"].waitForExistence(timeout: 20))
+        app.tabBars.buttons["Profile"].tap()
+        app.buttons["profile.edit"].tap()
+        XCTAssertTrue(app.buttons["profile.importDocument"].waitForExistence(timeout: 5))
+        let firstName = app.textFields["profile.firstName"]
+        firstName.tap()
+        if let value = firstName.value as? String, value != "First name", !value.isEmpty {
+            firstName.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: value.count))
+        }
+        firstName.typeText("Draft")
+        app.buttons["Done"].tap()
+        app.buttons["profile.importDocument"].tap()
+        XCTAssertTrue(app.buttons["profile.document.upload"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["profile.document.scan"].exists)
+        attachScreenshot(app, name: "Profile upload and scan options")
+        app.navigationBars["Use a document"].buttons["Cancel"].tap()
+        XCTAssertTrue(firstName.waitForExistence(timeout: 5))
+        XCTAssertEqual(firstName.value as? String, "Draft")
+        app.buttons["Cancel"].tap()
+    }
+
+    @MainActor
     func testPINKeypadLimitsInputAndSupportsDeletion() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
