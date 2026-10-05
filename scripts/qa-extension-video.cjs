@@ -79,7 +79,7 @@ async function main() {
       await page.waitForTimeout(hold);
     }
     async function panelTop() {
-      await panel.evaluate(() => { document.getElementById('panel-body').scrollTop = 0; });
+      await panel.evaluate(() => { document.getElementById('sidepanel').scrollTop = 0; });
     }
     async function noNext() { assert.equal(await page.evaluate(() => window.__nextClicks), 0); }
 

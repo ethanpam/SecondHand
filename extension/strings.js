@@ -11,7 +11,6 @@
   const en = Object.freeze({
     'app.title': 'SecondHand · Iowa SNAP assistant',
     'brand.name': 'SecondHand',
-    'brand.region': 'IOWA SNAP',
     'language.label': 'Language',
     'language.en': 'English',
     'language.es': 'Español',
@@ -339,7 +338,6 @@
   const es = Object.freeze({
     'app.title': 'SecondHand · Asistente de SNAP de Iowa',
     'brand.name': 'SecondHand',
-    'brand.region': 'IOWA SNAP',
     'language.label': 'Idioma',
     'language.en': 'English',
     'language.es': 'Español',
@@ -663,7 +661,6 @@
   const vi = Object.freeze({
     'app.title': 'SecondHand · Trợ lý SNAP Iowa',
     'brand.name': 'SecondHand',
-    'brand.region': 'IOWA SNAP',
     'language.label': 'Ngôn ngữ',
     'language.en': 'English',
     'language.es': 'Español',
@@ -988,7 +985,6 @@
   const zh = Object.freeze({
     'app.title': 'SecondHand · 爱荷华州 SNAP 助手',
     'brand.name': 'SecondHand',
-    'brand.region': 'IOWA SNAP',
     'language.label': '语言',
     'language.en': 'English',
     'language.es': 'Español',
@@ -1313,7 +1309,6 @@
   const fr = Object.freeze({
     'app.title': 'SecondHand · Assistant SNAP de l’Iowa',
     'brand.name': 'SecondHand',
-    'brand.region': 'IOWA SNAP',
     'language.label': 'Langue',
     'language.en': 'English',
     'language.es': 'Español',
@@ -1638,7 +1633,6 @@
   const ar = Object.freeze({
     'app.title': 'SecondHand · مساعد SNAP في ولاية أيوا',
     'brand.name': 'SecondHand',
-    'brand.region': 'IOWA SNAP',
     'language.label': 'اللغة',
     'language.en': 'English',
     'language.es': 'Español',

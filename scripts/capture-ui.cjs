@@ -163,7 +163,7 @@ async function openPanel(session) {
 // The side panel checks the tab every second and a half; `ready` says when it shows the state to capture.
 async function panelShot(session, panel, name, ready, { scroll = 0, clip } = {}) {
   await expect.poll(() => panel.evaluate(ready), { timeout: 20000 }).toBe(true);
-  await panel.evaluate(scroll => document.fonts.ready.then(() => { document.getElementById('panel-body').scrollTop = scroll; }), scroll);
+  await panel.evaluate(scroll => document.fonts.ready.then(() => { document.getElementById('sidepanel').scrollTop = scroll; }), scroll);
   // The pointer rests on the header's logo, so nothing is drawn hovered.
   await panel.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 30, y: 30 });
   await session.page.waitForTimeout(400);
@@ -306,7 +306,7 @@ async function iowaPanel() {
     await expect.poll(() => panel.visible('#questions-show'), { timeout: 20000 }).toBe(true);
     await panel.click('#questions-show');
     await expect.poll(() => panel.evaluate(() => document.querySelectorAll('#questions-list > *').length > 0), { timeout: 20000 }).toBe(true);
-    const top = await panel.evaluate(() => { const body = document.getElementById('panel-body'); return document.getElementById('questions-show').getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop - 12; });
+    const top = await panel.evaluate(() => document.getElementById('questions-show').getBoundingClientRect().top + document.getElementById('sidepanel').scrollTop - document.querySelector('.panel-header').offsetHeight - 12);
     await panelShot(session, panel, 'panel-questions', () => !document.getElementById('questions').hidden, { scroll: top });
     await chooseLanguage(panel, 'en');
     assert.equal(await worker.evaluate(() => globalThis.__desktop.closed), false);
