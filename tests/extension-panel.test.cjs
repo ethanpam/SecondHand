@@ -1307,7 +1307,7 @@ test('verified navigation keeps its private snapshot local and consumes one auth
 const { en: EN, es: ES } = strings.catalogs;
 const englishOnly = new Set(Object.keys(EN).filter(key => typeof EN[key] === 'string' && EN[key] !== ES[key]).map(key => EN[key]));
 // Every word of SecondHand's the applicant can see or hear: visible text, tooltips, and screen-reader
-// labels. The page's own words, kept under their translation in the question list, are the page's.
+// labels. The words kept under each question in the question list are the form's, there to match it with.
 function shownText(view) {
   const found = [view.window.document.title];
   for (const element of view.window.document.body.querySelectorAll('*')) {
@@ -1455,8 +1455,10 @@ test('the side panel lists every question in Spanish; a row click finds it throu
   const rows = [...view.get('questions-list').children];
   assert.deepEqual(rows.map(row => [row.tagName, row.querySelector('.checklist-label').textContent, row.querySelector('.checklist-detail').textContent]), [
     ['DIV', '[es] Have these ready before you start your application.', 'Have these ready before you start your application.'],
-    ['BUTTON', spanish('iowa.firstName'), ''],
+    // SecondHand's own label is in Spanish from its catalog, with the English it stands for under it.
+    ['BUTTON', spanish('iowa.firstName'), 'First name'],
     ['BUTTON', '[es] Preferred pickup day', 'Preferred pickup day']]);
+  assert.equal(rows[1].querySelector('.checklist-detail').hidden, false);
   assert.equal(view.get('questions').hidden, false);
   assert.equal(view.get('questions-summary').textContent, strings.text('es', 'questions.count', { count: 2 }));
   assert.equal(view.get('questions-note').textContent, spanish('translate.done'));

@@ -770,12 +770,12 @@
         row.disabled = working || !target;
         row.addEventListener('click', trusted(() => { if (!row.disabled) focusField(item.id); }));
       }
-      // SecondHand's own label is simply shown in the applicant's language; a translation of the
-      // page's words keeps the original underneath, to match it with the form.
+      // The question in the applicant's language (SecondHand's own label from its catalog, or Chrome's
+      // translation of the page's words), with the English it stands for underneath, to match it with the form.
       const own = item.labelKey ? t(item.labelKey, item.labelParams || {}) : translated.get(item.label);
       const copy = document.createElement('span'); copy.className = 'checklist-copy';
       const label = document.createElement('span'); label.className = 'checklist-label'; label.textContent = fixedText(own || item.label, 400);
-      const original = document.createElement('span'); original.className = 'checklist-detail'; original.textContent = !item.labelKey && own && own !== item.label ? fixedText(item.label, 400) : '';
+      const original = document.createElement('span'); original.className = 'checklist-detail'; original.textContent = own && own !== item.label ? fixedText(item.label, 400) : '';
       original.hidden = !original.textContent;
       copy.append(label, original);
       row.append(copy);

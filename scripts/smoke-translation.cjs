@@ -114,6 +114,9 @@ async function main() {
     assert.ok(expected.length > 5 && expected.includes(es('iowa.firstName')), JSON.stringify(expected));
     await expect.poll(rows, { timeout: 15000 }).toEqual(expected);
     assert.equal(await panel.text('#questions-summary'), es('questions.count', { count: expected.length }));
+    // Under each Spanish question is the English it stands for, to match it with Iowa's English form.
+    const originals = await panel.evaluate(() => [...document.querySelectorAll('#questions-list > *')].map(row => row.querySelector('.checklist-detail').textContent));
+    assert.deepEqual(originals, checklist.map(item => item.label));
     console.log(`Side panel: the offer opened the list of all ${expected.length} questions, in Spanish.`);
 
     // A row scrolls the form to its question through the existing focus route. Nothing is written.
