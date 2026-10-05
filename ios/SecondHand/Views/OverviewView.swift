@@ -14,19 +14,14 @@ struct OverviewView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Label("IOWA SNAP COMPANION", systemImage: "leaf")
-                            .font(.caption.weight(.semibold)).tracking(1.6)
-                            .foregroundStyle(AppTheme.accent)
                         Text(store.data.profile.displayName)
                             .font(.title.bold()).foregroundStyle(AppTheme.ink)
-                        Text("A little preparation. A little peace of mind.")
-                            .font(.subheadline).foregroundStyle(.secondary)
                     }
                     .padding(.top, 8)
 
                     renewalCard
 
-                    SectionLabel(title: "One step at a time", subtitle: "Your personal checklist for what comes next.")
+                    SectionLabel(title: "One step at a time")
                     AppCard {
                         checklistRow(symbol: "person.text.rectangle", title: "Review your information", detail: store.data.profile.reviewedAt.map { "Last confirmed \($0.formatted(date: .abbreviated, time: .omitted))" } ?? "Save your contact and household details.", complete: store.data.profile.reviewedAt != nil) {
                             editingProfile = true
@@ -86,7 +81,6 @@ struct OverviewView: View {
                             }
                         }
                     }
-                    LocalStorageNote()
                 }
                 .padding(20)
                 .frame(maxWidth: 700)

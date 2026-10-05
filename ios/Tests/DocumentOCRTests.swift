@@ -1,0 +1,64 @@
+import XCTest
+import PDFKit
+import UIKit
+@testable import SecondHand
+
+final class DocumentOCRTests: XCTestCase {
+    func testSynthetic1040ScanRecognizesKeyValues() throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "synthetic_1040sr_realistic_scan", withExtension: "pdf"))
+        let bytes = try Data(contentsOf: url)
+        let pdf = try XCTUnwrap(PDFDocument(data: bytes))
+        XCTAssertTrue((pdf.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, "Fixture must exercise scanned-image OCR")
+        let result = try DocumentOCR.recognize(data: bytes, isPDF: true)
+        XCTAssertEqual(result.pages.count, 1)
+        let text = result.text.uppercased()
+        for expected in ["1040-SR", "2024", "ALEXANDER", "MORGAN", "SAMPLE", "1847 TEST DATA AVE", "DES MOINES", "50309", "68,450", "18,600", "15,810"] {
+            XCTAssertTrue(text.contains(expected), "Missing synthetic value: \(expected)")
+        }
+        let attachment = XCTAttachment(string: result.text)
+        attachment.name = "Synthetic 1040 OCR output"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    func testImageRecognitionAndNoTextFailure() throws {
+        let size = CGSize(width: 1200, height: 500)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        let image = renderer.image { context in
+            UIColor.white.setFill(); context.fill(CGRect(origin: .zero, size: size))
+            ("NOTICE 12345" as NSString).draw(at: CGPoint(x: 80, y: 100), withAttributes: [.font: UIFont.systemFont(ofSize: 64), .foregroundColor: UIColor.black])
+        }
+        let result = try DocumentOCR.recognize(data: XCTUnwrap(image.pngData()), isPDF: false)
+        XCTAssertTrue(result.text.contains("NOTICE 12345"))
+        let blank = renderer.image { context in
+            UIColor.white.setFill(); context.fill(CGRect(origin: .zero, size: size))
+        }
+        XCTAssertThrowsError(try DocumentOCR.recognize(data: XCTUnwrap(blank.pngData()), isPDF: false))
+    }
+
+    func testTextPDFAndPageOrder() throws {
+        let bytes = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 600, height: 800)).pdfData { context in
+            for title in ["FIRST PAGE", "SECOND PAGE"] {
+                context.beginPage()
+                (title as NSString).draw(at: CGPoint(x: 50, y: 50), withAttributes: [.font: UIFont.systemFont(ofSize: 24)])
+            }
+        }
+        let result = try DocumentOCR.recognize(data: bytes, isPDF: true)
+        XCTAssertEqual(result.pages.count, 2)
+        XCTAssertTrue(result.pages[0].contains("FIRST PAGE"))
+        XCTAssertTrue(result.pages[1].contains("SECOND PAGE"))
+    }
+
+    func testInvalidAndOverlongDocumentsAreRejected() throws {
+        XCTAssertThrowsError(try DocumentOCR.recognize(data: Data("not a pdf".utf8), isPDF: true))
+        XCTAssertThrowsError(try DocumentOCR.recognize(data: Data(), isPDF: false))
+        let bytes = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 60, height: 80)).pdfData { context in
+            for _ in 0..<21 { context.beginPage() }
+        }
+        XCTAssertThrowsError(try DocumentOCR.recognize(data: bytes, isPDF: true)) { error in
+            guard case DocumentOCRError.tooManyPages = error else { return XCTFail("Expected page limit") }
+        }
+    }
+}
