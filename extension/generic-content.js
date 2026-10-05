@@ -47,7 +47,7 @@
         all: 'initial', position: 'fixed', right: '12px', bottom: '16px', display: 'block',
         width: frameWidth(0), height: '46px',
         'z-index': '2147483647', margin: '0', padding: '0', border: '0',
-        'border-radius': '14px', 'box-shadow': '0 12px 42px #17342235',
+        'border-radius': '12px', 'box-shadow': '0 2px 3px #202c2010, 0 8px 24px -8px #202c2030',
         'color-scheme': 'light', isolation: 'isolate'
       })) panelHost.style.setProperty(property, value, 'important');
       const shadow = panelHost.attachShadow({ mode: 'closed' });
@@ -57,7 +57,7 @@
       frame.setAttribute('sandbox', 'allow-scripts allow-same-origin');
       frame.setAttribute('allow', 'language-model; language-detector'); // lets the widget use Chrome's on-device AI and language detector
       frame.referrerPolicy = 'no-referrer';
-      for (const [property, value] of Object.entries({ width: '100%', height: '100%', display: 'block', border: '0', margin: '0', padding: '0', 'border-radius': '14px', background: 'transparent' })) frame.style.setProperty(property, value, 'important');
+      for (const [property, value] of Object.entries({ width: '100%', height: '100%', display: 'block', border: '0', margin: '0', padding: '0', 'border-radius': '12px', background: 'transparent' })) frame.style.setProperty(property, value, 'important');
       shadow.append(frame);
     }
     if (!panelHost.isConnected) document.body.append(panelHost);

@@ -39,6 +39,7 @@
       full = page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo) || generalUrl === location.href;
     } catch { full = false; }
     panelHost.setAttribute('data-secondhand-size', full ? 'full' : 'pill');
+    panelHost.style.setProperty('border-radius', full ? '12px' : '50%', 'important');
     panelHost.style.setProperty('width', full ? frameWidth(cardWidth) : '46px', 'important');
     panelHost.style.setProperty('height', full ? (messageRow ? '86px' : '46px') : '46px', 'important');
   }
@@ -57,7 +58,7 @@
       for (const [property, value] of Object.entries({
         all: 'initial', position: 'fixed', right: '12px', bottom: '16px', display: 'block',
         'z-index': '2147483647', margin: '0', padding: '0', border: '0',
-        'border-radius': '14px', 'box-shadow': '0 12px 42px #17342235',
+        'border-radius': '12px', 'box-shadow': '0 2px 3px #202c2010, 0 8px 24px -8px #202c2030',
         'color-scheme': 'light', isolation: 'isolate'
       })) panelHost.style.setProperty(property, value, 'important');
       const shadow = panelHost.attachShadow({ mode: 'closed' });
@@ -67,7 +68,7 @@
       panelFrame.setAttribute('sandbox', 'allow-scripts allow-same-origin');
       panelFrame.setAttribute('allow', 'language-detector'); // lets the widget check the page's language on this computer
       panelFrame.referrerPolicy = 'no-referrer';
-      for (const [property, value] of Object.entries({ width: '100%', height: '100%', display: 'block', border: '0', margin: '0', padding: '0', 'border-radius': '14px', background: 'transparent' })) panelFrame.style.setProperty(property, value, 'important');
+      for (const [property, value] of Object.entries({ width: '100%', height: '100%', display: 'block', border: '0', margin: '0', padding: '0', 'border-radius': 'inherit', background: 'transparent' })) panelFrame.style.setProperty(property, value, 'important');
       shadow.append(panelFrame);
     }
     sizePanel();

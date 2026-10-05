@@ -43,6 +43,7 @@
     'widget.offerTitle': 'Show this page’s questions in English in SecondHand’s side panel',
     'widget.languageCheckFailed': 'SecondHand couldn’t check this page’s language.',
 
+    // The widget shows these steps in the 46px frame it already has: in every language they must fit three lines of its 272px.
     'panel.outdated': 'SecondHand was updated. Open chrome://extensions and click the reload arrow on SecondHand, then reload this page.',
     'panel.updated': 'SecondHand was updated to match the app on this computer.',
     'panel.reloadPage': 'SecondHand was updated. Reload this page to use it.',
@@ -362,7 +363,7 @@
     'widget.offerTitle': 'Mostrar las preguntas de esta página en español en el panel lateral de SecondHand',
     'widget.languageCheckFailed': 'SecondHand no pudo comprobar el idioma de esta página.',
 
-    'panel.outdated': 'SecondHand se actualizó. Abra chrome://extensions, haga clic en la flecha de recargar de SecondHand y luego recargue esta página.',
+    'panel.outdated': 'SecondHand se actualizó. Abra chrome://extensions, haga clic en la flecha de recargar de SecondHand y recargue esta página.',
     'panel.updated': 'SecondHand se actualizó para coincidir con la aplicación de esta computadora.',
     'panel.reloadPage': 'SecondHand se actualizó. Recargue esta página para usarlo.',
     'panel.updateFailed': 'SecondHand no pudo actualizar los archivos de su extensión. En la aplicación SecondHand, abra “Chrome extension” y haga clic en “Refresh extension files”. Luego abra chrome://extensions y haga clic en la flecha de recargar de SecondHand.',
@@ -1312,7 +1313,7 @@
     'widget.offerTitle': 'Afficher les questions de cette page en français dans le panneau latéral de SecondHand',
     'widget.languageCheckFailed': 'SecondHand n’a pas pu vérifier la langue de cette page.',
 
-    'panel.outdated': 'SecondHand a été mis à jour. Ouvrez chrome://extensions, cliquez sur la flèche de rechargement de SecondHand, puis rechargez cette page.',
+    'panel.outdated': 'SecondHand a été mis à jour. Ouvrez chrome://extensions, cliquez sur sa flèche de rechargement, puis rechargez cette page.',
     'panel.updated': 'SecondHand a été mis à jour pour correspondre à l’application de cet ordinateur.',
     'panel.reloadPage': 'SecondHand a été mis à jour. Rechargez cette page pour l’utiliser.',
     'panel.updateFailed': 'SecondHand n’a pas pu mettre à jour les fichiers de son extension. Dans l’application SecondHand, ouvrez « Chrome extension » et cliquez sur « Refresh extension files ». Ouvrez ensuite chrome://extensions et cliquez sur la flèche de rechargement de SecondHand.',
