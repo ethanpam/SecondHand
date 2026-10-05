@@ -71,6 +71,9 @@ async function main() {
     await page.locator('#recovery-saved').check();
     await page.locator('#recovery-done').click();
     await expect(page.locator('#workspace')).toBeVisible();
+    await expect(page.locator('#setup-dialog')).toBeVisible();
+    await page.locator('#setup-skip').click();
+    await expect(page.locator('#setup-dialog')).not.toBeVisible();
     assert.equal((await page.evaluate(() => window.secondHand.status())).laya.enabled, false);
     const savedBeforeRead = await page.evaluate(async () => (await window.secondHand.getData()).profile);
 
