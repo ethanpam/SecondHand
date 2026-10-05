@@ -644,6 +644,15 @@ test('a failed trust change restores the checkbox and shows the error', async t 
   assert.match(view.get('autofill-trust-error').textContent, /Unlock/);
 });
 
+test('Privacy & backups names everything autofill fills or clicks today and keeps the live-submission caveat', async t => {
+  const view = await renderer(t);
+  view.window.document.querySelector('.nav-item[data-view="privacy"]').click();
+  const card = text(view.window.document.querySelector('#view-privacy .autofill-card'));
+  for (const phrase of ['first applicant page', 'Tell Us More', 'Iowa’s questions about you', 'first suggested home address', 'Information-only screens',
+    'Laya', 'guesses', 'Other sites you trust', 'A complete live submission has not been validated.']) assert.ok(card.includes(phrase), phrase);
+  assert.doesNotMatch(card, /—|passphrase|vault/i);
+});
+
 test('the profile form saves household counts and household flags', async t => {
   const view = await renderer(t);
   view.window.document.querySelector('.nav-item[data-view="profile"]').click();
