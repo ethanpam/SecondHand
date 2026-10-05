@@ -164,8 +164,8 @@ async function openPanel(session) {
 async function panelShot(session, panel, name, ready, { scroll = 0, clip } = {}) {
   await expect.poll(() => panel.evaluate(ready), { timeout: 20000 }).toBe(true);
   await panel.evaluate(scroll => document.fonts.ready.then(() => { document.getElementById('sidepanel').scrollTop = scroll; }), scroll);
-  // The pointer rests on the header's logo, so nothing is drawn hovered.
-  await panel.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 30, y: 30 });
+  // The pointer rests in the panel's top corner, clear of every control, so nothing is drawn hovered.
+  await panel.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 });
   await session.page.waitForTimeout(400);
   await save(name, 'png', async file => {
     if (!clip) return panel.screenshot(file);
@@ -310,7 +310,7 @@ async function iowaPanel() {
     await expect.poll(() => panel.visible('#questions-show'), { timeout: 20000 }).toBe(true);
     await panel.click('#questions-show');
     await expect.poll(() => panel.evaluate(() => document.querySelectorAll('#questions-list > *').length > 0), { timeout: 20000 }).toBe(true);
-    const top = await panel.evaluate(() => document.getElementById('questions-show').getBoundingClientRect().top + document.getElementById('sidepanel').scrollTop - document.querySelector('.panel-header').offsetHeight - 12);
+    const top = await panel.evaluate(() => document.getElementById('questions-show').getBoundingClientRect().top + document.getElementById('sidepanel').scrollTop - document.querySelector('.actions').offsetHeight - 12);
     await panelShot(session, panel, 'panel-questions', () => !document.getElementById('questions').hidden, { scroll: top });
     await chooseLanguage(panel, 'en');
     assert.equal(await worker.evaluate(() => globalThis.__desktop.closed), false);

@@ -537,6 +537,20 @@ async function main() {
     }
     await panel.screenshot(path.join(root, 'artifacts/extension-native-sidebar.png'));
     console.log('Side panel: checklist and desktop status without profile values.');
+    // Autofill's button and status stay in view while the checklist scrolls, and never cover the row the
+    // keyboard is on: from the end of the list, focus on the first row brings it into view below them.
+    const pinned = await panel.evaluate(async () => {
+      const scroller = document.getElementById('sidepanel'), strip = document.querySelector('.actions'), row = document.querySelector('#page-checklist .checklist-item');
+      scroller.scrollTop = scroller.scrollHeight;
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const scrolled = scroller.scrollTop > 200, held = Math.round(strip.getBoundingClientRect().top) === 0 && document.getElementById('panel-autofill').getClientRects().length > 0;
+      row.focus();
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      return { scrolled, held, clear: row.getBoundingClientRect().top >= strip.getBoundingClientRect().bottom };
+    });
+    assert.deepEqual(pinned, { scrolled: true, held: true, clear: true });
+    await panel.evaluate(() => { document.activeElement.blur(); document.getElementById('sidepanel').scrollTop = 0; });
+    console.log('Side panel: Autofill and its status stay in view over the scrolled checklist, clear of the row in focus.');
 
     // With SecondHand closed, Autofill fills nothing and the one desktop line and its Open SecondHand
     // button say so, not a red repeat under Autofill. Opening it waits for the app, then offers Unlock.

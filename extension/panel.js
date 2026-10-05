@@ -1069,6 +1069,14 @@
       renderDesktop();
     }
     whenOutdated = halt;
+    // The strip with Autofill and its status stays in view over the lists. The panel scrolls a row the
+    // keyboard moves to clear of it, by the strip's own height, which changes with what it says.
+    if (typeof ResizeObserver === 'function') {
+      new ResizeObserver(([entry]) => {
+        const pinned = getComputedStyle(entry.target).position === 'sticky';
+        $('sidepanel').style.scrollPaddingTop = pinned ? `${entry.target.offsetHeight + 12}px` : '';
+      }).observe(document.querySelector('.actions'));
+    }
     async function start() {
       try {
         await checkBuild();
