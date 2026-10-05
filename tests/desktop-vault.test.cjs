@@ -380,3 +380,30 @@ test('the password can be checked while unlocked, for a version 1 or 2 file, wit
   await old.lock();
   await old.unlock(PASSPHRASE);
 });
+
+// #135: a saved birth date is checked when it is saved. Reading it back never checks it against today again.
+test('a clock set back before a saved birth date never keeps the information from opening or saving', async t => {
+  const { file } = await fixture(t);
+  const vault = new Vault(file);
+  await vault.create(PASSPHRASE);
+  const child = { id: '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d', firstName: 'Synthetic', birthDate: '2026-10-01', relationship: 'child' };
+  await vault.update(data => { data.profile = { firstName: 'Synthetic', birthDate: '2026-09-30', householdMembers: [{ id: '0f2c8d4e-1a3b-4c5d-8e6f-7a8b9c0d1e2f', relationship: 'self' }, child] }; });
+  await vault.lock();
+  // The computer's clock goes back to 2025: both dates are now after today.
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2025-01-01T12:00:00Z') });
+  await vault.unlock(PASSPHRASE);
+  assert.equal(vault.getData().profile.birthDate, '2026-09-30');
+  assert.equal(vault.getData().profile.householdMembers[1].birthDate, '2026-10-01');
+  await vault.update(data => { data.applications.push(validateApplication({ status: 'draft' })); });
+  assert.equal(vault.getData().applications.length, 1, 'other changes still save');
+  await vault.lock();
+});
+
+test('information saved before the 130-year limit, with a birth date of 1825, still opens', async t => {
+  const { file } = await fixture(t);
+  await writeLegacyVault(file, PASSPHRASE, { version: 1, profile: { firstName: 'Synthetic', birthDate: '1825-06-01' }, applications: [] });
+  const vault = new Vault(file);
+  await vault.unlock(PASSPHRASE);
+  assert.equal(vault.getData().profile.birthDate, '1825-06-01');
+  await vault.lock();
+});
