@@ -315,6 +315,7 @@ class ModelStore {
       // A failed pipeline can settle before its file has closed, even before it has opened. The
       // partial file is left alone until then: an open after its deletion would bring it back, and
       // a write that lands after a pause would follow the bytes a resumed download appends.
+      writer.destroy(); // the failed pipeline has already done this; never leave it open
       await closed(writer);
       if (signal.aborted) throw error; // cancelled: keep the partial file to resume from
       await fs.rm(partial, { force: true });
