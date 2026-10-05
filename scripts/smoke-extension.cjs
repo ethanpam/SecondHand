@@ -558,7 +558,7 @@ async function main() {
     await worker.evaluate(() => { globalThis.__nativeSmoke.closed = true; });
     await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
     await panel.click('#panel-autofill');
-    await expect.poll(() => panel.text('#desktop-status'), { timeout: 15000 }).toBe('SecondHand isn’t running.');
+    await expect.poll(() => panel.text('#desktop-status'), { timeout: 15000 }).toBe('The SecondHand app on this computer is closed.');
     await expect.poll(() => panel.text('#desktop-action')).toBe('Open SecondHand');
     assert.equal(await panel.visible('#desktop-action'), true);
     await expect.poll(() => panel.text('#status')).toBe('');
@@ -566,7 +566,7 @@ async function main() {
     await expect(page.locator('#firstName')).toHaveValue('');
     await expect((await launcherFrame()).locator('#open-app')).toBeVisible({ timeout: 15000 });
     await panel.click('#desktop-action');
-    await expect.poll(() => panel.text('#desktop-status'), { timeout: 10000 }).toBe('SecondHand is locked.');
+    await expect.poll(() => panel.text('#desktop-status'), { timeout: 10000 }).toBe('The SecondHand app on this computer is locked.');
     await expect.poll(() => panel.text('#desktop-action')).toBe('Unlock');
     assert.equal((await calls('openApp')).length, 1);
     await panel.click('#desktop-action');

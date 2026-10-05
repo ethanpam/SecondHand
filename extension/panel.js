@@ -455,6 +455,9 @@
       $('laya-status').hidden = !laya;
       $('laya-status').textContent = laya;
       $('panel-autofill').textContent = t(autopilot ? 'panel.stopAutofill' : 'panel.autofill');
+      // While the app needs opening or unlocking, that button is the one to press: Autofill steps back to an outline.
+      $('panel-autofill').classList.toggle('primary', !desktopAction);
+      $('panel-autofill').classList.toggle('secondary', Boolean(desktopAction));
       // Where the questions left are listed by name, each row goes to its own.
       $('panel-left').hidden = !target || !left.length || named.length > 0;
       $('panel-left').disabled = working;

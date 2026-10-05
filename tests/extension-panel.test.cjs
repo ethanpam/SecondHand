@@ -574,15 +574,23 @@ test('after Autofill, a question whose answer isn’t saved says to type it in I
 
 test('desktop line shows locked with Unlock, and not running with Open SecondHand', async t => {
   const locked = await panel(t, { desktop: { unlocked: false } });
-  assert.match(locked.get('desktop-status').textContent, /locked/);
+  assert.equal(locked.get('desktop-status').textContent, 'The SecondHand app on this computer is locked.');
   assert.equal(locked.get('desktop-action').hidden, false);
   assert.equal(locked.get('desktop-action').textContent, 'Unlock');
+  // Unlock is the button to press: Autofill is still there, drawn as an outline.
+  const filled = button => [button.classList.contains('primary'), button.classList.contains('secondary')];
+  assert.deepEqual(filled(locked.get('desktop-action')), [true, false]);
+  assert.deepEqual(filled(locked.get('panel-autofill')), [false, true]);
+  assert.equal(locked.get('panel-autofill').disabled, false);
+  const open = await panel(t);
+  assert.deepEqual(filled(open.get('panel-autofill')), [true, false], 'with the app open and unlocked, Autofill is the filled button');
   await locked.userClick('desktop-action');
   assert.deepEqual(plainRequests(locked.requests.find(request => request.type === 'ui:showApp')), { type: 'ui:showApp', confirmed: true });
   const offline = await panel(t, { desktop: { connected: false, unlocked: false } });
-  assert.equal(offline.get('desktop-status').textContent, 'SecondHand isn’t running.');
+  assert.equal(offline.get('desktop-status').textContent, 'The SecondHand app on this computer is closed.');
   assert.equal(offline.get('desktop-action').hidden, false);
   assert.equal(offline.get('desktop-action').textContent, 'Open SecondHand');
+  assert.deepEqual(filled(offline.get('panel-autofill')), [false, true]);
 });
 
 // Waits for the panel to reach a state; each open check is about a second apart.
@@ -606,7 +614,7 @@ test('Open SecondHand asks the worker to open the app, waits for it, then shows 
   assert.equal(view.get('desktop-action').hidden, true, 'no second click while it opens');
   // The app starts locked; the panel's next check finds it.
   Object.assign(view.desktop, { connected: true, unlocked: false });
-  await until(() => view.get('desktop-status').textContent === 'SecondHand is locked.');
+  await until(() => view.get('desktop-status').textContent === 'The SecondHand app on this computer is locked.');
   assert.equal(view.get('desktop-action').hidden, false);
   assert.equal(view.get('desktop-action').textContent, 'Unlock');
   await view.userClick('desktop-action');
@@ -644,12 +652,12 @@ test('with SecondHand closed, Autofill leaves the one desktop line and its butto
   await settle();
   assert.equal(view.get('status').textContent, '');
   assert.equal(view.get('status').classList.contains('error'), false);
-  assert.equal(view.get('desktop-status').textContent, 'SecondHand isn’t running.');
+  assert.equal(view.get('desktop-status').textContent, 'The SecondHand app on this computer is closed.');
   assert.equal(view.get('desktop-action').textContent, 'Open SecondHand');
   // The worker's remembered result isn't repeated when the panel opens again either.
   const reopened = await panel(t, { desktop: CLOSED, result: offlineResult });
   assert.equal(reopened.get('status').textContent, '');
-  assert.equal(shownText(reopened).filter(text => /Open the SecondHand app|isn’t running/.test(text)).length, 1);
+  assert.equal(shownText(reopened).filter(text => /Open the SecondHand app|is closed/.test(text)).length, 1);
 });
 
 test('opening SecondHand speaks the applicant’s language', async t => {
