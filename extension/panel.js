@@ -359,12 +359,13 @@
     const SCREENS = { 'iowa-before-start': 'summary.iowaBeforeStart', 'iowa-information': 'summary.iowaInformation', 'iowa-instructions': 'summary.iowaInstructions' };
     const STATUS = { complete: 'checklist.complete', missing: 'checklist.missing', optional: 'checklist.optional', manual: 'checklist.manual' };
     const MARKS = { complete: '✓', manual: '!', missing: '○', optional: '○' };
+    // A message, or null for nothing to say.
     const show = (message, error = false) => { status = { message, error }; renderStatus(); };
     // A closed app is said once, by the desktop row and its Open SecondHand button, not again under Autofill.
     const reported = result => hasMessage(result) && result.state !== 'offline';
     function renderStatus() {
       const shown = notice || status;
-      $('status').textContent = words(shown.message, 650);
+      $('status').textContent = shown.message ? words(shown.message, 650) : '';
       $('status').classList.toggle('error', shown.error);
     }
     // On a tab SecondHand can't read: where to go.
@@ -512,8 +513,7 @@
       if (site?.enabled && !site.ready) show({ key: loading ? 'panel.waitingLoad' : 'panel.reloadToRead' });
       else if (reported(result)) show(fromResult(result), result.state === 'error');
       else if (site && !site.enabled) show({ key: 'panel.siteOff', params: { host: hostOf(site.origin) } });
-      else if (site) show({ key: 'panel.siteHint' });
-      else if (fillable) show({ key: 'panel.iowaHint' });
+      else if (site || fillable) show(null);
       else if (page.reason) show({ key: page.reasonKey, params: page.reasonParams, text: page.reason });
       else show({ key: 'panel.nothingToFill' });
       controls();

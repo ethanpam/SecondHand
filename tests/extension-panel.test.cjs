@@ -524,13 +524,13 @@ test('with SecondHand closed, Autofill leaves the one desktop line and its butto
   const view = await panel(t, { desktop: CLOSED, autofill: offlineResult });
   await view.userClick('panel-autofill');
   await settle();
-  assert.equal(view.get('status').textContent, 'Click Autofill. SecondHand fills what it can and tells you what it needs.');
+  assert.equal(view.get('status').textContent, '');
   assert.equal(view.get('status').classList.contains('error'), false);
   assert.equal(view.get('desktop-status').textContent, 'SecondHand isn’t running.');
   assert.equal(view.get('desktop-action').textContent, 'Open SecondHand');
   // The worker's remembered result isn't repeated when the panel opens again either.
   const reopened = await panel(t, { desktop: CLOSED, result: offlineResult });
-  assert.equal(reopened.get('status').textContent, 'Click Autofill. SecondHand fills what it can and tells you what it needs.');
+  assert.equal(reopened.get('status').textContent, '');
   assert.equal(shownText(reopened).filter(text => /Open the SecondHand app|isn’t running/.test(text)).length, 1);
 });
 
@@ -795,7 +795,7 @@ function languageModel({ availability = 'available', answer = JSON.stringify({ '
   };
   return { LanguageModel, calls };
 }
-const AI_UNAVAILABLE = 'On-device AI unavailable. Rule matches only.';
+const AI_UNAVAILABLE = 'Chrome’s AI isn’t available, so nothing was guessed.';
 
 test('side panel offers to turn SecondHand on for an https tab that is not Iowa, and ignores untrusted clicks', async t => {
   const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: false } });
@@ -879,7 +879,7 @@ test('without the on-device AI the widget fills with rule matches only and says 
     await view.userClick('autofill');
     assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'ui:autofill', confirmed: true }, JSON.stringify(setup));
     assert.equal(view.get('widget-text').textContent, `Filled 2 · ${AI_UNAVAILABLE}`, JSON.stringify(setup));
-    assert.match(view.get('widget-text').title, /On-device AI unavailable/);
+    assert.match(view.get('widget-text').title, /Chrome’s AI isn’t available/);
   }
 });
 
@@ -990,10 +990,10 @@ for (const loading of [false, true]) {
 test('Iowa widget and sidebar disclose first-address selection before Autofill; other sites do not', async t => {
   const widget = await panel(t, { launcher: true });
   assert.match(widget.get('widget-text').textContent, /first home address suggestion/);
-  assert.match(widget.get('autofill').title, /and continues/);
+  assert.match(widget.get('autofill').title, /moves on when it is complete, and picks Iowa’s first suggested home address\. Review that address before you submit/);
   const sidebar = await panel(t);
   assert.equal(sidebar.get('iowa-policy').hidden, false);
-  assert.match(sidebar.get('iowa-policy').textContent, /Review that address before submitting/);
+  assert.match(sidebar.get('iowa-policy').textContent, /moves on when a page is complete and picks Iowa’s first suggested home address\. Review that address before you submit/);
   const other = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true } });
   assert.equal(other.get('iowa-policy').hidden, true);
 });
@@ -1102,8 +1102,10 @@ test('with Spanish as the browser language, the side panel shows none of SecondH
   assert.equal(view.window.document.documentElement.lang, 'es');
   assert.equal(view.window.document.title, spanish('app.title'));
   assert.equal(view.get('panel-autofill').textContent, spanish('panel.autofill'));
-  assert.equal(view.get('status').textContent, spanish('panel.iowaHint'));
+  // Ready to fill, with the app unlocked: there is nothing more to say.
+  assert.equal(view.get('status').textContent, '');
   assert.equal(view.get('desktop-status').parentElement.hidden, true);
+  assert.equal(view.get('iowa-policy').textContent, spanish('panel.iowaPolicy'));
   assert.match(view.row('firstName').textContent, new RegExp(`${spanish('iowa.firstName')}.*${spanish('checklist.missing')}`));
   assert.equal(view.get('checklist-summary').textContent, strings.text('es', 'checklist.summary', { done: 1, total: 3 }));
   assert.equal(view.get('language').value, 'es');
@@ -1171,7 +1173,7 @@ test('the language picker saves the choice in the extension’s storage, changes
   await settle();
   assert.equal(storage.get('secondhand.language'), 'es');
   assert.equal(view.get('panel-autofill').textContent, spanish('panel.autofill'));
-  assert.equal(view.get('status').textContent, spanish('panel.iowaHint'));
+  assert.equal(view.get('checklist-summary').textContent, strings.text('es', 'checklist.summary', { done: 1, total: 3 }));
   assert.equal(view.get('iowa-policy').textContent, spanish('panel.iowaPolicy'));
   assert.deepEqual(shownText(view).filter(text => englishOnly.has(text)), []);
 

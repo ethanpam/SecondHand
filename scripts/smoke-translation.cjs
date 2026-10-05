@@ -127,7 +127,8 @@ async function main() {
 
     // The side panel shows none of SecondHand's English.
     await expect.poll(() => panel.text('#panel-autofill')).toBe(es('panel.autofill'));
-    await expect.poll(() => panel.text('#status')).toBe(es('panel.iowaHint'));
+    await expect.poll(() => panel.text('#iowa-policy')).toBe(es('panel.iowaPolicy'));
+    assert.equal(await panel.text('#status'), '', 'ready to fill, there is nothing more to say');
     assert.equal(await panel.evaluate(() => document.documentElement.lang), 'es');
     assert.equal(await panel.evaluate(() => document.getElementById('language').value), 'es');
     assert.deepEqual((await panel.evaluate(shownWords)).filter(text => englishOnly.includes(text)), []);

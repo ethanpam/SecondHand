@@ -483,7 +483,7 @@ async function main() {
     await expect.poll(() => panel.text('#desktop-status'), { timeout: 15000 }).toBe('SecondHand isn’t running.');
     await expect.poll(() => panel.text('#desktop-action')).toBe('Open SecondHand');
     assert.equal(await panel.visible('#desktop-action'), true);
-    await expect.poll(() => panel.text('#status')).toBe('Click Autofill. SecondHand fills what it can and tells you what it needs.');
+    await expect.poll(() => panel.text('#status')).toBe('');
     assert.equal(await panel.evaluate(() => document.getElementById('status').classList.contains('error')), false);
     await expect(page.locator('#firstName')).toHaveValue('');
     await expect((await launcherFrame()).locator('#open-app')).toBeVisible({ timeout: 15000 });
