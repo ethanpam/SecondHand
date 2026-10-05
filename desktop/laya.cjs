@@ -385,14 +385,15 @@ function createLaya({ userDataDir, manifest, modelDir, modelFormat, updateUrl = 
     return downloading;
   }
 
-  // Reads latest.json. Null when there's no update URL, when it can't be read, or when its model is
-  // in a format this app can't run; the note says which.
+  // Reads latest.json: { model }, the model null when there's no update URL, when latest.json names
+  // none, or when its model is in a format this app can't run (the note says so). Null when the
+  // check failed; the note says why.
   async function checkLatest(signal) {
-    if (!updateUrl) return null;
+    if (!updateUrl) return { model: null };
     try {
       const { model } = await fetchManifest(updateUrl, signal);
       note = model && !MODEL_FORMATS.includes(model.format) ? { state: 'incompatible', message: INCOMPATIBLE } : null;
-      return note ? null : model;
+      return { model: note ? null : model };
     } catch (error) {
       if (!signal.aborted) note = { state: 'error', message: error.publicMessage || `Update check failed: ${error.message}` };
       return null;
@@ -431,7 +432,8 @@ function createLaya({ userDataDir, manifest, modelDir, modelFormat, updateUrl = 
     preparing = true;
     try {
       await init();
-      const latest = await checkLatest(signal);
+      const checked = await checkLatest(signal);
+      const latest = checked?.model ?? null;
       if (signal.aborted) return;
       if ((await store.state()).state !== 'ready') {
         // Nothing is installed: download the newest model this app can run, else the shipped one.
@@ -445,8 +447,11 @@ function createLaya({ userDataDir, manifest, modelDir, modelFormat, updateUrl = 
       }
       preparing = false;
       if (latest && latest.revision !== (pending ?? store).model.revision) { await downloadUpdate(latest); return; }
-      // Up to date, or the check failed: whatever is left over is deleted, except an update download
-      // the check couldn't rule out.
+      // A failed check deletes nothing: an update download left from before a restart may be the
+      // newest model, and the next check that works resumes or deletes it.
+      if (!checked) return;
+      // Up to date, or latest.json names nothing to install: whatever is left over is deleted,
+      // except an update download latest.json didn't rule out.
       if (latest) {
         await candidate?.cancel();
         candidate = null;
