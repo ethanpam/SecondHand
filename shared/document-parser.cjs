@@ -11,18 +11,31 @@ const centerX = word => (word.bbox.x0 + word.bbox.x1) / 2;
 const phrase = text => text.split(/\s+/).map(normalize);
 const meanConfidence = words => Math.round(words.reduce((sum, word) => sum + word.confidence, 0) / (words.length || 1));
 const content = words => words.slice().sort((a, b) => a.bbox.x0 - b.bbox.x0).map(word => word.text).join(' ').trim();
+const wordHeight = word => word.bbox.y1 - word.bbox.y0;
+const medianHeight = words => words.map(wordHeight).sort((a, b) => a - b)[Math.floor(words.length / 2)];
+const inside = (mark, word) => word.bbox.x0 <= mark.bbox.x0 && mark.bbox.x1 <= word.bbox.x1 && word.bbox.y0 <= mark.bbox.y0 && mark.bbox.y1 <= word.bbox.y1;
+
+// OCR can report a mark it split off a word, such as the dot of an i, as its
+// own tiny word inside that word's box. It is part of the word already read,
+// not separate text. Ordered by position, it would break a printed label or
+// join a value. Only marks far shorter than this page's text are dropped.
+function withoutSplitMarks(words) {
+  const typical = medianHeight(words) || 0;
+  const tiny = word => wordHeight(word) * 3 <= typical;
+  const text = words.filter(word => !tiny(word));
+  return words.filter(mark => !tiny(mark) || !text.some(word => inside(mark, word)));
+}
 
 function wordRows(page) {
   const width = Number(page.width), height = Number(page.height);
   if (!(width > 0 && height > 0) || !Array.isArray(page.words)) return [];
-  const words = page.words.slice(0, 12000).filter(word => typeof word?.text === 'string' && word.text.trim() && word.text.length <= 250 &&
+  const words = withoutSplitMarks(page.words.slice(0, 12000).filter(word => typeof word?.text === 'string' && word.text.trim() && word.text.length <= 250 &&
     Number.isFinite(word.confidence) && word.confidence >= 0 && word.confidence <= 100 && word.bbox &&
     ['x0', 'y0', 'x1', 'y1'].every(key => Number.isFinite(word.bbox[key])) &&
     word.bbox.x0 >= 0 && word.bbox.y0 >= 0 && word.bbox.x1 <= width && word.bbox.y1 <= height &&
     word.bbox.x1 > word.bbox.x0 && word.bbox.y1 > word.bbox.y0)
-    .map(word => ({ ...word, text: word.text.trim() }));
-  const heights = words.map(word => word.bbox.y1 - word.bbox.y0).sort((a, b) => a - b);
-  const tolerance = Math.max(2, (heights[Math.floor(heights.length / 2)] || 10) * 0.5);
+    .map(word => ({ ...word, text: word.text.trim() })));
+  const tolerance = Math.max(2, (medianHeight(words) || 10) * 0.5);
   const rows = [];
   for (const word of words.sort((a, b) => centerY(a) - centerY(b))) {
     const recent = rows[rows.length - 1];
