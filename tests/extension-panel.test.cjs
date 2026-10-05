@@ -1885,6 +1885,9 @@ test('the side panel offers all websites on a tab it can’t read, with the Iowa
   const view = await panel(t, { tab: { id: 9, url: undefined }, desktop: { allSites: false } });
   assert.equal(view.get('all-sites-enable').hidden, false);
   assert.equal(view.get('all-sites-enable').textContent, 'Use SecondHand on all websites');
+  // Under the link, what it is for and that it fills nothing by itself.
+  assert.equal(view.get('all-sites-note').hidden, false);
+  assert.equal(view.get('all-sites-note').textContent, 'For food-assistance forms on other websites. SecondHand fills one only when you click Autofill there.');
   assert.equal(view.get('all-sites-disable').hidden, true);
   assert.match(view.get('status').textContent, /^Open Iowa’s SNAP application and your checklist appears here/);
   // Under it, a link to the one address SecondHand's Iowa script runs on. It opens beside the page the reader has.
@@ -1922,6 +1925,7 @@ test('a trusted click asks Chrome for every https site inside the click, then as
   assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:enableAllSites')), { type: 'ui:enableAllSites', confirmed: true, tabId: 9 });
   assert.equal(view.get('all-sites-enable').hidden, true);
   assert.equal(view.get('all-sites-disable').hidden, false);
+  assert.equal(view.get('all-sites-note').hidden, true, 'the note goes with the link it explains');
   assert.equal(view.get('status').textContent, ALL_ON);
 });
 

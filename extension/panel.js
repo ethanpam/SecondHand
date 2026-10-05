@@ -448,6 +448,8 @@
       $('site-disable').disabled = working;
       $('all-sites-enable').hidden = allSites !== false || stopped;
       $('all-sites-enable').disabled = working;
+      // What the link is for, and that turning it on fills nothing by itself.
+      $('all-sites-note').hidden = $('all-sites-enable').hidden;
       $('all-sites-disable').hidden = allSites !== true || stopped;
       $('all-sites-disable').disabled = working;
       $('panel-autofill').hidden = off || nowhere;
