@@ -329,6 +329,9 @@
     let told = false;
     // Autofill has run on the page on screen: until then a required question is only not filled yet.
     let ran = false;
+    // The questions Autofill left for the reader, and which of them the link under the status goes to next.
+    let left = [];
+    let leftCursor = 0;
     let site = null;
     let page = null;
     // The questions the last Autofill on this page could have filled but had no saved answer for.
@@ -449,6 +452,9 @@
       $('laya-status').hidden = !laya;
       $('laya-status').textContent = laya;
       $('panel-autofill').textContent = t(autopilot ? 'panel.stopAutofill' : 'panel.autofill');
+      $('panel-left').hidden = !target || !left.length;
+      $('panel-left').disabled = working;
+      $('panel-left').textContent = t('panel.goToLeft', { count: left.length || 1 });
       $('panel-autofill').disabled = !target || (!fillable && !autopilot) || working;
       document.querySelectorAll('.checklist-item').forEach(button => { button.disabled = working || !target; });
       document.querySelectorAll('.save-row button').forEach(button => { button.disabled = working || !target; });
@@ -456,7 +462,7 @@
       renderSummary();
     }
     function clearPage() {
-      fillable = false; autopilot = false; told = false; ran = false; site = null; page = null; notSaved = []; checklistSignature = '';
+      fillable = false; autopilot = false; told = false; ran = false; left = []; leftCursor = 0; site = null; page = null; notSaved = []; checklistSignature = '';
       savable = []; savableSignature = '';
       $('page-checklist').replaceChildren();
       $('checklist-section').hidden = true;
@@ -557,6 +563,10 @@
         .slice(0, 40).map(({ id, label, answered }) => ({ id, label, answered }));
       renderChecklist();
       renderSaves();
+      // What is left for the reader: on a page with a checklist, its rows as they are now; elsewhere, what Autofill reported.
+      const listed = Array.isArray(page.checklist) ? page.checklist.filter(item => item && fieldKeys([item.key]).length) : [];
+      const open = !ran ? [] : listed.length ? listed.filter(item => (item.required && item.status === 'missing') || item.status === 'manual').map(item => item.key) : fieldKeys(result.needYou);
+      if (open.join() !== left.join()) { left = open; leftCursor = 0; }
       const loading = target?.status === 'loading';
       if (site?.enabled && !site.ready) show({ key: loading ? 'panel.waitingLoad' : 'panel.reloadToRead' });
       else if (reported(result)) show(fromResult(result), result.state === 'error');
@@ -986,6 +996,11 @@
       try { await send({ type: 'ui:showApp', confirmed: true }); desktopLine = { key: 'desktop.unlockThenAutofill' }; }
       catch (error) { desktopLine = problem(error); }
       renderDesktop();
+    }));
+    // Like the widget's link: each click goes to the next question left, then round again.
+    $('panel-left').addEventListener('click', trusted(() => {
+      if ($('panel-left').disabled || !left.length) return;
+      focusField(left[leftCursor++ % left.length]);
     }));
     $('questions-show').addEventListener('click', trusted(() => { if (!$('questions-show').disabled) showQuestions(true); }));
     $('summary-get').addEventListener('click', trusted(() => { if (!$('summary-get').disabled) summarize(true); }));

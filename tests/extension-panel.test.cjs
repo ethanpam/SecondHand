@@ -454,6 +454,44 @@ test('checklist uses plain labels and a trusted row click finds the field', asyn
   assert.equal(complete.get('checklist-summary').textContent, 'Nothing left for you');
 });
 
+test('after Autofill, a link under the status goes to each question left in turn, as the widget’s does', async t => {
+  let checklist = null;
+  const view = await panel(t, { pageState: state => { const next = structuredClone(state); if (checklist) next.page.checklist = structuredClone(checklist); return next; } });
+  const focused = () => view.requests.filter(request => request.type === 'ui:focusField').map(request => request.key);
+  assert.equal(view.get('panel-left').hidden, true, 'nothing is left before Autofill has run');
+  await view.userClick('panel-autofill');
+  // The required question without an answer and the step SecondHand never does; not the optional one.
+  assert.equal(view.get('panel-left').hidden, false);
+  assert.equal(view.get('panel-left').textContent, 'Go to the next of the 2 questions left');
+  view.get('panel-left').click(); await tick();
+  assert.deepEqual(focused(), [], 'a click the page made up goes nowhere');
+  for (let i = 0; i < 3; i++) await view.userClick('panel-left');
+  assert.deepEqual(focused(), ['firstName', 'unverified', 'firstName']);
+  assert.deepEqual(plainRequests(view.requests.findLast(request => request.type === 'ui:focusField')), { type: 'ui:focusField', key: 'firstName', tabId: 7 });
+  // The link follows the page: an answer typed since is no longer left.
+  checklist = structuredClone(view.state.page.checklist);
+  checklist.find(item => item.key === 'firstName').status = 'complete';
+  view.window.document.dispatchEvent(new view.window.Event('visibilitychange')); await settle();
+  assert.equal(view.get('panel-left').textContent, 'Go to the question left');
+  await view.userClick('panel-left');
+  assert.equal(focused().at(-1), 'unverified');
+  checklist.find(item => item.key === 'unverified').status = 'complete';
+  view.window.document.dispatchEvent(new view.window.Event('visibilitychange')); await settle();
+  assert.equal(view.get('panel-left').hidden, true);
+  assert.equal(view.get('checklist-summary').textContent, 'Nothing left for you');
+  // Another site has no checklist: the link goes to what Autofill reported.
+  const site = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: siteDone });
+  assert.equal(site.get('panel-left').hidden, true);
+  await site.userClick('panel-autofill');
+  assert.equal(site.get('panel-left').hidden, false);
+  assert.equal(site.get('panel-left').textContent, 'Go to the next of the 2 questions left');
+  await site.userClick('panel-left');
+  assert.deepEqual(plainRequests(site.requests.findLast(request => request.type === 'ui:focusField')), { type: 'ui:focusField', key: 'f0:sh-4', tabId: SITE.id });
+  const spanish = await panel(t, { language: 'es-ES' });
+  await spanish.userClick('panel-autofill');
+  assert.equal(spanish.get('panel-left').textContent, strings.text('es', 'panel.goToLeft', { count: 2 }));
+});
+
 test('after Autofill, a question whose answer isn’t saved says to type it in Iowa’s form, and one note points to My information', async t => {
   const autofill = { ...doneResult, needYou: ['firstName', 'middleName', 'unverified'], notSaved: ['firstName', 'middleName', 'lastName'] };
   const view = await panel(t, { autofill });
