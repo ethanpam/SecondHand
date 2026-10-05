@@ -112,6 +112,63 @@ test('explicit selected applicant details merge into unsaved draft; encrypted Sa
   assert.equal(view.saves[0].firstName, 'Unsaved first name');
 });
 
+test('applying reviewed OCR names immediately updates the household applicant row without saving or replacing other draft edits', async t => {
+  const view = await renderer(t);
+  view.navigate('profile');
+  view.edit('birthDate', '1985-04-12');
+  view.edit('email', 'household-draft@example.invalid');
+  view.edit('monthlyEarnedIncome', '1450');
+  view.get('add-household-member').click();
+  const self = view.get('household-members').querySelector('[data-self="true"]');
+  const other = view.get('household-members').querySelector('[data-self="false"]');
+  const control = (row, field) => row.querySelector(`[data-member-field="${field}"]`);
+  const details = row => Object.fromEntries([...row.querySelectorAll('[data-member-field]')]
+    .map(input => [input.dataset.memberField, input.value]));
+  for (const [field, value] of Object.entries({ firstName: 'Casey', lastName: 'Fictional', birthDate: '2014-08-20', relationship: 'child', student: 'yes' })) {
+    const input = control(other, field);
+    view.edit(input.id, value);
+    input.dispatchEvent(new view.window.Event('change', { bubbles: true }));
+  }
+  view.edit(control(other, 'grade').id, '7th');
+  const otherBefore = { id: other.dataset.memberId, ...details(other) };
+  const countKeys = ['householdSize', 'householdAdults', 'householdChildren', 'householdSeniors'];
+  const countsBefore = Object.fromEntries(countKeys.map(key => [key, view.get(key).value]));
+  assert.equal(control(self, 'firstName').value, 'Existing');
+  assert.equal(control(self, 'lastName').value, 'Person');
+
+  await view.read();
+  view.field('firstName').click();
+  view.field('lastName').click();
+  view.approve();
+
+  assert.equal(view.get('firstName').value, 'Avery');
+  assert.equal(view.get('lastName').value, 'Example');
+  assert.equal(control(self, 'firstName').value, 'Avery', 'The read-only applicant row must reflect the reviewed name before Save.');
+  assert.equal(control(self, 'lastName').value, 'Example');
+  assert.equal(control(self, 'firstName').readOnly, true);
+  assert.equal(control(self, 'lastName').readOnly, true);
+  assert.equal(control(self, 'birthDate').value, '1985-04-12');
+  assert.deepEqual({ id: other.dataset.memberId, ...details(other) }, otherBefore);
+  assert.deepEqual(Object.fromEntries(countKeys.map(key => [key, view.get(key).value])), countsBefore);
+  assert.equal(view.get('email').value, 'household-draft@example.invalid');
+  assert.equal(view.get('monthlyEarnedIncome').value, '1450');
+  assert.equal(view.get('profile-save-state').textContent, 'Unsaved changes');
+  assert.deepEqual(view.saves, [], 'Applying OCR details must not save the household or profile.');
+
+  view.get('profile-form').dispatchEvent(new view.window.Event('submit', { bubbles: true, cancelable: true }));
+  await tick();
+  assert.equal(view.saves.length, 1);
+  const saved = view.saves[0];
+  assert.equal(saved.firstName, 'Avery');
+  assert.equal(saved.lastName, 'Example');
+  assert.equal(saved.householdMembers[0].firstName, 'Avery');
+  assert.equal(saved.householdMembers[0].lastName, 'Example');
+  assert.equal(saved.householdMembers[0].birthDate, '1985-04-12');
+  assert.deepEqual(saved.householdMembers[1], otherBefore);
+  assert.equal(saved.email, 'household-draft@example.invalid');
+  assert.equal(saved.monthlyEarnedIncome, '1450');
+});
+
 test('existing value is replaced only after explicit selection, correction and applicant confirmation', async t => {
   const view = await renderer(t); await view.read();
   view.field('firstName').click();
