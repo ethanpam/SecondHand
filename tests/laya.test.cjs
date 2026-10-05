@@ -675,6 +675,44 @@ test('nothing is checked or downloaded while Laya is off, and turning it off sto
   assert.equal(hub.fileRequests(NEW).filter(name => name === `${NEW}/model.onnx`).length, 1, 'the update resumed');
 });
 
+test('a restart while offline keeps a partial update download, and the next check that works resumes it', async t => {
+  const hub = await modelHub(t);
+  const shipped = hub.publish(OLD);
+  hub.latest = shipped;
+  const userDataDir = temporary(t, 'secondhand-laya-');
+  const laya = createLaya({ userDataDir, manifest: shipped, updateUrl: hub.updateUrl, runner: stubRunner(), enabled: true });
+  await laya.update();
+  hub.latest = hub.publish(NEW);
+  hub.serve = name => name === `${NEW}/model.onnx.data` ? undefined : false; // never answers
+  const update = laya.update();
+  await until(() => hub.requests.includes(`${NEW}/model.onnx.data`), 'the new weights');
+  await laya.close();
+  await update;
+  const arrived = path.join(userDataDir, 'models/laya', NEW, 'model.onnx');
+  assert.ok(fs.existsSync(arrived), 'part of the update arrived before the app quit');
+
+  const blocked = () => { throw new Error('The network is off in this test.'); };
+  for (const [module, name] of [[http, 'get'], [http, 'request'], [https, 'get'], [https, 'request']]) t.mock.method(module, name, blocked);
+  const runner = stubRunner();
+  const offline = createLaya({ userDataDir, manifest: shipped, updateUrl: hub.updateUrl, runner, enabled: true });
+  await offline.update();
+  const status = await offline.status();
+  assert.equal(status.state, 'ready');
+  assert.deepEqual(status.update, { state: 'error', message: 'Update check failed: The network is off in this test.' });
+  assert.ok(fs.existsSync(arrived), 'a failed check keeps the partial update');
+  await offline.decide(rowState('3'), { correct: DECISION });
+  assert.equal(runner.loads.at(-1), modelPath(userDataDir, OLD), 'the installed model keeps answering');
+  await offline.close();
+
+  t.mock.restoreAll();
+  hub.serve = null;
+  const online = createLaya({ userDataDir, manifest: shipped, updateUrl: hub.updateUrl, runner: stubRunner(), enabled: true });
+  await online.update();
+  assert.equal(installedRevision(userDataDir), NEW);
+  assert.equal(hub.fileRequests(NEW).filter(name => name === `${NEW}/model.onnx`).length, 1, 'the update resumed');
+  assert.deepEqual(stored(userDataDir), [NEW, 'installed.json']);
+});
+
 test('pausing the first download stops it and says so at once, even while the check that starts it runs', async t => {
   const hub = await modelHub(t);
   const shipped = hub.publish(OLD);
