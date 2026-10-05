@@ -641,7 +641,7 @@
       // Never include a page-provided label: it may contain a household member's
       // name or another answer. Unknown controls get one generic attention row.
       manualRemaining += unknown + Number(missingCore) + Number(external) + Number(errors);
-      checklist.push({ key: 'manualReview', label: 'Review unrecognized controls or portal errors', status: 'manual', required: true, fillable: false });
+      checklist.push({ key: 'manualReview', label: 'Check the questions and any Iowa error messages on this page, because something here isn’t what SecondHand expects', status: 'manual', required: true, fillable: false });
     }
     return { requiredRemaining, manualRemaining, checklist };
   }
@@ -842,7 +842,7 @@
         todo: address ? 'SecondHand selects the first suggested home address and saves this step. Review it before final submission.' : 'Review this address step and continue in Iowa’s form yourself.',
         canAdvance: Boolean(address), manualRemaining: address ? 0 : 1,
         checklist: [{ key: 'addressReview', label: 'First suggested home address', status: address ? (address.first.checked ? 'complete' : 'missing') : 'manual', required: true, fillable: false }],
-        reason: address ? 'Next selects Iowa’s first suggested home address and saves this step. Review the selected address before final submission.' : 'Review this address step in Iowa’s form. The expected home suggestions could not be verified, or another address question or error needs attention.' };
+        reason: address ? 'Next selects Iowa’s first suggested home address and saves this step. Review the selected address before final submission.' : 'Check this address step in Iowa’s form yourself. This page doesn’t look the way SecondHand expects, so SecondHand leaves the address to you.' };
     }
     const self = selfDetailsContext(doc, rawUrl);
     if (self) {
@@ -856,7 +856,7 @@
       return { ...result, kind: 'fillable', pageKey: 'iowa-self-details', heading: 'Tell Us More', fields, checklist,
         manualRemaining: checklist.filter(item => item.status === 'manual').length, canAdvance: false,
         todo: 'Review the other questions, then click Save and Continue in Iowa’s form yourself.',
-        reason: 'SecondHand can fill your saved date of birth on this verified self-information page. Review and answer the other questions, then choose Save and Continue directly in Iowa’s form.' };
+        reason: 'SecondHand can fill your saved date of birth on this page. Answer the other questions yourself, then click Save and Continue in Iowa’s form.' };
     }
     const start = startDetailsContext(doc, rawUrl);
     if (start) {
@@ -872,7 +872,7 @@
       return { ...result, kind: 'fillable', pageKey: 'iowa-tell-us-more', heading: 'Tell Us More', fields, checklist, canAdvance: false,
         requiredRemaining: checklist.filter(item => item.status === 'missing').length, manualRemaining: checklist.filter(item => item.status === 'manual').length,
         todo: 'Answer the remaining questions, then click Save and Continue in Iowa’s form yourself.',
-        reason: 'SecondHand can fill the answers you saved in My information on this verified self-information page. Answer the other questions, then choose Save and Continue directly in Iowa’s form.' };
+        reason: 'SecondHand can fill the answers you saved in My information on this page. Answer the other questions yourself, then click Save and Continue in Iowa’s form.' };
     }
     if (headings.includes('tell us more') || rawUrl === `${PORTAL}/applyForBenefits/dynamicQuestions`) return { ...result, pageKey: 'iowa-self-details-unverified', heading: 'Applicant questions', todo: 'Answer any questions on this page yourself, then go to the next page in Iowa’s form.', reason: 'SecondHand doesn’t fill this page. Answer any questions yourself, then go to the next page in Iowa’s form.' };
     const pageId = identifyPage(doc);
@@ -892,7 +892,7 @@
       const next = navigationButton(doc, rawUrl);
       return { ...result, ...issues, kind: 'fillable', pageKey: 'iowa-personal-information', heading: 'Enter Personal Information', fields: scanResult.fields,
         canAdvance: Boolean(next && issues.requiredRemaining === 0 && issues.manualRemaining === 0 && scanResult.ambiguous.length === 0),
-        todo: issues.requiredRemaining || issues.manualRemaining ? 'Complete the missing answers in Iowa’s form. SecondHand will check again before continuing.' : 'SecondHand can save this verified page and continue. Review every answer before final submission.',
+        todo: issues.requiredRemaining || issues.manualRemaining ? 'Complete the missing answers in Iowa’s form. SecondHand will check again before continuing.' : 'SecondHand can save this page and continue. Review every answer before final submission.',
         reason: issues.manualRemaining ? 'Answer the remaining questions and correct any errors in Iowa’s form.' : issues.requiredRemaining ? 'Complete the required applicant fields in Iowa’s form.' : 'Review your answers, then click Save and Continue in Iowa’s form.' };
     }
     if (rawUrl === `${PORTAL}/applyForBenefits/enterPersonalInfo` || headings.includes('enter personal information')) return { ...result, pageKey: 'iowa-personal-unverified', todo: 'Fill in this page yourself, then click Save and Continue in Iowa’s form.', reason: 'This page doesn’t look like the applicant page SecondHand knows, so it fills nothing here.' };

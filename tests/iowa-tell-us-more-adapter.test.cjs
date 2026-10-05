@@ -57,7 +57,7 @@ test('Tell Us More at dynamicQuestionsStart offers every question, and never Sav
   assert.deepEqual(probe.checklist.filter(item => item.fillable).map(item => item.key), FILLS);
   assert.equal(probe.requiredRemaining, 10); assert.equal(probe.manualRemaining, 1);
   assert.equal(probe.todo, 'Answer the remaining questions, then click Save and Continue in Iowa’s form yourself.');
-  assert.equal(probe.reason, 'SecondHand can fill the answers you saved in My information on this verified self-information page. Answer the other questions, then choose Save and Continue directly in Iowa’s form.');
+  assert.equal(probe.reason, 'SecondHand can fill the answers you saved in My information on this page. Answer the other questions yourself, then click Save and Continue in Iowa’s form.');
   assert.doesNotMatch(JSON.stringify(probe), /Avery|Example|answerSets|question0/);
   assert.equal(adapter.captureNavigation(doc, fixture.URL), null);
   let clicked = 0; byId(doc, 'dqButtonId309').addEventListener('click', () => clicked++);

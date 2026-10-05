@@ -6,6 +6,10 @@ const path = require('node:path');
 const { JSDOM } = require('jsdom');
 const strings = require('../extension/strings.js');
 const adapter = require('../extension/iowa-adapter.js');
+const personal = require('./fixtures/iowa-personal-information.cjs');
+const selfDetails = require('./fixtures/iowa-self-details.cjs');
+const tellUsMore = require('./fixtures/iowa-tell-us-more.cjs');
+const syntheticProfile = require('./fixtures/applicant-profile.json');
 
 const source = file => fs.readFileSync(path.join(__dirname, '../extension', file), 'utf8');
 const { en, es } = strings.catalogs;
@@ -168,16 +172,73 @@ test('on an applicant page that does not look as expected, SecondHand says plain
   assert.equal(en['iowa.personalUnverifiedTodo'], 'Fill in this page yourself, then click Save and Continue in Iowa’s form.');
 });
 
+// A fixture page with every element given an on-screen box, as the adapter sees it in Chrome.
+function onScreen(html, url) {
+  const doc = new JSDOM(`<!doctype html><main>${html}</main>`, { url, pretendToBeVisual: true }).window.document;
+  const { Element } = doc.defaultView;
+  Element.prototype.getBoundingClientRect = () => ({ left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 });
+  Element.prototype.getClientRects = function () { return [this.getBoundingClientRect()]; };
+  return doc;
+}
+const saveButton = doc => doc.querySelector('#dqButtonId309').textContent.trim();
+
+test('on Tell Us More, SecondHand says which saved answers it can fill and leaves Save and Continue to the applicant', () => {
+  const self = onScreen(selfDetails.html, selfDetails.URL), start = onScreen(tellUsMore.html, tellUsMore.URL);
+  assert.deepEqual(keyed(adapter.probePage(self, selfDetails.URL)), { pageKey: 'iowa-self-details', todo: 'iowa.selfDetailsTodo', reason: 'iowa.selfDetailsReason' });
+  assert.deepEqual(keyed(adapter.probePage(start, tellUsMore.URL)), { pageKey: 'iowa-tell-us-more', todo: 'iowa.startDetailsTodo', reason: 'iowa.startDetailsReason' });
+  // SecondHand never clicks on either page, and the button the sentences name is the one Iowa shows.
+  assert.equal(adapter.probePage(self, selfDetails.URL).canAdvance, false);
+  assert.equal(adapter.probePage(start, tellUsMore.URL).canAdvance, false);
+  assert.equal(saveButton(self), 'Save and Continue');
+  assert.equal(saveButton(start), 'Save and Continue');
+  assert.equal(en['iowa.selfDetailsReason'], 'SecondHand can fill your saved date of birth on this page. Answer the other questions yourself, then click Save and Continue in Iowa’s form.');
+  assert.equal(en['iowa.startDetailsReason'], 'SecondHand can fill the answers you saved in My information on this page. Answer the other questions yourself, then click Save and Continue in Iowa’s form.');
+});
+
+test('on Select Address when SecondHand selects nothing, it says so without claiming an address', () => {
+  const page = probe('/applyForBenefits/addressValidation', '<h2>Select Address</h2>');
+  assert.deepEqual(keyed(page), { pageKey: 'iowa-select-address', todo: 'iowa.addressManualTodo', reason: 'iowa.addressManualReason' });
+  assert.equal(page.kind, 'manual'); assert.equal(page.canAdvance, false);
+  // Any page that doesn't match what SecondHand expects lands here, not only one without suggestions.
+  assert.equal(en['iowa.addressManualReason'], 'Check this address step in Iowa’s form yourself. This page doesn’t look the way SecondHand expects, so SecondHand leaves the address to you.');
+  assert.doesNotMatch(en['iowa.addressManualReason'], /SecondHand (selects|selected|chooses|chose|picks|picked|fills|filled)\b/);
+});
+
+test('on Enter Personal Information, SecondHand says plainly what needs the applicant and that it saves and continues', () => {
+  const url = `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo`;
+  const doc = onScreen(personal.html, url);
+  personal.attachConditionalHandlers(doc);
+  for (let pass = 0; pass < 3; pass++) adapter.fill(doc, url, adapter.scan(doc, url).bindings, syntheticProfile);
+  const ready = adapter.probePage(doc, url);
+  assert.equal(ready.canAdvance, true);
+  assert.equal(strings.describeEnglish(ready.todo).key, 'iowa.canSaveContinue');
+  assert.equal(en['iowa.canSaveContinue'], 'SecondHand can save this page and continue. Review every answer before final submission.');
+  // One row covers a question SecondHand doesn't know, a question it expects that is gone, and an Iowa error message.
+  const row = page => page.checklist.filter(item => item.key === 'manualReview').map(item => strings.describeEnglish(item.label).key);
+  const unknown = onScreen(personal.html, url);
+  unknown.querySelector('form').append(Object.assign(unknown.createElement('input'), { id: 'synthetic' }));
+  const missing = onScreen(personal.html, url);
+  missing.querySelector('#lastName').remove();
+  const error = onScreen(personal.html, url);
+  error.querySelector('form').append(Object.assign(error.createElement('div'), { className: 'error', textContent: 'Synthetic error' }));
+  for (const page of [unknown, missing, error]) assert.deepEqual(row(adapter.probePage(page, url)), ['iowa.manualReview']);
+  assert.equal(en['iowa.manualReview'], 'Check the questions and any Iowa error messages on this page, because something here isn’t what SecondHand expects');
+});
+
 test('no Iowa English says "verified", "controls", "context", or "facts"', () => {
-  // Wording on pages SecondHand does fill, left for its own issue. Fixing one means taking it off this list.
-  const later = ['iowa.addressManualReason', 'iowa.canSaveContinue', 'iowa.manualReview', 'iowa.selfDetailsReason', 'iowa.startDetailsReason'];
   const jargon = /verified|controls|context|facts/i;
   const found = Object.entries(en).filter(([key, value]) => key.startsWith('iowa.') && jargon.test(typeof value === 'string' ? value : `${value.one} ${value.other}`))
     .map(([key]) => key);
-  assert.deepEqual(found.filter(key => !later.includes(key)), []);
-  assert.deepEqual(later.filter(key => !found.includes(key)), [], 'a key that no longer has the words comes off the list');
-  for (const key of ['iowa.manualStep', 'iowa.selfUnverifiedTodo', 'iowa.selfUnverifiedReason', 'iowa.personalUnverifiedTodo', 'iowa.personalUnverifiedReason']) {
-    assert.doesNotMatch(en[key], jargon, key);
+  assert.deepEqual(found, []);
+});
+
+test('in every language, the lines on the Iowa pages SecondHand fills no longer say the page was verified', () => {
+  // French "Vérifiez" means "check" and stays.
+  const verified = { es: /verific/i, vi: /xác minh/i, zh: /核实/, fr: /vérifié/i, ar: /التحقق/ };
+  for (const [code, pattern] of Object.entries(verified)) {
+    for (const key of ['iowa.manualReview', 'iowa.addressManualReason', 'iowa.selfDetailsReason', 'iowa.startDetailsReason', 'iowa.canSaveContinue']) {
+      assert.doesNotMatch(strings.catalogs[code][key], pattern, `${code} ${key}`);
+    }
   }
 });
 
