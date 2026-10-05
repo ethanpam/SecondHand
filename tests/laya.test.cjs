@@ -364,6 +364,35 @@ test('non-finite scores are refused, not answered, and the next request with fin
   }
 });
 
+test('turning Laya off during a load leaves nothing loaded: a model process that hasn’t started never starts, and one loading is released', async t => {
+  const runner = stubRunner();
+  const laya = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: NO_MODEL, runner, enabled: true, timeoutMs: 60000 });
+  const early = laya.decide(rowState('3'), { correct: DECISION }).catch(error => error);
+  await laya.setEnabled(false); // while the model's files are read, before its process starts
+  let refused = await early;
+  assert.equal(refused.code, LAYA_NOT_READY);
+  assert.match(refused.message, /turned off while the model was loading/);
+  assert.equal(runner.loads.length, 0, 'no model process was started');
+
+  let open;
+  const gate = new Promise(resolve => { open = resolve; });
+  const slow = stubRunner({ load: () => gate });
+  const loading = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: NO_MODEL, runner: slow, enabled: true, timeoutMs: 60000 });
+  const decision = loading.decide(rowState('3'), { correct: DECISION }).catch(error => error);
+  await settles(() => slow.loads.length === 1, 'the model process to start loading');
+  await loading.setEnabled(false);
+  open();
+  refused = await decision;
+  assert.equal(refused.code, LAYA_NOT_READY);
+  assert.match(refused.message, /turned off while the model was loading/);
+  assert.equal(slow.releases, 1, 'the model that finished loading was released');
+  assert.equal((await loading.status()).state, 'off');
+  await loading.setEnabled(true);
+  assert.equal((await loading.status()).state, 'ready', 'no load error is left behind');
+  assert.equal((await loading.decide(rowState('3'), { correct: DECISION })).answers.correct.type, 'noul');
+  assert.equal(slow.loads.length, 2, 'the next request loads the model again');
+});
+
 test('download, then decisions work with the network off; tampered files are refused before use', async t => {
   const files = modelFiles();
   const server = await localServer(t, files);
