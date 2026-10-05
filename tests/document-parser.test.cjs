@@ -46,6 +46,16 @@ function fixture() {
 const byId = result => Object.fromEntries(result.fields.map(field => [field.id, field.value]));
 const profile = result => Object.fromEntries(result.fields.filter(field => field.profileKey).map(field => [field.profileKey, field.value]));
 
+test('a title split by sparse segmentation still identifies the same printed form', () => {
+  const document = fixture();
+  document.pages[0].alternative.text = 'Form 1040-SR U.S. I\n\nncome Tax Return for Seniors 2024';
+  const result = analyzeDocument(document);
+  assert.equal(result.type, '1040-sr');
+  assert.equal(byId(result).taxLine1a, '12345');
+  assert.equal(byId(result).applicantSsn, '000-11-9999');
+  assert.equal(result.taxYear, '2024');
+});
+
 test('taxpayer cells remain distinct from spouse and dependents, with review-only annual amounts', () => {
   const result = analyzeDocument(fixture());
   assert.equal(result.type, '1040-sr');

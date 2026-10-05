@@ -1,13 +1,13 @@
 # Document OCR code walkthrough
 
-This guide explains the additions in PR #78 by file and function. Related lines are grouped so imports, validation, cleanup, and tests can be reviewed together. Links point to the source in this branch; function names remain useful if later edits move the line numbers. For the user-facing workflow, see [Read a document](document-ocr.md).
+This guide explains the local document reader and its later statement-parsing additions by file and function. Related lines are grouped so imports, validation, cleanup, and tests can be reviewed together. Links point to the source in this branch; function names remain useful if later edits move the line numbers. For the user-facing workflow, see [Read a document](document-ocr.md).
 
 ## Follow one document through the app
 
 1. **Choose:** the Documents screen generates a request UUID and calls the desktop preload. Main opens the native file picker; the UI never supplies a filesystem path.
 2. **Read:** the service reads the selected file into memory, checks cancellation/unlock state, and starts a fresh hidden OCR window.
 3. **Recognize:** that sandboxed window renders the PDF or image and runs two local English OCR passes. It returns text, confidence, and word positions.
-4. **Interpret:** the parser proposes fields only for a recognized tax-return layout. This is a set of conservative rules, not Laya or a remote AI service.
+4. **Interpret:** the parser proposes fields only for a recognized tax-return or statement layout. This is a set of conservative rules, not Laya or a remote AI service.
 5. **Review:** suggestions start unchecked. The user compares them with the original and current profile draft, corrects values, and confirms they belong to the applicant.
 6. **Apply, then save:** selected values enter the unsaved profile draft. The existing **Save my information** action validates and encrypts the profile. Reading or applying alone never saves it.
 
@@ -51,13 +51,11 @@ This guide explains the additions in PR #78 by file and function. Related lines 
 
 ## Turning OCR into review candidates
 
-The helpers in [document-parser.cjs](../shared/document-parser.cjs) are pure: they return analysis and never access the vault.
+The pure helpers in [document-layout.cjs](../shared/document-layout.cjs) validate OCR word geometry, remove tiny split marks, group rows, match printed labels, and read bounded cells. They do not access the vault or repair letters into digits.
 
-- [`wordRows`](../shared/document-parser.cjs#L14-L52) validates positioned words, drops tiny marks that OCR split off inside another word (such as the dot of an i), and groups the rest into rows using their heights and vertical centers.
-- [`matches` and `afterLabel`](../shared/document-parser.cjs#L54-L83) locate printed labels and read only one bounded value row between known headers. A blank primary cell does not trigger a search farther down into a spouse or dependent's details.
-- [`recognizedType` and `money`](../shared/document-parser.cjs#L85-L96) identify supported 1040/1040-SR text and accept strict numeric amount syntax. They do not repair letters into digits or guess zeros.
-- [`parseTaxPage`](../shared/document-parser.cjs#L98-L222) uses unique label anchors and column positions to separate primary names/SSNs, spouse fields, domestic address cells, and historical tax lines. Its `add` helper validates eligible profile values with the existing schema. Spouse fields and amounts have no `profileKey`, making them review-only. Ambiguous foreign addresses/years produce warnings rather than guesses.
-- [`analyzeDocument`](../shared/document-parser.cjs#L225-L264) requires exactly one supported taxpayer header. Multiple returns or unknown layouts produce no structured suggestions. Amounts and SSNs survive only when both segmentation passes produce the same value. Other primary name/address suggestions still require user review. Confidence is recognition metadata, not a probability that an answer is correct.
+[document-parser.cjs](../shared/document-parser.cjs) retains the 1040/1040-SR layout parser and dispatches to [document-w2.cjs](../shared/document-w2.cjs), [document-ssa1099.cjs](../shared/document-ssa1099.cjs), and [document-1099nec.cjs](../shared/document-1099nec.cjs). Each parser locates printed anchors and keeps payer/employer/spouse details separate from applicant candidates. Missing or duplicate anchors fail closed. Combined names and ambiguous identifiers stay review-only; annual amounts have no `profileKey`.
+
+`analyzeDocument` requires exactly one recognizable form across the selected PDF. Mixed or repeated forms produce no structured suggestions. Amounts and identifiers survive only when both segmentation passes identify the same form and produce the same value and mapping. Confidence and agreement are recognition metadata, not proof of correctness. Every candidate keeps its printed `sourceLabel` separately from its display label for local field review.
 
 ## Review UI and the save boundary
 
@@ -85,10 +83,12 @@ The document functions in [renderer/app.js](../renderer/app.js#L274-L455) implem
 | [desktop-ocr.test.cjs](../tests/desktop-ocr.test.cjs) | Invalid files/output, asset URL escape, oversized reads, lock/cancel races, stale cancellation, path/text leakage through errors, unsafe progress payloads. |
 | [desktop-ocr-assets.test.cjs](../tests/desktop-ocr-assets.test.cjs) | Malformed manifest shapes fail before window creation; missing/corrupt files return `ASSETS`, cleanup runs, queued worker messages stay ignored, and a later asset failure cannot override cancellation. The protocol/filesystem are real; Electron surfaces are mocked to control timing. |
 | [desktop-ocr-main.test.cjs](../tests/desktop-ocr-main.test.cjs) | Requests from the wrong frame, caller-supplied path arguments, locked reads, or missing lock/quit cancellation. |
+| [document-w2.test.cjs](../tests/document-w2.test.cjs), [document-ssa1099.test.cjs](../tests/document-ssa1099.test.cjs), [document-1099nec.test.cjs](../tests/document-1099nec.test.cjs) | Statement box boundaries, employer/payer separation, combined names, TIN type ambiguity, conflicting years, scale/translation, and no identifier or amount fallback. |
+| [document-cross-pass.test.cjs](../tests/document-cross-pass.test.cjs) | Conflicting form identity across pages/passes, alternate-only additional forms, and disagreements about printed statement years. |
 | [document-parser.test.cjs](../tests/document-parser.test.cjs) | Primary/spouse confusion, blank-cell fallback, conflicting amounts/SSNs, shifted geometry, foreign addresses, multiple returns, and fabricated fields on unknown documents. Values/layouts vary instead of hardcoding the sample's answers. |
 | [renderer-documents.test.cjs](../tests/renderer-documents.test.cjs) | Auto-saving, silent draft replacement, missing confirmation, stale async results, unsafe HTML, and text surviving discard/navigation/lock. Mock promises deliberately control race order. |
 | [`npm run test:ocr`](../scripts/smoke-ocr.cjs) | Runs the real Electron/PDF.js/Tesseract engine on generated synthetic data, including real recognition cancellation, 13-page rejection, and missing/corrupt assets in a temporary copy. `--input tests/fixtures/ocr/synthetic-1040sr.pdf` checks the supplied scan. |
-| [`npm run test:ocr:ui`](../scripts/smoke-document-ui.cjs) | Runs real OCR through the desktop review, draft merge, encrypted Save, and lock/unlock. Only the native picker result is stubbed. A temporary vault and disabled Laya avoid touching normal data or starting model downloads. Screenshots/reports default to ignored `artifacts/ocr`. |
+| [`npm run test:ocr:ui`](../scripts/smoke-document-ui.cjs) | Runs real OCR through the desktop review, draft merge, encrypted Save, and lock/unlock. Only the native picker result is stubbed. A temporary vault and disabled Laya avoid touching normal data or starting model downloads. Use `--case w2`, `--case ssa1099`, or `--case 1099nec` for the additional synthetic PDFs. Screenshots/reports default to ignored `artifacts/ocr/<case>`. |
 
 The UI smoke also accepts `--executable /absolute/path/to/app` to launch an already built application and `--artifacts directory` to separate its screenshots/report. It asserts the requested packaged/development mode and isolated user-data path before the test. Packaged mode uses the existing explicit test-storage environment variables; it does not bypass vault or OCR validation. This tests the packaged runtime/resources rather than substituting source assets. Platform execution results are recorded separately in the [QA scope](document-ocr.md#development-and-qa).
 

@@ -16,7 +16,7 @@ This feature is in the source branch. These instructions do not establish that i
 
 ## What it can recognize
 
-For a recognizable Form 1040 or 1040-SR layout, the parser uses printed labels and text positions to propose the primary taxpayer's name, Social Security number, and home address, including an apartment when detected. These are suggestions, not verified identity or proof of a current address. Missing or ambiguous fields may remain blank. Two OCR passes use different page-segmentation modes on the same image. Social Security numbers and tax amounts are proposed only when both passes agree; a missing or different result is omitted for manual review. Agreement is not proof of accuracy, because both passes use the same recognition model.
+For a recognizable Form 1040 or 1040-SR layout, the parser uses printed labels and text positions to propose the primary taxpayer's name, Social Security number, and home address, including an apartment when detected. These are suggestions, not verified identity or proof of a current address. Missing or ambiguous fields may remain blank. Two OCR passes use different page-segmentation modes on the same image. Social Security numbers, other taxpayer identifiers, and tax amounts are proposed only when both passes agree; a missing or different result is omitted for manual review. Agreement is not proof of accuracy, because both passes use the same recognition model.
 
 The review can also identify the tax year and these historical amounts:
 
@@ -29,6 +29,16 @@ The review can also identify the tax year and these historical amounts:
 | 4a / 4b | IRA distributions / taxable amount |
 | 5a / 5b | Pensions and annuities / taxable amount |
 | 6a / 6b | Social Security benefits / taxable amount |
+
+Supported statement layouts also use printed box labels and positions:
+
+| Document | Applicant details offered for review | Historical amounts (review only) |
+| --- | --- | --- |
+| W-2 | Employee SSN and domestic address; name parts only when separate printed columns are populated | Boxes 1–6: wages, federal withholding, Social Security wages/tax, Medicare wages/tax |
+| SSA-1099 | Beneficiary SSN from Box 2 and domestic address from Box 7; combined name stays review-only | Boxes 3–6: benefits paid, repaid, net benefits, federal withholding |
+| 1099-NEC | Recipient domestic address; combined name and recipient TIN stay review-only | Recognized compensation, tips, overtime, withholding, and state-income boxes in the supplied 2026 layout |
+
+Employer and payer details never substitute for recipient details. The SSA claim number is not an SSN fallback. A 1099-NEC recipient TIN can identify a person or business, so it is never mapped to the profile's SSN. Combined full names are not guessed into first/last names. Conflicting printed statement years produce a warning and no single tax year. Multiple recognized forms in one PDF produce no structured suggestions; read each document separately.
 
 Those amounts and the tax year are for review only. A joint return may combine two people's income, and an earlier tax year does not establish current income. SecondHand does not divide annual amounts by twelve, add overlapping tax lines together, or use them to answer benefits questions automatically.
 
@@ -48,7 +58,7 @@ Extracted candidates now receive [local field review](field-review.md): exact fo
 - Rendered OCR pages are limited to **16 megapixels**. PNG/JPEG images whose headers report more than **40 megapixels** are rejected. An image dimension may not exceed **20,000 pixels**.
 - Password-protected PDFs must be unlocked before reading.
 
-PDF.js renders PDFs and Tesseract.js recognizes image text using its bundled WebAssembly runtime and English language data. The app supplies those files locally to a hidden, sandboxed Electron window in a temporary browser session. That session blocks network access and requests outside its fixed local asset set. No installed Python, Poppler, Tesseract executable, or online OCR service is required on Windows or macOS. PDF rendering targets at least a 2,600-pixel long edge or 300 DPI, subject to the pixel cap. The passes use automatic and sparse-text segmentation (PSM 3 and PSM 11); they do not repair or guess missing digits.
+PDF.js renders PDFs, including saved filled-form appearances, and Tesseract.js recognizes image text using its bundled WebAssembly runtime and English language data. The app supplies those files locally to a hidden, sandboxed Electron window in a temporary browser session. That session blocks network access and requests outside its fixed local asset set. No installed Python, Poppler, Tesseract executable, or online OCR service is required on Windows or macOS. PDF rendering targets at least a 2,600-pixel long edge or 300 DPI, subject to the pixel cap. PDF scripts and interactive annotation layers are not used, and XFA rendering stays disabled; XFA-only forms may require a flattened copy. The passes use automatic and sparse-text segmentation (PSM 3 and PSM 11); they do not repair or guess missing digits.
 
 OCR assets are bundled at build time, about 29 MiB in the current bundle. This is separate from [Laya](../README.md#local-ai-with-laya), whose optional local inference model has its own download and update behavior. Reading a document does not invoke Laya.
 
@@ -67,18 +77,31 @@ npm ci
 npm run test:ocr
 npm run test:ocr -- --input tests/fixtures/ocr/synthetic-1040sr.pdf
 npm run test:ocr:ui
+node scripts/smoke-document-ui.cjs --case w2
+node scripts/smoke-document-ui.cjs --case ssa1099
+node scripts/smoke-document-ui.cjs --case 1099nec
 ```
 
 The default smoke command runs the real Electron OCR engine on a generated synthetic PNG, then checks actual cancellation, rejection of a 13-page PDF, and missing/corrupted bundled files. Damaged reader files show a reinstall message; malformed manifests fail before a worker opens. These checks use temporary copies and leave the real bundle untouched. The command with `--input` reads the supplied one-page **synthetic** 2024 Form 1040-SR scan through the same bundled engine and parser. The fixture is marked as test data, not for filing; its [provenance](../tests/fixtures/ocr/README.md) is recorded alongside it. Neither check starts the applicant vault or Laya, or sends anything to a government portal.
 
-`test:ocr:ui` exercises the desktop Documents view with that PDF and a temporary synthetic vault, with Laya disabled. Only the native file-picker response is stubbed. PDF rendering, OCR, parsing, review selection, draft merging, encrypted saving, and lock/unlock are real. It checks that reading and applying do not auto-save, unrelated draft edits survive, uncertain SSNs are omitted, and historical amounts cannot enter monthly income. Screenshots and a report are written to the ignored `artifacts/ocr/` folder.
+`test:ocr:ui` exercises the desktop Documents view with that PDF and a temporary synthetic vault, with Laya disabled. Only the native file-picker response is stubbed. PDF rendering, OCR, parsing, review selection, draft merging, encrypted saving, and lock/unlock are real. It checks that reading and applying do not auto-save, unrelated draft edits survive, uncertain SSNs are omitted, and historical amounts cannot enter monthly income. Screenshots and a report are written to the ignored `artifacts/ocr/<case>/` folder unless `--artifacts` chooses another directory.
 
 To test an installed or mounted package, run `node scripts/smoke-document-ui.cjs --executable /absolute/path/to/secondHand.app/Contents/MacOS/secondHand --artifacts artifacts/ocr-packaged` (use the app executable path on Windows). This opts the packaged app into its existing isolated test-storage mode. The harness verifies the storage path and packaged mode, records the runtime architecture, and never uses the normal applicant vault.
 
-Both Mac DMGs have been built locally, mounted read-only, and tested through the complete packaged OCR/review/encrypted-save/lock/unlock workflow with the synthetic PDF. Each package's 217 bundled OCR assets passed hash checks, and its OCR code matched source. The Apple silicon build ran natively; the Intel build ran as `darwin/x64` under Rosetta on Apple silicon, so physical Intel hardware remains untested. Windows execution remains unverified: this test machine has no Windows runtime or .NET Framework native-host compiler. The Mac builds retain the existing unsigned, non-notarized pilot packaging. No CI workflow or public release is created by these commands.
+The earlier 1040-only Mac DMGs were built locally, mounted read-only, and tested through the complete packaged OCR/review/encrypted-save/lock/unlock workflow with the synthetic PDF. Those earlier packages' 217 bundled OCR assets passed hash checks, and their OCR code matched source at that time. The new statement parsers and field-review changes require a new installer build; those earlier package tests do not validate the new source. The Apple silicon build ran natively; the Intel build ran as `darwin/x64` under Rosetta on Apple silicon, so physical Intel hardware remains untested. Windows execution remains unverified: this test machine has no Windows runtime or .NET Framework native-host compiler. The Mac builds retain the existing unsigned, non-notarized pilot packaging. No CI workflow or public release is created by these commands.
 
 On the supplied PDF, the current result proposes seven profile details: first name, last name, street, apartment, city, state, and ZIP. The middle initial and SSN are omitted. Only the agreeing historical amounts for line 1a (68,450) and line 2b (460) are proposed, for review only; the other amounts are omitted because the passes do not read them consistently. This is a deliberately partial result, not flawless extraction.
 
-The synthetic sample is useful for detecting primary/spouse/dependent confusion and the two amount columns. It is not evidence of accuracy across all tax returns, document types, scan qualities, languages, or installed Windows/macOS combinations. Parser unit tests should cover missing anchors, changed values, ambiguous identity, column boundaries, and blank amounts rather than treating the sample's exact values as parsing rules.
+The three new document cases also passed the complete desktop OCR/review/encrypted-save/lock/unlock harness on macOS arm64:
+
+| Synthetic case | Observed result |
+| --- | --- |
+| W-2 | Four selectable address fields plus a flagged test SSN; six historical amounts and the combined name are review-only. The street retains its printed apartment text. |
+| SSA-1099 | Five selectable address fields plus a flagged test SSN; four historical amounts and the combined name are review-only. The conflicting 2018/2019 years stay unresolved. |
+| 1099-NEC | Five selectable address fields; five historical amounts and the combined name are review-only. The disagreeing recipient TIN and state amounts are omitted; compensation carries a low-confidence warning. |
+
+The UI scenarios leave test SSNs unselected and save only reviewed address fields. These are development-app checks, not new installer or Windows execution results.
+
+The 1040-SR synthetic sample is useful for detecting primary/spouse/dependent confusion and the two amount columns. Three additional user-supplied synthetic PDFs cover a 2025 W-2, a 2026 1099-NEC, and a filled SSA-1099 with conflicting 2018/2019 years. The SSA file exercises saved AcroForm appearances; skipping annotations would lose its filled values. On these samples, combined names remain review-only. The W-2 and SSA test SSN starts with an invalid group and must be flagged by field review. The NEC identifier is omitted when OCR passes disagree. None of the samples supplies current monthly-income answers. It is not evidence of accuracy across all tax returns, document types, scan qualities, languages, or installed Windows/macOS combinations. Parser unit tests should cover missing anchors, changed values, ambiguous identity, column boundaries, and blank amounts rather than treating the sample's exact values as parsing rules.
 
 Keep real documents, OCR text, Social Security numbers, and document screenshots out of tests, commits, logs, and issues. Use synthetic fixtures when reporting a parsing problem.

@@ -9,7 +9,7 @@ Results appear beside the relevant controls:
 - **Check source**: compare this detail with the original document or the applicant's current circumstances.
 - **Needs review**: a format issue, contradictory answer, low-confidence reading, or conflicting draft value needs attention.
 
-Checks include profile choices, dates and household age counts, email/phone/state/ZIP formats, money formats, and Social Security number structure. The SSN checks use [SSA's invalid-number rules](https://www.ssa.gov/employer/randomizationfaqs.html); they cannot establish that a number was issued or belongs to the applicant. Unfamiliar names are not treated as invalid just for being unfamiliar. Historical tax amounts retain their review-only role and are never divided by twelve or copied into current income.
+Checks include profile choices, dates and household age counts, email/phone/state/ZIP formats, money formats, and Social Security number structure. The SSN checks use [SSA's invalid-number rules](https://www.ssa.gov/employer/randomizationfaqs.html); they cannot establish that a number was issued or belongs to the applicant. Unfamiliar names are not treated as invalid just for being unfamiliar. Historical amounts from supported 1040/1040-SR, W-2, SSA-1099, and 1099-NEC layouts retain their review-only role and are never divided by twelve or copied into current income.
 
 ## Optional Laya feedback
 
