@@ -134,8 +134,8 @@ export default function ChromeExtensionGuide() {
             off without it. Your saved information stays in the app.
           </p>
           <p>
-            If you installed version 0.4.0, its extension can’t update itself,
-            so do this once by hand. Open the app’s{' '}
+            If you installed version 0.4.0 or earlier, its extension can’t
+            update itself, so do this once by hand. Open the app’s{' '}
             <strong>Chrome extension</strong> page and click{' '}
             <strong>Refresh extension files</strong>. Then click the reload icon
             on SecondHand’s card at <code>chrome://extensions</code>, and reload

@@ -370,10 +370,11 @@ export function Home() {
                         extension’s updated permissions.
                       </p>
                       <p>
-                        If you installed version 0.4.0, its extension can’t
-                        update itself, so do this once by hand. Install the new
-                        app, choose <strong>Refresh extension files</strong>,
-                        then click Reload for SecondHand on{' '}
+                        If you installed version 0.4.0 or earlier, its extension
+                        can’t update itself, so do this once by hand. Install
+                        the new app, choose{' '}
+                        <strong>Refresh extension files</strong>, then click
+                        Reload for SecondHand on{' '}
                         <code>chrome://extensions</code>. Reload your Iowa tab
                         too. Use Chrome 116 or newer. Then click Autofill on
                         Iowa’s applicant page. Later updates are automatic.
