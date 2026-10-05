@@ -99,10 +99,20 @@ export function Home() {
               A browser side panel tracks the applicant page with completion
               checkmarks and missing-field reminders. With your approval, it
               fills saved applicant details, address and mailing information,
-              and your explicit program choices. It selects Save and Continue
-              when required answers are complete, then checks the next step.
-              Later navigation and questions the helper cannot recognize stay
-              manual.
+              and your explicit program choices, then selects Save and Continue
+              when required answers are complete. On the home-address page,
+              when SecondHand recognizes it, it selects Iowa’s first suggested
+              home address and continues, so review that address before you
+              submit. It answers Iowa’s Tell Us More questions only from answers
+              you saved in My information. If you turn on Laya, SecondHand’s AI
+              on this computer, it fills more questions and marks them as
+              guesses to check. It moves past information-only screens for you;
+              on every other page, you choose when to move on. The side panel
+              works in English, Spanish, Vietnamese, Chinese, French and Arabic.
+              On Iowa’s information-only screens, it can list what the screen
+              says and show its words in your language, using Chrome’s built-in
+              summarizer and translator on this computer, when that Chrome has
+              them.
             </p>
           </div>
 
