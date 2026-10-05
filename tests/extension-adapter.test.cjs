@@ -484,7 +484,7 @@ test('pages that need the applicant carry a plain instruction', () => {
   const address = adapter.probePage(page('<h1>Select Address</h1>'), URL);
   assert.equal(address.todo, 'Review this address step and continue in Iowa’s form yourself.');
   const applicant = adapter.probePage(fullPage(), URL);
-  assert.match(applicant.todo, /Complete the missing answers/);
+  assert.match(applicant.todo, /Answer what is left in Iowa’s form\. When the page is complete, SecondHand goes to the next one\./);
   const unknown = adapter.probePage(page('<h1>Household Members</h1><input id="member" name="member">'), `${adapter.PORTAL}/applyForBenefits/householdMembers`);
   assert.equal(unknown.kind, 'manual');
   assert.equal(unknown.todo, undefined);

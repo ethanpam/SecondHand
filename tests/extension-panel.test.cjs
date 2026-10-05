@@ -1151,9 +1151,9 @@ test('with Spanish as the browser language, the widget shows none of SecondHand�
 
 test('results the worker names by key show in Spanish in the widget and the side panel; a bare message shows as sent', async t => {
   const iowa = { state: 'done', filled: 3, needYou: ['firstName', 'lastName'], pageKey: 'iowa-personal-information',
-    message: 'Filled 3 · 2 left for you. Complete the missing answers in Iowa’s form. SecondHand will check again before continuing.',
+    message: 'Filled 3 · 2 left for you. Answer what is left in Iowa’s form. When the page is complete, SecondHand goes to the next one.',
     messageKey: 'result.thenTodo', messageParams: { summary: { key: 'result.filledNeedYou', params: { count: 3, needYou: 2 } }, todo: { key: 'iowa.missingAnswers', params: {} } },
-    todo: 'Complete the missing answers in Iowa’s form. SecondHand will check again before continuing.', todoKey: 'iowa.missingAnswers', todoParams: {} };
+    todo: 'Answer what is left in Iowa’s form. When the page is complete, SecondHand goes to the next one.', todoKey: 'iowa.missingAnswers', todoParams: {} };
   const widget = await panel(t, { launcher: true, language: 'es-ES', autofill: iowa });
   await widget.userClick('autofill');
   assert.equal(widget.get('widget-text').textContent, `${strings.text('es', 'widget.filled', { count: 3 })} · ${spanish('iowa.missingAnswers')}`);
