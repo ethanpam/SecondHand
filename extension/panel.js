@@ -327,7 +327,7 @@
     let desktopRun = 0;
     const OPEN_CHECKS = 20;
     const OPEN_CHECK_MS = 1000;
-    // Whether Laya, the desktop's local AI, is ready: shown only while the desktop app answers.
+    // Why Laya, the desktop's local AI, isn't guessing: said only on a site that is on, where it would.
     let layaLine = null;
     // SecondHand updating itself (#85): the steps to do it by hand when the worker can't, as it last
     // said, and whether this is the first side panel since an update.
@@ -336,7 +336,7 @@
     const UPDATE_STEPS = { failed: 'panel.updateFailed', elsewhere: 'panel.updateElsewhere' };
     // The build the side panel last ran, in this extension's own storage (as the language choice is).
     const BUILD_KEY = 'secondhand.build';
-    const LAYA_LINES = { ready: 'desktop.layaReady', off: 'desktop.layaOff', downloading: 'desktop.layaDownloading',
+    const LAYA_LINES = { off: 'desktop.layaOff', downloading: 'desktop.layaDownloading',
       'not-downloaded': 'desktop.layaNotReady', error: 'desktop.layaNotReady', unavailable: 'desktop.layaNotReady' };
     // The question list for the page on screen: the worker's items, and Chrome's translations of their words.
     let questions = null;
@@ -373,8 +373,6 @@
       $('desktop-status').textContent = desktopLine ? words(desktopLine) : '';
       $('desktop-action').hidden = !desktopAction;
       $('desktop-action').textContent = desktopAction ? t(ACTIONS[desktopAction]) : '';
-      $('laya-status').hidden = !layaLine;
-      $('laya-status').textContent = layaLine ? words(layaLine) : '';
       const note = updateSteps ? { key: updateSteps } : updated ? { key: 'panel.updated' } : null;
       $('update-note').hidden = !note;
       $('update-note').textContent = note ? words(note) : '';
@@ -411,6 +409,10 @@
       $('all-sites-disable').hidden = allSites !== true || stopped;
       $('all-sites-disable').disabled = working;
       $('panel-autofill').hidden = off;
+      // Iowa's form is filled by its own rules: Laya only guesses on a site that is on.
+      const laya = layaLine && site?.enabled ? words(layaLine) : '';
+      $('laya-status').hidden = !laya;
+      $('laya-status').textContent = laya;
       $('panel-autofill').textContent = t(autopilot ? 'panel.stopAutofill' : 'panel.autofill');
       $('panel-autofill').disabled = !target || (!fillable && !autopilot) || working;
       document.querySelectorAll('.checklist-item').forEach(button => { button.disabled = working || !target; });

@@ -1326,19 +1326,30 @@ test('with Laya not ready, the widget asks Chrome’s on-device AI exactly as be
   assert.equal(view.get('widget-text').textContent, 'Filled 2');
 });
 
-test('the side panel shows whether Laya is ready, in the applicant’s language, and nothing when the app is closed', async t => {
-  const lines = { ready: 'desktop.layaReady', off: 'desktop.layaOff', downloading: 'desktop.layaDownloading', 'not-downloaded': 'desktop.layaNotReady', error: 'desktop.layaNotReady', unavailable: 'desktop.layaNotReady' };
+test('on a site that is on, the side panel says why Laya isn’t guessing, in the applicant’s language; never when it is ready, on Iowa, or with the app closed', async t => {
+  const site = { tab: SITE, site: { origin: ORIGIN, enabled: true } };
+  const lines = { off: 'desktop.layaOff', downloading: 'desktop.layaDownloading', 'not-downloaded': 'desktop.layaNotReady', error: 'desktop.layaNotReady', unavailable: 'desktop.layaNotReady' };
   for (const [laya, key] of Object.entries(lines)) {
-    const view = await panel(t, { desktop: { laya } });
+    const view = await panel(t, { ...site, desktop: { laya } });
     assert.equal(view.get('laya-status').hidden, false, laya);
     assert.equal(view.get('laya-status').textContent, strings.text('en', key), laya);
+    // Iowa's form is filled by its own rules, so Laya isn't mentioned there.
+    const iowa = await panel(t, { desktop: { laya } });
+    assert.equal(iowa.get('laya-status').hidden, true, `${laya} on Iowa`);
+    assert.equal(iowa.get('laya-status').textContent, '', `${laya} on Iowa`);
   }
-  const closed = await panel(t, { desktop: { connected: false, unlocked: false, laya: 'unavailable' } });
+  // A Laya that is ready needs no line: each fill's result names its guesses.
+  const ready = await panel(t, { ...site, desktop: { laya: 'ready' } });
+  assert.equal(ready.get('laya-status').hidden, true);
+  assert.equal(ready.get('laya-status').textContent, '');
+  const off = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: false }, desktop: { laya: 'off' } });
+  assert.equal(off.get('laya-status').hidden, true, 'nothing about Laya on a site that is off');
+  const closed = await panel(t, { ...site, desktop: { connected: false, unlocked: false, laya: 'unavailable' } });
   assert.equal(closed.get('laya-status').hidden, true);
-  const older = await panel(t);
+  const older = await panel(t, site);
   assert.equal(older.get('laya-status').hidden, true, 'a worker that reports no Laya state shows no line');
-  const spanishView = await panel(t, { language: 'es-ES', pageState: keyedChecklist, desktop: { laya: 'ready' } });
-  assert.equal(spanishView.get('laya-status').textContent, spanish('desktop.layaReady'));
+  const spanishView = await panel(t, { ...site, language: 'es-ES', desktop: { laya: 'off' } });
+  assert.equal(spanishView.get('laya-status').textContent, spanish('desktop.layaOff'));
   assert.deepEqual(shownText(spanishView).filter(text => englishOnly.has(text)), []);
 });
 

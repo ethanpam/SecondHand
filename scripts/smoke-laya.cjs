@@ -214,11 +214,12 @@ async function main() {
     assert.deepEqual(await layaRequests(), []);
     console.log('Laya off: the widget fills with the rules only, exactly as before, and Laya is asked nothing.');
 
-    // The side panel shows whether Laya is ready. It runs last: in headless Chromium the open panel covers the widget's corner.
+    // The side panel says when Laya is off. It runs last: in headless Chromium the open panel covers the widget's corner.
     widget = await open(HOUSEHOLD, 'off');
     await widget.locator('#details').click();
     panel = await attachNativePanel(context, page, extensionId);
     await expect.poll(() => panel.text('#laya-status'), { timeout: 15000 }).toBe(en('desktop.layaOff'));
+    assert.equal(await panel.visible('#laya-status'), true);
     console.log(`Side panel with Laya off: "${en('desktop.layaOff')}"`);
     // The side panel's own Autofill has no widget plan: the worker asks Laya itself.
     await worker.evaluate(() => { globalThis.__desktop.laya = 'ready'; globalThis.__desktop.calls = []; });
@@ -226,9 +227,11 @@ async function main() {
     await panel.click('#panel-autofill');
     await expect(page.locator('input[name="sixty"][value="no"]')).toBeChecked({ timeout: 20000 });
     await expect.poll(() => panel.text('#status'), { timeout: 15000 }).toBe(en('result.suggestedByLaya', { summary: { key: 'result.siteFilledGuessedNeedYou', params: { count: 2, guessed: 1, needYou: 1 } } }));
-    await expect.poll(() => panel.text('#laya-status'), { timeout: 15000 }).toBe(en('desktop.layaReady'));
+    // A Laya that is ready has no line of its own: the result names its guesses.
+    await expect.poll(() => panel.visible('#laya-status'), { timeout: 15000 }).toBe(false);
+    assert.equal(await panel.text('#laya-status'), '');
     assert.deepEqual((await layaRequests()).map(call => call.type), ['answerFields']);
-    console.log(`Side panel Autofill with Laya ready: "${await panel.text('#status')}" and "${en('desktop.layaReady')}"`);
+    console.log(`Side panel Autofill with Laya ready: "${await panel.text('#status')}", and no line about Laya.`);
 
     // The side panel says why the Spanish question stayed with the applicant.
     if (spanishLine) {
