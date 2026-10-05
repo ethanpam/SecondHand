@@ -58,6 +58,13 @@ function adapterTexts(raw) {
   for (const match of code.matchAll(/\b(?:radio|fail)\(\s*/g)) texts.add(literals(expressionAt(code, match.index + match[0].length))[0]?.text);
   const known = code.match(/const known = \[([\s\S]*?)\]\.find/);
   if (known) for (const row of known[1].matchAll(/\[([^\]]*)\]/g)) texts.add(literals(row[1])[3].text);
+  // The question names on the date-of-birth Tell Us More page, labels reached through Object.entries.
+  if (/\bselfQuestions\b/.test(code)) {
+    const start = /const selfQuestions = Object\.freeze\(\{/.exec(code);
+    if (!start) throw new Error('selfQuestions is no longer an Object.freeze({ ... }) literal, so its labels cannot be read.');
+    const body = expressionAt(code, start.index + start[0].length - 1).slice(1, -1);
+    for (const entry of body.matchAll(/(?:^|,)\s*\w+:\s*/g)) texts.add(literals(expressionAt(body, entry.index + entry[0].length))[0]?.text);
+  }
   return [...texts].filter(text => text && /^[A-Z]|^template:/.test(text));
 }
 // Literals that reach the screen through show(...), .textContent =, .title =, or an aria-label.
@@ -193,6 +200,13 @@ test('on Tell Us More, SecondHand says which saved answers it can fill and leave
   assert.equal(saveButton(start), 'Save and Continue');
   assert.equal(en['iowa.selfDetailsReason'], 'SecondHand can fill your saved date of birth on this page. Answer the other questions yourself, then click Save and Continue in Iowa’s form.');
   assert.equal(en['iowa.startDetailsReason'], 'SecondHand can fill the answers you saved in My information on this page. Answer the other questions yourself, then click Save and Continue in Iowa’s form.');
+});
+
+test('on the date-of-birth Tell Us More page, every question left to the applicant is named in the catalog', () => {
+  const page = adapter.probePage(onScreen(selfDetails.html, selfDetails.URL), selfDetails.URL);
+  assert.equal(page.pageKey, 'iowa-self-details');
+  assert.equal(page.checklist.filter(item => item.key.startsWith('self-question')).length, 8);
+  assert.deepEqual(page.checklist.filter(item => strings.describeEnglish(item.label).key === 'detail').map(item => item.label), []);
 });
 
 test('on Select Address when SecondHand selects nothing, it says so without claiming an address', () => {
