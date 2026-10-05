@@ -56,11 +56,13 @@ const until = async (condition, what) => {
 // The real main process with Electron simulated. Laya is the real runtime with a stub model
 // runner (tests only). Its manifest and update URL are the test's local ones; only a test that
 // keeps Laya off may use the shipped manifest (`shipped: true`), which points at Hugging Face.
-async function desktop(t, { settings = { extensionId }, manifest, updateUrl = null, shipped = false, env = {}, unlocked = true, packaged = false } = {}) {
+// settings.json holds `settings` as JSON, or `settingsText` as it is; with `settings: null` there is none.
+async function desktop(t, { settings = { extensionId }, settingsText, manifest, updateUrl = null, shipped = false, env = {}, unlocked = true, packaged = false } = {}) {
   assert.ok(manifest || shipped, 'Give the desktop a local manifest, or keep Laya off with the shipped one');
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'secondhand-laya-main-'));
   t.after(() => fs.rmSync(userData, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(userData, 'settings.json'), JSON.stringify(settings));
+  if (settingsText !== undefined) fs.writeFileSync(path.join(userData, 'settings.json'), settingsText);
+  else if (settings !== null) fs.writeFileSync(path.join(userData, 'settings.json'), JSON.stringify(settings));
   let invoke;
   let window;
   let quit;
@@ -193,6 +195,68 @@ test('a choice that was never made stays unsaved when other settings are saved, 
   const chosen = await desktop(t, { manifest: server.manifest, updateUrl: server.updateUrl, settings: off });
   await chosen.invoke('setAutofillTrust', true);
   assert.deepEqual(chosen.writes.at(-1).json, { extensionId, autofillWithoutAsking: true, trustedSites: [], layaEnabled: false });
+});
+
+// A settings.json that can't be read is reset, and the app says what was reset (#139). Only Laya's off
+// choice is kept, when it can still be read: it gives no access, and it keeps the model's download away.
+const RESET = 'SecondHand couldn’t read its settings file, so it reset the Chrome connection, Always allow, your trusted sites, and all websites. Set them up again on the Chrome extension page.';
+const KEPT_OFF = `${RESET} Laya stays off.`;
+const BACK_ON = `${RESET} Laya is on again. If you had turned it off, turn it off again on that page.`;
+const site = 'https://pantry.example.org';
+const written = JSON.stringify({ extensionId, autofillWithoutAsking: true, trustedSites: [site], layaEnabled: false, allSites: true });
+
+test('a settings file that can’t be read is reset and the app says what was reset; Laya’s off choice is kept when it can still be read', async t => {
+  const cases = [
+    ['cut short', written.slice(0, -12), KEPT_OFF],
+    ['damaged', written.replace('"trustedSites"', 'trustedSites'), KEPT_OFF],
+    ['damaged where Laya’s choice was', `${written.slice(0, written.indexOf('"layaEnabled"'))}"layaEnab\u0000`, BACK_ON],
+    ['not settings', '[false]', BACK_ON],
+    ['empty', '', BACK_ON],
+    ['too large', JSON.stringify({ extensionId, layaEnabled: false, padding: 'x'.repeat(5000) }), BACK_ON]
+  ];
+  for (const [name, settingsText, notice] of cases) {
+    const server = await modelServer(t);
+    const app = await desktop(t, { manifest: server.manifest, updateUrl: server.updateUrl, settingsText, unlocked: false });
+    const status = await app.invoke('status');
+    assert.equal(status.settingsNotice, notice, name);
+    assert.equal(status.extensionId, null, `${name}: Chrome is disconnected`);
+    assert.equal(status.autofillWithoutAsking, false, name);
+    assert.deepEqual(plain(status.trustedSites), [], name);
+    assert.equal(status.allSites, false, name);
+    if (notice === KEPT_OFF) {
+      assert.equal(status.laya.state, 'off', name);
+      await new Promise(resolve => setTimeout(resolve, 50));
+      assert.deepEqual(server.requests, [], `${name}: nothing is checked or downloaded`);
+    } else {
+      assert.equal(status.laya.enabled, true, name);
+      await ready(app);
+    }
+    assert.deepEqual(app.writes, [], `${name}: nothing is saved until a setting changes`);
+  }
+});
+
+test('the settings notice stays until a setting is saved, and the saved file keeps Laya off', async t => {
+  const server = await modelServer(t);
+  const app = await desktop(t, { manifest: server.manifest, updateUrl: server.updateUrl, settingsText: written.slice(0, -12) });
+  assert.equal((await app.invoke('status')).settingsNotice, KEPT_OFF);
+  assert.equal((await app.invoke('status')).settingsNotice, KEPT_OFF, 'reading status doesn’t clear it');
+  const saved = await app.invoke('setAutofillTrust', false);
+  assert.equal(saved.settingsNotice, null);
+  assert.deepEqual(app.writes.at(-1).json, { extensionId: null, autofillWithoutAsking: false, trustedSites: [], layaEnabled: false });
+});
+
+test('a missing or readable settings file has no notice', async t => {
+  const server = await modelServer(t);
+  const fresh = await desktop(t, { manifest: server.manifest, updateUrl: server.updateUrl, settings: null, unlocked: false });
+  assert.equal((await fresh.invoke('status')).settingsNotice, null, 'a new install has nothing to say');
+  const kept = await desktop(t, { manifest: server.manifest, updateUrl: server.updateUrl, settingsText: written });
+  const status = await kept.invoke('status');
+  assert.equal(status.settingsNotice, null);
+  assert.equal(status.extensionId, extensionId);
+  assert.equal(status.autofillWithoutAsking, true);
+  assert.deepEqual(plain(status.trustedSites), [site]);
+  assert.equal(status.allSites, true);
+  assert.equal(status.laya.state, 'off');
 });
 
 test('download, cancel, and remove are desktop actions that need SecondHand unlocked; remove also turns Laya off', async t => {

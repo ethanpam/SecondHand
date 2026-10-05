@@ -406,6 +406,32 @@ test('restoring a backup while locked refreshes create-vault UI despite an uncha
   assert.equal(view.get('workspace').hidden, true);
 });
 
+test('when the desktop reset its settings, the saved information opens with the notice once, beside a Touch ID notice', async t => {
+  const settingsNotice = 'SecondHand couldn’t read its settings file, so it reset the Chrome connection, Always allow, your trusted sites, and all websites. Set them up again on the Chrome extension page. Laya stays off.';
+  const touchIdNotice = 'Touch ID was turned off because its key file on this Mac is damaged.';
+  let status = { exists: true, unlocked: false, lockRevision: 0, extensionId: '', bridgeRunning: true, settingsNotice, touchIdNotice };
+  const view = await renderer(t, {
+    status: async () => status,
+    unlock: async () => { status = { ...status, unlocked: true }; return status; },
+    lock: async () => { status = { ...status, unlocked: false, lockRevision: status.lockRevision + 1, touchIdNotice: null }; return status; }
+  });
+  assert.equal(view.get('toast').hidden, true, 'nothing shows on the lock screen');
+  view.edit('passphrase', 'synthetic password');
+  view.submit('auth-form');
+  await tick(); await tick();
+  assert.equal(view.get('workspace').hidden, false);
+  assert.equal(view.get('toast').textContent, `${touchIdNotice} ${settingsNotice}`);
+  assert.equal(view.get('toast').classList.contains('error'), true);
+
+  view.get('lock-button').click();
+  await tick();
+  view.edit('passphrase', 'synthetic password');
+  view.submit('auth-form');
+  await tick(); await tick();
+  assert.equal(view.get('workspace').hidden, false);
+  assert.equal(view.get('toast').hidden, true, 'shown once while the app is open');
+});
+
 test('opening Applications or Overview refreshes progress recorded while another view was active', async t => {
   for (const destination of ['applications', 'overview']) await t.test(destination, async t => {
     const view = await renderer(t);
