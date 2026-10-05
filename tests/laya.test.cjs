@@ -70,7 +70,8 @@ function stubRunner(overrides = {}) {
         async run(batch) {
           runner.runs.push(batch);
           if (overrides.run) await overrides.run(batch);
-          return { data: Float32Array.from({ length: batch.rows * batch.count }, (_, index) => scoreFor(batch, Math.floor(index / batch.count), index % batch.count)), dims: [batch.rows, batch.count] };
+          const data = Float32Array.from({ length: batch.rows * batch.count }, (_, index) => scoreFor(batch, Math.floor(index / batch.count), index % batch.count));
+          return { data: overrides.scores ? overrides.scores(data) : data, dims: [batch.rows, batch.count] };
         },
         async release() { runner.releases++; }
       };
@@ -349,6 +350,18 @@ test('a model that fails to load is reported as an error and decisions are refus
     message: 'The Laya model couldn’t be loaded (synthetic load failure).' });
   const missing = createLaya({ modelDir: path.join(os.tmpdir(), 'secondhand-no-such-laya-dir'), modelFormat: 'noul-v1', manifest: { version: 1, model: null }, runner: stubRunner(), enabled: true });
   assert.match((await missing.status()).message, /model folder is missing model\.onnx/);
+});
+
+test('non-finite scores are refused, not answered, and the next request with finite scores is answered', async t => {
+  for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+    let poisoned = true;
+    const runner = stubRunner({ scores: data => { if (poisoned) data[data.length - 1] = bad; return data; } });
+    const laya = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: NO_MODEL, runner, enabled: true });
+    await assert.rejects(laya.decide(rowState('3'), { correct: DECISION, match: MATCH }), { name: 'RangeError', message: /non-finite scores/ }, String(bad));
+    poisoned = false;
+    const { answers } = await laya.decide(rowState('3'), { correct: DECISION, match: MATCH });
+    assert.ok(Number.isFinite(answers.correct.noul) && Object.values(answers.match.probabilities).every(Number.isFinite), String(bad));
+  }
 });
 
 test('download, then decisions work with the network off; tampered files are refused before use', async t => {
