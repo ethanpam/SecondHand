@@ -367,7 +367,10 @@ export function Home() {
                         the extension files and the extension reloads itself. If
                         an Iowa page was open, SecondHand asks you to reload it;
                         save your work first. Chrome may ask you to approve the
-                        extension’s updated permissions.
+                        extension’s updated permissions. Use Chrome 116 or
+                        newer, and keep <strong>Developer mode</strong> on at{' '}
+                        <code>chrome://extensions</code>, because Chrome turns
+                        SecondHand off without it.
                       </p>
                       <p>
                         If you installed version 0.4.0 or earlier, its extension
@@ -376,8 +379,8 @@ export function Home() {
                         <strong>Refresh extension files</strong>, then click
                         Reload for SecondHand on{' '}
                         <code>chrome://extensions</code>. Reload your Iowa tab
-                        too. Use Chrome 116 or newer. Then click Autofill on
-                        Iowa’s applicant page. Later updates are automatic.
+                        too. Then click Autofill on Iowa’s applicant page. Later
+                        updates are automatic.
                       </p>
                     </div>
                   </details>
