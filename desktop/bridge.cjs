@@ -16,6 +16,9 @@ const { TEXT_TYPES, CHOICE_TYPES } = require('../shared/laya-prompts.cjs');
 const HOST_NAME = 'org.secondhand.bridge';
 const MAX_MESSAGE_BYTES = 64 * 1024;
 const EXTENSION_ID = /^[a-p]{32}$/;
+// The native host sends each request to the desktop with the session token and the extension ID beside it,
+// all in one frame. A request must leave room for them.
+const ENVELOPE_BYTES = Buffer.byteLength(JSON.stringify({ token: '0'.repeat(64), extensionId: 'a'.repeat(32), request: {} })) - '{}'.length;
 const IOWA_NAVIGATION_URLS = new Set(['enterPersonalInfo', 'addressValidation'].map(page => `${PORTAL_URL}/applyForBenefits/${page}`));
 // Questions for Laya, the desktop's local AI: text boxes to match to a saved field (#39) and
 // choice questions to answer from the saved profile (#42). Labels, types, and options only.
@@ -128,7 +131,13 @@ function validateSave(request) {
   return request;
 }
 
-const questionText = (value, max) => typeof value === 'string' && value.trim() !== '' && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
+// Page text the desktop shows in its approval dialog (“label”: option), and an option is the exact text the
+// extension fills. Refused, not stripped, when it has a character that reorders, hides, or breaks the words around
+// it: controls (C0, DEL, C1), format characters (bidi controls, zero-width characters, tags), line and paragraph
+// separators, and other invisible characters. Stripped text would no longer be the page's own, and two options
+// that differ only by such a character would look the same in the dialog.
+const UNSEEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/u;
+const questionText = (value, max) => typeof value === 'string' && value.trim() !== '' && value.length <= max && !UNSEEN.test(value);
 function validateQuestions(items, { max, types, choices }) {
   if (!Array.isArray(items) || !items.length || items.length > max) throw new Error('Invalid questions for Laya.');
   const ids = new Set();
@@ -170,6 +179,7 @@ function validateRequest(request) {
   if (request.type === 'recordProgress' && (!Number.isInteger(request.filledCount) || request.filledCount < 1 || request.filledCount > 100)) {
     throw new Error('Invalid filled field count.');
   }
+  if (Buffer.byteLength(JSON.stringify(request)) > MAX_MESSAGE_BYTES - ENVELOPE_BYTES) throw new Error('Request exceeds the local bridge limit.');
   return request;
 }
 
