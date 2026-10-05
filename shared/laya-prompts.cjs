@@ -55,16 +55,18 @@ const OFFER_GROUPS = Object.freeze([
 // A label's words, lowercased and without accents or punctuation.
 const topicText = label => String(label).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[‘’']/g, '').replace(/#/g, ' number ')
   .replace(/[^a-z0-9+]+/g, ' ').trim();
-const OTHER_PERSON_ROLE = /\b(spouse|spouses|partner|husband|wife|helper|proxy|emergency contact|reference|landlord|other household member|guardian|guardians|parent|parents|conyuge|esposo|esposa|pareja|dependiente|ayudante|contacto de emergencia|referencia|propietario|arrendador|tutor legal)\b|\brepresentative\b|\brepresentante\b/;
-const MEMBER_DETAIL = /\b(family member|household member (number )?\d+|miembro de (la )?(familia|casa|hogar))\b/;
-const CHILD_ROLE = /\b(child|children|son|daughter|student|students|hijo|hija|hijos|hijas|estudiante|estudiantes)\b/;
-const PERSON_DETAIL = /\b(name|nombre|birth|nacimiento|address|direccion|phone|telefono|email|relationship|school|escuela)\b/;
+// A box no saved field may go to: another person's (a possessive is the role with an s, "child’s" is
+// "childs"), who pays, or a combined address. Identical to extension/generic-adapter.js's patterns.
+const OTHER_PERSON_ROLE = /\b(spouses?|partners?|husbands?|wifes?|wives|helpers?|proxys?|proxies|emergency contacts?|references?|landlords?|guardians?|parents?|conyuge|esposo|esposa|pareja|dependiente|ayudante|contacto de emergencia|referencia|propietario|arrendador|tutor legal)\b|\brepresentatives?\b|\brepresentante\b/;
+const MEMBER_DETAIL = /^household members?$|\b(family member|household member (number )?\d+|(other|additional|another) (household |family )?(members?|persons?|people|adults?|individuals?)( of (the |your )?(household|family|home))?|miembro de(l| la)? (familia|casa|hogar))\b/;
+const CHILD_ROLE = /^household member\b|\b((grand)?childs?|(grand)?childrens?|kids?|sons?|daughters?|students?|dependents?|household members|family members|hijos?|hijas?|estudiantes?)\b/;
+const PERSON_DETAIL = /\b(names?|first|last|middle|nombres?|apellidos?|birth\w*|dob|nacimiento|address(es)?|direccion|phone|telephone|cell|telefono|e ?mail|relation\w*|school|escuela)\b/;
 const COMBINED_ADDRESS_QUESTION = /^(city (and )?state|city (and )?(zip|zip code|zipcode|postal code)|city (and )?state (and )?(zip|zip code|zipcode|postal code)|(complete|full) (physical |home |residential )?address( including (town|city|town city))?|ciudad (y )?estado|ciudad (y )?codigo postal|ciudad (y )?estado (y )?codigo postal|direccion completa)$/;
 const PERSON_NOT_AMOUNT = /^(who|que persona|quien) (pays?|paga)( |$)/;
 function matchableBox({ label }) {
   const text = topicText(label);
   const representative = !(text.startsWith('household representative ') || text === 'household representative') && OTHER_PERSON_ROLE.test(text);
-  const other = representative || MEMBER_DETAIL.test(text) || (CHILD_ROLE.test(text) && PERSON_DETAIL.test(text)) || text === 'household members' || /^household members (first|last|full|date|birth|name|phone|email|address|relation|relationship)\b/.test(text);
+  const other = representative || MEMBER_DETAIL.test(text) || (CHILD_ROLE.test(text) && PERSON_DETAIL.test(text));
   return !other && !COMBINED_ADDRESS_QUESTION.test(text) && !PERSON_NOT_AMOUNT.test(text);
 }
 function offeredFields({ label, type }) {
@@ -136,9 +138,10 @@ const CHOICE = Object.freeze({
 });
 
 // Questions only the applicant answers: consent, signatures, attestations, agreements, terms,
-// Social Security numbers, and secrets. Must stay identical to UNSAFE_QUESTION in
-// extension/generic-adapter.js, and is matched against the same normalized text.
-const UNSAFE_QUESTION = /^social security$|\b(consent\w*|sign|signs|signed|signing|signature\w*|initials|attest\w*|certif\w*|agree|agrees|agreed|agreement\w*|terms|acknowledg\w*|authoriz\w*|permission|perjury|i understand|i confirm|i have read|true and (correct|accurate|complete)|privacy|social security (number|no|num|card)|ss number|ssn|itin|password|passcode|pin|cvv|cvc|card number|credit card|debit card|security code|captcha|verification code|one time)\b/;
+// Social Security numbers, secrets, texted, emailed or verification codes, security questions, and
+// user names. Must stay identical to UNSAFE_QUESTION in extension/generic-adapter.js, and is matched
+// against the same normalized text.
+const UNSAFE_QUESTION = /^social security$|^(enter )?(the |your |a )?codes?$|\b(consent\w*|sign|signs|signed|signing|signature\w*|initials|attest\w*|certif\w*|agree|agrees|agreed|agreement\w*|terms|acknowledg\w*|authoriz\w*|permission|perjury|i understand|i confirm|i have read|true and (correct|accurate|complete)|privacy|social security (number|no|num|card)|ss number|ssn|itin|password|passcode|pin|cvv|cvc|card number|credit card|debit card|security code|captcha|one time|otp|2fa|mfa|(verification|verify|authentication|confirmation|access|login|log in|sms|text|texted|email|emailed) codes?|\d+ digit codes?|codes? (that |which )?(we |was |were |has been |have been )?(just )?(sent|texted|emailed)|(sent|texted|emailed) (to )?(you )?(a |the |your )?codes?|codes? from (the |your |our )?(text|sms|email|e mail|message|app)|(security|secret|challenge) (questions?|answers?)|mothers maiden name|(city|town) (were you|you were|was your \w+) born|born in what (city|town)|first (pets?|car)|street (did you|you) gr[eo]w up on|user ?names?|user ?ids?|(login|log in) (ids?|names?)|screen ?names?)\b/;
 const normal = value => String(value || '').toLowerCase().replace(/[‘’']/g, '').replace(/#/g, ' number ').replace(/\*/g, ' ').replace(/[^a-z0-9+]+/g, ' ').trim();
 const unsafeQuestion = field => [field?.label, ...(Array.isArray(field?.options) ? field.options : [])].some(text => UNSAFE_QUESTION.test(normal(text)));
 
