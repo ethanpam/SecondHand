@@ -188,6 +188,33 @@ test('Laya requests outside the limits, with the wrong question type, or with an
   assert.throws(() => validateRequest(suggest([box()], { questions: [choice()] })), /Unexpected request field/);
 });
 
+// Characters that reorder, hide, or break the words around them. A label or option is shown in the desktop's
+// approval dialog (“label”: option), and an option is the exact text the extension fills.
+const UNSEEN = Object.freeze({
+  'right-to-left override': '‮', 'left-to-right override': '‭', 'right-to-left embedding': '‫', 'pop directional formatting': '‬',
+  'right-to-left isolate': '⁧', 'first strong isolate': '⁨', 'pop directional isolate': '⁩',
+  'right-to-left mark': '‏', 'left-to-right mark': '‎', 'Arabic letter mark': '؜',
+  'zero-width space': '​', 'zero-width non-joiner': '‌', 'zero-width joiner': '‍', 'word joiner': '⁠', 'invisible separator': '⁣',
+  'byte order mark': '﻿', 'soft hyphen': '­', 'combining grapheme joiner': '͏', 'Hangul filler': 'ㅤ', 'variation selector': '️',
+  'interlinear annotation anchor': '￹', 'tag letter': '\u{E0041}', 'language tag': '\u{E0001}',
+  'line separator': ' ', 'paragraph separator': ' ', 'next line (C1)': '\u0085', 'control sequence introducer (C1)': '\u009B'
+});
+
+test('labels and options with bidi controls, invisible characters, or line breaks are refused, so a page can’t reorder or hide words in a desktop dialog', () => {
+  for (const [name, character] of Object.entries(UNSEEN)) {
+    assert.throws(() => validateRequest(suggest([box({ label: `Where can we email you?${character}` })])), /question label/, name);
+    assert.throws(() => validateRequest(answer([choice({ label: `${character}Is anyone in your household 60 or older?` })])), /question label/, name);
+    assert.throws(() => validateRequest(answer([choice({ options: ['Yes', `N${character}o`] })])), /question options/, name);
+    assert.throws(() => validateRequest(suggest([box({ options: [`Home${character}`] })])), /question options/, name);
+  }
+  // Words in any language, with accents, typographic punctuation, no-break spaces, and emoji, are asked as they are.
+  for (const text of ['¿Cuántas personas viven en su hogar?', 'Số người trong hộ gia đình', 'كم عدد الأشخاص في أسرتك؟', 'כמה אנשים גרים בבית?',
+    'Household size (people)', '“Monthly” income – before taxes', '📧 Email']) {
+    assert.equal(validateRequest(suggest([box({ label: text })])).fields[0].label, text, text);
+    assert.deepEqual(validateRequest(answer([choice({ options: [text, 'No'] })])).questions[0].options, [text, 'No'], text);
+  }
+});
+
 test('each Laya request carries the milliseconds its Autofill click has left: a whole number from 1 to 3000', () => {
   for (const budgetMs of [1, 1500, 3000]) {
     assert.equal(validateRequest(suggest([box()], { budgetMs })).budgetMs, budgetMs);
@@ -390,4 +417,52 @@ test('the app’s unlockWithTouchId answer reaches the extension as it is, throu
   assert.deepEqual(await relayRequest(directory, EXTENSION, { id: 'touch-1', type: 'unlockWithTouchId' }), { id: 'touch-1', ok: true, data: { unlocked: false, reason: 'cancelled' } });
   const responses = await hostSession(directory, [{ id: 'touch-2', type: 'unlockWithTouchId' }]);
   assert.deepEqual(responses, [{ id: 'touch-2', ok: true, data: { unlocked: true } }]);
+});
+
+// One envelope written straight to the desktop's socket, as a host that skipped its own checks would send it.
+async function unchecked(directory, request) {
+  const session = JSON.parse(await fs.readFile(path.join(directory, 'bridge-session.json'), 'utf8'));
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection(session.socketPath);
+    const reader = new FrameReader();
+    socket.on('error', reject);
+    socket.on('connect', () => socket.write(frame({ token: session.token, extensionId: EXTENSION, request })));
+    socket.on('data', chunk => reader.push(chunk));
+    reader.on('message', value => { socket.destroy(); resolve(value); });
+  });
+}
+
+test('the desktop refuses a label or option with a bidi control or invisible character even when the host let it through', async t => {
+  const directory = await temporary(t, 'secondhand-bridge-unseen-');
+  let reached = 0;
+  const bridge = await startBridge(directory, () => EXTENSION, async () => { reached++; return { answers: {}, accessRevision: 1 }; });
+  t.after(() => bridge.close());
+  const refused = { id: 'laya-2', ok: false, error: 'The request could not be completed. Check the desktop app.' };
+  assert.deepEqual(await unchecked(directory, answer([choice({ label: 'Can we share your answers?‮' })])), refused);
+  assert.deepEqual(await unchecked(directory, answer([choice({ options: ['Yes', 'Ye​s'] })])), refused);
+  assert.equal(reached, 0);
+  assert.deepEqual(await unchecked(directory, answer([choice()])), { id: 'laya-2', ok: true, data: { answers: {}, accessRevision: 1 } });
+});
+
+test('a request too large to reach the desktop beside the session token is refused with its reason, never thrown from the relay', async t => {
+  const directory = await temporary(t, 'secondhand-bridge-oversized-');
+  const seen = [];
+  const bridge = await startBridge(directory, () => EXTENSION, async request => { seen.push(request.id); return { trusted: true }; });
+  t.after(() => bridge.close());
+  // The host sends each request to the desktop with the session token and the extension ID beside it.
+  const envelope = Buffer.byteLength(JSON.stringify({ token: '0'.repeat(64), extensionId: EXTENSION, request: {} })) - '{}'.length;
+  const sized = (id, bytes) => {
+    const request = { id, type: 'trustSite', url: 'https://pantry.example.org/?q=' };
+    request.url += 'x'.repeat(bytes - Buffer.byteLength(JSON.stringify(request)));
+    return request;
+  };
+  const largest = sized('largest', MAX_MESSAGE_BYTES - envelope);
+  const over = sized('over', MAX_MESSAGE_BYTES - envelope + 1);
+  assert.equal(Buffer.byteLength(JSON.stringify(over)), MAX_MESSAGE_BYTES - envelope + 1);
+  assert.deepEqual(validateRequest(largest), largest);
+  assert.throws(() => validateRequest(over), /^Error: Request exceeds the local bridge limit\.$/);
+  // Chrome can send either one: both fit in a native message. The host relays the first and answers the other itself.
+  const responses = await hostSession(directory, [over, largest]);
+  assert.deepEqual(responses, [{ id: 'over', ok: false, error: 'Request exceeds the local bridge limit.' }, { id: 'largest', ok: true, data: { trusted: true } }]);
+  assert.deepEqual(seen, ['largest']);
 });
