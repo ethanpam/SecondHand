@@ -107,7 +107,7 @@ target("SecondHand", app_sources, [assets] + qa_resources + profile_import_resou
         "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon", "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME": "AccentColor",
         "LD_RUNPATH_SEARCH_PATHS": ["$(inherited)", "@executable_path/Frameworks"]},
        "com.apple.product-type.application", [ext_dep], [embed])
-test_resources = [ref("Tests/Fixtures/synthetic_1040sr_realistic_scan.pdf", "image.pdf")]
+test_resources = [ref(str(p.relative_to(ROOT)), "image.pdf") for p in sorted((ROOT / "Tests/Fixtures").glob("*.pdf"))]
 target("SecondHandTests", test_sources, test_resources,
        {"PRODUCT_BUNDLE_IDENTIFIER": "com.ethanpam.secondhand.tests", "PRODUCT_NAME": "$(TARGET_NAME)", "GENERATE_INFOPLIST_FILE": "YES",
         "TEST_HOST": "$(BUILT_PRODUCTS_DIR)/SecondHand.app/SecondHand", "BUNDLE_LOADER": "$(TEST_HOST)",

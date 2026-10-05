@@ -107,7 +107,7 @@ struct ProfileEditor: View {
                     }
                     .accessibilityIdentifier("profile.importDocument")
                 } footer: {
-                    Text("Use a completed 1040 to fill in your details, or enter them below.")
+                    Text("Use a tax or benefit document to fill in your details, or enter them below.")
                 }
                 Section {
                     TextField("First name", text: $draft.firstName).textContentType(.givenName)

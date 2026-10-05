@@ -52,7 +52,9 @@ enum DocumentOCR {
                 let text = try autoreleasepool {
                     guard let page = pdf.page(at: index) else { throw DocumentOCRError.unreadable }
                     // A selectable text layer avoids recognition errors and unnecessary image processing.
-                    if !includeLayout, let text = page.string?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+                    if !includeLayout, page.annotations.isEmpty,
+                       let text = page.string?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty,
+                       !text.unicodeScalars.contains(where: { $0.value < 32 && !CharacterSet.whitespacesAndNewlines.contains($0) }) {
                         return OCRPage(text: text, words: [])
                     }
                     guard let source = page.pageRef else { throw DocumentOCRError.unreadable }
@@ -74,6 +76,11 @@ enum DocumentOCR {
                     context.concatenate(source.getDrawingTransform(.cropBox,
                         rect: CGRect(x: 0, y: 0, width: width, height: height), rotate: 0, preserveAspectRatio: true))
                     context.drawPDFPage(source)
+                    // Filled AcroForm values may exist only in annotation appearance streams.
+                    // Render them just as the PDF viewer does instead of recognizing an empty form.
+                    for annotation in page.annotations where annotation.shouldDisplay {
+                        annotation.draw(with: .cropBox, in: context)
+                    }
                     guard let image = context.makeImage() else { throw DocumentOCRError.unreadable }
                     return try recognize(image: image, includeLayout: includeLayout)
                 }
