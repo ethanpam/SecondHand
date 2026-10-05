@@ -105,14 +105,14 @@ export default function ChromeExtensionGuide() {
           <Image
             className="guide-media guide-card"
             src="/guide/iowa-card.png"
-            alt="The SecondHand card on Iowa’s page, with an Autofill button and a Details link."
+            alt="The SecondHand card on Iowa’s page, with the SecondHand logo and an Autofill button."
             width={624}
             height={228}
             unoptimized
           />
           <p>
-            Click <strong>Autofill</strong> to fill the details you saved, or{' '}
-            <strong>Details</strong> to open the checklist in Chrome’s side
+            Click <strong>Autofill</strong> to fill the details you saved, or
+            click the SecondHand logo to open the checklist in Chrome’s side
             panel. SecondHand asks the first time before it shares your details,
             and you review and submit the application yourself.
           </p>
