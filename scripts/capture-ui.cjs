@@ -236,7 +236,7 @@ async function iowaCard() {
 
     await open(screen('household'));
     await (await card()).locator('#autofill').click();
-    // "Filled 1 · Solve the CAPTCHA, then click Continue.", once the fill has settled.
+    // "Filled 1 · Type the characters shown in Iowa’s security check, then click Continue.", once the fill has settled.
     await expect((await card()).locator('#widget-text')).toContainText('·', { timeout: 20000 });
     await cardShot(session, 'card-message');
 

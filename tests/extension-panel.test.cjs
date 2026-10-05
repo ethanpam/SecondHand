@@ -140,7 +140,7 @@ test('continue runs the adapter once for our extension only', t => {
 test('widget stays full size on info screens and steps that need the applicant', t => {
   const page = content(t);
   const host = page.window.document.querySelector('[data-secondhand-assistant]');
-  for (const [kind, todo, size] of [['info', undefined, 'full'], ['blocked', 'Solve the CAPTCHA, then click Continue.', 'full'], ['manual', 'Pick the correct address, then click Continue.', 'full'], ['manual', undefined, 'pill'], ['unsupported', undefined, 'pill']]) {
+  for (const [kind, todo, size] of [['info', undefined, 'full'], ['blocked', 'Type the characters shown in Iowa’s security check, then click Continue.', 'full'], ['manual', 'Pick the correct address, then click Continue.', 'full'], ['manual', undefined, 'pill'], ['unsupported', undefined, 'pill']]) {
     page.setKind(kind, todo);
     page.window.dispatchEvent(new page.window.Event('popstate'));
     assert.equal(host.getAttribute('data-secondhand-size'), size, `${kind} ${todo}`);
@@ -194,7 +194,7 @@ test('on Iowa pages a general fill the page interrupted by changing answers that
 
 test('verified Iowa pages and pages with Iowa instructions never reach the general engine', t => {
   const page = content(t);
-  for (const [kind, todo] of [['fillable'], ['info'], ['blocked', 'Solve the CAPTCHA, then click Continue.'], ['manual', 'Pick the correct address, then click Continue.'], ['unsupported']]) {
+  for (const [kind, todo] of [['fillable'], ['info'], ['blocked', 'Type the characters shown in Iowa’s security check, then click Continue.'], ['manual', 'Pick the correct address, then click Continue.'], ['unsupported']]) {
     page.setKind(kind, todo);
     assert.equal(page.request({ type: 'secondhand:generic:plan' }).ok, false, kind);
     assert.equal(page.request({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [{ id: 'sh-1-0', key: 'householdAdults', guessed: false }], values: { householdAdults: '2' } }).ok, false, kind);
@@ -714,7 +714,7 @@ test('widget offers Open SecondHand in Autofill’s place when the app is closed
   assert.equal(restored.get('need-you').textContent, '2 questions left');
 });
 
-const waitingResult = { state: 'waiting', filled: 0, needYou: [], message: 'Solve the CAPTCHA, then click Continue.', pageKey: 'iowa-personal-information' };
+const waitingResult = { state: 'waiting', filled: 0, needYou: [], message: 'Type the characters shown in Iowa’s security check, then click Continue.', pageKey: 'iowa-personal-information' };
 
 test('while autofill is on, the widget shows Stop and the current instruction', async t => {
   const view = await panel(t, { launcher: true, autofill: { ...doneResult, needYou: [], todo: 'Check your answers, then click Save and Continue.' }, autopilotAfterAutofill: true });
@@ -725,7 +725,7 @@ test('while autofill is on, the widget shows Stop and the current instruction', 
   view.state.result = waitingResult;
   view.window.document.dispatchEvent(new view.window.Event('visibilitychange'));
   await tick(); await tick();
-  assert.equal(view.get('widget-text').textContent, 'Solve the CAPTCHA, then click Continue.', 'polls follow the worker while autofill is on');
+  assert.equal(view.get('widget-text').textContent, 'Type the characters shown in Iowa’s security check, then click Continue.', 'polls follow the worker while autofill is on');
   view.get('stop').click(); await tick();
   assert.equal(view.types().includes('ui:stop'), false);
   await view.userClick('stop');
@@ -741,7 +741,7 @@ test('a widget that loads mid-run picks up the running autofill', async t => {
   const view = await panel(t, { launcher: true, kind: 'blocked', autopilot: true, result: waitingResult });
   assert.equal(view.get('widget').hidden, false, 'instructions stay readable on steps that need you');
   assert.equal(view.get('stop').hidden, false);
-  assert.equal(view.get('widget-text').textContent, 'Solve the CAPTCHA, then click Continue.');
+  assert.equal(view.get('widget-text').textContent, 'Type the characters shown in Iowa’s security check, then click Continue.');
 });
 
 test('side panel turns its button into Stop while autofill is on', async t => {

@@ -426,7 +426,7 @@ test('household question is a fillable page answered only from an explicit saved
   const after = adapter.probePage(doc, url);
   assert.equal(after.kind, 'blocked');
   assert.equal(after.pageKey, 'iowa-captcha');
-  assert.equal(after.todo, 'Solve the CAPTCHA, then click Continue.');
+  assert.equal(after.todo, 'Type the characters shown in Iowa’s security check, then click Continue.');
 });
 
 test('household matcher fails closed on an extra option, changed label, or changed handler', () => {

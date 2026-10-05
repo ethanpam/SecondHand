@@ -805,7 +805,7 @@
   // Steps SecondHand never operates. Each maps to a plain instruction for the applicant.
   function protectedStep(doc, headings) {
     const shown = selector => Array.from(doc.querySelectorAll(selector)).some(element => rendered(element, doc));
-    if (shown('#captchaDiv, [name="captchaAnswer"], #simpleCaptcha')) return { pageKey: 'iowa-captcha', heading: 'Security check', todo: 'Solve the CAPTCHA, then click Continue.' };
+    if (shown('#captchaDiv, [name="captchaAnswer"], #simpleCaptcha')) return { pageKey: 'iowa-captcha', heading: 'Security check', todo: 'Type the characters shown in Iowa’s security check, then click Continue.' };
     if (shown('#termChkbox')) return { pageKey: 'iowa-consent', heading: 'Let’s get started', todo: 'Read and accept Iowa’s consent, then click Continue.' };
     if (shown('input[type="password"], #securityCode')) return { pageKey: 'iowa-verification', heading: 'Sign in or verify', todo: 'Sign in or verify in Iowa’s form, then continue.' };
     if (shown('[aria-modal="true"], [role="dialog"]')) return { pageKey: 'iowa-popup', heading: 'Iowa pop-up', todo: 'Answer Iowa’s pop-up, then continue.' };
@@ -883,7 +883,7 @@
       return { ...result, kind: 'fillable', pageKey: 'iowa-program-intent', heading: 'Household Application Information', fields: scan(doc, rawUrl).fields,
         checklist: [{ key: 'householdApplyProg', label: definition.label, status, required: true, fillable: status === 'missing' }],
         requiredRemaining: Number(status === 'missing'), manualRemaining: Number(status === 'manual'),
-        reason: status === 'complete' ? 'Click Continue in Iowa’s form.' : 'Answer whether anyone is applying, then solve the CAPTCHA.',
+        reason: status === 'complete' ? 'Click Continue in Iowa’s form.' : 'Answer whether anyone is applying, then type the characters shown in Iowa’s security check.',
         ...(status === 'complete' ? { todo: 'Click Continue in Iowa’s form.' } : {}) };
     }
     if (pageId === 'personal') {
@@ -904,7 +904,7 @@
         ...(ready ? {} : { todo: 'Read this page, then click Continue in Iowa’s form.' }) };
     }
     const known = [
-      ['household application information', 'iowa-program-intent', 'Household Application Information', 'Answer whether anyone is applying, solve the CAPTCHA, then click Continue.'],
+      ['household application information', 'iowa-program-intent', 'Household Application Information', 'Answer whether anyone is applying, type the characters shown in Iowa’s security check, then click Continue.'],
       ['assisting organization or person', 'iowa-assistance', 'Assisting Organization or Person', 'If nobody is helping you, leave this blank and click Continue.'],
       ['select address', 'iowa-select-address', 'Select Address', 'Pick the correct address, then click Continue.'],
       ['about you', 'iowa-about-you', 'About you', 'Click Continue in Iowa’s form.']

@@ -121,7 +121,7 @@ test('the language is the saved choice, otherwise the browser language, and a ch
 });
 
 test('fixed English from the Iowa adapter maps to its key; anything else is passed through as a detail', () => {
-  assert.deepEqual(strings.describeEnglish('Solve the CAPTCHA, then click Continue.'), { key: 'iowa.solveCaptcha', params: {} });
+  assert.deepEqual(strings.describeEnglish('Type the characters shown in Iowa’s security check, then click Continue.'), { key: 'iowa.solveCaptcha', params: {} });
   assert.deepEqual(strings.describeEnglish('First name: review existing dependent answers'),
     { key: 'iowa.reviewDependent', params: { label: { key: 'iowa.firstName', params: {} } } });
   assert.deepEqual(strings.describeEnglish('Receiving end does not exist.'), { key: 'detail', params: { detail: 'Receiving end does not exist.' } });
@@ -223,6 +223,14 @@ test('on Enter Personal Information, SecondHand says plainly what needs the appl
   error.querySelector('form').append(Object.assign(error.createElement('div'), { className: 'error', textContent: 'Synthetic error' }));
   for (const page of [unknown, missing, error]) assert.deepEqual(row(adapter.probePage(page, url)), ['iowa.manualReview']);
   assert.equal(en['iowa.manualReview'], 'Check the questions and any Iowa error messages on this page, because something here isn’t what SecondHand expects');
+});
+
+test('Iowa’s security check is named in plain words: no catalog says "CAPTCHA"', () => {
+  for (const code of strings.LANGUAGES) {
+    const found = Object.entries(strings.catalogs[code]).filter(([, value]) => /captcha/i.test(typeof value === 'string' ? value : `${value.one} ${value.other}`)).map(([key]) => key);
+    assert.deepEqual(found, [], code);
+  }
+  assert.equal(en['iowa.solveCaptcha'], 'Type the characters shown in Iowa’s security check, then click Continue.');
 });
 
 test('no Iowa English says "verified", "controls", "context", or "facts"', () => {

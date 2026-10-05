@@ -589,7 +589,7 @@ function journey({ screens, desktop = {}, continueStays = false, engine = noSite
 const info = (name, path, pageKey) => ({ name, path, page: { kind: 'info', pageKey } });
 const walk = () => [
   { name: 'household', path: '/applyForBenefits/guestLogin', fields: ['householdApplyProg'],
-    page: filled => filled.has('householdApplyProg') ? { kind: 'blocked', pageKey: 'iowa-captcha', todo: 'Solve the CAPTCHA, then click Continue.', checklist: [] }
+    page: filled => filled.has('householdApplyProg') ? { kind: 'blocked', pageKey: 'iowa-captcha', todo: 'Type the characters shown in Iowa’s security check, then click Continue.', checklist: [] }
       : { kind: 'fillable', pageKey: 'iowa-program-intent', checklist: [{ key: 'householdApplyProg', label: 'q', required: true, status: 'missing' }] } },
   info('beforeYouStart', '/applyForBenefits/welcome', 'iowa-before-start'),
   { name: 'consent', path: '/applyForBenefits/letsGetStarted', page: { kind: 'blocked', pageKey: 'iowa-consent', todo: 'Read and accept Iowa’s consent, then click Continue.', checklist: [] } },
@@ -607,7 +607,7 @@ test('one click walks the application: fills, continues info screens, and waits 
   const first = (await w.send({ type: 'ui:autofill', confirmed: true })).data;
   assert.deepEqual(plain(w.getFields()[0].fields), ['programSnap', 'programFip', 'programMedicaid']);
   assert.deepEqual(w.filled(), ['householdApplyProg']);
-  assert.match(first.message, /Filled 1\. Solve the CAPTCHA, then click Continue\./);
+  assert.match(first.message, /Filled 1\. Type the characters shown in Iowa’s security check, then click Continue\./);
   assert.equal((await lastResult(w)).autopilot, true);
 
   w.userContinues(); await settle();            // applicant solved the CAPTCHA
@@ -754,12 +754,12 @@ test('an error reply names its catalog key next to the same English', async () =
 });
 
 test('page state names the catalog key of each instruction, reason, and checklist label the Iowa adapter wrote', async () => {
-  const w = worker({ page: { todo: 'Solve the CAPTCHA, then click Continue.', reason: 'SecondHand doesn’t know this Iowa page. Check it and fill in anything missing yourself, then continue in Iowa’s form.', checklist: [
+  const w = worker({ page: { todo: 'Type the characters shown in Iowa’s security check, then click Continue.', reason: 'SecondHand doesn’t know this Iowa page. Check it and fill in anything missing yourself, then continue in Iowa’s form.', checklist: [
     { key: 'firstName', label: 'First name', status: 'missing', required: true },
     { key: 'hasHomeAddress', label: 'Do you have a home address?: review existing dependent answers', status: 'manual', required: true },
     { key: 'manualReview', label: 'Synthetic unrecognized text', status: 'manual', required: true }] } });
   const { page } = plain((await w.panel({ type: 'ui:pageState' })).data);
-  assert.equal(page.todo, 'Solve the CAPTCHA, then click Continue.', 'the English stays as it was');
+  assert.equal(page.todo, 'Type the characters shown in Iowa’s security check, then click Continue.', 'the English stays as it was');
   assert.equal(page.todoKey, 'iowa.solveCaptcha');
   assert.equal(page.reasonKey, 'iowa.manualStep');
   assert.deepEqual(page.checklist.map(item => [item.label, item.labelKey, item.labelParams]), [
