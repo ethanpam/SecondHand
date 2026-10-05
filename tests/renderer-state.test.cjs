@@ -650,13 +650,13 @@ test('Privacy & backups names everything autofill fills or clicks today and keep
   const card = text(view.window.document.querySelector('#view-privacy .autofill-card'));
   for (const phrase of ['first applicant page', 'Household Application Information', 'Tell Us More', 'date of birth', 'Iowa’s questions about you',
     'first suggested home address', 'Information-only screens', 'Laya', 'guesses', 'Other sites you trust', 'Chrome’s built-in AI', 'on this computer',
-    'never guesses on Iowa’s form', 'A complete live submission has not been validated.']) assert.ok(card.includes(phrase), phrase);
+    'never guesses on Iowa’s form', 'Iowa pages SecondHand doesn’t know', 'A complete live submission has not been validated.']) assert.ok(card.includes(phrase), phrase);
   // Chrome's AI is named with where it runs, that its answers are marked, and that it stays off Iowa's form.
   const chrome = card.split(/(?<=\.)\s+/).find(sentence => sentence.includes('Chrome’s built-in AI'));
   assert.match(chrome, /only/);
   assert.match(chrome, /on this computer/);
   assert.match(chrome, /marked to check/);
-  assert.doesNotMatch(card, /—|passphrase|vault/i);
+  assert.doesNotMatch(card, /—|passphrase|vault|the rules/i);
   // The one value SecondHand picks for the applicant gets its own paragraph, ending on the instruction to check it.
   const address = Array.from(view.window.document.querySelectorAll('#view-privacy .autofill-card p'), text).filter(paragraph => paragraph.includes('first suggested home address'));
   assert.equal(address.length, 1);
