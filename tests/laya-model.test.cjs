@@ -286,6 +286,48 @@ test('a pause waits for the write in progress, so the resumed download starts wh
   assert.deepEqual(fs.readFileSync(path.join(store.directory, name)), files[name]);
 });
 
+test('a full disk fails the download or its record with a clear message, and the partial file is deleted to free its space', async t => {
+  const files = fixtureFiles();
+  const { model } = await server(t, files);
+  const directory = userData(t);
+  const store = new ModelStore({ userDataDir: directory, model: validateManifest({ version: 1, model }).model });
+  const noSpace = syscall => Object.assign(new Error(`ENOSPC: no space left on device, ${syscall}`), { code: 'ENOSPC', syscall });
+  const message = 'The Laya model couldn’t be saved on this computer (ENOSPC). Free some space and try again.';
+  // Writing the weights fails.
+  const weights = path.join(store.directory, 'model.onnx.data.partial');
+  const open = fs.open;
+  const full = new Set();
+  t.mock.method(fs, 'open', (file, flags, mode, callback) => open(file, flags, mode, (error, fd) => {
+    if (!error && file === weights) full.add(fd);
+    callback(error, fd);
+  }));
+  for (const method of ['write', 'writev']) {
+    const original = fs[method];
+    t.mock.method(fs, method, (fd, ...args) => full.has(fd) ? process.nextTick(args.at(-1), noSpace('write')) : original(fd, ...args));
+  }
+  await store.startDownload();
+  assert.deepEqual(await store.state(), { state: 'error', message });
+  assert.equal(fs.existsSync(weights), false);
+  assert.ok(fs.existsSync(path.join(store.directory, 'model.onnx')), 'a file that was saved is kept');
+  t.mock.restoreAll();
+
+  // Making its folder fails.
+  fs.rmSync(path.join(directory, 'models'), { recursive: true });
+  const mkdir = fsp.mkdir;
+  t.mock.method(fsp, 'mkdir', (target, options) => target === store.directory ? Promise.reject(noSpace('mkdir')) : mkdir(target, options));
+  await store.startDownload();
+  assert.deepEqual(await store.state(), { state: 'error', message });
+  t.mock.restoreAll();
+
+  // Recording the installed model fails.
+  await store.startDownload();
+  assert.deepEqual(await store.state(), { state: 'ready' });
+  const openFile = fsp.open;
+  t.mock.method(fsp, 'open', (file, ...rest) => file.startsWith(path.join(directory, 'models/laya/installed.json')) ? Promise.reject(noSpace('open')) : openFile(file, ...rest));
+  await assert.rejects(store.install(), { message });
+  assert.equal(await readInstalled(directory), null);
+});
+
 test('a server error is reported with its status, and redirects are followed', async t => {
   const files = fixtureFiles();
   const { model, state, base } = await server(t, files);

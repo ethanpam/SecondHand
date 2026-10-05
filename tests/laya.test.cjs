@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const fsp = require('node:fs/promises');
 const http = require('node:http');
 const https = require('node:https');
 const os = require('node:os');
@@ -688,6 +689,69 @@ test('a tampered update is deleted, the installed model keeps working, and the n
   await laya.update();
   assert.deepEqual(await laya.status(), { state: 'ready', enabled: true, sizeBytes: sizeOf(hub.latest) });
   assert.equal(installedRevision(userDataDir), NEW);
+});
+
+test('a full disk stops an update with a clear note while the installed model keeps working, and the update installs once there is room', async t => {
+  const hub = await modelHub(t);
+  const shipped = hub.publish(OLD);
+  hub.latest = shipped;
+  const userDataDir = temporary(t, 'secondhand-laya-');
+  const runner = stubRunner();
+  const laya = createLaya({ userDataDir, manifest: shipped, updateUrl: hub.updateUrl, runner, enabled: true });
+  await laya.update();
+  const newer = hub.publish(NEW);
+  hub.latest = newer;
+  const noSpace = syscall => Object.assign(new Error(`ENOSPC: no space left on device, ${syscall}`), { code: 'ENOSPC', syscall });
+  const saved = 'The Laya model couldn’t be saved on this computer (ENOSPC). Free some space and try again.';
+  // The disk is full: writing the update's files fails.
+  const update = path.join(userDataDir, 'models/laya', NEW);
+  const open = fs.open;
+  const full = new Set();
+  t.mock.method(fs, 'open', (file, flags, mode, callback) => open(file, flags, mode, (error, fd) => {
+    if (!error && file.startsWith(update)) full.add(fd);
+    callback(error, fd);
+  }));
+  for (const method of ['write', 'writev']) {
+    const original = fs[method];
+    t.mock.method(fs, method, (fd, ...args) => full.has(fd) ? process.nextTick(args.at(-1), noSpace('write')) : original(fd, ...args));
+  }
+  await laya.update();
+  let status = await laya.status();
+  assert.equal(status.state, 'ready');
+  assert.deepEqual(status.update, { state: 'error', message: `Update download failed: ${saved}` });
+  assert.deepEqual(fs.readdirSync(update, { recursive: true }).filter(name => name.endsWith('.partial')), [], 'the partial file is deleted, freeing its space');
+  assert.equal(installedRevision(userDataDir), OLD);
+  await laya.decide(rowState('3'), { correct: DECISION });
+  assert.equal(runner.loads.at(-1), modelPath(userDataDir, OLD), 'the installed model keeps answering');
+  t.mock.restoreAll();
+
+  // The files fit, but recording the update as installed doesn't.
+  const openFile = fsp.open;
+  t.mock.method(fsp, 'open', (file, ...rest) => file.startsWith(path.join(userDataDir, 'models/laya/installed.json')) ? Promise.reject(noSpace('open')) : openFile(file, ...rest));
+  await laya.update();
+  status = await laya.status();
+  assert.equal(status.state, 'ready');
+  assert.deepEqual(status.update, { state: 'error', message: `Update failed: ${saved}` });
+  assert.equal(installedRevision(userDataDir), OLD);
+  await laya.decide(rowState('4'), { correct: DECISION });
+  assert.equal(runner.loads.at(-1), modelPath(userDataDir, OLD), 'the installed model keeps answering');
+  t.mock.restoreAll();
+
+  await laya.update();
+  assert.deepEqual(await laya.status(), { state: 'ready', enabled: true, sizeBytes: sizeOf(newer) });
+  assert.equal(installedRevision(userDataDir), NEW);
+});
+
+test('with nothing installed, a full disk while recording the model says so plainly', async t => {
+  const hub = await modelHub(t);
+  const shipped = hub.publish(OLD);
+  const userDataDir = temporary(t, 'secondhand-laya-');
+  const openFile = fsp.open;
+  t.mock.method(fsp, 'open', (file, ...rest) => file.startsWith(path.join(userDataDir, 'models/laya/installed.json'))
+    ? Promise.reject(Object.assign(new Error('ENOSPC: no space left on device, open'), { code: 'ENOSPC', syscall: 'open' })) : openFile(file, ...rest));
+  const laya = createLaya({ userDataDir, manifest: shipped, runner: stubRunner(), enabled: true });
+  await laya.update();
+  assert.deepEqual((await laya.status()).update, { state: 'error', message: 'The Laya model couldn’t be saved on this computer (ENOSPC). Free some space and try again.' });
 });
 
 test('nothing is checked or downloaded while Laya is off, and turning it off stops an update download, keeping what arrived', async t => {
