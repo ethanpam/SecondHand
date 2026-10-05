@@ -324,7 +324,7 @@ test('a Touch ID key opens the information through its own slot only, and removi
   assert.equal(vault.getData().profile.lastName, 'Saved After Touch ID');
 });
 
-test('resetting the password with the recovery key or this computer removes the Touch ID slot and keeps the others', async t => {
+test('resetting the password with the recovery key or this computer keeps the Touch ID slot, which still unlocks', async t => {
   for (const method of ['recovery', 'device']) {
     const { file } = await fixture(t);
     const deviceSecret = crypto.randomBytes(32);
@@ -336,13 +336,15 @@ test('resetting the password with the recovery key or this computer removes the 
     await vault.lock();
     if (method === 'recovery') await vault.resetWithRecoveryKey(recoveryKey, 'a brand new password');
     else await vault.resetWithDeviceSecret(deviceSecret, 'a brand new password');
-    assert.equal(vault.hasTouchIdSlot, false, method);
+    assert.equal(vault.hasTouchIdSlot, true, method);
     const after = await slotsOf(file);
-    assert.deepEqual(Object.keys(after).sort(), ['device', 'password', 'recovery'], method);
-    assert.deepEqual(after.recovery, before.recovery, method);
-    assert.deepEqual(after.device, before.device, method);
+    assert.deepEqual(Object.keys(after).sort(), ['device', 'password', 'recovery', 'touchId'], method);
+    for (const name of ['recovery', 'device', 'touchId']) assert.deepEqual(after[name], before[name], `${method}: ${name} slot unchanged`);
+    assert.notDeepEqual(after.password, before.password, `${method}: only the password slot is new`);
     await vault.lock();
-    await assert.rejects(vault.unlockWithTouchIdKey(touchIdKey), error => error.code === 'TOUCH_ID_MISSING', method);
+    // A reset keeps the data key, so the Touch ID key still opens the information.
+    await vault.unlockWithTouchIdKey(touchIdKey);
+    await vault.lock();
     await vault.unlock('a brand new password');
     await vault.lock();
   }

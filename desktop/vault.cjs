@@ -305,12 +305,10 @@ class Vault {
       } catch { key?.fill(0); throw new Error(messages.failed); }
       finally { wrappingKey?.fill(0); }
       const salt = crypto.randomBytes(32);
-      // A new password needs the password again before Touch ID: the reset removes its slot.
-      const { touchId, ...slots } = envelope.slots;
       let passwordKey;
       try {
         passwordKey = await deriveKey(passphrase, salt);
-        await this.commit(data, { version: 2, key, slots: { ...slots, password: wrapKey(key, passwordKey, 'password', salt) } });
+        await this.commit(data, { version: 2, key, slots: { ...envelope.slots, password: wrapKey(key, passwordKey, 'password', salt) } });
       } catch (error) { key.fill(0); throw error; }
       finally { passwordKey?.fill(0); }
     });
