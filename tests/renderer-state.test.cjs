@@ -644,6 +644,32 @@ test('a failed trust change restores the checkbox and shows the error', async t 
   assert.match(view.get('autofill-trust-error').textContent, /Unlock/);
 });
 
+test('Privacy & backups names everything autofill fills or clicks today and keeps the live-submission caveat', async t => {
+  const view = await renderer(t);
+  view.window.document.querySelector('.nav-item[data-view="privacy"]').click();
+  const card = text(view.window.document.querySelector('#view-privacy .autofill-card'));
+  for (const phrase of ['first applicant page', 'Household Application Information', 'Tell Us More', 'date of birth', 'Iowa’s questions about you',
+    'first suggested home address', 'Information-only screens', 'Laya', 'guesses', 'Other sites you trust', 'Chrome’s built-in AI', 'on this computer',
+    'never guesses on Iowa’s form', 'Iowa pages SecondHand doesn’t know', 'A complete live submission has not been validated.']) assert.ok(card.includes(phrase), phrase);
+  // Chrome's AI is named with where it runs, that its answers are marked, and that it stays off Iowa's form.
+  const chrome = card.split(/(?<=\.)\s+/).find(sentence => sentence.includes('Chrome’s built-in AI'));
+  assert.match(chrome, /only/);
+  assert.match(chrome, /on this computer/);
+  assert.match(chrome, /marked to check/);
+  assert.doesNotMatch(card, /—|passphrase|vault|the rules/i);
+  // The one value SecondHand picks for the applicant gets its own paragraph, ending on the instruction to check it.
+  const address = Array.from(view.window.document.querySelectorAll('#view-privacy .autofill-card p'), text).filter(paragraph => paragraph.includes('first suggested home address'));
+  assert.equal(address.length, 1);
+  assert.match(address[0], /^On the verified home-address page, .*\. Check that this address is yours before you submit\.$/);
+});
+
+test('the document review card opens with the file name as its heading, with no line above it', async t => {
+  const view = await renderer(t);
+  const summary = view.window.document.querySelector('#document-review .document-summary > div');
+  assert.equal(summary.firstElementChild, view.get('document-name'));
+  assert.equal(summary.firstElementChild.tagName, 'H2');
+});
+
 test('the profile form saves household counts and household flags', async t => {
   const view = await renderer(t);
   view.window.document.querySelector('.nav-item[data-view="profile"]').click();
