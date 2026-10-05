@@ -16,14 +16,15 @@ button,select{font:inherit;color:inherit;cursor:pointer;-webkit-tap-highlight-co
 .primary{background:var(--primary);color:#fff}.primary:hover:enabled{background:var(--pressed)}
 .secondary{background:#fff;border-color:var(--border)}.secondary:hover:enabled{background:var(--muted)}
 .text-button{display:flex;align-items:center;width:fit-content;min-height:32px;margin-bottom:4px;padding:0;border:0;background:none;font-weight:500;text-align:start;text-decoration:underline;text-underline-offset:4px}.text-button:hover:enabled{text-decoration-thickness:2px}
-/* On-page widget: an extension iframe the page cannot script. Its frame is 46px tall, or 86px with a line under the row. */
-body.launcher-surface{background:none}#launcher{width:100%;height:100%;display:flex;align-items:center;justify-content:center}#widget{width:max-content;max-width:272px;margin-inline-start:auto}#widget.outdated{width:100%}
-.widget{display:flex;flex-direction:column;justify-content:center;gap:4px;height:100%;padding:6px 8px;background:#fff;border:1px solid var(--border);border-radius:12px}.widget .brand{width:30px;height:30px}.widget-logo{display:flex;flex:none;padding:0;border:0;border-radius:30%;background:none}
+/* On-page widget: an extension iframe the page cannot script. It is as tall as what it holds, 46px for its row alone,
+   and asks for a frame that size; the row sits at the bottom, so its button stays where it was when a line comes or goes. */
+body.launcher-surface{background:none}#launcher{width:100%;height:100%;display:flex;align-items:flex-end;justify-content:center}#widget{width:max-content;max-width:272px;margin-inline-start:auto}#widget.outdated{width:100%;height:100%}
+.widget{display:flex;flex-direction:column;justify-content:center;gap:4px;padding:6px 8px;background:#fff;border:1px solid var(--border);border-radius:12px}.widget .brand{width:30px;height:30px}.widget-logo{display:flex;flex:none;margin-inline-end:auto;padding:0;border:0;border-radius:30%;background:none}
 .widget-row{display:flex;align-items:center;gap:8px;min-width:0}
 .widget-primary{flex:none;height:32px;padding:0 16px;border:0;border-radius:100px;background:var(--primary);color:#fff;font-weight:500;white-space:nowrap}.widget-primary:hover:enabled{background:var(--pressed)}
-.widget-link{padding:0;border:0;background:none;font-size:12px;font-weight:500;line-height:16px;text-decoration:underline;text-underline-offset:3px;white-space:nowrap}#need-you{font-weight:600}#translate-offer{align-self:flex-start}
-#widget-text{font-size:12px;line-height:16px;color:var(--muted-foreground);min-width:0;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}
-/* A line the reader must act on widens the widget to its 272px, so two lines hold it. */
+.widget-link{padding:0;border:0;background:none;font-size:12px;font-weight:500;line-height:15px;text-decoration:underline;text-underline-offset:3px;white-space:nowrap}#need-you{font-weight:600}#translate-offer{align-self:flex-start}
+#widget-text{font-size:12px;line-height:15px;color:var(--muted-foreground);min-width:0;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4}
+/* A line to read widens the widget to its 272px; four lines of it make the widget 110px tall, the most its frame allows. */
 #widget-text:not(.visually-hidden){width:max-content;max-width:254px}
 /* An outdated worker: only the reload steps, with room for all of them in the frame the widget already has. */
 .widget.outdated .widget-row{display:none}.widget.outdated{padding:0 8px}.widget.outdated #widget-text{font-size:11px;line-height:14px;color:var(--foreground);-webkit-line-clamp:3}

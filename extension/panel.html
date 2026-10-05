@@ -14,19 +14,19 @@
 </head>
 <body>
   <section id="launcher" hidden>
-    <!-- The logo (which opens the side panel), one button, and a yellow need-you link when answers remain.
-         A line appears below only when the reader must act. -->
+    <!-- A line, when there is one to read, above a row that keeps its place in the page's corner: the logo
+         (which opens the side panel), a link to the answers still needed, and one button. -->
     <div id="widget" class="widget">
+      <p id="widget-text" class="visually-hidden" role="status" aria-live="polite" data-i18n="widget.iowaReady"></p>
+      <button id="translate-offer" class="widget-link" type="button" data-i18n="widget.offer" data-i18n-title="widget.offerTitle" hidden></button>
       <div class="widget-row">
         <button id="details" class="widget-logo" type="button" data-i18n-title="widget.detailsTitle" data-i18n-aria-label="widget.detailsTitle"><img class="brand" src="icon-128.png" alt=""></button>
+        <button id="need-you" class="widget-link" type="button" hidden></button>
         <button id="autofill" class="widget-primary" type="button" data-i18n="widget.autofill" data-i18n-title="widget.autofillIowaTitle"></button>
         <button id="unlock" class="widget-primary" type="button" data-i18n="widget.unlock" hidden></button>
         <button id="open-app" class="widget-primary" type="button" data-i18n="desktop.open" hidden></button>
         <button id="stop" class="widget-primary" type="button" data-i18n="widget.stop" hidden></button>
-        <button id="need-you" class="widget-link" type="button" hidden></button>
       </div>
-      <p id="widget-text" class="visually-hidden" role="status" aria-live="polite" data-i18n="widget.iowaReady"></p>
-      <button id="translate-offer" class="widget-link" type="button" data-i18n="widget.offer" data-i18n-title="widget.offerTitle" hidden></button>
     </div>
     <button id="pill" class="pill" type="button" data-i18n-title="widget.pillTitle" hidden><img class="brand" src="icon-128.png" alt=""></button>
   </section>

@@ -894,6 +894,9 @@ test('the widget’s request for room for its line goes to its own tab’s conte
   assert.deepEqual(plain((await w.launcher({ type: 'ui:widgetSize', line: false, width: 152 })).data), { sized: true });
   assert.deepEqual(plain(w.calls.content.at(-1)), { type: 'secondhand:widgetSize', line: false, width: 152 }, 'the widget’s measured width goes along');
   for (const width of [0, -5, 1.5, '152', 5000, null]) assert.equal(await w.launcher({ type: 'ui:widgetSize', line: false, width }), undefined, `width ${width}`);
+  assert.deepEqual(plain((await w.launcher({ type: 'ui:widgetSize', line: true, width: 254, height: 95 })).data), { sized: true });
+  assert.deepEqual(plain(w.calls.content.at(-1)), { type: 'secondhand:widgetSize', line: true, width: 254, height: 95 }, 'and its measured height');
+  for (const height of [0, 45, 111, 80.5, '95', null]) assert.equal(await w.launcher({ type: 'ui:widgetSize', line: true, width: 254, height }), undefined, `height ${height}`);
   assert.deepEqual(w.calls.native, []);
 });
 

@@ -99,9 +99,9 @@
     let pageLanguage = '';
     let languageChecked = false;
     let languageTrouble = null;
-    // The frame the page's content script was last asked for: a row taller for a message,
-    // and as wide as the widget (0 until it has measured itself).
-    let frame = { line: false, width: 0 };
+    // The frame the page's content script was last asked for: whether it holds a line to read, and the
+    // widget's own width and height (0 until it has measured itself).
+    let frame = { line: false, width: 0, height: 0 };
     const AI_TIMEOUT_MS = 8000;
     // An outdated worker keeps its reload steps on screen and is not polled again.
     const trouble = error => { if (error.outdated) { outdated = true; outdatedKey = error.messageKey; } return problem(error); };
@@ -155,16 +155,18 @@
       const message = outdated || Boolean(note) || result?.state === 'error' || unfinished;
       $('widget-text').classList.toggle('visually-hidden', !message);
       $('translate-offer').hidden = outdated || message || !known || !pageLanguage || pageLanguage === language;
-      // The widget is as wide as what it shows, up to 272px (see panel.css). An outdated worker
-      // is not asked for anything more; its steps fill the frame the widget already has.
+      // The widget is as wide and as tall as what it shows, up to 272px by 110px (see panel.css). An outdated
+      // worker is not asked for anything more; its steps fill the frame the widget already has.
       const room = message || !$('translate-offer').hidden;
-      const width = outdated || $('widget').hidden ? frame.width : Math.ceil($('widget').getBoundingClientRect().width);
-      if (!outdated && (room !== frame.line || width !== frame.width)) fitFrame(room, width);
+      const box = outdated || $('widget').hidden ? null : $('widget').getBoundingClientRect();
+      const width = box ? Math.ceil(box.width) || 0 : frame.width;
+      const height = box ? Math.ceil(box.height) || 0 : frame.height;
+      if (!outdated && (room !== frame.line || width !== frame.width || height !== frame.height)) fitFrame(room, width, height);
     }
     // The widget can't size its own frame: the worker asks this tab's content script for it.
-    async function fitFrame(line, width) {
-      frame = { line, width };
-      try { await send({ type: 'ui:widgetSize', line, ...(width ? { width } : {}) }); }
+    async function fitFrame(line, width, height) {
+      frame = { line, width, height };
+      try { await send({ type: 'ui:widgetSize', line, ...(width ? { width } : {}), ...(height ? { height } : {}) }); }
       catch (error) { note = trouble(error); render(); }
     }
     async function poll() {

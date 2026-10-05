@@ -1514,6 +1514,19 @@ test('the site widget frame is as wide as the widget measured itself, never past
   assert.match(page.host().style.width, /^min\(272px/);
 });
 
+test('the site widget frame is as tall as the widget measured itself, from its row alone to four lines above it', t => {
+  const page = siteContent(t);
+  assert.equal(page.host().style.height, '46px');
+  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 110 })), { sized: true });
+  assert.equal(page.host().style.height, '110px');
+  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: false, width: 152, height: 46 })), { sized: true });
+  assert.equal(page.host().style.height, '46px');
+  for (const height of [0, 45, 111, 80.5, '80', null]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height }), undefined, `height ${height}`);
+  assert.equal(page.host().style.height, '46px');
+  assert.equal(page.request({ type: 'secondhand:widgetSize', line: true, height: 95 }, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
+  assert.equal(page.host().style.height, '46px');
+});
+
 test('a site frame answers the page-text request with its declared language and its words, never an answer, for our extension only', t => {
   const page = siteContent(t);
   const doc = page.window.document;

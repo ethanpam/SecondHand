@@ -23,6 +23,7 @@
   const strings = value => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
   // The widget's frame is as wide as the widget measured itself, never past 272px or the screen.
   const fits = width => Number.isInteger(width) && width > 0 && width <= 1000;
+  const tall = height => Number.isInteger(height) && height >= 46 && height <= 110;
   const frameWidth = width => `min(${width || 272}px, 272px, calc(100vw - 24px))`;
 
   function withOwnPanelHidden(work) {
@@ -184,11 +185,12 @@
         // Every question's label for the applicant's translated list, and the language this document declares.
         const listed = withOwnPanelHidden(() => engine.questions(document));
         respond({ lang: document.documentElement.lang || '', questions: listed.map(({ id, label }) => ({ id, label })) });
-      } else if (message.type === 'secondhand:widgetSize' && typeof message.line === 'boolean' && (message.width === undefined || fits(message.width)) && topFrame) {
-        // As wide as the widget, and one row taller while it shows a line the reader must act on.
+      } else if (message.type === 'secondhand:widgetSize' && typeof message.line === 'boolean' && (message.width === undefined || fits(message.width)) &&
+        (message.height === undefined || tall(message.height)) && topFrame) {
+        // As wide and as tall as the widget measured itself: 46px for its row alone, more with a line to read above it.
         if (panelHost) {
           panelHost.style.setProperty('width', frameWidth(message.width), 'important');
-          panelHost.style.setProperty('height', message.line ? '86px' : '46px', 'important');
+          panelHost.style.setProperty('height', `${message.height || (message.line ? 86 : 46)}px`, 'important');
         }
         respond({ sized: Boolean(panelHost) });
       } else if (message.type === 'secondhand:generic:pageText') {

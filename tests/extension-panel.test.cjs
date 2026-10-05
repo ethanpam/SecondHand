@@ -647,6 +647,20 @@ test('widget frame is a row taller for a line and stays as wide as the widget wi
   assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: false, width: 181 });
 });
 
+test('widget frame is as tall as the widget measured itself, and is asked for again when its lines change', async t => {
+  const view = await panel(t, { launcher: true, autofill: { state: 'locked', filled: 0, needYou: [], message: 'Unlock SecondHand to autofill.', pageKey: 'iowa-personal-information' } });
+  // The row alone, then the row under two lines of 15px with the 4px between them.
+  view.get('widget').getBoundingClientRect = () => view.get('widget-text').classList.contains('visually-hidden') ? { width: 180.4, height: 46 } : { width: 253.1, height: 79.6 };
+  const sizes = () => plainRequests(view.requests.filter(request => request.type === 'ui:widgetSize'));
+  await view.userClick('autofill');
+  assert.deepEqual(sizes(), [{ type: 'ui:widgetSize', line: false, width: 181, height: 46 }]);
+  await view.userClick('unlock');
+  assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: true, width: 254, height: 80 }, 'a line to read makes the frame as tall as the widget with it');
+  await view.userClick('autofill');
+  assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: false, width: 181, height: 46 });
+  assert.equal(sizes().length, 3, 'the same size is not asked for again');
+});
+
 test('widget is a pill off the applicant page and opens the side panel from it', async t => {
   const view = await panel(t, { launcher: true, kind: 'manual' });
   assert.equal(view.get('widget').hidden, true);
@@ -1587,6 +1601,21 @@ test('the Iowa widget frame is as wide as the widget measured itself, never past
   assert.match(host.style.width, /^min\(272px/, 'a widget that could not measure itself gets the full card');
   for (const width of [0, 1.5, '152', 5000]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: false, width }), undefined, `width ${width}`);
   assert.match(host.style.width, /^min\(272px/);
+  // The frame is as tall as the widget measured itself: its row alone, or up to four lines above it.
+  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 95 })), { sized: true });
+  assert.equal(host.style.height, '95px');
+  page.window.dispatchEvent(new page.window.Event('popstate'));
+  assert.equal(host.style.height, '95px', 'the height stays across page changes');
+  page.setKind('manual');
+  page.window.dispatchEvent(new page.window.Event('popstate'));
+  assert.equal(host.style.height, '46px', 'a pill is never taller');
+  page.setKind('fillable');
+  page.window.dispatchEvent(new page.window.Event('popstate'));
+  assert.equal(host.style.height, '95px', 'and the widget gets its height back');
+  for (const height of [0, 45, 111, 80.5, '80', null]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height }), undefined, `height ${height}`);
+  assert.equal(host.style.height, '95px');
+  page.request({ type: 'secondhand:widgetSize', line: true });
+  assert.equal(host.style.height, '86px', 'a widget that could not measure itself gets a row for its line');
 });
 
 // SecondHand on all websites.

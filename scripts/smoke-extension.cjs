@@ -8,6 +8,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { chromium, expect } = require('@playwright/test');
+const strings = require('../extension/strings.js');
 const syntheticProfile = require('../tests/fixtures/applicant-profile.json');
 const applicantFixture = require('../tests/fixtures/iowa-personal-information.cjs');
 const preApplicant = require('../tests/fixtures/iowa-pre-applicant.cjs');
@@ -143,6 +144,12 @@ function fixture(nextStep) {
 
 // Pre-applicant screens with stand-ins for Iowa's page functions. About you is not
 // recorded yet, so Instructions' Continue leads straight to the applicant page.
+// Iowa's applicant heading over a form SecondHand doesn't know: a page it fills nothing on.
+const anotherApplicantForm = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Synthetic unknown applicant form · test only</title>
+  <style>body{font:16px system-ui;background:#f7f8f2;color:#294035;margin:0;padding:30px}label{display:block;margin:12px 0 4px}</style></head>
+  <body><main><p class="test-only">SYNTHETIC TEST FIXTURE. No government connection or real applicant data.</p><h1>Enter Personal Information</h1>
+  <form id="qa-another-form"><label for="qa-nickname">Preferred name (QA only)</label><input id="qa-nickname" name="qaNickname"><button type="button">Save and Continue</button></form></main></body></html>`;
+
 function preApplicantPage(name) {
   const targets = { letsGetStarted: '/applyForBenefits/letsGetStarted', instructions: '/applyForBenefits/instructions', aboutYou: '/applyForBenefits/enterPersonalInfo?next=stay', welcome: '/applyForBenefits/welcome', importantInfo: '/applyForBenefits/importantInfo' };
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Synthetic Iowa screen · test only</title></head><body>
@@ -274,7 +281,7 @@ async function main() {
     await context.route('**/*', route => {
       const request = route.request(); const url = new URL(request.url());
       if (request.isNavigationRequest() && url.origin === 'https://hhsservices.iowa.gov' && url.pathname === '/apspssp/ssp.portal/applyForBenefits/enterPersonalInfo') {
-        return route.fulfill({ status: 200, contentType: 'text/html', body: fixture(url.searchParams.get('next')) });
+        return route.fulfill({ status: 200, contentType: 'text/html', body: url.searchParams.get('next') === 'another-form' ? anotherApplicantForm : fixture(url.searchParams.get('next')) });
       }
       if (request.isNavigationRequest() && request.url() === addressUrl) {
         verifiedAddressLoads++;
@@ -442,6 +449,41 @@ async function main() {
     assert.deepEqual((await calls('getFields'))[0].fields, ['programSnap', 'programFip', 'programMedicaid']);
     assert.equal(await page.evaluate(() => window.__continues), 0);
     console.log('Autopilot: the household question is answered from saved programs and the CAPTCHA is left to the applicant.');
+
+    // On an Iowa page SecondHand doesn't fill, the widget says what to do next, every word of it on screen, in each
+    // language SecondHand speaks, in a frame that is its row alone before Autofill and never past 272 by 110 after (#110).
+    const host = page.locator('[data-secondhand-assistant]');
+    const notFilled = [[selfDetailsUrl, 'iowa.selfUnverifiedTodo'], [`${applicant}?next=another-form`, 'iowa.personalUnverifiedTodo']];
+    currentSelfVariant = 'heading';
+    for (const code of strings.LANGUAGES) {
+      for (const [url, key] of notFilled) {
+        await resetTo(url);
+        // The language is the choice saved in the extension pages' own storage, as the side panel's picker saves it.
+        await (await launcherFrame()).evaluate(code => localStorage.setItem('secondhand.language', code), code);
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        widget = await launcherFrame();
+        await expect(widget.locator('#autofill')).toBeVisible({ timeout: 20000 });
+        assert.equal(await widget.evaluate(() => document.documentElement.dir), code === 'ar' ? 'rtl' : 'ltr');
+        // Before Autofill the frame is the widget's row alone, or one line taller where the widget offers
+        // the page's questions in the applicant's language.
+        await expect.poll(async () => (await host.boundingBox()).height === (await widget.locator('#translate-offer').isVisible() ? 65 : 46), { timeout: 10000 }).toBe(true);
+        if (code === 'en') assert.equal((await host.boundingBox()).height, 46);
+        await widget.locator('#autofill').click();
+        await expect(widget.locator('#widget-text')).toHaveText(strings.text(code, key), { timeout: 20000 });
+        await expect(widget.locator('#widget-text')).toBeVisible();
+        // The frame follows the widget's measured size a moment later: then the whole line and the whole widget show.
+        await expect.poll(() => widget.evaluate(() => {
+          const line = document.getElementById('widget-text');
+          return line.scrollHeight <= line.clientHeight && document.getElementById('widget').getBoundingClientRect().height <= innerHeight;
+        }), { timeout: 10000 }).toBe(true);
+        const box = await host.boundingBox();
+        assert.ok(box.width <= 272 && box.height > 46 && box.height <= 110, `${code} ${key}: the frame is ${box.width} by ${box.height}`);
+        assert.deepEqual(await calls('getFields'), [], 'nothing is asked of the desktop for a page SecondHand does not fill');
+      }
+    }
+    await (await launcherFrame()).evaluate(() => localStorage.removeItem('secondhand.language'));
+    currentSelfVariant = 'verified';
+    console.log(`Widget: on Iowa pages SecondHand doesn’t fill, the whole next step shows in ${strings.LANGUAGES.join(', ')}, in a frame no larger than 272 by 110.`);
 
     // Other portal pages show only a small pill and never contact the desktop.
     await resetTo(`${portal}/applyForBenefits/householdMembers`);
