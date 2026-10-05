@@ -659,7 +659,7 @@ test('Always allow on the answers prompt works like getFields’: it saves the s
   assert.equal(other.prompts.length, 1, 'Always allow belongs to the stored extension ID: another one is asked, then refused');
 });
 
-test('with Always allow on, everyday answers need no prompt; answers that needed sensitive facts get one "Share sensitive details?" prompt, and Cancel returns none', async () => {
+test('with Always allow on, everyday answers need no prompt; answers that needed sensitive facts get one "Share sensitive details?" prompt, and Cancel drops only those', async () => {
   const app = await answering(trusted);
   const everyday = await app.request(answerRequest([veteran]));
   assert.deepEqual(plain(everyday.answers), { 'f0:sh-1-4': 'No' });
@@ -682,7 +682,11 @@ test('with Always allow on, everyday answers need no prompt; answers that needed
 
   app.answer(async () => ({ response: 0 }));
   const cancelled = await app.request(answerRequest([sixty, veteran]));
-  assert.deepEqual(plain(cancelled.answers), {}, 'Cancel returns no answers');
+  assert.deepEqual(plain(cancelled.answers), { 'f0:sh-1-4': 'No' }, 'Cancel drops only the answer that needed sensitive details; the everyday one still fills');
+  assert.equal(app.prompts.length, 2, 'Always allow covers the everyday answer: no other prompt');
+  assert.equal(cancelled.accessRevision, (await app.request({ type: 'status' })).accessRevision);
+  assert.deepEqual(plain((await app.request(answerRequest([sixty]))).answers), {}, 'with only sensitive answers, Cancel returns none');
+  assert.equal(app.prompts.length, 3);
 });
 
 test('the sensitive prompt says how many of the answers needed sensitive details, in plain grammar, and that Laya read them', async () => {
@@ -716,8 +720,40 @@ test('without Always allow, answers that needed sensitive facts fold into the sa
   assert.deepEqual(plain(app.prompts[0].buttons), ['Cancel', 'Allow once']);
   assert.match(app.prompts[0].detail, /Date of birth/);
   assert.equal((await app.invoke('status')).autofillWithoutAsking, false);
+
+  // Cancel drops the answer that needed sensitive details. The everyday one follows its own rule: without
+  // Always allow, it asks "Let Chrome fill this form?", listing only that answer.
+  const responses = [0, 1];
+  app.answer(async () => ({ response: responses.shift() }));
+  assert.deepEqual(plain((await app.request(answerRequest([sixty, veteran]))).answers), { 'f0:sh-1-4': 'No' });
+  assert.deepEqual(app.prompts.slice(1).map(prompt => prompt.title), ['Share sensitive details?', 'Let Chrome fill this form?']);
+  const everyday = app.prompts.at(-1);
+  assert.deepEqual(plain(everyday.buttons), ['Cancel', 'Allow once', 'Always allow on this computer']);
+  assert.equal(everyday.message, 'Fill this answer into https://pantry.example.org?');
+  assert.match(everyday.detail, /“Is anyone in your household a veteran\?”: No/);
+  assert.doesNotMatch(everyday.detail, /60 or older/, 'the dropped answer isn’t offered again');
+  assert.equal((await app.invoke('status')).autofillWithoutAsking, false);
+
   app.answer(async () => ({ response: 0 }));
-  assert.deepEqual(plain((await app.request(answerRequest([sixty, veteran]))).answers), {});
+  assert.deepEqual(plain((await app.request(answerRequest([sixty, veteran]))).answers), {}, 'Cancel on both returns none');
+  assert.equal(app.prompts.length, 5);
+});
+
+test('a lock while the "Share sensitive details?" prompt is open releases nothing when it is cancelled', async () => {
+  for (const settings of [trusted, asking]) for (const change of ['lock', 'lock and unlock']) {
+    const app = await answering(settings);
+    // The sensitive prompt waits for Cancel; any later prompt would be allowed at once.
+    let cancel;
+    app.answer(() => cancel ? Promise.resolve({ response: 1 }) : new Promise(done => { cancel = () => done({ response: 0 }); }));
+    const pending = app.request(answerRequest([sixty, veteran]));
+    for (let i = 0; i < 50 && !cancel; i++) await tick();
+    assert.equal(typeof cancel, 'function', 'the prompt is showing');
+    await app.invoke('lock');
+    if (change === 'lock and unlock') await app.invoke('unlock', 'synthetic password');
+    cancel();
+    await assert.rejects(pending, change === 'lock' ? /Unlock SecondHand first/ : /SecondHand access changed/, `${settings.autofillWithoutAsking ? 'Always allow' : 'asking'}, ${change}`);
+    assert.equal(app.prompts.length, 1, 'no prompt for the everyday answer');
+  }
 });
 
 test('on Iowa’s portal, answers follow getFields’ Iowa rule: a prompt only without Always allow, and never a sensitive one', async () => {
