@@ -796,6 +796,169 @@ test('creating a password shows the recovery key once and requires acknowledgeme
   assert.equal(view.get('recovery-dialog').open, false);
 });
 
+test('a pending or failed setup save does not hide the new recovery key or its reset warning', async t => {
+  const completion = deferred();
+  const recoveryKey = 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789';
+  let setupRequests = 0;
+  const view = await renderer(t, {
+    status: async () => ({ exists: false, unlocked: false, lockRevision: 0 }),
+    createVault: async () => ({
+      status: { exists: true, unlocked: true, recoveryKey: true, lockRevision: 0 },
+      recoveryKey, deviceResetFailed: true
+    }),
+    startSetup: () => { setupRequests++; return completion.promise; }
+  });
+  view.edit('passphrase', 'synthetic long password');
+  view.edit('confirm-passphrase', 'synthetic long password');
+  view.submit('auth-form');
+  await tick();
+  assert.equal(setupRequests, 1);
+  assert.equal(view.get('workspace').hidden, false);
+  assert.equal(view.get('recovery-dialog').open, true, 'the key must be available before the setup save settles');
+  assert.equal(view.get('recovery-key-value').textContent, recoveryKey);
+  assert.match(view.get('recovery-feedback').textContent, /couldn’t save a reset option/);
+  assert.equal(view.get('recovery-done').disabled, true);
+  view.get('recovery-done').click();
+  assert.equal(view.get('recovery-dialog').open, true, 'a slow setup save does not bypass acknowledgement');
+
+  completion.reject(new Error('Synthetic setup progress write failed'));
+  await tick();
+  assert.equal(view.get('recovery-dialog').open, true);
+  assert.equal(view.get('recovery-key-value').textContent, recoveryKey);
+  assert.match(view.get('recovery-feedback').textContent, /setup/i, 'the failure is reported in the open recovery dialog');
+  assert.match(view.get('recovery-feedback').textContent, /couldn’t save a reset option/, 'the earlier reset warning is preserved');
+  assert.equal(view.get('auth-error').hidden, true, 'setup failure must not be routed to the hidden authentication form');
+  assert.equal(view.get('auth-error').textContent, '');
+  assert.equal(view.get('recovery-done').disabled, true);
+  const cancel = new view.window.Event('cancel', { cancelable: true });
+  view.get('recovery-dialog').dispatchEvent(cancel);
+  assert.equal(cancel.defaultPrevented, true);
+  view.get('recovery-saved').checked = true;
+  view.get('recovery-saved').dispatchEvent(new view.window.Event('change'));
+  view.get('recovery-done').click();
+  assert.equal(view.get('recovery-dialog').open, false);
+  assert.equal(view.get('setup-dialog').open, false, 'failed setup persistence must not offer a setup that was never started');
+});
+
+test('setup responses after recovery acknowledgement never redisplay the key', async t => {
+  for (const result of ['success', 'failure']) await t.test(result, async t => {
+    const completion = deferred();
+    const view = await renderer(t, {
+      status: async () => ({ exists: false, unlocked: false, lockRevision: 0 }),
+      createVault: async () => ({
+        status: { exists: true, unlocked: true, recoveryKey: true, lockRevision: 0 },
+        recoveryKey: 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789'
+      }),
+      startSetup: () => completion.promise
+    });
+    view.edit('passphrase', 'synthetic long password');
+    view.edit('confirm-passphrase', 'synthetic long password');
+    view.submit('auth-form');
+    await tick();
+    assert.equal(view.get('recovery-dialog').open, true);
+    view.get('recovery-saved').checked = true;
+    view.get('recovery-saved').dispatchEvent(new view.window.Event('change'));
+    view.get('recovery-done').click();
+    // JSDOM's dialog mock does not queue the browser's close event.
+    view.get('recovery-dialog').dispatchEvent(new view.window.Event('close'));
+    assert.equal(view.get('recovery-dialog').open, false);
+    assert.equal(view.get('recovery-key-value').textContent, '');
+    assert.equal(view.get('setup-dialog').open, false, 'setup cannot open before persistence succeeds');
+
+    if (result === 'success') completion.resolve({ step: 0, steps: 6 });
+    else completion.reject(new Error('Synthetic setup progress write failed'));
+    await tick();
+    assert.equal(view.get('recovery-dialog').open, false);
+    assert.equal(view.get('recovery-key-value').textContent, '');
+    assert.equal(view.get('auth-error').hidden, true);
+    assert.equal(view.get('auth-error').textContent, '');
+    assert.equal(view.get('setup-dialog').open, false, 'finishing a slow setup save must not open a surprise modal');
+    assert.equal(view.get('setup-resume').hidden, result !== 'success');
+    if (result === 'failure') {
+      assert.equal(view.get('toast').hidden, false, 'a failure after acknowledgment still has visible feedback');
+      assert.match(view.get('toast').textContent, /setup/i);
+      assert.equal(view.get('setup-resume').hidden, true);
+    }
+  });
+});
+
+test('a pending initial setup save never treats a replacement recovery key as its own dialog', async t => {
+  for (const result of ['success', 'failure']) await t.test(result, async t => {
+    const completion = deferred();
+    const replacementKey = 'NEWK-EYAB-CDEF-GHJK-MNPQ-RSTV-WXYZ-2345';
+    const view = await renderer(t, {
+      status: async () => ({ exists: false, unlocked: false, lockRevision: 0 }),
+      createVault: async () => ({
+        status: { exists: true, unlocked: true, recoveryKey: true, lockRevision: 0 },
+        recoveryKey: 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789'
+      }),
+      startSetup: () => completion.promise,
+      replaceRecoveryKey: async () => ({ recoveryKey: replacementKey })
+    });
+    view.edit('passphrase', 'synthetic long password');
+    view.edit('confirm-passphrase', 'synthetic long password');
+    view.submit('auth-form');
+    await tick();
+    view.get('recovery-saved').checked = true;
+    view.get('recovery-saved').dispatchEvent(new view.window.Event('change'));
+    view.get('recovery-done').click();
+    view.get('recovery-dialog').dispatchEvent(new view.window.Event('close'));
+    view.get('replace-recovery-key').click();
+    await tick();
+    assert.equal(view.get('recovery-dialog').open, true);
+    assert.equal(view.get('recovery-key-value').textContent, replacementKey);
+    if (result === 'success') completion.resolve({ step: 0, steps: 6 });
+    else completion.reject(new Error('Synthetic setup progress write failed'));
+    await tick();
+    assert.equal(view.get('recovery-dialog').open, true);
+    assert.equal(view.get('recovery-key-value').textContent, replacementKey);
+    assert.equal(view.get('recovery-feedback').textContent, '', 'the setup response must not alter a different key’s feedback');
+    assert.equal(view.get('recovery-done').disabled, true);
+    if (result === 'failure') {
+      assert.equal(view.get('toast').hidden, false);
+      assert.match(view.get('toast').textContent, /setup/i);
+    }
+    view.get('recovery-saved').checked = true;
+    view.get('recovery-saved').dispatchEvent(new view.window.Event('change'));
+    view.get('recovery-done').click();
+    assert.equal(view.get('setup-dialog').open, false, 'acknowledging a replacement key must not open the initial setup offer');
+  });
+});
+
+test('locking while setup is being saved discards late success and failure without restoring recovery UI', async t => {
+  for (const result of ['success', 'failure']) await t.test(result, async t => {
+    const completion = deferred();
+    const view = await renderer(t, {
+      status: async () => ({ exists: false, unlocked: false, lockRevision: 0 }),
+      createVault: async () => ({
+        status: { exists: true, unlocked: true, recoveryKey: true, lockRevision: 0 },
+        recoveryKey: 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789', deviceResetFailed: true
+      }),
+      startSetup: () => completion.promise
+    });
+    view.edit('passphrase', 'synthetic long password');
+    view.edit('confirm-passphrase', 'synthetic long password');
+    view.submit('auth-form');
+    await tick();
+    assert.equal(view.get('recovery-dialog').open, true);
+    view.lock(1);
+    view.edit('passphrase', 'newer lock-screen input');
+    if (result === 'success') completion.resolve({ step: 0, steps: 6 });
+    else completion.reject(new Error('Synthetic setup progress write failed'));
+    await tick();
+    assert.equal(view.get('workspace').hidden, true);
+    assert.equal(view.get('auth-view').hidden, false);
+    assert.equal(view.get('recovery-dialog').open, false);
+    assert.equal(view.get('recovery-key-value').textContent, '');
+    assert.equal(view.get('recovery-feedback').textContent, '');
+    assert.equal(view.get('setup-dialog').open, false);
+    assert.equal(view.get('setup-resume').hidden, true);
+    assert.equal(view.get('auth-error').hidden, true);
+    assert.equal(view.get('toast').hidden, true);
+    assert.equal(view.get('passphrase').value, 'newer lock-screen input');
+  });
+});
+
 test('locking during initial profile loading cannot redisplay the newly created recovery key', async t => {
   const completion = deferred();
   let dataRequests = 0;

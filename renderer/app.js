@@ -733,6 +733,7 @@
       return;
     }
     for (const field of selected) profileControl(field.key).value = field.input.value.trim();
+    syncSelf();
     profileRevision++;
     setProfileDirty(true);
     showView('profile', { skipConfirmation: true });
@@ -986,13 +987,30 @@
           if (generation !== vaultGeneration) return;
           await loadUnlocked(created.status);
           if (generation !== vaultGeneration) return;
-          // The guided setup starts with the new password, so it can be resumed; it is offered after the recovery key.
-          setupProgress = await api.startSetup();
-          if (generation !== vaultGeneration) return;
-          renderSetupResume();
-          offerSetup = true;
+          // The recovery key must be available even if optional setup progress
+          // is slow or cannot be saved. Setup is offered after the key is saved.
+          offerSetup = false;
           showRecoveryKey(created.recoveryKey);
           if (created.deviceResetFailed) $('recovery-feedback').textContent = 'This computer couldn’t save a reset option, so keep this key safe.';
+          const showingCreatedKey = () => $('recovery-dialog').open && $('recovery-key-value').textContent === created.recoveryKey;
+          try {
+            const progress = await api.startSetup();
+            if (generation !== vaultGeneration || !vaultStatus.unlocked) return;
+            setupProgress = progress;
+            renderSetupResume();
+            // If the key was already acknowledged, leave the resume link
+            // available without interrupting the user's next action.
+            offerSetup = showingCreatedKey();
+          } catch {
+            if (generation !== vaultGeneration || !vaultStatus.unlocked) return;
+            setupProgress = null;
+            offerSetup = false;
+            renderSetupResume();
+            if (showingCreatedKey()) {
+              $('recovery-feedback').textContent = [$('recovery-feedback').textContent,
+                'Guided setup couldn’t start. After saving this key, you can enter your details in My information.'].filter(Boolean).join(' ');
+            } else toast('Guided setup couldn’t start. You can enter your details in My information.', true);
+          }
         }
       } catch (error) { if (generation === vaultGeneration) showError('auth-error', error); }
       finally {
