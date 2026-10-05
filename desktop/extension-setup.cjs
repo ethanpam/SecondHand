@@ -8,7 +8,10 @@ const { atomicWrite } = require('./vault.cjs');
 // Copy application assets only. Never copy the vault, settings, or user documents.
 const EXTENSION_FILES = Object.freeze([
   'background.js', 'content.js', 'address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'generic-content.js', 'ai-mapper.js',
-  'strings.js', 'translation.js', 'summary.js', 'page-text.js', 'panel.html', 'panel.css', 'panel.js', 'icon-16.png', 'icon-32.png', 'icon-48.png', 'icon-128.png', 'manifest.json'
+  'strings.js', 'translation.js', 'summary.js', 'page-text.js', 'panel.html', 'panel.css', 'panel.js', 'icon-16.png', 'icon-32.png', 'icon-48.png', 'icon-128.png', 'manifest.json',
+  // The website's typefaces and their license.
+  'geist-latin-400-normal.woff2', 'geist-latin-500-normal.woff2', 'geist-latin-600-normal.woff2', 'geist-vietnamese-400-normal.woff2', 'geist-vietnamese-500-normal.woff2', 'geist-vietnamese-600-normal.woff2',
+  'bricolage-grotesque-latin-wght-normal.woff2', 'bricolage-grotesque-vietnamese-wght-normal.woff2', 'font-licenses.txt'
 ]);
 
 function extensionIdFromKey(key) {

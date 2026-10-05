@@ -284,6 +284,8 @@
     document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
     window.addEventListener('pagehide', () => clearTimeout(pollTimer), { once: true });
     render();
+    // The widget measures its own width for its frame: measure again whenever one of its fonts has loaded.
+    document.fonts?.addEventListener('loadingdone', render);
     checkBuild().catch(error => { note = trouble(error); render(); }).then(poll);
   }
 
