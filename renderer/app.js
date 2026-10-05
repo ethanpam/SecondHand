@@ -205,16 +205,13 @@
     if (api) $('passphrase').focus();
   }
 
-  // The lock screen's Unlock with Touch ID, when it's ready, or a line saying why the password is
-  // needed: Touch ID was turned off (and why), or SecondHand restarted or 14 days have passed.
+  // The lock screen's Unlock with Touch ID, when it's ready, or a line saying why Touch ID was turned off.
   function renderTouchIdUnlock() {
     const locked = Boolean(vaultStatus.exists) && !vaultStatus.unlocked;
     $('touch-id-unlock').hidden = !(locked && vaultStatus.touchId === 'ready');
     const notice = locked && typeof vaultStatus.touchIdNotice === 'string' ? vaultStatus.touchIdNotice : '';
-    const note = notice || (locked && vaultStatus.touchId === 'password' ? 'Enter your password: it’s needed after SecondHand restarts or every 14 days.' : '');
-    $('touch-id-note').textContent = note;
-    $('touch-id-note').hidden = !note;
-    $('touch-id-note').classList.toggle('error', Boolean(notice));
+    $('touch-id-note').textContent = notice;
+    $('touch-id-note').hidden = !notice;
   }
 
   // Touch ID's state can change while the lock screen shows (an auto-lock, a failed attempt).
@@ -231,7 +228,7 @@
   // Unlock with Touch ID in Privacy & backups: shown only on a Mac that can use it.
   function renderTouchId() {
     $('touch-id-setting').hidden = !vaultStatus.touchIdSupported;
-    $('touch-id-toggle').checked = vaultStatus.touchId === 'ready' || vaultStatus.touchId === 'password';
+    $('touch-id-toggle').checked = vaultStatus.touchId === 'ready';
   }
 
   function closeTouchIdDialog() {

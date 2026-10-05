@@ -23,4 +23,4 @@
 .household-list{margin-bottom:20px}.household-members{display:flex;flex-direction:column;gap:12px;margin:12px 0}.household-member{border:1px solid var(--line);border-radius:10px;padding:16px;margin:0;min-width:0}.household-member legend{font-size:13px;font-weight:600;padding:0 6px}.household-member .field-grid{gap:12px}.household-member input[readonly]{background:#f6f7f2;color:var(--body)}.remove-member{margin-top:8px}.household-counts-note{margin:0 0 20px}
 input[readonly]{background:#f6f7f2}
 @media(max-width:870px){.household-member .field-grid.three{grid-template-columns:1fr}}
-.auth-box #touch-id-unlock{margin-top:12px}.touch-id-note{font-size:11px;line-height:1.7;color:#6f7a69;margin-top:12px}.touch-id-note.error{color:var(--danger)}.touch-id-dialog{width:440px}.touch-id-dialog p{font-size:12px;margin-bottom:16px}
+.auth-box #touch-id-unlock{margin-top:12px}.touch-id-note{font-size:11px;line-height:1.7;color:var(--danger);margin-top:12px}.touch-id-dialog{width:440px}.touch-id-dialog p{font-size:12px;margin-bottom:16px}

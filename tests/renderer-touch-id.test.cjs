@@ -9,7 +9,6 @@ const { JSDOM } = require('jsdom');
 const html = fs.readFileSync(path.join(__dirname, '../renderer/index.html'), 'utf8');
 const script = fs.readFileSync(path.join(__dirname, '../renderer/app.js'), 'utf8');
 const tick = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve)); };
-const NEEDED = 'Enter your password: it’s needed after SecondHand restarts or every 14 days.';
 const PASSWORD = 'synthetic touch password';
 
 // The desktop app's window with its preload API simulated. Touch ID itself is the main process's
@@ -68,10 +67,11 @@ test('the Touch ID setting shows only where Touch ID can be used, off by default
   assert.equal(view.get('touch-id-toggle').checked, false);
   assert.match(view.get('touch-id-setting').textContent, /Unlock with Touch ID/);
   const hint = view.get('touch-id-setting').querySelector('.field-hint').textContent;
-  assert.match(hint, /restarts and every 14 days/);
+  assert.match(hint, /stays on until you turn it off/);
   assert.match(hint, /login password/);
-  const on = await renderer(t, { touchId: 'password' });
-  assert.equal(on.get('touch-id-toggle').checked, true, 'on, even while the password is needed');
+  assert.doesNotMatch(hint, /restart|14 days/);
+  const on = await renderer(t, { touchId: 'ready' });
+  assert.equal(on.get('touch-id-toggle').checked, true);
 });
 
 test('turning Touch ID on asks for the password in the app, and a wrong one keeps the dialog open', async t => {
@@ -149,11 +149,11 @@ test('the lock screen offers Unlock with Touch ID when it is ready, beside the p
   assert.equal(view.shown('auth-view'), false);
 });
 
-test('the lock screen says when the password is needed, and shows no Touch ID button then or while it is off', async t => {
-  const needed = await renderer(t, { unlocked: false, touchId: 'password' });
-  assert.equal(needed.shown('touch-id-unlock'), false);
-  assert.equal(needed.shown('touch-id-note'), true);
-  assert.equal(needed.get('touch-id-note').textContent, NEEDED);
+test('right after SecondHand starts, the lock screen offers Touch ID with no line asking for the password; while it is off there is no button', async t => {
+  const started = await renderer(t, { unlocked: false, touchId: 'ready' });
+  assert.equal(started.shown('touch-id-unlock'), true);
+  assert.equal(started.shown('touch-id-note'), false);
+  assert.doesNotMatch(started.get('auth-view').textContent, /restarts|14 days/);
   const off = await renderer(t, { unlocked: false, touchId: 'off' });
   assert.equal(off.shown('touch-id-unlock'), false);
   assert.equal(off.shown('touch-id-note'), false);
@@ -163,12 +163,17 @@ test('the lock screen says when the password is needed, and shows no Touch ID bu
 });
 
 test('after an auto-lock, the lock screen reads Touch ID’s state again', async t => {
-  const view = await renderer(t, { touchId: 'ready' });
-  view.view.status.touchId = 'password';
-  await view.lock();
-  assert.equal(view.shown('auth-view'), true);
-  assert.equal(view.shown('touch-id-unlock'), false);
-  assert.equal(view.get('touch-id-note').textContent, NEEDED);
+  const ready = await renderer(t, { touchId: 'ready' });
+  await ready.lock();
+  assert.equal(ready.shown('auth-view'), true);
+  assert.equal(ready.shown('touch-id-unlock'), true);
+  assert.equal(ready.shown('touch-id-note'), false);
+  const notice = 'Touch ID was turned off because this Mac’s Keychain couldn’t open its key.';
+  const turnedOff = await renderer(t, { touchId: 'ready' });
+  turnedOff.view.status = { ...turnedOff.view.status, touchId: 'off', touchIdNotice: notice };
+  await turnedOff.lock();
+  assert.equal(turnedOff.shown('touch-id-unlock'), false);
+  assert.equal(turnedOff.get('touch-id-note').textContent, notice);
 });
 
 test('a cancelled Touch ID prompt says why and leaves the password field ready', async t => {
@@ -200,13 +205,12 @@ test('when Touch ID is turned off because its key can’t be used, the lock scre
   assert.equal(view.get('auth-error').textContent, `${notice} Enter your password.`);
   assert.equal(view.shown('touch-id-unlock'), false);
   assert.equal(view.get('touch-id-note').textContent, notice);
-  assert.equal(view.get('touch-id-note').classList.contains('error'), true);
   assert.equal(view.window.document.activeElement, view.get('passphrase'));
 });
 
 test('a notice from a password unlock is shown once the saved information opens', async t => {
   const notice = 'Touch ID was turned off because its key file on this Mac is damaged.';
-  const view = await renderer(t, { unlocked: false, touchId: 'password' }, {
+  const view = await renderer(t, { unlocked: false, touchId: 'ready' }, {
     unlock: async () => { view.view.status = { ...view.view.status, unlocked: true, touchId: 'off', touchIdNotice: notice }; return structuredClone(view.view.status); }
   });
   view.get('passphrase').value = PASSWORD;
