@@ -38,6 +38,8 @@ class DownloadError extends Error {
   constructor(message) { super(message); this.publicMessage = message; }
 }
 const incomplete = () => new DownloadError('The Laya model download was incomplete, so SecondHand deleted it. Try again.');
+// A write to this computer's disk that failed: the disk is full, or SecondHand can't write there.
+const notSaved = code => new DownloadError(`The Laya model couldn’t be saved on this computer (${code}). Free some space and try again.`);
 // What a failed request says, for a model download and for an update check.
 const DOWNLOAD = Object.freeze({
   redirect: 'The Laya model download was redirected somewhere SecondHand doesn’t trust. Try again later.',
@@ -204,6 +206,7 @@ class ModelStore {
     this.received = 0;
     const promise = this.download(controller.signal).catch(error => {
       if (controller.signal.aborted) return;
+      if (DISK_ERRORS.has(error.code)) error = notSaved(error.code);
       this.failure = error.publicMessage || `The Laya model couldn’t be downloaded (${error.code || error.message}).`;
     }).finally(() => { this.active = null; });
     this.active = { controller, promise };
@@ -230,7 +233,8 @@ class ModelStore {
     const problem = replacedProblem(replaced, revision);
     if (problem) throw new TypeError(`The replaced Laya revisions ${problem}.`);
     const model = { revision, format, files: files.map(({ path: file, url, size, sha256 }) => ({ path: file, url, size, sha256 })) };
-    await atomicWrite(path.join(this.root, INSTALLED), Buffer.from(`${JSON.stringify({ version: 1, model, replaced }, null, 2)}\n`));
+    try { await atomicWrite(path.join(this.root, INSTALLED), Buffer.from(`${JSON.stringify({ version: 1, model, replaced }, null, 2)}\n`)); }
+    catch (error) { throw DISK_ERRORS.has(error.code) ? notSaved(error.code) : error; }
   }
 
   // Deletes everything else under models/laya: other revisions and partial downloads, but not
@@ -315,7 +319,7 @@ class ModelStore {
       if (signal.aborted) throw error; // cancelled: keep the partial file to resume from
       await fs.rm(partial, { force: true });
       if (error instanceof DownloadError) throw error;
-      if (DISK_ERRORS.has(error.code)) throw new DownloadError(`The Laya model couldn’t be saved on this computer (${error.code}). Free some space and try again.`);
+      if (DISK_ERRORS.has(error.code)) throw notSaved(error.code);
       throw incomplete();
     }
     if (bytes !== file.size) { await fs.rm(partial, { force: true }); throw incomplete(); }

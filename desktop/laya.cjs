@@ -389,7 +389,7 @@ function createLaya({ userDataDir, manifest, modelDir, modelFormat, updateUrl = 
       recordNote = null;
       await prune();
     })().catch(error => {
-      note = { state: 'error', message: `The Laya model couldn’t be installed (${error.code || error.message}).` };
+      note = { state: 'error', message: error.publicMessage || `The Laya model couldn’t be installed (${error.code || error.message}).` };
     }).finally(() => { downloading = null; });
     return downloading;
   }
