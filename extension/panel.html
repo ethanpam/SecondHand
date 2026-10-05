@@ -46,15 +46,12 @@
     <main id="panel-body">
       <div class="desktop-row" hidden><span id="desktop-status"></span><button id="desktop-action" class="button primary" type="button" hidden></button></div>
       <p id="update-note" class="status" role="status" aria-live="polite" hidden></p>
-      <p id="laya-status" class="status" hidden></p>
       <button id="frames-enable" class="button primary full" type="button" data-i18n="panel.framesEnable" hidden></button>
       <button id="site-enable" class="button primary full" type="button" data-i18n="panel.siteEnable" hidden></button>
-      <button id="all-sites-enable" class="button secondary full" type="button" data-i18n="panel.allSitesEnable" hidden></button>
-      <p id="iowa-policy" class="status" data-i18n="panel.iowaPolicy"></p>
-      <button id="panel-autofill" class="button primary full" type="button" data-i18n="panel.autofill" disabled></button>
+      <button id="panel-autofill" class="button primary full" type="button" data-i18n="panel.autofill" disabled hidden></button>
       <div id="status" class="status" role="status" aria-live="polite" data-i18n="panel.checkingTab"></div>
-      <button id="site-disable" class="text-button site-off" type="button" data-i18n="panel.siteDisable" hidden></button>
-      <button id="all-sites-disable" class="text-button site-off" type="button" data-i18n="panel.allSitesDisable" hidden></button>
+      <p id="iowa-policy" class="note" data-i18n="panel.iowaPolicy" hidden></p>
+      <p id="laya-status" class="note" hidden></p>
       <section id="save-section" class="checklist-section" hidden aria-labelledby="save-title">
         <div class="fields-heading"><h2 id="save-title" data-i18n="save.title"></h2></div>
         <p class="save-hint" data-i18n="save.hint"></p>
@@ -79,6 +76,9 @@
         <div class="fields-heading"><h2 id="checklist-title" data-i18n="panel.onThisPage"></h2><span id="checklist-summary"></span></div>
         <div id="page-checklist" class="page-checklist"></div>
       </section>
+      <button id="all-sites-enable" class="text-button" type="button" data-i18n="panel.allSitesEnable" hidden></button>
+      <button id="site-disable" class="text-button" type="button" data-i18n="panel.siteDisable" hidden></button>
+      <button id="all-sites-disable" class="text-button" type="button" data-i18n="panel.allSitesDisable" hidden></button>
       <footer><p data-i18n="panel.footer"></p></footer>
     </main>
   </div>

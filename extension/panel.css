@@ -6,6 +6,11 @@
 /* The website's colors (website/app/globals.css), and the app's red for a problem. */
 :root{--background:#f8faf7;--foreground:#163a2c;--primary:#164c38;--pressed:#0c3323;--muted:#e9eee8;--muted-foreground:#52665b;--border:#dcded8;--ring:#337d5b;--danger:#a23c38;--text:Geist,system-ui,-apple-system,"Segoe UI",sans-serif;--display:"Bricolage Grotesque Variable",var(--text);color:var(--foreground);background:var(--background);color-scheme:light;font-size:12px;font-synthesis:none}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}body{display:flex;flex-direction:column;background:var(--background);font-family:var(--text)}button,select{font:inherit;color:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}button:disabled{cursor:default;opacity:.48}button:focus-visible{outline:3px solid #d5b668;outline-offset:2px}p,h1,h2{margin:0}[hidden]{display:none!important}
 .brand{width:32px;height:32px;border-radius:30%;display:block;flex-shrink:0}
+/* The website's buttons: a filled pill, an outlined pill, and an underlined link. */
+.button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:10px 20px;border:1px solid transparent;border-radius:100px;font-size:14px;font-weight:500;line-height:1.3;text-align:center}.full{width:100%;margin-bottom:12px}
+.primary{background:var(--primary);color:#fff}.primary:hover:enabled{background:var(--pressed)}
+.secondary{background:#fff;border-color:var(--border)}.secondary:hover:enabled{background:var(--muted)}
+.text-button{display:flex;align-items:center;width:fit-content;min-height:32px;margin-bottom:4px;padding:0;border:0;background:none;font-weight:500;text-align:start;text-decoration:underline;text-underline-offset:4px}.text-button:hover:enabled{text-decoration-thickness:2px}
 /* On-page widget: an extension iframe the page cannot script. */
 body.launcher-surface{background:transparent}#launcher{width:100%;height:100%;display:flex;align-items:center;justify-content:center}#widget{width:max-content;max-width:272px;margin-inline-start:auto}#widget.outdated{width:100%}
 .widget{display:flex;flex-direction:column;justify-content:center;gap:4px;height:100%;padding:6px 8px;background:#28543f;color:#f5f8eb;border:1px solid #cddcc1;border-radius:14px}.widget .brand{width:30px;height:30px;flex:none}.widget-logo{display:flex;flex:none;padding:0;border:0;border-radius:9px;background:none;cursor:pointer}.widget-logo:focus-visible{outline:2px solid #f2d58d;outline-offset:2px}
@@ -25,19 +30,16 @@ body.launcher-surface{background:transparent}#launcher{width:100%;height:100%;di
 .language-picker{margin-inline-start:auto;max-width:132px;padding:6px 10px;border:1px solid var(--border);border-radius:100px;background:var(--background);font-size:12px;font-weight:500}
 main{padding:16px 16px 0}
 /* The app needs opening or unlocking. */
-.desktop-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 12px;padding:12px 14px;background:#fff;border:1px solid var(--border);border-radius:12px}.desktop-row>span{flex:1 1 140px;font-weight:500}.desktop-row.error>span{color:var(--danger)}.desktop-row .button{min-height:36px;margin-top:0;padding:6px 16px;font-size:13px}
-/* The website's buttons: a filled pill, an outlined pill, and an underlined link. */
-.button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:10px 20px;border:1px solid transparent;border-radius:100px;font-size:14px;font-weight:500;line-height:1.3;text-align:center;margin-top:14px}.full{width:100%}
-.primary{background:var(--primary);color:#fff}.primary:hover:enabled{background:var(--pressed)}
-.secondary{background:#fff;border-color:var(--border)}.secondary:hover:enabled{background:var(--muted)}
-.text-button{padding:4px 0;border:0;background:none;font-weight:500;text-align:start;text-decoration:underline;text-underline-offset:4px}.text-button:hover:enabled{text-decoration-thickness:2px}.site-off{margin-top:6px}
-.status{color:var(--muted-foreground);margin-top:12px;overflow-wrap:anywhere}.status.error{color:var(--danger)}
-.checklist-section{margin:18px 0 16px}.fields-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.fields-heading h2{font-family:var(--display);font-size:16px;font-weight:600;letter-spacing:-.3px;line-height:1.3}.fields-heading span{font-size:12px;color:var(--muted-foreground)}
+.desktop-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 12px;margin-bottom:12px;padding:12px 14px;background:#fff;border:1px solid var(--border);border-radius:12px}.desktop-row>span{flex:1 1 140px;font-weight:500}.desktop-row.error>span{color:var(--danger)}.desktop-row .button{min-height:36px;padding:6px 16px;font-size:13px}
+/* What happened, then the small print. An empty status keeps its place for screen readers and takes no room. */
+.status{margin-bottom:12px;overflow-wrap:anywhere}.status:empty{margin:0}.status.error{color:var(--danger)}
+.note{margin-bottom:12px;font-size:12px;color:var(--muted-foreground)}
+.checklist-section{margin:12px 0 24px}.fields-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.fields-heading h2{font-family:var(--display);font-size:16px;font-weight:600;letter-spacing:-.3px;line-height:1.3}.fields-heading span{font-size:12px;color:var(--muted-foreground)}
 .page-checklist{background:#fff;border:1px solid var(--border);border-radius:9px;overflow:auto;max-height:360px;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
 .checklist-item{display:flex;align-items:center;gap:10px;width:100%;border:0;border-bottom:1px solid var(--muted);background:#fff;padding:11px 10px;text-align:start;color:var(--foreground)}.checklist-item:last-child{border-bottom:0}.checklist-item:hover:enabled{background:var(--background)}.checklist-item:disabled{opacity:1;cursor:default}
 .checklist-mark{display:flex;align-items:center;justify-content:center;flex-shrink:0;width:18px;height:18px;border:1px solid var(--border);border-radius:50%;color:var(--muted-foreground);font-size:11px;line-height:1}.checklist-item.complete .checklist-mark{color:#fff;background:var(--ring);border-color:var(--ring)}.checklist-item.missing .checklist-mark,.checklist-item.manual .checklist-mark{border-color:var(--foreground);color:var(--foreground)}
 .checklist-copy{flex:1;min-width:0}.checklist-label{display:block;font-size:14px;line-height:1.4}.checklist-detail{display:block;font-size:12px;color:var(--muted-foreground);margin-top:2px}.checklist-item.missing .checklist-detail,.checklist-item.manual .checklist-detail{color:var(--foreground);font-weight:500}.checklist-item.optional .checklist-label{color:var(--muted-foreground)}
-footer{border-top:1px solid var(--border);padding:12px 0 14px}footer p{font-size:12px;color:var(--muted-foreground)}
+footer{border-top:1px solid var(--border);margin-top:12px;padding:12px 0 16px}footer p{font-size:12px;color:var(--muted-foreground)}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 /* The page's questions in the applicant's language. */
 #need-you{color:#f2d58d;font-weight:600}#translate-offer{color:#f2d58d;align-self:flex-start}.visually-hidden{position:absolute!important;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}

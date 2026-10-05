@@ -295,6 +295,8 @@
     $('sidepanel').hidden = false;
     const service = translation.create();
     let target = null;
+    // No tab SecondHand can read has been found yet: Autofill isn't offered.
+    let nowhere = true;
     let fillable = false;
     let autopilot = false;
     let site = null;
@@ -408,7 +410,7 @@
       $('all-sites-enable').disabled = working;
       $('all-sites-disable').hidden = allSites !== true || stopped;
       $('all-sites-disable').disabled = working;
-      $('panel-autofill').hidden = off;
+      $('panel-autofill').hidden = off || nowhere;
       // Iowa's form is filled by its own rules: Laya only guesses on a site that is on.
       const laya = layaLine && site?.enabled ? words(layaLine) : '';
       $('laya-status').hidden = !laya;
@@ -528,13 +530,13 @@
           const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
           if (revision !== contextRevision || stopped) return;
           if (!tab || !Number.isInteger(tab.id) || (!supportedUrl(tab.url) && !siteUrl(tab.url))) {
-            target = null; clearPage(); controls();
+            target = null; nowhere = true; clearPage(); controls();
             show(elsewhere());
             return;
           }
           if (!target || target.id !== tab.id || target.url !== tab.url) {
             contextRevision++; revision = contextRevision;
-            clearPage(); target = { id: tab.id, url: tab.url };
+            clearPage(); target = { id: tab.id, url: tab.url }; nowhere = false;
           }
           target.status = tab.status;
           const state = await send({ type: 'ui:pageState', tabId: tab.id });
@@ -965,7 +967,7 @@
         renderDesktop();
       } catch (error) {
         if (error.outdated) {
-          stopped = true; target = null; clearPage(); controls(); show(problem(error), true);
+          stopped = true; target = null; nowhere = true; clearPage(); controls(); show(problem(error), true);
           $('desktop-status').parentElement.hidden = true;
           return;
         }

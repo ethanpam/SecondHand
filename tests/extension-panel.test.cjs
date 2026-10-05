@@ -551,12 +551,14 @@ test('pages with nothing to fill disable Autofill and explain the step', async t
 
 test('tab activation clears a stale checklist without sending data to an unsupported tab', async t => {
   const view = await panel(t);
+  assert.equal(view.get('panel-autofill').hidden, false);
   // Plain http, and an https tab whose address Chrome hides until the user invokes SecondHand.
   for (const [id, url] of [[8, 'http://example.invalid/'], [9, undefined]]) {
     view.tabs.current = { id, url };
     view.listeners.activated({ tabId: id }); await tick(); await tick();
     assert.equal(view.get('page-checklist').children.length, 0);
     assert.equal(view.get('panel-autofill').disabled, true);
+    assert.equal(view.get('panel-autofill').hidden, true, 'no Autofill button where there is nothing to read');
     assert.equal(view.get('site-enable').hidden, true);
     assert.match(view.get('status').textContent, /Open Iowa/);
   }
@@ -571,7 +573,24 @@ test('a late old-tab response cannot restore a checklist', async t => {
   view.listeners.activated({ tabId: 8 });
   resolve(structuredClone(view.state)); await tick(); await tick();
   assert.equal(view.get('page-checklist').children.length, 0);
+  assert.equal(view.get('panel-autofill').hidden, true);
   assert.match(view.get('status').textContent, /Open Iowa/);
+});
+
+test('Autofill keeps its place, disabled, while a tab SecondHand reads is checked again', async t => {
+  let hold;
+  const view = await panel(t, { pageState: state => hold ? hold.then(() => structuredClone(state)) : structuredClone(state) });
+  assert.equal(view.get('panel-autofill').hidden, false);
+  assert.equal(view.get('panel-autofill').disabled, false);
+  // The tab loads its next page: until that page is read, the button waits where it was instead of blinking out.
+  let release;
+  hold = new Promise(done => { release = done; });
+  view.listeners.updated(7, { status: 'loading' }); await tick();
+  assert.equal(view.get('panel-autofill').hidden, false);
+  assert.equal(view.get('panel-autofill').disabled, true);
+  release(); await settle();
+  assert.equal(view.get('panel-autofill').hidden, false);
+  assert.equal(view.get('panel-autofill').disabled, false);
 });
 
 test('widget on a fillable page offers one-click Autofill and cycles through what needs you', async t => {
@@ -720,6 +739,7 @@ test('a worker that never answers gets exact reload steps in the widget and the 
   const side = await panel(t, { silent: true });
   assert.equal(side.get('status').textContent, OUTDATED);
   assert.equal(side.get('panel-autofill').disabled, true);
+  assert.equal(side.get('panel-autofill').hidden, true, 'only the reload steps are offered');
 
   // A worker that answers page state but not a newer message is outdated too.
   const partial = await panel(t, { launcher: true, silent: ['ui:autofill'], build: BUILD });
@@ -1657,6 +1677,7 @@ test('an error turning all websites on or off is shown in the applicant’s lang
 test('with all websites on, a tab SecondHand can’t read asks for a form', async t => {
   const on = await panel(t, { tab: { id: 9, url: 'chrome://newtab/' }, desktop: { allSites: true } });
   assert.equal(on.get('status').textContent, 'Open Iowa’s SNAP application or another food-assistance form in this tab.');
+  assert.equal(on.get('panel-autofill').hidden, true);
   assert.equal(on.get('all-sites-disable').hidden, false);
 });
 
