@@ -99,11 +99,23 @@ function validDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
 }
 // A birth date being saved must be today or earlier and no more than 130 years ago, on this computer's
-// calendar (#135). `whose` names the person as My information does: "Your" or "Person 3’s".
-function checkBirthDate(birthDate, whose, today) {
+// calendar (#135). Why one can't be, or null. `whose` names the person as My information does: "Your" or "Person 3’s".
+function birthDateRefusal(birthDate, whose, today) {
   const problem = household.birthDateProblem(birthDate, today);
-  if (problem === 'future') throw new Error(`${whose} date of birth can’t be after today (${household.localDate(today)} on this computer).`);
-  if (problem === 'tooOld') throw new Error(`${whose} date of birth can’t be more than ${household.MAX_YEARS_BACK} years ago.`);
+  if (problem === 'future') return `${whose} date of birth can’t be after today (${household.localDate(today)} on this computer).`;
+  if (problem === 'tooOld') return `${whose} date of birth can’t be more than ${household.MAX_YEARS_BACK} years ago.`;
+  return null;
+}
+function checkBirthDate(birthDate, whose, today) {
+  const refusal = birthDateRefusal(birthDate, whose, today);
+  if (refusal) throw new Error(refusal);
+}
+// Why a profile read back from the vault couldn't be saved again on `today` because of a birth date already
+// in it: the first such date, named as My information names it. Null when every saved date can be used.
+function savedBirthDateRefusal(profile, { today } = {}) {
+  const others = (Array.isArray(profile?.householdMembers) ? profile.householdMembers : [])
+    .map((member, index) => member.relationship === 'self' ? null : birthDateRefusal(member.birthDate, `Person ${index + 1}’s`, today));
+  return [birthDateRefusal(profile?.birthDate, 'Your', today), ...others].find(Boolean) ?? null;
 }
 // A profile being saved: every field is checked, and each birth date against `today` (this computer's
 // date unless a caller names one).
@@ -241,5 +253,5 @@ function validateStoredApplication(input) {
 }
 
 module.exports = { PORTAL_URL, FIELD_LABELS, PROFILE_FIELDS, REQUEST_FIELDS, DERIVED_FIELDS, PROFILE_CHOICES, YES_NO_FIELDS, APPLICATION_STATUSES, HOUSEHOLD_COUNT_FIELDS,
-  RELATIONSHIPS, MAX_MEMBERS, SAVE_FIELDS, isPortalUrl, isHttpsSiteUrl, siteOrigin, isRequestField, fieldLabel, releasedValue, blockedByBirthDate,
+  RELATIONSHIPS, MAX_MEMBERS, SAVE_FIELDS, isPortalUrl, isHttpsSiteUrl, siteOrigin, isRequestField, fieldLabel, releasedValue, blockedByBirthDate, savedBirthDateRefusal,
   validateProfile, validateStoredProfile, validateApplication, validateStoredApplication };

@@ -22,7 +22,7 @@ const { createDocumentReader } = require('./ocr-service.cjs');
 const { requestId: documentRequestId } = require('./ocr-limits.cjs');
 const { analyzeDocument } = require('../shared/document-parser.cjs');
 const { validateProfile, validateApplication, HOUSEHOLD_COUNT_FIELDS, YES_NO_FIELDS, PORTAL_URL, isPortalUrl, siteOrigin, isRequestField, fieldLabel, releasedValue,
-  blockedByBirthDate } = require('../shared/schema.cjs');
+  blockedByBirthDate, savedBirthDateRefusal } = require('../shared/schema.cjs');
 const household = require('../shared/household.cjs');
 
 app.setName('SecondHand');
@@ -470,6 +470,9 @@ if (nativeOrigin) {
     // A plain record of the profile with the answers filled in, checked as My information checks it.
     const filledIn = profile => Object.assign(Object.create(null), profile, answers);
     const now = today();
+    // A birth date already saved that today's checks refuse is fixed in My information first (#135): the side panel names whose.
+    const stored = savedBirthDateRefusal(current, { today: now });
+    if (stored) throw publicError(`${stored} Fix the date in My information, then save this answer again.`);
     const clean = validated(validateProfile, filledIn(current), { today: now });
     if (fieldRequestPending) throw publicError('Another request is waiting for your approval.');
     fieldRequestPending = true;
