@@ -35,7 +35,7 @@ const FRAME_ERROR = 'worker.frameUnsafe';
 const FIELD_ID = /^[A-Za-z][A-Za-z0-9_-]{0,59}$/; // field ids from the site engine's plan
 const results = new Map(); // tabId -> last autofill result: counts, keys, and fixed messages only. Never answers.
 const siteRuns = new Map(); // tabId -> the fill running on an approved site, so two clicks share one request.
-// Save to My information (#98). tabId -> { url, origin ('' on Iowa's portal), items: Map(id -> { frameId, planId, token, key, label }) }:
+// Save to My information (#98). tabId -> { url, origin ('' on Iowa's portal), items: Map(id -> { frameId, documentId, planId, token, key, label }) }:
 // the questions the last Autofill matched to a saved field that has no saved answer. Memory only, forgotten when
 // the tab navigates. Keys and plan ids stay in the worker; the side panel gets each question's id and label.
 const savables = new Map();
@@ -1056,7 +1056,7 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       // Questions the rules matched to a saved field with no saved answer: the side panel offers to save the applicant's own (#98).
       for (const field of plan.matched) {
         if (!SecondHandGeneric.SAVE_KEYS.includes(field.key) || !keys.includes(field.key) || (typeof values?.[field.key] === 'string' && values[field.key])) continue;
-        savable.push({ id: prefix ? `f${frameId}:${field.id}` : field.id, frameId, planId: field.id, token: plan.token, key: field.key,
+        savable.push({ id: prefix ? `f${frameId}:${field.id}` : field.id, frameId, documentId, planId: field.id, token: plan.token, key: field.key,
           label: typeof field.label === 'string' ? field.label.trim().slice(0, LABEL_LIMIT) : '' });
       }
     }
@@ -1143,16 +1143,23 @@ function keepSavable(tabId, url, origin, items) {
   if (items.length) savables.set(tabId, { url, origin, items: new Map(items.map(item => [item.id, item])) });
   else savables.delete(tabId);
 }
-// A message to the frame a kept question is in: on a site, only while the site (and that embedded form) is on.
-async function savableMessage(tabId, kept, frameId, message) {
+// The frame a kept question is in, with its address as Chrome gives it (#137): on a site, only while the site
+// (and that embedded form) is on. Null once an embedded form's frame holds another document: its questions
+// went with the page they were on.
+async function savableFrame(tabId, kept, { frameId, documentId }) {
   if (!kept.origin) {
     await activePortal(tabId);
-    return chrome.tabs.sendMessage(tabId, message, { frameId: 0 });
+    return { frameId: 0, url: kept.url };
   }
   await requireSite(kept.origin);
-  if (frameId === 0) return topSiteMessage(tabId, message);
-  if (!(await enabledSiteFrames(tabId, kept.origin)).some(frame => frame.frameId === frameId)) throw fault('worker.turnOnFrameFirst');
-  return chrome.tabs.sendMessage(tabId, message, { frameId });
+  if (frameId === 0) return { frameId: 0, url: kept.url };
+  const frame = (await enabledSiteFrames(tabId, kept.origin)).find(candidate => candidate.frameId === frameId);
+  if (!frame) throw fault('worker.turnOnFrameFirst');
+  return frame.documentId === documentId ? frame : null;
+}
+function savableMessage(tabId, kept, frame, message) {
+  if (frame.frameId !== 0) return chrome.tabs.sendMessage(tabId, message, frameTarget(frame.frameId, frame.documentId));
+  return kept.origin ? topSiteMessage(tabId, message) : chrome.tabs.sendMessage(tabId, message, { frameId: 0 });
 }
 // Each kept question's id and label, and whether its box holds an answer now. The page says which listed
 // boxes are answered, by id; nothing they hold is read here.
@@ -1167,24 +1174,30 @@ async function savableState(tabId) {
   }
   const answered = new Set();
   for (const items of groups.values()) {
-    const reply = await savableMessage(tabId, kept, items[0].frameId, { type: 'secondhand:generic:answered', token: items[0].token, ids: items.map(item => item.planId) });
+    const frame = await savableFrame(tabId, kept, items[0]);
+    if (!frame) { for (const item of items) kept.items.delete(item.id); continue; }
+    const reply = await savableMessage(tabId, kept, frame, { type: 'secondhand:generic:answered', token: items[0].token, ids: items.map(item => item.planId) });
     if (!Array.isArray(reply?.answered) || reply.answered.some(id => typeof id !== 'string')) throw fault('worker.pageCheckUnsafe');
     for (const item of items) if (reply.answered.includes(item.planId)) answered.add(item.id);
   }
+  if (!kept.items.size) savables.delete(tabId);
   return [...kept.items.values()].map(({ id, label }) => ({ id, label, answered: answered.has(id) }));
 }
 // After the applicant's Save click in the side panel: that one box's answer is read, then the desktop app
-// saves it after its own confirmation. The answer goes only to the app, and is not kept.
+// saves it after its own confirmation, in the name of the site whose page holds the box. The answer goes
+// only to the app, and is not kept.
 async function saveAnswer(tabId, id) {
   const kept = savables.get(tabId);
   const item = kept?.items.get(id);
   if (!item || (await chrome.tabs.get(tabId)).url !== kept.url) throw fault('worker.answerGone');
-  const read = await savableMessage(tabId, kept, item.frameId, { type: 'secondhand:generic:read', token: item.token, id: item.planId, key: item.key });
+  const frame = await savableFrame(tabId, kept, item);
+  if (!frame) throw fault('worker.answerGone');
+  const read = await savableMessage(tabId, kept, frame, { type: 'secondhand:generic:read', token: item.token, id: item.planId, key: item.key });
   if (read?.empty === true) throw fault('worker.answerFirst');
   if (read?.unreadable === true) throw fault('worker.answerUnreadable');
   if (typeof read?.value !== 'string' || !read.value.trim() || read.value.length > 200) throw fault('worker.answerGone');
   let reply;
-  try { reply = await nativeRequest('saveFields', { url: safeUrl(kept.url), fields: { [item.key]: read.value } }); }
+  try { reply = await nativeRequest('saveFields', { url: safeUrl(frame.url), fields: { [item.key]: read.value } }); }
   catch (error) { throw error.code !== 'offline' && /cancelled/i.test(error.message) ? fault('worker.saveCancelled') : error; }
   if (!Array.isArray(reply?.saved) || !reply.saved.includes(item.key)) throw fault('worker.desktopUnexpected');
   kept.items.delete(id);
