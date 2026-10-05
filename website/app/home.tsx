@@ -355,13 +355,22 @@ export function Home() {
                     <summary>Updating from an earlier version</summary>
                     <div className="details-body">
                       <p>
-                        Install the new app, choose{' '}
-                        <strong>Refresh extension files</strong>, then click
-                        Reload for SecondHand on{' '}
+                        Install the new app and open it. The next time you open
+                        the side panel or click Autofill, SecondHand refreshes
+                        the extension files and the extension reloads itself.
+                        If an Iowa page was open, SecondHand asks you to reload
+                        it; save your work first. Chrome may ask you to approve
+                        the extension’s updated permissions.
+                      </p>
+                      <p>
+                        If you installed version 0.4.0, its extension can’t
+                        update itself, so do this once by hand. Install the new
+                        app,
+                        choose <strong>Refresh extension files</strong>, then
+                        click Reload for SecondHand on{' '}
                         <code>chrome://extensions</code>. Reload your Iowa tab
-                        too. Use Chrome 116 or newer. Chrome may ask you to
-                        approve the extension’s updated permissions. Then click
-                        Autofill on Iowa’s applicant page.
+                        too. Use Chrome 116 or newer. Then click Autofill on
+                        Iowa’s applicant page. Later updates are automatic.
                       </p>
                     </div>
                   </details>

@@ -125,10 +125,21 @@ export default function ChromeExtensionGuide() {
         <section aria-labelledby="after-update">
           <h2 id="after-update">After you update SecondHand</h2>
           <p>
-            Open the app’s <strong>Chrome extension</strong> page and click{' '}
+            Install the new app and open it. The next time you open the side
+            panel or click <strong>Autofill</strong>, SecondHand refreshes the
+            extension files and the extension reloads itself. If an Iowa page
+            was open, SecondHand asks you to reload it; save your work first.
+            Keep <strong>Developer mode</strong> on at{' '}
+            <code>chrome://extensions</code>, because Chrome turns SecondHand
+            off without it. Your saved information stays in the app.
+          </p>
+          <p>
+            If you installed version 0.4.0, its extension can’t update itself,
+            so do this once by hand. Open the app’s{' '}
+            <strong>Chrome extension</strong> page and click{' '}
             <strong>Refresh extension files</strong>. Then click the reload icon
-            on SecondHand’s card at <code>chrome://extensions</code>. Your saved
-            information stays in the app.
+            on SecondHand’s card at <code>chrome://extensions</code>, and reload
+            your Iowa tab. Later updates are automatic.
           </p>
         </section>
       </main>
