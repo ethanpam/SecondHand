@@ -4,7 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { promisify } = require('node:util');
-const { validateProfile, validateStoredApplication } = require('../shared/schema.cjs');
+const { validateStoredProfile, validateStoredApplication } = require('../shared/schema.cjs');
 
 const scrypt = promisify(crypto.scrypt);
 const MAX_VAULT_BYTES = 8 * 1024 * 1024;
@@ -145,11 +145,13 @@ function encode(data, state) {
   return bytes;
 }
 
+// The vault's contents as they are read back or written. Birth dates are checked against today where a
+// profile is saved (desktop/main.cjs), not here: a clock set back never keeps the information from opening (#135).
 function validateData(data) {
   if (!data || data.version !== 1 || !Array.isArray(data.applications) || data.applications.length > 2000) {
     throw new Error('Invalid vault contents.');
   }
-  const profile = validateProfile(data.profile);
+  const profile = validateStoredProfile(data.profile);
   const applications = data.applications.map(item => validateStoredApplication(item));
   if (new Set(applications.map(item => item.id)).size !== applications.length) throw new Error('Duplicate application records.');
   return { version: 1, profile, applications };

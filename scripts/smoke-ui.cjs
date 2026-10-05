@@ -123,6 +123,16 @@ async function guidedSetup(page, application, userData) {
   await self.locator('[data-member-field="student"]').selectOption('no');
   for (const field of COUNT_FIELDS) await expect(page.locator(`#${field}`)).toHaveValue(applicantFixture[field]);
   await expect(page.locator('#household-counts-note')).toHaveText('Counted from your household list. To change them, change the list.');
+  // #135: a birth date after today counts no ages, the note says whose it is, and the app refuses to save it, saying why.
+  const sam = page.locator('.household-member').nth(2).locator('[data-member-field="birthDate"]');
+  await sam.fill('2999-01-01');
+  for (const field of COUNT_FIELDS.slice(1)) await expect(page.locator(`#${field}`)).toHaveValue('');
+  await expect(page.locator('#household-counts-note')).toHaveText('Counted from your household list. Person 3’s date of birth is after today, so ages can’t be counted. Check the date.');
+  await page.locator('#setup-next').click();
+  await expect(page.locator('#profile-error')).toHaveText(/Person 3’s date of birth can’t be after today \(\d{4}-\d{2}-\d{2} on this computer\)\.$/);
+  await expect(page.locator('#setup-step-count')).toHaveText('Step 2 of 6');
+  await sam.fill(members[2].birthDate);
+  for (const field of COUNT_FIELDS) await expect(page.locator(`#${field}`)).toHaveValue(applicantFixture[field]);
   await captureDiagnostic(page, 'household/setup-household.png', { fullPage: true });
   // Keyboard: Save and continue from the keyboard.
   await page.locator('#setup-next').focus();

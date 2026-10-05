@@ -220,6 +220,34 @@ The shipped round-2 model remains unchanged. Before asking it, the app now exclu
 
 No correct model match is lost. Rules now fill `City/State`, `City and Zip Code`, `City, State and Zip code`, and full/complete physical-address boxes with one formatted value only when every required saved part exists; otherwise they remain for the applicant. The wording was chosen from the training forms, including `Family Member: First Name`, `Household Members: First Name`, `Name of Proxy`, `Address of Proxy`, `Spouse Name … Nombre del cónyuge`, `City/State`, `City and Zip Code`, `City, State and Zip code`, and `Complete Physical Address (including Town/City!)`. Final-form labels were used only for the after-the-fact score above.
 
+#### Possessive, dependent and household-member boxes (#136), and applicant-only boxes (#134)
+
+The shipped round-2 model remains unchanged. Before asking it, the app now also excludes these boxes:
+- another person's box with a possessive ("Child’s name", "Partner’s phone", "Household member’s name");
+- a dependent's details;
+- a household member's details, with or without a number ("Household member name", "Other members of the household: Full name");
+- a box under another person's section heading, which the extension reads as "Child 1: First name".
+
+#83's exceptions still go to the applicant: "Household representative", "Number of children", "How many children under 18?", and counts of dependents or household members. "Name of household member" also stays with the applicant, because Central Texas's TEFAP form asks for the applicant that way and the question bank keys it to the applicant's full name.
+
+Questions only the applicant answers now also include texted, emailed and verification codes, security questions and user names. These boxes get no saved field from the rules, Laya or Chrome's AI. No question in the bank is one of them, so they change no score.
+
+At the published 0.95 matching bar, `decisions.py --as-app-asks` gives:
+
+| Forms | Offer policy | Decisions asked | Filled | Right | Wrong | Precision | Coverage |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Test pool | Before | 134 | 65 | 60 | 5 | 0.923 | 60/69 = 0.870 |
+| Test pool | After | 134 | 65 | 60 | 5 | 0.923 | 60/69 = 0.870 |
+| Final holdout | Before | 200 | 67 | 59 | 8 | 0.881 | 59/81 = 0.728 |
+| Final holdout | After | 195 | 67 | 59 | 8 | 0.881 | 59/81 = 0.728 |
+
+- **Before** is main at `50c93ce`. It asks 3 fewer test-pool boxes than #83's after row, with 69 answerable instead of 70. This is because #98 excluded guardian, parent and student boxes and retagged Goodwin's "Parent/Guardian Name" `none`.
+- **No correct match is lost.** At every bar in the reports, no box that is still asked is filled differently.
+- **Test pool:** no text box changes.
+- **Final holdout:** the 5 boxes no longer asked are all `none` in the key, and the model abstained on each. They are "How many other people live in your household (do not include yourself)?", the three "COMPLETE THIS SECTION FOR ALL OTHER PERSONS IN YOUR HOUSEHOLD:" boxes, and "Name(s) of all Household Members".
+- **Whole question bank:** 38 text boxes are no longer offered, all `none`. Every box with a saved field is still offered.
+- Datasets: `node ML_model/dataset/build.cjs --format noul-v1 --today 2026-09-26 --households 400 --seed 11 --per-question 8`, with `--final` for the final holdout. Scores: round 2's int8 export with `--runtime onnx --as-app-asks --task match`.
+
 **Right by the facts** (the key tags these `none`; the facts settle them; the same rules for both rounds):
 - Vermont's "U.S. citizen?" for another member: Yes when everyone in the household is a citizen.
 - Vermont's "Disabled?" for another member: No when nobody in the household has a disability.

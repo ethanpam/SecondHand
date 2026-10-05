@@ -16,6 +16,9 @@ const source = fs.readFileSync(path.join(root, 'desktop/main.cjs'), 'utf8');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 // Values created inside the vm context have foreign prototypes.
 const plain = value => JSON.parse(JSON.stringify(value));
+// The day every test here runs on (#135): ages and birth-date checks never depend on when the tests run.
+// A test may name another day (`today`), or its own environment (`env`) to run on the clock.
+const TODAY = '2026-10-05';
 
 async function desktop(options = {}) {
   let bridge;
@@ -33,7 +36,8 @@ async function desktop(options = {}) {
   const opened = [];
   let registrations = 0;
   class Vault {
-    constructor() { this.unlocked = true; this.data = { profile: { firstName: 'Synthetic', lastName: '' }, applications: [] }; }
+    // `options.profile`: information saved earlier, as the vault reads it back, without today's checks.
+    constructor() { this.unlocked = true; this.data = { profile: options.profile ? structuredClone(options.profile) : { firstName: 'Synthetic', lastName: '' }, applications: [] }; }
     async exists() { return true; }
     async inspect() { return { recoveryKey: true }; }
     async lock() { if (options.beforeLock) await options.beforeLock(); this.unlocked = false; }
@@ -50,7 +54,7 @@ async function desktop(options = {}) {
     show() { shows++; } focus() {} setMenuBarVisibility() {} once() {} on() {} loadFile() {}
     isDestroyed() { return false; }
   }
-  const app = { isPackaged: false, setName() {}, setPath() {}, getPath: () => '/synthetic-local-data',
+  const app = { isPackaged: options.packaged === true, setName() {}, setPath() {}, getPath: () => '/synthetic-local-data',
     requestSingleInstanceLock: () => true, whenReady: () => Promise.resolve(), on() {} };
   const electron = { app, BrowserWindow, ipcMain: { handle(_name, handler) { invoke = handler; } },
     dialog: { async showMessageBox(_parent, options) { prompts.push(options); return answer(); }, showErrorBox() { assert.fail('Desktop setup failed'); } },
@@ -78,7 +82,7 @@ async function desktop(options = {}) {
   };
   vm.runInNewContext(source, {
     require: name => Object.hasOwn(overrides, name) ? overrides[name] : require(name.startsWith('.') ? path.join(root, 'desktop', name) : name),
-    __dirname: path.join(root, 'desktop'), process: { platform: process.platform, env: {}, argv: ['synthetic-electron'] },
+    __dirname: path.join(root, 'desktop'), process: { platform: process.platform, env: options.env ?? { SECONDHAND_TEST_MODE: '1', SECONDHAND_TEST_TODAY: options.today ?? TODAY }, argv: ['synthetic-electron'] },
     setTimeout: () => 1, clearTimeout() {}, Buffer
   });
   await tick();
@@ -999,4 +1003,90 @@ test('the guided setup remembers how many of its six steps are done until it is 
   await assert.rejects(finished.invoke('saveSetupProgress', 2), /isn’t under way/);
   const broken = await desktop({ settings: trusted, setup: '{"version":1,"step":"three"}' });
   await assert.rejects(broken.invoke('setupProgress'), /setup progress/, 'an unreadable progress file fails loudly');
+});
+
+// #135: one "today", on this computer's calendar, for checking birth dates when they are saved and for
+// working out ages. A birth date saved earlier that today's checks would refuse never fails a request.
+test('ages follow the day the app runs on: on 2027-02-14 the child born 2021-02-14 turns 6 and leaves the 0 to 5 band', async () => {
+  const birthday = await desktop({ settings: trusted, today: '2027-02-14' });
+  await birthday.invoke('saveProfile', listedHousehold());
+  assert.deepEqual(plain((await birthday.request({ type: 'getFields', fields: ['householdCount:0-5', 'householdCount:6-17', 'householdChildren'] })).values),
+    { 'householdCount:0-5': '0', 'householdCount:6-17': '2', householdChildren: '2' });
+  const before = await desktop({ settings: trusted, today: '2027-02-13' });
+  await before.invoke('saveProfile', listedHousehold());
+  assert.deepEqual(plain((await before.request({ type: 'getFields', fields: ['householdCount:0-5'] })).values), { 'householdCount:0-5': '1' }, 'the day before, still 5');
+});
+
+test('a pinned day is for tests only: it needs test mode and an unpackaged app, and must be a real date', async () => {
+  await assert.rejects(desktop({ env: { SECONDHAND_TEST_TODAY: TODAY } }), /SECONDHAND_TEST_TODAY needs SECONDHAND_TEST_MODE=1/);
+  await assert.rejects(desktop({ packaged: true, env: { SECONDHAND_TEST_MODE: '1', SECONDHAND_TEST_TODAY: TODAY } }), /packaged SecondHand refuses SECONDHAND_TEST_TODAY/);
+  await assert.rejects(desktop({ env: { SECONDHAND_TEST_MODE: '1', SECONDHAND_TEST_TODAY: '2026-02-30' } }), /real date/);
+});
+
+test('on an Iowa evening, with no day pinned, My information refuses a child born tomorrow', async t => {
+  const before = process.env.TZ;
+  process.env.TZ = 'America/Chicago';
+  t.after(() => { if (before === undefined) delete process.env.TZ; else process.env.TZ = before; });
+  // 8:30 pm on October 5 in Iowa: already October 6 in UTC.
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-10-06T01:30:00Z') });
+  const app = await desktop({ settings: trusted, env: {} });
+  await assert.rejects(app.invoke('saveProfile', listedHousehold({ 2: { birthDate: '2026-10-06' } })), /Person 3’s date of birth can’t be after today \(2026-10-05 on this computer\)\./);
+  const saved = await app.invoke('saveProfile', listedHousehold({ 2: { birthDate: '2026-10-05' } }));
+  assert.equal(saved.householdMembers[2].birthDate, '2026-10-05', 'born today');
+});
+
+test('My information and Save to My information refuse a birth date after today or more than 130 years ago, and say which', async () => {
+  const app = await desktop({ settings: trusted });
+  await assert.rejects(app.invoke('saveProfile', { birthDate: '2026-10-06' }), /Your date of birth can’t be after today \(2026-10-05 on this computer\)\./);
+  await assert.rejects(app.invoke('saveProfile', listedHousehold({ 3: { birthDate: '1825-06-01' } })), /Person 4’s date of birth can’t be more than 130 years ago\./);
+  app.answer(async () => ({ response: 1 }));
+  await assert.rejects(app.request({ type: 'saveFields', url: PANTRY, fields: { birthDate: '2026-10-06' } }), error => /can’t be after today/.test(error.publicMessage));
+  assert.equal(app.prompts.length, 0, 'a refused date is never offered for confirmation');
+});
+
+// Saved while the clock was later (a child born 2026-10-08), or before the 130-year limit existed (a parent born 1825).
+// As the vault keeps it, the applicant's own row carries their name and birth date.
+const unusableDates = listedHousehold({ 0: { firstName: 'Synthetic', lastName: 'Applicant', birthDate: '1985-04-12' }, 2: { birthDate: '2026-10-08' }, 3: { birthDate: '1825-06-01' } });
+
+test('a saved birth date the app can’t use never fails a field request: answers from ages stay with the applicant, and the reply says why', async () => {
+  const app = await desktop({ settings: trusted, profile: unusableDates });
+  app.answer(async () => ({ response: 1 }));
+  const reply = plain(await app.request({ type: 'getFields', url: PANTRY, fields: [...BANDS, 'householdChildren', 'householdSize', 'studentNameGrade', 'firstName'] }));
+  assert.deepEqual(reply.values, { householdSize: '4', studentNameGrade: 'Riley Example, 5th', firstName: 'Synthetic' });
+  assert.equal(reply.reason, 'birthDate');
+  const unrelated = plain(await app.request({ type: 'getFields', url: PANTRY, fields: ['firstName', 'householdSize'] }));
+  assert.equal(unrelated.reason, undefined, 'nothing was left out because of a birth date');
+  // The applicant's own date: never filled into a page.
+  const own = await desktop({ settings: trusted, profile: { firstName: 'Synthetic', birthDate: '2026-10-08' } });
+  const ownReply = plain(await own.request({ type: 'getFields', fields: ['birthDate', 'firstName'] }));
+  assert.deepEqual(ownReply.values, { firstName: 'Synthetic' });
+  assert.equal(ownReply.reason, 'birthDate');
+});
+
+test('a saved birth date the app can’t use never fails Laya: it answers from the other facts and the reply says why', async () => {
+  const ownDate = listedHousehold({ 0: { firstName: 'Synthetic', lastName: 'Applicant', birthDate: '2026-10-08' } });
+  const app = await desktop({ laya: stubLaya(sixtyFromAge), settings: trusted, profile: { ...ownDate, birthDate: '2026-10-08', householdVeteran: 'no' } });
+  app.answer(async () => ({ response: 1 }));
+  const reply = plain(await app.request(answerRequest([sixty, veteran])));
+  assert.deepEqual(reply.answers, { [veteran.id]: 'No' }, 'no age, so 60 or older stays with the applicant');
+  assert.equal(reply.reason, 'birthDate');
+  const fine = await desktop({ laya: stubLaya(sixtyFromAge), settings: trusted, profile: { ...household } });
+  const answered = plain(await fine.request(answerRequest([sixty, veteran])));
+  assert.equal(answered.reason, undefined);
+});
+
+test('Save to My information is refused while a saved birth date can’t be used, naming whose date to fix in My information', async () => {
+  const app = await desktop({ settings: trusted, profile: unusableDates });
+  app.answer(async () => ({ response: 1 }));
+  await assert.rejects(app.request({ type: 'saveFields', url: PANTRY, fields: { county: 'Story' } }), error => error.publicMessage ===
+    'Person 3’s date of birth can’t be after today (2026-10-05 on this computer). Fix the date in My information, then save this answer again.');
+  const own = await desktop({ settings: trusted, profile: { firstName: 'Synthetic', birthDate: '1825-06-01' } });
+  await assert.rejects(own.request({ type: 'saveFields', url: PANTRY, fields: { county: 'Story' } }), error => error.publicMessage ===
+    'Your date of birth can’t be more than 130 years ago. Fix the date in My information, then save this answer again.');
+  assert.equal(app.prompts.length + own.prompts.length, 0, 'nothing is offered for confirmation');
+  assert.equal(plain(await app.invoke('getData')).profile.county, undefined);
+  // A date of birth saved from the page is that answer’s own problem, not My information’s.
+  const fresh = await desktop({ settings: trusted, profile: { firstName: 'Synthetic' } });
+  await assert.rejects(fresh.request({ type: 'saveFields', url: PANTRY, fields: { birthDate: '2026-10-06' } }), error => error.publicMessage ===
+    'Your date of birth can’t be after today (2026-10-05 on this computer).');
 });

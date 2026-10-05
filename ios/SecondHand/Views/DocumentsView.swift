@@ -1,9 +1,13 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import QuickLook
+import VisionKit
+import AVFoundation
 
 struct DocumentsView: View {
     @EnvironmentObject private var store: AppStore
+    @State private var scanning = false
+    @State private var textDocument: SavedDocument?
     @State private var importing = false
     @State private var isImporting = false
     @State private var previewURL: URL?
@@ -18,6 +22,11 @@ struct DocumentsView: View {
                         .font(.title2.weight(.semibold)).foregroundStyle(AppTheme.ink)
                     Text("Save notices, supporting documents, and confirmations so they’re easy to find when you need them.")
                         .font(.subheadline).foregroundStyle(.secondary).lineSpacing(3)
+
+                    if VNDocumentCameraViewController.isSupported {
+                        Button { startScan() } label: { Label("Scan a document", systemImage: "doc.viewfinder") }
+                            .buttonStyle(PrimaryButtonStyle()).disabled(isImporting)
+                    }
 
                     if store.data.documents.isEmpty {
                         AppCard {
@@ -55,13 +64,23 @@ struct DocumentsView: View {
                                     }
                                     Spacer(minLength: 0)
                                     Menu {
-                                        Button { preview(document) } label: { Label("Preview", systemImage: "eye") }
+                                        Button { textDocument = document } label: {
+                                    Label("Read text", systemImage: "text.viewfinder")
+                                        .font(.subheadline.weight(.medium)).frame(minHeight: 30)
+                                }
+                                .accessibilityIdentifier("document.readText")
+                                Button { preview(document) } label: { Label("Preview", systemImage: "eye") }
                                         Button(role: .destructive) { documentToDelete = document } label: { Label("Delete", systemImage: "trash") }
                                     } label: {
                                         Image(systemName: "ellipsis").frame(width: 36, height: 44)
                                     }
                                     .accessibilityLabel("Actions for \(document.name)")
                                 }
+                                Button { textDocument = document } label: {
+                                    Label("Read text", systemImage: "text.viewfinder")
+                                        .font(.subheadline.weight(.medium)).frame(minHeight: 30)
+                                }
+                                .accessibilityIdentifier("document.readText")
                                 Button { preview(document) } label: {
                                     Label("Preview document", systemImage: "eye")
                                         .font(.subheadline.weight(.medium)).frame(minHeight: 30)
@@ -110,6 +129,21 @@ struct DocumentsView: View {
                 case .failure(let failure): error = failure.localizedDescription
                 }
             }
+            .sheet(isPresented: $scanning) {
+                DocumentScanner { result in
+                    scanning = false
+                    switch result {
+                    case .success(let bytes):
+                        guard let bytes else { return }
+                        do {
+                            let name = "Scan \(Date().formatted(date: .abbreviated, time: .omitted)).pdf"
+                            _ = try store.saveDocument(bytes: bytes, name: name, fileExtension: "pdf")
+                        } catch { self.error = error.localizedDescription }
+                    case .failure(let failure): error = failure.localizedDescription
+                    }
+                }.ignoresSafeArea()
+            }
+            .sheet(item: $textDocument) { document in DocumentTextView(document: document) }
             .quickLookPreview($previewURL)
             .onChange(of: previewURL) { old, new in
                 if old != nil && new == nil { store.cleanupPreviews() }
@@ -127,6 +161,15 @@ struct DocumentsView: View {
             .alert("Couldn’t open or save the document", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
                 Button("OK", role: .cancel) { error = nil }
             } message: { Text(error ?? "Please try again.") }
+        }
+    }
+
+    private func startScan() {
+        Task {
+            let allowed = await AVCaptureDevice.requestAccess(for: .video)
+            guard store.isUnlocked else { return }
+            if allowed { scanning = true }
+            else { error = "Allow camera access in iPhone Settings to scan, or add a document from Files." }
         }
     }
 

@@ -85,7 +85,7 @@ struct LockScreenView: View {
     private var digitCount: Int { store.needsPINSetup ? 4 : store.requiredPINDigits }
     private var title: String {
         if store.needsPINSetup { return confirming ? "Confirm your PIN" : "Create your four-digit PIN" }
-        return "Enter your SecondHand PIN"
+        return "Enter PIN"
     }
 
     var body: some View {

@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { validateProfile, validateApplication, validateStoredApplication, isPortalUrl, YES_NO_FIELDS, PROFILE_FIELDS, PROFILE_CHOICES, REQUEST_FIELDS, DERIVED_FIELDS, FIELD_LABELS } = require('../shared/schema.cjs');
+const { validateProfile, validateStoredProfile, validateApplication, validateStoredApplication, isPortalUrl, YES_NO_FIELDS, PROFILE_FIELDS, PROFILE_CHOICES, REQUEST_FIELDS, DERIVED_FIELDS, FIELD_LABELS,
+  releasedValue, blockedByBirthDate } = require('../shared/schema.cjs');
 const fictionalProfile = require('./fixtures/applicant-profile.json');
 
 test('only the exact HTTPS Iowa application origin and path can receive fields', () => {
@@ -208,4 +209,77 @@ test('the fictional fixture has a fictional household: the applicant, two childr
   const saved = validateProfile(fictionalProfile);
   assert.deepEqual(saved.householdMembers.map(member => [member.firstName, member.relationship, member.student]),
     [['Avery', 'self', 'no'], ['Riley', 'child', 'yes'], ['Sam', 'child', 'no'], ['Morgan', 'parent', 'no']]);
+});
+
+// #135: a birth date is checked against today on this computer's calendar when it is saved, and never when it is read back.
+function inZone(t, zone) {
+  const before = process.env.TZ;
+  process.env.TZ = zone;
+  t.after(() => { if (before === undefined) delete process.env.TZ; else process.env.TZ = before; });
+}
+// 8:30 pm on October 5 in Iowa is already October 6 in UTC.
+const IOWA_EVENING = '2026-10-06T01:30:00Z';
+
+test('on an Iowa evening, a birth date of tomorrow is refused, though it is already that date in UTC', t => {
+  inZone(t, 'America/Chicago');
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse(IOWA_EVENING) });
+  assert.throws(() => validateProfile({ birthDate: '2026-10-06' }), { message: 'Your date of birth can’t be after today (2026-10-05 on this computer).' });
+  assert.throws(() => validateProfile(withMembers([child({ birthDate: '2026-10-06' })])), { message: 'Person 2’s date of birth can’t be after today (2026-10-05 on this computer).' });
+  assert.equal(validateProfile({ birthDate: '2026-10-05' }).birthDate, '2026-10-05', 'born today');
+  assert.equal(validateProfile(withMembers([child({ birthDate: '2026-10-05' })])).householdMembers[1].birthDate, '2026-10-05');
+  // The same instant on a computer set to UTC: it is October 6 there.
+  process.env.TZ = 'UTC';
+  assert.equal(validateProfile({ birthDate: '2026-10-06' }).birthDate, '2026-10-06');
+});
+
+test('around midnight, the day a birth date is checked against follows the computer’s timezone', t => {
+  inZone(t, 'Pacific/Kiritimati');
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-10-05T10:00:00Z') });
+  assert.equal(validateProfile({ birthDate: '2026-10-06' }).birthDate, '2026-10-06', 'just after midnight in UTC+14, while UTC is still October 5');
+  process.env.TZ = 'UTC';
+  assert.throws(() => validateProfile({ birthDate: '2026-10-06' }), /after today \(2026-10-05 on this computer\)/);
+});
+
+test('a birth date more than 130 years ago is refused when saved; exactly 130 years ago is not', () => {
+  const today = '2026-10-05';
+  assert.throws(() => validateProfile({ birthDate: '1896-10-04' }, { today }), { message: 'Your date of birth can’t be more than 130 years ago.' });
+  assert.throws(() => validateProfile({ birthDate: '1825-06-01' }, { today }), /more than 130 years ago/);
+  assert.equal(validateProfile({ birthDate: '1896-10-05' }, { today }).birthDate, '1896-10-05');
+  assert.throws(() => validateProfile(withMembers([{ id: memberId(1), firstName: 'Morgan', birthDate: '1825-06-01', relationship: 'parent' }]), { today }),
+    { message: 'Person 2’s date of birth can’t be more than 130 years ago.' });
+  assert.throws(() => validateProfile(withMembers([child(), { id: memberId(1), firstName: 'Sam', birthDate: '2026-10-06', relationship: 'child' }]), { today }),
+    { message: 'Person 3’s date of birth can’t be after today (2026-10-05 on this computer).' }, 'named by the row it is on in My information');
+  assert.throws(() => validateProfile({ birthDate: '2020-02-30' }, { today }), { message: 'Enter a valid date of birth.' });
+});
+
+test('a profile read back from the vault keeps a birth date the clock now puts in the future, or one from before the 130-year limit', () => {
+  const stored = withMembers([child({ birthDate: '2031-01-01' }), { id: memberId(1), firstName: 'Morgan', birthDate: '1825-06-01', relationship: 'parent' }], { birthDate: '2030-05-05' });
+  const read = validateStoredProfile(stored);
+  assert.equal(read.birthDate, '2030-05-05');
+  assert.deepEqual(read.householdMembers.map(member => member.birthDate), ['2030-05-05', '2031-01-01', '1825-06-01']);
+  // Everything else is still checked as it is when saved.
+  for (const profile of [{ birthDate: '2020-02-30' }, { birthDate: '04/12/1985' }, withMembers([child({ birthDate: '2015-02-30' })]), { zip: 'ABCDE' }, { unknown: 'value' }]) {
+    assert.throws(() => validateStoredProfile(profile), JSON.stringify(profile));
+  }
+});
+
+test('a page gets no answer worked out from a birth date that can’t be used, and the reason is known', () => {
+  const today = '2026-10-05';
+  const stored = validateStoredProfile({ ...withMembers([], { householdChildren: '3', householdVeteran: 'no' }),
+    householdMembers: [{ id: MEMBER_SELF, relationship: 'self', student: 'no' }, child({ birthDate: '2026-10-06' })] });
+  for (const field of ['householdCount:0-17', 'householdChildren', 'householdAdults', 'householdSeniors']) {
+    assert.equal(releasedValue(stored, field, { today }), '', field);
+    assert.equal(blockedByBirthDate(stored, field, { today }), true, field);
+  }
+  assert.equal(releasedValue(stored, 'householdSize', { today }), '2', 'the size needs no birth date');
+  assert.equal(releasedValue(stored, 'studentNameGrade', { today }), 'Riley Example, 5th');
+  for (const field of ['householdSize', 'studentNameGrade', 'householdVeteran', 'firstName', 'birthDate']) assert.equal(blockedByBirthDate(stored, field, { today }), false, field);
+  assert.equal(releasedValue(stored, 'birthDate', { today }), '1985-04-12', 'the applicant’s own date is fine');
+  // The applicant's own date: it is never filled into a page, and the reason is known.
+  const own = validateStoredProfile({ birthDate: '1825-06-01', householdChildren: '1' });
+  assert.equal(releasedValue(own, 'birthDate', { today }), '');
+  assert.equal(blockedByBirthDate(own, 'birthDate', { today }), true);
+  assert.equal(releasedValue(own, 'householdChildren', { today }), '1', 'without a list, the manual count is the applicant’s own answer');
+  assert.equal(blockedByBirthDate(own, 'householdChildren', { today }), false);
+  assert.equal(blockedByBirthDate(validateStoredProfile({ birthDate: '' }), 'birthDate', { today }), false, 'nothing saved is not a reason');
 });

@@ -338,10 +338,24 @@
     setProfileDirty(false);
   }
 
-  // Whole years on this computer's calendar today; a birthday counts on the day itself. Null without a date.
-  function ageOn(birthDate) {
+  // Why a birth date can't be used on this computer's calendar today: 'future', 'tooOld' (more than 130
+  // years ago), or null. The desktop checks a date the same way when it is saved (#135).
+  function dateProblem(birthDate) {
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(birthDate || '');
     if (!match) return null;
+    const now = new Date();
+    const today = [now.getFullYear(), now.getMonth() + 1, now.getDate()];
+    const birth = match.slice(1).map(Number);
+    const compare = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+    if (compare(birth, today) > 0) return 'future';
+    if (compare(birth, [today[0] - 130, today[1], today[2]]) < 0) return 'tooOld';
+    return null;
+  }
+  // Whole years on this computer's calendar today; a birthday counts on the day itself. Null without a date
+  // or with one that can't be used.
+  function ageOn(birthDate) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(birthDate || '');
+    if (!match || dateProblem(birthDate)) return null;
     const now = new Date();
     const [year, month, day] = match.slice(1).map(Number);
     return now.getFullYear() - year - (now.getMonth() + 1 < month || (now.getMonth() + 1 === month && now.getDate() < day) ? 1 : 0);
@@ -450,7 +464,12 @@
     profileControl('householdAdults').value = count(18, 64);
     profileControl('householdChildren').value = count(0, 17);
     profileControl('householdSeniors').value = count(65, Infinity);
-    $('household-counts-note').textContent = known ? 'Counted from your household list. To change them, change the list.'
+    // A birth date after today or more than 130 years ago: whose it is, named as its row is.
+    const unusable = members.findIndex(member => dateProblem(member.birthDate));
+    const whose = unusable < 0 ? '' : members[unusable].relationship === 'self' ? 'Your' : `Person ${unusable + 1}’s`;
+    const when = unusable < 0 ? '' : dateProblem(members[unusable].birthDate) === 'future' ? 'after today' : 'more than 130 years ago';
+    $('household-counts-note').textContent = unusable >= 0 ? `Counted from your household list. ${whose} date of birth is ${when}, so ages can’t be counted. Check the date.`
+      : known ? 'Counted from your household list. To change them, change the list.'
       : 'Counted from your household list. Add every person’s birth date to count their ages.';
   }
   function addMember() {

@@ -2,7 +2,8 @@
 // Turns a saved profile into short plain-language facts for the local decision model.
 // Every calculation (ages, bands, totals) happens here in code; the model only reads
 // the sentences. A fact is stated only when the saved answers prove it, and it is left
-// out when they are missing. Names, contact details, street address and SSN are never facts.
+// out when they are missing, or when it comes from a birth date after today or more than
+// 130 years ago (#135). Names, contact details, street address and SSN are never facts.
 const { localToday, ageOn, householdCounts, memberAges } = require('./household.cjs');
 
 // Saved fields whose facts need the applicant's permission before an answer based on them
@@ -156,7 +157,7 @@ function memberFacts(profile, today, add) {
 }
 
 const factsText = facts => facts.map(fact => fact.text).join(' ');
-// The applicant's age in whole years, or null when no birth date is saved.
+// The applicant's age in whole years, or null when no birth date is saved or the saved one can't be used.
 const ageOf = (profile, { today } = {}) => applicantAge(profile, localToday(today));
 
 module.exports = { buildFacts, factsText, ageOf, SENSITIVE_SOURCES, STATE_NAMES };

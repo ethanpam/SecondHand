@@ -9,6 +9,7 @@ This is an independent prototype, not an Iowa HHS product. It does not determine
 - A SwiftUI app for a saved contact and household profile, income and housing notes, and renewal tracking.
 - Separate dates for renewal return, benefits ending, interview, and requested documents. Dates come from the user's notice; the app does not assume annual renewal.
 - An encrypted local document vault and document preview.
+- On-device text extraction from saved PDFs, JPEGs, PNGs, and HEIC images, plus camera document scanning on supported iPhones.
 - Local reminders with generic wording on the lock screen.
 - A required four-digit SecondHand PIN with optional Face ID, enabled in Settings. Face ID failures fall back to the app PIN.
 - A Safari extension with an expiring, one-tab application session; automatic filling of verified applicant fields; user-selected mappings on other supported forms; Pause/Resume/Stop; and separate Continue and final submission actions.
@@ -19,6 +20,16 @@ Saved information and reminders work offline. Opening the Iowa website, signing 
 **Second Hand has no app account or sign-in.** You can demo it without a paid Apple Developer subscription: Simulator needs no Apple account, and testing on your own iPhone uses a free Apple account in Xcode. An Iowa benefits-portal account is only relevant when using the official website. Apple's [account guidance](https://developer.apple.com/help/account/basics/about-your-developer-account) explains free personal-device testing and its limits.
 
 <img src="docs/images/overview.png" width="280" alt="Second Hand renewal overview with no saved personal data"> <img src="docs/images/documents.png" width="280" alt="Second Hand document vault empty state">
+
+## Scan documents and read text
+
+In **Documents**, choose **Scan a document** to capture pages with the camera, or **Add a document** to import a PDF or image from Files. Scans are saved as encrypted PDFs. The camera option appears only where document scanning is supported; Simulator can test imported files instead.
+
+Choose **Read text** on a saved document to extract text locally using Apple Vision. Selectable PDFs use their existing text; scanned PDF pages and images use recognition. Review the result against the original, especially amounts, columns, and checkboxes. This version does not interpret tax forms, populate profile fields, or send text to a server. You can select text using the standard iOS text-selection controls. Extracted text is not saved separately and is cleared when the review closes or the app locks.
+
+Documents are limited to 20 MB; text extraction and camera scans support up to 20 pages. Camera access can be enabled in iPhone Settings if previously denied.
+
+QA uses the explicitly synthetic, not-for-filing 1040-SR in `Tests/Fixtures`. It is included only in the unit-test bundle, not the shipping app. Tests check names, address, and selected amounts against the scan, plus image recognition, blank/invalid input, page ordering, and the page limit. Camera capture still requires a physical-device check.
 
 ## Application assistance scope
 

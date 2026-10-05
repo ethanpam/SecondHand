@@ -1576,3 +1576,46 @@ test('an answer saved from Chrome shows in My information without losing the app
   await tick(); await tick();
   assert.equal(view.get('zip').value, '50011', 'a field the applicant is editing keeps their edit');
 });
+
+// #135: a birth date after today, or more than 130 years ago, on this computer's calendar. My information
+// counts no ages from it and says whose date it is, as the app refuses to save it.
+// Pins the clock the page reads, at local noon on `day`.
+function pinDay(view, day) {
+  const RealDate = view.window.Date;
+  const [year, month, date] = day.split('-').map(Number);
+  const noon = new RealDate(year, month - 1, date, 12).getTime();
+  view.window.Date = class extends RealDate { constructor(...args) { super(...(args.length ? args : [noon])); } static now() { return noon; } };
+}
+const COUNT_VALUES = view => ['householdSize', 'householdAdults', 'householdChildren', 'householdSeniors'].map(view.value);
+const withDates = dates => ({ ...fictionalProfile, householdMembers: fictionalProfile.householdMembers.map((member, index) => ({ ...member, ...(dates[index] !== undefined ? { birthDate: dates[index] } : {}) })),
+  ...(dates[0] !== undefined ? { birthDate: dates[0] } : {}) });
+
+test('a saved birth date after today or more than 130 years ago counts no ages, and the note says whose date to check', async t => {
+  const view = await renderer(t, { getData: async () => structuredClone({ profile: withDates({ 2: '2999-01-01' }), applications: [] }) });
+  openProfile(view);
+  assert.deepEqual(COUNT_VALUES(view), ['4', '', '', ''], 'the size still counts everyone');
+  assert.equal(view.get('household-counts-note').textContent, 'Counted from your household list. Person 3’s date of birth is after today, so ages can’t be counted. Check the date.');
+  editRow(view, memberRows(view)[2], 'birthDate', '1825-06-01');
+  assert.equal(view.get('household-counts-note').textContent, 'Counted from your household list. Person 3’s date of birth is more than 130 years ago, so ages can’t be counted. Check the date.');
+  editRow(view, memberRows(view)[2], 'birthDate', '2021-02-14');
+  assert.deepEqual(COUNT_VALUES(view), ['4', '1', '2', '1']);
+  assert.equal(view.get('household-counts-note').textContent, 'Counted from your household list. To change them, change the list.');
+  view.edit('birthDate', '2999-01-01');
+  assert.equal(view.get('household-counts-note').textContent, 'Counted from your household list. Your date of birth is after today, so ages can’t be counted. Check the date.');
+});
+
+test('the day My information counts from is this computer’s own: born today counts, born tomorrow doesn’t', async t => {
+  const view = await renderer(t, { getData: async () => structuredClone({ profile: withDates({ 2: '2026-10-05' }), applications: [] }) });
+  pinDay(view, '2026-10-05');
+  openProfile(view);
+  editRow(view, memberRows(view)[2], 'birthDate', '2026-10-05');
+  assert.deepEqual(COUNT_VALUES(view), ['4', '1', '2', '1'], 'a newborn is a child');
+  editRow(view, memberRows(view)[2], 'birthDate', '2026-10-06');
+  assert.deepEqual(COUNT_VALUES(view), ['4', '', '', '']);
+  assert.match(view.get('household-counts-note').textContent, /Person 3’s date of birth is after today/);
+  editRow(view, memberRows(view)[3], 'birthDate', '1896-10-05');
+  editRow(view, memberRows(view)[2], 'birthDate', '2021-02-14');
+  assert.deepEqual(COUNT_VALUES(view), ['4', '1', '2', '1'], 'exactly 130 years ago still counts');
+  editRow(view, memberRows(view)[3], 'birthDate', '1896-10-04');
+  assert.match(view.get('household-counts-note').textContent, /Person 4’s date of birth is more than 130 years ago/);
+});
