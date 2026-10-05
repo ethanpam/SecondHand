@@ -21,6 +21,7 @@ const UNAVAILABLE = 'No Laya model is available to download yet.';
 const INCOMPATIBLE = 'A newer Laya model is available, but it needs a newer version of SecondHand.';
 const REPLACED = 'The update list names a Laya model SecondHand already replaced with a newer one, so SecondHand keeps the one it has.';
 const DAY_MS = 24 * 60 * 60 * 1000;
+const TURNED_OFF_WHILE_LOADING = 'Laya was turned off while the model was loading.';
 const UNSUPPORTED = 'Laya can’t run on this computer. It needs Windows, Linux, or a Mac with Apple silicon.';
 // Platforms onnxruntime-node ships a native build for.
 const SUPPORTED_PLATFORMS = new Set(['darwin-arm64', 'win32-x64', 'win32-arm64', 'linux-x64', 'linux-arm64']);
@@ -232,8 +233,15 @@ function createLaya({ userDataDir, manifest, modelDir, modelFormat, updateUrl = 
     if (current) await current.model.release();
   }
 
+  // Reads the model's tokenizer and config, then starts its process. Laya turned off (or the model
+  // released) during a load stops it before the process starts, or releases the model it loaded.
   async function load() {
     const loadGeneration = generation;
+    const stopped = () => loadGeneration !== generation || !on;
+    const failed = error => {
+      loadFailure = `The Laya model couldn’t be loaded (${error.message}).`;
+      return notReady(loadFailure);
+    };
     let directory = modelDir;
     let format = modelFormat;
     if (store) {
@@ -256,14 +264,13 @@ function createLaya({ userDataDir, manifest, modelDir, modelFormat, updateUrl = 
       if (!Number.isInteger(limits.maxLen) || !Number.isInteger(limits.headMaxLen) || !(limits.headMaxLen > 4 && limits.headMaxLen < limits.maxLen)) {
         throw new Error('its token limits are invalid');
       }
-      result = { tokenizer, limits, format, calibration: readCalibration(config), model: await runner.load(path.join(directory, 'model.onnx')) };
-    } catch (error) {
-      loadFailure = `The Laya model couldn’t be loaded (${error.message}).`;
-      throw notReady(loadFailure);
-    }
-    if (loadGeneration !== generation || !on) {
+      result = { tokenizer, limits, format, calibration: readCalibration(config) };
+    } catch (error) { throw failed(error); }
+    if (stopped()) throw notReady(TURNED_OFF_WHILE_LOADING);
+    try { result.model = await runner.load(path.join(directory, 'model.onnx')); } catch (error) { throw failed(error); }
+    if (stopped()) {
       await result.model.release();
-      throw notReady('Laya was turned off while the model was loading.');
+      throw notReady(TURNED_OFF_WHILE_LOADING);
     }
     loadFailure = null;
     return result;
