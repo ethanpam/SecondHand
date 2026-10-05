@@ -228,6 +228,10 @@ async function iowaCard() {
     await page.keyboard.press('Tab');
     await expect((await card()).locator('#autofill:focus-visible')).toBeVisible();
     await cardShot(session, 'card-focus');
+    // The reader hid the card: its logo stays in the corner, to bring the card back.
+    await (await card()).locator('#hide').click();
+    await expect((await card()).locator('#pill')).toBeVisible();
+    await cardShot(session, 'card-hidden');
 
     await open(applicant, { profile: { ...smoke.syntheticProfile, firstName: '' } });
     await (await card()).locator('#autofill').click();
@@ -468,7 +472,7 @@ async function recording() {
 }
 
 const sessions = [
-  [iowaCard, ['card-ready', 'card-focus', 'card-need-you', 'card-message', 'card-locked', 'card-closed', 'card-pill']],
+  [iowaCard, ['card-ready', 'card-focus', 'card-hidden', 'card-need-you', 'card-message', 'card-locked', 'card-closed', 'card-pill']],
   [iowaPanel, ['panel-iowa', 'panel-header', 'panel-focus', 'panel-iowa-filled', 'panel-checklist', 'panel-locked', 'panel-closed', 'panel-info', 'panel-elsewhere', 'panel-arabic', 'panel-questions']],
   [sites, ['panel-site-off', 'panel-site-filled', 'panel-laya-off', 'panel-save', 'panel-all-sites-off', 'card-site', 'card-offer']],
   [outdated, ['card-outdated', 'panel-outdated']],

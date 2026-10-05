@@ -489,6 +489,24 @@ async function main() {
     currentSelfVariant = 'verified';
     console.log(`Widget: on Iowa pages SecondHand doesn’t fill, what Autofill will do and then the whole next step show in ${strings.LANGUAGES.join(', ')}, in a frame no larger than 272 by 110.`);
 
+    // The keyboard can hide the widget, down to the round logo in the page's corner, and bring it back from there.
+    widget = await startFixture();
+    await widget.locator('#autofill').focus();
+    await page.keyboard.press('Tab');
+    await expect(widget.locator('#hide')).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(widget.locator('#pill')).toBeFocused();
+    await expect(widget.locator('#autofill')).toBeHidden();
+    await expect.poll(async () => { const box = await host.boundingBox(); return `${box.width} by ${box.height}`; }, { timeout: 10000 }).toBe('46 by 46');
+    assert.equal(await host.evaluate(element => element.style.borderRadius), '50%');
+    await page.keyboard.press('Enter');
+    await expect(widget.locator('#autofill')).toBeVisible();
+    await expect(widget.locator('#hide')).toBeFocused();
+    await expect.poll(async () => (await host.boundingBox()).height, { timeout: 10000 }).toBeGreaterThan(46);
+    assert.equal(await host.evaluate(element => element.style.borderRadius), '12px');
+    assert.deepEqual(await calls('getFields'), [], 'hiding and showing the widget asks nothing of the desktop');
+    console.log('Widget: Tab reaches its hide control; Enter leaves the round logo, and Enter on the logo brings the widget back.');
+
     // Other portal pages show only a small pill and never contact the desktop.
     await resetTo(`${portal}/applyForBenefits/householdMembers`);
     await expect(page.locator('[data-secondhand-assistant]')).toHaveAttribute('data-secondhand-size', 'pill');

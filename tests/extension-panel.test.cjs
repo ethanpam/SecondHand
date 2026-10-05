@@ -668,8 +668,44 @@ test('widget is a pill off the applicant page and opens the side panel from it',
   const view = await panel(t, { launcher: true, kind: 'manual' });
   assert.equal(view.get('widget').hidden, true);
   assert.equal(view.get('pill').hidden, false);
+  assert.equal(view.get('pill').title, EN['widget.pillTitle']);
   await view.userClick('pill');
   assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'ui:openPanel', confirmed: true });
+});
+
+test('the widget can be hidden to its logo and shown again from it, by the reader only, and nothing is saved', async t => {
+  const storage = new Map();
+  const view = await panel(t, { launcher: true, storage });
+  const sizes = () => plainRequests(view.requests.filter(request => request.type === 'ui:widgetSize'));
+  assert.equal(view.get('hide').getAttribute('aria-label'), EN['widget.hideTitle']);
+  assert.equal(view.get('hide').title, EN['widget.hideTitle']);
+  view.get('hide').click(); await tick();
+  assert.equal(view.get('widget').hidden, false, 'a click the page made up hides nothing');
+  await view.userClick('hide');
+  assert.equal(view.get('widget').hidden, true);
+  assert.equal(view.get('pill').hidden, false);
+  assert.equal(view.get('pill').title, EN['widget.showTitle']);
+  assert.equal(view.get('pill').getAttribute('aria-label'), EN['widget.showTitle']);
+  assert.equal(view.window.document.activeElement, view.get('pill'), 'the keyboard stays on the control that brings it back');
+  assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: true, pill: true }, 'the frame is asked to be the logo alone');
+  // It stays hidden while the page is checked again, and while Autofill runs elsewhere.
+  const asked = sizes().length;
+  view.window.document.dispatchEvent(new view.window.Event('visibilitychange'));
+  await tick(); await tick();
+  assert.equal(view.get('widget').hidden, true);
+  assert.equal(sizes().length, asked);
+  await view.userClick('pill');
+  assert.equal(view.types().includes('ui:openPanel'), false, 'the logo of a hidden card shows the card; it does not open the side panel');
+  assert.equal(view.get('widget').hidden, false);
+  assert.equal(view.get('pill').hidden, true);
+  assert.equal(view.window.document.activeElement, view.get('hide'));
+  assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: true });
+  assert.deepEqual([...storage.keys()], [], 'hiding is for this page only');
+  // Another site's widget hides the same way.
+  const site = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true } });
+  await site.userClick('hide');
+  assert.equal(site.get('pill').title, EN['widget.showTitle']);
+  assert.deepEqual(plainRequests(site.requests.at(-1)), { type: 'ui:widgetSize', line: false, pill: true });
 });
 
 test('widget shows Unlock when the vault is locked and returns to Autofill after bringing the app forward', async t => {
@@ -1635,6 +1671,22 @@ test('the Iowa widget frame is as wide as the widget measured itself, never past
   assert.equal(host.style.height, '95px');
   page.request({ type: 'secondhand:widgetSize', line: true });
   assert.equal(host.style.height, '86px', 'a widget that could not measure itself gets a row for its line');
+});
+
+test('the Iowa widget the reader hid is the round logo alone, until the widget asks for its card back', t => {
+  const page = content(t);
+  const host = page.host();
+  page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 95 });
+  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 95, pill: true })), { sized: true });
+  assert.deepEqual([host.style.width, host.style.height, host.style.borderRadius, host.getAttribute('data-secondhand-size')], ['46px', '46px', '50%', 'pill']);
+  page.window.dispatchEvent(new page.window.Event('popstate'));
+  assert.equal(host.style.width, '46px', 'it stays hidden while this page stays');
+  page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 95 });
+  assert.match(host.style.width, /^min\(254px/);
+  assert.deepEqual([host.style.height, host.style.borderRadius, host.getAttribute('data-secondhand-size')], ['95px', '12px', 'full']);
+  for (const pill of [false, 'true', 1, null]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: true, pill }), undefined, `pill ${pill}`);
+  assert.equal(page.request({ type: 'secondhand:widgetSize', line: true, pill: true }, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
+  assert.equal(host.getAttribute('data-secondhand-size'), 'full');
 });
 
 // SecondHand on all websites.

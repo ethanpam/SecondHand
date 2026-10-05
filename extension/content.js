@@ -15,6 +15,7 @@
   let messageRow = false; // the widget shows a line to read above its row
   let cardWidth = 0; // the widget's measured width; 0 until it measures
   let cardHeight = 0; // and its measured height: 46px for its row alone, up to 130px with all it can hold
+  let cardHidden = false; // the reader hid the widget on this page: its frame is the logo alone
   const strings = value => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
   // The widget's frame is as wide as the widget measured itself, never past 272px or the screen.
   const fits = width => Number.isInteger(width) && width > 0 && width <= 1000;
@@ -40,6 +41,7 @@
       const page = withOwnPanelHidden(() => adapter.probePage(document, location.href));
       full = page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo) || generalUrl === location.href;
     } catch { full = false; }
+    full = full && !cardHidden;
     panelHost.setAttribute('data-secondhand-size', full ? 'full' : 'pill');
     panelHost.style.setProperty('border-radius', full ? '12px' : '50%', 'important');
     panelHost.style.setProperty('width', full ? frameWidth(cardWidth) : '46px', 'important');
@@ -223,10 +225,11 @@
       } else if (message.type === 'secondhand:pageText') {
         respond(withOwnPanelHidden(pageText));
       } else if (message.type === 'secondhand:widgetSize' && typeof message.line === 'boolean' && (message.width === undefined || fits(message.width)) &&
-        (message.height === undefined || tall(message.height))) {
+        (message.height === undefined || tall(message.height)) && (message.pill === undefined || message.pill === true)) {
         messageRow = message.line;
         cardWidth = message.width || 0;
         cardHeight = message.height || 0;
+        cardHidden = message.pill === true;
         if (panelHost) sizePanel();
         respond({ sized: Boolean(panelHost) });
       } else if (message.type === 'secondhand:generic:focus' && typeof message.id === 'string' && engine) {

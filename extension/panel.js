@@ -90,6 +90,8 @@
     let note = null;
     let working = false;
     let outdated = false;
+    // The reader hid the card: only the logo shows, until they click it or the page changes.
+    let collapsed = false;
     // What an outdated widget says: reload SecondHand, or reload this page after SecondHand updated itself.
     let outdatedKey = 'panel.outdated';
     let ai = { note: null, reason: '' };
@@ -99,9 +101,9 @@
     let pageLanguage = '';
     let languageChecked = false;
     let languageTrouble = null;
-    // The frame the page's content script was last asked for: whether it holds a line to read, and the
-    // widget's own width and height (0 until it has measured itself).
-    let frame = { line: false, width: 0, height: 0 };
+    // The frame the page's content script was last asked for: whether it holds a line to read, the
+    // widget's own width and height (0 until it has measured itself), and whether it is only the logo.
+    let frame = { line: false, width: 0, height: 0, pill: false };
     const AI_TIMEOUT_MS = 8000;
     // An outdated worker keeps its reload steps on screen and is not polled again.
     const trouble = error => { if (error.outdated) { outdated = true; outdatedKey = error.messageKey; } return problem(error); };
@@ -127,9 +129,14 @@
       return words(fromResult(result), 120);
     }
     function render() {
-      $('widget').hidden = !known && !autopilot && !outdated;
+      // There is a card for this page, unless the reader hid it. An outdated card keeps its steps on screen.
+      const card = known || autopilot || outdated;
+      const pill = card && collapsed && !outdated;
+      $('widget').hidden = !card || pill;
       $('widget').classList.toggle('outdated', outdated);
-      $('pill').hidden = known || autopilot || outdated;
+      $('pill').hidden = card && !pill;
+      $('pill').title = t(pill ? 'widget.showTitle' : 'widget.pillTitle');
+      $('pill').setAttribute('aria-label', t(pill ? 'widget.showTitle' : 'widget.pillTitle'));
       // A locked app offers Unlock, and a closed one Open SecondHand, in Autofill's place.
       const locked = result?.state === 'locked';
       const closed = result?.state === 'offline';
@@ -160,12 +167,12 @@
       const box = outdated || $('widget').hidden ? null : $('widget').getBoundingClientRect();
       const width = box ? Math.ceil(box.width) || 0 : frame.width;
       const height = box ? Math.ceil(box.height) || 0 : frame.height;
-      if (!outdated && (room !== frame.line || width !== frame.width || height !== frame.height)) fitFrame(room, width, height);
+      if (!outdated && (room !== frame.line || width !== frame.width || height !== frame.height || pill !== frame.pill)) fitFrame(room, width, height, pill);
     }
     // The widget can't size its own frame: the worker asks this tab's content script for it.
-    async function fitFrame(line, width, height) {
-      frame = { line, width, height };
-      try { await send({ type: 'ui:widgetSize', line, ...(width ? { width } : {}), ...(height ? { height } : {}) }); }
+    async function fitFrame(line, width, height, pill) {
+      frame = { line, width, height, pill };
+      try { await send({ type: 'ui:widgetSize', line, ...(width ? { width } : {}), ...(height ? { height } : {}), ...(pill ? { pill } : {}) }); }
       catch (error) { note = trouble(error); render(); }
     }
     async function poll() {
@@ -271,12 +278,15 @@
       render();
     }));
     // The logo, like the pill, opens the side panel. Send immediately inside the trusted click:
-    // Chrome needs the user gesture to open the panel.
+    // Chrome needs the user gesture to open the panel. A pill that stands for a hidden card shows the card again.
     for (const id of ['details', 'pill']) {
       $(id).addEventListener('click', trusted(() => {
+        if (id === 'pill' && collapsed) { collapsed = false; render(); $('hide').focus(); return; }
         send({ type: 'ui:openPanel', confirmed: true }).catch(error => { note = trouble(error); render(); });
       }));
     }
+    // Hiding is the reader's choice for this page only: nothing is saved, and the next page shows the card again.
+    $('hide').addEventListener('click', trusted(() => { collapsed = true; render(); $('pill').focus(); }));
     // The offer opens the side panel straight on the page's questions.
     $('translate-offer').addEventListener('click', trusted(() => {
       send({ type: 'ui:openPanel', confirmed: true, questions: true }).catch(error => { note = trouble(error); render(); });

@@ -897,6 +897,11 @@ test('the widget’s request for room for its line goes to its own tab’s conte
   assert.deepEqual(plain((await w.launcher({ type: 'ui:widgetSize', line: true, width: 254, height: 95 })).data), { sized: true });
   assert.deepEqual(plain(w.calls.content.at(-1)), { type: 'secondhand:widgetSize', line: true, width: 254, height: 95 }, 'and its measured height');
   for (const height of [0, 45, 131, 80.5, '95', null]) assert.equal(await w.launcher({ type: 'ui:widgetSize', line: true, width: 254, height }), undefined, `height ${height}`);
+  // A widget the reader hid asks for the logo alone.
+  assert.deepEqual(plain((await w.launcher({ type: 'ui:widgetSize', line: true, width: 254, height: 95, pill: true })).data), { sized: true });
+  assert.deepEqual(plain(w.calls.content.at(-1)), { type: 'secondhand:widgetSize', line: true, width: 254, height: 95, pill: true });
+  for (const pill of [false, 'true', 1, null]) assert.equal(await w.launcher({ type: 'ui:widgetSize', line: true, pill }), undefined, `pill ${pill}`);
+  assert.equal(await w.panel({ type: 'ui:widgetSize', line: true, pill: true }), undefined);
   assert.deepEqual(w.calls.native, []);
 });
 

@@ -186,11 +186,15 @@
         const listed = withOwnPanelHidden(() => engine.questions(document));
         respond({ lang: document.documentElement.lang || '', questions: listed.map(({ id, label }) => ({ id, label })) });
       } else if (message.type === 'secondhand:widgetSize' && typeof message.line === 'boolean' && (message.width === undefined || fits(message.width)) &&
-        (message.height === undefined || tall(message.height)) && topFrame) {
+        (message.height === undefined || tall(message.height)) && (message.pill === undefined || message.pill === true) && topFrame) {
         // As wide and as tall as the widget measured itself: 46px for its row alone, more with a line to read above it.
+        // A widget the reader hid is the round logo alone.
         if (panelHost) {
-          panelHost.style.setProperty('width', frameWidth(message.width), 'important');
-          panelHost.style.setProperty('height', `${message.height || (message.line ? 86 : 46)}px`, 'important');
+          const pill = message.pill === true;
+          panelHost.setAttribute('data-secondhand-size', pill ? 'pill' : 'full');
+          panelHost.style.setProperty('border-radius', pill ? '50%' : '12px', 'important');
+          panelHost.style.setProperty('width', pill ? '46px' : frameWidth(message.width), 'important');
+          panelHost.style.setProperty('height', pill ? '46px' : `${message.height || (message.line ? 86 : 46)}px`, 'important');
         }
         respond({ sized: Boolean(panelHost) });
       } else if (message.type === 'secondhand:generic:pageText') {
