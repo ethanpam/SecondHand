@@ -110,7 +110,7 @@
       if (outdated) return t(outdatedKey);
       if (working) return t('widget.working');
       if (note) return words(note, 120);
-      if (!result) return languageTrouble ? t('widget.languageCheckFailed') : site ? t('widget.siteReady', { host: hostOf(site.origin) }) : t('widget.iowaReady');
+      if (!result) return !site ? t('widget.iowaReady') : languageTrouble ? t('widget.languageCheckFailed') : t('widget.siteReady', { host: hostOf(site.origin) });
       // Other sites: the need-you link carries the count, so it isn't repeated here.
       if (result.state === 'done' && result.pageKey === 'general') {
         const filled = Number(result.filled) || 0;
@@ -138,7 +138,7 @@
       $('unlock').hidden = autopilot || !locked;
       $('open-app').hidden = autopilot || !closed;
       $('autofill').disabled = working;
-      // Answers still to give show as a yellow link that finds each one in the form.
+      // Answers still to give show as a link that finds each one in the form.
       const needYou = ['done', 'waiting'].includes(result?.state) ? fieldKeys(result.needYou) : [];
       $('need-you').hidden = outdated || !needYou.length;
       $('need-you').textContent = t('widget.needYou', { count: needYou.length });
@@ -146,16 +146,15 @@
       $('autofill').title = site ? t('widget.autofillSiteTitle') : t('widget.autofillIowaTitle');
       const details = [hasMessage(result) ? words(fromResult(result)) : '', ai.note ? words(ai.note) : '', ai.reason, fixedText(languageTrouble?.message, 160)];
       $('widget-text').title = outdated ? t(outdatedKey) : fixedText(details.filter(Boolean).join(' '), 240);
-      // The status is always read to screen readers, but shown as a line only when the reader
-      // must act and neither the need-you link nor the Unlock or Open SecondHand button already
-      // says so: a problem, an unlock or CAPTCHA step, a fill that found nothing, or an outdated
-      // extension. The Autofill button's title keeps the Iowa address disclosure.
-      const waiting = ['waiting', 'done'].includes(result?.state) && !needYou.length;
-      const unfinished = waiting && (result.state === 'waiting' || Boolean(result.todo || result.todoKey) || !(Number(result.filled) > 0));
-      const message = outdated || Boolean(note) || result?.state === 'error' || unfinished;
+      // The status is always read to screen readers, and shown as a line whenever it says something the
+      // buttons don't: on Iowa, what Autofill will do before it is clicked; then what it did and what it
+      // waits for; a problem; an outdated extension. Unlock and Open SecondHand say their own step, and
+      // another site's name before Autofill is no news.
+      const message = outdated || Boolean(note) || working || (result ? !locked && !closed : known && !site);
       $('widget-text').classList.toggle('visually-hidden', !message);
-      $('translate-offer').hidden = outdated || message || !known || !pageLanguage || pageLanguage === language;
-      // The widget is as wide and as tall as what it shows, up to 272px by 110px (see panel.css). An outdated
+      // The translated view is offered until Autofill has something to report.
+      $('translate-offer').hidden = outdated || Boolean(note) || working || Boolean(result) || !known || !pageLanguage || pageLanguage === language;
+      // The widget is as wide and as tall as what it shows, up to 272px by 130px (see panel.css). An outdated
       // worker is not asked for anything more; its steps fill the frame the widget already has.
       const room = message || !$('translate-offer').hidden;
       const box = outdated || $('widget').hidden ? null : $('widget').getBoundingClientRect();

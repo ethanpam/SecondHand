@@ -23,7 +23,7 @@
   const strings = value => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
   // The widget's frame is as wide as the widget measured itself, never past 272px or the screen.
   const fits = width => Number.isInteger(width) && width > 0 && width <= 1000;
-  const tall = height => Number.isInteger(height) && height >= 46 && height <= 110;
+  const tall = height => Number.isInteger(height) && height >= 46 && height <= 130;
   const frameWidth = width => `min(${width || 272}px, 272px, calc(100vw - 24px))`;
 
   function withOwnPanelHidden(work) {

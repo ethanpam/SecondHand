@@ -365,7 +365,7 @@ async function main() {
     // Missing saved answers become "need you" links that jump to the field.
     widget = await startFixture({ profile: { firstName: '' } });
     await widget.locator('#autofill').click();
-    await expect(widget.locator('#need-you')).toHaveText('1 need you', { timeout: 20000 });
+    await expect(widget.locator('#need-you')).toHaveText('1 question left', { timeout: 20000 });
     await expect(page.locator('#lastName')).toHaveValue(syntheticProfile.lastName);
     await widget.locator('#need-you').click();
     await expect.poll(() => page.evaluate(() => document.activeElement.id)).toBe('firstName');
@@ -394,7 +394,7 @@ async function main() {
 
     widget = await startFixture({ profile: { programSnap: 'no', programFip: 'no', programMedicaid: 'no' } });
     await widget.locator('#autofill').click();
-    await expect(widget.locator('#need-you')).toHaveText('1 need you', { timeout: 20000 });
+    await expect(widget.locator('#need-you')).toHaveText('1 question left', { timeout: 20000 });
     console.log('Widget: an unanswered required program choice is flagged for the applicant.');
 
     // Manual completion can reveal a saved optional field. Fill that new field
@@ -450,9 +450,14 @@ async function main() {
     assert.equal(await page.evaluate(() => window.__continues), 0);
     console.log('Autopilot: the household question is answered from saved programs and the CAPTCHA is left to the applicant.');
 
-    // On an Iowa page SecondHand doesn't fill, the widget says what to do next, every word of it on screen, in each
-    // language SecondHand speaks, in a frame that is its row alone before Autofill and never past 272 by 110 after (#110).
+    // On an Iowa page SecondHand doesn't fill, the widget says what Autofill will do, then what to do next, every
+    // word of it on screen, in each language SecondHand speaks, in a frame never past 272 by 110 (#110).
     const host = page.locator('[data-secondhand-assistant]');
+    // The frame follows the widget's measured size a moment later: then the whole line and the whole widget show.
+    const whole = () => {
+      const line = document.getElementById('widget-text');
+      return line.scrollHeight <= line.clientHeight && document.getElementById('widget').getBoundingClientRect().height <= innerHeight;
+    };
     const notFilled = [[selfDetailsUrl, 'iowa.selfUnverifiedTodo'], [`${applicant}?next=another-form`, 'iowa.personalUnverifiedTodo']];
     currentSelfVariant = 'heading';
     for (const code of strings.LANGUAGES) {
@@ -464,18 +469,17 @@ async function main() {
         widget = await launcherFrame();
         await expect(widget.locator('#autofill')).toBeVisible({ timeout: 20000 });
         assert.equal(await widget.evaluate(() => document.documentElement.dir), code === 'ar' ? 'rtl' : 'ltr');
-        // Before Autofill the frame is the widget's row alone, or one line taller where the widget offers
-        // the page's questions in the applicant's language.
-        await expect.poll(async () => (await host.boundingBox()).height === (await widget.locator('#translate-offer').isVisible() ? 65 : 46), { timeout: 10000 }).toBe(true);
-        if (code === 'en') assert.equal((await host.boundingBox()).height, 46);
+        // Before Autofill: that it goes on by itself and picks the first suggested address, with the offer of
+        // the page's questions in the applicant's language under it where there is one.
+        await expect(widget.locator('#widget-text')).toHaveText(strings.text(code, 'widget.iowaReady'));
+        await expect(widget.locator('#widget-text')).toBeVisible();
+        await expect.poll(() => widget.evaluate(whole), { timeout: 10000 }).toBe(true);
+        const ready = await host.boundingBox();
+        assert.ok(ready.width <= 272 && ready.height > 46 && ready.height <= 110, `${code} before Autofill: the frame is ${ready.width} by ${ready.height}`);
         await widget.locator('#autofill').click();
         await expect(widget.locator('#widget-text')).toHaveText(strings.text(code, key), { timeout: 20000 });
         await expect(widget.locator('#widget-text')).toBeVisible();
-        // The frame follows the widget's measured size a moment later: then the whole line and the whole widget show.
-        await expect.poll(() => widget.evaluate(() => {
-          const line = document.getElementById('widget-text');
-          return line.scrollHeight <= line.clientHeight && document.getElementById('widget').getBoundingClientRect().height <= innerHeight;
-        }), { timeout: 10000 }).toBe(true);
+        await expect.poll(() => widget.evaluate(whole), { timeout: 10000 }).toBe(true);
         const box = await host.boundingBox();
         assert.ok(box.width <= 272 && box.height > 46 && box.height <= 110, `${code} ${key}: the frame is ${box.width} by ${box.height}`);
         assert.deepEqual(await calls('getFields'), [], 'nothing is asked of the desktop for a page SecondHand does not fill');
@@ -483,7 +487,7 @@ async function main() {
     }
     await (await launcherFrame()).evaluate(() => localStorage.removeItem('secondhand.language'));
     currentSelfVariant = 'verified';
-    console.log(`Widget: on Iowa pages SecondHand doesn’t fill, the whole next step shows in ${strings.LANGUAGES.join(', ')}, in a frame no larger than 272 by 110.`);
+    console.log(`Widget: on Iowa pages SecondHand doesn’t fill, what Autofill will do and then the whole next step show in ${strings.LANGUAGES.join(', ')}, in a frame no larger than 272 by 110.`);
 
     // Other portal pages show only a small pill and never contact the desktop.
     await resetTo(`${portal}/applyForBenefits/householdMembers`);

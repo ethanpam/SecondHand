@@ -98,7 +98,7 @@ test('text fills parameters, nests messages, picks plural forms, and refuses a m
     'Filled 3. Check your answers, then click Continue.');
   assert.equal(strings.text('es', 'widget.needYou', { count: 1 }), 'Falta 1');
   assert.equal(strings.text('es', 'widget.needYou', { count: 2 }), 'Faltan 2');
-  assert.equal(strings.text('en', 'widget.needYou', { count: 2 }), '2 need you');
+  assert.equal(strings.text('en', 'widget.needYou', { count: 2 }), '2 questions left');
   assert.throws(() => strings.text('es', 'no.such.key'), /no\.such\.key/);
   assert.throws(() => strings.text('en', 'worker.stoppedAfterSteps', {}), /steps/);
   assert.throws(() => strings.text('de', 'widget.autofill'), /de/);

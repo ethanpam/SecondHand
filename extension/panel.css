@@ -23,11 +23,11 @@ body.launcher-surface{background:none}#launcher{width:100%;height:100%;display:f
 .widget-row{display:flex;align-items:center;gap:8px;min-width:0}
 .widget-primary{flex:none;height:32px;padding:0 16px;border:0;border-radius:100px;background:var(--primary);color:#fff;font-weight:500;white-space:nowrap}.widget-primary:hover:enabled{background:var(--pressed)}
 .widget-link{padding:0;border:0;background:none;font-size:12px;font-weight:500;line-height:15px;text-decoration:underline;text-underline-offset:3px;white-space:nowrap}#need-you{font-weight:600}#translate-offer{align-self:flex-start}
-#widget-text{font-size:12px;line-height:15px;color:var(--muted-foreground);min-width:0;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4}
-/* A line to read widens the widget to its 272px; four lines of it make the widget 110px tall, the most its frame allows. */
+#widget-text{font-size:12px;line-height:15px;min-width:0;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4}
+/* A line to read widens the widget to its 272px. Four lines of it and the translation offer make the widget 129px tall; its frame allows 130px. */
 #widget-text:not(.visually-hidden){width:max-content;max-width:254px}
 /* An outdated worker: only the reload steps, with room for all of them in the frame the widget already has. */
-.widget.outdated .widget-row{display:none}.widget.outdated{padding:0 8px}.widget.outdated #widget-text{font-size:11px;line-height:14px;color:var(--foreground);-webkit-line-clamp:3}
+.widget.outdated .widget-row{display:none}.widget.outdated{padding:0 8px}.widget.outdated #widget-text{font-size:11px;line-height:14px;-webkit-line-clamp:3}
 .pill{width:46px;height:46px;flex:none;padding:0;border:1px solid var(--border);border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center}.pill .brand{width:30px;height:30px}
 /* Chrome's native side panel. */
 #sidepanel{height:100%;overflow:auto;scrollbar-width:thin;scrollbar-color:var(--border) transparent}

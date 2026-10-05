@@ -230,7 +230,7 @@ test('Stop revokes a pending native request and late approval or rejection canno
     assert.equal((await w.stop()).data.state, 'stopped');
     release.resolve(); await run;
     const state = (await w.poll()).data;
-    assert.equal(state.result.message, 'Autofill stopped.');
+    assert.equal(state.result.message, 'Autofill stopped. Nothing was erased.');
     assert.equal(state.autopilot, false);
     assert.equal(w.model.filled.length, 0);
     assert.equal(w.model.nextCount, 0);

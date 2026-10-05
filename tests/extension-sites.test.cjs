@@ -374,7 +374,7 @@ test('autofill on an approved site asks for the planned keys once and fills with
   assert.deepEqual(fill.assignments, [{ id: 'sh-1-0', key: 'fullName', guessed: false }, { id: 'sh-1-1', key: 'zip', guessed: false }]);
   assert.deepEqual(fill.values, { fullName: 'Synthetic private first Synthetic private last', zip: '50309' }, 'only the values being placed reach the page');
   assert.deepEqual(plain(response.data), { state: 'done', filled: 2, guessed: 0, needYou: [w.page.idOf('pickup'), w.page.idOf('size')].map(id => `f0:${id}`),
-    message: 'Filled 2 · 2 need you. Check your answers before you submit.', messageKey: 'result.siteFilledNeedYou', messageParams: { count: 2, needYou: 2 }, pageKey: 'general' });
+    message: 'Filled 2 · 2 left for you. Check your answers before you submit.', messageKey: 'result.siteFilledNeedYou', messageParams: { count: 2, needYou: 2 }, pageKey: 'general' });
   assert.deepEqual(plain(response.data.needYou), ['f0:sh-2-1', 'f0:sh-2-0'], 'need-you ids come from the latest plan');
   assert.doesNotMatch(JSON.stringify(response), /Synthetic private/);
 
@@ -410,7 +410,7 @@ test('answers that reveal more questions are filled in the same click from one d
   assert.equal(result.filled, 3);
   assert.deepEqual(result.needYou, [w.page.idOf('pickup'), w.page.idOf('size'), w.page.idOf('phone')].map(id => `f0:${id}`));
   assert.ok(result.needYou.every(id => id.startsWith('f0:sh-3-')), 'need-you ids come from the latest plan');
-  assert.match(result.message, /^Filled 3 · 3 need you\./);
+  assert.match(result.message, /^Filled 3 · 3 left for you\./);
   assert.doesNotMatch(JSON.stringify(w.content), /5155550100/);
 });
 
@@ -423,7 +423,7 @@ test('answers the page refuses are listed as need-you, not filled, and not tried
   assert.equal(result.filled, 1);
   // The cleared ZIP box is back in the latest plan; the chosen veteran option keeps its first id.
   assert.deepEqual(result.needYou, [w.page.idOf('pickup'), w.page.idOf('zip'), 'sh-1-2'].map(id => `f0:${id}`));
-  assert.equal(result.message, 'Filled 1 · 3 need you. Check your answers before you submit.');
+  assert.equal(result.message, 'Filled 1 · 3 left for you. Check your answers before you submit.');
 
   const alone = siteWorker({ enabled: true, fields: [{ name: 'zip', key: 'zip', rejects: true }], desktop: { values: { zip: '5030' } } });
   const refused = plain((await autofill(alone)).data);
@@ -457,10 +457,10 @@ test('a second click on the next page of a multi-page form plans that page again
 
 test('another click on the same page reports the running total, not what that click added', async () => {
   const w = siteWorker({ enabled: true });
-  assert.equal((await autofill(w)).data.message, 'Filled 2 · 2 need you. Check your answers before you submit.');
+  assert.equal((await autofill(w)).data.message, 'Filled 2 · 2 left for you. Check your answers before you submit.');
   const again = plain((await autofill(w)).data);
   assert.equal(again.filled, 2);
-  assert.equal(again.message, 'Filled 2 · 2 need you. Check your answers before you submit.');
+  assert.equal(again.message, 'Filled 2 · 2 left for you. Check your answers before you submit.');
   assert.deepEqual(w.tallies.map(call => call.target), [{ tabId: 7, frameIds: [0] }, { tabId: 7, frameIds: [0] }]);
   assert.deepEqual(w.injected, [], 'no files are injected');
 });
@@ -469,11 +469,11 @@ test('a page where nothing matches the saved profile says so instead of Filled 0
   const unknown = siteWorker({ enabled: true, fields: [{ ...PICKUP }, { name: 'shoe', label: 'Shoe size', type: 'text' }] });
   const result = plain((await autofill(unknown)).data);
   assert.equal(result.filled, 0);
-  assert.equal(result.message, 'Nothing here matches your saved profile. 2 need you.');
+  assert.equal(result.message, 'Nothing here matches your saved profile. 2 left for you.');
   const unsaved = siteWorker({ enabled: true, desktop: { values: {} } });
   const empty = plain((await autofill(unsaved)).data);
   assert.deepEqual(unsaved.nativeTypes(), ['status', 'getFields']);
-  assert.equal(empty.message, 'Nothing here matches your saved profile. 4 need you.');
+  assert.equal(empty.message, 'Nothing here matches your saved profile. 4 left for you.');
 });
 
 test('a page with nothing to fill points to Next when the form has one', async () => {
@@ -552,7 +552,7 @@ test('AI guesses join the one desktop request and are filled with the guessed ma
   const result = plain(response.data);
   assert.equal(result.filled, 3);
   assert.equal(result.guessed, 2);
-  assert.equal(result.message, 'Filled 3 · 2 guessed · 1 need you. Check your answers before you submit.');
+  assert.equal(result.message, 'Filled 3 · 2 guessed · 1 left for you. Check your answers before you submit.');
   assert.doesNotMatch(JSON.stringify(result), /Synthetic private|5155550100/);
 });
 
@@ -596,7 +596,7 @@ test('a form with nothing SecondHand recognizes never contacts the desktop', asy
   assert.equal(result.state, 'done');
   assert.equal(result.filled, 0);
   assert.deepEqual(result.needYou, ['f0:sh-1-0']);
-  assert.equal(result.message, 'Nothing here matches your saved profile. 1 need you.');
+  assert.equal(result.message, 'Nothing here matches your saved profile. 1 left for you.');
 });
 
 test('sites that are not turned on never reach the vault or the page', async () => {
@@ -1229,7 +1229,7 @@ test('with Laya ready, the widget’s plan says so, and its match fills a text b
   assert.equal(result.filled, 2);
   assert.equal(result.guessed, 1);
   assert.equal(result.laya, 1);
-  assert.equal(result.message, 'Filled 2 · 1 guessed · 1 need you. Check your answers before you submit. Guesses were suggested by Laya on this computer.');
+  assert.equal(result.message, 'Filled 2 · 1 guessed · 1 left for you. Check your answers before you submit. Guesses were suggested by Laya on this computer.');
   assert.equal(result.messageKey, 'result.suggestedByLaya');
   assert.doesNotMatch(JSON.stringify(layaCalls(w)), /Synthetic private|synthetic\.private|50309/, 'no saved value is ever sent to Laya');
 });
@@ -1249,7 +1249,7 @@ test('Laya answers a choice question from the saved profile: the option is picke
   assert.equal(w.page.fields[1].mark, 'guess');
   assert.deepEqual(result.needYou, [idOf(w, 'pet')], '"Do you have a pet?" stays under need you');
   assert.equal(result.guessed, 1);
-  assert.equal(result.message, 'Filled 2 · 1 guessed · 1 need you. Check your answers before you submit. Guesses were suggested by Laya on this computer.');
+  assert.equal(result.message, 'Filled 2 · 1 guessed · 1 left for you. Check your answers before you submit. Guesses were suggested by Laya on this computer.');
   assert.deepEqual(w.nativeTypes().filter(type => type !== 'status'), ['warmLaya', 'answerFields', 'getFields'],
     'Laya is readied, answers the choice questions first, and the saved values follow');
   assert.doesNotMatch(JSON.stringify(layaCalls(w)), /Synthetic private|synthetic\.private|50309/, 'no saved value is ever sent to Laya');
@@ -1320,22 +1320,22 @@ test('Laya not ready: the widget’s plan says so after one readiness check, and
   assert.deepEqual(today.nativeTypes(), ['warmLaya', 'status', 'getFields', 'status'], 'Laya is not asked again in the same click');
   assert.equal(guessed.guessed, 1);
   assert.equal(guessed.laya, undefined);
-  assert.equal(guessed.message, 'Filled 2 · 1 guessed · 2 need you. Check your answers before you submit.');
+  assert.equal(guessed.message, 'Filled 2 · 1 guessed · 2 left for you. Check your answers before you submit.');
 
   const unguessed = siteWorker({ enabled: true, fields: openQuestions(), desktop: { values: SAVED } });
   await plan(unguessed);
   const plain_ = plain((await unguessed.launcher({ type: 'ui:autofill', confirmed: true })).data);
   assert.deepEqual(unguessed.nativeTypes(), ['warmLaya', 'status', 'getFields', 'status'], 'a fresh plan in the same click does not ask Laya again');
-  assert.equal(plain_.message, 'Filled 1 · 3 need you. Check your answers before you submit.');
+  assert.equal(plain_.message, 'Filled 1 · 3 left for you. Check your answers before you submit.');
 
   const side = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...REACH }, { ...SIXTY }], desktop: { values: SAVED } });
   const fromPanel = plain((await autofill(side)).data);
   assert.deepEqual(side.nativeTypes(), ['warmLaya', 'status', 'getFields', 'status'], 'one "not ready" answer and Laya is left alone for the click');
-  assert.equal(fromPanel.message, 'Filled 1 · 2 need you. Check your answers before you submit.');
+  assert.equal(fromPanel.message, 'Filled 1 · 2 left for you. Check your answers before you submit.');
   // A closed desktop app reads as today: nothing to fill without the rules, "open the app" with them.
   const alone = plain((await autofill(siteWorker({ enabled: true, fields: [{ ...REACH }], desktop: { reachable: false } }))).data);
   assert.equal(alone.state, 'done');
-  assert.equal(alone.message, 'Nothing here matches your saved profile. 1 need you.');
+  assert.equal(alone.message, 'Nothing here matches your saved profile. 1 left for you.');
   assert.equal((await autofill(siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...REACH }], desktop: { reachable: false } }))).data.state, 'offline');
 });
 
@@ -1517,11 +1517,11 @@ test('the site widget frame is as wide as the widget measured itself, never past
 test('the site widget frame is as tall as the widget measured itself, from its row alone to four lines above it', t => {
   const page = siteContent(t);
   assert.equal(page.host().style.height, '46px');
-  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 110 })), { sized: true });
-  assert.equal(page.host().style.height, '110px');
+  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 130 })), { sized: true });
+  assert.equal(page.host().style.height, '130px');
   assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: false, width: 152, height: 46 })), { sized: true });
   assert.equal(page.host().style.height, '46px');
-  for (const height of [0, 45, 111, 80.5, '80', null]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height }), undefined, `height ${height}`);
+  for (const height of [0, 45, 131, 80.5, '80', null]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height }), undefined, `height ${height}`);
   assert.equal(page.host().style.height, '46px');
   assert.equal(page.request({ type: 'secondhand:widgetSize', line: true, height: 95 }, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
   assert.equal(page.host().style.height, '46px');

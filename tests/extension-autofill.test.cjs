@@ -190,7 +190,7 @@ test('one click makes one status and one getFields request, fills revealed field
   assert.equal(result.state, 'done');
   assert.equal(result.filled, 3);
   assert.deepEqual(result.needYou, ['lastName']);
-  assert.match(result.message, /Filled 3 · 1 need you/);
+  assert.match(result.message, /Filled 3 · 1 left for you/);
   assert.doesNotMatch(JSON.stringify(response), /Synthetic private/);
   assert.equal(w.calls.content.some(message => message.type.startsWith('secondhand:generic:')), false, 'verified pages never use the general engine');
   assert.deepEqual(w.calls.injected[0], { target: { tabId: 7, frameIds: [0] }, files: ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js'] });
@@ -251,7 +251,7 @@ test('an unknown Iowa page gets one general fill, then waits for the applicant t
   const response = await autofill(w);
   assert.equal(response.ok, true, response.error);
   assert.deepEqual(plain(response.data), { state: 'done', filled: 2, needYou: ['sh-1-3', 'sh-1-2'],
-    message: 'Filled 2 · 2 need you. Check your answers, then click Continue.', todo: 'Check your answers, then click Continue.', pageKey: 'iowa-manual',
+    message: 'Filled 2 · 2 left for you. Check your answers, then click Continue.', todo: 'Check your answers, then click Continue.', pageKey: 'iowa-manual',
     messageKey: 'result.thenTodo', messageParams: { summary: { key: 'result.filledNeedYou', params: { count: 2, needYou: 2 } }, todo: { key: 'worker.checkThenContinue', params: {} } },
     todoKey: 'worker.checkThenContinue', todoParams: {} });
   assert.deepEqual(w.calls.native.map(call => call.type).filter(type => type !== 'status'), ['warmLaya', 'getFields'], 'Laya is readied for the open question and isn’t ready');
@@ -311,7 +311,7 @@ test('an unknown Iowa page fills questions its answers reveal in the same click,
     'secondhand:generic:plan', 'secondhand:generic:fill', 'secondhand:generic:plan']);
   assert.equal(result.filled, 3);
   assert.deepEqual(result.needYou, ['sh-1-3', 'sh-1-2', 'sh-1-5']);
-  assert.equal(result.message, 'Filled 3 · 3 need you. Check your answers, then click Continue.');
+  assert.equal(result.message, 'Filled 3 · 3 left for you. Check your answers, then click Continue.');
   assert.equal(w.calls.content.some(message => message.type === 'secondhand:continue'), false);
   assert.doesNotMatch(JSON.stringify(w.calls.content), /700/);
 });
@@ -323,7 +323,7 @@ test('an answer an unknown Iowa page refuses needs the applicant and is not coun
   const result = plain((await autofill(w)).data);
   assert.equal(result.filled, 1);
   assert.deepEqual(result.needYou, ['sh-1-3', 'sh-1-0', 'sh-1-2']);
-  assert.equal(result.message, 'Filled 1 · 3 need you. Check your answers, then click Continue.');
+  assert.equal(result.message, 'Filled 1 · 3 left for you. Check your answers, then click Continue.');
   assert.equal(w.calls.content.filter(message => message.type === 'secondhand:generic:fill').length, 1, 'a refused answer is not tried again');
 });
 
@@ -374,7 +374,7 @@ test('with Laya ready, its answer joins the general fill on an unknown Iowa page
   assert.deepEqual(plain(w.calls.content.find(message => message.type === 'secondhand:generic:fill').assignments).at(-1), { id: blind.id, option: 'No', guessed: true });
   assert.equal(result.filled, 3);
   assert.equal(result.laya, 1);
-  assert.equal(result.message, 'Filled 3 · 1 need you. Guesses were suggested by Laya on this computer. Check your answers, then click Continue.');
+  assert.equal(result.message, 'Filled 3 · 1 left for you. Guesses were suggested by Laya on this computer. Check your answers, then click Continue.');
   assert.doesNotMatch(JSON.stringify(answer), /Synthetic private/);
 });
 
@@ -401,7 +401,7 @@ test('an unknown Iowa page that declares no language, with no detector to read i
   assert.equal(w.calls.native.some(call => call.type === 'answerFields'), false, 'Laya is asked nothing');
   assert.equal(result.filled, 2);
   assert.ok(result.needYou.includes(blind.id));
-  assert.equal(result.message, 'Filled 2 · 2 need you. Laya skipped questions in a language SecondHand couldn’t identify. Check your answers, then click Continue.');
+  assert.equal(result.message, 'Filled 2 · 2 left for you. Laya skipped questions in a language SecondHand couldn’t identify. Check your answers, then click Continue.');
 });
 
 test('launcher is bound to its own tab, needs confirmed clicks, and cannot use panel-only or unknown types', async () => {
@@ -637,7 +637,7 @@ test('the walk fills an unknown page with the general engine, waits for the appl
     { name: 'members', path: '/applyForBenefits/householdMembers', page: { kind: 'manual', pageKey: 'iowa-manual', checklist: [] } }
   ] });
   const first = (await w.send({ type: 'ui:autofill', confirmed: true })).data;
-  assert.equal(first.message, 'Filled 2 · 2 need you. Check your answers, then click Continue.');
+  assert.equal(first.message, 'Filled 2 · 2 left for you. Check your answers, then click Continue.');
   await settle();
   w.events.updated(7, { status: 'complete' }); await settle();
   const waiting = await lastResult(w);
@@ -896,7 +896,7 @@ test('the widget’s request for room for its line goes to its own tab’s conte
   for (const width of [0, -5, 1.5, '152', 5000, null]) assert.equal(await w.launcher({ type: 'ui:widgetSize', line: false, width }), undefined, `width ${width}`);
   assert.deepEqual(plain((await w.launcher({ type: 'ui:widgetSize', line: true, width: 254, height: 95 })).data), { sized: true });
   assert.deepEqual(plain(w.calls.content.at(-1)), { type: 'secondhand:widgetSize', line: true, width: 254, height: 95 }, 'and its measured height');
-  for (const height of [0, 45, 111, 80.5, '95', null]) assert.equal(await w.launcher({ type: 'ui:widgetSize', line: true, width: 254, height }), undefined, `height ${height}`);
+  for (const height of [0, 45, 131, 80.5, '95', null]) assert.equal(await w.launcher({ type: 'ui:widgetSize', line: true, width: 254, height }), undefined, `height ${height}`);
   assert.deepEqual(w.calls.native, []);
 });
 
