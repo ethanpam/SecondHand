@@ -39,6 +39,7 @@ async function desktop(t, { userData, platform = 'darwin', canPrompt = true, enc
   const timers = [];
   let answer = async () => {};
   let onUnseal = () => {};
+  let onRemove = async () => {};
   const safeStorage = {
     isEncryptionAvailable: () => encryptionAvailable,
     encryptString: text => Buffer.from(`sealed:${Buffer.from(text).toString('hex')}`),
@@ -70,6 +71,8 @@ async function desktop(t, { userData, platform = 'darwin', canPrompt = true, enc
     session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, webRequest: { onBeforeRequest() {} } } } };
   const overrides = {
     electron,
+    // main.cjs's own file removals wait for `removing`, so a test can act while one is under way.
+    'node:fs/promises': { ...fsp, rm: async (file, options) => { await onRemove(file); return fsp.rm(file, options); } },
     './bridge.cjs': { ...require('../desktop/bridge.cjs'), startBridge: async (_directory, _getId, handler) => { bridge = handler; return { close: async () => {} }; } },
     './extension-setup.cjs': { getExtensionSetup: async () => ({ prepared: true }) },
     './registration.cjs': { registerHost: async () => ({}) },
@@ -89,6 +92,7 @@ async function desktop(t, { userData, platform = 'darwin', canPrompt = true, enc
     userData, sealedPath, prompts, sent, timers, clock,
     answer: callback => { answer = callback; },
     unsealing: callback => { onUnseal = callback; },
+    removing: callback => { onRemove = callback; },
     invoke: (method, argument) => invoke({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, method, ...(argument === undefined ? [] : [argument])),
     request: type => bridge({ id: 'synthetic', type }, { extensionId: 'a'.repeat(32) }),
     sealed: async () => JSON.parse(safeStorage.decryptString(await fsp.readFile(sealedPath))),
@@ -398,6 +402,73 @@ test('restoring a backup removes the Touch ID key: the backup opens with its own
   const unlocked = await app.invoke('unlock', PASSWORD);
   assert.equal(unlocked.touchIdNotice, null);
   assert.deepEqual(Object.keys(await app.slots()).sort(), ['device', 'password', 'recovery']);
+});
+
+// A backup exported while Touch ID was on carries the same Touch ID slot, so only the order of the restore
+// keeps Touch ID from opening it (#140).
+async function withBackup(t) {
+  const backup = path.join(await folder(t), 'synthetic.secondhand');
+  const dialog = { showOpenDialog: async () => ({ canceled: false, filePaths: [backup] }), showSaveDialog: async () => ({ canceled: false, filePath: backup }),
+    showMessageBox: async () => ({ response: 1 }) };
+  const { app } = await withTouchId(t, { dialog });
+  await app.invoke('saveProfile', { firstName: 'Backed up' });
+  await app.invoke('exportBackup');
+  await app.invoke('saveProfile', { firstName: 'Current' });
+  await app.invoke('lock');
+  return { app, backup, vaultPath: path.join(app.userData, 'vault.secondhand') };
+}
+// Runs `during` once, after the restore has replaced the file and before it finishes.
+const duringRestore = (app, during) => app.removing(async file => {
+  if (!file.endsWith('setup-progress.json')) return;
+  app.removing(async () => {});
+  await during();
+});
+
+test('a backup restored while the Touch ID prompt is up isn’t opened by it: Touch ID is off, and the backup opens with its password', async t => {
+  const { app, backup, vaultPath } = await withBackup(t);
+  let approve;
+  app.answer(() => new Promise(resolve => { approve = resolve; }));
+  const asking = app.request('unlockWithTouchId');
+  for (let tries = 0; !approve && tries < 100; tries++) await new Promise(resolve => setImmediate(resolve));
+  assert.ok(approve, 'the prompt is up');
+  let answered;
+  duringRestore(app, async () => { approve(); answered = plain(await asking); });
+  assert.deepEqual(plain(await app.invoke('importBackup')), { cancelled: false });
+  assert.deepEqual(answered, { unlocked: false, reason: 'off' });
+  const status = await app.invoke('status');
+  assert.equal(status.unlocked, false);
+  assert.equal(status.touchId, 'off');
+  assert.deepEqual(await fsp.readFile(vaultPath), await fsp.readFile(backup), 'the backup is restored as it was');
+  await app.invoke('unlock', PASSWORD);
+  assert.equal((await app.invoke('getData')).profile.firstName, 'Backed up');
+});
+
+test('Touch ID asked for while a backup is being restored finds it off', async t => {
+  const { app } = await withBackup(t);
+  let attempt;
+  duringRestore(app, async () => { attempt = await app.invoke('unlockWithTouchId').then(() => null, error => error); });
+  await app.invoke('importBackup');
+  assert.match(attempt?.message ?? 'it unlocked', /^Touch ID is off\. Enter your password\.$/);
+  assert.deepEqual(app.prompts, [], 'no prompt');
+  assert.equal((await app.invoke('status')).unlocked, false);
+});
+
+test('a restore moves the access revision on, so a Touch ID answer from before it can’t unlock', async t => {
+  const { app } = await withBackup(t);
+  const before = plain(await app.request('status')).accessRevision;
+  await app.invoke('importBackup');
+  assert.ok(plain(await app.request('status')).accessRevision > before);
+});
+
+test('a restore that can’t remove Touch ID’s key is refused and leaves the saved information as it was', async t => {
+  const { app, vaultPath } = await withBackup(t);
+  const vaultBytes = await fsp.readFile(vaultPath);
+  await fsp.rm(app.sealedPath);
+  await fsp.mkdir(app.sealedPath);
+  await fsp.writeFile(path.join(app.sealedPath, 'synthetic'), 'in the way');
+  await assert.rejects(app.invoke('importBackup'), /^Error: Touch ID’s key on this Mac couldn’t be removed \(.+\), so the backup wasn’t restored\. Please try again\.$/);
+  assert.deepEqual(await fsp.readFile(vaultPath), vaultBytes);
+  assert.equal((await fsp.readdir(app.userData)).some(name => name.includes('before-import')), false, 'no copy was made');
 });
 
 test('a new password removes a Touch ID key left from earlier information', async t => {
