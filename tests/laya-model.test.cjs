@@ -103,7 +103,7 @@ test('a download is verified, stored under models/laya/<revision>/, and reports 
   assert.equal(await readInstalled(directory), null, 'nothing is recorded as installed yet');
 
   await store.install();
-  assert.deepEqual(await readInstalled(directory), validateManifest({ version: 1, model }).model);
+  assert.deepEqual(await readInstalled(directory), { model: validateManifest({ version: 1, model }).model, replaced: [] });
   const kept = path.join(directory, 'models/laya', 'e'.repeat(40));
   fs.mkdirSync(kept);
   await store.removeOthers(['e'.repeat(40)]);
@@ -120,6 +120,23 @@ test('installed.json names the installed model; a missing one means none, and a 
   await assert.rejects(readInstalled(directory), /JSON/);
   fs.writeFileSync(path.join(directory, 'models/laya/installed.json'), JSON.stringify({ version: 1, model: { revision } }));
   await assert.rejects(readInstalled(directory), /manifest is invalid/);
+});
+
+test('installed.json lists the revisions Laya replaced; a record without the list replaced none, and a damaged list is refused', async t => {
+  const model = { revision, format: 'noul-v1', files: MODEL_FILES.map(name => ({ path: name, url: `https://huggingface.co/example/laya/resolve/${revision}/${name}`, size: 10, sha256: 'b'.repeat(64) })) };
+  const directory = userData(t);
+  const store = new ModelStore({ userDataDir: directory, model: validateManifest({ version: 1, model }).model });
+  const replaced = ['c'.repeat(40), 'e'.repeat(40)];
+  await store.install(replaced);
+  assert.deepEqual(await readInstalled(directory), { model: validateManifest({ version: 1, model }).model, replaced });
+  const record = path.join(directory, 'models/laya/installed.json');
+  fs.writeFileSync(record, JSON.stringify({ version: 1, model }));
+  assert.deepEqual((await readInstalled(directory)).replaced, [], 'a record written before the list');
+  for (const list of [['main'], 'c'.repeat(40), [revision]]) {
+    fs.writeFileSync(record, JSON.stringify({ version: 1, model, replaced: list }));
+    await assert.rejects(readInstalled(directory), /installed\.json is invalid: replaced/, JSON.stringify(list));
+  }
+  for (const list of [['main'], [revision]]) await assert.rejects(store.install(list), /replaced/, JSON.stringify(list));
 });
 
 test('the app runs the single-candidate noul-v1 prompts and the one-pass choice-v2 prompts', () => {

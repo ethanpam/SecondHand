@@ -574,6 +574,52 @@ test('a decision running when an update is ready finishes on the old model; the 
   assert.equal(runner.loads.at(-1), modelPath(userDataDir, NEW));
 });
 
+test('latest.json naming a model Laya already replaced is refused, even after a restart; a rollback published as a new commit installs', async t => {
+  const hub = await modelHub(t);
+  const shipped = hub.publish(OLD);
+  hub.latest = shipped;
+  const userDataDir = temporary(t, 'secondhand-laya-');
+  const runner = stubRunner();
+  const laya = createLaya({ userDataDir, manifest: shipped, updateUrl: hub.updateUrl, runner, enabled: true });
+  await laya.update();
+  const newer = hub.publish(NEW);
+  hub.latest = newer;
+  await laya.update();
+  assert.equal(installedRevision(userDataDir), NEW);
+
+  hub.latest = shipped; // back to the model NEW replaced
+  const downloaded = hub.fileRequests(OLD).length;
+  await laya.update();
+  const refused = { state: 'error', message: 'The update list names a Laya model SecondHand already replaced with a newer one, so SecondHand keeps the one it has.' };
+  assert.deepEqual(await laya.status(), { state: 'ready', enabled: true, sizeBytes: sizeOf(newer), update: refused });
+  assert.equal(installedRevision(userDataDir), NEW);
+  assert.equal(hub.fileRequests(OLD).length, downloaded, 'nothing of the older model is downloaded');
+  await laya.decide(rowState('3'), { correct: DECISION });
+  assert.equal(runner.loads.at(-1), modelPath(userDataDir, NEW));
+  await laya.close();
+
+  const restarted = createLaya({ userDataDir, manifest: shipped, updateUrl: hub.updateUrl, runner, enabled: true });
+  t.after(() => restarted.close());
+  await restarted.update();
+  assert.deepEqual((await restarted.status()).update, refused, 'installed.json keeps the revisions Laya replaced');
+  fs.rmSync(path.join(userDataDir, 'models/laya', NEW), { recursive: true });
+  await restarted.update();
+  assert.equal(installedRevision(userDataDir), NEW, 'a missing installed model downloads again, not the one it replaced');
+  assert.equal(hub.fileRequests(OLD).length, downloaded);
+  assert.equal((await restarted.status()).state, 'ready');
+
+  // A rollback is published as a new commit, so it has a new revision.
+  const ROLLBACK = 'c'.repeat(40);
+  hub.latest = hub.publish(ROLLBACK);
+  await restarted.update();
+  assert.equal(installedRevision(userDataDir), ROLLBACK);
+  assert.deepEqual(stored(userDataDir), [ROLLBACK, 'installed.json']);
+  hub.latest = newer;
+  await restarted.update();
+  assert.deepEqual((await restarted.status()).update, refused, 'every replaced revision is refused');
+  assert.equal(installedRevision(userDataDir), ROLLBACK);
+});
+
 test('a model in a format this app can’t run is ignored with a note, and the installed or shipped model is used', async t => {
   const hub = await modelHub(t);
   const shipped = hub.publish(OLD);
@@ -778,6 +824,20 @@ test('an installed.json SecondHand can’t use leaves the shipped model in place
   const status = await downgraded.status();
   assert.equal(status.state, 'ready', 'the shipped model’s files are still there');
   assert.deepEqual(status.update, { state: 'incompatible', message: 'The installed Laya model needs a newer version of SecondHand, so SecondHand uses one it can run.' });
+});
+
+test('an app that can’t run the installed model installs the shipped one, even one an update replaced', async t => {
+  const hub = await modelHub(t);
+  const shipped = hub.publish(OLD);
+  const userDataDir = temporary(t, 'secondhand-laya-');
+  const record = path.join(userDataDir, 'models/laya/installed.json');
+  fs.mkdirSync(path.dirname(record), { recursive: true });
+  fs.writeFileSync(record, JSON.stringify({ ...hub.publish(NEW, modelFiles(), 'noul-v9'), replaced: [OLD] }));
+  const laya = createLaya({ userDataDir, manifest: shipped, runner: stubRunner(), enabled: true });
+  await laya.update();
+  assert.deepEqual(await laya.status(), { state: 'ready', enabled: true, sizeBytes: sizeOf(shipped) });
+  assert.equal(installedRevision(userDataDir), OLD);
+  assert.deepEqual(JSON.parse(fs.readFileSync(record, 'utf8')).replaced, [], 'the installed revision isn’t listed as replaced');
 });
 
 test('remove turns Laya off and deletes every revision; turned on again, it downloads the newest model', async t => {
