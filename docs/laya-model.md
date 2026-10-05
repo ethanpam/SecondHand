@@ -362,7 +362,7 @@ The order was chosen on 17 of the 22 training forms that aren't live QA forms: e
   - The box type now settles short labels: "Where can we reach you?" in an email box is matched to the email address.
 
 ## Publishing a model
-The desktop app reads `latest.json` from the repo's `main` branch at startup and every 24 hours while Laya is on. It installs the model `latest.json` names when that model is newer and in a format the app can run ([security.md](security.md#local-ai-with-laya)). `latest.json` has the same form as `desktop/laya-model.json`:
+The desktop app reads `latest.json` from the repo's `main` branch at startup and every 24 hours while Laya is on. It installs the model `latest.json` names when its revision differs from the installed one and its format is one the app can run ([security.md](security.md#local-ai-with-laya)). An update never goes back to a revision it replaced, so publish a rollback as a new commit: publishing the older export again uploads its files as a new commit. `latest.json` has the same form as `desktop/laya-model.json`:
 
 ```json
 { "version": 1, "model": { "revision": "<commit that holds the files>", "format": "noul-v1", "files": [

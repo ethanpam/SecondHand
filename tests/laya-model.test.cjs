@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const fsp = require('node:fs/promises');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
@@ -102,7 +103,7 @@ test('a download is verified, stored under models/laya/<revision>/, and reports 
   assert.equal(await readInstalled(directory), null, 'nothing is recorded as installed yet');
 
   await store.install();
-  assert.deepEqual(await readInstalled(directory), validateManifest({ version: 1, model }).model);
+  assert.deepEqual(await readInstalled(directory), { model: validateManifest({ version: 1, model }).model, replaced: [] });
   const kept = path.join(directory, 'models/laya', 'e'.repeat(40));
   fs.mkdirSync(kept);
   await store.removeOthers(['e'.repeat(40)]);
@@ -119,6 +120,23 @@ test('installed.json names the installed model; a missing one means none, and a 
   await assert.rejects(readInstalled(directory), /JSON/);
   fs.writeFileSync(path.join(directory, 'models/laya/installed.json'), JSON.stringify({ version: 1, model: { revision } }));
   await assert.rejects(readInstalled(directory), /manifest is invalid/);
+});
+
+test('installed.json lists the revisions Laya replaced; a record without the list replaced none, and a damaged list is refused', async t => {
+  const model = { revision, format: 'noul-v1', files: MODEL_FILES.map(name => ({ path: name, url: `https://huggingface.co/example/laya/resolve/${revision}/${name}`, size: 10, sha256: 'b'.repeat(64) })) };
+  const directory = userData(t);
+  const store = new ModelStore({ userDataDir: directory, model: validateManifest({ version: 1, model }).model });
+  const replaced = ['c'.repeat(40), 'e'.repeat(40)];
+  await store.install(replaced);
+  assert.deepEqual(await readInstalled(directory), { model: validateManifest({ version: 1, model }).model, replaced });
+  const record = path.join(directory, 'models/laya/installed.json');
+  fs.writeFileSync(record, JSON.stringify({ version: 1, model }));
+  assert.deepEqual((await readInstalled(directory)).replaced, [], 'a record written before the list');
+  for (const list of [['main'], 'c'.repeat(40), [revision]]) {
+    fs.writeFileSync(record, JSON.stringify({ version: 1, model, replaced: list }));
+    await assert.rejects(readInstalled(directory), /installed\.json is invalid: replaced/, JSON.stringify(list));
+  }
+  for (const list of [['main'], [revision]]) await assert.rejects(store.install(list), /replaced/, JSON.stringify(list));
 });
 
 test('the app runs the single-candidate noul-v1 prompts and the one-pass choice-v2 prompts', () => {
@@ -173,6 +191,141 @@ test('a download larger than its pinned size is stopped and deleted', async t =>
   assert.equal(status.state, 'error');
   assert.match(status.message, /larger than expected, so SecondHand deleted it/);
   assert.equal(fs.existsSync(path.join(store.directory, 'tokenizer/tokenizer.json.partial')), false);
+});
+
+test('a download that fails before its partial file has opened deletes that file only once it is closed', async t => {
+  const files = fixtureFiles();
+  const { model, state } = await server(t, files);
+  const name = 'tokenizer/tokenizer.json';
+  state.serve = (requested, _request, response) => {
+    if (requested !== name) return false;
+    response.writeHead(200).end(Buffer.concat([files[name], Buffer.from('extra bytes')]));
+  };
+  const store = new ModelStore({ userDataDir: userData(t), model: validateManifest({ version: 1, model }).model });
+  const partial = path.join(store.directory, `${name}.partial`);
+  // A slow disk: the partial file's open waits until the test finishes it.
+  const open = fs.open;
+  let finishOpen = null;
+  t.mock.method(fs, 'open', (file, flags, mode, callback) => {
+    if (file !== partial) return open(file, flags, mode, callback);
+    finishOpen = () => new Promise(resolve => open(file, flags, mode, (...results) => { callback(...results); resolve(); }));
+  });
+  const rm = fsp.rm;
+  const removals = [];
+  t.mock.method(fsp, 'rm', (file, options) => {
+    const removal = rm(file, options);
+    if (file === partial) removals.push(removal);
+    return removal;
+  });
+  // The oversized answer fails the download; its response closes after the failure is handled.
+  const get = http.get;
+  let failed;
+  const dropped = new Promise(resolve => { failed = resolve; });
+  t.mock.method(http, 'get', (...args) => get(...args).on('response', response => { if (response.req.path === `/${name}`) response.once('close', failed); }));
+  const download = store.startDownload();
+  await dropped;
+  assert.ok(finishOpen, 'the partial file is still opening');
+  await Promise.all(removals);
+  await finishOpen();
+  await download;
+  assert.match((await store.state()).message, /larger than expected, so SecondHand deleted it/);
+  assert.equal(fs.existsSync(partial), false, 'the file that opened late was deleted after it closed');
+});
+
+test('a pause waits for the write in progress, so the resumed download starts where the partial file ends', async t => {
+  const files = fixtureFiles();
+  const { model, state } = await server(t, files);
+  const name = 'model.onnx.data';
+  // A small first part, so the download waits for more data while that part is written.
+  const first = 1000;
+  state.serve = (requested, request, response) => {
+    if (requested !== name || request.headers.range) return false;
+    response.writeHead(200, { 'Content-Length': files[name].length });
+    response.write(files[name].subarray(0, first)); // then stall until paused
+  };
+  const store = new ModelStore({ userDataDir: userData(t), model: validateManifest({ version: 1, model }).model });
+  const partial = path.join(store.directory, `${name}.partial`);
+  // A slow disk: the first write to the partial file waits until the test finishes it.
+  const open = fs.open;
+  let partialFd = null;
+  t.mock.method(fs, 'open', (file, flags, mode, callback) => open(file, flags, mode, (error, fd) => {
+    if (file === partial) partialFd = fd;
+    callback(error, fd);
+  }));
+  let finishWrite = null;
+  let writing;
+  const held = new Promise(resolve => { writing = resolve; });
+  for (const method of ['write', 'writev']) {
+    const original = fs[method];
+    t.mock.method(fs, method, (fd, ...args) => {
+      if (fd !== partialFd || finishWrite) return original(fd, ...args);
+      finishWrite = () => original(fd, ...args);
+      writing();
+    });
+  }
+  // The paused response closes, and one more turn of the event loop lets the pause be handled.
+  const get = http.get;
+  let dropped;
+  const droppedResponse = new Promise(resolve => { dropped = resolve; });
+  t.mock.method(http, 'get', (...args) => get(...args).on('response', response => {
+    if (response.req.path === `/${name}` && !response.req.getHeader('range')) response.once('close', dropped);
+  }));
+  const download = store.startDownload();
+  await held;
+  let paused = false;
+  const pausing = store.cancel().then(() => { paused = true; });
+  await droppedResponse;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(paused, false, 'the pause waits for the write in progress');
+  finishWrite();
+  await pausing;
+  await download;
+  assert.equal(fs.statSync(partial).size, first, 'the written part is kept');
+  await store.startDownload();
+  assert.deepEqual(await store.state(), { state: 'ready' });
+  assert.deepEqual(fs.readFileSync(path.join(store.directory, name)), files[name]);
+});
+
+test('a full disk fails the download or its record with a clear message, and the partial file is deleted to free its space', async t => {
+  const files = fixtureFiles();
+  const { model } = await server(t, files);
+  const directory = userData(t);
+  const store = new ModelStore({ userDataDir: directory, model: validateManifest({ version: 1, model }).model });
+  const noSpace = syscall => Object.assign(new Error(`ENOSPC: no space left on device, ${syscall}`), { code: 'ENOSPC', syscall });
+  const message = 'The Laya model couldn’t be saved on this computer (ENOSPC). Free some space and try again.';
+  // Writing the weights fails.
+  const weights = path.join(store.directory, 'model.onnx.data.partial');
+  const open = fs.open;
+  const full = new Set();
+  t.mock.method(fs, 'open', (file, flags, mode, callback) => open(file, flags, mode, (error, fd) => {
+    if (!error && file === weights) full.add(fd);
+    callback(error, fd);
+  }));
+  for (const method of ['write', 'writev']) {
+    const original = fs[method];
+    t.mock.method(fs, method, (fd, ...args) => full.has(fd) ? process.nextTick(args.at(-1), noSpace('write')) : original(fd, ...args));
+  }
+  await store.startDownload();
+  assert.deepEqual(await store.state(), { state: 'error', message });
+  assert.equal(fs.existsSync(weights), false);
+  assert.ok(fs.existsSync(path.join(store.directory, 'model.onnx')), 'a file that was saved is kept');
+  t.mock.restoreAll();
+
+  // Making its folder fails.
+  fs.rmSync(path.join(directory, 'models'), { recursive: true });
+  const mkdir = fsp.mkdir;
+  t.mock.method(fsp, 'mkdir', (target, options) => target === store.directory ? Promise.reject(noSpace('mkdir')) : mkdir(target, options));
+  await store.startDownload();
+  assert.deepEqual(await store.state(), { state: 'error', message });
+  t.mock.restoreAll();
+
+  // Recording the installed model fails.
+  await store.startDownload();
+  assert.deepEqual(await store.state(), { state: 'ready' });
+  const openFile = fsp.open;
+  t.mock.method(fsp, 'open', (file, ...rest) => file.startsWith(path.join(directory, 'models/laya/installed.json')) ? Promise.reject(noSpace('open')) : openFile(file, ...rest));
+  await assert.rejects(store.install(), { message });
+  assert.equal(await readInstalled(directory), null);
 });
 
 test('a server error is reported with its status, and redirects are followed', async t => {
