@@ -194,7 +194,7 @@ const UNSEEN = Object.freeze({
   'right-to-left override': '\u202E', 'left-to-right override': '\u202D', 'right-to-left embedding': '\u202B', 'pop directional formatting': '\u202C',
   'right-to-left isolate': '\u2067', 'first strong isolate': '\u2068', 'pop directional isolate': '\u2069',
   'right-to-left mark': '\u200F', 'left-to-right mark': '\u200E', 'Arabic letter mark': '\u061C',
-  'zero-width space': '\u200B', 'zero-width non-joiner': '\u200C', 'zero-width joiner': '\u200D', 'word joiner': '\u2060', 'invisible separator': '\u2063',
+  'zero-width space': '\u200B', 'word joiner': '\u2060', 'invisible separator': '\u2063',
   'byte order mark': '\uFEFF', 'soft hyphen': '\u00AD', 'combining grapheme joiner': '\u034F', 'Hangul filler': '\u3164', 'variation selector': '\uFE0F',
   'interlinear annotation anchor': '\uFFF9', 'tag letter': '\u{E0041}', 'language tag': '\u{E0001}',
   'line separator': '\u2028', 'paragraph separator': '\u2029', 'next line (C1)': '\u0085', 'control sequence introducer (C1)': '\u009B'
@@ -213,6 +213,43 @@ test('labels and options with bidi controls, invisible characters, or line break
     assert.equal(validateRequest(suggest([box({ label: text })])).fields[0].label, text, text);
     assert.deepEqual(validateRequest(answer([choice({ options: [text, 'No'] })])).questions[0].options, [text, 'No'], text);
   }
+});
+
+// Words that need U+200C ZERO WIDTH NON-JOINER or U+200D ZERO WIDTH JOINER to be written right.
+const JOINED = Object.freeze({
+  'Persian, with a non-joiner': 'می\u200Cخواهید', 'a Persian name, with a non-joiner': 'زهرا\u200Cسادات',
+  'Hindi, with a joiner': 'क्\u200Dष', 'an emoji family, with joiners': '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}'
+});
+
+test('the non-joiner and joiner that Persian, Arabic, and Indic words need are allowed in labels, options, and saved answers', () => {
+  for (const [name, text] of Object.entries(JOINED)) {
+    assert.equal(validateRequest(suggest([box({ label: `${text}?` })])).fields[0].label, `${text}?`, name);
+    assert.deepEqual(validateRequest(answer([choice({ options: [text, 'No'] })])).questions[0].options, [text, 'No'], name);
+    assert.deepEqual(validateRequest({ id: 'x', type: 'saveFields', url: 'https://pantry.example.org/intake', fields: { firstName: text } }).fields, { firstName: text }, name);
+  }
+});
+
+test('saved answers with bidi controls, invisible characters, or line breaks are refused, so a page can’t disguise what the save dialog shows', () => {
+  const save = value => validateRequest({ id: 'x', type: 'saveFields', url: 'https://pantry.example.org/intake', fields: { city: value } });
+  for (const [name, character] of Object.entries(UNSEEN)) {
+    assert.throws(() => save(`Ames${character}`), /answers to save/, name);
+    assert.throws(() => save(`${character}Ames`), /answers to save/, name);
+  }
+  assert.deepEqual(save('Ames').fields, { city: 'Ames' });
+});
+
+test('the extension leaves to the applicant exactly the labels and options the bridge refuses, character for character', () => {
+  const { layaQuestion } = require('../extension/generic-adapter.js');
+  const bridgeTakes = text => { try { validateRequest(answer([choice({ label: text, options: [text, 'No'] })])); return true; } catch { return false; } };
+  const extensionTakes = text => layaQuestion({ label: text, type: 'radio', options: [text, 'No'] }) === 'choice';
+  const differ = [];
+  for (const [first, last] of [[0, 0xFFFF], [0x1D100, 0x1D1FF], [0x1BC00, 0x1BCFF], [0xE0000, 0xE0FFF]]) {
+    for (let code = first; code <= last; code++) {
+      const text = `Pickup ${String.fromCodePoint(code)} day`;
+      if (bridgeTakes(text) !== extensionTakes(text)) differ.push(`U+${code.toString(16).toUpperCase().padStart(4, '0')}`);
+    }
+  }
+  assert.deepEqual(differ, []);
 });
 
 test('each Laya request carries the milliseconds its Autofill click has left: a whole number from 1 to 3000', () => {
