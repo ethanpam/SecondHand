@@ -118,10 +118,26 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
   }
   const page = sitePage(fields, { next, lang });
   for (const frame of frames) frame.page = sitePage(frame.fields || pantryFields(), { next: frame.next, tokenPrefix: `frame${frame.frameId}`, lang: frame.lang });
+  // Each frame's document and address as Chrome knows them. A frame can't change these, but its page says what it
+  // likes about itself: `claims` is the origin its own `location` reports. A test navigates a frame by changing them.
+  const topDocument = { frameId: 0, documentId: 'doc-0' };
+  const documentOf = frame => frame ? { frameId: frame.frameId, documentId: frame.documentId || `doc-${frame.frameId}`, url: frame.url || `${frame.origin}/form`, claims: frame.claims }
+    : { ...topDocument, url: tab.url };
+  // Runs an injected function in one frame, as Chrome does: the page's own `location`, and messages Chrome sends on
+  // to the worker with the frame's true id, document, and address as their sender.
+  function runInFrame(details, frame) {
+    const where = documentOf(frame);
+    const sender = { id: 'testextension', url: where.url, origin: new URL(where.url).origin, frameId: where.frameId, documentId: where.documentId, tab: { id: tab.id, url: tab.url } };
+    const location = { origin: where.claims || sender.origin, href: where.claims ? `${where.claims}/` : where.url };
+    const frameChrome = { runtime: { id: 'testextension', sendMessage: message => send(plain(message), sender) } };
+    return vm.runInNewContext(`(${details.func})(...args)`, { chrome: frameChrome, location, args: plain(details.args || []) });
+  }
   const tallies = [];
   let statusChecks = 0;
   const vault = { reachable: true, unlocked: true, accessRevision: 0, getFieldsError: null, trustError: null, allSites,
     values: { firstName: 'Synthetic private first', lastName: 'Synthetic private last', zip: '50309' }, ...desktop };
+  // With `trusted`, the app trusts only those origins, as its trusted-site list does.
+  const untrusted = url => Array.isArray(vault.trusted) && !vault.trusted.includes(new URL(url).origin);
   const events = {};
   const event = key => ({ addListener: value => { events[key] = value; } });
   let listener;
@@ -131,11 +147,13 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
       // Without the tabs permission Chrome gives an address only where SecondHand has access.
       query: async () => (openTabs || [tab]).map(open => ({ ...open, url: covered(open.url) ? open.url : undefined })),
       sendMessage: async (tabId, message, options) => {
-        content.push({ tabId, frameId: options?.frameId, ...plain(message) });
+        content.push({ tabId, frameId: options?.frameId, ...(options?.documentId === undefined ? {} : { documentId: options.documentId }), ...plain(message) });
         if (['secondhand:generic:formFrames', 'secondhand:generic:off'].includes(message.type)) return undefined;
         if (options?.frameId === 0 && topError) throw new Error(topError);
         if (message.type === 'secondhand:generic:frames') return framesReply === undefined ? { origins: frames.map(frame => frame.origin) } : framesReply;
         const frame = frames.find(frame => frame.frameId === options?.frameId);
+        // A message for one document reaches its frame only while that document is still there.
+        if (options?.documentId !== undefined && options.documentId !== documentOf(frame).documentId) throw new Error('Could not establish connection. Receiving end does not exist.');
         const model = frame?.page || page;
         if (message.type === 'secondhand:generic:plan') {
           if (frame?.planError) throw new Error('private frame failure');
@@ -170,7 +188,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
       executeScript: async details => {
         if (details.func && details.target.allFrames) {
           if (discoveryError) throw new Error('Cannot access an unapproved frame');
-          return [{ frameId: 0, result: new URL(tab.url).origin }, ...frames.map(frame => ({ frameId: frame.frameId, result: frame.origin }))];
+          return Promise.all([undefined, ...frames].map(async frame => ({ frameId: documentOf(frame).frameId, documentId: documentOf(frame).documentId, result: await runInFrame(details, frame) })));
         }
         if (details.func) {
           tallies.push({ target: plain(details.target), func: details.func });
@@ -230,6 +248,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
               // Laya (#39, #42): readied before a click's questions; "not ready" unless a test plays it.
               if (request.type === 'warmLaya') { vault.warming?.(); return reply({ state: vault.layaState || 'unavailable' }); }
               if (request.type === 'suggestFields' || request.type === 'answerFields') {
+                if (untrusted(request.url) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
                 const play = vault.laya?.[request.type];
                 if (!play) return onMessage({ id: request.id, ok: false, error: 'Laya isn’t ready on this computer.', code: 'LAYA_NOT_READY' });
                 const answer = play(plain(request), vault);
@@ -243,9 +262,10 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
                 return reply({ saved: Object.keys(request.fields) });
               }
               if (request.type === 'getFields') {
-                duringGetFields?.(tab);
+                duringGetFields?.(tab, plain(request));
                 // The app's rule: a site it doesn't trust gets nothing unless all websites is on.
-                if (vault.refuseUntrusted && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
+                if ((vault.refuseUntrusted || untrusted(request.url)) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
+                if (vault.cancelOrigin === new URL(request.url).origin) return fail('You cancelled this field request.');
                 if (vault.getFieldsError) return fail(vault.getFieldsError);
                 // `fieldsReason`: why the app left saved answers out (#135).
                 return reply({ accessRevision: vault.accessRevision, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])),
@@ -905,12 +925,13 @@ test('declining a frame trust returns all pending permissions and registers noth
   assert.equal(covered.log.includes('permissions.remove'), false);
   assert.deepEqual([...covered.registered.keys()], [SCRIPT_ID]);
 });
-test('site fill requests the union once and uses each frame token', async () => {
+test('site fill asks once for each site and uses each frame token', async () => {
   const w = siteWorker({ enabled: true, frames: [secondFrame({ enabled: true, fields: [{ name: 'zip', key: 'zip' }] })] });
   const result = (await autofill(w)).data;
   assert.equal(result.filled, 3);
   assert.deepEqual(plain(result.needYou), ['f0:sh-2-1', 'f0:sh-2-0']);
-  assert.equal(w.native.filter(call => call.type === 'getFields').length, 1);
+  assert.deepEqual(w.native.filter(call => call.type === 'getFields').map(({ url, fields }) => ({ url, fields })),
+    [{ url: `${ORIGIN}/intake`, fields: ['firstName', 'lastName', 'zip', 'householdSize'] }, { url: `${FRAME_ORIGIN}/form`, fields: ['zip'] }]);
   assert.deepEqual(w.content.filter(call => call.type === 'secondhand:generic:fill').map(call => [call.frameId, call.token]), [[0, 'plan-1'], [4, 'frame4-1']]);
 });
 for (const failure of [{ planError: true }, { fillError: true }, { plan: { token: 'bad', matched: [null], unmatched: [] } }, { fillResult: { ok: true, filled: 'bad' } }]) {
@@ -1122,13 +1143,13 @@ test('autofill without a top receiver asks for reload', async () => {
   assert.deepEqual(w.native, []);
 });
 
-test('two frames share one request while the child runs multiple fill passes', async () => {
+test('each site’s one request serves every fill pass, while the child runs multiple fill passes', async () => {
   const child = secondFrame({ enabled: true, fields: [{ name: 'zip', key: 'zip' }, { name: 'again', key: 'zip', revealedBy: 'zip' }] });
   const w = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }], frames: [child] });
   const result = (await autofill(w)).data;
   assert.equal(result.filled, 3);
   assert.deepEqual(child.page.answered(), ['zip', 'again']);
-  assert.equal(w.native.filter(call => call.type === 'getFields').length, 1);
+  assert.deepEqual(w.native.filter(call => call.type === 'getFields').map(call => call.url), [`${ORIGIN}/intake`, `${FRAME_ORIGIN}/form`]);
   assert.deepEqual(w.content.filter(call => call.type === 'secondhand:generic:fill').map(call => [call.frameId, call.token]), [[0, 'plan-1'], [4, 'frame4-1'], [4, 'frame4-2']]);
   assert.deepEqual(w.tallies.at(-1).target, { tabId: 7, frameIds: [0, 4] });
 });
@@ -1761,6 +1782,89 @@ test('an embedded form tells the top frame to show the card, with a yes or no on
   const off = siteWorker({ url: OTHER_URL });
   assert.equal(await off.send({ type: 'secondhand:generic:form', helps: true }, { id: 'testextension', url: OTHER_URL, frameId: 0, tab: { id: 7, url: OTHER_URL } }), undefined, 'a site that is off gets no answer');
   assert.deepEqual([...w.native, ...off.native], [], 'nothing reaches the desktop');
+});
+
+// #137: saved answers for a form embedded from another site are asked for in that site's name, the address Chrome
+// gives for the frame, and each site's answers are approved and filled apart.
+const EMBED_URL = `${FRAME_ORIGIN}/pantry-signup`;
+const requestsOf = w => w.native.filter(call => !['status', 'warmLaya'].includes(call.type))
+  .map(call => [call.type, call.url, (call.fields || call.questions).map(item => typeof item === 'string' ? item : item.id)]);
+
+test('with all websites on, an embedded form’s saved answers are asked for in its own site’s name, from the address Chrome gives, never the page around it', async () => {
+  // The embedded page says it is the host page; Chrome says where it is.
+  const child = secondFrame({ url: `${EMBED_URL}?visit=synthetic#form`, claims: OTHER, fields: [{ name: 'zip', key: 'zip' }, { name: 'size', key: 'householdSize' }] });
+  const w = siteWorker({ url: OTHER_URL, allSites: true, fields: [{ name: 'name', key: 'fullName' }, { name: 'zip', key: 'zip' }], frames: [child], desktop: { values: SAVED } });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.state, 'done', result.message);
+  assert.equal(result.filled, 4);
+  assert.deepEqual(requestsOf(w), [['getFields', OTHER_URL, ['firstName', 'lastName', 'zip']], ['getFields', EMBED_URL, ['zip', 'householdSize']]],
+    'one request for each site, naming the site that gets its answers');
+  assert.deepEqual(w.content.filter(call => call.type === 'secondhand:generic:fill').map(call => [call.frameId, Object.keys(call.values)]), [[0, ['fullName', 'zip']], [4, ['zip', 'householdSize']]]);
+  assert.deepEqual(w.page.answered(), ['name', 'zip']);
+  assert.deepEqual(child.page.answered(), ['zip', 'size']);
+});
+
+test('each site’s answers are approved apart: the host page’s approval never covers its embedded form, and a refusal for the form fills nothing', async () => {
+  for (const desktop of [{ cancelOrigin: FRAME_ORIGIN }, { trusted: [ORIGIN] }]) {
+    const child = secondFrame({ enabled: true, fields: [{ name: 'zip', key: 'zip' }] });
+    const w = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }], frames: [child], desktop });
+    const result = plain((await autofill(w)).data);
+    assert.equal(result.state, 'error', JSON.stringify(desktop));
+    assert.match(result.message, desktop.trusted ? /isn’t trusted/ : /^Cancelled/);
+    assert.deepEqual(requestsOf(w), [['getFields', `${ORIGIN}/intake`, ['firstName', 'lastName']], ['getFields', `${FRAME_ORIGIN}/form`, ['zip']]]);
+    assert.equal(w.contentTypes().includes('secondhand:generic:fill'), false, 'nothing is filled, not even on the host page');
+    assert.deepEqual([...w.page.answered(), ...child.page.answered()], []);
+  }
+});
+
+test('Laya is asked about each site’s questions in that site’s name: every site’s text boxes first, then its choice questions, within the click’s one budget', async () => {
+  const budgets = [];
+  const child = secondFrame({ enabled: true, fields: [{ ...REACH }, { ...SIXTY }] });
+  const w = siteWorker({ enabled: true, fields: [{ ...REACH }, { ...SIXTY }], frames: [child], desktop: layaDesktop({
+    suggestFields: request => { budgets.push(request.budgetMs); return { suggestions: Object.fromEntries(request.fields.map(field => [field.id, 'email'])) }; },
+    answerFields: (request, vault) => { budgets.push(request.budgetMs); return { answers: Object.fromEntries(request.questions.map(question => [question.id, 'No'])), accessRevision: vault.accessRevision }; } }) });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.state, 'done', result.message);
+  assert.deepEqual(requestsOf(w), [
+    ['suggestFields', `${ORIGIN}/intake`, ['f0:sh-1-0']], ['suggestFields', `${FRAME_ORIGIN}/form`, ['f4:sh-1-0']],
+    ['answerFields', `${ORIGIN}/intake`, ['f0:sh-1-1']], ['answerFields', `${FRAME_ORIGIN}/form`, ['f4:sh-1-1']],
+    ['getFields', `${ORIGIN}/intake`, ['email']], ['getFields', `${FRAME_ORIGIN}/form`, ['email']]]);
+  assert.equal(budgets.length, 4);
+  assert.ok(budgets.every((budget, index) => budget <= 3000 && (index === 0 || budget <= budgets[index - 1])), 'the requests share the click’s budget');
+  assert.deepEqual(w.page.answered(), ['reach', 'sixty']);
+  assert.deepEqual(child.page.answered(), ['reach', 'sixty']);
+});
+
+test('a frame is placed by the address Chrome gives with its message, never by what its page says: one claiming the host page’s address gets nothing', async () => {
+  const impostor = { origin: 'https://impostor.example.net', frameId: 6, claims: ORIGIN, fields: [{ name: 'zip', key: 'zip' }] };
+  const w = siteWorker({ enabled: true, frames: [impostor] });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.state, 'done', result.message);
+  assert.equal(w.content.some(call => call.frameId === 6), false, 'a frame on a site that is off is never asked');
+  assert.deepEqual(impostor.page.answered(), []);
+  assert.deepEqual(requestsOf(w), [['getFields', `${ORIGIN}/intake`, ['firstName', 'lastName', 'zip', 'householdSize']]]);
+});
+
+test('answers go only to the document Chrome placed: an embedded form that moves to another site after its approval gets nothing', async () => {
+  const child = secondFrame({ enabled: true, fields: [{ name: 'zip', key: 'zip' }] });
+  const away = { origin: 'https://elsewhere.example.net', url: 'https://elsewhere.example.net/form', documentId: 'doc-4-later' };
+  const w = siteWorker({ url: OTHER_URL, allSites: true, fields: [], frames: [child],
+    duringGetFields: (_tab, request) => { if (request.url.startsWith(FRAME_ORIGIN)) Object.assign(child, away); } });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.state, 'error');
+  assert.equal(result.messageKey, 'worker.frameUnsafe');
+  assert.deepEqual(w.content.filter(call => call.type === 'secondhand:generic:fill').map(call => [call.frameId, call.documentId]), [[4, 'doc-4']], 'the fill was for the document Chrome placed');
+  assert.deepEqual(child.page.answered(), [], 'nothing reaches the page now in that frame');
+
+  // The widget's planned click: a frame whose document changed between the plan and the click is refused before anything is asked.
+  const planned = secondFrame({ enabled: true, fields: [{ ...REACH }] });
+  const g = siteWorker({ enabled: true, fields: [], frames: [planned], desktop: { values: SAVED } });
+  await plan(g);
+  planned.documentId = 'doc-4-later';
+  const refused = plain((await g.launcher({ type: 'ui:autofill', confirmed: true, guesses: { 'f4:sh-1-0': 'email' } })).data);
+  assert.equal(refused.messageKey, 'worker.frameUnsafe');
+  assert.deepEqual(requestsOf(g), []);
+  assert.deepEqual(planned.page.answered(), []);
 });
 
 // The real site engine and content script on a page, as Chrome loads them for each registration that matches.
