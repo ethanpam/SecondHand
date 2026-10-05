@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { JSDOM } = require('jsdom');
 const strings = require('../extension/strings.js');
+const adapter = require('../extension/iowa-adapter.js');
 
 const source = file => fs.readFileSync(path.join(__dirname, '../extension', file), 'utf8');
 const { en, es } = strings.catalogs;
@@ -131,6 +132,53 @@ test('every label, instruction, and reason the Iowa adapter and content script c
     : strings.describeEnglish(text).key === 'detail');
   assert.deepEqual(missing, []);
   assert.equal(en['iowa.reviewDependent'], '{label}: review existing dependent answers');
+});
+
+// An Iowa portal page as the adapter sees it, with every element on screen.
+function portalPage(path, html) {
+  const doc = new JSDOM(`<!doctype html><main>${html}</main>`, { url: `${adapter.PORTAL}${path}`, pretendToBeVisual: true }).window.document;
+  doc.defaultView.Element.prototype.getClientRects = () => [{ left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 }];
+  return doc;
+}
+const probe = (path, html) => adapter.probePage(portalPage(path, html), `${adapter.PORTAL}${path}`);
+const keyed = page => ({ pageKey: page.pageKey, todo: page.todo && strings.describeEnglish(page.todo).key, reason: strings.describeEnglish(page.reason).key });
+
+test('on the Iowa questions pages SecondHand does not fill, it says so plainly and tells the applicant to answer and go on', () => {
+  // Job Information, Expenses, and every summary share this address with Tell Us More.
+  for (const heading of ['Job Information', 'Housing Expenses', 'Expenses Summary', 'Tell Us More']) {
+    assert.deepEqual(keyed(probe('/applyForBenefits/dynamicQuestions', `<h1>${heading}</h1>`)),
+      { pageKey: 'iowa-self-details-unverified', todo: 'iowa.selfUnverifiedTodo', reason: 'iowa.selfUnverifiedReason' }, heading);
+  }
+  assert.equal(en['iowa.selfUnverifiedReason'], 'SecondHand doesn’t fill this page. Answer any questions yourself, then go to the next page in Iowa’s form.');
+  assert.equal(en['iowa.selfUnverifiedTodo'], 'Answer any questions on this page yourself, then go to the next page in Iowa’s form.');
+});
+
+test('on an Iowa page it does not know, SecondHand says so without promising it fills nothing there', () => {
+  assert.deepEqual(keyed(probe('/applyForBenefits/personRelationshipRender', '<h1>Household Relationships</h1>')),
+    { pageKey: 'iowa-manual', todo: undefined, reason: 'iowa.manualStep' });
+  // No instruction here, so the general engine may still fill: the reason must leave room for that.
+  assert.equal(en['iowa.manualStep'], 'SecondHand doesn’t know this Iowa page. Check it and fill in anything missing yourself, then continue in Iowa’s form.');
+  assert.doesNotMatch(en['iowa.manualStep'], /doesn’t fill|fills nothing|won’t fill/);
+});
+
+test('on an applicant page that does not look as expected, SecondHand says plainly that it fills nothing', () => {
+  assert.deepEqual(keyed(probe('/applyForBenefits/enterPersonalInfo', '<h1>Enter Personal Information</h1>')),
+    { pageKey: 'iowa-personal-unverified', todo: 'iowa.personalUnverifiedTodo', reason: 'iowa.personalUnverifiedReason' });
+  assert.equal(en['iowa.personalUnverifiedReason'], 'This page doesn’t look like the applicant page SecondHand knows, so it fills nothing here.');
+  assert.equal(en['iowa.personalUnverifiedTodo'], 'Fill in this page yourself, then click Save and Continue in Iowa’s form.');
+});
+
+test('no Iowa English says "verified", "controls", "context", or "facts"', () => {
+  // Wording on pages SecondHand does fill, left for its own issue. Fixing one means taking it off this list.
+  const later = ['iowa.addressManualReason', 'iowa.canSaveContinue', 'iowa.manualReview', 'iowa.selfDetailsReason', 'iowa.startDetailsReason'];
+  const jargon = /verified|controls|context|facts/i;
+  const found = Object.entries(en).filter(([key, value]) => key.startsWith('iowa.') && jargon.test(typeof value === 'string' ? value : `${value.one} ${value.other}`))
+    .map(([key]) => key);
+  assert.deepEqual(found.filter(key => !later.includes(key)), []);
+  assert.deepEqual(later.filter(key => !found.includes(key)), [], 'a key that no longer has the words comes off the list');
+  for (const key of ['iowa.manualStep', 'iowa.selfUnverifiedTodo', 'iowa.selfUnverifiedReason', 'iowa.personalUnverifiedTodo', 'iowa.personalUnverifiedReason']) {
+    assert.doesNotMatch(en[key], jargon, key);
+  }
 });
 
 test('the worker says nothing in English of its own: every message it builds comes from a catalog key', () => {

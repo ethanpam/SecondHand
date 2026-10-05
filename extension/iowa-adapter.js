@@ -832,7 +832,7 @@
     const result = { kind: 'unsupported', pageKey: 'unsupported', heading: 'Unsupported website', reason: 'Open the official Iowa benefits portal.', canAdvance: false, fields: [], checklist: [], requiredRemaining: 0, manualRemaining: 0 };
     if (!isSupportedUrl(rawUrl)) return result;
     result.kind = 'manual'; result.pageKey = 'iowa-manual'; result.heading = 'Iowa benefits application';
-    result.reason = 'Complete this step in Iowa’s form. SecondHand has not verified its controls.';
+    result.reason = 'SecondHand doesn’t know this Iowa page. Check it and fill in anything missing yourself, then continue in Iowa’s form.';
     const headings = Array.from(doc.querySelectorAll('h1,h2,h3')).filter(element => rendered(element, doc)).map(element => normal(element.textContent));
     const blocked = protectedStep(doc, headings);
     if (blocked) return { ...result, ...blocked, kind: 'blocked', reason: blocked.todo };
@@ -874,7 +874,7 @@
         todo: 'Answer the remaining questions, then click Save and Continue in Iowa’s form yourself.',
         reason: 'SecondHand can fill the answers you saved in My information on this verified self-information page. Answer the other questions, then choose Save and Continue directly in Iowa’s form.' };
     }
-    if (headings.includes('tell us more') || rawUrl === `${PORTAL}/applyForBenefits/dynamicQuestions`) return { ...result, pageKey: 'iowa-self-details-unverified', heading: 'Applicant questions', todo: 'Review and complete these questions directly in Iowa’s form.', reason: 'This person or question context is not verified for saved applicant facts.' };
+    if (headings.includes('tell us more') || rawUrl === `${PORTAL}/applyForBenefits/dynamicQuestions`) return { ...result, pageKey: 'iowa-self-details-unverified', heading: 'Applicant questions', todo: 'Answer any questions on this page yourself, then go to the next page in Iowa’s form.', reason: 'SecondHand doesn’t fill this page. Answer any questions yourself, then go to the next page in Iowa’s form.' };
     const pageId = identifyPage(doc);
     if (pageId === 'household') {
       const definition = householdDefinitions.householdApplyProg;
@@ -895,7 +895,7 @@
         todo: issues.requiredRemaining || issues.manualRemaining ? 'Complete the missing answers in Iowa’s form. SecondHand will check again before continuing.' : 'SecondHand can save this verified page and continue. Review every answer before final submission.',
         reason: issues.manualRemaining ? 'Answer the remaining questions and correct any errors in Iowa’s form.' : issues.requiredRemaining ? 'Complete the required applicant fields in Iowa’s form.' : 'Review your answers, then click Save and Continue in Iowa’s form.' };
     }
-    if (rawUrl === `${PORTAL}/applyForBenefits/enterPersonalInfo` || headings.includes('enter personal information')) return { ...result, pageKey: 'iowa-personal-unverified', todo: 'Review the applicant fields and continue directly in Iowa’s form.', reason: 'The expected primary-applicant form could not be verified.' };
+    if (rawUrl === `${PORTAL}/applyForBenefits/enterPersonalInfo` || headings.includes('enter personal information')) return { ...result, pageKey: 'iowa-personal-unverified', todo: 'Fill in this page yourself, then click Save and Continue in Iowa’s form.', reason: 'This page doesn’t look like the applicant page SecondHand knows, so it fills nothing here.' };
     const info = headings.map(heading => infoScreens[heading]).find(Boolean);
     if (info) {
       const ready = Boolean(continueButton(doc, info.onclick));

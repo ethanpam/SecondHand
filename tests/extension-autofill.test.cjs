@@ -754,7 +754,7 @@ test('an error reply names its catalog key next to the same English', async () =
 });
 
 test('page state names the catalog key of each instruction, reason, and checklist label the Iowa adapter wrote', async () => {
-  const w = worker({ page: { todo: 'Solve the CAPTCHA, then click Continue.', reason: 'Complete this step in Iowa’s form. SecondHand has not verified its controls.', checklist: [
+  const w = worker({ page: { todo: 'Solve the CAPTCHA, then click Continue.', reason: 'SecondHand doesn’t know this Iowa page. Check it and fill in anything missing yourself, then continue in Iowa’s form.', checklist: [
     { key: 'firstName', label: 'First name', status: 'missing', required: true },
     { key: 'hasHomeAddress', label: 'Do you have a home address?: review existing dependent answers', status: 'manual', required: true },
     { key: 'manualReview', label: 'Synthetic unrecognized text', status: 'manual', required: true }] } });
