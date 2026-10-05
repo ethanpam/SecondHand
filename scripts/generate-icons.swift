@@ -80,3 +80,23 @@ for (path, data) in outputs {
     try data.write(to: url)
     print("wrote \(path)")
 }
+
+// Finder and the Dock use a native, multi-resolution macOS icon in packaged apps.
+let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+let iconset = temporary.appendingPathComponent("SecondHand.iconset")
+try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
+defer { try? FileManager.default.removeItem(at: temporary) }
+for size in [16, 32, 128, 256, 512] {
+    for scale in [1, 2] {
+        let suffix = scale == 2 ? "@2x" : ""
+        let data = icon(size: size * scale, tile: 824 / 1024, radius: 0.225, shadow: true)
+        try data.write(to: iconset.appendingPathComponent("icon_\(size)x\(size)\(suffix).png"))
+    }
+}
+let iconutil = Process()
+iconutil.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
+iconutil.arguments = ["-c", "icns", iconset.path, "-o", root.appendingPathComponent("desktop/icon.icns").path]
+try iconutil.run()
+iconutil.waitUntilExit()
+guard iconutil.terminationStatus == 0 else { fatalError("Could not build the macOS icon") }
+print("wrote desktop/icon.icns")
