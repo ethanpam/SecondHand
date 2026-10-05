@@ -571,6 +571,23 @@ test('guesses outside the plan’s open questions or for sensitive keys are refu
   }
 });
 
+test('a box only the applicant answers is never shown to Chrome’s AI, and a guess for it is refused before the vault is asked (#134)', async () => {
+  const applicantOnly = [{ name: 'sig', label: 'Type your full name as your electronic signature', type: 'text' }, { name: 'code', label: 'Enter the code we texted you', type: 'text' },
+    { name: 'born', label: 'In what city were you born?', type: 'text' }, { name: 'user', label: 'Username', type: 'text' }];
+  const fields = () => [...openQuestions(), ...applicantOnly.map(field => ({ ...field }))];
+  const planned = await plan(siteWorker({ enabled: true, fields: fields() }));
+  assert.deepEqual(planned.unmatched.map(field => field.label), ['Preferred pickup day', 'Where can we email you?', 'Best number to reach you']);
+  for (const [name, key] of [['sig', 'fullName'], ['code', 'phone'], ['born', 'city'], ['user', 'email']]) {
+    const w = siteWorker({ enabled: true, fields: fields() });
+    await plan(w);
+    const result = plain((await w.launcher({ type: 'ui:autofill', confirmed: true, guesses: { [`f0:${w.page.idOf('reach')}`]: 'email', [`f0:${w.page.idOf(name)}`]: key } })).data);
+    assert.equal(result.state, 'error', name);
+    assert.match(result.message, /couldn’t use the on-device AI/, name);
+    assert.deepEqual(w.nativeTypes(), ['warmLaya'], `${name}: only the plan’s Laya check`);
+    assert.equal(w.contentTypes().includes('secondhand:generic:fill'), false, name);
+  }
+});
+
 test('guesses without a current plan for this page are refused', async () => {
   const unplanned = siteWorker({ enabled: true, fields: openQuestions() });
   const refused = plain((await unplanned.launcher({ type: 'ui:autofill', confirmed: true, guesses: { 'sh-1-2': 'email' } })).data);

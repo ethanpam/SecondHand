@@ -44,20 +44,30 @@ test('AI never matches a text box to a saved answer SecondHand keeps from guesse
   assert.ok(prompts.MATCH_CANDIDATES.every(key => generic.GENERIC_KEYS.includes(key)), 'every candidate is a key the engine can fill');
 });
 
-test('consent, signature, attestation, agreement, terms, and SSN questions are never asked about', () => {
-  const unsafe = ['I certify that the information above is true and correct.', 'Signature', 'Applicant signature', 'I agree to the terms', 'Consent to share information',
-    'Social Security Number', 'SSN', 'SS#', 'By entering your initials below you are signing this form', 'I attest that I live in the service area',
-    'I acknowledge the rules of the pantry', 'Do you authorize us to contact your landlord?', 'I understand that food is limited', 'Password', 'Terms of service'];
-  for (const label of unsafe) assert.equal(prompts.unsafeQuestion({ label, options: [] }), true, label);
+// Questions only the applicant answers. The second half is #134's: signatures typed as a name, texted or
+// emailed codes, security questions and user names.
+const UNSAFE_LABELS = ['I certify that the information above is true and correct.', 'Signature', 'Applicant signature', 'I agree to the terms', 'Consent to share information',
+  'Social Security Number', 'SSN', 'SS#', 'By entering your initials below you are signing this form', 'I attest that I live in the service area',
+  'I acknowledge the rules of the pantry', 'Do you authorize us to contact your landlord?', 'I understand that food is limited', 'Password', 'Terms of service',
+  'Type your full name as your electronic signature', 'Applicant initials', 'Enter the code we texted you', 'Enter the code we emailed you', 'We texted you a code. Enter it here',
+  'Enter the 6-digit code sent to your phone', 'Code from the text message', 'Confirmation code', 'Authentication code', 'OTP', 'Enter code', 'Security question',
+  'Answer to your security question', 'Secret answer', 'In what city were you born?', 'What city were you born in?', 'What is your mother’s maiden name?',
+  'What was the name of your first pet?', 'What street did you grow up on?', 'Username', 'User name', 'Create a user name', 'User ID', 'Login ID'];
+// Ordinary questions with words near those: still asked.
+const SAFE_LABELS = ['Is anyone in your household 60 or older?', 'How many children under 18?', 'Where can we email you?', 'Do you live in Polk County?', 'Confirm email address',
+  'Full name', 'City', 'Email', 'ZIP code', 'Postal code', 'Middle initial', 'Date of birth', 'When were you born?', 'Place of residence', 'Phone number (we may text you)',
+  'Maiden name', 'Number of pets', 'Name'];
+
+test('consent, signature, attestation, agreement, terms, SSN, code, security and user-name questions are never asked about', () => {
+  for (const label of UNSAFE_LABELS) assert.equal(prompts.unsafeQuestion({ label, options: [] }), true, label);
   assert.equal(prompts.unsafeQuestion({ label: 'Please confirm', options: ['I agree', 'I do not agree'] }), true, 'an option can make a question unsafe');
-  for (const label of ['Is anyone in your household 60 or older?', 'How many children under 18?', 'Where can we email you?', 'Do you live in Polk County?', 'Confirm email address']) {
-    assert.equal(prompts.unsafeQuestion({ label, options: ['Yes', 'No'] }), false, label);
-  }
+  for (const label of SAFE_LABELS) assert.equal(prompts.unsafeQuestion({ label, options: ['Yes', 'No'] }), false, label);
 });
 
 test('the desktop’s unsafe-question check is the extension engine’s, on every question in the bank', () => {
   assert.equal(prompts.UNSAFE_QUESTION.source, generic.UNSAFE_QUESTION.source);
   assert.equal(prompts.UNSAFE_QUESTION.flags, generic.UNSAFE_QUESTION.flags);
+  for (const label of [...UNSAFE_LABELS, ...SAFE_LABELS]) assert.equal(prompts.unsafeQuestion({ label, options: [] }), generic.unsafeQuestion({ label, options: [] }), label);
   const bank = [...loadQuestionBank(), ...loadSyntheticBank()];
   let unsafe = 0;
   for (const file of bank) for (const question of file.questions) {

@@ -556,6 +556,60 @@ test('Laya takes text boxes and choice questions within the bridge’s limits, n
   for (const [name, question] of Object.entries(refused)) assert.equal(generic.layaQuestion(question), '', name);
 });
 
+// Boxes only the applicant answers (#134), each with an autocomplete hint that would otherwise give it a saved field.
+const APPLICANT_ONLY = [
+  ['Type your full name as your electronic signature', 'name'],
+  ['Full name (your electronic signature)', 'name'],
+  ['Applicant initials', 'name'],
+  ['Enter the code we texted you', 'tel'],
+  ['Enter the code we emailed you', 'email'],
+  ['Enter the 6-digit code sent to your phone', 'tel'],
+  ['Code from the text message', 'tel'],
+  ['In what city were you born?', 'address-level2'],
+  ['Security question: What is your mother’s maiden name?', 'family-name'],
+  ['What was the name of your first pet?', 'given-name'],
+  ['Answer to your security question', 'address-level2'],
+  ['Username', 'email'],
+  ['Create a user name', 'given-name'],
+  ['User ID', 'email']
+];
+
+test('a box only the applicant answers gets no saved field: not from the rules, a guess or Laya (#134)', () => {
+  const doc = page(APPLICANT_ONLY.map(([label, hint], index) => `<label for="u${index}">${label}</label><input id="u${index}" autocomplete="${hint}">`).join(''));
+  const result = generic.plan(doc);
+  assert.deepEqual(result.matched, [], 'not by the rules, nor by the box’s autocomplete hint');
+  assert.deepEqual(result.unmatched.map(field => field.label), APPLICANT_ONLY.map(([label]) => label));
+  for (const field of result.unmatched) {
+    assert.equal(generic.unsafeQuestion(field), true, field.label);
+    assert.equal(generic.layaQuestion(field), '', `${field.label}: never sent to Laya`);
+    for (const key of generic.GENERIC_KEYS) assert.equal(generic.canSuggest(key, field), false, `${field.label}: ${key}`);
+  }
+  const guesses = result.unmatched.flatMap(({ id }) => ['fullName', 'firstName', 'lastName', 'city', 'email', 'phone'].map(key => ({ id, key, guessed: true })));
+  const filled = generic.fillFields(doc, result.token, guesses, generic.deriveValues(profile));
+  assert.deepEqual(filled.filled, [], 'a guess, from Chrome’s AI or from Laya, is refused');
+  assert.deepEqual(APPLICANT_ONLY.map((_, index) => doc.getElementById(`u${index}`).value), APPLICANT_ONLY.map(() => ''));
+});
+
+test('ordinary boxes stay fillable by the rules and by a guess, and the SSN box only by its own rule (#134)', () => {
+  const doc = page('<label for="full">Full name</label><input id="full"><label for="city">City</label><input id="city"><label for="email">Email</label><input id="email" type="email">' +
+    '<label for="reach">Where can we reach you by email?</label><input id="reach" type="email"><label for="ssn">Social Security number</label><input id="ssn">');
+  const result = generic.plan(doc);
+  assert.deepEqual(byElement(doc, result), { full: 'fullName', city: 'city', email: 'email', ssn: 'ssn' });
+  for (const [label, key] of [['Full name', 'fullName'], ['City', 'city'], ['Email', 'email'], ['Where can we reach you by email?', 'email']]) {
+    assert.equal(generic.unsafeQuestion({ label, options: [] }), false, label);
+    assert.equal(generic.canSuggest(key, { label }), true, `${label}: ${key}`);
+    assert.equal(generic.layaQuestion({ label, type: 'text', options: [] }), 'text', label);
+  }
+  const reach = result.unmatched.find(field => field.label === 'Where can we reach you by email?');
+  const ssn = result.matched.find(item => item.key === 'ssn');
+  const assignments = [...result.matched.filter(item => item.key !== 'ssn').map(({ id, key }) => ({ id, key, guessed: false })), { id: reach.id, key: 'email', guessed: true },
+    { id: ssn.id, key: 'fullName', guessed: true }, { id: ssn.id, key: 'ssn', guessed: false }];
+  const filled = generic.fillFields(doc, result.token, assignments, { ...generic.deriveValues(profile), ssn: '123-45-6789' });
+  assert.deepEqual(filled.filled, [...result.matched.filter(item => item.key !== 'ssn').map(item => item.id), reach.id, ssn.id]);
+  assert.deepEqual(['full', 'city', 'email', 'reach', 'ssn'].map(id => doc.getElementById(id).value),
+    ['Avery Example', 'Demo City', 'avery.example@example.invalid', 'avery.example@example.invalid', '123-45-6789'], 'a guess never reaches the SSN box; its rule still does');
+});
+
 test('plans carry each matched question’s label, so the side panel can name a question that wasn’t saved', () => {
   const doc = page('<label for="apt">Apartment number</label><input id="apt"><label for="kids">Children 0-5</label><input id="kids" type="number">');
   const result = generic.plan(doc);
