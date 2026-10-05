@@ -819,11 +819,14 @@ if (nativeOrigin) {
           buttons: ['Cancel', 'Replace'], defaultId: 0, cancelId: 0, noLink: true });
         if (answer.response !== 1) return { cancelled: true };
       }
+      // A restored backup opens with its own password first. Touch ID's key goes before the file is
+      // replaced, and the access revision moves on, so a Touch ID prompt that is already up can't open it.
+      try { await touchIdUnlock.removeSealed(); }
+      catch (error) { throw publicError(`Touch ID’s key on this Mac couldn’t be removed (${error.code || error.message}), so the backup wasn’t restored. Please try again.`); }
+      accessRevision++;
       await vault.importEncrypted(bytes);
       // Setup progress belonged to the information just replaced.
       await fs.rm(setupPath, { force: true });
-      // A restored backup opens with its own password first.
-      await touchIdUnlock.forget();
       return { cancelled: false };
     }
   };

@@ -176,7 +176,11 @@ function createTouchIdUnlock({ vault, platform, filePath, revision }) {
     } catch (error) {
       // A password unlock finished first.
       if (vault.unlocked) return { unlocked: true };
-      if (error.temporary) return refuse('cancelled', `Touch ID didn’t work this time (${error.message}). Use your password.`);
+      if (error.temporary) {
+        // Its key was removed while Touch ID asked: a restored backup, or starting over.
+        if (!await sealedExists()) return refuse('off', 'Touch ID is off. Enter your password.');
+        return refuse('cancelled', `Touch ID didn’t work this time (${error.message}). Use your password.`);
+      }
       const reason = error.touchIdReason ? error.message : error.code === 'TOUCH_ID_MISSING' ? 'your saved information has no Touch ID key' :
         error.code === 'TOUCH_ID_KEY' ? 'its key doesn’t open your saved information' : null;
       if (!reason) throw error;
