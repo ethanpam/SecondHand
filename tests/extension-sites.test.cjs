@@ -268,9 +268,10 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
                 if ((vault.refuseUntrusted || untrusted(request.url)) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
                 if (vault.cancelOrigin === new URL(request.url).origin) return fail('You cancelled this field request.');
                 if (vault.getFieldsError) return fail(vault.getFieldsError);
-                // `fieldsReason`: why the app left saved answers out (#135).
+                // `fieldsReason`: why the app left saved answers out (#135), or a function of the request that says it for one site.
+                const reason = typeof vault.fieldsReason === 'function' ? vault.fieldsReason(plain(request)) : vault.fieldsReason;
                 return reply({ accessRevision: vault.accessRevision, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])),
-                  ...(vault.fieldsReason !== undefined ? { reason: vault.fieldsReason } : {}) });
+                  ...(reason !== undefined ? { reason } : {}) });
               }
               fail('Unsupported bridge request.');
             });
@@ -2275,6 +2276,39 @@ test('when Laya answers without a saved date of birth it can’t use, the click 
   assert.equal(result.message, `Filled 2 · 1 guessed · 1 need you. Check your answers before you submit. Guesses were suggested by Laya on this computer. ${BIRTH_DATE_REASON}`);
   const both = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...SIXTY }, { ...PET }], desktop: { ...layaDesktop(play), fieldsReason: 'birthDate' } });
   assert.equal(plain((await autofill(both)).data).message.split(BIRTH_DATE_REASON).length, 2, 'the same reason is said once');
+});
+
+test('an embedded site’s reason for answers the app left out is said for the click, once even when every site gives it', async () => {
+  const fromForm = reason => request => new URL(request.url).origin === FRAME_ORIGIN ? reason : undefined;
+  const click = fieldsReason => {
+    const child = secondFrame({ enabled: true, fields: [{ name: 'zip', key: 'zip' }] });
+    return { child, w: siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }], frames: [child], desktop: { fieldsReason } }) };
+  };
+  const { w, child } = click(fromForm('birthDate'));
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.state, 'done', result.message);
+  assert.equal(result.filled, 2);
+  assert.equal(result.messageKey, 'result.withReason');
+  assert.ok(result.message.endsWith(` ${BIRTH_DATE_REASON}`), result.message);
+  assert.deepEqual(requestsOf(w).map(([type, url]) => [type, url]), [['getFields', `${ORIGIN}/intake`], ['getFields', `${FRAME_ORIGIN}/form`]], 'the reason came with the embedded form’s own request');
+  assert.deepEqual(child.page.answered(), ['zip']);
+
+  const both = click('birthDate').w;
+  assert.equal(plain((await autofill(both)).data).message.split(BIRTH_DATE_REASON).length, 2, 'the same reason from both sites is said once');
+
+  // Laya's answers for the embedded form carry the reason too.
+  const form = secondFrame({ enabled: true, fields: [{ ...SIXTY }] });
+  const laya = siteWorker({ enabled: true, fields: [{ ...SIXTY }], frames: [form], desktop: layaDesktop({ answerFields: (request, vault) => ({
+    answers: Object.fromEntries(request.questions.map(question => [question.id, 'No'])), accessRevision: vault.accessRevision, ...fromForm('birthDate')(request) && { reason: 'birthDate' } }) }) });
+  const answered = plain((await autofill(laya)).data);
+  assert.equal(answered.filled, 2);
+  assert.equal(answered.message.split(BIRTH_DATE_REASON).length, 2, answered.message);
+
+  // A reason the worker doesn't know, from the embedded form's request, fills nothing anywhere.
+  const odd = click(fromForm('somethingElse'));
+  const refused = plain((await autofill(odd.w)).data);
+  assert.equal(refused.messageKey, 'worker.desktopUnexpected');
+  assert.deepEqual([...odd.w.page.answered(), ...odd.child.page.answered()], []);
 });
 
 test('a reason the worker doesn’t know fills nothing and shows a fixed error', async () => {
