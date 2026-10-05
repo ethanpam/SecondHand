@@ -129,18 +129,24 @@
     for (let previous = ''; previous !== text;) { previous = text; text = text.replace(LEAD, ''); }
     return text;
   }
+  // Labels are read without apostrophes, so a possessive is the role with an s ("child’s" is "childs").
   // A guardian or parent may be the applicant, but saying so would be a guess: their boxes stay with the applicant.
-  const OTHER_PERSON_ROLE = /\b(spouse|spouses|partner|husband|wife|helper|proxy|emergency contact|reference|landlord|other household member|guardian|guardians|parent|parents|conyuge|esposo|esposa|pareja|dependiente|ayudante|contacto de emergencia|referencia|propietario|arrendador|tutor legal)\b|\brepresentative\b|\brepresentante\b/;
-  const MEMBER_DETAIL = /\b(family member|household member (number )?\d+|miembro de (la )?(familia|casa|hogar))\b/;
-  // Someone other than the applicant when the question asks for their details: a child or a student.
-  const CHILD_ROLE = /\b(child|children|son|daughter|student|students|hijo|hija|hijos|hijas|estudiante|estudiantes)\b/;
-  const PERSON_DETAIL = /\b(name|nombre|birth|nacimiento|address|direccion|phone|telefono|email|relationship|school|escuela)\b/;
+  const OTHER_PERSON_ROLE = /\b(spouses?|partners?|husbands?|wifes?|wives|helpers?|proxys?|proxies|emergency contacts?|references?|landlords?|guardians?|parents?|conyuge|esposo|esposa|pareja|dependiente|ayudante|contacto de emergencia|referencia|propietario|arrendador|tutor legal)\b|\brepresentatives?\b|\brepresentante\b/;
+  // Always someone else: a family member, a numbered household member, another or additional one, or a box
+  // that only says "Household member".
+  const MEMBER_DETAIL = /^household members?$|\b(family member|household member (number )?\d+|(other|additional|another) (household |family )?(members?|persons?|people|adults?|individuals?)( of (the |your )?(household|family|home))?|miembro de(l| la)? (familia|casa|hogar))\b/;
+  // Someone other than the applicant when the question asks for their details: a child, a student, a
+  // dependent, or household members. A count of them ("Number of children") stays the applicant's. One
+  // household member is another person when the label leads with them ("Household member name");
+  // "Name of household member" is how USDA TEFAP forms ask for the applicant.
+  const CHILD_ROLE = /^household member\b|\b((grand)?childs?|(grand)?childrens?|kids?|sons?|daughters?|students?|dependents?|household members|family members|hijos?|hijas?|estudiantes?)\b/;
+  const PERSON_DETAIL = /\b(names?|first|last|middle|nombres?|apellidos?|birth\w*|dob|nacimiento|address(es)?|direccion|phone|telephone|cell|telefono|e ?mail|relation\w*|school|escuela)\b/;
   const COMBINED_ADDRESS_QUESTION = /^(city (and )?state|city (and )?(zip|zip code|zipcode|postal code)|city (and )?state (and )?(zip|zip code|zipcode|postal code)|(complete|full) (physical |home |residential )?address( including (town|city|town city))?|ciudad (y )?estado|ciudad (y )?codigo postal|ciudad (y )?estado (y )?codigo postal|direccion completa)$/;
   const PERSON_NOT_AMOUNT = /^(who|que persona|quien) (pays?|paga)( |$)/;
   function otherPersonQuestion(value) {
     const text = normal(value);
     const representative = !(text.startsWith('household representative ') || text === 'household representative') && OTHER_PERSON_ROLE.test(text);
-    return representative || MEMBER_DETAIL.test(text) || (CHILD_ROLE.test(text) && PERSON_DETAIL.test(text)) || text === 'household members' || /^household members (first|last|full|date|birth|name|phone|email|address|relation|relationship)\b/.test(text);
+    return representative || MEMBER_DETAIL.test(text) || (CHILD_ROLE.test(text) && PERSON_DETAIL.test(text));
   }
   const blockedSuggestion = value => otherPersonQuestion(value) || COMBINED_ADDRESS_QUESTION.test(question(value)) || PERSON_NOT_AMOUNT.test(question(value));
   // A count of people by age: "# of people in your household 18 - 59 yrs old", "60 +", "60 and older",
@@ -187,14 +193,16 @@
   const UNSAFE_QUESTION = /^social security$|^(enter )?(the |your |a )?codes?$|\b(consent\w*|sign|signs|signed|signing|signature\w*|initials|attest\w*|certif\w*|agree|agrees|agreed|agreement\w*|terms|acknowledg\w*|authoriz\w*|permission|perjury|i understand|i confirm|i have read|true and (correct|accurate|complete)|privacy|social security (number|no|num|card)|ss number|ssn|itin|password|passcode|pin|cvv|cvc|card number|credit card|debit card|security code|captcha|one time|otp|2fa|mfa|(verification|verify|authentication|confirmation|access|login|log in|sms|text|texted|email|emailed) codes?|\d+ digit codes?|codes? (that |which )?(we |was |were |has been |have been )?(just )?(sent|texted|emailed)|(sent|texted|emailed) (to )?(you )?(a |the |your )?codes?|codes? from (the |your |our )?(text|sms|email|e mail|message|app)|(security|secret|challenge) (questions?|answers?)|mothers maiden name|(city|town) (were you|you were|was your \w+) born|born in what (city|town)|first (pets?|car)|street (did you|you) gr[eo]w up on|user ?names?|user ?ids?|(login|log in) (ids?|names?)|screen ?names?)\b/;
   const unsafeQuestion = field => [field?.label, ...(Array.isArray(field?.options) ? field.options : [])].some(text => UNSAFE_QUESTION.test(normal(text)));
   // The questions Laya, the desktop app's AI, may take, within the bridge's limits: a text box to match
-  // to a saved field ('text') or a choice question to answer ('choice'). Never one only the applicant answers.
+  // to a saved field ('text') or a choice question to answer ('choice'). Never one only the applicant answers,
+  // and never a text box no saved field may go to (another person's, who pays, a combined address), which
+  // the desktop's matchableBox refuses too.
   const LAYA = Object.freeze({ text: Object.freeze(['text', 'textarea', 'number', 'date', 'email', 'tel']), choice: Object.freeze(['radio', 'select', 'checkbox']),
     label: 200, options: 30, option: 100 });
   const layaText = (value, max) => typeof value === 'string' && value.trim() !== '' && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
   function layaQuestion({ label, type, options }) {
     if (!layaText(label, LAYA.label) || !Array.isArray(options) || options.length > LAYA.options || options.some(option => !layaText(option, LAYA.option)) ||
       new Set(options).size !== options.length || unsafeQuestion({ label, options })) return '';
-    if (LAYA.text.includes(type)) return 'text';
+    if (LAYA.text.includes(type)) return blockedSuggestion(label) ? '' : 'text';
     return LAYA.choice.includes(type) && options.length ? 'choice' : '';
   }
   // Whether a guess (the AI step) may offer a key for a question: never for one only the applicant
@@ -262,7 +270,8 @@
     const labels = present.length ? present : [precedingText(element)].filter(Boolean);
     return labels.map(text => {
       const asked = enclosingQuestion(element, doc)?.text;
-      if (asked && normal(asked) !== normal(text) && otherPersonQuestion(asked)) return `${asked}: ${text}`;
+      // Under another person's heading ("Emergency contact", "Child 1", "Partner’s information"), a box asks for that person's detail.
+      if (asked && normal(asked) !== normal(text) && (otherPersonQuestion(asked) || otherPersonQuestion(`${asked}: ${text}`))) return `${asked}: ${text}`;
       if (!DATE_PART.test(normal(text))) return text;
       return asked && normal(asked) !== normal(text) ? `${asked}: ${text}` : text;
     });
