@@ -168,6 +168,19 @@ test('on an applicant page that does not look as expected, SecondHand says plain
   assert.equal(en['iowa.personalUnverifiedTodo'], 'Fill in this page yourself, then click Save and Continue in Iowa’s form.');
 });
 
+test('no Iowa English says "verified", "controls", "context", or "facts"', () => {
+  // Wording on pages SecondHand does fill, left for its own issue. Fixing one means taking it off this list.
+  const later = ['iowa.addressManualReason', 'iowa.canSaveContinue', 'iowa.manualReview', 'iowa.selfDetailsReason', 'iowa.startDetailsReason'];
+  const jargon = /verified|controls|context|facts/i;
+  const found = Object.entries(en).filter(([key, value]) => key.startsWith('iowa.') && jargon.test(typeof value === 'string' ? value : `${value.one} ${value.other}`))
+    .map(([key]) => key);
+  assert.deepEqual(found.filter(key => !later.includes(key)), []);
+  assert.deepEqual(later.filter(key => !found.includes(key)), [], 'a key that no longer has the words comes off the list');
+  for (const key of ['iowa.manualStep', 'iowa.selfUnverifiedTodo', 'iowa.selfUnverifiedReason', 'iowa.personalUnverifiedTodo', 'iowa.personalUnverifiedReason']) {
+    assert.doesNotMatch(en[key], jargon, key);
+  }
+});
+
 test('the worker says nothing in English of its own: every message it builds comes from a catalog key', () => {
   const code = withoutComments(source('background.js'));
   // Chrome's and the native hosts' own error wording, compared but never shown, and the worker's start-up failure.
