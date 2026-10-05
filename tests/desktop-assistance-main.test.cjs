@@ -545,6 +545,7 @@ test('an embedded form’s requests are trusted and prompted for the form’s ow
   for (const request of [{ type: 'getFields', url: EMBEDDED_FORM, fields: ['firstName'] }, suggest([box], { url: EMBEDDED_FORM }), sixtyThere]) {
     await assert.rejects(hostOnly.request(request), /isn’t trusted/, request.type);
   }
+  await assert.rejects(hostOnly.request({ type: 'saveFields', url: EMBEDDED_FORM, fields: { email: 'synthetic@example.org' } }), /isn’t trusted/, 'saveFields');
   assert.equal(hostOnly.prompts.length, 0);
   hostOnly.answer(async () => ({ response: 1 }));
   await hostOnly.request({ type: 'trustSite', url: EMBEDDED_FORM });
@@ -563,6 +564,9 @@ test('an embedded form’s requests are trusted and prompted for the form’s ow
   assert.match(fields.detail, /give these details to https:\/\/forms\.example\.net\./);
   assert.equal(answers.message, 'Fill this answer on https://forms.example.net? It uses sensitive details.');
   assert.match(answers.detail, /meant to give these answers to https:\/\/forms\.example\.net:/);
+  // Saving an answer the form's page holds names that site too.
+  assert.deepEqual(plain(await everywhere.request({ type: 'saveFields', url: EMBEDDED_FORM, fields: { email: 'synthetic@example.org' } })), { saved: ['email'] });
+  assert.equal(everywhere.prompts.at(-1).message, 'Save this answer from https://forms.example.net to My information?');
   for (const prompt of everywhere.prompts) assert.doesNotMatch(`${prompt.message} ${prompt.detail}`, /pantry\.example\.org/);
 
   // Without Always allow, the everyday prompt names it too.

@@ -258,6 +258,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
               if (request.type === 'trustSite') return (vault.trustError || request.url === vault.declineOrigin) ? fail(vault.trustError || 'Declined') : reply({ trusted: true, origin: new URL(request.url).origin });
               if (request.type === 'untrustSite') return vault.untrustSiteError ? fail(vault.untrustSiteError) : reply({ trusted: false, origin: new URL(request.url).origin });
               if (request.type === 'saveFields') {
+                if (untrusted(request.url) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
                 if (vault.saveError) return fail(vault.saveError);
                 return reply({ saved: Object.keys(request.fields) });
               }
@@ -2197,6 +2198,48 @@ test('a page that changed, or a site turned off, forgets the list and reads noth
   off.registered.clear(); off.permissions.clear();
   assert.equal((await saveAnswer(off, `f0:${off.page.idOf('size')}`)).ok, false);
   for (const each of [w, moved, off]) assert.equal(each.contentTypes().includes('secondhand:generic:read'), false);
+});
+
+test('Save to My information saves an embedded form’s answer in that form’s own site’s name, from the address Chrome gives, and the app’s trust follows it', async () => {
+  // The embedded page says it is the host page; Chrome says where it is.
+  const child = secondFrame({ url: `${EMBED_URL}?visit=synthetic`, claims: OTHER, fields: [{ name: 'zip', key: 'zip' }, { name: 'size', key: 'householdSize' }] });
+  const w = siteWorker({ url: OTHER_URL, allSites: true, fields: [{ name: 'name', key: 'fullName' }], frames: [child] });
+  await autofill(w);
+  const size = `f4:${child.page.idOf('size')}`;
+  assert.deepEqual(await savable(w), [{ id: size, label: 'size', answered: false }]);
+  child.page.type('size', '3');
+  assert.deepEqual(await savable(w), [{ id: size, label: 'size', answered: true }]);
+  const response = await saveAnswer(w, size);
+  assert.equal(response.ok, true, response.error);
+  assert.deepEqual(w.native.filter(call => call.type === 'saveFields').map(({ url, fields }) => ({ url, fields })), [{ url: EMBED_URL, fields: { householdSize: '3' } }],
+    'saved in the name of the site the answer came from');
+  assert.deepEqual(w.content.filter(call => ['secondhand:generic:answered', 'secondhand:generic:read'].includes(call.type)).map(call => [call.type, call.frameId, call.documentId]),
+    [['secondhand:generic:answered', 4, 'doc-4'], ['secondhand:generic:answered', 4, 'doc-4'], ['secondhand:generic:read', 4, 'doc-4']], 'only the document Chrome placed is asked');
+
+  // Turned on one site at a time: once the app no longer trusts the form's site, the host page's trust doesn't save its answer.
+  const form = secondFrame({ enabled: true, fields: [{ name: 'size', key: 'householdSize' }] });
+  const site = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }], frames: [form] });
+  await autofill(site);
+  form.page.type('size', '3');
+  site.vault.trusted = [ORIGIN];
+  const refused = await saveAnswer(site, `f4:${form.page.idOf('size')}`);
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /isn’t trusted/);
+  assert.deepEqual(site.native.filter(call => call.type === 'saveFields').map(call => call.url), [`${FRAME_ORIGIN}/form`]);
+});
+
+test('an embedded form that moved on to another page takes its questions with it: the list forgets them and nothing is read or saved', async () => {
+  const child = secondFrame({ enabled: true, fields: [{ name: 'size', key: 'householdSize' }] });
+  const w = siteWorker({ enabled: true, fields: [], frames: [child] });
+  await autofill(w);
+  const size = `f4:${child.page.idOf('size')}`;
+  child.page.type('size', '3');
+  assert.deepEqual(await savable(w), [{ id: size, label: 'size', answered: true }]);
+  child.documentId = 'doc-4-next';
+  assert.equal(await savable(w), undefined, 'the list forgets it');
+  assert.equal((await saveAnswer(w, size)).errorKey, 'worker.answerGone');
+  assert.equal(w.contentTypes().includes('secondhand:generic:read'), false);
+  assert.equal(w.nativeTypes().includes('saveFields'), false);
 });
 
 test('a site frame says which listed boxes hold an answer, by id, and reads one box only when the worker asks for it', t => {
