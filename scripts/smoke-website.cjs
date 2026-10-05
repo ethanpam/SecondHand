@@ -153,13 +153,18 @@ async function inspectWhatItDoes(page) {
   for (const phrase of ['first suggested home address', 'guesses', 'Vietnamese', 'Arabic', 'on this computer']) {
     assert.ok(scope.includes(phrase), `What it does today must mention "${phrase}"`);
   }
+  // The address the applicant must review ends the first paragraph, where a skimming reader sees it.
+  await expect(page.locator('.scope-note p')).toHaveCount(3);
+  await expect(page.locator('.scope-note p').first()).toContainText(/review that address before you submit\.$/);
   await page.getByText('Updating from an earlier version', { exact: true }).click();
   await expect(page.locator('#setup details[open] .details-body')).toContainText('reloads itself');
+  await expect(page.locator('#setup details[open] .details-body')).toContainText('0.4.0 or earlier');
   await page.goto(`${site}/chrome-extension`, { waitUntil: 'networkidle' });
   await inspectLayout(page);
   await expect(page.locator('main')).not.toContainText(/Details link|\bDetails\b to open/);
   await expect(page.locator('img.guide-card')).not.toHaveAttribute('alt', /Details/);
   await expect(page.locator('section[aria-labelledby="after-update"]')).toContainText('reloads itself');
+  await expect(page.locator('section[aria-labelledby="after-update"]')).toContainText('0.4.0 or earlier');
   await page.goto(site, { waitUntil: 'networkidle' });
   console.log('What it does today, update steps, and the Chrome guide card passed.');
 }
