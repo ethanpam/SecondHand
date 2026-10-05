@@ -98,7 +98,25 @@ function text(value, name, max = 200) {
 function validDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
 }
-function validateProfile(input) {
+// A birth date being saved must be today or earlier and no more than 130 years ago, on this computer's
+// calendar (#135). `whose` names the person as My information does: "Your" or "Person 3’s".
+function checkBirthDate(birthDate, whose, today) {
+  const problem = household.birthDateProblem(birthDate, today);
+  if (problem === 'future') throw new Error(`${whose} date of birth can’t be after today (${household.localDate(today)} on this computer).`);
+  if (problem === 'tooOld') throw new Error(`${whose} date of birth can’t be more than ${household.MAX_YEARS_BACK} years ago.`);
+}
+// A profile being saved: every field is checked, and each birth date against `today` (this computer's
+// date unless a caller names one).
+function validateProfile(input, { today } = {}) {
+  return checkProfile(input, { today, saving: true });
+}
+// A profile read back from the vault. Its birth dates were checked when they were saved and are not
+// checked against today again, so a clock set back, or a date saved before the 130-year limit,
+// never keeps the information from opening (#135). Everything else is checked as when saved.
+function validateStoredProfile(input) {
+  return checkProfile(input, { saving: false });
+}
+function checkProfile(input, { today, saving }) {
   object(input);
   if (Object.keys(input).some(key => !PROFILE_FIELDS.includes(key))) throw new Error('Unknown profile field.');
   const result = Object.fromEntries(PROFILE_FIELDS.filter(key => !LIST_FIELDS.includes(key)).map(key => [key, text(input[key], FIELD_LABELS[key])]));
@@ -107,7 +125,8 @@ function validateProfile(input) {
       `${FIELD_LABELS[field]} must be Yes, No, or left unanswered.` : `Choose a supported ${FIELD_LABELS[field].toLowerCase()}, or leave it blank.`);
   }
   if (result.bestContactTime.length > 30) throw new Error('Best time to call must be 30 characters or fewer.');
-  if (result.birthDate && (!validDate(result.birthDate) || result.birthDate > new Date().toISOString().slice(0, 10))) throw new Error('Enter a valid date of birth.');
+  if (result.birthDate && !validDate(result.birthDate)) throw new Error('Enter a valid date of birth.');
+  if (saving) checkBirthDate(result.birthDate, 'Your', today);
   if (result.ssn && !/^\d{3}-?\d{2}-?\d{4}$/.test(result.ssn)) throw new Error('Enter a nine-digit Social Security number or leave it blank.');
   if (result.ssn && result.hasSsnAnswer === 'no') throw new Error('You saved a Social Security number, so answer Yes to having one, or leave that question unanswered.');
   if (result.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(result.email)) throw new Error('Enter a valid email address.');
@@ -128,20 +147,19 @@ function validateProfile(input) {
   for (const field of ['monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand', 'monthlyMedicalExpenses']) {
     if (result[field] && !/^\d{1,8}(\.\d{1,2})?$/.test(result[field])) throw new Error(`${FIELD_LABELS[field]} must be a nonnegative dollar amount, or blank if unknown.`);
   }
-  result.householdMembers = validateMembers(input.householdMembers, result);
+  result.householdMembers = validateMembers(input.householdMembers, result, { today, saving });
   return result;
 }
 
 const MEMBER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const pastDate = value => validDate(value) && value <= new Date().toISOString().slice(0, 10);
 // The household list: up to 20 people, each checked like the rest of the profile. The applicant is its one
 // self row, which always carries their own name and birth date.
-function validateMembers(input, applicant) {
+function validateMembers(input, applicant, { today, saving }) {
   if (input === undefined) return [];
   if (!Array.isArray(input) || Object.getPrototypeOf(input) !== Array.prototype) throw new Error('The household list is invalid.');
   if (input.length > MAX_MEMBERS) throw new Error(`The household list holds up to ${MAX_MEMBERS} people.`);
   const ids = new Set();
-  const members = input.map(member => {
+  const members = input.map((member, index) => {
     try { object(member); } catch { throw new Error('A household member is invalid.'); }
     if (Object.keys(member).some(key => !MEMBER_FIELDS.includes(key))) throw new Error('Unknown household member field.');
     if (typeof member.id !== 'string' || !MEMBER_ID.test(member.id)) throw new Error('A household member is invalid.');
@@ -155,7 +173,9 @@ function validateMembers(input, applicant) {
     if (result.grade && result.student !== 'yes') throw new Error('Add a grade only for a household member who is a student.');
     if (result.relationship === 'self') Object.assign(result, { firstName: applicant.firstName, lastName: applicant.lastName, birthDate: applicant.birthDate });
     else if (!result.firstName) throw new Error('Enter a first name for each person in your household.');
-    if (result.birthDate && !pastDate(result.birthDate)) throw new Error('Enter a valid date of birth for each person in your household.');
+    if (result.birthDate && !validDate(result.birthDate)) throw new Error('Enter a valid date of birth for each person in your household.');
+    // The applicant's own date was checked as theirs.
+    if (saving && result.relationship !== 'self') checkBirthDate(result.birthDate, `Person ${index + 1}’s`, today);
     return result;
   });
   if (members.length && members.filter(member => member.relationship === 'self').length !== 1) throw new Error('The household list must include you once.');
@@ -172,12 +192,21 @@ function fieldLabel(key) {
 }
 // What a page asking for `field` gets from a saved profile: '' when nothing is saved. Derived answers are
 // worked out, age-band counts come from birth dates, and the household list's counts win over the manual ones.
+// A birth date after today or more than 130 years ago is never filled, and no age is worked out from it.
 function releasedValue(profile, field, { today } = {}) {
   if (!isRequestField(field)) throw new Error('This is not a field a page may ask for.');
   if (household.isBandKey(field)) return household.bandCount(profile, field, { today });
   if (Object.hasOwn(DERIVED_FIELDS, field)) return DERIVED_FIELDS[field](profile);
   if (Object.hasOwn(HOUSEHOLD_COUNT_FIELDS, field) && household.listed(profile)) return household.householdCounts(profile, { today })[HOUSEHOLD_COUNT_FIELDS[field]];
+  if (field === 'birthDate' && household.birthDateProblem(profile.birthDate, today)) return '';
   return typeof profile[field] === 'string' ? profile[field] : '';
+}
+// Whether a page asking for `field` gets no answer because a saved birth date it needs can't be used:
+// the applicant's own for their date of birth, everyone's on the household list for a count by age.
+function blockedByBirthDate(profile, field, { today } = {}) {
+  if (field === 'birthDate') return household.birthDateProblem(profile.birthDate, today) !== null;
+  const byAge = household.isBandKey(field) || Object.hasOwn(household.COUNT_BANDS, field);
+  return byAge && household.listed(profile) && profile.householdMembers.some(member => household.birthDateProblem(member.birthDate, today) !== null);
 }
 
 function validateApplication(input, existing) {
@@ -212,4 +241,5 @@ function validateStoredApplication(input) {
 }
 
 module.exports = { PORTAL_URL, FIELD_LABELS, PROFILE_FIELDS, REQUEST_FIELDS, DERIVED_FIELDS, PROFILE_CHOICES, YES_NO_FIELDS, APPLICATION_STATUSES, HOUSEHOLD_COUNT_FIELDS,
-  RELATIONSHIPS, MAX_MEMBERS, SAVE_FIELDS, isPortalUrl, isHttpsSiteUrl, siteOrigin, isRequestField, fieldLabel, releasedValue, validateProfile, validateApplication, validateStoredApplication };
+  RELATIONSHIPS, MAX_MEMBERS, SAVE_FIELDS, isPortalUrl, isHttpsSiteUrl, siteOrigin, isRequestField, fieldLabel, releasedValue, blockedByBirthDate,
+  validateProfile, validateStoredProfile, validateApplication, validateStoredApplication };

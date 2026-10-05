@@ -21,7 +21,8 @@ const { createOcrEngine } = require('./ocr-engine.cjs');
 const { createDocumentReader } = require('./ocr-service.cjs');
 const { requestId: documentRequestId } = require('./ocr-limits.cjs');
 const { analyzeDocument } = require('../shared/document-parser.cjs');
-const { validateProfile, validateApplication, HOUSEHOLD_COUNT_FIELDS, YES_NO_FIELDS, PORTAL_URL, isPortalUrl, siteOrigin, isRequestField, fieldLabel, releasedValue } = require('../shared/schema.cjs');
+const { validateProfile, validateApplication, HOUSEHOLD_COUNT_FIELDS, YES_NO_FIELDS, PORTAL_URL, isPortalUrl, siteOrigin, isRequestField, fieldLabel, releasedValue,
+  blockedByBirthDate } = require('../shared/schema.cjs');
 const household = require('../shared/household.cjs');
 
 app.setName('SecondHand');
@@ -60,6 +61,16 @@ if (nativeOrigin) {
 } else if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
+  // Today on this computer's calendar (#135): what a birth date being saved is checked against and what
+  // ages are worked out from. Tests pin it with SECONDHAND_TEST_TODAY (YYYY-MM-DD) in test mode; a packaged
+  // SecondHand refuses it.
+  const pinnedToday = process.env.SECONDHAND_TEST_TODAY;
+  if (pinnedToday !== undefined) {
+    if (app.isPackaged) throw new Error('A packaged SecondHand refuses SECONDHAND_TEST_TODAY.');
+    if (process.env.SECONDHAND_TEST_MODE !== '1') throw new Error('SECONDHAND_TEST_TODAY needs SECONDHAND_TEST_MODE=1.');
+    household.localDate(pinnedToday);
+  }
+  const today = () => household.localDate(pinnedToday);
   let mainWindow;
   let bridge;
   let extensionId = null;
@@ -261,11 +272,15 @@ if (nativeOrigin) {
         return { suggestions };
       }
       const generation = accessRevision;
-      const { answers, sensitive, sensitiveFields } = await fieldAnswers.answer({ questions: request.questions, profile: vault.getData().profile, budgetMs: request.budgetMs });
+      const now = today();
+      const profile = vault.getData().profile;
+      const { answers, sensitive, sensitiveFields } = await fieldAnswers.answer({ questions: request.questions, profile, budgetMs: request.budgetMs, today: now });
       requireUnlocked();
       if (generation !== accessRevision) throw publicError('SecondHand access changed. Click Autofill again.');
       const chosen = request.questions.filter(question => Object.hasOwn(answers, question.id));
-      if (!chosen.length) return { answers: {}, accessRevision };
+      // Laya had no age from a saved birth date it can't use; the questions it left say why (#135).
+      const reason = chosen.length < request.questions.length && household.hasUnusableBirthDate(profile, { today: now }) ? { reason: 'birthDate' } : {};
+      if (!chosen.length) return { answers: {}, accessRevision, ...reason };
       // Answers are profile information: they follow getFields' approval, each question listed
       // with the option that would be filled. Iowa's portal keeps its rule of no sensitive prompt.
       const count = chosen.length;
@@ -281,7 +296,7 @@ if (nativeOrigin) {
         sensitive: !iowa && needed ? { message: `Fill ${count === 1 ? 'this answer' : `these ${count} answers`} on ${origin}? ${uses} sensitive details.`,
           detail: `${sensitiveFields.map(fieldLabel).join(', ')}\n\nLaya, SecondHand’s AI on this computer, read these saved details to pick ${which}. The details stay on this computer. Only allow this if you meant to give these answers to ${origin}:\n${lines}` } : null });
       touch();
-      return { answers: approved ? answers : {}, accessRevision };
+      return { answers: approved ? answers : {}, accessRevision, ...reason };
     } catch (error) {
       if (error.publicMessage) throw error;
       if (error.code === 'LAYA_NOT_READY') throw layaNotReady();
@@ -410,13 +425,16 @@ if (nativeOrigin) {
       if (!approved) throw publicError('You cancelled this field request.');
       if (navigationOnly) { touch(); return { values: {}, accessRevision }; }
       const profile = vault.getData().profile;
+      const now = today();
       const values = {};
       for (const field of request.fields) {
-        const value = releasedValue(profile, field);
+        const value = releasedValue(profile, field, { today: now });
         if (typeof value === 'string' && value.trim()) values[field] = value;
       }
+      // An answer left out because a saved birth date can't be used stays with the applicant, who is told why (#135).
+      const blocked = request.fields.some(field => !Object.hasOwn(values, field) && blockedByBirthDate(profile, field, { today: now }));
       touch();
-      return { values, accessRevision };
+      return { values, accessRevision, ...(blocked ? { reason: 'birthDate' } : {}) };
     }
     if (request.type === 'saveFields') return saveAnswers(request, context);
     if (request.type === 'recordProgress') {
@@ -451,7 +469,8 @@ if (nativeOrigin) {
     if (saved.length) throw publicError(`${listing(saved.map(fieldLabel))} ${saved.length === 1 ? 'is' : 'are'} already saved in My information. Change ${saved.length === 1 ? 'it' : 'them'} there.`);
     // A plain record of the profile with the answers filled in, checked as My information checks it.
     const filledIn = profile => Object.assign(Object.create(null), profile, answers);
-    const clean = validated(validateProfile, filledIn(current));
+    const now = today();
+    const clean = validated(validateProfile, filledIn(current), { today: now });
     if (fieldRequestPending) throw publicError('Another request is waiting for your approval.');
     fieldRequestPending = true;
     const generation = accessRevision;
@@ -471,7 +490,7 @@ if (nativeOrigin) {
       requireUnlocked();
       if (generation !== accessRevision || extensionId !== context.extensionId) throw publicError('SecondHand access changed. Try again.');
       accessRevision++;
-      await vault.update(data => { data.profile = validateProfile(filledIn(data.profile)); });
+      await vault.update(data => { data.profile = validateProfile(filledIn(data.profile), { today: now }); });
       accessRevision++;
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('secondhand:profile-changed', { fields });
       touch();
@@ -615,7 +634,7 @@ if (nativeOrigin) {
     cancelDocumentRead: requestId => documentReader.cancel(documentRequestId(requestId)),
     async saveProfile(profile) {
       requireUnlocked();
-      const clean = validated(validateProfile, profile);
+      const clean = validated(validateProfile, profile, { today: today() });
       accessRevision++;
       await vault.update(data => { data.profile = clean; });
       accessRevision++;
