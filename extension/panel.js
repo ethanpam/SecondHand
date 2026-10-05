@@ -765,8 +765,8 @@
     function startSummary() { if (!summaryStarted && summarizable()) summarize(false); }
     function renderSummary() {
       const readable = summarizable();
-      // Without Chrome's Summarizer the section is hidden behind one plain line.
-      const note = !readable ? null : summaries.supported() ? summaryNote : { message: { key: 'summary.missing' }, error: false };
+      // Without Chrome's Summarizer the section stays hidden and nothing is said.
+      const note = readable && summaries.supported() ? summaryNote : null;
       $('summary-note').hidden = !note;
       $('summary-note').textContent = note ? words(note.message) : '';
       $('summary-note').classList.toggle('error', Boolean(note?.error));
@@ -834,7 +834,7 @@
           const output = await summaries.outputLanguage(chosen, input);
           const availability = await summaries.availability(output, input);
           if (!current()) return;
-          if (availability === 'unavailable') return say({ key: 'summary.unavailable' });
+          if (availability === 'unavailable') return say(null);
           // Chrome downloads its model only from the applicant's click.
           if (availability !== 'available' && !click) { summaryDownload = true; return say({ key: 'summary.needsDownload' }); }
           const downloading = percent => say({ key: 'summary.downloading', params: { percent } });

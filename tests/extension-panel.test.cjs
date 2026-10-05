@@ -1396,14 +1396,14 @@ const points = view => [...view.get('summary-list').querySelectorAll('li')].map(
 const groups = view => [...view.get('summary-list').children].map(group => [group.querySelector('h3')?.textContent || '', [...group.querySelectorAll('li, p')].map(node => node.textContent)]);
 const kept = view => plainRequests(view.requests.filter(request => request.type === 'ui:keepSummary'));
 
-test('without the Summarizer API the side panel says so in one line, hides the section, and never reads the page', async t => {
+test('without the Summarizer API the side panel says nothing about it, hides the section, and never reads the page', async t => {
   const view = await panel(t, { pageText: { pages: [summaryPage] } });
   assert.equal(view.get('summary').hidden, true);
   assert.equal(view.get('summary-get').hidden, true);
-  assert.equal(view.get('summary-note').hidden, false);
-  assert.equal(view.get('summary-note').textContent, EN['summary.missing']);
+  assert.equal(view.get('summary-note').hidden, true);
+  assert.equal(view.get('summary-note').textContent, '');
   assert.equal(view.types().includes('ui:pageText'), false);
-  assert.equal((await panel(t, { language: 'es-ES' })).get('summary-note').textContent, spanish('summary.missing'));
+  assert.equal((await panel(t, { language: 'es-ES' })).get('summary-note').hidden, true);
   const elsewhere = await panel(t, { tab: { id: 7, url: 'chrome://newtab/' } });
   assert.equal(elsewhere.get('summary-note').hidden, true, 'nothing is said where there is no page to read');
 });
@@ -1434,13 +1434,15 @@ test('with Chrome’s model ready, the side panel lists the page’s key points 
   assert.equal(off.get('summary-note').hidden, true);
 });
 
-test('when Chrome can’t summarize here, the section is hidden behind one plain line; a page without words says nothing', async t => {
+test('when Chrome can’t summarize here, the section stays hidden and nothing is said; a page without words says nothing', async t => {
   const ai = summarizerStub({ availability: 'unavailable' });
   const view = await panel(t, { Summarizer: ai.Summarizer, pageText: { pages: [summaryPage] } });
   await settle();
+  assert.equal(ai.calls.availability.length, 1, 'Chrome was asked');
   assert.equal(view.get('summary').hidden, true);
-  assert.equal(view.get('summary-note').textContent, EN['summary.unavailable']);
-  assert.equal(view.get('summary-note').classList.contains('error'), false);
+  assert.equal(view.get('summary-get').hidden, true);
+  assert.equal(view.get('summary-note').hidden, true);
+  assert.equal(view.get('summary-note').textContent, '');
   assert.deepEqual(ai.calls.create, []);
   const empty = await panel(t, { Summarizer: summarizerStub().Summarizer, pageText: { pages: [] } });
   await settle();
