@@ -1,12 +1,12 @@
 :root{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#254b39;background:#fbfcf7;color-scheme:light;font-size:12px;font-synthesis:none}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}body{display:flex;flex-direction:column;background:#fbfcf7}button{font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}button:disabled{cursor:default;opacity:.48}button:focus-visible{outline:3px solid #d5b668;outline-offset:2px}p,h1,h2{margin:0}[hidden]{display:none!important}
 .brand{width:32px;height:32px;border-radius:30%;display:block;flex-shrink:0}
 /* On-page widget: an extension iframe the page cannot script. */
-body.launcher-surface{background:transparent}#launcher{width:100%;height:100%;display:flex;align-items:center;justify-content:center}#widget{width:max-content;max-width:272px;margin-inline-start:auto}#widget.outdated{width:100%}
+body.launcher-surface{background:transparent}#launcher{width:100%;height:100%;display:flex;align-items:center;justify-content:center}#widget{flex:none;width:max-content;max-width:272px;margin-inline-start:auto}#widget.outdated{width:100%}
 .widget{display:flex;flex-direction:column;justify-content:center;gap:4px;height:100%;padding:6px 8px;background:#28543f;color:#f5f8eb;border:1px solid #cddcc1;border-radius:14px}.widget .brand{width:30px;height:30px;flex:none}.widget-logo{display:flex;flex:none;padding:0;border:0;border-radius:9px;background:none;cursor:pointer}.widget-logo:focus-visible{outline:2px solid #f2d58d;outline-offset:2px}
 .widget-row{display:flex;align-items:center;gap:9px;min-width:0}.widget-row .widget-primary{padding:7px 16px}
 .widget-primary{background:#f5f8eb;color:#1f4432;border:0;border-radius:7px;padding:4px 13px;font-size:12px;font-weight:700;white-space:nowrap}.widget-primary:hover:enabled{background:#fff}
 .widget-link{background:none;border:0;padding:0;color:#d6e5c8;font-size:10px;text-decoration:underline;white-space:nowrap}
-#widget-text{font-size:10px;line-height:12px;color:#c7d8ba;min-width:0;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+#widget-text{font-size:10px;line-height:12px;color:#c7d8ba;min-width:0;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3}
 /* An outdated worker: only the reload steps, with room for all of them. */
 .widget.outdated .widget-row{display:none}.widget.outdated{padding:4px 8px}.widget.outdated #widget-text{-webkit-line-clamp:3}
 .pill{width:46px;height:46px;flex:none;padding:0;border:1px solid #cddcc1;border-radius:50%;background:#28543f;display:flex;align-items:center;justify-content:center}.pill .brand{width:30px;height:30px}
