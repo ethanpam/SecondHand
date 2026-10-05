@@ -503,7 +503,7 @@ test('on a page with no checklist, the side panel names each question Autofill l
   assert.deepEqual(rows.map(row => row.dataset.leftKey), ['f0:sh-4', 'f4:sh-3']);
   assert.equal(rows[0].querySelector('.checklist-label').textContent, 'Do you have a pet?');
   assert.equal(rows[0].querySelector('.checklist-detail').textContent, 'Needs your answer');
-  assert.equal(rows[0].getAttribute('aria-label'), 'Do you have a pet?: Needs your answer. Find it in the form.');
+  assert.equal(rows[0].getAttribute('aria-label'), 'Do you have a pet?: Needs your answer. Go to this question.');
   assert.equal(rows[1].querySelector('.checklist-label').textContent, 'A question with no label');
   assert.equal(view.get('panel-left').hidden, true, 'the rows are the way to each question');
   rows[0].click(); await tick();
@@ -554,7 +554,7 @@ test('after Autofill, a question whose answer isn’t saved says to type it in I
   await view.userClick('panel-autofill');
   assert.equal(detail('firstName'), 'No saved answer: type it in Iowa’s form');
   assert.equal(detail('middleName'), 'Optional, no saved answer');
-  assert.equal(view.row('firstName').getAttribute('aria-label'), 'First name: No saved answer: type it in Iowa’s form. Find it in Iowa’s form.');
+  assert.equal(view.row('firstName').getAttribute('aria-label'), 'First name: No saved answer: type it in Iowa’s form. Go to this question.');
   // Where the answer goes now is on the row; where to save it for next time is said once, above the list.
   assert.equal(view.get('checklist-note').hidden, false);
   assert.equal(view.get('checklist-note').textContent, 'No saved answer? Add it in the SecondHand app, under My information, to have it filled next time.');

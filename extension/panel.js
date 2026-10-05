@@ -544,7 +544,7 @@
           const status = t(item.done ? 'checklist.complete' : 'checklist.missing');
           const detail = document.createElement('span'); detail.className = 'checklist-detail'; detail.textContent = status;
           copy.append(label, detail);
-          button.setAttribute('aria-label', t('left.rowLabel', { label: item.label || t('left.unnamed'), status }));
+          button.setAttribute('aria-label', t('checklist.rowLabel', { label: item.label || t('left.unnamed'), status }));
           button.append(mark, copy);
           button.addEventListener('click', trusted(() => { if (!button.disabled) focusField(item.key); }));
           return button;
