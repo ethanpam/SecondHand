@@ -653,6 +653,13 @@ test('Privacy & backups names everything autofill fills or clicks today and keep
   assert.doesNotMatch(card, /—|passphrase|vault/i);
 });
 
+test('the document review card opens with the file name as its heading, with no line above it', async t => {
+  const view = await renderer(t);
+  const summary = view.window.document.querySelector('#document-review .document-summary > div');
+  assert.equal(summary.firstElementChild, view.get('document-name'));
+  assert.equal(summary.firstElementChild.tagName, 'H2');
+});
+
 test('the profile form saves household counts and household flags', async t => {
   const view = await renderer(t);
   view.window.document.querySelector('.nav-item[data-view="profile"]').click();
