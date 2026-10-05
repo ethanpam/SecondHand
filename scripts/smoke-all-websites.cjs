@@ -208,10 +208,24 @@ async function main() {
     assert.equal(await page.locator('#apt').inputValue(), '');
     assert.deepEqual((await calls('getFields')).filter(call => call.url === HOUSEHOLD).map(call => call.fields),
       [['householdChildren', 'householdCount:18-59', 'householdCount:60+', 'studentNameGrade', 'addressLine2']]);
+    // The side panel names the two questions Autofill left, in the form's own words; a row finds its box.
+    const leftRows = () => panel.evaluate(() => [...document.querySelectorAll('#left-list > *')].map(row => [row.querySelector('.checklist-label').textContent, row.querySelector('.checklist-detail').textContent]));
+    await expect.poll(() => panel.visible('#left-section'), { timeout: 15000 }).toBe(true);
+    assert.deepEqual((await leftRows()).sort(), [[HOUSEHOLD_QUESTIONS.apt, en('checklist.missing')], [HOUSEHOLD_QUESTIONS.guardian, en('checklist.missing')]].sort());
+    assert.equal(await panel.text('#left-summary'), en('checklist.left', { count: 2 }));
+    await panel.click(`#left-list > :nth-child(${(await leftRows()).findIndex(([label]) => label === HOUSEHOLD_QUESTIONS.guardian) + 1})`);
+    // On another site a question is scrolled to and outlined; the keyboard's focus is left where it was.
+    await expect.poll(() => page.evaluate(() => Boolean(document.getElementById('guardian').closest('[data-secondhand-attention]'))), { timeout: 15000 }).toBe(true);
+    assert.equal(await page.evaluate(() => Boolean(document.getElementById('apt').closest('[data-secondhand-attention]'))), false);
+    assert.equal(await page.locator('#guardian').inputValue(), '', 'finding a question writes nothing');
     await expect.poll(() => panel.visible('#save-section'), { timeout: 15000 }).toBe(true);
     await expect.poll(() => panel.text('#save-list')).toBe(`${HOUSEHOLD_QUESTIONS.apt}${en('save.answerFirst')}`);
     await page.locator('#apt').fill('Unit 5');
     await expect.poll(() => panel.visible('[data-save-id] button'), { timeout: 15000 }).toBe(true);
+    // The apartment now holds an answer, so its row is done and one question is left.
+    await expect.poll(async () => (await leftRows()).find(([label]) => label === HOUSEHOLD_QUESTIONS.apt)?.[1], { timeout: 15000 }).toBe(en('checklist.complete'));
+    assert.equal(await panel.text('#left-summary'), en('checklist.left', { count: 1 }));
+    assert.equal(await panel.evaluate(() => document.getElementById('left-section').textContent.includes('Unit 5')), false, 'the list never shows an answer');
     assert.equal(await panel.text('[data-save-id] button'), en('save.button'));
     assert.equal(await panel.evaluate(() => document.getElementById('save-section').textContent.includes('Unit 5')), false, 'the panel never shows the answer');
     assert.deepEqual(await worker.evaluate(() => globalThis.__desktop.saves), [], 'nothing is saved before the click');
@@ -223,7 +237,7 @@ async function main() {
     await expect.poll(() => panel.visible('#save-section'), { timeout: 15000 }).toBe(false);
     await page.waitForTimeout(1000);
     assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
-    console.log('#98: a pantry form’s household questions filled from the fictional household list (0-17, 18-59, 60+, and the student’s name and grade); the guardian stayed blank; the typed apartment was saved to My information after the Save click.');
+    console.log('#98: a pantry form’s household questions filled from the fictional household list (0-17, 18-59, 60+, and the student’s name and grade); the guardian stayed blank and the side panel named it and the apartment as left; the typed apartment was saved to My information after the Save click.');
 
     // A page whose only input is a search box gets no card.
     await page.goto(SEARCH, { waitUntil: 'domcontentloaded' });

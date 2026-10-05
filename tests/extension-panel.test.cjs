@@ -479,17 +479,70 @@ test('after Autofill, a link under the status goes to each question left in turn
   view.window.document.dispatchEvent(new view.window.Event('visibilitychange')); await settle();
   assert.equal(view.get('panel-left').hidden, true);
   assert.equal(view.get('checklist-summary').textContent, 'Nothing left for you');
-  // Another site has no checklist: the link goes to what Autofill reported.
+  // Another site has no checklist: what Autofill reported is listed by name instead, and each row is its own link.
   const site = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: siteDone });
   assert.equal(site.get('panel-left').hidden, true);
   await site.userClick('panel-autofill');
-  assert.equal(site.get('panel-left').hidden, false);
-  assert.equal(site.get('panel-left').textContent, 'Go to the next of the 2 questions left');
-  await site.userClick('panel-left');
-  assert.deepEqual(plainRequests(site.requests.findLast(request => request.type === 'ui:focusField')), { type: 'ui:focusField', key: 'f0:sh-4', tabId: SITE.id });
+  assert.equal(site.get('panel-left').hidden, true);
+  assert.equal(site.get('left-list').children.length, 2);
   const spanish = await panel(t, { language: 'es-ES' });
   await spanish.userClick('panel-autofill');
   assert.equal(spanish.get('panel-left').textContent, strings.text('es', 'panel.goToLeft', { count: 2 }));
+});
+
+test('on a page with no checklist, the side panel names each question Autofill left, and a row finds it', async t => {
+  const left = [{ key: 'f0:sh-4', label: '  Do you have a pet?  ' }, { key: 'f4:sh-3', label: '' }, { key: 'f9:sh-9', label: 'Not in needYou' }, { key: 'f0:sh-4' }, 'f0:sh-4'];
+  const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: { ...siteDone, left } });
+  assert.equal(view.get('left-section').hidden, true);
+  await view.userClick('panel-autofill');
+  assert.equal(view.get('left-section').hidden, false);
+  assert.equal(view.get('left-title').textContent, 'Left for you');
+  assert.equal(view.get('left-summary').textContent, '2 left');
+  const rows = [...view.get('left-list').children];
+  // One row per key the result lists as left, in its order; a name for a key it doesn't list is ignored.
+  assert.deepEqual(rows.map(row => row.dataset.leftKey), ['f0:sh-4', 'f4:sh-3']);
+  assert.equal(rows[0].querySelector('.checklist-label').textContent, 'Do you have a pet?');
+  assert.equal(rows[0].querySelector('.checklist-detail').textContent, 'Needs your answer');
+  assert.equal(rows[0].getAttribute('aria-label'), 'Do you have a pet?: Needs your answer. Find it in the form.');
+  assert.equal(rows[1].querySelector('.checklist-label').textContent, 'A question with no label');
+  assert.equal(view.get('panel-left').hidden, true, 'the rows are the way to each question');
+  rows[0].click(); await tick();
+  assert.equal(view.types().includes('ui:focusField'), false);
+  await view.userClick(rows[1]);
+  assert.deepEqual(plainRequests(view.requests.findLast(request => request.type === 'ui:focusField')), { type: 'ui:focusField', key: 'f4:sh-3', tabId: SITE.id });
+  // A question the page reports as answered since (one it may save) turns to done, and the count follows.
+  const answering = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: { ...siteDone, left: [{ key: 'f0:sh-4', label: 'Apartment number' }, { key: 'f4:sh-3', label: 'Guardian name' }] },
+    savable: [{ id: 'f0:sh-4', label: 'Apartment number', answered: false }] });
+  await answering.userClick('panel-autofill');
+  assert.equal(answering.get('left-summary').textContent, '2 left');
+  answering.state.savable[0].answered = true;
+  answering.window.document.dispatchEvent(new answering.window.Event('visibilitychange')); await settle();
+  const apartment = answering.get('left-list').children[0];
+  assert.equal(apartment.classList.contains('complete'), true);
+  assert.equal(apartment.querySelector('.checklist-detail').textContent, 'Done');
+  assert.equal(apartment.querySelectorAll('.checklist-mark svg').length, 1);
+  assert.equal(answering.get('left-list').children[1].classList.contains('missing'), true);
+  assert.equal(answering.get('left-summary').textContent, '1 left');
+  // The page's words are shown as text, never as markup.
+  const markup = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: { ...siteDone, left: [{ key: 'f0:sh-4', label: '<img src=x onerror=alert(1)>' }] } });
+  await markup.userClick('panel-autofill');
+  assert.equal(markup.get('left-list').querySelector('img'), null);
+  assert.equal(markup.get('left-list').children[0].querySelector('.checklist-label').textContent, '<img src=x onerror=alert(1)>');
+  // The list follows the language picker, and leaves with the tab.
+  view.get('language').value = 'es';
+  view.get('language').dispatchEvent(new view.window.Event('change'));
+  await settle();
+  assert.equal(view.get('left-title').textContent, strings.text('es', 'left.title'));
+  assert.equal(view.get('left-list').children[0].querySelector('.checklist-detail').textContent, spanish('checklist.missing'));
+  view.tabs.current = { id: 8, url: 'http://example.invalid/' };
+  view.listeners.activated({ tabId: 8 }); await settle();
+  assert.equal(view.get('left-section').hidden, true);
+  assert.equal(view.get('left-list').children.length, 0);
+  // Iowa's checklist already names its questions: no second list there.
+  const iowa = await panel(t, { autofill: { ...doneResult, left: [{ key: 'firstName', label: 'First name' }] } });
+  await iowa.userClick('panel-autofill');
+  assert.equal(iowa.get('left-section').hidden, true);
+  assert.equal(iowa.get('panel-left').hidden, false);
 });
 
 test('after Autofill, a question whose answer isn’t saved says to type it in Iowa’s form, and one note points to My information', async t => {

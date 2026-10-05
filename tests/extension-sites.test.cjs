@@ -374,8 +374,10 @@ test('autofill on an approved site asks for the planned keys once and fills with
   assert.deepEqual(fill.assignments, [{ id: 'sh-1-0', key: 'fullName', guessed: false }, { id: 'sh-1-1', key: 'zip', guessed: false }]);
   assert.deepEqual(fill.values, { fullName: 'Synthetic private first Synthetic private last', zip: '50309' }, 'only the values being placed reach the page');
   assert.deepEqual(plain(response.data), { state: 'done', filled: 2, guessed: 0, needYou: [w.page.idOf('pickup'), w.page.idOf('size')].map(id => `f0:${id}`),
+    left: [{ key: `f0:${w.page.idOf('pickup')}`, label: 'Preferred pickup day' }, { key: `f0:${w.page.idOf('size')}`, label: 'size' }],
     message: 'Filled 2 · 2 left for you. Check your answers before you submit.', messageKey: 'result.siteFilledNeedYou', messageParams: { count: 2, needYou: 2 }, pageKey: 'general' });
   assert.deepEqual(plain(response.data.needYou), ['f0:sh-2-1', 'f0:sh-2-0'], 'need-you ids come from the latest plan');
+  assert.deepEqual(plain(response.data.left.map(item => item.key)), plain(response.data.needYou), 'and each is named, in the same order');
   assert.doesNotMatch(JSON.stringify(response), /Synthetic private/);
 
   const state = plain((await w.panel({ type: 'ui:pageState' })).data);

@@ -932,7 +932,8 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       for (const [id, option] of prepared.mapAnswers(answers.entries)) addLaya(id, { option });
     }
     let filled = 0, placedByLaya = 0;
-    const needYou = [], savable = [];
+    // `left` names what needYou lists, for the side panel: each key with the page's own label for its question.
+    const needYou = [], left = [], savable = [];
     for (const frame of initial) {
       const { frameId } = frame;
       let { plan, planned } = frame;
@@ -972,7 +973,12 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       }
       const missing = [...plan.unmatched, ...plan.matched].map(field => field.id);
       for (const [key, id] of refused) if (!missing.includes(id) && !plan.matched.some(field => field.key === key)) missing.push(id);
-      needYou.push(...missing.map(id => prefix ? `f${frameId}:${id}` : id));
+      const labels = new Map([...plan.unmatched, ...plan.matched].map(field => [field.id, typeof field.label === 'string' ? field.label.trim().slice(0, LABEL_LIMIT) : '']));
+      for (const id of missing) {
+        const key = prefix ? `f${frameId}:${id}` : id;
+        needYou.push(key);
+        left.push({ key, label: labels.get(id) || '' });
+      }
       // Questions the rules matched to a saved field with no saved answer: the side panel offers to save the applicant's own (#98).
       for (const field of plan.matched) {
         if (!SecondHandGeneric.SAVE_KEYS.includes(field.key) || !keys.includes(field.key) || (typeof values?.[field.key] === 'string' && values[field.key])) continue;
@@ -980,7 +986,7 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
           label: typeof field.label === 'string' ? field.label.trim().slice(0, LABEL_LIMIT) : '' });
       }
     }
-    return { filled, needYou, savable, laya: placedByLaya, reason: prepared.reason };
+    return { filled, needYou, left, savable, laya: placedByLaya, reason: prepared.reason };
   } finally { values = null; questionTranslation.forget(); }
 }
 
@@ -1011,11 +1017,11 @@ async function fillSiteOnce(tabId, url, guesses) {
       const hosts = pending.map(frame => new URL(frame.origin).hostname).join(', ');
       return siteResult('waiting', say('worker.formInsideFrames', { hosts }));
     }
-    const { needYou, savable, laya: suggested, reason } = await fillPlan(tabId, url, frames, { prefix: true, laya });
+    const { needYou, left, savable, laya: suggested, reason } = await fillPlan(tabId, url, frames, { prefix: true, laya });
     keepSavable(tabId, url, siteOrigin(url), savable);
     const tally = await tallySite(tabId, frames);
     const filled = tally.rule + tally.guess;
-    return siteResult('done', siteSummary(filled, tally.guess, needYou, tally.next, suggested, reason), { filled, guessed: tally.guess, needYou, ...(suggested ? { laya: suggested } : {}) });
+    return siteResult('done', siteSummary(filled, tally.guess, needYou, tally.next, suggested, reason), { filled, guessed: tally.guess, needYou, left, ...(suggested ? { laya: suggested } : {}) });
   } catch (error) {
     const { state, ...message } = failed(error);
     return siteResult(state, message);
@@ -1026,9 +1032,9 @@ async function fillSiteOnce(tabId, url, guesses) {
 async function fillIowaGeneral(tabId, state, plan, guard, laya = null) {
   const { pageKey } = state.page;
   try {
-    const { filled, needYou, savable, laya: suggested, reason } = await fillPlan(tabId, state.url, [{ frameId: 0, plan }], { guard, laya });
+    const { filled, needYou, left, savable, laya: suggested, reason } = await fillPlan(tabId, state.url, [{ frameId: 0, plan }], { guard, laya });
     keepSavable(tabId, state.url, '', savable);
-    return { state: 'done', filled, needYou, ...say('result.thenTodo', { summary: withReason(withLaya(filledSummary(filled, needYou), suggested), reason), todo: { key: GENERAL_TODO, params: {} } }),
+    return { state: 'done', filled, needYou, left, ...say('result.thenTodo', { summary: withReason(withLaya(filledSummary(filled, needYou), suggested), reason), todo: { key: GENERAL_TODO, params: {} } }),
       todo: english(GENERAL_TODO), todoKey: GENERAL_TODO, todoParams: {}, pageKey, ...(suggested ? { laya: suggested } : {}) };
   } catch (error) {
     return { ...failed(error), filled: 0, needYou: [], pageKey };

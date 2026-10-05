@@ -332,6 +332,9 @@
     // The questions Autofill left for the reader, and which of them the link under the status goes to next.
     let left = [];
     let leftCursor = 0;
+    // On a page with no checklist, those questions by name, as the worker read them from the page.
+    let named = [];
+    let namedSignature = '';
     let site = null;
     let page = null;
     // The questions the last Autofill on this page could have filled but had no saved answer for.
@@ -452,7 +455,8 @@
       $('laya-status').hidden = !laya;
       $('laya-status').textContent = laya;
       $('panel-autofill').textContent = t(autopilot ? 'panel.stopAutofill' : 'panel.autofill');
-      $('panel-left').hidden = !target || !left.length;
+      // Where the questions left are listed by name, each row goes to its own.
+      $('panel-left').hidden = !target || !left.length || named.length > 0;
       $('panel-left').disabled = working;
       $('panel-left').textContent = t('panel.goToLeft', { count: left.length || 1 });
       $('panel-autofill').disabled = !target || (!fillable && !autopilot) || working;
@@ -462,12 +466,13 @@
       renderSummary();
     }
     function clearPage() {
-      fillable = false; autopilot = false; told = false; ran = false; left = []; leftCursor = 0; site = null; page = null; notSaved = []; checklistSignature = '';
+      fillable = false; autopilot = false; told = false; ran = false; left = []; leftCursor = 0; named = []; site = null; page = null; notSaved = []; checklistSignature = '';
       savable = []; savableSignature = '';
       $('page-checklist').replaceChildren();
       $('checklist-section').hidden = true;
       $('save-list').replaceChildren();
       $('save-section').hidden = true;
+      renderLeft();
       resetQuestions();
       resetSummary();
     }
@@ -516,6 +521,31 @@
       $('checklist-summary').textContent = !ran ? t('questions.count', { count: entries.length }) : left ? t('checklist.left', { count: left }) : t('checklist.noneLeft');
       $('checklist-note').hidden = !(ran && entries.some(item => item.status !== 'complete' && notSaved.includes(item.key)));
       $('checklist-section').hidden = !entries.length;
+    }
+    // A page with no checklist: one row per question Autofill left, in the page's own words. A row finds its question.
+    function renderLeft() {
+      const signature = JSON.stringify([language, named]);
+      if (signature !== namedSignature) {
+        namedSignature = signature;
+        $('left-list').replaceChildren(...named.map(item => {
+          const button = document.createElement('button');
+          button.type = 'button'; button.className = `checklist-item ${item.done ? 'complete' : 'missing'}`; button.dataset.leftKey = item.key;
+          const mark = document.createElement('span'); mark.className = 'checklist-mark'; mark.setAttribute('aria-hidden', 'true');
+          if (item.done) mark.append(checkMark());
+          const copy = document.createElement('span'); copy.className = 'checklist-copy';
+          const label = document.createElement('span'); label.className = 'checklist-label'; label.dir = 'auto'; label.textContent = item.label || t('left.unnamed');
+          const status = t(item.done ? 'checklist.complete' : 'checklist.missing');
+          const detail = document.createElement('span'); detail.className = 'checklist-detail'; detail.textContent = status;
+          copy.append(label, detail);
+          button.setAttribute('aria-label', t('left.rowLabel', { label: item.label || t('left.unnamed'), status }));
+          button.append(mark, copy);
+          button.addEventListener('click', trusted(() => { if (!button.disabled) focusField(item.key); }));
+          return button;
+        }));
+        const open = named.filter(item => !item.done).length;
+        $('left-summary').textContent = open ? t('checklist.left', { count: open }) : named.length ? t('checklist.noneLeft') : '';
+      }
+      $('left-section').hidden = !named.length;
     }
     // One row per question with no saved answer: its own words, then Save to My information once the page holds an answer.
     function renderSaves() {
@@ -567,6 +597,12 @@
       const listed = Array.isArray(page.checklist) ? page.checklist.filter(item => item && fieldKeys([item.key]).length) : [];
       const open = !ran ? [] : listed.length ? listed.filter(item => (item.required && item.status === 'missing') || item.status === 'manual').map(item => item.key) : fieldKeys(result.needYou);
       if (open.join() !== left.join()) { left = open; leftCursor = 0; }
+      // Only names for keys the result itself lists are read, and only where no checklist shows them already.
+      const names = new Map((Array.isArray(result?.left) ? result.left : []).filter(item => typeof item?.key === 'string' && typeof item.label === 'string').map(item => [item.key, fixedText(item.label.trim(), 200)]));
+      // The page says which of the questions it may save now hold an answer: those rows are done.
+      const answered = new Set(savable.filter(item => item.answered).map(item => item.id));
+      named = ran && !listed.length ? left.map(key => ({ key, label: names.get(key) || '', done: answered.has(key) })) : [];
+      renderLeft();
       const loading = target?.status === 'loading';
       if (site?.enabled && !site.ready) show({ key: loading ? 'panel.waitingLoad' : 'panel.reloadToRead' });
       else if (reported(result)) show(fromResult(result), result.state === 'error');
@@ -1008,7 +1044,7 @@
     function relabel() {
       applyStatic();
       $('language').value = language;
-      if (page) { renderChecklist(); renderSaves(); }
+      if (page) { renderChecklist(); renderLeft(); renderSaves(); }
       renderStatus();
       renderDesktop();
       resetQuestions();

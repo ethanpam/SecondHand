@@ -129,6 +129,9 @@
     'save.saving': 'Confirm in the SecondHand app to save your answer.',
     'save.saved': 'Saved to My information. SecondHand can fill it next time.',
     'checklist.rowLabel': '{label}: {status}. Find it in Iowa’s form.',
+    'left.title': 'Left for you',
+    'left.unnamed': 'A question with no label',
+    'left.rowLabel': '{label}: {status}. Find it in the form.',
 
     'questions.show': 'Show questions in English',
     'questions.refresh': 'Update the question list',
@@ -461,6 +464,9 @@
     'save.saving': 'Confirme en la aplicación SecondHand para guardar su respuesta.',
     'save.saved': 'Se guardó en “My information”. SecondHand podrá llenarla la próxima vez.',
     'checklist.rowLabel': '{label}: {status}. Búsquelo en el formulario de Iowa.',
+    'left.title': 'Por contestar',
+    'left.unnamed': 'Una pregunta sin etiqueta',
+    'left.rowLabel': '{label}: {status}. Búsquelo en el formulario.',
 
     'questions.show': 'Ver las preguntas en español',
     'questions.refresh': 'Actualizar la lista de preguntas',
@@ -790,6 +796,9 @@
     'save.saving': 'Hãy xác nhận trong ứng dụng SecondHand để lưu câu trả lời.',
     'save.saved': 'Đã lưu vào “My information”. Lần sau SecondHand có thể điền câu này.',
     'checklist.rowLabel': '{label}: {status}. Hãy tìm nó trong biểu mẫu của Iowa.',
+    'left.title': 'Còn lại cho bạn',
+    'left.unnamed': 'Một câu hỏi không có nhãn',
+    'left.rowLabel': '{label}: {status}. Hãy tìm nó trong biểu mẫu.',
 
     'questions.show': 'Xem các câu hỏi bằng tiếng Việt',
     'questions.refresh': 'Cập nhật danh sách câu hỏi',
@@ -1120,6 +1129,9 @@
     'save.saving': '请在 SecondHand 应用中确认以保存您的答案。',
     'save.saved': '已保存到“My information”。下次 SecondHand 可以填写它。',
     'checklist.rowLabel': '{label}：{status}。请在爱荷华州的表格中找到它。',
+    'left.title': '留给您的问题',
+    'left.unnamed': '没有标签的问题',
+    'left.rowLabel': '{label}：{status}。请在表格中找到它。',
 
     'questions.show': '用中文显示问题',
     'questions.refresh': '更新问题列表',
@@ -1450,6 +1462,9 @@
     'save.saving': 'Confirmez dans l’application SecondHand pour enregistrer votre réponse.',
     'save.saved': 'Enregistré dans « My information ». SecondHand pourra le remplir la prochaine fois.',
     'checklist.rowLabel': '{label} : {status}. Trouvez-le dans le formulaire de l’Iowa.',
+    'left.title': 'Il vous reste',
+    'left.unnamed': 'Une question sans libellé',
+    'left.rowLabel': '{label} : {status}. Trouvez-le dans le formulaire.',
 
     'questions.show': 'Afficher les questions en français',
     'questions.refresh': 'Mettre à jour la liste des questions',
@@ -1780,6 +1795,9 @@
     'save.saving': 'أكّد في تطبيق SecondHand لحفظ إجابتك.',
     'save.saved': 'تم الحفظ في “My information”. يمكن لـ SecondHand تعبئته في المرة القادمة.',
     'checklist.rowLabel': '{label}: {status}. ابحث عنه في نموذج أيوا.',
+    'left.title': 'المتبقي لك',
+    'left.unnamed': 'سؤال بلا تسمية',
+    'left.rowLabel': '{label}: {status}. ابحث عنه في النموذج.',
 
     'questions.show': 'عرض الأسئلة بالعربية',
     'questions.refresh': 'تحديث قائمة الأسئلة',
