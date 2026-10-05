@@ -96,6 +96,9 @@ async function sizeOf(file) {
   catch (error) { if (error.code === 'ENOENT') return null; throw error; }
 }
 
+// Settles once `stream` has closed its file, after any open or write it started has finished.
+const closed = stream => stream.closed ? Promise.resolve() : new Promise(resolve => stream.once('close', resolve));
+
 async function sha256Of(file, end) {
   const hash = crypto.createHash('sha256');
   for await (const chunk of createReadStream(file, end === undefined ? {} : { end })) hash.update(chunk);
@@ -273,6 +276,7 @@ class ModelStore {
     }
     let bytes = offset;
     const store = this;
+    const writer = createWriteStream(partial, { flags: offset ? 'a' : 'w' });
     try {
       await pipeline(response, async function* (source) {
         for await (const chunk of source) {
@@ -282,8 +286,12 @@ class ModelStore {
           store.received += chunk.length;
           yield chunk;
         }
-      }, createWriteStream(partial, { flags: offset ? 'a' : 'w' }), { signal });
+      }, writer, { signal });
     } catch (error) {
+      // A failed pipeline can settle before its file has closed, even before it has opened. The
+      // partial file is left alone until then: an open after its deletion would bring it back, and
+      // a write that lands after a pause would follow the bytes a resumed download appends.
+      await closed(writer);
       if (signal.aborted) throw error; // cancelled: keep the partial file to resume from
       await fs.rm(partial, { force: true });
       if (error instanceof DownloadError) throw error;
