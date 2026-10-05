@@ -634,7 +634,7 @@ async function main() {
     await resetTo(addressUrl);
     await expect(page.locator('#homeAddressIndex1')).toBeChecked();
     await expect(enteredCounty).toBeVisible();
-    await expect.poll(() => panel.text('[data-key="addressReview"]')).toContain('Needs you');
+    await expect.poll(() => panel.text('[data-key="addressReview"]')).toContain('Not filled yet');
     await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
     await panel.click('#panel-autofill');
     await expect.poll(() => page.url(), { timeout: 20000 }).toBe(documentManualUrl);
@@ -756,13 +756,16 @@ async function main() {
     }
     console.log('Tell Us More (dynamicQuestionsStart), every answer saved: all ten questions and the revealed card question filled; the SSN box and Save and Continue left to the applicant.');
 
-    // With nothing saved, nothing is filled and each row points to My information.
+    // With nothing saved, nothing is filled; each row says to type the answer in Iowa's form, and one note above
+    // the list says where to save answers for next time.
     await resetTo(startDetailsUrl, { profile: Object.fromEntries(startFields.map(field => [field, ''])) });
     await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
     await panel.click('#panel-autofill');
     for (const key of startRows.filter(key => key !== 'ssnCardName')) {
-      await expect.poll(() => panel.text(`[data-key="${key}"]`), { timeout: 20000 }).toContain('Not saved. Add it in My information');
+      await expect.poll(() => panel.text(`[data-key="${key}"]`), { timeout: 20000 }).toContain('No saved answer: type it in Iowa’s form');
     }
+    assert.equal(await panel.visible('#checklist-note'), true);
+    assert.match(await panel.text('#checklist-note'), /Add it in the SecondHand app, under My information/);
     await page.waitForTimeout(1800);
     assert.deepEqual(await startChecked(), []);
     await expect(page.locator(`[id="${tellUsMore.DOB_ID}"]`)).toHaveValue('');
@@ -770,7 +773,7 @@ async function main() {
     assert.deepEqual(await startBoxes(), ['', '', '', '']);
     assert.deepEqual(await page.evaluate(() => window.__startQa), { nextClicks: 0, shown: [] });
     assert.deepEqual((await calls('getFields')).map(call => call.fields), [startFields]);
-    console.log('Tell Us More (dynamicQuestionsStart), nothing saved: nothing filled; every row says it is not saved and points to My information.');
+    console.log('Tell Us More (dynamicQuestionsStart), nothing saved: nothing filled; every row says to type the answer in Iowa’s form, and a note points to My information.');
 
     assert.deepEqual(errors, []);
     console.log('Widget: intro pages show a small pill. All browser fixtures/data were synthetic; native desktop responses were DevTools stubs.');

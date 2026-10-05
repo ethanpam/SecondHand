@@ -52,6 +52,7 @@ main{padding:16px 16px 0}
 /* A ring for a row that waits, heavier when it waits for the reader, and the website's check for one that is done. */
 .checklist-mark{display:flex;align-items:center;justify-content:center;flex-shrink:0;width:20px;height:20px;border:1.5px solid var(--border);border-radius:50%}.checklist-mark svg{width:12px;height:12px;fill:none;stroke:#fff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.checklist-item.complete .checklist-mark{background:var(--ring);border-color:var(--ring)}.checklist-item.missing .checklist-mark,.checklist-item.manual .checklist-mark{border:2px solid var(--foreground)}
 .checklist-copy{flex:1;min-width:0}.checklist-label{display:block;font-size:14px;line-height:1.4}.checklist-detail{display:block;font-size:12px;color:var(--muted-foreground);margin-top:2px}.checklist-item.complete .checklist-label,.checklist-item.optional .checklist-label{color:var(--muted-foreground)}.checklist-item.missing .checklist-label,.checklist-item.manual .checklist-label,.checklist-item.missing .checklist-detail,.checklist-item.manual .checklist-detail{color:var(--foreground);font-weight:500}
+.checklist-section>.note{margin:0 0 8px}
 footer{border-top:1px solid var(--border);margin-top:12px;padding:12px 0 16px}footer p{font-size:12px;color:var(--muted-foreground)}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 /* The page's questions in the applicant's language. */

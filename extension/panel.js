@@ -327,6 +327,8 @@
     let autopilot = false;
     // Autofill has reported on this tab: its result is in the status line.
     let told = false;
+    // Autofill has run on the page on screen: until then a required question is only not filled yet.
+    let ran = false;
     let site = null;
     let page = null;
     // The questions the last Autofill on this page could have filled but had no saved answer for.
@@ -454,7 +456,7 @@
       renderSummary();
     }
     function clearPage() {
-      fillable = false; autopilot = false; told = false; site = null; page = null; notSaved = []; checklistSignature = '';
+      fillable = false; autopilot = false; told = false; ran = false; site = null; page = null; notSaved = []; checklistSignature = '';
       savable = []; savableSignature = '';
       $('page-checklist').replaceChildren();
       $('checklist-section').hidden = true;
@@ -480,19 +482,22 @@
     }
     function renderChecklist() {
       const entries = Array.isArray(page.checklist) ? page.checklist.filter(item => item && fieldKeys([item.key]).length && typeof item.label === 'string' && Object.hasOwn(STATUS, item.status)).slice(0, 80) : [];
-      const signature = JSON.stringify([language, entries, notSaved]);
+      const signature = JSON.stringify([language, entries, notSaved, ran]);
       if (signature === checklistSignature) return;
       checklistSignature = signature;
       $('page-checklist').replaceChildren();
       for (const item of entries) {
         const button = document.createElement('button');
-        button.type = 'button'; button.className = `checklist-item ${item.status}`; button.dataset.key = item.key;
+        // A required question waits for Autofill before it waits for the reader.
+        const pending = item.status === 'missing' && !ran;
+        button.type = 'button'; button.className = `checklist-item ${pending ? 'pending' : item.status}`; button.dataset.key = item.key;
         const mark = document.createElement('span'); mark.className = 'checklist-mark'; mark.setAttribute('aria-hidden', 'true');
         if (item.status === 'complete') mark.append(checkMark());
         const copy = document.createElement('span'); copy.className = 'checklist-copy';
         const text = words({ key: item.labelKey, params: item.labelParams, text: item.label }, 100);
         const label = document.createElement('span'); label.className = 'checklist-label'; label.textContent = text;
-        const status = t(item.status !== 'complete' && notSaved.includes(item.key) ? 'checklist.notSaved' : STATUS[item.status]);
+        const unsaved = ran && item.status !== 'complete' && notSaved.includes(item.key);
+        const status = t(pending ? 'checklist.pending' : unsaved ? (item.status === 'optional' ? 'checklist.notSavedOptional' : 'checklist.notSaved') : STATUS[item.status]);
         const detail = document.createElement('span'); detail.className = 'checklist-detail'; detail.textContent = status;
         copy.append(label, detail);
         button.setAttribute('aria-label', t('checklist.rowLabel', { label: text, status }));
@@ -500,8 +505,10 @@
         button.addEventListener('click', trusted(() => { if (!button.disabled) focusField(item.key); }));
         $('page-checklist').append(button);
       }
-      const done = entries.filter(item => item.status === 'complete').length;
-      $('checklist-summary').textContent = t('checklist.summary', { done, total: entries.length });
+      // How many questions, then how many are left for the reader: the same count as the status line's and the widget's.
+      const left = entries.filter(item => (item.required && item.status === 'missing') || item.status === 'manual').length;
+      $('checklist-summary').textContent = !ran ? t('questions.count', { count: entries.length }) : left ? t('checklist.left', { count: left }) : t('checklist.noneLeft');
+      $('checklist-note').hidden = !(ran && entries.some(item => item.status !== 'complete' && notSaved.includes(item.key)));
       $('checklist-section').hidden = !entries.length;
     }
     // One row per question with no saved answer: its own words, then Save to My information once the page holds an answer.
@@ -544,6 +551,7 @@
       autopilot = Boolean(state.autopilot);
       const result = state.result;
       told = reported(result);
+      ran = Boolean(result) && result.pageKey === page.pageKey && ['done', 'waiting', 'continuing'].includes(result.state);
       notSaved = fieldKeys(result?.notSaved);
       savable = (Array.isArray(state.savable) ? state.savable : []).filter(item => fieldKeys([item?.id]).length && typeof item.label === 'string' && typeof item.answered === 'boolean')
         .slice(0, 40).map(({ id, label, answered }) => ({ id, label, answered }));
