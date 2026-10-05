@@ -325,6 +325,8 @@
     let nowhere = true;
     let fillable = false;
     let autopilot = false;
+    // Autofill has reported on this tab: its result is in the status line.
+    let told = false;
     let site = null;
     let page = null;
     // The questions the last Autofill on this page could have filled but had no saved answer for.
@@ -424,7 +426,8 @@
     }
     function controls() {
       const off = Boolean(target && site && !site.enabled);
-      $('iowa-policy').hidden = !target || Boolean(site);
+      // What Autofill will do on Iowa's form, said before it is clicked. Once it has run, the status line says what it did.
+      $('iowa-policy').hidden = !target || Boolean(site) || autopilot || told;
       const pending = site?.enabled && site.ready ? site.frames.filter(frame => !frame.enabled) : [];
       $('frames-enable').hidden = !target || !pending.length;
       $('frames-enable').disabled = working;
@@ -451,7 +454,7 @@
       renderSummary();
     }
     function clearPage() {
-      fillable = false; autopilot = false; site = null; page = null; notSaved = []; checklistSignature = '';
+      fillable = false; autopilot = false; told = false; site = null; page = null; notSaved = []; checklistSignature = '';
       savable = []; savableSignature = '';
       $('page-checklist').replaceChildren();
       $('checklist-section').hidden = true;
@@ -540,6 +543,7 @@
       fillable = site ? site.enabled && site.ready : page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo);
       autopilot = Boolean(state.autopilot);
       const result = state.result;
+      told = reported(result);
       notSaved = fieldKeys(result?.notSaved);
       savable = (Array.isArray(state.savable) ? state.savable : []).filter(item => fieldKeys([item?.id]).length && typeof item.label === 'string' && typeof item.answered === 'boolean')
         .slice(0, 40).map(({ id, label, answered }) => ({ id, label, answered }));
@@ -549,7 +553,8 @@
       if (site?.enabled && !site.ready) show({ key: loading ? 'panel.waitingLoad' : 'panel.reloadToRead' });
       else if (reported(result)) show(fromResult(result), result.state === 'error');
       else if (site && !site.enabled) show({ key: 'panel.siteOff', params: { host: hostOf(site.origin) } });
-      else if (site || fillable) show(null);
+      // An information-only page of Iowa's says there is nothing to fill before Autofill is clicked.
+      else if (site || (fillable && page.kind !== 'info')) show(null);
       else if (page.reason) show({ key: page.reasonKey, params: page.reasonParams, text: page.reason });
       else show({ key: 'panel.nothingToFill' });
       controls();

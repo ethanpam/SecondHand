@@ -1103,10 +1103,22 @@ test('Iowa widget and sidebar disclose first-address selection before Autofill; 
   const widget = await panel(t, { launcher: true });
   assert.match(widget.get('widget-text').textContent, /goes to the next by itself\. Picks Iowa’s first suggested home address/);
   assert.equal(widget.get('widget-text').classList.contains('visually-hidden'), false, 'the widget shows it, not only its tooltip');
-  assert.match(widget.get('autofill').title, /moves on when it is complete, and picks Iowa’s first suggested home address\. Review that address before you submit/);
+  assert.match(widget.get('autofill').title, /goes to the next one by itself\. On the address step it picks Iowa’s first suggested home address\. Check that address before you submit/);
   const sidebar = await panel(t);
   assert.equal(sidebar.get('iowa-policy').hidden, false);
-  assert.match(sidebar.get('iowa-policy').textContent, /moves on when a page is complete and picks Iowa’s first suggested home address\. Review that address before you submit/);
+  assert.match(sidebar.get('iowa-policy').textContent, /^Autofill fills each page and goes to the next one by itself\. On the address step it picks Iowa’s first suggested home address\. Check that address before you submit\.$/);
+  assert.equal(sidebar.get('iowa-policy').classList.contains('note'), false, 'it is not small print');
+  // Once Autofill has run, the status line says what it did and the note is not repeated under it.
+  await sidebar.userClick('panel-autofill');
+  assert.equal(sidebar.get('iowa-policy').hidden, true);
+  assert.match(sidebar.get('status').textContent, /^Filled 3/);
+  const running = await panel(t, { autopilot: true, result: waitingResult });
+  assert.equal(running.get('iowa-policy').hidden, true);
+  // An information-only page says there is nothing to fill before Autofill is clicked, above the note.
+  const info = await panel(t, { pageState: state => ({ ...structuredClone(state), page: { kind: 'info', pageKey: 'iowa-instructions', reason: 'Nothing to fill on this page.', reasonKey: 'iowa.infoOnly', reasonParams: {}, checklist: [] } }) });
+  assert.equal(info.get('status').textContent, 'Nothing to fill on this page.');
+  assert.equal(info.get('iowa-policy').hidden, false);
+  assert.equal(info.get('panel-autofill').disabled, false);
   const other = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true } });
   assert.equal(other.get('iowa-policy').hidden, true);
   const otherWidget = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true } });
