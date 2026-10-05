@@ -1886,7 +1886,16 @@ test('the side panel offers all websites on a tab it can’t read, with the Iowa
   assert.equal(view.get('all-sites-enable').hidden, false);
   assert.equal(view.get('all-sites-enable').textContent, 'Use SecondHand on all websites');
   assert.equal(view.get('all-sites-disable').hidden, true);
-  assert.match(view.get('status').textContent, /^Open Iowa’s SNAP application in this tab/);
+  assert.match(view.get('status').textContent, /^Open Iowa’s SNAP application and your checklist appears here/);
+  // Under it, a link to the one address SecondHand's Iowa script runs on. It opens beside the page the reader has.
+  const link = view.get('open-iowa');
+  assert.equal(link.hidden, false);
+  assert.equal(link.textContent, 'Open Iowa’s SNAP application');
+  assert.equal(link.getAttribute('href'), adapter.PORTAL);
+  assert.equal(link.getAttribute('target'), '_blank');
+  assert.equal(link.getAttribute('rel'), 'noopener noreferrer');
+  assert.equal((await panel(t)).get('open-iowa').hidden, true, 'not on Iowa’s own form');
+  assert.equal((await panel(t, { build: 'older-build' })).get('open-iowa').hidden, true, 'nor under the update notice');
   view.get('all-sites-enable').click(); await tick();
   assert.equal(view.types().includes('permissions.request'), false);
   assert.equal(view.types().includes('ui:enableAllSites'), false);

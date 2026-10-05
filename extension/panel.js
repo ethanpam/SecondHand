@@ -405,8 +405,9 @@
       $('status').textContent = shown.message ? words(shown.message, 650) : '';
       $('status').classList.toggle('error', shown.error);
     }
-    // On a tab SecondHand can't read: where to go.
-    const elsewhere = () => ({ key: allSites ? 'panel.openForm' : 'panel.openIowa' });
+    // On a tab SecondHand can't read: where to go, with a link to Iowa's application.
+    let away = false;
+    const elsewhere = () => { away = true; return { key: allSites ? 'panel.openForm' : 'panel.openIowa' }; };
     // The desktop row shows only while the app needs opening or unlocking, or can't be reached.
     function renderDesktop() {
       $('desktop-status').parentElement.hidden = !desktopLine;
@@ -461,6 +462,7 @@
       // Where the questions left are listed by name, each row goes to its own.
       $('panel-left').hidden = !target || !left.length || named.length > 0;
       $('panel-left').disabled = working;
+      $('open-iowa').hidden = Boolean(target) || !away || halted;
       $('panel-left').textContent = t('panel.goToLeft', { count: left.length || 1 });
       $('panel-autofill').disabled = !target || (!fillable && !autopilot) || working;
       document.querySelectorAll('.checklist-item').forEach(button => { button.disabled = working || !target; });
@@ -628,13 +630,14 @@
           const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
           if (revision !== contextRevision || stopped) return;
           if (!tab || !Number.isInteger(tab.id) || (!supportedUrl(tab.url) && !siteUrl(tab.url))) {
-            target = null; nowhere = true; clearPage(); controls();
+            target = null; nowhere = true; clearPage();
             show(elsewhere());
+            controls();
             return;
           }
           if (!target || target.id !== tab.id || target.url !== tab.url) {
             contextRevision++; revision = contextRevision;
-            clearPage(); target = { id: tab.id, url: tab.url }; nowhere = false;
+            clearPage(); target = { id: tab.id, url: tab.url }; nowhere = false; away = false;
           }
           target.status = tab.status;
           const state = await send({ type: 'ui:pageState', tabId: tab.id });
