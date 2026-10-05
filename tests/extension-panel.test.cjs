@@ -437,9 +437,9 @@ test('after Autofill, a question whose answer isn’t saved says so and points t
   const detail = key => view.row(key).querySelector('.checklist-detail').textContent;
   assert.equal(detail('firstName'), 'Needs you');
   await view.userClick('panel-autofill');
-  assert.equal(detail('firstName'), 'Not saved in SecondHand — add it in My information');
-  assert.equal(detail('middleName'), 'Not saved in SecondHand — add it in My information');
-  assert.equal(view.row('firstName').getAttribute('aria-label'), 'First name: Not saved in SecondHand — add it in My information. Find it in Iowa’s form.');
+  assert.equal(detail('firstName'), 'Not saved in SecondHand: add it in My information');
+  assert.equal(detail('middleName'), 'Not saved in SecondHand: add it in My information');
+  assert.equal(view.row('firstName').getAttribute('aria-label'), 'First name: Not saved in SecondHand: add it in My information. Find it in Iowa’s form.');
   // A question answered since shows as done; one SecondHand can't fill still says to do it yourself.
   assert.equal(detail('lastName'), 'Done');
   assert.equal(detail('unverified'), 'Do it yourself');

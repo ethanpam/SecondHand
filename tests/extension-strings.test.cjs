@@ -250,6 +250,16 @@ test('SecondHand speaks Spanish, Vietnamese, Chinese, French, and Arabic, each w
   }
 });
 
+test('no catalog text uses an em dash', () => {
+  const found = [];
+  for (const code of strings.LANGUAGES) {
+    for (const [key, value] of Object.entries(strings.catalogs[code])) {
+      if ((typeof value === 'string' ? [value] : [value.one, value.other]).some(text => text.includes('—'))) found.push(`${code} ${key}`);
+    }
+  }
+  assert.deepEqual(found, []);
+});
+
 test('every language is named in its own words in every catalog and offered in the picker', () => {
   const natives = { en: 'English', es: 'Español', vi: 'Tiếng Việt', zh: '中文（简体）', fr: 'Français', ar: 'العربية' };
   for (const code of strings.LANGUAGES) for (const [name, native] of Object.entries(natives)) assert.equal(strings.catalogs[code][`language.${name}`], native, `${code} language.${name}`);

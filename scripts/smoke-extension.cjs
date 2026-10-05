@@ -694,7 +694,7 @@ async function main() {
     await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
     await panel.click('#panel-autofill');
     for (const key of startRows.filter(key => key !== 'ssnCardName')) {
-      await expect.poll(() => panel.text(`[data-key="${key}"]`), { timeout: 20000 }).toContain('Not saved in SecondHand — add it in My information');
+      await expect.poll(() => panel.text(`[data-key="${key}"]`), { timeout: 20000 }).toContain('Not saved in SecondHand: add it in My information');
     }
     await page.waitForTimeout(1800);
     assert.deepEqual(await startChecked(), []);
