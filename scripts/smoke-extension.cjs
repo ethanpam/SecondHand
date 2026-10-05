@@ -248,7 +248,7 @@ async function attachNativePanel(context, page, extensionId) {
     await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
     await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
   };
-  return { evaluate, text, visible, click,
+  return { send, evaluate, text, visible, click,
     // Like Playwright's page.screenshot, it creates the file's folder.
     async screenshot(file) {
       const result = await send('Page.captureScreenshot', { format: 'png' });

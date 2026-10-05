@@ -18,6 +18,7 @@
     "test:summary": "node scripts/smoke-summary.cjs",
     "test:laya": "node scripts/smoke-laya.cjs",
     "test:extension:video": "node scripts/qa-extension-video.cjs",
+    "capture:ui": "node scripts/capture-ui.cjs",
     "test:native": "node tests/desktop-native-smoke.cjs",
     "extension:zip": "node scripts/zip-extension.cjs",
     "dist:win": "npm run ocr:prepare && node scripts/build-native-host.cjs && electron-builder --win nsis --x64 --publish never",
