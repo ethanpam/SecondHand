@@ -7,7 +7,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { chromium, expect } = require('@playwright/test');
+const { chromium, expect: playwrightExpect } = require('@playwright/test');
+const { despiteSleep, sleepTolerant, host: hostSleep } = require('./host-sleep.cjs');
 const syntheticProfile = require('../tests/fixtures/applicant-profile.json');
 const applicantFixture = require('../tests/fixtures/iowa-personal-information.cjs');
 const preApplicant = require('../tests/fixtures/iowa-pre-applicant.cjs');
@@ -19,6 +20,8 @@ const root = path.join(__dirname, '..');
 const portal = 'https://hhsservices.iowa.gov/apspssp/ssp.portal';
 const applicant = `${portal}/applyForBenefits/enterPersonalInfo`;
 const extensionDirectory = path.join(root, 'extension');
+// Every wait counts wall-clock time, which runs on while the computer sleeps (see host-sleep.cjs).
+const expect = sleepTolerant(playwrightExpect);
 
 const documentManualUrl = `${portal}/qa-only/document-manual`;
 const documentNextMarker = 'SECONDHAND_SYNTHETIC_FULL_DOCUMENT_NEXT';
@@ -229,10 +232,19 @@ async function attachNativePanel(context, page, extensionId) {
   });
   const send = (method, params = {}) => new Promise((resolve, reject) => {
     const id = ++sequence;
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`Native panel CDP timed out: ${method}`)); }, 15000);
-    pending.set(id, { resolve, reject, timer });
+    const request = { resolve, reject, timer: null };
+    // A sleep of the computer doesn't use up the reply's 15 seconds.
+    const arm = () => {
+      const mark = hostSleep.mark();
+      request.timer = setTimeout(() => {
+        if (hostSleep.slept(mark)) return arm();
+        pending.delete(id); reject(new Error(`Native panel CDP timed out: ${method}`));
+      }, 15000);
+    };
+    arm();
+    pending.set(id, request);
     transport.send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify({ id, method, params }) }).catch(error => {
-      clearTimeout(timer); pending.delete(id); reject(error);
+      clearTimeout(request.timer); pending.delete(id); reject(error);
     });
   });
   const evaluate = async (fn, argument) => {
@@ -310,8 +322,7 @@ async function main() {
       if (url.protocol === 'chrome-extension:') return route.continue();
       return route.abort('blockedbyclient');
     });
-    [worker] = context.serviceWorkers();
-    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 20000 });
+    worker = await despiteSleep(async () => context.serviceWorkers()[0] || context.waitForEvent('serviceworker', { timeout: 20000 }));
     const extensionId = new URL(worker.url()).hostname;
     assert.equal(extensionId, 'jogldddafjfbmfjnjlbjloakjbecnjpl');
     await installNativeStub(worker);
@@ -331,9 +342,9 @@ async function main() {
 
     // Leaving Iowa's site turns a running autofill off, so every flow starts clean.
     async function resetTo(url, { profile = {}, locked = false } = {}) {
-      await page.goto('about:blank');
+      await despiteSleep(() => page.goto('about:blank'));
       await worker.evaluate(({ profile, locked }) => { globalThis.__nativeSmoke = { locked, accessRevision: 0, calls: [], profile }; }, { profile: { ...syntheticProfile, ...profile }, locked });
-      await page.goto(url, { waitUntil: 'domcontentloaded' });
+      await despiteSleep(() => page.goto(url, { waitUntil: 'domcontentloaded' }));
     }
     async function startFixture({ profile = {}, locked = false } = {}) {
       await resetTo(`${applicant}?next=stay`, { profile, locked });
