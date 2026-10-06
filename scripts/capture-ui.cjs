@@ -240,6 +240,9 @@ async function iowaCard() {
     await page.keyboard.press('Enter');
     await expect((await card()).locator('#pill:focus-visible')).toBeVisible();
     await cardShot(session, 'card-hidden-focus');
+    // Hiding holds for the tab, so the card is brought back before the next pages.
+    await page.keyboard.press('Enter');
+    await expect((await card()).locator('#autofill')).toBeVisible();
 
     // While the app asks the person for permission.
     await open(applicant, { profile: { ...smoke.syntheticProfile, firstName: '' }, hold: true });
@@ -249,6 +252,11 @@ async function iowaCard() {
     await worker.evaluate(() => { globalThis.__desktop.hold = false; globalThis.__release?.(); });
     await expect((await card()).locator('#need-you')).toBeVisible({ timeout: 20000 });
     await cardShot(session, 'card-need-you');
+    // Hidden while a question is left, the logo carries a dot.
+    await (await card()).locator('#hide').click();
+    await expect((await card()).locator('#pill')).toHaveClass(/waiting/);
+    await cardShot(session, 'card-hidden-waiting');
+    await (await card()).locator('#pill').click();
     // Autofill has been started once from this Chrome: the next form page gets the short line.
     await open(applicant);
     await expect((await card()).locator('#autofill')).toBeVisible();
@@ -505,7 +513,7 @@ async function recording() {
 }
 
 const sessions = [
-  [iowaCard, ['card-ready', 'card-focus', 'card-hidden', 'card-hidden-focus', 'card-working', 'card-need-you', 'card-ready-again', 'card-message', 'card-locked', 'card-closed', 'card-pill']],
+  [iowaCard, ['card-ready', 'card-focus', 'card-hidden', 'card-hidden-focus', 'card-working', 'card-need-you', 'card-hidden-waiting', 'card-ready-again', 'card-message', 'card-locked', 'card-closed', 'card-pill']],
   [iowaPanel, ['panel-iowa', 'panel-header', 'panel-focus', 'panel-working', 'panel-iowa-filled', 'panel-checklist', 'panel-iowa-again', 'panel-locked', 'panel-closed', 'panel-info', 'panel-elsewhere', 'panel-arabic', 'panel-questions']],
   [sites, ['panel-site-off', 'panel-site-filled', 'panel-site-filled-open', 'panel-laya-off', 'panel-save', 'panel-all-sites-off', 'card-site', 'card-offer']],
   [outdated, ['card-outdated', 'panel-outdated', 'card-reload']],

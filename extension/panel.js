@@ -119,8 +119,11 @@
     let note = null;
     let working = false;
     let outdated = false;
-    // The reader hid the card: only the logo shows, until they click it or the page changes.
-    let collapsed = false;
+    // The reader hid the card: only the logo shows until they click it. The choice holds for this tab, in
+    // the frame's session storage, so the card stays out of the way as the form goes from page to page.
+    const HIDDEN_KEY = 'secondhand.cardHidden';
+    let collapsed = (() => { try { return sessionStorage.getItem(HIDDEN_KEY) === '1'; } catch { return false; } })();
+    const rememberHidden = hidden => { try { if (hidden) sessionStorage.setItem(HIDDEN_KEY, '1'); else sessionStorage.removeItem(HIDDEN_KEY); } catch { /* the choice then lasts for this page */ } };
     // Why the widget is outdated: its worker is older than this page (panel.outdated), which Restart
     // fixes, or SecondHand reloaded and left this frame behind (panel.reloadPage). An outdated worker
     // is asked once for a frame with room for a line, in the oldest form of that request.
@@ -161,8 +164,12 @@
       $('widget').classList.toggle('outdated', outdated);
       $('widget').classList.toggle('restartable', outdated && outdatedKey !== 'panel.reloadPage');
       $('pill').hidden = card && !pill;
-      $('pill').title = t(pill ? 'widget.showTitle' : 'widget.pillTitle');
-      $('pill').setAttribute('aria-label', t(pill ? 'widget.showTitle' : 'widget.pillTitle'));
+      // A hidden card that waits for the reader marks its logo with a dot and says so in the logo's name.
+      const needYou = ['done', 'waiting'].includes(result?.state) ? fieldKeys(result.needYou) : [];
+      const waiting = pill && (needYou.length > 0 || ['waiting', 'error', 'locked', 'offline'].includes(result?.state) || Boolean(note));
+      $('pill').classList.toggle('waiting', waiting);
+      $('pill').title = t(waiting ? 'widget.showWaitingTitle' : pill ? 'widget.showTitle' : 'widget.pillTitle');
+      $('pill').setAttribute('aria-label', t(waiting ? 'widget.showWaitingTitle' : pill ? 'widget.showTitle' : 'widget.pillTitle'));
       // A locked app offers Unlock, and a closed one Open SecondHand, in Autofill's place.
       const locked = result?.state === 'locked';
       const closed = result?.state === 'offline';
@@ -174,9 +181,9 @@
       $('hide').hidden = outdated;
       $('autofill').disabled = working;
       // Answers still to give show as a link that finds each one in the form.
-      const needYou = ['done', 'waiting'].includes(result?.state) ? fieldKeys(result.needYou) : [];
       $('need-you').hidden = outdated || !needYou.length;
       $('need-you').textContent = t('widget.needYou', { count: needYou.length });
+      $('need-you').title = t('widget.needYouTitle');
       $('widget-text').textContent = statusText();
       $('autofill').title = site ? t('widget.autofillSiteTitle') : t('widget.autofillIowaTitle');
       const details = [hasMessage(result) ? words(fromResult(result)) : '', ai.note ? words(ai.note) : '', ai.reason, fixedText(languageTrouble?.message, 160)];
@@ -317,15 +324,15 @@
     // Chrome needs the user gesture to open the panel. A pill that stands for a hidden card shows the card again.
     for (const id of ['details', 'pill']) {
       $(id).addEventListener('click', trusted(() => {
-        if (id === 'pill' && collapsed) { collapsed = false; render(); $('hide').focus(); return; }
+        if (id === 'pill' && collapsed) { collapsed = false; rememberHidden(false); render(); $('hide').focus(); return; }
         send({ type: 'ui:openPanel', confirmed: true }).catch(error => { note = trouble(error); render(); });
       }));
     }
     // Restart reloads SecondHand, which starts the worker that matches this page. This frame is then left
     // behind, like any page open during an update, so it says at once how to get SecondHand back here.
     $('restart').addEventListener('click', trusted(() => { outdatedKey = 'panel.reloadPage'; render(); chrome.runtime.reload(); }));
-    // Hiding is the reader's choice for this page only: nothing is saved, and the next page shows the card again.
-    $('hide').addEventListener('click', trusted(() => { collapsed = true; render(); $('pill').focus(); }));
+    // Hiding holds for this tab until the logo is clicked; nothing about the applicant is kept.
+    $('hide').addEventListener('click', trusted(() => { collapsed = true; rememberHidden(true); render(); $('pill').focus(); }));
     // The offer opens the side panel straight on the page's questions.
     $('translate-offer').addEventListener('click', trusted(() => {
       send({ type: 'ui:openPanel', confirmed: true, questions: true }).catch(error => { note = trouble(error); render(); });

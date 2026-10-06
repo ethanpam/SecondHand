@@ -372,8 +372,11 @@ async function panel(t, initial = {}) {
   if (initial.Summarizer) window.Summarizer = initial.Summarizer;
   // Chrome gives extension pages localStorage; jsdom has none for this origin. A shared map is one browser profile.
   const storage = initial.storage || new Map();
-  Object.defineProperty(window, 'localStorage', { configurable: true, value: {
-    getItem: key => storage.has(key) ? storage.get(key) : null, setItem: (key, value) => { storage.set(key, String(value)); }, removeItem: key => { storage.delete(key); } } });
+  const mapStorage = map => ({ getItem: key => map.has(key) ? map.get(key) : null, setItem: (key, value) => { map.set(key, String(value)); }, removeItem: key => { map.delete(key); } });
+  Object.defineProperty(window, 'localStorage', { configurable: true, value: mapStorage(storage) });
+  // And session storage, which a widget's frame keeps for its tab.
+  const session = initial.session || new Map();
+  Object.defineProperty(window, 'sessionStorage', { configurable: true, value: mapStorage(session) });
   if (initial.language) Object.defineProperty(window.navigator, 'language', { configurable: true, get: () => initial.language });
   // Opening SecondHand checks the desktop once a second; `hurry` lets those seconds pass at once.
   if (initial.hurry) {
@@ -829,9 +832,10 @@ test('widget is a pill off the applicant page and opens the side panel from it',
   assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'ui:openPanel', confirmed: true });
 });
 
-test('the widget can be hidden to its logo and shown again from it, by the reader only, and nothing is saved', async t => {
+test('the widget can be hidden to its logo and shown again from it, by the reader only, and the choice holds for the tab', async t => {
   const storage = new Map();
-  const view = await panel(t, { launcher: true, storage });
+  const session = new Map();
+  const view = await panel(t, { launcher: true, storage, session });
   const sizes = () => plainRequests(view.requests.filter(request => request.type === 'ui:widgetSize'));
   assert.equal(view.get('hide').getAttribute('aria-label'), EN['widget.hideTitle']);
   assert.equal(view.get('hide').title, EN['widget.hideTitle']);
@@ -856,7 +860,26 @@ test('the widget can be hidden to its logo and shown again from it, by the reade
   assert.equal(view.get('pill').hidden, true);
   assert.equal(view.window.document.activeElement, view.get('hide'));
   assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: true });
-  assert.deepEqual([...storage.keys()], [], 'hiding is for this page only');
+  assert.deepEqual([...storage.keys()], [], 'nothing goes in the extension’s own storage');
+  assert.equal(session.get('secondhand.cardHidden'), undefined, 'shown again, the tab forgets the hiding');
+  // Hidden, the choice holds for the next page in this tab, and the logo says when the hidden card needs the reader.
+  await view.userClick('hide');
+  assert.equal(session.get('secondhand.cardHidden'), '1');
+  const next = await panel(t, { launcher: true, storage, session, result: doneResult });
+  assert.equal(next.get('widget').hidden, true, 'the next page keeps the card hidden');
+  assert.equal(next.get('pill').hidden, false);
+  assert.equal(next.get('pill').classList.contains('waiting'), true, 'two questions are left for the reader');
+  assert.equal(next.get('pill').title, 'Show SecondHand’s card: it needs you');
+  assert.equal(next.get('pill').getAttribute('aria-label'), 'Show SecondHand’s card: it needs you');
+  const quiet = await panel(t, { launcher: true, storage, session });
+  assert.equal(quiet.get('pill').classList.contains('waiting'), false);
+  assert.equal(quiet.get('pill').title, 'Show SecondHand’s card');
+  await quiet.userClick('pill');
+  assert.equal(session.has('secondhand.cardHidden'), false);
+  // The link to what is left says what it does.
+  assert.equal(next.get('need-you').title, 'Go to the next question left, in the form');
+  assert.equal(next.get('details').getAttribute('aria-label'), 'Open SecondHand’s side panel');
+  assert.equal(next.get('hide').getAttribute('aria-label'), 'Hide SecondHand’s card');
   // Another site's widget hides the same way.
   const site = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true } });
   await site.userClick('hide');

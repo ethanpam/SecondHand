@@ -512,7 +512,25 @@ async function main() {
     await expect.poll(async () => (await host.boundingBox()).height, { timeout: 10000 }).toBeGreaterThan(46);
     assert.equal(await host.evaluate(element => element.style.borderRadius), '12px');
     assert.deepEqual(await calls('getFields'), [], 'hiding and showing the widget asks nothing of the desktop');
-    console.log('Widget: Tab reaches its hide control; Enter leaves the round logo, and Enter on the logo brings the widget back.');
+    // Hidden, the card stays hidden on the tab's next page, and its logo says when the hidden card needs the reader.
+    await widget.locator('#hide').click();
+    await expect(widget.locator('#pill')).toBeVisible();
+    await page.goto(`${portal}/applyForBenefits/guestLogin`, { waitUntil: 'domcontentloaded' });
+    widget = await launcherFrame();
+    await expect(widget.locator('#pill')).toBeVisible({ timeout: 15000 });
+    await expect(widget.locator('#widget')).toBeHidden();
+    await expect.poll(async () => { const box = await host.boundingBox(); return `${box.width} by ${box.height}`; }, { timeout: 10000 }).toBe('46 by 46');
+    await expect(widget.locator('#pill')).toHaveAttribute('aria-label', 'Show SecondHand’s card');
+    await widget.locator('#pill').click();
+    await expect(widget.locator('#autofill')).toBeVisible();
+    await widget.locator('#autofill').click();
+    await expect(page.locator('#householdApplyProgYes')).toBeChecked({ timeout: 20000 });
+    await widget.locator('#hide').click();
+    await expect(widget.locator('#pill')).toHaveClass(/waiting/);
+    await expect(widget.locator('#pill')).toHaveAttribute('aria-label', 'Show SecondHand’s card: it needs you');
+    await widget.locator('#pill').click();
+    await expect(widget.locator('#stop')).toBeVisible();
+    console.log('Widget: Tab reaches its hide control; Enter leaves the round logo, and Enter on the logo brings the widget back. Hidden, it stays hidden on the next page, and the logo says when it needs the reader.');
 
     // Other portal pages show only a small pill and never contact the desktop.
     await resetTo(`${portal}/applyForBenefits/householdMembers`);
