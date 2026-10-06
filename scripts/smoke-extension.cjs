@@ -7,17 +7,21 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { chromium, expect } = require('@playwright/test');
+const { chromium, expect: playwrightExpect } = require('@playwright/test');
+const { despiteSleep, sleepTolerant, host: hostSleep } = require('./host-sleep.cjs');
 const syntheticProfile = require('../tests/fixtures/applicant-profile.json');
 const applicantFixture = require('../tests/fixtures/iowa-personal-information.cjs');
 const preApplicant = require('../tests/fixtures/iowa-pre-applicant.cjs');
 const addressFixture = require('../tests/fixtures/iowa-select-address.cjs');
 const selfFixture = require('../tests/fixtures/iowa-self-details.cjs');
 const tellUsMore = require('../tests/fixtures/iowa-tell-us-more.cjs');
+const strings = require('../extension/strings.js');
 const root = path.join(__dirname, '..');
 const portal = 'https://hhsservices.iowa.gov/apspssp/ssp.portal';
 const applicant = `${portal}/applyForBenefits/enterPersonalInfo`;
 const extensionDirectory = path.join(root, 'extension');
+// Every wait counts wall-clock time, which runs on while the computer sleeps (see host-sleep.cjs).
+const expect = sleepTolerant(playwrightExpect);
 
 const documentManualUrl = `${portal}/qa-only/document-manual`;
 const documentNextMarker = 'SECONDHAND_SYNTHETIC_FULL_DOCUMENT_NEXT';
@@ -51,6 +55,13 @@ function verifiedAddressFixture(variant) {
 }
 
 function selfDetailsFixture(variant = 'verified') {
+  // Iowa serves Job Information at the same address. SecondHand fills nothing there.
+  if (variant === 'job') {
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Job Information · isolated QA</title></head>
+      <body><main><p>ISOLATED QA · FICTIONAL APPLICANT. No government connection.</p><h2>Job Information</h2>
+      <form id="qaJob"><fieldset><legend>Does anyone in your household have a job? (QA only)</legend><label><input name="qaJob" type="radio" value="yes">Yes</label><label><input name="qaJob" type="radio" value="no">No</label></fieldset>
+      <button type="button">Save and Continue</button></form></main></body></html>`;
+  }
   let html = selfFixture.html;
   if (variant === 'people') html = html.replace('People | Unvisited', 'People | Active');
   else if (variant === 'form') html = html.replace('action="simple"', 'action="otherPerson"');
@@ -72,10 +83,12 @@ function selfDetailsFixture(variant = 'verified') {
 
 // The trimmed Tell Us More page at dynamicQuestionsStart, with a QA stand-in for Iowa's
 // hideShowQuestions: each rule is "answer:shown ids:hidden ids", and ids follow the prefix.
-function startDetailsFixture() {
+function startDetailsFixture(variant = 'verified') {
+  const html = variant === 'people' ? tellUsMore.html.replace('People | Unvisited', 'People | Active') : tellUsMore.html;
+  if (!['verified', 'people'].includes(variant)) throw new Error('Unknown Tell Us More QA variant.');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Tell Us More · isolated QA</title>
     <style>body{font:16px system-ui;background:#f7f8f2;color:#294035;margin:0;padding:30px}main{max-width:900px}li{display:inline-block;margin-right:12px}label{margin:0 12px 0 4px}input[type=text],select{padding:8px}button{padding:12px;margin:10px}.questionAnswer{margin:16px 0}</style></head>
-    <body><main><p>ISOLATED QA · FICTIONAL APPLICANT. Trimmed from a sanitized capture; the script below is a QA stand-in for Iowa's.</p>${tellUsMore.html}</main>
+    <body><main><p>ISOLATED QA · FICTIONAL APPLICANT. Trimmed from a sanitized capture; the script below is a QA stand-in for Iowa's.</p>${html}</main>
     <script>
       window.__startQa = { nextClicks: 0, shown: [] };
       function hideShowQuestions(prefix, input, rules) {
@@ -99,6 +112,12 @@ function fixture(nextStep) {
       <h1>Household Members</h1><label>Fictional household member<input id="qa-household-member" name="qaHouseholdMember"></label>
       <button id="qa-manual-continue" type="button">Continue (QA only)</button></main>
       <script>window.__manualNextClicks=0;document.getElementById('qa-manual-continue').addEventListener('click',()=>{window.__manualNextClicks++;});</script></body></html>`;
+  }
+  // An applicant page whose form SecondHand doesn't recognize, so it fills nothing.
+  if (nextStep === 'unexpected') {
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Unexpected applicant page · test only</title></head>
+      <body><main><p class="test-only">SYNTHETIC TEST FIXTURE. No government connection or real applicant data.</p><h1>Enter Personal Information</h1>
+      <form id="qaPersonal"><label>QA first name<input name="qaFirstName"></label><button type="button">Save and Continue</button></form></main></body></html>`;
   }
   // Address controls below are hypothetical QA controls, not an observed Iowa
   // schema. They verify the shipping adapter's refusal to operate this step.
@@ -215,10 +234,19 @@ async function attachNativePanel(context, page, extensionId) {
   });
   const send = (method, params = {}) => new Promise((resolve, reject) => {
     const id = ++sequence;
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`Native panel CDP timed out: ${method}`)); }, 15000);
-    pending.set(id, { resolve, reject, timer });
+    const request = { resolve, reject, timer: null };
+    // A sleep of the computer doesn't use up the reply's 15 seconds.
+    const arm = () => {
+      const mark = hostSleep.mark();
+      request.timer = setTimeout(() => {
+        if (hostSleep.slept(mark)) return arm();
+        pending.delete(id); reject(new Error(`Native panel CDP timed out: ${method}`));
+      }, 15000);
+    };
+    arm();
+    pending.set(id, request);
     transport.send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify({ id, method, params }) }).catch(error => {
-      clearTimeout(timer); pending.delete(id); reject(error);
+      clearTimeout(request.timer); pending.delete(id); reject(error);
     });
   });
   const evaluate = async (fn, argument) => {
@@ -263,7 +291,7 @@ async function main() {
   const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-chromium-smoke-'));
   let context, panel, page, worker;
   const errors = [];
-  let currentAddressVariant = 'original', currentSelfVariant = 'verified';
+  let currentAddressVariant = 'original', currentSelfVariant = 'verified', currentStartVariant = 'verified';
   let verifiedApplicantClicks = 0, verifiedAddressLoads = 0, documentManualLoads = 0;
   const verifiedAddressNext = [];
   try {
@@ -281,7 +309,7 @@ async function main() {
         return route.fulfill({ status: 200, contentType: 'text/html', body: verifiedAddressFixture(currentAddressVariant) });
       }
       if (request.isNavigationRequest() && request.url() === selfDetailsUrl) return route.fulfill({ status: 200, contentType: 'text/html', body: selfDetailsFixture(currentSelfVariant) });
-      if (request.isNavigationRequest() && request.url() === startDetailsUrl) return route.fulfill({ status: 200, contentType: 'text/html', body: startDetailsFixture() });
+      if (request.isNavigationRequest() && request.url() === startDetailsUrl) return route.fulfill({ status: 200, contentType: 'text/html', body: startDetailsFixture(currentStartVariant) });
       if (request.isNavigationRequest() && request.url() === documentManualUrl) {
         documentManualLoads++;
         return route.fulfill({ status: 200, contentType: 'text/html', body: fixture('document-manual-destination') });
@@ -296,8 +324,7 @@ async function main() {
       if (url.protocol === 'chrome-extension:') return route.continue();
       return route.abort('blockedbyclient');
     });
-    [worker] = context.serviceWorkers();
-    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 20000 });
+    worker = await despiteSleep(async () => context.serviceWorkers()[0] || context.waitForEvent('serviceworker', { timeout: 20000 }));
     const extensionId = new URL(worker.url()).hostname;
     assert.equal(extensionId, 'jogldddafjfbmfjnjlbjloakjbecnjpl');
     await installNativeStub(worker);
@@ -317,9 +344,9 @@ async function main() {
 
     // Leaving Iowa's site turns a running autofill off, so every flow starts clean.
     async function resetTo(url, { profile = {}, locked = false } = {}) {
-      await page.goto('about:blank');
+      await despiteSleep(() => page.goto('about:blank'));
       await worker.evaluate(({ profile, locked }) => { globalThis.__nativeSmoke = { locked, accessRevision: 0, calls: [], profile }; }, { profile: { ...syntheticProfile, ...profile }, locked });
-      await page.goto(url, { waitUntil: 'domcontentloaded' });
+      await despiteSleep(() => page.goto(url, { waitUntil: 'domcontentloaded' }));
     }
     async function startFixture({ profile = {}, locked = false } = {}) {
       await resetTo(`${applicant}?next=stay`, { profile, locked });
@@ -442,6 +469,123 @@ async function main() {
     assert.deepEqual((await calls('getFields'))[0].fields, ['programSnap', 'programFip', 'programMedicaid']);
     assert.equal(await page.evaluate(() => window.__continues), 0);
     console.log('Autopilot: the household question is answered from saved programs and the CAPTCHA is left to the applicant.');
+
+    // After Autofill, the widget draws the whole next step inside its frame, in every language.
+    // The language is chosen as the side panel saves it, in the extension's own storage.
+    const frameBox = () => page.locator('[data-secondhand-assistant]').boundingBox();
+    const widgetLine = frame => frame.evaluate(() => {
+      const text = document.getElementById('widget-text'), box = text.getBoundingClientRect(), card = document.getElementById('widget').getBoundingClientRect();
+      const inside = rect => rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight;
+      return { text: text.textContent, shown: !text.classList.contains('visually-hidden') && box.width > 0 && box.height > 0,
+        clipped: text.scrollHeight > text.clientHeight, inFrame: inside(box) && inside(card), dir: document.documentElement.dir };
+    });
+    const lineProblems = async (frame, expected, code) => {
+      const line = await widgetLine(frame), box = await frameBox();
+      return [line.text !== expected && `text "${line.text}"`, !line.shown && 'line hidden', line.clipped && 'line clipped',
+        !line.inFrame && 'line past the frame', box.width > 272 && `frame ${box.width}px wide`, box.height > 110 && `frame ${box.height}px tall`,
+        line.dir !== strings.direction(code) && `dir ${line.dir}`].filter(Boolean);
+    };
+    const wholeSteps = [
+      { name: 'Job Information', url: selfDetailsUrl, pageKey: 'iowa-self-details-unverified', line: code => strings.text(code, 'iowa.selfUnverifiedTodo') },
+      { name: 'unexpected Enter Personal Information', url: `${applicant}?next=unexpected`, pageKey: 'iowa-personal-unverified', line: code => strings.text(code, 'iowa.personalUnverifiedTodo') },
+      // Save and Continue disabled: SecondHand fills the page and does not continue.
+      { name: 'Enter Personal Information, Save and Continue disabled', url: `${applicant}?next=stay`, pageKey: 'iowa-personal-information', disabled: true,
+        line: (code, filled) => `${strings.text(code, 'widget.filled', { count: filled })} · ${strings.text(code, 'iowa.reviewSaveContinue')}` }
+    ];
+    // Before Autofill there is no line, so the frame is 46px tall. On these English pages the
+    // widget may offer the page in the applicant's language instead, and that offer gets the row.
+    const beforeProblems = async (frame, code) => {
+      const state = await frame.evaluate(() => ({ line: !document.getElementById('widget-text').classList.contains('visually-hidden'), offer: !document.getElementById('translate-offer').hidden }));
+      const box = await frameBox();
+      return [state.line && 'line shown before Autofill', code === 'en' && state.offer && 'offer on an English page',
+        !state.offer && box.height !== 46 && `frame ${box.height}px tall without a line`, box.width > 272 && `frame ${box.width}px wide`, box.height > 110 && `frame ${box.height}px tall`].filter(Boolean);
+    };
+    const measured = [];
+    currentSelfVariant = 'job';
+    for (const code of strings.LANGUAGES) {
+      await resetTo(wholeSteps[0].url);
+      await (await launcherFrame()).evaluate(code => globalThis.SecondHandStrings.setLanguage(code), code);
+      for (const step of wholeSteps) {
+        await resetTo(step.url);
+        widget = await launcherFrame();
+        await expect(widget.locator('#autofill')).toBeVisible();
+        if (step.disabled) await page.locator('.saveAndContinueButton').evaluate(button => button.setAttribute('disabled', ''));
+        await expect.poll(() => beforeProblems(widget, code), { timeout: 10000, message: `${code} ${step.name} before Autofill` }).toEqual([]);
+        const before = await frameBox();
+        const offered = await widget.locator('#translate-offer').isVisible();
+        await widget.locator('#autofill').click();
+        await expect.poll(async () => (await widget.evaluate(() => chrome.runtime.sendMessage({ type: 'ui:pageState' })))?.data?.result?.state, { timeout: 20000 }).toMatch(/^(waiting|done)$/);
+        const { page: probed, result } = (await widget.evaluate(() => chrome.runtime.sendMessage({ type: 'ui:pageState' }))).data;
+        assert.equal(probed.pageKey, step.pageKey, `${step.name} is classified as ${step.pageKey}`);
+        if (step.disabled) assert.ok(result.filled > 0, 'SecondHand fills the applicant page');
+        // A disabled button fires no click, so the worker's own result says it never tried to continue
+        // (it would say it is continuing, or waiting after a try).
+        if (step.disabled) assert.equal(result.state, 'done', 'SecondHand does not try to continue');
+        const expected = step.line(code, result.filled);
+        await expect.poll(() => lineProblems(widget, expected, code), { timeout: 10000, message: `${code} ${step.name}` }).toEqual([]);
+        assert.equal(await page.evaluate(() => window.__nextClicks || 0), 0, 'SecondHand does not continue');
+        const after = await frameBox();
+        measured.push(`${code} ${step.name}: ${before.width}x${before.height} before${offered ? ' (language offer)' : ''}, ${after.width}x${after.height} after`);
+      }
+    }
+    for (const line of measured) console.log(`Widget frame, ${line}.`);
+    console.log('Widget: after Autofill, the whole next step shows inside the frame in all six languages, and Arabic reads right to left.');
+
+    // A narrow page (an old laptop at high zoom with the side panel open leaves about 260px): the
+    // widget keeps its buttons' width and its line takes more rows, all of it inside the frame.
+    const settledLine = async (code, expected) => {
+      await expect.poll(async () => (await widget.evaluate(() => chrome.runtime.sendMessage({ type: 'ui:pageState' })))?.data?.result?.state, { timeout: 20000 }).toMatch(/^(waiting|done)$/);
+      const { result } = (await widget.evaluate(() => chrome.runtime.sendMessage({ type: 'ui:pageState' }))).data;
+      await expect.poll(() => lineProblems(widget, expected(result.filled), code), { timeout: 10000, message: `${code} at ${page.viewportSize().width}px` }).toEqual([]);
+    };
+    const narrow = [];
+    await page.setViewportSize({ width: 260, height: 900 });
+    for (const code of strings.LANGUAGES) {
+      await (await launcherFrame()).evaluate(code => globalThis.SecondHandStrings.setLanguage(code), code);
+      await resetTo(selfDetailsUrl);
+      widget = await launcherFrame();
+      await expect.poll(() => beforeProblems(widget, code), { timeout: 10000, message: `${code} at 260px before Autofill` }).toEqual([]);
+      const before = await frameBox();
+      await widget.locator('#autofill').click();
+      await settledLine(code, () => wholeSteps[0].line(code));
+      const after = await frameBox();
+      assert.ok(after.width <= before.width, `${code} at 260px: the line makes the widget no wider`);
+      narrow.push(`${code} Job Information at 260px: ${before.width}x${before.height} before, ${after.width}x${after.height} after`);
+    }
+    currentSelfVariant = 'verified';
+
+    // Save and Continue stays as clear of the widget as main left it, on Enter Personal Information
+    // scrolled to the bottom. At 390px main's widget already covers its right edge. Under 640px the
+    // widget's width doesn't depend on the page's, so 390px also shows each language's line fits.
+    const clearOf = { 390: ['left', 'center'], 427: ['left', 'center', 'right'], 455: ['left', 'center', 'right'], 512: ['left', 'center', 'right'], 640: ['left', 'center', 'right'] };
+    for (const code of strings.LANGUAGES) {
+      await (await launcherFrame()).evaluate(code => globalThis.SecondHandStrings.setLanguage(code), code);
+      for (const [width, points] of Object.entries(clearOf).filter(([width]) => ['en', 'es'].includes(code) || width === '390')) {
+        await page.setViewportSize({ width: Number(width), height: 700 });
+        await resetTo(`${applicant}?next=stay`);
+        widget = await launcherFrame();
+        await expect(widget.locator('#autofill')).toBeVisible();
+        await page.locator('.saveAndContinueButton').evaluate(button => button.setAttribute('disabled', ''));
+        await expect.poll(() => beforeProblems(widget, code), { timeout: 10000, message: `${code} at ${width}px before Autofill` }).toEqual([]);
+        const before = await frameBox();
+        await widget.locator('#autofill').click();
+        await settledLine(code, filled => wholeSteps[2].line(code, filled));
+        const after = await frameBox();
+        if (Number(width) < 640) assert.ok(after.width <= before.width, `${code} at ${width}px: the line makes the widget no wider`);
+        await page.evaluate(() => window.scrollTo(0, document.scrollingElement.scrollHeight));
+        const clear = await page.evaluate(() => {
+          const button = document.querySelector('.saveAndContinueButton'), box = button.getBoundingClientRect(), y = box.top + box.height / 2;
+          return [['left', box.left + 2], ['center', box.left + box.width / 2], ['right', box.right - 2]]
+            .filter(([, x]) => button.contains(document.elementFromPoint(x, y))).map(([point]) => point);
+        });
+        for (const point of points) assert.ok(clear.includes(point), `${code} at ${width}px: Save and Continue's ${point} is clear of the widget (clear: ${clear.join(', ') || 'none'})`);
+        narrow.push(`${code} Save and Continue disabled at ${width}px: ${before.width}x${before.height} before, ${after.width}x${after.height} after; button clear at ${clear.join(', ') || 'no point'}`);
+      }
+    }
+    await page.setViewportSize({ width: 1200, height: 900 });
+    await widget.evaluate(key => localStorage.removeItem(key), strings.STORAGE_KEY);
+    for (const line of narrow) console.log(`Widget frame, ${line}.`);
+    console.log('Widget: on narrow pages it stays inside its frame, keeps its buttons\' width, and leaves Save and Continue as clear as before.');
 
     // Other portal pages show only a small pill and never contact the desktop.
     await resetTo(`${portal}/applyForBenefits/householdMembers`);
@@ -653,11 +797,11 @@ async function main() {
       console.log(`Tell Us More ${variant}: mismatched context stays manual.`);
     }
 
-    // Tell Us More at dynamicQuestionsStart with every answer saved: Autofill types the date of birth,
+    // Tell Us More at dynamicQuestionsStart with the original non-number answers saved: Autofill types the date of birth,
     // picks the marital status and clicks each saved answer, then answers the Social Security card
     // question Iowa's script shows after Yes. The number box stays empty and Save and Continue is never
     // clicked. (The native stub answers hasSsn itself, as the desktop works it out from saved answers.)
-    const startFields = ['sex', 'birthDate', 'hasSsn', 'ssnCardNameMatches', 'usCitizen', 'householdAllCitizens', 'maritalStatus',
+    const startFields = ['sex', 'birthDate', 'hasSsn', 'ssn', 'ssnCardNameMatches', 'ssnCardFirstName', 'ssnCardMiddleName', 'ssnCardLastName', 'usCitizen', 'householdAllCitizens', 'maritalStatus',
       'militaryOrVeteran', 'disabled', 'householdDisability', 'blind', 'healthLimitation', 'medicare', 'householdMedicare'];
     const startRows = ['gender', 'birthDate', 'hasSsn', 'ssnCardName', 'usCitizen', 'maritalStatus', 'militaryOrVeteran', 'hasDisability', 'blind', 'healthLimits', 'hasMedicare'];
     const startChecked = () => page.evaluate(() => Array.from(document.querySelectorAll('#answerSet input[type="radio"]')).filter(element => element.checked).map(element => element.id));
@@ -687,7 +831,62 @@ async function main() {
     for (const value of ['Avery', 'Example', '1985-04-12', '04/12/1985', 'Female', 'Never Married']) {
       assert.equal(startMetadata.includes(value), false, value); assert.equal(startText.includes(value), false, value);
     }
-    console.log('Tell Us More (dynamicQuestionsStart), every answer saved: all ten questions and the revealed card question filled; the SSN box and Save and Continue left to the applicant.');
+    console.log('Tell Us More (dynamicQuestionsStart): all ten original questions and the revealed card question filled; an unsaved SSN stays blank and Next stays manual.');
+
+    // The newly supported follow-ups use the captured controls and the same bounded multi-pass
+    // flow. No masking-script synchronization is fabricated: the submitted hidden mirror stays empty.
+    const sensitiveProfile = { hasSsn: 'yes', ssn: '123456789', ssnCardNameMatches: 'no',
+      ssnCardFirstName: 'Alex', ssnCardMiddleName: 'Quinn', ssnCardLastName: 'Sample' };
+    const cardIds = ['answerSets0.answers12.answerValue', 'answerSets0.answers15.answerValue', 'answerSets0.answers16.answerValue'];
+    const ssnMirror = () => page.locator('input[name="answerSets[0].answers[8].answerValue"]');
+    await resetTo(startDetailsUrl, { profile: sensitiveProfile });
+    await expect(page.locator(`[id="${tellUsMore.SSN_BOX_ID}"]`)).toBeHidden();
+    for (const id of cardIds) await expect(page.locator(`[id="${id}"]`)).toBeHidden();
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await panel.click('#panel-autofill');
+    await expect.poll(startBoxes, { timeout: 20000 }).toEqual(['123-45-6789', 'Alex', 'Quinn', 'Sample']);
+    await expect(page.locator(`[id="${tellUsMore.radioId(11, 2)}"]`)).toBeChecked();
+    for (const key of ['ssnCardFirstName', 'ssnCardMiddleName', 'ssnCardLastName']) await expect.poll(() => panel.text(`[data-key="${key}"]`)).toContain('Done');
+    await expect.poll(() => panel.text('[data-key="ssn"]')).toContain('Do it yourself');
+    await expect(ssnMirror()).toHaveValue('');
+    await page.waitForTimeout(1800);
+    assert.equal(await page.evaluate(() => window.__startQa.nextClicks), 0);
+    assert.deepEqual((await calls('getFields')).map(call => call.fields), [startFields]);
+    for (const index of [9, 13, 14, 17]) await expect(page.locator(`[id="answerSets0.answers${index}.answerValue"]`)).toHaveValue('');
+    const sensitiveMetadata = await panel.evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      return JSON.stringify(await chrome.runtime.sendMessage({ type: 'ui:pageState', tabId: tab.id }));
+    });
+    const sensitiveText = await panel.evaluate(() => document.body.innerText);
+    for (const value of ['123456789', '123-45-6789', 'Alex', 'Quinn', 'Sample']) {
+      assert.equal(sensitiveMetadata.includes(value), false, value); assert.equal(sensitiveText.includes(value), false, value);
+    }
+    console.log('Tell Us More conditional SSN/card-name controls: explicit saved answers filled across fresh scans; hidden mirror/alternatives untouched, SSN manual review and Next manual, sidebar has no answer values.');
+
+    // Existing answers are preserved while other eligible blank card fields still fill.
+    await resetTo(startDetailsUrl, { profile: sensitiveProfile });
+    await page.locator(`[id="${tellUsMore.radioId(6, 1)}"]`).check();
+    await page.locator(`[id="${tellUsMore.radioId(11, 2)}"]`).check();
+    await page.locator(`[id="${tellUsMore.SSN_BOX_ID}"]`).fill('321-54-9876');
+    await page.locator(`[id="${cardIds[0]}"]`).fill('Existing card name');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await panel.click('#panel-autofill');
+    await expect.poll(startBoxes, { timeout: 20000 }).toEqual(['321-54-9876', 'Existing card name', 'Quinn', 'Sample']);
+    await expect(ssnMirror()).toHaveValue('');
+    assert.equal(await page.evaluate(() => window.__startQa.nextClicks), 0);
+    console.log('Tell Us More conditional controls: existing SSN and card first name are preserved.');
+
+    currentStartVariant = 'people';
+    await resetTo(startDetailsUrl, { profile: sensitiveProfile });
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await panel.click('#panel-autofill');
+    await page.waitForTimeout(1800);
+    assert.deepEqual(await calls('getFields'), []);
+    assert.deepEqual(await startBoxes(), ['', '', '', '']);
+    assert.deepEqual(await startChecked(), []);
+    assert.equal(await page.evaluate(() => window.__startQa.nextClicks), 0);
+    currentStartVariant = 'verified';
+    console.log('Tell Us More conditional controls: another-person phase releases no profile fields and fills nothing.');
 
     // With nothing saved, nothing is filled and each row points to My information.
     await resetTo(startDetailsUrl, { profile: Object.fromEntries(startFields.map(field => [field, ''])) });

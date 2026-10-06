@@ -70,16 +70,22 @@ final class DocumentOCRTests: XCTestCase {
             let analysis = try ProfileDocumentParser.analyze(result)
             XCTAssertEqual(analysis.type, type, name)
             let values = Dictionary(uniqueKeysWithValues: analysis.fields.compactMap { field in field.profileKey.map { ($0, field.value) } })
-            XCTAssertEqual(values["firstName"], "ALEXANDER", name)
-            XCTAssertEqual(values["lastName"], "SAMPLE", name)
-            XCTAssertEqual(values["addressLine1"], "1847 TEST DATA AVE", name)
+            // These samples combine the full name in one cell. The parser
+            // does not guess the first/last name boundaries for an applicant.
+            XCTAssertNil(values["firstName"], name)
+            XCTAssertNil(values["middleName"], name)
+            XCTAssertNil(values["lastName"], name)
+            XCTAssertEqual(values["addressLine1"], type == "w2" ? "1847 TEST DATA AVE, APT 4B" : "1847 TEST DATA AVE", name)
+            XCTAssertEqual(values["addressLine2"], type == "w2" ? nil : "APT 4B", name)
             XCTAssertEqual(values["city"], "DES MOINES", name)
             XCTAssertEqual(values["state"], "IA", name)
             XCTAssertEqual(values["zip"], "50309", name)
-            XCTAssertEqual(values["ssn"], "000-12-3456", name)
-            // The alternate 1099-NEC scan reads the calendar year as "202€"; leave it for user confirmation.
-            XCTAssertEqual(analysis.taxYear, type == "ssa-1099" ? "2019" : type == "w2" ? "2025" : "", name)
-            XCTAssertEqual(analysis.fields.first(where: { $0.isAnnualIncome })?.value, type == "ssa-1099" ? "18600.00" : "68450.00", name)
+            XCTAssertEqual(values["ssn"], type == "1099-nec" ? nil : "000-12-3456", name)
+            // SSA has conflicting printed years; NEC has conflicting OCR years.
+            // NEC recipient TIN stays review-only and inconsistent amount labels are omitted.
+            XCTAssertEqual(analysis.taxYear, type == "w2" ? "2025" : "", name)
+            XCTAssertEqual(analysis.fields.first(where: { $0.isAnnualIncome })?.value, type == "1099-nec" ? nil : type == "ssa-1099" ? "18600.00" : "68450.00", name)
+            XCTAssertFalse(analysis.fields.contains { $0.isAnnualIncome && ($0.label.lowercased().contains("withheld") || $0.label.lowercased().contains("repaid")) })
             try checkReviewedIncome(analysis)
         }
     }
@@ -97,9 +103,9 @@ final class DocumentOCRTests: XCTestCase {
         for index in selected.fields.indices { selected.fields[index].selected = selected.fields[index].isAnnualIncome || selected.fields[index].profileKey == "ssn" }
         let documentID = UUID()
         let draft = selected.applying(to: profile, documentID: documentID, documentName: "Synthetic form")
-        XCTAssertEqual(draft.ssn, "000-12-3456")
+        XCTAssertEqual(draft.ssn, original.fields.first(where: { $0.profileKey == "ssn" })?.value ?? profile.ssn)
         XCTAssertEqual(draft.monthlyIncome, "1000")
-        XCTAssertFalse(draft.annualIncome.isEmpty)
+        XCTAssertEqual(draft.annualIncome.count, original.fields.filter { $0.isAnnualIncome }.count)
         XCTAssertTrue(draft.annualIncome.allSatisfy { $0.year == original.taxYear && $0.source == "Synthetic form" })
         XCTAssertEqual(selected.applying(to: draft, documentID: documentID).annualIncome.count, draft.annualIncome.count)
         XCTAssertNoThrow(try AppStore.validate(draft))

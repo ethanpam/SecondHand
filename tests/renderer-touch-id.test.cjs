@@ -7,7 +7,7 @@ const test = require('node:test');
 const { JSDOM } = require('jsdom');
 
 const html = fs.readFileSync(path.join(__dirname, '../renderer/index.html'), 'utf8');
-const script = fs.readFileSync(path.join(__dirname, '../renderer/app.js'), 'utf8');
+const script = ['../shared/snap-information.js', '../renderer/snap-information.js', '../renderer/app.js'].map(file => fs.readFileSync(path.join(__dirname, file), 'utf8')).join('\n');
 const tick = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve)); };
 const PASSWORD = 'synthetic touch password';
 
@@ -191,6 +191,24 @@ test('a cancelled Touch ID prompt says why and leaves the password field ready',
   view.get('passphrase').value = PASSWORD;
   await view.submit('auth-form');
   assert.deepEqual(view.calls.find(([name]) => name === 'unlock'), ['unlock', PASSWORD]);
+  assert.equal(view.shown('workspace'), true);
+});
+
+test('when Touch ID didn’t work this time, the lock screen says so, keeps Touch ID beside the password, and it works next time', async t => {
+  const message = 'Touch ID didn’t work this time (this Mac’s Keychain couldn’t open its key). Use your password.';
+  const view = await renderer(t, { unlocked: false, touchId: 'ready' });
+  const unlockWithTouchId = view.window.secondHand.unlockWithTouchId;
+  let fail = true;
+  view.window.secondHand.unlockWithTouchId = async () => { if (fail) throw new view.window.Error(message); return unlockWithTouchId(); };
+  await view.click('touch-id-unlock');
+  assert.equal(view.get('auth-error').textContent, message);
+  assert.equal(view.shown('auth-error'), true);
+  assert.equal(view.shown('touch-id-unlock'), true, 'Touch ID stays on');
+  assert.equal(view.get('touch-id-unlock').disabled, false);
+  assert.equal(view.shown('touch-id-note'), false, 'nothing was turned off');
+  assert.equal(view.window.document.activeElement, view.get('passphrase'));
+  fail = false;
+  await view.click('touch-id-unlock');
   assert.equal(view.shown('workspace'), true);
 });
 

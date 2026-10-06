@@ -3,6 +3,7 @@
 (() => {
   const api = window.secondHand;
   const $ = (id) => document.getElementById(id);
+  const snapCatalog = window.SecondHandSnapInformation;
   const profileFields = ['firstName', 'middleName', 'lastName', 'suffix', 'maidenName', 'isApplicant',
     'birthDate', 'ssn', 'email', 'phone', 'homePhone', 'mobilePhone', 'bestContactTime',
     'hasHomeAddress', 'mailingSameAsHome', 'addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county',
@@ -11,7 +12,8 @@
     'householdAdults', 'householdChildren', 'householdSeniors', 'householdVeteran', 'householdDisability',
     'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare',
     'monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand', 'monthlyMedicalExpenses',
-    'sex', 'maritalStatus', 'hasSsnAnswer', 'ssnCardNameMatches', 'usCitizen', 'militaryOrVeteran', 'disabled', 'blind', 'healthLimitation', 'medicare'];
+    'sex', 'maritalStatus', 'hasSsnAnswer', 'ssnCardNameMatches', 'usCitizen', 'militaryOrVeteran', 'disabled', 'blind', 'healthLimitation', 'medicare',
+    ...snapCatalog.scalarFields.map(field => field.key)];
   const viewNames = { overview: 'Overview', profile: 'My information', documents: 'Documents', applications: 'Applications', extension: 'Chrome extension', privacy: 'Privacy & backups' };
   const statusNames = { draft: 'Draft', in_progress: 'In progress', submitted: 'Submitted', needs_action: 'Needs action', approved: 'Approved', denied: 'Denied' };
   let vaultStatus = { exists: false, unlocked: false, recoveryKey: false, deviceReset: false, deviceResetSupported: false, extensionId: '', bridgeRunning: false };
@@ -28,8 +30,12 @@
   let documentRequestId = null;
   let documentBusy = false;
   let documentFields = [];
+  let documentReviewFields = [];
+  let documentStatement = null;
   let stopDocumentProgress = null;
   const documentProfileKeys = new Set(['firstName', 'middleName', 'lastName', 'ssn', 'addressLine1', 'addressLine2', 'city', 'state', 'zip']);
+  const fieldReview = { profile: { revision: 0, busy: false, descriptions: [] }, document: { revision: 0, busy: false, descriptions: [] } };
+  const fieldReviewLabels = { empty: 'Blank', 'format-passed': 'Format checks passed', 'needs-review': 'Needs review', 'check-source': 'Check source' };
   let layaPoll;
   const LAYA_POLL_MS = 500;
   // The household list (#98): each person who lives with the applicant, the applicant's own row first.
@@ -55,6 +61,8 @@
   let setupStep = null;
   // A new password offers the setup once its recovery key is saved.
   let offerSetup = false;
+  // The desktop's note that it reset its settings is shown once while the app is open.
+  let settingsNoticeShown = false;
 
   function icon(name) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -142,6 +150,7 @@
 
   function clearSensitiveUI() {
     vaultGeneration++;
+    clearFieldReviews({ resetOptIn: true });
     offerSetup = false;
     setupProgress = null;
     closeSetup();
@@ -155,6 +164,7 @@
     setApplicationBusy(false);
     data = { profile: {}, applications: [] };
     $('profile-form').reset();
+    snapEditor.render({});
     manualCounts = null;
     renderMembers([]);
     renderSetupResume();
@@ -314,6 +324,7 @@
       if (!window.confirm('Leave without saving your profile changes?')) return;
       fillProfile();
     }
+    if (view !== currentView) clearFieldReviews({ resetOptIn: true });
     if (view !== 'profile') closeSetup();
     if (currentView === 'documents' && view !== 'documents') clearDocumentReview();
     currentView = view;
@@ -329,11 +340,16 @@
 
   // A profile field's input or select, or its radio buttons: setting a group's value checks that answer.
   const profileControl = (field) => $('profile-form').elements.namedItem(field);
+  const snapEditor = window.SecondHandSnapEditor.create($('snap-information-fields'), () => {
+    clearFieldReviews(); profileRevision++; setProfileDirty(true);
+  });
 
   function fillProfile() {
+    clearFieldReviews();
     profileRevision++;
     manualCounts = null;
     for (const key of profileFields) profileControl(key).value = typeof data.profile[key] === 'string' ? data.profile[key] : '';
+    snapEditor.render(data.profile);
     renderMembers(Array.isArray(data.profile.householdMembers) ? data.profile.householdMembers : []);
     setProfileDirty(false);
   }
@@ -404,6 +420,7 @@
     });
     grid.append(student, grade);
     row.append(element('legend'), grid);
+    window.SecondHandSnapEditor.memberDetails(row, member);
     if (self) row.append(element('p', 'field-hint', 'Your name and date of birth come from About you.'));
     row.querySelectorAll('[data-member-field="birthDate"]').forEach(input => input.addEventListener('input', renderCounts));
     return row;
@@ -414,6 +431,7 @@
     refreshMembers();
   }
   function refreshMembers() {
+    clearFieldReviews();
     const rows = memberRows();
     rows.forEach((row, index) => {
       const self = row.dataset.self === 'true';
@@ -442,7 +460,8 @@
       const self = row.dataset.self === 'true';
       const value = field => row.querySelector(`[data-member-field="${field}"]`)?.value.trim() ?? '';
       const student = value('student');
-      return { id: row.dataset.memberId, firstName: self ? profileControl('firstName').value.trim() : value('firstName'),
+      return { ...Object.fromEntries(snapCatalog.memberFields.map(field => [field.key, value(field.key)])),
+        id: row.dataset.memberId, firstName: self ? profileControl('firstName').value.trim() : value('firstName'),
         lastName: self ? profileControl('lastName').value.trim() : value('lastName'), birthDate: self ? profileControl('birthDate').value.trim() : value('birthDate'),
         relationship: self ? 'self' : value('relationship'), student, grade: student === 'yes' ? value('grade') : '' };
     });
@@ -488,6 +507,7 @@
 
   // The guided setup on screen: one step's cards, its title, and Back, Finish later, and Save and continue.
   function renderSetupStep() {
+    clearFieldReviews();
     const active = setupStep !== null;
     // Each section of My information belongs to one step; a card shows while any of its sections does.
     for (const part of $('profile-form').querySelectorAll('[data-setup-step]')) part.hidden = active && Number(part.dataset.setupStep) !== setupStep + 1;
@@ -544,10 +564,12 @@
   // a field the applicant is editing keeps their unsaved edit.
   async function profileChangedElsewhere(fields) {
     if (!vaultStatus.unlocked) return;
+    clearFieldReviews();
     const generation = vaultGeneration;
     try {
       const latest = await api.getData();
       if (generation !== vaultGeneration || !vaultStatus.unlocked) return;
+      clearFieldReviews();
       const before = data.profile;
       data = { ...data, profile: latest.profile || {} };
       if (!profileDirty) fillProfile();
@@ -559,6 +581,124 @@
     } catch (error) { if (generation === vaultGeneration) toast(error.message || 'Unable to show the answer you saved from Chrome.', true); }
   }
 
+  function fieldReviewControls() {
+    for (const scope of ['profile', 'document']) {
+      const button = $(`check-${scope}-fields`);
+      button.disabled = !api?.reviewFields || !vaultStatus.unlocked || fieldReview[scope].busy || (scope === 'document' && (documentBusy || !documentReviewFields.length));
+      button.setAttribute('aria-busy', String(fieldReview[scope].busy));
+      const optIn = $(`${scope}-review-laya`);
+      if (optIn) optIn.disabled = !api?.reviewFields;
+    }
+  }
+
+  // Review results describe one exact draft, never a saved validation flag.
+  // Invalidation also cancels model work, but correctness never depends on cancellation arriving first.
+  function clearFieldReviews({ resetOptIn = false, scopes = ['profile', 'document'] } = {}) {
+    const cancel = scopes.some(scope => fieldReview[scope].busy);
+    for (const scope of scopes) {
+      const review = fieldReview[scope];
+      review.revision++;
+      review.busy = false;
+      for (const { control, id } of review.descriptions) {
+        const remaining = (control.getAttribute('aria-describedby') || '').split(/\s+/).filter(value => value && value !== id);
+        if (remaining.length) control.setAttribute('aria-describedby', remaining.join(' ')); else control.removeAttribute('aria-describedby');
+      }
+      review.descriptions = [];
+      document.querySelectorAll(`.field-review-result[data-review-scope="${scope}"]`).forEach(node => node.remove());
+      $(`${scope}-review-other`).replaceChildren();
+      $(`${scope}-review-summary`).textContent = '';
+      $(`${scope}-review-laya-status`).textContent = '';
+      if (resetOptIn && $(`${scope}-review-laya`)) $(`${scope}-review-laya`).checked = false;
+    }
+    fieldReviewControls();
+    if (cancel && api?.cancelFieldReview) {
+      try { Promise.resolve(api.cancelFieldReview()).catch(() => {}); } catch { /* Old results still fail the revision guard. */ }
+    }
+  }
+
+  const reviewProfileDraft = () => ({ ...Object.fromEntries(profileFields.map(key => [key, String(profileControl(key).value || '')])), householdMembers: collectMembers(), ...snapEditor.read() });
+  const reviewDocumentCandidates = () => documentReviewFields.map(field => ({ ...field.metadata, value: field.input ? field.input.value : field.value }));
+
+  function profileReviewTarget(key) {
+    let controls = [], container;
+    if (profileFields.includes(key)) {
+      const control = profileControl(key);
+      controls = control instanceof window.RadioNodeList ? Array.from(control) : [control];
+      container = controls[0]?.closest('.choice-question, .field');
+    } else if (key === 'householdMembers') container = $('household-members');
+    else {
+      const match = /^householdMembers\.(\d+)\.([a-zA-Z]+)$/.exec(key);
+      if (match && snapCatalog.memberFields.some(field => field.key === match[2])) {
+        const row = memberRows()[Number(match[1])];
+        const control = row?.querySelector(`[data-member-field="${match[2]}"]`);
+        controls = control ? [control] : [];
+        container = control?.closest('.field') || row;
+      }
+    }
+    return container ? { container, controls } : snapEditor.reviewTarget(key) || { container: $('profile-review-other'), controls };
+  }
+
+  function renderFieldReview(scope, response) {
+    const profileResultLimit = profileFields.length + 1 + snapCatalog.records.length + snapCatalog.maxRecords *
+      (snapCatalog.memberFields.length + snapCatalog.records.reduce((sum, record) => sum + record.fields.length, 0));
+    const results = Array.isArray(response?.[scope]) ? response[scope].slice(0, scope === 'profile' ? profileResultLimit : 150) : [];
+    let count = 0, needsReview = 0, checkSource = 0;
+    for (const [index, result] of results.entries()) {
+      if (!result || !Object.hasOwn(fieldReviewLabels, result.status) || typeof result.key !== 'string') continue;
+      let target;
+      if (scope === 'profile') target = profileReviewTarget(result.key);
+      else {
+        const field = documentReviewFields[index];
+        if (!field || (field.metadata.id && field.metadata.id !== result.id)) continue;
+        target = { container: field.row, controls: field.input ? [field.input] : [] };
+      }
+      const node = element('p', `field-review-result ${result.status}`);
+      node.dataset.reviewScope = scope;
+      node.dataset.reviewKey = result.key;
+      node.id = `field-review-${scope}-${index}`;
+      const label = typeof result.label === 'string' ? result.label.slice(0, 160) : 'Field';
+      const messages = Array.isArray(result.messages) ? result.messages.filter(message => typeof message === 'string').slice(0, 8).map(message => message.slice(0, 500)) : [];
+      node.append(element('span', 'field-review-sr-label', `${label}: `), element('strong', '', fieldReviewLabels[result.status]));
+      if (messages.length) node.append(document.createTextNode(` · ${messages.join(' ')}`));
+      target.container.append(node);
+      for (const control of target.controls) {
+        const ids = (control.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean);
+        control.setAttribute('aria-describedby', [...new Set([...ids, node.id])].join(' '));
+        fieldReview[scope].descriptions.push({ control, id: node.id });
+      }
+      count++;
+      if (result.status === 'needs-review') needsReview++;
+      if (result.status === 'check-source') checkSource++;
+    }
+    $(`${scope}-review-summary`).textContent = `${count} fields checked · ${needsReview} need review · ${checkSource} need a source check. These checks do not verify your answers.`;
+    $(`${scope}-review-laya-status`).textContent = typeof response?.laya?.message === 'string' ? response.laya.message.slice(0, 500) : '';
+  }
+
+  async function checkFields(scope, { rulesOnly = false } = {}) {
+    const requiredView = scope === 'profile' ? 'profile' : 'documents';
+    if (!api?.reviewFields || !vaultStatus.unlocked || currentView !== requiredView || (scope === 'document' && !documentReviewFields.length)) return;
+    clearFieldReviews({ scopes: [scope] });
+    const review = fieldReview[scope], revision = review.revision, generation = vaultGeneration;
+    const request = { profile: reviewProfileDraft(), ...(scope === 'document' ? { documentFields: reviewDocumentCandidates() } : {}), useLaya: scope === 'document' && !rulesOnly && $(`${scope}-review-laya`).checked };
+    const snapshot = JSON.stringify(request);
+    const current = () => generation === vaultGeneration && vaultStatus.unlocked && currentView === requiredView && revision === review.revision &&
+      snapshot === JSON.stringify({ profile: reviewProfileDraft(), ...(scope === 'document' ? { documentFields: reviewDocumentCandidates() } : {}), useLaya: request.useLaya });
+    review.busy = true;
+    fieldReviewControls();
+    $(`${scope}-review-summary`).textContent = request.useLaya ? 'Checking formats and requesting experimental Laya suggestions…' : 'Checking fields on this computer…';
+    try {
+      const response = await api.reviewFields(request);
+      if (current()) renderFieldReview(scope, response);
+    } catch {
+      if (current()) $(`${scope}-review-summary`).textContent = 'Checks could not be completed. Your information has not changed. Try again or review it yourself.';
+    } finally {
+      if (revision === review.revision && generation === vaultGeneration) {
+        review.busy = false;
+        fieldReviewControls();
+      }
+    }
+  }
+
   function documentControls() {
     $('read-document').disabled = documentBusy || !api?.readDocument;
     $('read-document').setAttribute('aria-busy', String(documentBusy));
@@ -567,9 +707,12 @@
     const selected = documentFields.filter(field => field.checkbox?.checked);
     $('document-selection-count').textContent = selected.length ? `${selected.length} ${selected.length === 1 ? 'detail' : 'details'} selected · profile draft only` : 'No details selected. Nothing will be changed.';
     $('apply-document-fields').disabled = documentBusy || !selected.length || !$('document-confirm-applicant').checked || !vaultStatus.unlocked;
+    $('add-document-statement').disabled = documentBusy || !documentStatement || !$('document-confirm-statement').checked || !vaultStatus.unlocked;
+    fieldReviewControls();
   }
 
   function clearDocumentReview({ cancel = true } = {}) {
+    clearFieldReviews({ resetOptIn: true });
     const requestId = documentRequestId;
     const wasBusy = documentBusy;
     documentRevision++;
@@ -578,6 +721,11 @@
     if (stopDocumentProgress) { try { stopDocumentProgress(); } catch { /* Cleared generation still blocks late events. */ } }
     stopDocumentProgress = null;
     documentFields = [];
+    documentReviewFields = [];
+    documentStatement = null;
+    $('document-statement').hidden = true;
+    $('document-statement-summary').textContent = '';
+    $('document-confirm-statement').checked = false;
     for (const id of ['document-fields', 'document-pages', 'document-warning-list']) $(id).replaceChildren();
     for (const id of ['document-name', 'document-type', 'document-page-summary', 'document-status', 'document-progress-label']) $(id).textContent = '';
     $('document-review').hidden = true;
@@ -639,6 +787,17 @@
       const page = Number.isInteger(field.page) && field.page > 0 ? `Page ${field.page} · ` : '';
       label.append(element('span', 'document-field-source', page + confidenceText(field.confidence)));
       const values = element('div', 'document-field-value');
+      const metadata = { label: documentText(field.label, 150) };
+      if (typeof field.id === 'string' && /^[A-Za-z0-9_.:-]{1,80}$/.test(field.id)) metadata.id = field.id;
+      if (profileFields.includes(field.profileKey)) metadata.profileKey = field.profileKey;
+      if (Number.isInteger(field.page) && field.page >= 1 && field.page <= 12) metadata.page = field.page;
+      if (typeof field.confidence === 'number' && Number.isFinite(field.confidence) && field.confidence >= 0 && field.confidence <= 100) metadata.confidence = field.confidence;
+      if (typeof field.sourceLabel === 'string' && field.sourceLabel.length <= 150) {
+        metadata.sourceLabel = field.sourceLabel;
+        label.append(element('span', 'document-field-source', `Document label: ${field.sourceLabel}`));
+      }
+      if (['applicant', 'spouse', 'document', 'employer', 'payer', 'issuer'].includes(field.sourceRole)) metadata.sourceRole = field.sourceRole;
+      const reviewField = { metadata, row, value: documentText(field.value, 500), input: null };
       if (eligible) {
         const checkbox = element('input'); checkbox.type = 'checkbox'; checkbox.id = `document-select-${index}`;
         checkbox.dataset.profileKey = key;
@@ -648,6 +807,7 @@
         const current = element('div', 'document-current'); current.append(element('span', '', 'Current profile draft'));
         const currentValue = element('div'); current.append(currentValue);
         const record = { key, checkbox, input, currentValue, current: '' };
+        reviewField.input = input;
         documentCurrent(record);
         documentFields.push(record);
         checkbox.addEventListener('change', () => {
@@ -658,20 +818,34 @@
           $('document-confirm-applicant').checked = false;
           documentControls();
         });
-        input.addEventListener('input', () => { $('document-confirm-applicant').checked = false; documentControls(); });
+        input.addEventListener('input', () => { clearFieldReviews(); $('document-confirm-applicant').checked = false; documentControls(); });
         values.append(input);
         row.append(checkbox, label, values, current);
       } else {
         values.append(element('strong', '', documentText(field.value, 500)));
-        row.append(label, values, element('span', 'document-review-only', 'Review only · not added to profile'));
+        row.append(label, values, element('span', 'document-review-only', 'Review only · not used for applicant autofill'));
       }
+      documentReviewFields.push(reviewField);
       $('document-fields').append(row);
     }
     $('document-no-fields').hidden = $('document-fields').childElementCount > 0;
+    const statementFields = snapCatalog.records.find(record => record.key === 'taxStatements').fields;
+    const statement = analysis.statement;
+    if (statement && statementFields.find(field => field.key === 'documentType').options.some(([value]) => value && value === statement.documentType)) {
+      documentStatement = Object.fromEntries(statementFields.map(field => [field.key, documentText(statement[field.key], 200)]));
+      $('document-statement-summary').replaceChildren();
+      for (const field of statementFields) {
+        const value = documentStatement[field.key];
+        if (value) $('document-statement-summary').append(element('dt', '', field.label), element('dd', '', value));
+      }
+      $('document-statement').hidden = false;
+    }
     $('document-empty').hidden = true;
     $('document-review').hidden = false;
     $('document-status').textContent = 'Read locally. No information has been saved or shared.';
     documentControls();
+    // Automatic checks use rules only, even if a previous manual check opted into Laya.
+    checkFields('document', { rulesOnly: true });
   }
 
   async function readDocument() {
@@ -732,6 +906,7 @@
       documentControls();
       return;
     }
+    clearFieldReviews();
     for (const field of selected) profileControl(field.key).value = field.input.value.trim();
     syncSelf();
     profileRevision++;
@@ -922,10 +1097,12 @@
     fillProfile(); renderSummary();
     showView('overview', { skipConfirmation: true });
     renderSetupResume();
-    // Problems found while opening, in one toast so neither hides the other: setup progress that
-    // couldn't be read, and Touch ID turned off while unlocking (and why).
+    // Problems found while opening, in one toast so none hides another: setup progress that couldn't
+    // be read, Touch ID turned off while unlocking (and why), and settings the desktop had to reset.
+    const settingsNotice = !settingsNoticeShown && typeof status.settingsNotice === 'string' && status.settingsNotice;
+    if (settingsNotice) settingsNoticeShown = true;
     const problems = [progress.error && (progress.error.message || 'SecondHand couldn’t read your setup progress.'),
-      typeof status.touchIdNotice === 'string' && status.touchIdNotice].filter(Boolean);
+      typeof status.touchIdNotice === 'string' && status.touchIdNotice, settingsNotice].filter(Boolean);
     if (problems.length) toast(problems.join(' '), true);
   }
 
@@ -1219,21 +1396,37 @@
   });
   $('document-confirm-applicant').addEventListener('change', documentControls);
   $('apply-document-fields').addEventListener('click', applyDocumentFields);
+  $('document-confirm-statement').addEventListener('change', documentControls);
+  $('add-document-statement').addEventListener('click', () => {
+    if (!vaultStatus.unlocked || currentView !== 'documents' || documentBusy || !documentStatement || !$('document-confirm-statement').checked) return;
+    if (!snapEditor.append('taxStatements', documentStatement, true)) { showError('document-error', 'You can save up to 20 tax-statement records. Remove an old record before adding another.'); return; }
+    showView('profile', { skipConfirmation: true });
+    $('snap-information').open = true;
+    document.querySelector('[data-record-section="taxStatements"]').open = true;
+    toast('Historical tax record added to your draft. Review and save your information.');
+  });
+  for (const scope of ['profile', 'document']) {
+    $(`check-${scope}-fields`).addEventListener('click', () => checkFields(scope));
+    $(`${scope}-review-laya`)?.addEventListener('change', () => clearFieldReviews({ scopes: [scope] }));
+  }
   documentControls();
   $('overview-start').addEventListener('click', () => showView('profile'));
   $('lock-button').addEventListener('click', lockVault);
   $('privacy-lock').addEventListener('click', lockVault);
   $('profile-form').addEventListener('input', (event) => {
+    clearFieldReviews();
     profileRevision++; setProfileDirty(true);
     if (['firstName', 'lastName', 'birthDate'].includes(event.target.name)) syncSelf();
   });
+  $('profile-form').addEventListener('change', () => clearFieldReviews());
   $('profile-form').addEventListener('submit', (event) => {
     event.preventDefault(); clearError('profile-error');
     const generation = vaultGeneration;
     const revision = profileRevision;
     // In the guided setup, saving a step moves on to the next.
     const step = setupStep;
-    const profile = { ...Object.fromEntries(profileFields.map((field) => [field, profileControl(field).value.trim()])), householdMembers: collectMembers() };
+    const profile = reviewProfileDraft();
+    for (const field of profileFields) profile[field] = profile[field].trim();
     pending(step === null ? $('save-profile') : $('setup-next'), async () => {
       try {
         const saved = await api.saveProfile(profile);

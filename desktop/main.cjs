@@ -17,12 +17,13 @@ const { touchIdPlatform, createTouchIdUnlock } = require('./touch-id.cjs');
 const { createLaya } = require('./laya.cjs');
 const { createFieldSuggestions } = require('./field-suggestions.cjs');
 const { createFieldAnswers } = require('./field-answers.cjs');
+const { createFieldReview } = require('./field-review.cjs');
 const { createOcrEngine } = require('./ocr-engine.cjs');
 const { createDocumentReader } = require('./ocr-service.cjs');
 const { requestId: documentRequestId } = require('./ocr-limits.cjs');
 const { analyzeDocument } = require('../shared/document-parser.cjs');
 const { validateProfile, validateApplication, HOUSEHOLD_COUNT_FIELDS, YES_NO_FIELDS, PORTAL_URL, isPortalUrl, siteOrigin, isRequestField, fieldLabel, releasedValue,
-  blockedByBirthDate, savedBirthDateRefusal } = require('../shared/schema.cjs');
+  blockedByBirthDate, savedBirthDateRefusal, SNAP_IOWA_ONLY_FIELDS } = require('../shared/schema.cjs');
 const household = require('../shared/household.cjs');
 
 app.setName('SecondHand');
@@ -85,6 +86,8 @@ if (nativeOrigin) {
   let allSites = false;
   // Laya is on unless the person turned it off. Until they choose, this is undefined and not saved.
   let layaEnabled;
+  // What was reset because settings.json couldn't be read at startup, until a setting is saved (#139).
+  let settingsNotice = null;
   // Released only after a named confirmation on sites other than Iowa's portal.
   const SENSITIVE_FIELDS = ['ssn', 'hasSsn', 'hasSsnAnswer', 'birthDate', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'assetsOnHand', 'monthlyMedicalExpenses',
     'usCitizen', 'disabled', 'blind', 'healthLimitation', 'medicare'];
@@ -92,6 +95,11 @@ if (nativeOrigin) {
   // always, and the profile's own age counts while the household list sets them.
   const AGE_COUNT_FIELDS = Object.freeze(['householdAdults', 'householdChildren', 'householdSeniors']);
   const MAX_TRUSTED_SITES = 50;
+  // A trusted site's host name is at most 253 characters, the longest DNS allows, so its origin is at most 261.
+  const MAX_HOST_LENGTH = 253;
+  const hostTooLong = origin => new URL(origin).hostname.length > MAX_HOST_LENGTH;
+  // settings.json at its largest: 50 origins of 261 characters (13.2 KB) and the other settings. 16 KB holds it.
+  const MAX_SETTINGS_BYTES = 16 * 1024;
   // The guided first-run setup's progress: how many of its six steps are done. Not sensitive, and kept
   // beside the settings only while the setup is under way.
   const SETUP_STEPS = 6;
@@ -113,6 +121,8 @@ if (nativeOrigin) {
   // The extension's uses of that runtime: matching text boxes (#39) and answering choice questions (#42).
   const fieldSuggestions = createFieldSuggestions({ laya });
   const fieldAnswers = createFieldAnswers({ laya });
+  const fieldReview = createFieldReview({ laya });
+  let fieldReviewRevision = 0;
   const vault = new Vault(path.join(userData, 'vault.secondhand'));
   // Unlock with Touch ID on a Mac (#99). Its key is sealed in this Mac's Keychain in touch-unlock.bin.
   const touchIdUnlock = createTouchIdUnlock({ vault, filePath: path.join(userData, 'touch-unlock.bin'), revision: () => accessRevision,
@@ -164,7 +174,7 @@ if (nativeOrigin) {
     const details = await vault.inspect().catch(() => null);
     return { exists: await vault.exists(), unlocked: vault.unlocked, lockRevision, recoveryKey: Boolean(details?.recoveryKey),
       deviceReset: Boolean(details?.deviceReset) && await hasDeviceSecret(), deviceResetSupported, extensionId, autofillWithoutAsking, trustedSites: [...trustedSites], allSites,
-      touchId: await touchIdUnlock.state(), touchIdSupported: touchIdUnlock.supported(), touchIdNotice: touchIdUnlock.notice,
+      touchId: await touchIdUnlock.state(), touchIdSupported: touchIdUnlock.supported(), touchIdNotice: touchIdUnlock.notice, settingsNotice,
       bridgeRunning: Boolean(bridge), platform: process.platform, laya: await layaStatus(),
       extensionSetup: await getExtensionSetup(app).catch(() => ({ prepared: false, available: false })) };
   }
@@ -187,6 +197,28 @@ if (nativeOrigin) {
   }
   async function saveSettings() {
     await atomicWrite(configPath, Buffer.from(JSON.stringify({ extensionId, autofillWithoutAsking, trustedSites, layaEnabled, ...(allSites && { allSites }) })));
+    settingsNotice = null;
+  }
+  // settings.json at startup. None is a new install. A file that can't be read, or isn't settings, leaves
+  // every setting at its default, and the app says so. Only Laya's off choice is kept, when it can still be
+  // read: it gives no access, and it keeps the model's download away.
+  async function loadSettings() {
+    let text = null;
+    try {
+      if ((await fs.stat(configPath)).size <= MAX_SETTINGS_BYTES) text = await fs.readFile(configPath, 'utf8');
+    } catch (error) { if (error.code === 'ENOENT') return; }
+    let config;
+    try { config = JSON.parse(text); } catch { config = null; }
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      if (/"layaEnabled"\s*:\s*false\b/.test(text ?? '')) layaEnabled = false;
+      settingsNotice = 'SecondHand couldn’t read its settings file, so it reset the Chrome connection, Always allow, your trusted sites, and all websites. Set them up again on the Chrome extension page.' +
+        (layaEnabled === false ? ' Laya stays off.' : ' Laya is on again. If you had turned it off, turn it off again on that page.');
+      return;
+    }
+    if (EXTENSION_ID.test(config.extensionId || '')) { extensionId = config.extensionId; autofillWithoutAsking = config.autofillWithoutAsking === true; }
+    if (Array.isArray(config.trustedSites)) trustedSites = [...new Set(config.trustedSites.filter(origin => typeof origin === 'string' && siteOrigin(origin) === origin && !hostTooLong(origin)))].slice(0, MAX_TRUSTED_SITES);
+    if (typeof config.layaEnabled === 'boolean') layaEnabled = config.layaEnabled;
+    allSites = config.allSites === true;
   }
   // A site other than Iowa's portal may receive saved answers when the person trusted it, or every
   // https site while all websites is on. Sensitive details still ask on each one.
@@ -283,20 +315,31 @@ if (nativeOrigin) {
       if (!chosen.length) return { answers: {}, accessRevision, ...reason };
       // Answers are profile information: they follow getFields' approval, each question listed
       // with the option that would be filled. Iowa's portal keeps its rule of no sensitive prompt.
+      const lines = list => list.map(question => `“${question.label}”: ${answers[question.id]}`).join('\n');
+      const these = list => list.length === 1 ? 'this answer' : 'these answers';
+      const approve = (list, sensitivePrompt = null) => approveRelease({ context, iowa, origin, generation,
+        message: `Fill ${these(list)} into ${iowa ? 'Iowa’s application' : origin}?`,
+        items: `Laya, SecondHand’s AI on this computer, picked ${these(list)} from your saved information:\n${lines(list)}`, sensitive: sensitivePrompt });
       const count = chosen.length;
-      const lines = chosen.map(question => `“${question.label}”: ${answers[question.id]}`).join('\n');
       // Laya reads every sensitive fact at once, so the prompt names them all and says how many
       // answers needed them; which fact decided an answer is not known.
       const needed = sensitive.length;
-      const which = needed === count ? (count === 1 ? 'this answer' : 'these answers') : `${needed} of these answers`;
+      const which = needed === count ? these(chosen) : `${needed} of these answers`;
       const uses = needed === count ? (count === 1 ? 'It uses' : 'They use') : `${needed} of them ${needed === 1 ? 'uses' : 'use'}`;
-      const approved = await approveRelease({ context, iowa, origin, generation,
-        message: `Fill ${count === 1 ? 'this answer' : 'these answers'} into ${iowa ? 'Iowa’s application' : origin}?`,
-        items: `Laya, SecondHand’s AI on this computer, picked ${count === 1 ? 'this answer' : 'these answers'} from your saved information:\n${lines}`,
-        sensitive: !iowa && needed ? { message: `Fill ${count === 1 ? 'this answer' : `these ${count} answers`} on ${origin}? ${uses} sensitive details.`,
-          detail: `${sensitiveFields.map(fieldLabel).join(', ')}\n\nLaya, SecondHand’s AI on this computer, read these saved details to pick ${which}. The details stay on this computer. Only allow this if you meant to give these answers to ${origin}:\n${lines}` } : null });
+      const asksSensitive = !iowa && needed > 0;
+      const approved = await approve(chosen, asksSensitive ? { message: `Fill ${count === 1 ? 'this answer' : `these ${count} answers`} on ${origin}? ${uses} sensitive details.`,
+        detail: `${sensitiveFields.map(fieldLabel).join(', ')}\n\nLaya, SecondHand’s AI on this computer, read these saved details to pick ${which}. The details stay on this computer. Only allow this if you meant to give these answers to ${origin}:\n${lines(chosen)}` } : null);
       touch();
-      return { answers: approved ? answers : {}, accessRevision, ...reason };
+      if (approved) return { answers, accessRevision, ...reason };
+      // Cancel on "Share sensitive details?" drops only the answers that needed sensitive details (#42).
+      // The others follow their own rule: no prompt with Always allow, else "Let Chrome fill this form?".
+      const everyday = asksSensitive ? chosen.filter(question => !sensitive.includes(question.id)) : [];
+      if (!everyday.length) return { answers: {}, accessRevision, ...reason };
+      requireUnlocked();
+      if (generation !== accessRevision) throw publicError('SecondHand access changed. Click Autofill again.');
+      const kept = await approve(everyday);
+      touch();
+      return { answers: kept ? Object.fromEntries(everyday.map(question => [question.id, answers[question.id]])) : {}, accessRevision, ...reason };
     } catch (error) {
       if (error.publicMessage) throw error;
       if (error.code === 'LAYA_NOT_READY') throw layaNotReady();
@@ -322,6 +365,8 @@ if (nativeOrigin) {
     const setup = await getExtensionSetup(app);
     if (setup.prepared) return { build: setup.build, copy: 'ready' };
     if (!setup.exists) return { build: setup.build, copy: 'absent' };
+    // A newer app prepared the copy: it is never refreshed with this older build, and Chrome loads its build (#142).
+    if (setup.newerCopy) return { build: setup.newerCopy, copy: 'ready' };
     if (copyFailed) return { build: setup.build, copy: 'failed' };
     try { await refreshCopy(); }
     catch { return { build: setup.build, copy: 'failed' }; }
@@ -360,6 +405,7 @@ if (nativeOrigin) {
     requireUnlocked();
     if (request.type === 'trustSite') {
       const origin = siteOrigin(request.url);
+      if (origin && hostTooLong(origin)) throw publicError('This site’s address is too long for SecondHand to trust.');
       if (fieldRequestPending) throw publicError('Another request is waiting for your approval.');
       fieldRequestPending = true;
       const generation = accessRevision;
@@ -415,6 +461,7 @@ if (nativeOrigin) {
       const origin = siteOrigin(request.url);
       if (!iowa && !siteAllowed(origin)) throw publicError('This site isn’t trusted. Turn on SecondHand for it first.');
       if (!request.fields.every(isRequestField)) throw publicError('This page asked for something SecondHand doesn’t share.');
+      if (!iowa && request.fields.some(field => SNAP_IOWA_ONLY_FIELDS.includes(field))) throw publicError('These SNAP answers can only be shared with Iowa’s application.');
       const byAge = !iowa && request.fields.some(field => AGE_COUNT_FIELDS.includes(field)) && household.listed(vault.getData().profile);
       const sensitive = iowa ? [] : request.fields.filter(field => SENSITIVE_FIELDS.includes(field) || household.isBandKey(field) || (byAge && AGE_COUNT_FIELDS.includes(field)));
       const approved = await approveRelease({ context, iowa, origin, generation: accessRevision,
@@ -635,6 +682,19 @@ if (nativeOrigin) {
       return result;
     },
     cancelDocumentRead: requestId => documentReader.cancel(documentRequestId(requestId)),
+    async reviewFields(request) {
+      requireUnlocked();
+      const revision = accessRevision;
+      const sequence = ++fieldReviewRevision;
+      const isCurrent = () => vault.unlocked && !quitting && revision === accessRevision && sequence === fieldReviewRevision;
+      touch();
+      const result = await fieldReview.review(request, { today: today(), isCurrent });
+      if (!isCurrent()) throw publicError('Your information changed during review. Check it again.');
+      touch();
+      return result;
+    },
+    // Cancels only this desktop review. Other local model callers keep their own work.
+    cancelFieldReview() { fieldReviewRevision++; return true; },
     async saveProfile(profile) {
       requireUnlocked();
       const clean = validated(validateProfile, profile, { today: today() });
@@ -784,11 +844,14 @@ if (nativeOrigin) {
           buttons: ['Cancel', 'Replace'], defaultId: 0, cancelId: 0, noLink: true });
         if (answer.response !== 1) return { cancelled: true };
       }
+      // A restored backup opens with its own password first. Touch ID's key goes before the file is
+      // replaced, and the access revision moves on, so a Touch ID prompt that is already up can't open it.
+      try { await touchIdUnlock.removeSealed(); }
+      catch (error) { throw publicError(`Touch ID’s key on this Mac couldn’t be removed (${error.code || error.message}), so the backup wasn’t restored. Please try again.`); }
+      accessRevision++;
       await vault.importEncrypted(bytes);
       // Setup progress belonged to the information just replaced.
       await fs.rm(setupPath, { force: true });
-      // A restored backup opens with its own password first.
-      await touchIdUnlock.forget();
       return { cancelled: false };
     }
   };
@@ -823,13 +886,7 @@ if (nativeOrigin) {
     // Packaged builds get the icon from electron-builder; show it in development too.
     if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(path.join(__dirname, 'icon.png'));
     await fs.mkdir(userData, { recursive: true, mode: 0o700 });
-    try {
-      const stat = await fs.stat(configPath);
-      if (stat.size <= 4096) { const config = JSON.parse(await fs.readFile(configPath, 'utf8')); if (EXTENSION_ID.test(config.extensionId || '')) { extensionId = config.extensionId; autofillWithoutAsking = config.autofillWithoutAsking === true; }
-      if (Array.isArray(config.trustedSites)) trustedSites = [...new Set(config.trustedSites.filter(origin => typeof origin === 'string' && siteOrigin(origin) === origin))].slice(0, MAX_TRUSTED_SITES);
-      if (typeof config.layaEnabled === 'boolean') layaEnabled = config.layaEnabled;
-      allSites = config.allSites === true; }
-    } catch { /* Missing or invalid non-sensitive setup settings are reset. */ }
+    await loadSettings();
     await laya.setEnabled(layaEnabled !== false);
     // Downloads the model if it's missing, then checks for a newer one now and every 24 hours.
     // It needs no unlock: it touches no saved information. It does nothing while Laya is off.

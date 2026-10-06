@@ -7,7 +7,12 @@ struct ProfileDocumentField: Decodable, Identifiable {
     var value: String
     let profileKey: String?
     var selected = true
-    var isAnnualIncome: Bool { id.hasPrefix("taxLine") || id.hasPrefix("annual") }
+    var isAnnualIncome: Bool {
+        // Statement parsers also emit tax withholding and repayments; those
+        // are not income. Preserve the original income lines, never total them.
+        let statementIncome = ["taxLineW2Box1", "taxLineNecBox1a", "taxLineSsaBox3", "taxLineSsaBox5"]
+        return statementIncome.contains(id) || id.range(of: #"^taxLine[1-6][abz]$"#, options: .regularExpression) != nil
+    }
     enum CodingKeys: String, CodingKey { case id, label, value, profileKey }
 
     static let paths: [String: WritableKeyPath<PersonalProfile, String>] = [
@@ -47,10 +52,13 @@ enum ProfileDocumentParser {
     static func analyze(_ document: RecognizedDocument) throws -> ProfileDocumentAnalysis {
         guard let context = JSContext() else { throw DocumentOCRError.unreadable }
         context.evaluateScript("var modules = {'node:crypto': {randomUUID: function() { throw new Error('Unavailable'); }}}; function require(name) { if (!(name in modules)) throw new Error('Unknown module'); return modules[name]; }")
-        for name in ["household", "schema", "document-parser"] {
-            guard let url = Bundle.main.url(forResource: name, withExtension: "cjs") else { throw DocumentOCRError.unreadable }
+        // Load the shared CommonJS dependencies before their consumers. These
+        // bundled scripts receive only the fixed in-memory module registry.
+        for name in ["snap-information", "household", "schema", "facts", "document-layout", "document-w2", "document-ssa1099", "document-1099nec", "document-parser"] {
+            let scriptExtension = name == "snap-information" ? "js" : "cjs"
+            guard let url = Bundle.main.url(forResource: name, withExtension: scriptExtension) else { throw DocumentOCRError.unreadable }
             let script = try String(contentsOf: url, encoding: .utf8)
-            context.evaluateScript("modules['./\(name).cjs'] = (function() { var module = {exports:{}}; \(script)\n return module.exports; })();")
+            context.evaluateScript("modules['./\(name).\(scriptExtension)'] = (function() { var module = {exports:{}}; \(script)\n return module.exports; })();")
             guard context.exception == nil else { throw DocumentOCRError.unreadable }
         }
         let input = try JSONEncoder().encode(document.layoutPages)

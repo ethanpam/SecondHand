@@ -1,6 +1,10 @@
 'use strict';
 const { randomUUID } = require('node:crypto');
 const household = require('./household.cjs');
+const SNAP_INFORMATION = require('./snap-information.js');
+const RECORD_FIELDS = Object.freeze(Object.fromEntries(SNAP_INFORMATION.records.map(record => [record.key, record.fields])));
+const MAX_RECORDS = SNAP_INFORMATION.maxRecords;
+const SNAP_IOWA_ONLY_FIELDS = Object.freeze(SNAP_INFORMATION.scalarFields.map(field => field.key));
 
 const PORTAL_URL = 'https://hhsservices.iowa.gov/apspssp/ssp.portal';
 const FIELD_LABELS = Object.freeze({
@@ -29,7 +33,9 @@ const FIELD_LABELS = Object.freeze({
   healthLimitation: 'A health condition limits your daily activities, or you live in a medical facility or nursing home', medicare: 'You have Medicare',
   // Each person in the household: name, birth date, relationship to the applicant, and whether they are a student.
   householdMembers: 'Household members',
-  hasSsn: 'Whether you have a Social Security number', studentNameGrade: 'Student name and grade'
+  hasSsn: 'Whether you have a Social Security number', studentNameGrade: 'Student name and grade',
+  ...Object.fromEntries(SNAP_INFORMATION.scalarFields.map(field => [field.key, field.label])),
+  ...Object.fromEntries(SNAP_INFORMATION.records.map(record => [record.key, record.label]))
 });
 // Answers the desktop works out from saved fields when a page asks for them. They are never saved,
 // and never carry the saved value itself: hasSsn is Yes when a Social Security number is saved,
@@ -40,14 +46,16 @@ const DERIVED_FIELDS = Object.freeze({
 });
 const PROFILE_FIELDS = Object.freeze(Object.keys(FIELD_LABELS).filter(key => !Object.hasOwn(DERIVED_FIELDS, key)));
 // The household list never leaves the app whole: a page gets only the answers worked out from it.
-const LIST_FIELDS = Object.freeze(['householdMembers']);
+const LIST_FIELDS = Object.freeze(['householdMembers', ...Object.keys(RECORD_FIELDS)]);
 // Every named field a page may ask the desktop for. Age-band counts ("householdCount:0-17") are asked for by key too.
-const REQUEST_FIELDS = Object.freeze(Object.keys(FIELD_LABELS).filter(key => !LIST_FIELDS.includes(key)));
+const REQUEST_FIELDS = Object.freeze([...PROFILE_FIELDS.filter(key => !LIST_FIELDS.includes(key)), ...Object.keys(DERIVED_FIELDS)]);
 // The fixed counts the household list works out when it has people; the manual counts answer otherwise.
 const HOUSEHOLD_COUNT_FIELDS = Object.freeze({ householdSize: 'size', householdAdults: 'adults', householdChildren: 'children', householdSeniors: 'seniors' });
 const RELATIONSHIPS = Object.freeze(['self', 'spouse-partner', 'child', 'parent', 'sibling', 'grandchild', 'other-relative', 'other']);
 const MAX_MEMBERS = 20;
-const MEMBER_FIELDS = Object.freeze(['id', 'firstName', 'lastName', 'birthDate', 'relationship', 'student', 'grade']);
+const MEMBER_FIELDS = Object.freeze(['id', ...SNAP_INFORMATION.memberFields.map(field => field.key)]);
+const MAX_PROFILE_REVIEW_ROWS = PROFILE_FIELDS.length + MAX_MEMBERS * (MEMBER_FIELDS.length - 1) +
+  MAX_RECORDS * Object.values(RECORD_FIELDS).reduce((count, fields) => count + fields.length, 0);
 // Answers the side panel may offer to save from a page: the general engine's saved profile fields
 // (extension/generic-adapter.js PROFILE_KEYS), except the Social Security number, which is never read from a page.
 const SAVE_FIELDS = Object.freeze(['firstName', 'middleName', 'lastName', 'suffix', 'birthDate', 'email', 'mobilePhone', 'homePhone', 'phone',
@@ -59,7 +67,8 @@ const SOURCE_LABELS = Object.freeze({ 'householdMembers.birthDate': 'Household m
 const YES_NO_FIELDS = Object.freeze(['hasHomeAddress', 'mailingSameAsHome', 'isApplicant',
   'programSnap', 'programFip', 'programMedicaid', 'helpPayMedicalBills', 'householdVeteran', 'householdDisability',
   'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare',
-  'hasSsnAnswer', 'ssnCardNameMatches', 'usCitizen', 'militaryOrVeteran', 'disabled', 'blind', 'healthLimitation', 'medicare']);
+  'hasSsnAnswer', 'ssnCardNameMatches', 'usCitizen', 'militaryOrVeteran', 'disabled', 'blind', 'healthLimitation', 'medicare',
+  ...SNAP_INFORMATION.scalarFields.filter(field => field.type === 'yesno').map(field => field.key)]);
 const PROFILE_CHOICES = Object.freeze({
   ...Object.fromEntries(YES_NO_FIELDS.map(field => [field, Object.freeze(['', 'yes', 'no'])])),
   suffix: Object.freeze(['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'Jr.', 'Sr.']),
@@ -89,6 +98,7 @@ function siteOrigin(value) { return isHttpsSiteUrl(value) ? new URL(value).origi
 function object(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
       ![Object.prototype, null].includes(Object.getPrototypeOf(value))) throw new Error('Expected an object.');
+  if (Reflect.ownKeys(value).some(key => typeof key !== 'string' || !Object.hasOwn(Object.getOwnPropertyDescriptor(value, key), 'value'))) throw new Error('Expected plain data.');
 }
 function text(value, name, max = 200) {
   if (value === undefined) return '';
@@ -159,8 +169,55 @@ function checkProfile(input, { today, saving }) {
   for (const field of ['monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand', 'monthlyMedicalExpenses']) {
     if (result[field] && !/^\d{1,8}(\.\d{1,2})?$/.test(result[field])) throw new Error(`${FIELD_LABELS[field]} must be a nonnegative dollar amount, or blank if unknown.`);
   }
+  for (const definition of SNAP_INFORMATION.scalarFields) result[definition.key] = validateInformationValue(definition, input[definition.key]);
   result.householdMembers = validateMembers(input.householdMembers, result, { today, saving });
+  for (const key of Object.keys(RECORD_FIELDS)) result[key] = validateRecords(key, input[key]);
   return result;
+}
+
+const STATE_CODES = new Set('AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC AS GU MP PR VI AA AE AP FM MH PW'.split(' '));
+// Catalog fields stay ordinary bounded strings. Validation never chooses a
+// person, time period, citizenship answer, or current-income interpretation.
+function validateInformationValue(definition, input) {
+  const { key, label, type } = definition;
+  const value = text(input, label, definition.maxLength || 200);
+  if (!value) return '';
+  if (type === 'yesno' || type === 'select') {
+    if (!definition.options.some(option => option[0] === value)) throw new Error(`Choose a supported answer for ${label}.`);
+  }
+  if (type === 'money' && !/^\d{1,8}(\.\d{1,2})?$/.test(value)) throw new Error(`${label} must be a nonnegative dollar amount, or blank if unknown.`);
+  if (type === 'date' && !validDate(value)) throw new Error(`${label} must be a valid date.`);
+  if (type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) throw new Error(`${label} must be a valid email address.`);
+  if (type === 'tel' && (!/^\+?[\d\s().-]{7,30}$/.test(value) || value.replace(/\D/g, '').length < 7 || value.replace(/\D/g, '').length > 15)) throw new Error(`${label} must be a valid phone number.`);
+  if (type === 'zip' && !/^\d{5}(-\d{4})?$/.test(value)) throw new Error(`${label} must be a five- or nine-digit ZIP code.`);
+  if (type === 'state' && !STATE_CODES.has(value.toUpperCase())) throw new Error(`${label} must be a recognized two-letter state or postal-region abbreviation.`);
+  if (key === 'ssn' && !/^\d{3}-?\d{2}-?\d{4}$/.test(value)) throw new Error('Enter a nine-digit Social Security number or leave it blank.');
+  if (key === 'taxYear' && !/^(19|20)\d{2}$/.test(value)) throw new Error('Tax year must contain four digits from 1900 to 2099.');
+  if (key === 'hoursPerWeek' && (!/^\d{1,3}(\.\d{1,2})?$/.test(value) || Number(value) > 168)) throw new Error('Hours per week must be between 0 and 168.');
+  return type === 'state' ? value.toUpperCase() : value;
+}
+
+function denseList(value, max, label) {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype || value.length > max) throw new Error(`${label} must be a list with up to ${max} entries.`);
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  if (Reflect.ownKeys(descriptors).some(key => key !== 'length' && (typeof key !== 'string' || !/^(0|[1-9]\d*)$/.test(key) || !Object.hasOwn(descriptors[key], 'value'))) || Object.keys(value).length !== value.length) throw new Error(`${label} must contain plain entries.`);
+  return value;
+}
+
+function validateRecords(key, input) {
+  if (!Object.hasOwn(RECORD_FIELDS, key)) throw new Error('Unknown information list.');
+  if (input === undefined) return [];
+  denseList(input, MAX_RECORDS, FIELD_LABELS[key]);
+  const definitions = RECORD_FIELDS[key], allowed = ['id', ...definitions.map(field => field.key)], ids = new Set();
+  return input.map(row => {
+    object(row);
+    if (Object.keys(row).some(field => !allowed.includes(field))) throw new Error('Unknown information-list field.');
+    if (typeof row.id !== 'string' || !MEMBER_ID.test(row.id) || ids.has(row.id.toLowerCase())) throw new Error('Each information-list entry needs a unique identifier.');
+    ids.add(row.id.toLowerCase());
+    const result = { id: row.id.toLowerCase(), ...Object.fromEntries(definitions.map(field => [field.key, validateInformationValue(field, row[field.key])])) };
+    if (result.startDate && result.endDate && result.endDate < result.startDate) throw new Error('An end date cannot be before its start date.');
+    return result;
+  });
 }
 
 const MEMBER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -168,8 +225,8 @@ const MEMBER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 // self row, which always carries their own name and birth date.
 function validateMembers(input, applicant, { today, saving }) {
   if (input === undefined) return [];
-  if (!Array.isArray(input) || Object.getPrototypeOf(input) !== Array.prototype) throw new Error('The household list is invalid.');
-  if (input.length > MAX_MEMBERS) throw new Error(`The household list holds up to ${MAX_MEMBERS} people.`);
+  if (Array.isArray(input) && input.length > MAX_MEMBERS) throw new Error(`The household list holds up to ${MAX_MEMBERS} people.`);
+  denseList(input, MAX_MEMBERS, 'The household list');
   const ids = new Set();
   const members = input.map((member, index) => {
     try { object(member); } catch { throw new Error('A household member is invalid.'); }
@@ -180,9 +237,13 @@ function validateMembers(input, applicant, { today, saving }) {
     const result = { id: member.id.toLowerCase(), firstName: text(member.firstName, 'A household member’s first name', 100), lastName: text(member.lastName, 'A household member’s last name', 100),
       birthDate: text(member.birthDate, 'A household member’s date of birth', 10), relationship: text(member.relationship, 'A household member’s relationship', 20),
       student: text(member.student, 'Whether a household member is a student', 3), grade: text(member.grade, 'A household member’s grade', 20) };
+    for (const definition of SNAP_INFORMATION.memberFields) {
+      if (!['firstName', 'lastName', 'birthDate', 'relationship', 'student', 'grade'].includes(definition.key)) result[definition.key] = validateInformationValue(definition, member[definition.key]);
+    }
     if (!RELATIONSHIPS.includes(result.relationship) && result.relationship !== '') throw new Error('Choose how each household member is related to you.');
     if (!['', 'yes', 'no'].includes(result.student)) throw new Error('Whether a household member is a student must be Yes, No, or left unanswered.');
     if (result.grade && result.student !== 'yes') throw new Error('Add a grade only for a household member who is a student.');
+    if (result.ssn && result.hasSsnAnswer === 'no') throw new Error('A household member has a Social Security number entered but having one is answered No.');
     if (result.relationship === 'self') Object.assign(result, { firstName: applicant.firstName, lastName: applicant.lastName, birthDate: applicant.birthDate });
     else if (!result.firstName) throw new Error('Enter a first name for each person in your household.');
     if (result.birthDate && !validDate(result.birthDate)) throw new Error('Enter a valid date of birth for each person in your household.');
@@ -253,5 +314,6 @@ function validateStoredApplication(input) {
 }
 
 module.exports = { PORTAL_URL, FIELD_LABELS, PROFILE_FIELDS, REQUEST_FIELDS, DERIVED_FIELDS, PROFILE_CHOICES, YES_NO_FIELDS, APPLICATION_STATUSES, HOUSEHOLD_COUNT_FIELDS,
-  RELATIONSHIPS, MAX_MEMBERS, SAVE_FIELDS, isPortalUrl, isHttpsSiteUrl, siteOrigin, isRequestField, fieldLabel, releasedValue, blockedByBirthDate, savedBirthDateRefusal,
-  validateProfile, validateStoredProfile, validateApplication, validateStoredApplication };
+  RELATIONSHIPS, MAX_MEMBERS, MEMBER_FIELDS, LIST_FIELDS, SNAP_INFORMATION, SNAP_IOWA_ONLY_FIELDS, RECORD_FIELDS, MAX_RECORDS, MAX_PROFILE_REVIEW_ROWS,
+  SAVE_FIELDS, isPortalUrl, isHttpsSiteUrl, siteOrigin, isRequestField, fieldLabel, releasedValue, blockedByBirthDate, savedBirthDateRefusal,
+  validateInformationValue, validateRecords, validateProfile, validateStoredProfile, validateApplication, validateStoredApplication };

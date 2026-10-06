@@ -95,15 +95,32 @@ export function Home() {
 
           <div className="scope-note">
             <span className="note-label">What it does today</span>
-            <p>
-              A browser side panel tracks the applicant page with completion
-              checkmarks and missing-field reminders. With your approval, it
-              fills saved applicant details, address and mailing information,
-              and your explicit program choices. It selects Save and Continue
-              when required answers are complete, then checks the next step.
-              Later navigation and questions the helper cannot recognize stay
-              manual.
-            </p>
+            <div>
+              <p>
+                A browser side panel tracks the applicant page with completion
+                checkmarks and missing-field reminders. With your approval, it
+                fills saved applicant details, address and mailing information,
+                and your explicit program choices, then selects Save and
+                Continue when required answers are complete. On the home-address
+                page, when SecondHand recognizes it, it selects Iowa’s first
+                suggested home address and continues, so review that address
+                before you submit.
+              </p>
+              <p>
+                It answers Iowa’s Tell Us More questions only from answers you
+                saved in My information. If you turn on Laya, SecondHand’s AI on
+                this computer, it fills more questions and marks them as guesses
+                to check. It moves past information-only screens for you; on
+                every other page, you choose when to move on.
+              </p>
+              <p>
+                The side panel works in English, Spanish, Vietnamese, Chinese,
+                French and Arabic. On Iowa’s information-only screens, it can
+                list what the screen says and show its words in your language,
+                using Chrome’s built-in summarizer and translator on this
+                computer, when that Chrome has them.
+              </p>
+            </div>
           </div>
 
           <section
@@ -345,13 +362,26 @@ export function Home() {
                     <summary>Updating from an earlier version</summary>
                     <div className="details-body">
                       <p>
-                        Install the new app, choose{' '}
+                        Install the new app and open it. If it comes with a
+                        newer extension, the next time you open the side panel
+                        or click Autofill, SecondHand refreshes the extension
+                        files and the extension reloads itself. If an Iowa page
+                        was open, SecondHand asks you to reload it; save your
+                        work first. Chrome may ask you to approve the
+                        extension’s updated permissions. Use Chrome 116 or
+                        newer, and keep <strong>Developer mode</strong> on at{' '}
+                        <code>chrome://extensions</code>, because Chrome turns
+                        SecondHand off without it.
+                      </p>
+                      <p>
+                        If you installed version 0.4.0 or earlier, its extension
+                        can’t update itself, so do this once by hand. Install
+                        the new app, choose{' '}
                         <strong>Refresh extension files</strong>, then click
                         Reload for SecondHand on{' '}
                         <code>chrome://extensions</code>. Reload your Iowa tab
-                        too. Use Chrome 116 or newer. Chrome may ask you to
-                        approve the extension’s updated permissions. Then click
-                        Autofill on Iowa’s applicant page.
+                        too. Then click Autofill on Iowa’s applicant page. Later
+                        updates are automatic.
                       </p>
                     </div>
                   </details>

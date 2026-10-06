@@ -5,11 +5,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { JSDOM } = require('jsdom');
-const { PROFILE_FIELDS, PROFILE_CHOICES, YES_NO_FIELDS } = require('../shared/schema.cjs');
+const { PROFILE_FIELDS, PROFILE_CHOICES, YES_NO_FIELDS, LIST_FIELDS, MEMBER_FIELDS, validateProfile } = require('../shared/schema.cjs');
 const fictionalProfile = require('./fixtures/applicant-profile.json');
 
 const html = fs.readFileSync(path.join(__dirname, '../renderer/index.html'), 'utf8');
-const script = fs.readFileSync(path.join(__dirname, '../renderer/app.js'), 'utf8');
+const script = ['../shared/snap-information.js', '../renderer/snap-information.js', '../renderer/app.js'].map(file => fs.readFileSync(path.join(__dirname, file), 'utf8')).join('\n');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 function deferred() {
@@ -159,15 +159,15 @@ test('new profile choices default to unknown, save explicit no, and clear with a
     assert.equal(view.value(field), '', field);
     assert.deepEqual([...view.choices(field)].sort(), [...PROFILE_CHOICES[field]].sort(), field);
   }
-  for (const [field, value] of Object.entries(fictionalProfile)) if (field !== 'householdMembers') view.answer(field, value);
+  for (const [field, value] of Object.entries(fictionalProfile)) if (!LIST_FIELDS.includes(field)) view.answer(field, value);
   view.submit('profile-form');await tick();
-  assert.deepEqual(saved[0], { ...fictionalProfile, householdMembers: [] });
+  assert.deepEqual(saved[0], validateProfile({ ...fictionalProfile, householdMembers: [] }));
   assert.equal(view.get('programFip').value, 'no');
   assert.equal(view.get('mailingSameAsHome').value, 'no');
   assert.equal(view.get('mailingAddressLine1').value, 'PO Box 123');
   assert.equal(view.get('addressLine1').value, fictionalProfile.addressLine1);
   view.lock();
-  for (const field of PROFILE_FIELDS.filter(field => field !== 'householdMembers')) assert.equal(view.value(field), '', field);
+  for (const field of PROFILE_FIELDS.filter(field => !LIST_FIELDS.includes(field))) assert.equal(view.value(field), '', field);
 });
 
 test('legacy profile loading leaves all new choice fields unknown and does not populate mailing fields', async t => {
@@ -176,6 +176,87 @@ test('legacy profile loading leaves all new choice fields unknown and does not p
   for (const field of [...YES_NO_FIELDS, 'suffix', 'sex', 'maritalStatus', 'maidenName', 'bestContactTime', 'mailingAddressLine1', 'mailingAddressLine2', 'mailingCity', 'mailingState', 'mailingZip']) {
     assert.equal(view.value(field), '', field);
   }
+});
+
+test('SNAP preparation keeps separate owners, unknown amounts and zero through save, reload and lock', async t => {
+  const view = await renderer(t);
+  const doc = view.window.document;
+  doc.querySelector('.nav-item[data-view="profile"]').click();
+  view.answer('iowaResident', 'yes');
+  view.answer('utilityGas', 'no');
+  view.edit('ssnCardFirstName', 'Initial');
+  const rows = key => [...doc.querySelector(`[data-record-list="${key}"]`).children];
+  const add = key => doc.querySelector(`[data-add-record="${key}"]`).click();
+  const edit = (row, key, value) => { const control = row.querySelector(`[data-record-field="${key}"]`); control.value = value; control.dispatchEvent(new view.window.Event('input', { bubbles: true })); };
+  add('jobs'); add('jobs');
+  edit(rows('jobs')[0], 'person', 'Initial Test'); edit(rows('jobs')[0], 'employer', 'Synthetic Bakery');
+  edit(rows('jobs')[0], 'amount', '0'); edit(rows('jobs')[0], 'frequency', 'Weekly');
+  edit(rows('jobs')[1], 'person', 'Other Person'); edit(rows('jobs')[1], 'employer', 'Synthetic Shop');
+  add('taxStatements'); edit(rows('taxStatements')[0], 'documentType', 'w2'); edit(rows('taxStatements')[0], 'annualIncome', '68450.00');
+  view.submit('profile-form'); await tick();
+  const profile = view.database.profile;
+  assert.equal(profile.iowaResident, 'yes'); assert.equal(profile.utilityGas, 'no'); assert.equal(profile.utilityElectricity, '');
+  assert.deepEqual(profile.jobs.map(({ person, amount, frequency }) => ({ person, amount, frequency })), [
+    { person: 'Initial Test', amount: '0', frequency: 'Weekly' }, { person: 'Other Person', amount: '', frequency: '' }
+  ]);
+  assert.equal(profile.taxStatements[0].annualIncome, '68450.00');
+  assert.equal(profile.monthlyEarnedIncome, ''); assert.equal(profile.householdWorking, '');
+  const savedIds = profile.jobs.map(row => row.id);
+  assert.deepEqual(rows('jobs').map(row => row.dataset.recordId), savedIds);
+  assert.doesNotThrow(() => validateProfile(profile));
+  rows('jobs')[0].querySelector('button').click();
+  view.submit('profile-form'); await tick();
+  assert.deepEqual(view.database.profile.jobs.map(row => row.id), [savedIds[1]]);
+  view.lock();
+  assert.equal(rows('jobs').length, 0); assert.equal(rows('taxStatements').length, 0);
+  assert.equal(view.get('iowaResident').value, ''); assert.equal(view.get('ssnCardFirstName').value, '');
+});
+
+test('each household member keeps their own sensitive details, without copying the applicant answers', async t => {
+  const view = await renderer(t);
+  view.get('add-household-member').click();
+  const rows = [...view.get('household-members').children];
+  const member = (index, key) => rows[index].querySelector(`[data-member-field="${key}"]`);
+  view.answer('usCitizen', 'yes'); view.answer('bornInUs', 'yes');
+  assert.equal(member(1, 'usCitizen').value, ''); assert.equal(member(1, 'bornInUs').value, '');
+  member(1, 'usCitizen').value = 'no'; member(1, 'isApplicant').value = 'no';
+  member(1, 'immigrationStatus').value = 'Documented status to review';
+  view.submit('profile-form'); await tick();
+  assert.equal(view.database.profile.householdMembers[1].usCitizen, 'no');
+  assert.equal(view.database.profile.householdMembers[0].usCitizen, '');
+  assert.equal(view.database.profile.householdMembers[1].isApplicant, 'no');
+  assert.equal(view.database.profile.householdMembers[1].immigrationStatus, 'Documented status to review');
+});
+
+test('list review summaries never become records when saving or adding and removing rows', async t => {
+  const view = await renderer(t, { reviewFields: async () => ({ profile: [{ key: 'jobs', label: 'Jobs', status: 'format-passed', messages: [] }] }) });
+  const doc = view.window.document;
+  doc.querySelector('.nav-item[data-view="profile"]').click();
+  const add = doc.querySelector('[data-add-record="jobs"]');
+  const rows = doc.querySelector('[data-record-list="jobs"]');
+  add.click();
+  view.get('check-profile-fields').click(); await tick();
+  assert.equal(doc.querySelectorAll('[data-review-key="jobs"]').length, 1);
+  assert.equal(rows.children.length, 1);
+  view.submit('profile-form'); await tick();
+  assert.equal(view.database.profile.jobs.length, 1);
+  assert.doesNotThrow(() => validateProfile(view.database.profile));
+  view.get('check-profile-fields').click(); await tick();
+  add.click();
+  assert.equal(rows.children.length, 2);
+  rows.firstElementChild.querySelector('button').click();
+  view.submit('profile-form'); await tick();
+  assert.equal(view.database.profile.jobs.length, 1);
+});
+
+test('valid imported record IDs shared across lists still get unique accessible controls', async t => {
+  const id = '4c7b6618-41c4-4d80-9fba-bb11f52babc3';
+  const view = await renderer(t, { getData: async () => ({ profile: { jobs: [{ id, person: 'Job owner' }], housingExpenses: [{ id, person: 'Housing owner' }] }, applications: [] }) });
+  const doc = view.window.document;
+  const first = doc.querySelector('[data-record-list="jobs"] [data-record-field="person"]');
+  const second = doc.querySelector('[data-record-list="housingExpenses"] [data-record-field="person"]');
+  assert.notEqual(first.id, second.id);
+  assert.equal(first.labels[0].control, first); assert.equal(second.labels[0].control, second);
 });
 
 // Iowa's Tell Us More questions about the applicant, in Iowa's own words.
@@ -404,6 +485,32 @@ test('restoring a backup while locked refreshes create-vault UI despite an uncha
   assert.equal(view.get('confirm-passphrase-field').hidden, true);
   assert.match(view.get('auth-submit').textContent, /Unlock/);
   assert.equal(view.get('workspace').hidden, true);
+});
+
+test('when the desktop reset its settings, the saved information opens with the notice once, beside a Touch ID notice', async t => {
+  const settingsNotice = 'SecondHand couldn’t read its settings file, so it reset the Chrome connection, Always allow, your trusted sites, and all websites. Set them up again on the Chrome extension page. Laya stays off.';
+  const touchIdNotice = 'Touch ID was turned off because its key file on this Mac is damaged.';
+  let status = { exists: true, unlocked: false, lockRevision: 0, extensionId: '', bridgeRunning: true, settingsNotice, touchIdNotice };
+  const view = await renderer(t, {
+    status: async () => status,
+    unlock: async () => { status = { ...status, unlocked: true }; return status; },
+    lock: async () => { status = { ...status, unlocked: false, lockRevision: status.lockRevision + 1, touchIdNotice: null }; return status; }
+  });
+  assert.equal(view.get('toast').hidden, true, 'nothing shows on the lock screen');
+  view.edit('passphrase', 'synthetic password');
+  view.submit('auth-form');
+  await tick(); await tick();
+  assert.equal(view.get('workspace').hidden, false);
+  assert.equal(view.get('toast').textContent, `${touchIdNotice} ${settingsNotice}`);
+  assert.equal(view.get('toast').classList.contains('error'), true);
+
+  view.get('lock-button').click();
+  await tick();
+  view.edit('passphrase', 'synthetic password');
+  view.submit('auth-form');
+  await tick(); await tick();
+  assert.equal(view.get('workspace').hidden, false);
+  assert.equal(view.get('toast').hidden, true, 'shown once while the app is open');
 });
 
 test('opening Applications or Overview refreshes progress recorded while another view was active', async t => {
@@ -657,7 +764,20 @@ test('Privacy & backups names everything autofill fills or clicks today and keep
   assert.match(chrome, /only/);
   assert.match(chrome, /on this computer/);
   assert.match(chrome, /marked to check/);
+  // It says both times Chrome's AI may guess, and never that it takes what Laya skipped: with Laya ready, it stays off for the whole click.
+  assert.match(chrome, /Laya isn’t ready/);
+  assert.match(chrome, /can’t take any of/);
+  assert.doesNotMatch(chrome, /the rest|questions Laya can’t take/);
   assert.doesNotMatch(card, /—|passphrase|vault|the rules/i);
+  // The sites you turned on get one short paragraph for saved answers and another for Laya's and Chrome's guesses.
+  const paragraphs = Array.from(view.window.document.querySelectorAll('#view-privacy .autofill-card p'), text);
+  const sites = paragraphs.filter(paragraph => paragraph.includes('Other sites you trust'));
+  assert.equal(sites.length, 1);
+  assert.doesNotMatch(sites[0], /Laya|Chrome’s/);
+  const guesses = paragraphs.filter(paragraph => paragraph.includes('Chrome’s built-in AI'));
+  assert.equal(guesses.length, 1);
+  for (const phrase of ['Laya', 'Iowa pages SecondHand doesn’t know', 'never guesses on Iowa’s form']) assert.ok(guesses[0].includes(phrase), phrase);
+  for (const paragraph of [sites[0], guesses[0]]) assert.ok(paragraph.split(/\s+/).length <= 75, `${paragraph.split(/\s+/).length} words: ${paragraph}`);
   // The one value SecondHand picks for the applicant gets its own paragraph, ending on the instruction to check it.
   const address = Array.from(view.window.document.querySelectorAll('#view-privacy .autofill-card p'), text).filter(paragraph => paragraph.includes('first suggested home address'));
   assert.equal(address.length, 1);
@@ -1155,6 +1275,175 @@ test('a lock notification arriving after the lock response cannot clear an unloc
   assert.equal(view.get('workspace').hidden, true);
 });
 
+// Privacy & backups and the Chrome extension page (#140): what each button asks the desktop, and what it shows.
+const unlockedStatus = (changes = {}) => ({ exists: true, unlocked: true, recoveryKey: true, deviceReset: false, deviceResetSupported: true, extensionId: '', bridgeRunning: true, ...changes });
+const NEW_KEY = 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789';
+
+test('a new recovery key asks first when one exists, shows once in its dialog, and Copy and Save say what happened', async t => {
+  const calls = [];
+  let questions = 0;
+  let save = async () => ({ cancelled: true });
+  let copy = async () => true;
+  const view = await renderer(t, {
+    status: async () => unlockedStatus(),
+    replaceRecoveryKey: async () => { calls.push('replace'); return { recoveryKey: NEW_KEY }; },
+    copyRecoveryKey: async key => { calls.push(['copy', key]); return copy(); },
+    saveRecoveryKey: async key => { calls.push(['save', key]); return save(); }
+  });
+  assert.equal(view.get('replace-recovery-key').textContent, 'Create a new recovery key');
+  assert.match(view.get('recovery-status').textContent, /^You have a recovery key\. Creating a new one stops the old key from working\./);
+  view.window.confirm = () => { questions++; return false; };
+  view.get('replace-recovery-key').click();
+  await tick();
+  assert.equal(questions, 1);
+  assert.deepEqual(calls, [], 'declined: nothing is asked of the desktop');
+  view.window.confirm = () => true;
+  view.get('replace-recovery-key').click();
+  await tick(); await tick();
+  assert.deepEqual(calls, ['replace']);
+  assert.equal(view.get('recovery-dialog').open, true);
+  assert.equal(view.get('recovery-key-value').textContent, NEW_KEY);
+
+  view.get('save-recovery-key').click();
+  await tick();
+  assert.deepEqual(calls.at(-1), ['save', NEW_KEY]);
+  assert.equal(view.get('recovery-feedback').textContent, '', 'a cancelled save says nothing');
+  save = async () => ({ cancelled: false });
+  view.get('save-recovery-key').click();
+  await tick();
+  assert.equal(view.get('recovery-feedback').textContent, 'Saved. Print it or move it somewhere safe, away from this computer.');
+  view.get('copy-recovery-key').click();
+  await tick();
+  assert.deepEqual(calls.at(-1), ['copy', NEW_KEY]);
+  assert.equal(view.get('recovery-feedback').textContent, 'Copied. It will be cleared from the clipboard in 1 minute.');
+  copy = async () => { throw new view.window.Error('Enter the recovery key exactly as it was shown, like ABCD-EFGH-1234.'); };
+  view.get('copy-recovery-key').click();
+  await tick();
+  assert.equal(view.get('recovery-feedback').textContent, 'Enter the recovery key exactly as it was shown, like ABCD-EFGH-1234.');
+
+  view.get('recovery-saved').click();
+  view.get('recovery-done').click();
+  assert.equal(view.get('recovery-dialog').open, false);
+  // The browser tells the page its dialog closed.
+  view.get('recovery-dialog').dispatchEvent(new view.window.Event('close'));
+  assert.equal(view.get('recovery-key-value').textContent, '', 'the key leaves the page when the dialog closes');
+
+  let first;
+  first = await renderer(t, { status: async () => unlockedStatus({ recoveryKey: false }), replaceRecoveryKey: async () => { throw new first.window.Error('Could not create a recovery key. Please try again.'); } });
+  assert.equal(first.get('replace-recovery-key').textContent, 'Create recovery key');
+  first.window.confirm = () => assert.fail('nothing to replace, so nothing to ask');
+  first.get('replace-recovery-key').click();
+  await tick(); await tick();
+  assert.equal(first.get('toast').textContent, 'Could not create a recovery key. Please try again.');
+  assert.equal(first.get('toast').classList.contains('error'), true);
+  assert.equal(first.get('recovery-dialog').open, false);
+});
+
+test('letting this computer reset the password turns on and off through the desktop, and a failed change is undone', async t => {
+  const calls = [];
+  let fail = false;
+  let status = unlockedStatus();
+  let view;
+  view = await renderer(t, {
+    status: async () => status,
+    setDeviceReset: async enabled => {
+      calls.push(enabled);
+      if (fail) throw new view.window.Error('This computer couldn’t save a reset option. Your recovery key still works.');
+      status = { ...status, deviceReset: enabled };
+      return status;
+    }
+  });
+  const toggle = view.get('device-reset-toggle');
+  assert.equal(view.get('device-reset-setting').hidden, false);
+  assert.equal(toggle.checked, false);
+  const change = async checked => { toggle.checked = checked; toggle.dispatchEvent(new view.window.Event('change')); await tick(); await tick(); };
+  await change(true);
+  assert.deepEqual(calls, [true]);
+  assert.equal(toggle.checked, true);
+  assert.equal(view.get('toast').textContent, 'This computer can now reset your password.');
+  await change(false);
+  assert.deepEqual(calls, [true, false]);
+  assert.equal(view.get('toast').textContent, 'Reset on this computer is turned off.');
+  fail = true;
+  await change(true);
+  assert.equal(toggle.checked, false, 'a failed change is undone');
+  assert.equal(toggle.disabled, false);
+  assert.equal(view.get('toast').textContent, 'This computer couldn’t save a reset option. Your recovery key still works.');
+  assert.equal(view.get('toast').classList.contains('error'), true);
+  const elsewhere = await renderer(t, { status: async () => unlockedStatus({ deviceResetSupported: false }) });
+  assert.equal(elsewhere.get('device-reset-setting').hidden, true, 'shown only where the system can keep the secret');
+});
+
+test('a custom extension ID is checked before it is sent, and the desktop’s answer is shown', async t => {
+  const calls = [];
+  let fail = false;
+  let view;
+  view = await renderer(t, {
+    status: async () => unlockedStatus(),
+    connectExtension: async id => {
+      calls.push(id);
+      if (fail) throw new view.window.Error('Could not prepare the Chrome connection. Try again or see the setup instructions.');
+      return { extensionId: id };
+    }
+  });
+  for (const id of ['', 'abc', 'q'.repeat(32), 'A'.repeat(32)]) {
+    view.get('extension-id').value = id;
+    view.submit('extension-form');
+    await tick();
+    assert.equal(view.get('extension-error').textContent, 'Use the 32-letter ID shown for SecondHand in Chrome’s extensions page.', JSON.stringify(id));
+  }
+  assert.deepEqual(calls, [], 'nothing is sent');
+  view.get('extension-id').value = ` ${'b'.repeat(32)} `;
+  view.submit('extension-form');
+  await tick(); await tick();
+  assert.deepEqual(calls, ['b'.repeat(32)]);
+  assert.equal(view.get('extension-error').hidden, true);
+  assert.equal(view.get('toast').textContent, 'Extension registered. Keep SecondHand open while you use it.');
+  fail = true;
+  view.submit('extension-form');
+  await tick(); await tick();
+  assert.equal(view.get('extension-error').textContent, 'Could not prepare the Chrome connection. Try again or see the setup instructions.');
+  assert.equal(view.get('extension-error').hidden, false);
+});
+
+test('Export says when the backup is saved, nothing when it is cancelled, and why it failed', async t => {
+  let result = async () => ({ cancelled: true });
+  const view = await renderer(t, { status: async () => unlockedStatus(), exportBackup: () => result() });
+  view.get('export-backup').click();
+  await tick();
+  assert.equal(view.get('toast').hidden, true, 'cancelled: nothing to say');
+  result = async () => { throw new view.window.Error('Create a password before saving a backup.'); };
+  view.get('export-backup').click();
+  await tick();
+  assert.equal(view.get('toast').textContent, 'Create a password before saving a backup.');
+  assert.equal(view.get('toast').classList.contains('error'), true);
+  result = async () => ({ cancelled: false });
+  view.get('export-backup').click();
+  await tick();
+  assert.equal(view.get('toast').textContent, 'Encrypted backup saved. You’ll need your password to restore it.');
+  assert.equal(view.get('toast').classList.contains('error'), false);
+});
+
+test('a refused restore says why on the unlock screen, and declining the warning asks the desktop nothing', async t => {
+  let imports = 0;
+  let view;
+  view = await renderer(t, {
+    status: async () => ({ exists: true, unlocked: false, lockRevision: 0, recoveryKey: true }),
+    importBackup: async () => { imports++; throw new view.window.Error('This is not a supported encrypted backup.'); }
+  });
+  view.window.confirm = () => false;
+  view.get('auth-import').click();
+  await tick();
+  assert.equal(imports, 0);
+  view.window.confirm = () => true;
+  view.get('auth-import').click();
+  await tick();
+  assert.equal(imports, 1);
+  assert.equal(view.get('auth-error').textContent, 'This is not a supported encrypted backup.');
+  assert.equal(view.get('auth-error').hidden, false);
+  assert.equal(view.get('workspace').hidden, true);
+});
+
 const LAYA_BYTES = 428699034;
 const layaView = view => ({
   checked: view.get('laya-toggle').checked, disabled: view.get('laya-toggle').disabled, text: view.get('laya-status').textContent,
@@ -1397,9 +1686,10 @@ test('the household list starts with the applicant, who mirrors their own name a
   await tick();
   const members = saved[0].householdMembers;
   assert.ok(members.every(member => UUID.test(member.id)) && members[0].id !== members[1].id);
+  const blankMember = Object.fromEntries(MEMBER_FIELDS.filter(key => key !== 'id').map(key => [key, '']));
   assert.deepEqual(members.map(({ id, ...member }) => member), [
-    { firstName: 'Avery', lastName: 'Test', birthDate: '1985-04-12', relationship: 'self', student: 'no', grade: '' },
-    { firstName: 'Riley', lastName: 'Example', birthDate: '2015-09-03', relationship: 'child', student: 'yes', grade: '5th' }]);
+    { ...blankMember, firstName: 'Avery', lastName: 'Test', birthDate: '1985-04-12', relationship: 'self', student: 'no', grade: '' },
+    { ...blankMember, firstName: 'Riley', lastName: 'Example', birthDate: '2015-09-03', relationship: 'child', student: 'yes', grade: '5th' }]);
   // A student answer changed to No clears the grade, so a grade is never saved for someone who isn't a student.
   editRow(view, memberRows(view)[1], 'student', 'no');
   view.submit('profile-form');

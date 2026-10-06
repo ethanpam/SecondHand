@@ -9,24 +9,59 @@ const os = require('node:os');
 const path = require('node:path');
 const { _electron: electron, expect } = require('@playwright/test');
 const root = path.resolve(__dirname, '..');
-const fixture = path.join(root, 'tests/fixtures/ocr/synthetic-1040sr.pdf');
 const arguments_ = process.argv.slice(2);
 const options = {};
 for (let index = 0; index < arguments_.length; index += 2) {
   const flag = arguments_[index], value = arguments_[index + 1];
-  if (!['--executable', '--artifacts'].includes(flag) || !value || value.startsWith('--') || options[flag]) {
-    throw new Error('Usage: node scripts/smoke-document-ui.cjs [--executable /absolute/path/to/app] [--artifacts directory]');
+  if (!['--executable', '--artifacts', '--case'].includes(flag) || !value || value.startsWith('--') || options[flag]) {
+    throw new Error('Usage: node scripts/smoke-document-ui.cjs [--executable /absolute/path/to/app] [--artifacts directory] [--case 1040sr|w2|ssa1099|1099nec]');
   }
-  options[flag] = path.resolve(value);
+  options[flag] = flag === '--case' ? value : path.resolve(value);
 }
-const executable = options['--executable'];
-const output = options['--artifacts'] || path.join(root, 'artifacts/ocr');
-const passphrase = 'synthetic-document-ui-vault-passphrase';
-const expected = {
-  firstName: 'ALEXANDER', lastName: 'SAMPLE',
-  addressLine1: '1847 TEST DATA AVE', addressLine2: '4B',
-  city: 'DES MOINES', state: 'IA', zip: '50309'
+// Expected values were checked against the visible synthetic PDFs, not derived
+// from parser output. Combined names remain review-only on these three samples.
+const address = { addressLine1: '1847 TEST DATA AVE', addressLine2: 'APT 4B', city: 'DES MOINES', state: 'IA', zip: '50309' };
+const cases = {
+  '1040sr': {
+    file: 'synthetic-1040sr.pdf', title: 'Form 1040-SR tax return · Tax year 2024', text: '1040',
+    profile: { firstName: 'ALEXANDER', lastName: 'SAMPLE', ...address, addressLine2: '4B' },
+    review: { taxLine1a: '68450', taxLine2b: '460' }, amount: 'taxLine1a',
+    statement: { documentType: '1040-sr', taxYear: '2024', sourceName: '', sourceRole: 'taxpayer', annualIncome: '68450', annualWithholding: '' }
+  },
+  'w2': {
+    file: 'synthetic_w2_page3_2025.pdf', title: 'Form W-2 wage statement · Tax year 2025', text: 'W-2',
+    profile: { ssn: '000-12-3456', addressLine1: '1847 TEST DATA AVE, APT 4B', city: 'DES MOINES', state: 'IA', zip: '50309' },
+    review: { taxLineW2Box1: '68450.00', taxLineW2Box2: '8214.00', taxLineW2Box3: '68450.00', taxLineW2Box4: '4243.90', taxLineW2Box5: '68450.00', taxLineW2Box6: '992.53', w2EmployeeName: 'ALEXANDER J SAMPLE',
+      w2EmployerName: 'SYNTHETIC TEST COMPANY LLC', w2EmployerStreet: '100 SAMPLE BUSINESS RD', w2EmployerCity: 'DES MOINES', w2EmployerState: 'IA', w2EmployerZip: '50309', w2EmployerEin: '00-0000000' },
+    amount: 'taxLineW2Box1', ssn: 'w2EmployeeSsn',
+    statement: { documentType: 'w2', taxYear: '2025', sourceName: 'SYNTHETIC TEST COMPANY LLC', sourceRole: 'employer', recipientName: 'ALEXANDER J SAMPLE', annualIncome: '68450.00', annualWithholding: '8214.00' }
+  },
+  'ssa1099': {
+    file: 'synthetic_ssa1099_filled.pdf', title: 'Form SSA-1099 benefit statement', text: 'SSA-1099',
+    profile: { ssn: '000-12-3456', ...address },
+    review: { ssaIssuerName: 'SOCIAL SECURITY', ssaRecipientName: 'ALEXANDER J SAMPLE', taxLineSsaBox3: '18600.00', taxLineSsaBox4: '0.00', taxLineSsaBox5: '18600.00', taxLineSsaBox6: '0.00' },
+    amount: 'taxLineSsaBox3', ssn: 'applicantSsn', warning: /years disagree.*2018.*2019/,
+    statement: { documentType: 'ssa-1099', taxYear: '', sourceName: 'SOCIAL SECURITY', sourceRole: 'issuer', recipientName: 'ALEXANDER J SAMPLE', annualIncome: '', annualWithholding: '' }
+  },
+  '1099nec': {
+    file: 'synthetic_1099nec_copyb_2026.pdf', title: 'Form 1099-NEC nonemployee compensation · Tax year 2026', text: '1099-NEC',
+    profile: address,
+    review: { necRecipientName: 'ALEXANDER J SAMPLE', taxLineNecBox1a: '68450.00', taxLineNecBox1b: '0.00', taxLineNecBox1d: '0.00', taxLineNecBox3: '0.00', taxLineNecBox4: '0.00',
+      necPayerName: 'SYNTHETIC TEST COMPANY LLC', necPayerStreet: '100 SAMPLE BUSINESS RD', necPayerRoom: 'STE 200', necPayerCity: 'DES MOINES', necPayerCountry: 'Us', necPayerZip: '50309', necPayerTin: '00-0000000' },
+    amount: 'taxLineNecBox1b', lowConfidence: 'taxLineNecBox1a',
+    statement: { documentType: '1099-nec', taxYear: '2026', sourceName: 'SYNTHETIC TEST COMPANY LLC', sourceRole: 'payer', recipientName: 'ALEXANDER J SAMPLE', annualIncome: '68450.00', annualWithholding: '0.00' }
+  }
 };
+const caseName = options['--case'] || '1040sr';
+if (!Object.hasOwn(cases, caseName)) throw new Error('Unknown synthetic document case. Choose 1040sr, w2, ssa1099, or 1099nec.');
+const scenario = cases[caseName];
+const fixture = path.join(root, 'tests/fixtures/ocr', scenario.file);
+const executable = options['--executable'];
+const output = options['--artifacts'] || path.join(root, 'artifacts/ocr', caseName);
+const passphrase = 'synthetic-document-ui-vault-passphrase';
+// The deliberately impossible sample SSN must be flagged, and is not selected
+// or saved in this UI scenario. Address fields still exercise draft/save/lock.
+const expected = Object.fromEntries(Object.entries(scenario.profile).filter(([key]) => key !== 'ssn'));
 
 async function main() {
   const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-document-ui-'));
@@ -95,9 +130,12 @@ async function main() {
     assert.equal(await page.locator('#document-error').isVisible(), false, await page.locator('#document-error').textContent());
     await expect(page.locator('#document-review')).toBeVisible();
     await expect(page.locator('#read-document')).toBeEnabled();
-    await expect(page.locator('#document-name')).toHaveText('synthetic-1040sr.pdf');
-    await expect(page.locator('#document-type')).toHaveText('Form 1040-SR tax return · Tax year 2024');
+    await expect(page.locator('#document-name')).toHaveText(scenario.file);
+    await expect(page.locator('#document-type')).toHaveText(scenario.title);
     await expect(page.locator('#document-draft-note')).toBeVisible();
+    await expect(page.locator('#document-statement')).toBeVisible();
+    await expect(page.locator('#document-confirm-statement')).not.toBeChecked();
+    await expect(page.locator('#add-document-statement')).toBeDisabled();
     assert.equal(await page.locator('#document-fields input[type="checkbox"]:checked').count(), 0);
     await expect(page.locator('#apply-document-fields')).toBeDisabled();
     assert.deepEqual(await page.evaluate(async () => (await window.secondHand.getData()).profile), savedBeforeRead, 'Reading must not save OCR values.');
@@ -108,15 +146,31 @@ async function main() {
       value: row.querySelector('input[type="text"]')?.value || row.querySelector('.document-field-value strong')?.textContent || null,
       label: row.querySelector('.document-field-label')?.textContent || ''
     })));
-    assert.deepEqual(Object.fromEntries(rows.filter(row => row.key).map(row => [row.key, row.value])), expected);
-    assert.equal(rows.filter(row => row.key).some(row => /Income|birthDate|ssn|middleName/i.test(row.key)), false, 'Conflicting identity readings and historical amounts must not become selectable suggestions.');
+    assert.deepEqual(Object.fromEntries(rows.filter(row => row.key).map(row => [row.key, row.value])), scenario.profile);
+    assert.equal(rows.filter(row => row.key).some(row => /Income|birthDate|middleName/i.test(row.key)), false, 'Conflicting identity readings and historical amounts must not become selectable suggestions.');
     assert.deepEqual(Object.fromEntries(rows.filter(row => !row.key).map(row => [row.id, row.value])),
-      { taxLine1a: '68450', taxLine2b: '460' }, 'Only consistently recognized, correct historical amounts remain review-only.');
+      scenario.review, 'Historical amounts and ambiguous names remain review-only.');
+    await expect(page.locator('#document-review-summary')).toContainText('fields checked');
+    await expect(page.locator('#document-fields .field-review-result')).toHaveCount(rows.length);
+    if (caseName === '1040sr') await expect(page.locator('[data-field-id="applicantFirstName"] .field-review-result')).toHaveClass(/needs-review/);
+    if (scenario.ssn) await expect(page.locator(`[data-field-id="${scenario.ssn}"] .field-review-result`)).toHaveClass(/needs-review/);
+    if (scenario.lowConfidence) await expect(page.locator(`[data-field-id="${scenario.lowConfidence}"] .field-review-result`)).toContainText(/confidence is low/i);
+    if (scenario.warning) await expect(page.locator('#document-warnings')).toContainText(scenario.warning);
+    await expect(page.locator(`[data-field-id="${scenario.amount}"] .field-review-result`)).toContainText(/historical|annual|current income/i);
+    await expect(page.locator('#document-review-laya')).not.toBeChecked();
+    // Explicitly requesting model feedback never turns on a disabled model.
+    await page.locator('#document-review-laya').check();
+    await page.locator('#check-document-fields').click();
+    await expect(page.locator('#document-review-summary')).toContainText('fields checked');
+    await expect(page.locator('#document-review-laya-status')).toContainText(/off|unavailable|not ready|No supported applicant source labels/i);
+    assert.equal((await page.evaluate(() => window.secondHand.status())).laya.enabled, false);
+    await expect(page.locator('#apply-document-fields')).toBeDisabled();
     const progress = await page.evaluate(() => window.__documentUiSmokeProgress);
     assert.ok(progress.some(event => event.phase === 'recognizing' && event.page === 1 && event.total === 1));
+    await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({ path: path.join(output, 'document-ui-review.png'), fullPage: true });
     await page.locator('#document-raw > summary').click();
-    await expect(page.locator('#document-pages')).toContainText('1040');
+    await expect(page.locator('#document-pages')).toContainText(scenario.text);
     await page.locator('#document-pages .document-page > summary').first().click();
     await page.locator('#document-raw').screenshot({ path: path.join(output, 'document-ui-text.png') });
     await page.locator('#document-raw > summary').click();
@@ -135,6 +189,50 @@ async function main() {
     assert.deepEqual(await page.evaluate(async () => (await window.secondHand.getData()).profile), savedBeforeRead, 'Applying reviewed fields still must not save the draft.');
     for (const id of ['document-name', 'document-fields', 'document-pages']) assert.equal(await page.locator(`#${id}`).textContent(), '');
     await page.screenshot({ path: path.join(output, 'document-ui-draft.png') });
+    // A structurally impossible SSN is flagged without changing it or saving anything.
+    await page.locator('#ssn').fill('000-12-0000');
+    await page.locator('#check-profile-fields').click();
+    await expect(page.locator('#profile-review-summary')).toContainText('fields checked');
+    await expect(page.locator('[data-review-scope="profile"][data-review-key="ssn"]')).toHaveClass(/needs-review/);
+    await expect(page.locator('#ssn')).toHaveValue('000-12-0000');
+    assert.deepEqual(await page.evaluate(async () => (await window.secondHand.getData()).profile), savedBeforeRead);
+    await expect(page.locator('#toast')).toBeHidden({ timeout: 10000 });
+    await page.screenshot({ path: path.join(output, 'field-review-profile.png'), fullPage: true });
+    await page.locator('#ssn').fill('');
+    await expect(page.locator('#profile-review-summary')).toBeEmpty();
+
+    // Leaving Documents discarded its review. Read the actual PDF again to
+    // exercise the separate, explicitly confirmed historical-reference action.
+    await page.locator('.nav-item[data-view="documents"]').click();
+    await page.locator('#read-document').click();
+    await page.waitForFunction(() => !document.getElementById('document-review').hidden || !document.getElementById('document-error').hidden, null, { timeout: 180000 });
+    assert.equal(await page.locator('#document-error').isVisible(), false, await page.locator('#document-error').textContent());
+    await expect(page.locator('#document-statement')).toBeVisible();
+    await expect(page.locator('#document-confirm-statement')).not.toBeChecked();
+    await expect(page.locator('#add-document-statement')).toBeDisabled();
+    assert.deepEqual(await page.evaluate(async () => (await window.secondHand.getData()).profile), savedBeforeRead);
+    await page.locator('#document-statement').screenshot({ path: path.join(output, 'document-ui-statement-review.png') });
+    await page.locator('#document-confirm-statement').check();
+    await page.locator('#add-document-statement').click();
+    await expect(page.locator('#view-profile')).toBeVisible();
+    await expect(page.locator('#profile-save-state')).toHaveText('Unsaved changes');
+    const record = page.locator('[data-record-list="taxStatements"] fieldset[data-record-id]');
+    await expect(record).toHaveCount(1);
+    const statementDraft = await record.evaluate(fieldset => ({ id: fieldset.dataset.recordId,
+      ...Object.fromEntries([...fieldset.querySelectorAll('[data-record-field]')].map(input => [input.dataset.recordField, input.value])) }));
+    assert.match(statementDraft.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    for (const [key, value] of Object.entries(scenario.statement)) assert.equal(statementDraft[key], value, `historical ${key}`);
+    assert.equal(Object.keys(statementDraft).some(key => /ssn|tin|ein|claim|raw|text|bytes/i.test(key)), false);
+    assert.ok(!/000-12-3456|00-0000000|000-12-3456-A/.test(JSON.stringify(statementDraft)));
+    await expect(page.locator('#email')).toHaveValue('preserved@example.invalid');
+    await expect(page.locator('#monthlyEarnedIncome')).toHaveValue('1234.00');
+    for (const [key, value] of Object.entries(expected)) await expect(page.locator(`#${key}`)).toHaveValue(value);
+    assert.equal(await page.locator('[data-record-list="jobs"] fieldset').count(), 0, 'A historical employer never creates a current job.');
+    assert.deepEqual(await page.evaluate(async () => (await window.secondHand.getData()).profile), savedBeforeRead, 'Adding a tax record changes only the unsaved draft.');
+    for (const id of ['document-name', 'document-fields', 'document-pages', 'document-statement-summary']) assert.equal(await page.locator(`#${id}`).textContent(), '');
+    await expect(page.locator('#toast')).toBeHidden({ timeout: 10000 });
+    await record.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(output, 'document-ui-statement-draft.png') });
     await page.locator('#save-profile').click();
     await expect(page.locator('#profile-save-state')).toBeHidden();
     const saved = await page.evaluate(async () => (await window.secondHand.getData()).profile);
@@ -142,36 +240,39 @@ async function main() {
     assert.equal(saved.email, 'preserved@example.invalid');
     assert.equal(saved.monthlyEarnedIncome, '1234.00');
     assert.equal(saved.ssn, ''); assert.equal(saved.birthDate, '');
+    assert.deepEqual(saved.taxStatements, [statementDraft]);
     const vaultBytes = await fs.readFile(path.join(userData, 'vault.secondhand'), 'utf8');
-    for (const secret of [...Object.values(expected), 'preserved@example.invalid', 'synthetic-1040sr.pdf', passphrase]) {
+    for (const secret of [...Object.values(expected), ...Object.values(statementDraft), 'preserved@example.invalid', scenario.file, passphrase]) {
       // Short apartment/state strings can occur by chance in encrypted base64.
       if (secret.length > 6) assert.equal(vaultBytes.includes(secret), false, 'Saved applicant text must not appear as plaintext in the vault.');
     }
     await page.locator('#lock-button').click();
     await expect(page.locator('#auth-view')).toBeVisible();
     await expect(page.locator('#firstName')).toHaveValue('');
+    assert.equal(await page.locator('[data-record-list="taxStatements"] fieldset[data-record-id]').count(), 0, 'Lock removes historical-reference values from the rendered form.');
     for (const id of ['document-name', 'document-fields', 'document-pages']) assert.equal(await page.locator(`#${id}`).textContent(), '');
     await page.locator('#passphrase').fill(passphrase);
     await page.locator('#auth-submit').click();
     await expect(page.locator('#workspace')).toBeVisible({ timeout: 30000 });
     assert.deepEqual(await page.evaluate(() => window.secondHand.getData()).then(data => data.profile), saved);
     await page.locator('.nav-item[data-view="profile"]').click();
-    await expect(page.locator('#firstName')).toHaveValue(expected.firstName);
+    await expect(page.locator('#firstName')).toHaveValue(expected.firstName || 'Existing fictional draft');
     await page.locator('.nav-item[data-view="documents"]').click();
     await expect(page.locator('#document-empty')).toBeVisible();
     await expect(page.locator('#document-review')).toBeHidden();
     assert.equal((await page.evaluate(() => window.secondHand.status())).laya.enabled, false);
-    assert.equal((await fs.readdir(userData)).includes('synthetic-1040sr.pdf'), false);
+    assert.equal((await fs.readdir(userData)).includes(scenario.file), false);
     await page.evaluate(() => { window.__documentUiSmokeUnsubscribe(); delete window.__documentUiSmokeUnsubscribe; delete window.__documentUiSmokeProgress; });
     assert.deepEqual(errors, []);
     const report = {
-      passed: true, runtime, fixture: 'tests/fixtures/ocr/synthetic-1040sr.pdf', durationSeconds: (Date.now() - started) / 1000,
+      passed: true, runtime, fixture: `tests/fixtures/ocr/${scenario.file}`, durationSeconds: (Date.now() - started) / 1000,
       actual: ['Electron desktop UI', 'native IPC', 'PDF rendering', 'two English OCR passes', 'document analysis', 'encrypted vault save', 'lock and unlock'],
       stubbed: ['native file-picker response selects the explicit synthetic fixture'],
       selectedKeys: Object.keys(expected), reviewOnlyFieldCount: rows.filter(row => !row.key).length,
+      historicalStatementSaved: true, historicalStatementType: statementDraft.documentType,
       progressPhases: [...new Set(progress.map(event => event.phase))],
-      assertions: ['all suggestions unchecked', 'reading and apply never auto-save', 'applicant attestation required', 'unrelated unsaved edits preserved', 'annual income not converted', 'OCR review cleared on leaving and lock', 'saved values persist after unlock', 'Laya disabled'],
-      screenshots: ['document-ui-empty.png', 'document-ui-review.png', 'document-ui-text.png', 'document-ui-draft.png'],
+      assertions: ['all suggestions unchecked', 'reading and apply never auto-save', 'applicant attestation required', 'unrelated unsaved edits preserved', 'annual income not converted', 'OCR review cleared on leaving and lock', 'saved values persist after unlock', 'Laya disabled', 'every OCR candidate gets a rule result', 'optional model review does not enable Laya', 'impossible SSN flagged without correction or saving', 'edits clear previous review', 'tax record needs separate explicit confirmation', 'historical reference adds only to draft before Save', 'historical employer never creates a current job', 'tax reference contains no identifiers or raw document', 'historical record persists through lock/unlock'],
+      screenshots: ['document-ui-empty.png', 'document-ui-review.png', 'document-ui-text.png', 'document-ui-draft.png', 'field-review-profile.png', 'document-ui-statement-review.png', 'document-ui-statement-draft.png'],
       limitations: 'Synthetic document only. This does not establish recognition accuracy on arbitrary real tax returns; every selected answer requires review.'
     };
     await fs.writeFile(path.join(output, 'document-ui-report.json'), JSON.stringify(report, null, 2) + '\n');

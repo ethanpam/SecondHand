@@ -27,6 +27,46 @@
   // Answers about a household member, worked out by the desktop from the household list. Only the
   // rules place them, and only in a box that asks for that member: never a guess, never an applicant box.
   const MEMBER_KEYS = Object.freeze(['studentNameGrade']);
+  // These are explicit saved Iowa answers, not general-site fields or model guesses. The question
+  // must state its scope and match a whole phrase. Person/amount/source detail rows stay manual.
+  const IOWA_RULES = Object.freeze([
+    [/^are you an iowa resident$/, 'applicantIowaResident', 'applicant'],
+    [/^were you born in (the )?(united states|u s|us)$/, 'bornInUs', 'applicant'],
+    [/^are you a naturalized (united states|u s|us) citizen$/, 'naturalizedCitizen', 'applicant'],
+    [/^do you need an interpreter$/, 'needsInterpreter', 'applicant'],
+    [/^do you (purchase|buy) and prepare (food|meals) with (this|your) household$/, 'eatsWithHousehold', 'applicant'],
+    [/^are you pregnant$/, 'pregnant', 'applicant'],
+    [/^are you a migrant or seasonal farmworker$/, 'migrantSeasonalFarmworker', 'applicant'],
+    [/^does anyone in (your|the) household (attend|go to) school or college$/, 'householdInSchool', 'household'],
+    [/^is anyone in (your|the) household on strike$/, 'householdOnStrike', 'household'],
+    [/^does anyone in (your|the) household work expect to work or (is |are )?(self employed|selfemployed)$/, 'householdWorking', 'household'],
+    [/^has anyone in (your|the) household ended a job in the (last|past) 30 days$/, 'householdJobEnded30Days', 'household'],
+    [/^does (your|the) household receive (money )?from friends or relatives$/, 'incomeFriendsRelatives', 'household'],
+    [/^does (your|the) household receive educational grants or loans$/, 'incomeEducationGrantsLoans', 'household'],
+    [/^does (your|the) household pay (for )?dependent care( expenses)?$/, 'paysDependentCare', 'household'],
+    [/^does (your|the) household pay housing expenses$/, 'paysHousing', 'household'],
+    [/^does (your|the) household live in low rent or subsidized housing$/, 'lowRentHousing', 'household'],
+    [/^does (your|the) household pay child support$/, 'paysChildSupport', 'household'],
+    [/^does (your|the) household pay (for )?utilities$/, 'paysUtilities', 'household'],
+    [/^has (your|the) household received energy assistance in the (past|last) year$/, 'receivedEnergyAssistance', 'household'],
+    [/^does (your|the) household pay medical expenses$/, 'paysMedical', 'household'],
+    [/^does (your|the) household pay medicare expenses$/, 'paysMedicare', 'household'],
+    [/^does (your|the) household own real property$/, 'hasRealProperty', 'household'],
+    [/^does (your|the) household have a trust$/, 'hasTrust', 'household'],
+    [/^has (your|the) household sold or transferred property in the (last|past) 90 days$/, 'transferredProperty90Days', 'household'],
+    [/^does (your|the) household have (other )?personal property$/, 'hasPersonalProperty', 'household'],
+    [/^does (your|the) household own a vehicle$/, 'hasVehicle', 'household'],
+    [/^does (your|the) household share resources with someone outside (your|the) household$/, 'sharesResourcesOutsideHousehold', 'household'],
+    [/^has anyone in (your|the) household aged out of foster care$/, 'agedOutFosterCare', 'household'],
+    [/^is anyone in (your|the) household homeless$/, 'householdHomeless', 'household'],
+    [/^does anyone in (your|the) household have an iowa ebt card$/, 'hasIowaEbt', 'household'],
+    [/^does anyone in (your|the) household receive benefits from another state$/, 'benefitsAnotherState', 'household']
+  ]);
+  const IOWA_KEYS = Object.freeze(IOWA_RULES.map(([, key]) => key));
+  // Unlike the older general rules, keep parenthetical qualifications: "excluding heating" or
+  // "for this person" changes what a saved household answer means.
+  const iowaRule = text => IOWA_RULES.find(([pattern]) => pattern.test(normal(String(text || '').replace(QUESTION_NUMBER, '')).replace(/ (required|optional)$/, '')));
+  const householdRulesOnly = doc => doc?.location?.href === 'https://hhsservices.iowa.gov/apspssp/ssp.portal/applyForBenefits/dynamicQuestions';
   // A household count by age, worked out by the desktop from birth dates: "householdCount:0-5" or
   // "householdCount:60+", whole numbers 0 to 120 without leading zeros. shared/household.cjs reads them the same way.
   const BAND_KEY = /^householdCount:(0|[1-9]\d{0,2})(?:-(0|[1-9]\d{0,2})|(\+))$/;
@@ -35,7 +75,7 @@
     return Boolean(match) && Number(match[1]) <= 120 && (Boolean(match[3]) || (Number(match[2]) <= 120 && Number(match[2]) >= Number(match[1])));
   }
   // Keys the rules may place beyond the profile's own: composites, a member's answer, and band counts.
-  const ruleOnlyKey = key => MEMBER_KEYS.includes(key) || isBandKey(key);
+  const ruleOnlyKey = key => MEMBER_KEYS.includes(key) || isBandKey(key) || IOWA_KEYS.includes(key);
   // Answers that are only ever a guess for the applicant to review, however they were matched.
   const GUESS_KEYS = Object.freeze(['iowaResident']);
   const KIND = Object.freeze({ birthDate: 'date', email: 'email', phone: 'tel', state: 'state', ageRange: 'ageRange', householdSize: 'count', householdAdults: 'count',
@@ -198,10 +238,14 @@
   // the desktop's matchableBox refuses too.
   const LAYA = Object.freeze({ text: Object.freeze(['text', 'textarea', 'number', 'date', 'email', 'tel']), choice: Object.freeze(['radio', 'select', 'checkbox']),
     label: 200, options: 30, option: 100 });
-  const layaText = (value, max) => typeof value === 'string' && value.trim() !== '' && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
+  // The bridge's rule for page text (UNSEEN in desktop/bridge.cjs): no character that reorders, hides, or breaks the
+  // words around it, but the non-joiner and joiner Persian, Arabic, and Indic words need. A question with one stays
+  // with the applicant: the bridge would refuse the whole request.
+  const UNSEEN = /[[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]--[\u200C\u200D]]/v;
+  const layaText = (value, max) => typeof value === 'string' && value.trim() !== '' && value.length <= max && !UNSEEN.test(value);
   function layaQuestion({ label, type, options }) {
     if (!layaText(label, LAYA.label) || !Array.isArray(options) || options.length > LAYA.options || options.some(option => !layaText(option, LAYA.option)) ||
-      new Set(options).size !== options.length || unsafeQuestion({ label, options })) return '';
+      new Set(options).size !== options.length || unsafeQuestion({ label, options }) || iowaRule(label)) return '';
     if (LAYA.text.includes(type)) return blockedSuggestion(label) ? '' : 'text';
     return LAYA.choice.includes(type) && options.length ? 'choice' : '';
   }
@@ -210,7 +254,7 @@
   // a month box, or a child's birthday.
   function canSuggest(key, field) {
     if (!GENERIC_KEYS.includes(key)) return false;
-    if (unsafeQuestion(field) || blockedSuggestion(field?.label)) return false;
+    if (unsafeQuestion(field) || blockedSuggestion(field?.label) || iowaRule(field?.label)) return false;
     if (key !== 'birthDate') return true;
     const text = question(field?.label);
     return /\b(birth|born|dob)/.test(text) && !/\b(month|day|year|time|hours?|minutes?)\b/.test(text) && !OTHER_PERSON.test(text);
@@ -349,13 +393,15 @@
   const ageRange = option => /^(\d+) (\d+)( yrs?| years?)?$/.exec(normal(option)) || /^(\d+)(\+| and older| or older)( yrs?| years?)?$/.exec(normal(option));
   // A key is only placed on a control that can hold its kind of answer. Div checkboxes and
   // listboxes are only ever left for the applicant.
-  const answerKind = key => isBandKey(key) ? 'count' : KIND[key] || 'text';
+  const answerKind = key => IOWA_KEYS.includes(key) ? 'yesno' : isBandKey(key) ? 'count' : KIND[key] || 'text';
   function compatible(key, entry) {
     if (entry.kind === 'ariaCheckbox' || entry.kind === 'ariaListbox') return false;
     const kind = answerKind(key);
     const type = (entry.elements[0].type || 'text').toLowerCase();
     const options = optionsOf(entry);
     const choice = entry.kind === 'radio' || entry.kind === 'ariaRadio';
+    if (IOWA_KEYS.includes(key)) return (choice || entry.kind === 'select') && options.length === 2 &&
+      options.map(normal).sort().join('|') === 'no|yes';
     if (kind === 'yesno') return (choice || entry.kind === 'select') ? isYesNo(options) : entry.kind === 'checkbox' && entry.elements.length === 1;
     if (kind === 'ageRange') return (choice || entry.kind === 'select') && options.some(ageRange);
     if (kind === 'count') return (entry.kind === 'input' && ['number', 'text', 'tel', ''].includes(type)) || ((entry.kind === 'select' || choice) && isNumeric(options.filter(option => normal(option))));
@@ -374,8 +420,46 @@
     const result = ruleMatch(entry);
     return result.key && result.key !== 'ssn' && applicantOnly(entry) ? { key: null, confidence: null } : result;
   }
+  function iowaScope(entry, scope) {
+    const doc = entry.elements[0].ownerDocument;
+    if (entry.elements.some(element => element.matches(':disabled'))) return false;
+    let url;
+    try { url = new URL(doc.location.href); } catch { return false; }
+    if (url.origin !== 'https://hhsservices.iowa.gov' || url.username || url.password || /[%\\]/.test(url.pathname) ||
+        !(url.pathname === '/apspssp/ssp.portal' || url.pathname.startsWith('/apspssp/ssp.portal/'))) return false;
+    const form = entry.elements[0].form || entry.elements[0].closest('form');
+    if (!form || entry.elements.some(element => (element.form || element.closest('form')) !== form)) return false;
+    for (let node = entry.elements[0].parentElement; node; node = node.parentElement) {
+      const context = `${node.getAttribute('aria-label') || ''} ${idsText(doc, node.getAttribute('aria-labelledby'))}`;
+      if (otherPersonQuestion(context) || /\b(employer|helper|assisting|representative|another person|other person)\b/.test(normal(context))) return false;
+    }
+    // A selected person or detail row cannot silently turn an applicant/household answer into
+    // somebody else's answer. Names/identifiers are not used to infer who that person is.
+    if (Array.from(form.querySelectorAll('select, input')).some(element => rendered(element) && /personSelection|householdMember|employer|helper|representative/i.test(`${element.name} ${element.id}`))) return false;
+    const headings = Array.from(doc.querySelectorAll('h1,h2,h3,h4,legend')).filter(element => rendered(element)).map(element => clean(element.textContent));
+    if (headings.some(text => otherPersonQuestion(text) || /\b(employer|helper|assisting|representative|another person|other person|certification|e signature)\b/.test(normal(text)))) return false;
+    if (scope === 'household') return true;
+    const start = doc.querySelectorAll('a[title="Start Application | Active"]'), people = doc.querySelectorAll('a[title="People | Unvisited"]');
+    return start.length === 1 && people.length === 1 && start[0].parentElement.classList.contains('current') && people[0].parentElement.classList.contains('next') &&
+      rendered(start[0]) && rendered(people[0]) && Array.from(doc.querySelectorAll('p')).some(element => rendered(element) &&
+        clean(element.textContent).startsWith('Please give us additional information about yourself. If you cannot answer a question you can skip it.'));
+  }
+  function iowaEntryState(entry) {
+    const doc = entry.elements[0].ownerDocument, form = entry.elements[0].form || entry.elements[0].closest('form');
+    return JSON.stringify({ url: doc.location.href, labels: entry.labels, options: optionsOf(entry),
+      controls: entry.elements.map(element => [element.id, element.name, element.type, element.getAttribute('value'), element.getAttribute('onchange'), element.getAttribute('onclick')]),
+      form: form && [form.id, form.getAttribute('action'), form.getAttribute('method')],
+      headings: Array.from(doc.querySelectorAll('h1,h2,h3,h4,legend,p,a[title]')).filter(element => rendered(element)).map(element => [element.tagName, element.getAttribute('title'), clean(element.textContent)]) });
+  }
   function ruleMatch(entry) {
     const element = entry.elements[0];
+    const iowa = entry.labels.map(iowaRule).filter(Boolean);
+    if (iowa.length) {
+      const [, key, scope] = iowa[0];
+      return iowa.every(rule => rule[1] === key) && (!householdRulesOnly(element.ownerDocument) || scope === 'household') && iowaScope(entry, scope) && compatible(key, entry)
+        ? { key, confidence: 'high' } : { key: null, confidence: null };
+    }
+    if (householdRulesOnly(element.ownerDocument)) return { key: null, confidence: null };
     // A member's own question takes that member's answer; it names another person, so nothing of the applicant's.
     for (const text of entry.labels) {
       const key = memberRuleFor(text);
@@ -465,10 +549,13 @@
     const token = `plan-${Date.now().toString(36)}-${++sequence}`;
     const map = new Map();
     const matched = [], unmatched = [];
-    scan(doc).forEach((entry, index) => {
+    const entries = scan(doc), rules = entries.map(match);
+    entries.forEach((entry, index) => {
       const id = `sh-${sequence}-${index}`;
       map.set(id, entry);
-      const result = match(entry);
+      const result = rules[index];
+      if (IOWA_KEYS.includes(result.key) && rules.filter(rule => rule.key === result.key).length !== 1) { unmatched.push({ id, ...fieldOf(entry) }); return; }
+      if (IOWA_KEYS.includes(result.key)) entry.iowaState = iowaEntryState(entry);
       if (result.confidence === 'high') { matched.push({ id, key: result.key, confidence: 'high', label: entry.labels[0] || '' }); return; }
       unmatched.push({ id, ...fieldOf(entry) });
     });
@@ -484,8 +571,30 @@
   }
   // After the applicant's click: one listed box's answer, in the profile's own format. Only for the
   // saved field the rules matched to that box, never a password, code, signature or SSN box. Null when
-  // the box may not be read; { empty } when it holds no answer; { unreadable } when its answer doesn't fit the field.
+  // the box may not be read; { empty } when it holds no answer; { unreadable } when its answer doesn't fit the field;
+  // { repeated } when the page asks for the field in more than one box.
   const DATE_TYPED = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/;
+  // The order a typed date is in (#142): as its box asks for it ("MM/DD/YYYY", "dd/mm/aaaa", "jj/mm/aaaa") in its labels,
+  // placeholder, description or title, or as its numbers allow only one way. Null when it can't be told: never guessed.
+  const MONTH_FIRST = /\bmm? dd? (yyyy|yy|aaaa|aa)\b/;
+  const DAY_FIRST = /\b(dd?|jj?) mm? (yyyy|yy|aaaa|aa)\b/;
+  function typedDate(text, entry) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+    const typed = DATE_TYPED.exec(text);
+    if (!typed) return null;
+    const element = entry.elements[0];
+    const words = normal([...entry.labels, idsText(element.ownerDocument, element.getAttribute('aria-describedby')), element.getAttribute('title') || ''].join(' '));
+    const [first, second] = [Number(typed[1]), Number(typed[2])];
+    const monthFirst = MONTH_FIRST.test(words), dayFirst = DAY_FIRST.test(words);
+    let leads = null;
+    if (monthFirst !== dayFirst) leads = monthFirst ? 'month' : 'day';
+    else if (first === second || (first <= 12 && second > 12)) leads = 'month';
+    else if (first > 12 && second <= 12) leads = 'day';
+    if (!leads) return null;
+    const [month, day] = leads === 'month' ? [first, second] : [second, first];
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    return `${typed[3]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
   function answerIn(entry, key) {
     const first = entry.elements[0];
     const kind = answerKind(key);
@@ -504,11 +613,7 @@
       const amount = text.replace(/^\$\s*/, '').replace(/,(?=\d{3}(\D|$))/g, '');
       return /^\d{1,8}(\.\d{1,2})?$/.test(amount) ? amount : null;
     }
-    if (kind === 'date') {
-      if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
-      const typed = DATE_TYPED.exec(text);
-      return typed ? `${typed[3]}-${typed[1].padStart(2, '0')}-${typed[2].padStart(2, '0')}` : null;
-    }
+    if (kind === 'date') return typedDate(text, entry);
     if (kind === 'state') {
       if (entry.kind === 'select' && Object.hasOwn(STATES, String(first.value).toUpperCase())) return String(first.value).toUpperCase();
       const code = Object.keys(STATES).find(state => state === text.toUpperCase() || STATES[state] === normal(text));
@@ -522,6 +627,9 @@
     if (!entry || ARIA_TYPES[entry.kind] || !entry.elements.every(element => element.isConnected && eligible(element))) return null;
     const label = entry.labels.join(' ');
     if (match(entry).key !== key || applicantOnly(entry) || CODE.test(normal(label)) || otherPersonQuestion(label)) return null;
+    // The page asks for this field in more than one box, as a household member's section with no heading of its own
+    // does: whose answer each box holds can't be told, so none is read as the applicant's (#142).
+    if (questionsOn(doc).filter(other => match(other).key === key).length > 1) return { repeated: true };
     if (!answered(entry)) return { empty: true };
     const value = answerIn(entry, key);
     return value === null ? { unreadable: true } : { value };
@@ -552,12 +660,15 @@
   }
 
   function requestKeys(keys) {
-    return [...new Set((Array.isArray(keys) ? keys : []).flatMap(key => SOURCES[key] || [key]))].filter(key => PROFILE_KEYS.includes(key) || ruleOnlyKey(key));
+    return [...new Set((Array.isArray(keys) ? keys : []).flatMap(key => key === 'applicantIowaResident' ? ['iowaResident'] : SOURCES[key] || [key]))]
+      .filter(key => PROFILE_KEYS.includes(key) || ruleOnlyKey(key) || key === 'iowaResident');
   }
   const cents = value => /^\d{1,8}(\.\d{1,2})?$/.test(String(value || '')) ? Math.round(Number(value) * 100) : null;
   const dollars = amount => amount % 100 ? (amount / 100).toFixed(2) : String(amount / 100);
   function deriveValues(values) {
     const result = { ...(values || {}) };
+    if (['yes', 'no'].includes(values?.iowaResident)) result.applicantIowaResident = values.iowaResident;
+    else delete result.applicantIowaResident;
     if (result.firstName && result.lastName) result.fullName = `${result.firstName} ${result.lastName}`;
     if (result.city && result.state) result.cityState = `${result.city}, ${result.state}`; else delete result.cityState;
     if (result.city && result.zip) result.cityZip = `${result.city}, ${result.zip}`; else delete result.cityZip;
@@ -708,15 +819,17 @@
       const entry = current.map.get(assignment?.id);
       const key = assignment?.key;
       const value = values?.[key];
-      const usable = entry && !answered(entry) && entry.elements.every(element => element.isConnected && (ARIA_TYPES[entry.kind] ? ariaUsable(element) : eligible(element)));
+      const freshIowa = entry && IOWA_KEYS.includes(key) ? questionsOn(doc).find(candidate => candidate.elements.length === entry.elements.length && candidate.elements.every((element, index) => element === entry.elements[index])) : null;
+      const usable = entry && !answered(entry) && entry.elements.every(element => element.isConnected && (ARIA_TYPES[entry.kind] ? ariaUsable(element) : eligible(element))) &&
+        (!IOWA_KEYS.includes(key) || (['yes', 'no'].includes(value) && entry.iowaState && freshIowa && match(freshIowa).key === key && entry.iowaState === iowaEntryState(freshIowa)));
       // An option Laya picked from the saved profile is always a guess, and never for a question only the applicant answers.
       const option = assignment?.option;
       const answering = typeof option === 'string' && key === undefined;
       // A key the rules did not choose for this question is a guess: never for a question only the applicant
       // answers, by any of its labels, and only a key a guess may offer.
-      const allowed = entry && (match(entry).key === key || (!applicantOnly(entry) && canSuggest(key, { label: entry.labels[0] || '' })));
+      const allowed = entry && (match(entry).key === key || (!householdRulesOnly(doc) && !applicantOnly(entry) && canSuggest(key, { label: entry.labels[0] || '' })));
       const placed = !usable ? false
-        : answering ? !applicantOnly(entry) && fillOption(entry, option)
+        : answering ? !householdRulesOnly(doc) && !applicantOnly(entry) && !entry.labels.some(iowaRule) && fillOption(entry, option)
         : option === undefined && (GENERIC_KEYS.includes(key) || COMPOSITE_KEYS.includes(key) || ruleOnlyKey(key)) && allowed && typeof value === 'string' && value && compatible(key, entry) && fillEntry(entry, key, value);
       if (!placed) { skipped.push(assignment?.id); continue; }
       const guess = answering || assignment.guessed || GUESS_KEYS.includes(key);
@@ -784,7 +897,7 @@
   }
   const elementFor = id => current?.map.get(id)?.elements[0] || null;
 
-  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, SAVE_KEYS, GUESS_KEYS, MEMBER_KEYS, answeredIds, readAnswer, UNSAFE_QUESTION, OTHER_PERSON_ROLE, MEMBER_DETAIL, CHILD_ROLE, PERSON_DETAIL,
+  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, SAVE_KEYS, GUESS_KEYS, MEMBER_KEYS, IOWA_KEYS, answeredIds, readAnswer, UNSAFE_QUESTION, OTHER_PERSON_ROLE, MEMBER_DETAIL, CHILD_ROLE, PERSON_DETAIL,
     COMBINED_ADDRESS_QUESTION, PERSON_NOT_AMOUNT, blockedSuggestion, isBandKey, plan, offers, questions, requestKeys, deriveValues, fillFields, settle, focusField, elementFor,
     canSuggest, unsafeQuestion, layaQuestion });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

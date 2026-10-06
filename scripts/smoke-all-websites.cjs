@@ -11,7 +11,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { chromium, expect } = require('@playwright/test');
+const { chromium, expect: playwrightExpect } = require('@playwright/test');
+// Every wait counts wall-clock time, which runs on while the computer sleeps (see host-sleep.cjs).
+const expect = require('./host-sleep.cjs').sleepTolerant(playwrightExpect);
 const strings = require('../extension/strings.js');
 const { attachNativePanel, fixture, applicant, syntheticProfile } = require('./smoke-extension.cjs');
 const { validateProfile, releasedValue } = require('../shared/schema.cjs');
@@ -46,7 +48,10 @@ const pages = {
   [WIC]: formPage('WIC pre-screening', '<form><label for="name">Full name</label><input id="name" name="name"><button type="submit">Submit</button></form>' +
     `<iframe src="${FORMS}" title="Embedded sign-up" style="width:420px;height:180px;border:1px solid #ced7c5"></iframe>`),
   [EMBEDDING]: formPage('Sign up below', `<iframe src="${FORMS}" title="Embedded sign-up" style="width:420px;height:180px;border:1px solid #ced7c5"></iframe>`),
-  [FORMS]: formPage('Embedded sign-up', '<form><label for="city">City</label><input id="city" name="city"><button type="submit">Submit</button></form>'),
+  // Money on hand is one of the details the app asks about on every site but Iowa's (SENSITIVE_FIELDS in desktop/main.cjs).
+  // The fictional profile has no apartment, so Save to My information offers it.
+  [FORMS]: formPage('Embedded sign-up', '<form><label for="city">City</label><input id="city" name="city"><label for="cash">Money on hand</label><input id="cash" name="cash">' +
+    '<label for="apt">Apartment number</label><input id="apt" name="apt"><button type="submit">Submit</button></form>'),
   [SEARCH]: formPage('Find a pantry', '<form role="search"><input type="search" name="q" aria-label="Search"><button>Search</button></form>'),
   [NEVER]: formPage('Never trusted', '<form><label for="first">First name</label><input id="first" name="first"><button type="submit">Submit</button></form>'),
   [HOUSEHOLD]: formPage('Pantry order: household', `<form>${Object.entries(HOUSEHOLD_QUESTIONS).map(([id, label]) => `<label for="${id}">${label}</label><input id="${id}" name="${id}">`).join('')}` +
@@ -54,10 +59,11 @@ const pages = {
 };
 
 // The desktop app as the worker sees it over native messaging, with Always allow on. It keeps its own
-// all-websites setting, as the real app does, and reports it in status.
+// all-websites setting, as the real app does, and reports it in status. Asked for money on hand, or to save
+// an answer, it shows the prompt the app shows, naming the site the request names.
 async function installDesktop(worker, profile) {
   await worker.evaluate(profile => {
-    globalThis.__desktop = { allSites: false, calls: [], saves: [], profile };
+    globalThis.__desktop = { allSites: false, calls: [], saves: [], prompts: [], profile };
     nativeRequest = async (type, payload = {}) => {
       const desktop = globalThis.__desktop;
       desktop.calls.push({ type, url: payload.url || '', fields: payload.fields || [] });
@@ -69,10 +75,15 @@ async function installDesktop(worker, profile) {
       if (type === 'showApp') return { shown: true };
       if (type === 'warmLaya') return { state: 'unavailable' };
       if (type === 'suggestFields' || type === 'answerFields') throw Object.assign(new Error('Laya isn’t ready on this computer.'), { code: 'LAYA_NOT_READY' });
+      if (type === 'getFields' && payload.fields.includes('assetsOnHand')) desktop.prompts.push(`Fill sensitive details on ${new URL(payload.url).origin}?`);
       if (type === 'getFields') return { accessRevision: 0, values: Object.fromEntries(payload.fields.filter(field => desktop.profile[field]).map(field => [field, desktop.profile[field]])) };
       if (type === 'recordProgress') return { recorded: true };
       // Save to My information (#98): the app's confirmation and save, as Allow.
-      if (type === 'saveFields') { desktop.saves.push({ url: payload.url, fields: payload.fields }); return { saved: Object.keys(payload.fields) }; }
+      if (type === 'saveFields') {
+        desktop.prompts.push(`Save ${Object.keys(payload.fields).length === 1 ? 'this answer' : 'these answers'} from ${new URL(payload.url).origin} to My information?`);
+        desktop.saves.push({ url: payload.url, fields: payload.fields });
+        return { saved: Object.keys(payload.fields) };
+      }
       throw new Error(`Unexpected native request in the all-websites smoke: ${type}`);
     };
   }, profile);
@@ -231,15 +242,51 @@ async function main() {
     assert.equal(await cards(), 0, 'no card on a search-only page');
     console.log('All websites: no card on a search-only page.');
 
-    // A page whose only form is embedded from another site gets the card through the worker.
+    // A page whose only form is embedded from another site gets the card through the worker. Its answers are asked
+    // for in the name of the site the form is from, the frame's address as Chrome gives it, and the sensitive-details
+    // prompt names that site, not the page around it (#137).
+    const prompts = () => worker.evaluate(() => globalThis.__desktop.prompts.splice(0));
+    const requested = async since => (await calls('getFields')).slice(since).map(call => ({ url: call.url, fields: call.fields }));
+    await prompts();
+    let asked = (await calls('getFields')).length;
     await page.goto(EMBEDDING, { waitUntil: 'domcontentloaded' });
     await expect.poll(cards, { timeout: 15000 }).toBe(1);
     await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
     await panel.click('#panel-autofill');
     const signUp = page.frames().find(frame => frame.url() === FORMS);
     await expect(signUp.locator('#city')).toHaveValue(syntheticProfile.city, { timeout: 20000 });
+    await expect(signUp.locator('#cash')).toHaveValue(syntheticProfile.assetsOnHand);
     assert.equal(await signUp.evaluate(() => window.__submits), 0);
-    console.log('All websites: a form embedded from another site brought the card and filled with no second approval.');
+    assert.deepEqual(await requested(asked), [{ url: FORMS, fields: ['city', 'assetsOnHand', 'addressLine2'] }], 'one request, in the embedded form’s own name');
+    assert.deepEqual(await prompts(), ['Fill sensitive details on https://forms.example.net?'], 'the prompt names the site that gets the answers');
+    // Save to My information from the embedded form: the answer is saved in the name of the site it came from.
+    await expect.poll(() => panel.visible('#save-section'), { timeout: 15000 }).toBe(true);
+    await expect.poll(() => panel.text('#save-list')).toBe(`Apartment number${en('save.answerFirst')}`);
+    await signUp.locator('#apt').fill('Unit 7');
+    await expect.poll(() => panel.visible('[data-save-id] button'), { timeout: 15000 }).toBe(true);
+    await panel.click('[data-save-id] button');
+    await expect.poll(() => panel.text('#status'), { timeout: 15000 }).toBe(en('save.saved'));
+    assert.deepEqual((await worker.evaluate(() => globalThis.__desktop.saves)).at(-1), { url: FORMS, fields: { addressLine2: 'Unit 7' } });
+    assert.deepEqual(await prompts(), ['Save this answer from https://forms.example.net to My information?'], 'the save prompt names the site the answer came from');
+    console.log('All websites: a form embedded from another site brought the card and filled with no second approval; its sensitive prompt and its Save to My information named forms.example.net.');
+
+    // A page with its own form and one embedded from another site: one click asks for each site's answers in that
+    // site's name, apart, and each frame gets only its own site's.
+    asked = (await calls('getFields')).length;
+    await page.goto(WIC, { waitUntil: 'domcontentloaded' });
+    await launcherFrame();
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+    await panel.click('#panel-autofill');
+    const embeddedWic = page.frames().find(frame => frame.url() === FORMS);
+    await expect(page.locator('#name')).toHaveValue(`${syntheticProfile.firstName} ${syntheticProfile.lastName}`, { timeout: 20000 });
+    await expect(embeddedWic.locator('#city')).toHaveValue(syntheticProfile.city, { timeout: 20000 });
+    await expect(embeddedWic.locator('#cash')).toHaveValue(syntheticProfile.assetsOnHand);
+    const [wicRequest, formRequest] = await requested(asked);
+    assert.deepEqual([wicRequest?.url, formRequest], [WIC, { url: FORMS, fields: ['city', 'assetsOnHand', 'addressLine2'] }], 'one request for each site, in page order');
+    assert.equal(['city', 'assetsOnHand', 'addressLine2'].some(field => wicRequest.fields.includes(field)), false, 'the host page’s request asks only for its own questions');
+    assert.deepEqual(await prompts(), ['Fill sensitive details on https://forms.example.net?']);
+    assert.equal(await page.evaluate(() => window.__submits) + await embeddedWic.evaluate(() => window.__submits), 0);
+    console.log('All websites: one click on a page and the form embedded in it asked for each site’s answers apart, each in its own name.');
 
     // Turn it off from the side panel: the card leaves the open page at once and doesn't come back.
     // Chrome's grant is kept, unused, and Iowa's portal is untouched.

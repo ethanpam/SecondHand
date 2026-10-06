@@ -8,7 +8,7 @@ const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const applicantFixture = require('../tests/fixtures/applicant-profile.json');
-const { PROFILE_FIELDS } = require('../shared/schema.cjs');
+const { PROFILE_FIELDS, LIST_FIELDS, validateProfile } = require('../shared/schema.cjs');
 const { MODEL_FILES } = require('../desktop/laya-model.cjs');
 const root = path.join(__dirname, '..');
 const passphrase = 'synthetic-test-vault-passphrase';
@@ -21,10 +21,11 @@ const resetPassword = 'synthetic-reset-password';
 const IOWA_QUESTIONS = ['sex', 'maritalStatus', 'hasSsnAnswer', 'ssnCardNameMatches', 'usCitizen', 'militaryOrVeteran', 'disabled', 'blind', 'healthLimitation', 'medicare'];
 const startOverPassword = 'synthetic-start-over-password';
 // The household list (#98): member ids are made when a person is added, so profiles are compared without them.
-const withoutIds = profile => ({ ...profile, householdMembers: (profile.householdMembers || []).map(({ id, ...member }) => member) });
+const withoutIds = profile => { const normalized = validateProfile(profile); return { ...normalized, householdMembers: normalized.householdMembers.map(({ id, ...member }) => member) }; };
 const COUNT_FIELDS = ['householdSize', 'householdAdults', 'householdChildren', 'householdSeniors'];
 // Fields My information shows one by one; the household list has its own rows.
-const SCALAR_FIELDS = PROFILE_FIELDS.filter(field => field !== 'householdMembers');
+const SCALAR_FIELDS = PROFILE_FIELDS.filter(field => !LIST_FIELDS.includes(field));
+const scalars = profile => Object.fromEntries(SCALAR_FIELDS.map(field => [field, profile[field] || '']));
 
 async function captureDiagnostic(page, name, options = {}) {
   try {
@@ -245,6 +246,7 @@ async function main() {
     const shownProfile = () => page.locator('#profile-form').evaluate((form, fields) => Object.fromEntries(fields.map(field => [field, form.elements.namedItem(field).value])), SCALAR_FIELDS);
     const { householdMembers: _, ...scalarFixture } = applicantFixture;
     for (const field of SCALAR_FIELDS) {
+      if (!Object.hasOwn(applicantFixture, field)) continue; // Newly optional answers stay blank in this legacy fixture.
       // The guided setup saved the household list, so the counts come from it, read-only.
       if (COUNT_FIELDS.includes(field)) {
         await expect(page.locator(`#${field}`)).toHaveJSProperty('readOnly', true);
@@ -295,7 +297,7 @@ async function main() {
     await page.locator('.nav-item[data-view="profile"]').click();
     await expect(page.locator('#firstName')).toHaveValue(applicantFixture.firstName);
     // After unlocking, My information shows every saved answer again, Iowa's questions and the household list included.
-    assert.deepEqual(await shownProfile(), scalarFixture);
+    assert.deepEqual(await shownProfile(), scalars(scalarFixture));
     assert.deepEqual(await page.locator('.household-member [data-member-field="firstName"]').evaluateAll(inputs => inputs.map(input => input.value)),
       applicantFixture.householdMembers.map(member => member.firstName));
     await expect(page.locator('#sex-female')).toBeChecked();
@@ -447,7 +449,7 @@ async function main() {
     await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('.nav-item[data-view="profile"]').click();
     const { householdMembers: __, ...scalarUnanswered } = unanswered;
-    assert.deepEqual(await shownProfile(), scalarUnanswered);
+    assert.deepEqual(await shownProfile(), scalars(scalarUnanswered));
     for (const field of IOWA_QUESTIONS.filter(field => field !== 'maritalStatus')) await expect(page.locator(`#${field}-none`)).toBeChecked();
 
     // Locked out with no password or recovery key: start over from the reset screen.
