@@ -232,6 +232,10 @@
   // shared/laya-prompts.cjs keeps an identical copy for the desktop app.
   const UNSAFE_QUESTION = /^social security$|^(enter )?(the |your |a )?codes?$|\b(consent\w*|sign|signs|signed|signing|signature\w*|initials|attest\w*|certif\w*|agree|agrees|agreed|agreement\w*|terms|acknowledg\w*|authoriz\w*|permission|perjury|i understand|i confirm|i have read|true and (correct|accurate|complete)|privacy|social security (number|no|num|card)|ss number|ssn|itin|password|passcode|pin|cvv|cvc|card number|credit card|debit card|security code|captcha|one time|otp|2fa|mfa|(verification|verify|authentication|confirmation|access|login|log in|sms|text|texted|email|emailed) codes?|\d+ digit codes?|codes? (that |which )?(we |was |were |has been |have been )?(just )?(sent|texted|emailed)|(sent|texted|emailed) (to )?(you )?(a |the |your )?codes?|codes? from (the |your |our )?(text|sms|email|e mail|message|app)|(security|secret|challenge) (questions?|answers?)|mothers maiden name|(city|town) (were you|you were|was your \w+) born|born in what (city|town)|first (pets?|car)|street (did you|you) gr[eo]w up on|user ?names?|user ?ids?|(login|log in) (ids?|names?)|screen ?names?)\b/;
   const unsafeQuestion = field => [field?.label, ...(Array.isArray(field?.options) ? field.options : [])].some(text => UNSAFE_QUESTION.test(normal(text)));
+  // Custom answers have no approved financial/credential exception. Keep this in step with
+  // shared/custom-fields.cjs so direct assignments cannot bypass its desktop release guard.
+  const CUSTOM_PROTECTED = /\b(payment|billing|routing|iban|swift|bank account|bank details|account (number|no|num)|credit|debit|cardholder|card holder|card expiry|card expiration|cvc|cvv|pin|passphrase|security answer|recovery key|recovery phrase|seed phrase|secret key|api key|authentication|verification|captcha)\b/;
+  const protectedCustom = field => [field?.label, ...(Array.isArray(field?.options) ? field.options : [])].some(value => CUSTOM_PROTECTED.test(normal(value)));
   // The questions Laya, the desktop app's AI, may take, within the bridge's limits: a text box to match
   // to a saved field ('text') or a choice question to answer ('choice'). Never one only the applicant answers,
   // and never a text box no saved field may go to (another person's, who pays, a combined address), which
@@ -260,12 +264,30 @@
     return /\b(birth|born|dob)/.test(text) && !/\b(month|day|year|time|hours?|minutes?)\b/.test(text) && !OTHER_PERSON.test(text);
   }
 
+  // Only open roots in this document: never a frame's document or a closed shadow tree.
+  function deepQueryAll(doc, selector) {
+    const found = [], seen = new Set();
+    function visit(scope) {
+      if (seen.has(scope)) return; seen.add(scope);
+      for (const element of scope.querySelectorAll('*')) {
+        if (element.ownerDocument !== doc) continue;
+        if (element.matches(selector)) found.push(element);
+        if (element.shadowRoot?.mode === 'open') visit(element.shadowRoot);
+      }
+    }
+    visit(doc); return found;
+  }
+  const parentOf = element => element.parentElement || element.getRootNode()?.host || null;
+  function closestAcross(element, selector) { for (let node = element; node; node = parentOf(node)) if (node.matches?.(selector)) return node; return null; }
+  const rootOf = element => element.getRootNode();
+  function rootId(element, id) { const matches = Array.from(rootOf(element).querySelectorAll('[id]')).filter(node => node.id === id); return matches.length === 1 ? matches[0] : null; }
+
   // A label's own aria-hidden only hides it from screen readers (Jotform marks every choice
   // label that way), so a choice label is checked with `labelOnly`; an aria-hidden ancestor still hides it.
   function rendered(element, labelOnly = false) {
     const win = element.ownerDocument.defaultView;
     if (!win || !element.isConnected) return false;
-    for (let node = element; node && node.nodeType === 1; node = node.parentElement) {
+    for (let node = element; node && node.nodeType === 1; node = parentOf(node)) {
       const style = win.getComputedStyle(node);
       const customChoice = node === element && ['radio', 'checkbox'].includes(element.type) && Array.from(element.labels || []).some(label => rendered(label, true));
       const ariaHidden = node.getAttribute('aria-hidden') === 'true' && !(labelOnly && node === element);
@@ -276,10 +298,10 @@
   }
   function textWithoutControls(node) {
     const copy = node.cloneNode(true);
-    copy.querySelectorAll('input, select, textarea, button, script, style').forEach(control => control.remove());
+    copy.querySelectorAll('input, select, textarea, button, script, style, [contenteditable], [role="textbox"], [role="combobox"]').forEach(control => control.remove());
     return clean(copy.textContent);
   }
-  function idsText(doc, ids) { return clean(String(ids || '').split(/\s+/).filter(Boolean).map(id => doc.getElementById(id)?.textContent || '').join(' ')); }
+  function idsText(scope, ids) { return clean(String(ids || '').split(/\s+/).filter(Boolean).map(id => (scope.nodeType === 1 ? rootId(scope, id) : scope.getElementById(id))?.textContent || '').join(' ')); }
   // Short visible text just before a control or group, for forms without <label>.
   function precedingText(node) {
     for (let ancestor = node, depth = 0; ancestor && depth < 3; ancestor = ancestor.parentElement, depth++) {
@@ -295,11 +317,11 @@
   const QUESTION_BOX = '[role="listitem"], [role="radiogroup"], [role="group"], fieldset';
   function boxHeading(box, doc) {
     const legend = box.tagName === 'FIELDSET' ? box.querySelector('legend') : null;
-    return idsText(doc, box.getAttribute('aria-labelledby')) || clean(box.getAttribute('aria-label')) || (legend ? textWithoutControls(legend) : '') ||
+    return idsText(box, box.getAttribute('aria-labelledby')) || clean(box.getAttribute('aria-label')) || (legend ? textWithoutControls(legend) : '') ||
       clean(box.querySelector('[role="heading"]')?.textContent);
   }
   function enclosingQuestion(node, doc) {
-    for (let box = node.parentElement?.closest(QUESTION_BOX); box; box = box.parentElement?.closest(QUESTION_BOX)) {
+    for (let box = closestAcross(parentOf(node), QUESTION_BOX); box; box = closestAcross(parentOf(box), QUESTION_BOX)) {
       const text = boxHeading(box, doc);
       if (text) return { box, text };
     }
@@ -308,8 +330,9 @@
   // "Date", "Month", "Hour"… name a part of a question, not the question itself.
   const DATE_PART = /^(date|month|day|year|time|hours?|minutes?)$/;
   function labelsFor(element, doc) {
-    const candidates = [idsText(doc, element.getAttribute('aria-labelledby')), clean(element.getAttribute('aria-label')),
-      ...Array.from(element.labels || [], textWithoutControls), clean(element.getAttribute('placeholder'))];
+    const ownLabels = element.labels || (element.id ? Array.from(rootOf(element).querySelectorAll('label')).filter(node => node.htmlFor === element.id) : []);
+    const candidates = [idsText(element, element.getAttribute('aria-labelledby')), clean(element.getAttribute('aria-label')),
+      ...Array.from(ownLabels, textWithoutControls), clean(element.getAttribute('placeholder'))];
     const present = candidates.filter(Boolean);
     const labels = present.length ? present : [precedingText(element)].filter(Boolean);
     return labels.map(text => {
@@ -321,18 +344,28 @@
     });
   }
   // Form builders such as Google Forms draw choices as div[role=radio|checkbox|listbox], not native controls.
-  const ARIA_CONTROLS = '[role="radio"], [role="checkbox"], [role="listbox"]';
-  const ARIA_TYPES = Object.freeze({ ariaRadio: 'radio', ariaCheckbox: 'checkbox', ariaListbox: 'listbox' });
-  const ariaUsable = element => !element.matches('input, select, textarea') && element.getAttribute('aria-disabled') !== 'true' && rendered(element);
+  const ARIA_CONTROLS = '[role="radio"], [role="checkbox"], [role="switch"], [role="listbox"], [role="combobox"]';
+  const EDITABLE = '[contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"]';
+  const ARIA_TYPES = Object.freeze({ ariaRadio: 'radio', ariaCheckbox: 'checkbox', ariaSwitch: 'checkbox', ariaListbox: 'select', ariaCombo: 'select' });
+  const ariaUsable = element => (!element.matches('input, select, textarea') || element.getAttribute('role') === 'combobox') && !element.disabled && !element.readOnly && element.getAttribute('aria-disabled') !== 'true' && element.getAttribute('aria-readonly') !== 'true' && rendered(element);
+  const editableUsable = element => element.matches(EDITABLE) && !closestAcross(parentOf(element), EDITABLE) && !element.querySelector('input,select,textarea,button,[contenteditable]') && element.getAttribute('aria-readonly') !== 'true' && element.getAttribute('aria-disabled') !== 'true' && rendered(element);
+  function listboxFor(entry) {
+    if (entry.kind === 'ariaListbox') return entry.group;
+    const ids = String(entry.group.getAttribute('aria-controls') || entry.group.getAttribute('aria-owns') || '').trim().split(/\s+/);
+    const list = ids.length === 1 && ids[0] ? rootId(entry.group, ids[0]) : null;
+    return list?.getAttribute('role') === 'listbox' ? list : null;
+  }
   // Radios group by their radiogroup; checkboxes by the question they sit in; a listbox stands alone.
   function ariaGroup(element, doc) {
     const role = element.getAttribute('role');
+    if (role === 'combobox') return { kind: 'ariaCombo', group: element };
+    if (role === 'switch') return { kind: 'ariaSwitch', group: element };
     if (role === 'listbox') return { kind: 'ariaListbox', group: element };
     if (role === 'radio') { const group = element.closest('[role="radiogroup"]'); return group ? { kind: 'ariaRadio', group } : null; }
     return { kind: 'ariaCheckbox', group: enclosingQuestion(element, doc)?.box || element };
   }
   function ariaLabels(entry, doc) {
-    if (entry.group === entry.elements[0] && entry.kind === 'ariaCheckbox') return [ariaOptionText(entry.group)].filter(Boolean);
+    if (entry.group === entry.elements[0] && ['ariaCheckbox', 'ariaSwitch', 'ariaCombo', 'ariaListbox'].includes(entry.kind)) return labelsFor(entry.group, doc).length ? labelsFor(entry.group, doc) : [boxHeading(entry.group, doc) || enclosingQuestion(entry.group, doc)?.text || ariaOptionText(entry.group)].filter(Boolean);
     return [boxHeading(entry.group, doc) || enclosingQuestion(entry.group, doc)?.text || precedingText(entry.group)].filter(Boolean);
   }
   function ariaRequired(entry, doc) {
@@ -342,13 +375,13 @@
   }
   const ariaOptionValue = option => option.hasAttribute('data-value') ? option.getAttribute('data-value') : clean(option.textContent);
   const ariaOptionText = option => clean(option.getAttribute('aria-label') || option.getAttribute('data-value') || option.getAttribute('data-answer-value') || option.textContent);
-  const listboxOptions = listbox => Array.from(listbox.querySelectorAll('[role="option"]')).filter(option => ariaOptionValue(option));
+  const listboxOptions = listbox => listbox ? Array.from(listbox.querySelectorAll('[role="option"]')).filter(option => option.closest('[role="listbox"]') === listbox && ariaOptionValue(option)) : [];
   function groupQuestion(elements, doc) {
     const first = elements[0];
     const container = first.closest('fieldset, [role="radiogroup"], [role="group"]');
     const candidates = [];
     if (container) {
-      candidates.push(textWithoutControls(container.querySelector('legend') || doc.createElement('i')), idsText(doc, container.getAttribute('aria-labelledby')), clean(container.getAttribute('aria-label')));
+      candidates.push(textWithoutControls(container.querySelector('legend') || doc.createElement('i')), idsText(container, container.getAttribute('aria-labelledby')), clean(container.getAttribute('aria-label')));
       if (!candidates.some(Boolean)) candidates.push(precedingText(container));
     } else candidates.push(precedingText(first.closest('label') || first));
     return candidates.filter(Boolean);
@@ -362,11 +395,13 @@
     return !UNSAFE.test(identity);
   }
   const optionText = element => clean(Array.from(element.labels || [], textWithoutControls).join(' ') || element.getAttribute('aria-label') || element.value);
+  const explicitNo = new WeakMap();
   function answered(entry) {
-    if (entry.kind === 'ariaRadio' || entry.kind === 'ariaCheckbox') return [...entry.elements, ...entry.group.querySelectorAll('[aria-checked="true"]')].some(element => element.getAttribute('aria-checked') === 'true');
-    if (entry.kind === 'ariaListbox') return listboxOptions(entry.group).some(option => option.getAttribute('aria-selected') === 'true');
-    return entry.kind === 'radio' || entry.kind === 'checkbox' ? entry.elements.some(element => element.checked)
-      : entry.kind === 'select' ? Boolean(entry.elements[0].value) : Boolean(String(entry.elements[0].value || '').trim());
+    if (entry.kind === 'editable') return Boolean(clean(entry.elements[0].textContent));
+    if (['ariaRadio', 'ariaCheckbox', 'ariaSwitch'].includes(entry.kind)) return entry.elements.some(element => element.getAttribute('aria-checked') === 'true' || explicitNo.get(element) === element.getAttribute('aria-checked'));
+    if (['ariaListbox', 'ariaCombo'].includes(entry.kind)) return listboxOptions(listboxFor(entry)).some(option => option.getAttribute('aria-selected') === 'true') || Boolean(entry.group.value || entry.group.getAttribute('aria-valuetext'));
+    return entry.kind === 'radio' || entry.kind === 'checkbox' ? entry.elements.some(element => element.checked || (entry.kind === 'checkbox' && explicitNo.get(element) === 'false' && !element.checked))
+      : entry.kind === 'select' ? Array.from(entry.elements[0].selectedOptions).some(option => Boolean(option.value)) : Boolean(String(entry.elements[0].value || '').trim());
   }
   function kindOf(element) {
     if (element.tagName === 'SELECT') return 'select';
@@ -377,8 +412,10 @@
     // A select's empty-value entry is a placeholder ("Choose one"), not an answer.
     if (entry.kind === 'select') return Array.from(entry.elements[0].options).filter(option => option.value).map(option => clean(option.textContent) || option.value);
     if (entry.kind === 'radio' || (entry.kind === 'checkbox' && entry.elements.length > 1)) return entry.elements.map(optionText);
+    if (entry.kind === 'checkbox') return ['Yes', 'No'];
     if (entry.kind === 'ariaRadio' || (entry.kind === 'ariaCheckbox' && entry.elements.length > 1)) return entry.elements.map(ariaOptionText);
-    if (entry.kind === 'ariaListbox') return listboxOptions(entry.group).map(ariaOptionText);
+    if (['ariaCheckbox', 'ariaSwitch'].includes(entry.kind)) return ['Yes', 'No'];
+    if (['ariaListbox', 'ariaCombo'].includes(entry.kind)) return listboxOptions(listboxFor(entry)).map(ariaOptionText);
     return [];
   }
   const isYesNo = options => options.some(option => /^yes\b/.test(normal(option))) && options.some(option => /^no\b/.test(normal(option)));
@@ -391,26 +428,25 @@
   }
   const isNumeric = options => options.length > 0 && options.every(option => countOf(option));
   const ageRange = option => /^(\d+) (\d+)( yrs?| years?)?$/.exec(normal(option)) || /^(\d+)(\+| and older| or older)( yrs?| years?)?$/.exec(normal(option));
-  // A key is only placed on a control that can hold its kind of answer. Div checkboxes and
-  // listboxes are only ever left for the applicant.
+  // A key is only placed on a control that can hold its kind of answer.
   const answerKind = key => IOWA_KEYS.includes(key) ? 'yesno' : isBandKey(key) ? 'count' : KIND[key] || 'text';
   function compatible(key, entry) {
-    if (entry.kind === 'ariaCheckbox' || entry.kind === 'ariaListbox') return false;
     const kind = answerKind(key);
     const type = (entry.elements[0].type || 'text').toLowerCase();
     const options = optionsOf(entry);
-    const choice = entry.kind === 'radio' || entry.kind === 'ariaRadio';
+    const choice = ['radio', 'ariaRadio', 'ariaCombo', 'ariaListbox'].includes(entry.kind);
+    const toggle = ['checkbox', 'ariaCheckbox', 'ariaSwitch'].includes(entry.kind) && entry.elements.length === 1;
     if (IOWA_KEYS.includes(key)) return (choice || entry.kind === 'select') && options.length === 2 &&
       options.map(normal).sort().join('|') === 'no|yes';
-    if (kind === 'yesno') return (choice || entry.kind === 'select') ? isYesNo(options) : entry.kind === 'checkbox' && entry.elements.length === 1;
+    if (kind === 'yesno') return (choice || entry.kind === 'select') ? isYesNo(options) : toggle;
     if (kind === 'ageRange') return (choice || entry.kind === 'select') && options.some(ageRange);
     if (kind === 'count') return (entry.kind === 'input' && ['number', 'text', 'tel', ''].includes(type)) || ((entry.kind === 'select' || choice) && isNumeric(options.filter(option => normal(option))));
-    if (kind === 'state') return entry.kind === 'select' || (entry.kind === 'input' && type === 'text');
+    if (kind === 'state') return ['select', 'ariaCombo', 'ariaListbox'].includes(entry.kind) || (entry.kind === 'input' && type === 'text');
     if (kind === 'date') return entry.kind === 'input' && ['date', 'text', ''].includes(type);
     if (kind === 'email') return entry.kind === 'input' && ['email', 'text'].includes(type);
     if (kind === 'tel') return entry.kind === 'input' && ['tel', 'text', 'number'].includes(type);
     if (kind === 'money') return entry.kind === 'input' && ['number', 'text', ''].includes(type);
-    return entry.kind === 'textarea' || (entry.kind === 'input' && ['text', 'search', ''].includes(type));
+    return ['textarea', 'editable', 'select', 'ariaCombo', 'ariaListbox'].includes(entry.kind) || (entry.kind === 'input' && ['text', 'search', ''].includes(type));
   }
   // A box only the applicant answers, by any of its labels or options.
   const applicantOnly = entry => unsafeQuestion({ label: entry.labels.join(' '), options: optionsOf(entry) });
@@ -452,6 +488,7 @@
       headings: Array.from(doc.querySelectorAll('h1,h2,h3,h4,legend,p,a[title]')).filter(element => rendered(element)).map(element => [element.tagName, element.getAttribute('title'), clean(element.textContent)]) });
   }
   function ruleMatch(entry) {
+    if (entry.invalidLabels) return { key: null, confidence: null };
     const element = entry.elements[0];
     const iowa = entry.labels.map(iowaRule).filter(Boolean);
     if (iowa.length) {
@@ -493,8 +530,16 @@
   function questionsOn(doc) {
     const entries = [];
     const groups = new Map();
-    for (const element of doc.querySelectorAll(`input, select, textarea, ${ARIA_CONTROLS}`)) {
-      if (!element.matches('input, select, textarea')) {
+    const roots = new Map();
+    const controls = deepQueryAll(doc, `input, select, textarea, ${ARIA_CONTROLS}, ${EDITABLE}`);
+    const ownedLists = new Set(controls.filter(element => element.getAttribute('role') === 'combobox').map(group => listboxFor({ group, kind: 'ariaCombo' })).filter(Boolean));
+    for (const element of controls) {
+      if (ownedLists.has(element)) continue;
+      if (element.matches(EDITABLE) && !element.matches(ARIA_CONTROLS)) {
+        if (editableUsable(element)) entries.push({ kind: 'editable', elements: [element] });
+        continue;
+      }
+      if (!element.matches('input, select, textarea') || element.getAttribute('role') === 'combobox') {
         const choice = ariaUsable(element) && ariaGroup(element, doc);
         if (!choice) continue;
         if (groups.has(choice.group)) { groups.get(choice.group).elements.push(element); continue; }
@@ -505,7 +550,10 @@
       if (!eligible(element)) continue;
       const kind = kindOf(element);
       if ((kind === 'radio' || kind === 'checkbox') && element.name) {
-        const groupKey = `${kind}|${element.form ? Array.from(doc.forms).indexOf(element.form) : -1}|${element.name}`;
+        const tree = rootOf(element);
+        if (!roots.has(tree)) roots.set(tree, roots.size);
+        const forms = Array.from(tree.querySelectorAll('form'));
+        const groupKey = `${roots.get(tree)}|${kind}|${element.form ? forms.indexOf(element.form) : -1}|${element.name}`;
         if (groups.has(groupKey)) { groups.get(groupKey).elements.push(element); continue; }
         const entry = { kind, elements: [element] };
         groups.set(groupKey, entry); entries.push(entry);
@@ -515,6 +563,8 @@
       const grouped = entry.kind === 'radio' || (entry.kind === 'checkbox' && entry.elements.length > 1);
       entry.labels = ARIA_TYPES[entry.kind] ? ariaLabels(entry, doc) : grouped ? groupQuestion(entry.elements, doc) : labelsFor(entry.elements[0], doc);
       if (ARIA_TYPES[entry.kind]) entry.required = ariaRequired(entry, doc);
+      entry.invalidLabels = [entry.group, ...entry.elements].filter(Boolean).some(element =>
+        (element.id && rootId(element, element.id) !== element) || String(element.getAttribute('aria-labelledby') || '').trim().split(/\s+/).filter(Boolean).some(id => !rootId(element, id)));
     }
     return entries;
   }
@@ -542,7 +592,7 @@
   // A question as the worker sees it: its label, type, choices, and whether it must be answered.
   function fieldOf(entry) {
     const first = entry.elements[0];
-    return { label: entry.labels[0] || '', type: entry.kind === 'input' ? (first.type || 'text') : ARIA_TYPES[entry.kind] || entry.kind, options: optionsOf(entry),
+    return { label: entry.labels[0] || '', type: entry.kind === 'input' ? (first.type || 'text') : entry.kind === 'editable' ? 'textarea' : ARIA_TYPES[entry.kind] || entry.kind, options: optionsOf(entry),
       required: entry.required ?? (entry.elements.some(element => element.required || element.getAttribute('aria-required') === 'true') || /\*\s*$/.test(entry.labels.join(' '))) };
   }
   function plan(doc) {
@@ -552,6 +602,7 @@
     const entries = scan(doc), rules = entries.map(match);
     entries.forEach((entry, index) => {
       const id = `sh-${sequence}-${index}`;
+      entry.binding = binding(entry);
       map.set(id, entry);
       const result = rules[index];
       if (IOWA_KEYS.includes(result.key) && rules.filter(rule => rule.key === result.key).length !== 1) { unmatched.push({ id, ...fieldOf(entry) }); return; }
@@ -579,7 +630,7 @@
   const DATE_ORDERS = Object.freeze({ month: /\bmm? dd? (yyyy|yy|aaaa|aa)\b/, day: /\b(dd?|jj?) mm? (yyyy|yy|aaaa|aa)\b/, year: /\b(yyyy|aaaa) mm? dd?\b/ });
   function dateOrders(entry) {
     const element = entry.elements[0];
-    const hints = [...entry.labels, idsText(element.ownerDocument, element.getAttribute('aria-describedby')), element.getAttribute('title') || ''].map(normal);
+    const hints = [...entry.labels, idsText(element, element.getAttribute('aria-describedby')), element.getAttribute('title') || ''].map(normal);
     return new Set(Object.keys(DATE_ORDERS).filter(order => hints.some(hint => DATE_ORDERS[order].test(hint))));
   }
   // The order a typed date is in: as its box asks for it, or as its numbers allow only one way. Null when it can't be told: never guessed.
@@ -651,8 +702,8 @@
     if (element.type === 'search' || element.matches('[role="searchbox"]') || element.closest('search, [role="search"]') || SEARCH.test(words) ||
       SEARCH_NAMES.includes(normal(element.getAttribute('name')))) return true;
     if (CODE.test(words)) return true;
-    const scope = element.form || element.closest('form') || doc;
-    const password = Array.from(scope.querySelectorAll('input[type="password"]')).some(box => rendered(box));
+    const scope = element.form || closestAcross(element, 'form') || rootOf(element);
+    const password = deepQueryAll(doc, 'input[type="password"]').some(box => rendered(box) && (scope === doc || scope === rootOf(box) || scope.contains(box) || closestAcross(box, 'form') === scope));
     return password && SIGN_IN.test(`${words} ${normal(`${element.getAttribute('name') || ''} ${element.id || ''} ${element.getAttribute('autocomplete') || ''}`)}`);
   }
   // Whether the page asks something SecondHand can help with, so its card shows: a question the rules
@@ -702,8 +753,8 @@
     const win = element.ownerDocument.defaultView;
     const prototype = element.tagName === 'SELECT' ? win.HTMLSelectElement.prototype : element.tagName === 'TEXTAREA' ? win.HTMLTextAreaElement.prototype : win.HTMLInputElement.prototype;
     Object.getOwnPropertyDescriptor(prototype, 'value').set.call(element, value);
-    element.dispatchEvent(new win.Event('input', { bubbles: true }));
-    element.dispatchEvent(new win.Event('change', { bubbles: true }));
+    element.dispatchEvent(new win.Event('input', { bubbles: true, composed: true }));
+    element.dispatchEvent(new win.Event('change', { bubbles: true, composed: true }));
     return element.value === value;
   }
   function chooseOption(options, key, value) {
@@ -744,6 +795,8 @@
   }
   function fillEntry(entry, key, value) {
     const first = entry.elements[0];
+    if (entry.kind === 'editable') return writeEditable(first, value);
+    if (['ariaCombo', 'ariaListbox', 'ariaCheckbox', 'ariaSwitch'].includes(entry.kind)) return fillAria(entry, value, key);
     if (entry.kind === 'input' || entry.kind === 'textarea') {
       const text = formatted(key, value, entry);
       if (text === null || (first.maxLength > 0 && text.length > first.maxLength)) return false;
@@ -779,6 +832,110 @@
     }
     return false;
   }
+  // Bind labels, ownership and option identities to the preview. Only the unchanged, still
+  // unanswered entry can receive a saved answer; another person's new field cannot reuse its id.
+  function binding(entry) {
+    const first = entry.elements[0], form = first.form || closestAcross(first, 'form');
+    const options = entry.kind === 'select' ? Array.from(first.options) : ['ariaCombo', 'ariaListbox'].includes(entry.kind) ? listboxOptions(listboxFor(entry)) : [];
+    return { root: rootOf(first), form, options,
+      state: JSON.stringify({ labels: entry.labels, invalidLabels: entry.invalidLabels, field: fieldOf(entry), form: form && [form.id, form.getAttribute('action'), form.getAttribute('method')],
+        controls: entry.elements.map(element => ['id', 'name', 'type', 'role', 'autocomplete', 'aria-label', 'aria-labelledby', 'aria-controls', 'aria-owns', 'contenteditable', 'maxlength', 'pattern', 'min', 'max', 'step', 'value'].map(name => element.getAttribute(name))),
+        options: options.map(option => [optionText(option), option.value, ariaOptionText(option), option.getAttribute('data-value'), option.disabled, option.getAttribute('aria-disabled')]) }) };
+  }
+  function sameBinding(entry, fresh) {
+    if (!fresh || fresh.kind !== entry.kind) return false;
+    const saved = entry.binding, now = binding(fresh);
+    return saved && saved.root === now.root && saved.form === now.form && saved.state === now.state && saved.options.length === now.options.length && saved.options.every((option, index) => option === now.options[index]);
+  }
+  const sameElements = (entry, other) => entry.elements.length === other.elements.length && entry.elements.every((element, index) => element === other.elements[index]);
+  const entryUsable = entry => entry.elements.every(element => element.isConnected && (entry.kind === 'editable' ? editableUsable(element) : ARIA_TYPES[entry.kind] ? ariaUsable(element) : eligible(element)));
+  const exactText = value => String(value).trim().replace(/\s+/g, ' ').toLowerCase();
+  function uniqueIndex(options, value, key) {
+    if (key) {
+      const index = chooseOption(options, key, value);
+      if (index < 0) return -1;
+      // Duplicate or overlapping interpretations do not choose whichever happens to come first.
+      return options.filter(option => chooseOption([option], key, value) === 0).length === 1 ? index : -1;
+    }
+    const indexes = options.map((option, index) => exactText(option) === exactText(value) ? index : -1).filter(index => index >= 0);
+    return indexes.length === 1 ? indexes[0] : -1;
+  }
+  const unsafeValue = (value, multiline) => UNSEEN.test(multiline ? value.replace(/[\r\n\t]/g, '') : value);
+  function writeEditable(element, value) {
+    if (!editableUsable(element) || typeof value !== 'string' || !value.trim() || value.length > 1000 || unsafeValue(value, element.getAttribute('aria-multiline') !== 'false')) return false;
+    element.textContent = value; // text, never HTML supplied by a saved answer
+    const win = element.ownerDocument.defaultView;
+    element.dispatchEvent(new win.Event('input', { bubbles: true, composed: true }));
+    element.dispatchEvent(new win.Event('change', { bubbles: true, composed: true }));
+    return element.textContent === value;
+  }
+  function fillAria(entry, value, key) {
+    const first = entry.elements[0];
+    if (['ariaCheckbox', 'ariaSwitch'].includes(entry.kind)) {
+      if (entry.elements.length === 1) {
+        const wanted = exactText(value);
+        if (!['yes', 'no'].includes(wanted) || first.getAttribute('aria-checked') !== 'false') return false;
+        if (wanted === 'no') { explicitNo.set(first, 'false'); return true; }
+        first.click();
+        return first.getAttribute('aria-checked') === 'true' || { pending: first };
+      }
+      const index = uniqueIndex(entry.elements.map(ariaOptionText), value, key);
+      if (index < 0 || entry.elements.some(element => element.getAttribute('aria-checked') !== 'false')) return false;
+      const option = entry.elements[index]; option.click();
+      return option.getAttribute('aria-checked') === 'true' || { pending: option };
+    }
+    const list = listboxFor(entry), options = listboxOptions(list), index = uniqueIndex(options.map(ariaOptionText), value, key);
+    if (!list || index < 0 || options.some(option => !['true', 'false'].includes(option.getAttribute('aria-selected')))) return false;
+    const option = options[index];
+    if (option.getAttribute('aria-disabled') === 'true') return false;
+    if (entry.kind === 'ariaCombo' && !rendered(list)) {
+      if (first.getAttribute('aria-expanded') !== 'false') return false;
+      const before = binding(entry);
+      first.click();
+      // Only use the previewed option list, and only if the page actually opened it.
+      const fresh = listboxOptions(list);
+      const rechecked = questionsOn(first.ownerDocument).find(candidate => sameElements(entry, candidate));
+      if (fresh.length !== options.length || !fresh.every((item, i) => item === options[i]) || uniqueIndex(fresh.map(ariaOptionText), value, key) !== index || answered(entry) || !sameBinding({ ...entry, binding: before }, rechecked)) return false;
+    }
+    if (!rendered(option) || option.getAttribute('aria-disabled') === 'true') return false;
+    option.click();
+    return option.getAttribute('aria-selected') === 'true' || { pending: option, attribute: 'aria-selected' };
+  }
+  // Custom answers are explicit saved facts. They cannot override a standard saved-field match,
+  // or provide a route around protected questions and person scopes.
+  function canCustom(field) {
+    return Boolean(field && layaText(field.label, 200) && !unsafeQuestion(field) && !protectedCustom(field) && !blockedSuggestion(field.label) && !iowaRule(field.label) &&
+      ['text', 'textarea', 'number', 'date', 'email', 'tel', 'select', 'radio', 'checkbox'].includes(field.type) && Array.isArray(field.options) && field.options.length <= 30 &&
+      field.options.every(option => layaText(option, 100)) && new Set(field.options.map(exactText)).size === field.options.length);
+  }
+  function fillCustom(entry, value) {
+    if (typeof value !== 'string' || !value.trim() || value.length > 1000 || unsafeValue(value, entry.kind === 'textarea' || (entry.kind === 'editable' && entry.elements[0].getAttribute('aria-multiline') !== 'false'))) return false;
+    const first = entry.elements[0];
+    if (entry.kind === 'editable') return writeEditable(first, value);
+    if (['ariaCombo', 'ariaListbox', 'ariaCheckbox', 'ariaSwitch'].includes(entry.kind)) return fillAria(entry, value);
+    if (['select', 'radio', 'ariaRadio'].includes(entry.kind) || (entry.kind === 'checkbox' && entry.elements.length > 1)) {
+      const options = optionsOf(entry), index = uniqueIndex(options, value);
+      if (entry.kind === 'select') {
+        const target = Array.from(first.options).filter(option => option.value)[index];
+        if (!target || target.disabled || target.parentElement.disabled) return false;
+      }
+      return index >= 0 && fillOption(entry, options[index]);
+    }
+    if (entry.kind === 'checkbox') {
+      if (exactText(value) === 'no') { explicitNo.set(first, 'false'); return true; }
+      if (exactText(value) !== 'yes') return false;
+      first.click(); return first.checked;
+    }
+    if (!['input', 'textarea'].includes(entry.kind) || (first.maxLength > 0 && value.length > first.maxLength)) return false;
+    if (first.type === 'number' && !/^-?\d+(\.\d+)?$/.test(value)) return false;
+    if (first.type === 'date') {
+      const date = new Date(`${value}T00:00:00Z`);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) return false;
+    }
+    const probe = first.cloneNode(false); probe.value = value;
+    if (typeof probe.checkValidity === 'function' && !probe.checkValidity()) return false;
+    return setValue(first, value);
+  }
   // An answer Laya picked from the saved profile (#42): the option with exactly this text, and
   // only where it is the only option with that text. Only ever picks or checks; never unchecks.
   function fillOption(entry, option) {
@@ -804,14 +961,14 @@
     return false;
   }
   // A rule's answer has a solid green outline, a guess a dashed amber one, and Laya's best guess (#185) a dotted plum one.
-  function ensureStyle(doc) {
-    if (doc.getElementById('secondhand-filled-style')) return;
+  function ensureStyle(doc, scope = doc) {
+    if (scope.querySelector('#secondhand-filled-style')) return;
     const style = doc.createElement('style');
     style.id = 'secondhand-filled-style';
     style.textContent = '[data-secondhand-filled="rule"]{outline:2px solid #5f9b62!important;outline-offset:1px!important}[data-secondhand-filled="guess"]{outline:2px dashed #d99a2b!important;outline-offset:1px!important}' +
       '[data-secondhand-filled="laya-guess"]{outline:3px dotted #9b3d8f!important;outline-offset:2px!important}' +
       '[data-secondhand-attention]{outline:3px solid #d99a2b!important;outline-offset:3px!important;box-shadow:0 0 0 7px #d99a2b40!important}';
-    (doc.head || doc.documentElement).append(style);
+    (scope === doc ? doc.head || doc.documentElement : scope).append(style);
   }
   function rejectedByPage(entry) {
     const container = entry.elements[0].closest('.form-line');
@@ -826,7 +983,7 @@
   let layaGuessed = null;
   // `kind` is 'rule', 'guess', or 'laya-guess'.
   function mark(doc, entry, kind, id) {
-    ensureStyle(doc);
+    entry.elements.forEach(element => ensureStyle(doc, rootOf(element)));
     entry.elements.forEach(element => element.setAttribute('data-secondhand-filled', kind));
     if (kind !== 'laya-guess') return;
     if (layaGuessed?.doc !== doc) layaGuessed = { doc, map: new Map() };
@@ -840,10 +997,13 @@
     for (const assignment of assignments) {
       const entry = current.map.get(assignment?.id);
       const key = assignment?.key;
-      const value = values?.[key];
-      const freshIowa = entry && IOWA_KEYS.includes(key) ? questionsOn(doc).find(candidate => candidate.elements.length === entry.elements.length && candidate.elements.every((element, index) => element === entry.elements[index])) : null;
-      const usable = entry && !answered(entry) && entry.elements.every(element => element.isConnected && (ARIA_TYPES[entry.kind] ? ariaUsable(element) : eligible(element))) &&
-        (!IOWA_KEYS.includes(key) || (['yes', 'no'].includes(value) && entry.iowaState && freshIowa && match(freshIowa).key === key && entry.iowaState === iowaEntryState(freshIowa)));
+      const custom = assignment?.custom === true;
+      const value = values?.[custom ? assignment.id : key];
+      const fresh = entry && questionsOn(doc).find(candidate => sameElements(entry, candidate));
+      const usable = entry && !answered(entry) && entryUsable(entry) && sameBinding(entry, fresh) && !fresh.invalidLabels &&
+        (!(custom || entry.kind === 'editable' || ['ariaCombo', 'ariaListbox', 'ariaCheckbox', 'ariaSwitch'].includes(entry.kind)) ||
+          (!besideForm(fresh, doc) && !protectedCustom({ label: [...fresh.labels, ...fresh.elements.map(element => `${element.id} ${element.getAttribute('name') || ''} ${element.getAttribute('autocomplete') || ''}`)].join(' '), options: optionsOf(fresh) }))) &&
+        (!IOWA_KEYS.includes(key) || (['yes', 'no'].includes(value) && entry.iowaState && match(fresh).key === key && entry.iowaState === iowaEntryState(fresh)));
       // An option Laya picked from the saved profile is always a guess, and never for a question only the applicant answers.
       const option = assignment?.option;
       const answering = typeof option === 'string' && key === undefined;
@@ -852,11 +1012,12 @@
       // answers, by any of its labels, and only a key a guess may offer.
       const allowed = entry && (match(entry).key === key || (!householdRulesOnly(doc) && !applicantOnly(entry) && canSuggest(key, { label: entry.labels[0] || '' })));
       const placed = !usable ? false
+        : custom ? key === undefined && option === undefined && assignment.guessed !== true && assignment.layaGuess !== true && !householdRulesOnly(doc) && !fresh.invalidLabels && !match(fresh).key && canCustom(fieldOf(fresh)) && fillCustom(fresh, value)
         : answering ? !householdRulesOnly(doc) && !applicantOnly(entry) && !entry.labels.some(iowaRule) && (!layaGuess || layaGuessable(doc, entry)) && fillOption(entry, option)
         : option === undefined && (GENERIC_KEYS.includes(key) || COMPOSITE_KEYS.includes(key) || ruleOnlyKey(key)) && allowed && typeof value === 'string' && value && compatible(key, entry) && fillEntry(entry, key, value);
       if (!placed) { skipped.push(assignment?.id); continue; }
       const kind = layaGuess ? 'laya-guess' : answering || assignment.guessed || GUESS_KEYS.includes(key) ? 'guess' : 'rule';
-      if (placed.pending) { current.pending.set(assignment.id, { option: placed.pending, entry, kind }); pending.push(assignment.id); continue; }
+      if (placed.pending) { current.pending.set(assignment.id, { option: placed.pending, attribute: placed.attribute || 'aria-checked', entry, kind }); pending.push(assignment.id); continue; }
       entry.elements[0].dispatchEvent(new entry.elements[0].ownerDocument.defaultView.Event('blur'));
       if (rejectedByPage(entry)) {
         if (entry.kind === 'input' || entry.kind === 'textarea' || entry.kind === 'select') setValue(entry.elements[0], '');
@@ -874,7 +1035,7 @@
   async function settle(doc, token, result, { timeoutMs = 500 } = {}) {
     if (!result?.pending?.length) return result;
     const live = current && current.token === token && current.doc === doc ? current.pending : new Map();
-    const checked = id => live.get(id)?.option.getAttribute('aria-checked') === 'true';
+    const checked = id => { const item = live.get(id); return Boolean(current?.doc === doc && current.token === token && item?.option.isConnected && item.option.getAttribute(item.attribute) === 'true'); };
     const started = Date.now();
     while (doc.defaultView && !result.pending.every(checked) && Date.now() - started < timeoutMs) await new Promise(resolve => doc.defaultView.setTimeout(resolve, 10));
     if (!doc.defaultView) {
@@ -908,7 +1069,7 @@
     if (!element || !element.isConnected || !rendered(element)) return false;
     clearAttention();
     const targets = attentionTargets(entry, doc);
-    ensureStyle(doc);
+    targets.forEach(target => ensureStyle(doc, rootOf(target)));
     const clear = () => {
       for (const target of targets) { target.removeAttribute('data-secondhand-attention'); target.removeEventListener('focusin', clear); }
       if (clearAttention === clear) clearAttention = () => {};
@@ -920,9 +1081,24 @@
   }
   const elementFor = id => current?.map.get(id)?.elements[0] || null;
 
+  // Internal DOM records for the navigation guard. No answer values or DOM references are
+  // serialized to the worker; unsupported visible controls remain explicit blockers.
+  function navigationFields(doc) {
+    const entries = questionsOn(doc), covered = new Set(entries.flatMap(entry => entry.elements));
+    const fields = entries.map(entry => ({ elements: [...entry.elements, ...(entry.kind === 'ariaCombo' && listboxFor(entry) ? [listboxFor(entry)] : [])], answered: answered(entry), required: fieldOf(entry).required,
+      safe: !entry.invalidLabels && !applicantOnly(entry) && !protectedCustom(fieldOf(entry)) && !entry.labels.some(otherPersonQuestion) && !besideForm(entry, doc), supported: true }));
+    for (const control of deepQueryAll(doc, 'input,select,textarea,[contenteditable],[role="textbox"],[role="radio"],[role="checkbox"],[role="switch"],[role="combobox"],[role="listbox"],[role="slider"],[role="spinbutton"]')) {
+      if (covered.has(control) || !rendered(control) || control.disabled || control.getAttribute('aria-disabled') === 'true' || control.type === 'hidden' || ['submit', 'button', 'reset', 'image'].includes(control.type)) continue;
+      // The popup list of an already represented combobox is part of that one control.
+      if (entries.some(entry => entry.kind === 'ariaCombo' && listboxFor(entry) === control)) continue;
+      fields.push({ elements: [control], answered: false, required: control.required === true || control.getAttribute('aria-required') === 'true', safe: false, supported: false });
+    }
+    return fields;
+  }
+
   const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, SAVE_KEYS, GUESS_KEYS, MEMBER_KEYS, IOWA_KEYS, answeredIds, readAnswer, UNSAFE_QUESTION, OTHER_PERSON_ROLE, MEMBER_DETAIL, CHILD_ROLE, PERSON_DETAIL,
     COMBINED_ADDRESS_QUESTION, PERSON_NOT_AMOUNT, blockedSuggestion, isBandKey, plan, offers, questions, requestKeys, deriveValues, fillFields, settle, focusField, elementFor,
-    canSuggest, unsafeQuestion, layaQuestion });
+    canSuggest, canCustom, unsafeQuestion, layaQuestion, deepQueryAll, isRendered: rendered, navigationFields });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandGeneric = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

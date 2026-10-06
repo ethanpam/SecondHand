@@ -26,6 +26,14 @@ const FORMS = 'https://forms.example.net/embed';
 const EMBEDDING = 'https://pantry.example.org/sign-up';
 const NEVER = 'https://never.example.net/apply';
 const CONTACT = 'https://contact.example.org/contact';
+const WIZARD_ONE = 'https://appointments.example.org/step-one';
+const WIZARD_TWO = 'https://appointments.example.org/step-two';
+const WIZARD_REVIEW = 'https://appointments.example.org/review';
+const customAnswers = [
+  { id: 'b0000000-0000-4000-8000-000000000001', label: 'Member number', value: 'QA-MEMBER-4837', aliases: ['Membership ID'] },
+  { id: 'b0000000-0000-4000-8000-000000000002', label: 'Biography', value: 'Fictional QA applicant.\nAfternoon appointments work best.', aliases: [] },
+  { id: 'b0000000-0000-4000-8000-000000000003', label: 'Deliver to my door', value: 'Yes', aliases: [] }
+];
 // #176: one everyday question and one sensitive one (the date of birth, in SENSITIVE_FIELDS in desktop/main.cjs).
 const DETAILS = 'https://pantry.example.org/details';
 // #98: the household questions the live QA (#89) found on a pantry form, plus one the fictional profile has no answer for.
@@ -34,7 +42,7 @@ const HOUSEHOLD_QUESTIONS = { young: '# of people in your household 0 - 17 yrs o
   student: 'Student name and grade. Order will be assigned to(first and Last)', guardian: 'Guardian first and last name', apt: 'Apartment number' };
 // What the desktop works out from the fictional household list, as the app does: band counts and the one student's name and grade.
 const listed = validateProfile(syntheticProfile);
-const desktopProfile = { ...syntheticProfile, ...Object.fromEntries(['householdCount:18-59', 'householdCount:60+', 'studentNameGrade'].map(key => [key, releasedValue(listed, key)])) };
+const desktopProfile = { ...syntheticProfile, customFields: customAnswers, ...Object.fromEntries(['householdCount:18-59', 'householdCount:60+', 'studentNameGrade'].map(key => [key, releasedValue(listed, key)])) };
 // #185: a radio question no rule knows, which the stub Laya can only guess at.
 const GUESS = 'https://pantry.example.org/service-area';
 const GUESS_QUESTION = 'Do you live in our service area?';
@@ -61,6 +69,29 @@ const pages = {
   [SEARCH]: formPage('Find a pantry', '<form role="search"><input type="search" name="q" aria-label="Search"><button>Search</button></form>'),
   [NEVER]: formPage('Never trusted', '<form><label for="first">First name</label><input id="first" name="first"><button type="submit">Submit</button></form>'),
   [CONTACT]: formPage('Contact form', '<form><label for="detail">Signature</label><input id="detail"><button type="submit">Send</button></form>'),
+  [WIZARD_ONE]: formPage('Appointment details', `<form><div id="contact-component"></div>
+    <label for="membership">Membership ID</label><input id="membership" required>
+    <label id="bio-label">Biography</label><div id="biography" role="textbox" contenteditable="true" aria-labelledby="bio-label" aria-multiline="true" aria-required="true" style="min-height:65px;white-space:pre-wrap;border:1px solid #98a68f;padding:10px"></div>
+    <div id="delivery" role="checkbox" tabindex="0" aria-label="Deliver to my door" aria-checked="false" aria-required="true" style="padding:12px;border:1px solid #98a68f;margin:14px 0">Deliver to my door</div>
+    <button type="button" id="next">Next</button></form>
+    <script>
+      const shadow = document.getElementById('contact-component').attachShadow({mode:'open'});
+      shadow.innerHTML = '<style>label{display:block;margin:12px 0 4px}input{display:block;width:300px;height:32px}</style><label for="first">First name</label><input id="first" required><label for="email">Email address</label><input id="email" type="email" required>';
+      document.getElementById('delivery').addEventListener('click', event => { const control=event.currentTarget; control.setAttribute('aria-checked', control.getAttribute('aria-checked') === 'true' ? 'false' : 'true'); });
+      document.getElementById('next').addEventListener('click', async () => {
+        await window.recordWizardStep({step:'one',firstName:shadow.getElementById('first').value,email:shadow.getElementById('email').value,membership:document.getElementById('membership').value,biography:document.getElementById('biography').textContent,delivery:document.getElementById('delivery').getAttribute('aria-checked')});
+        location.assign('${WIZARD_TWO}');
+      });
+    </script>`),
+  [WIZARD_TWO]: formPage('Appointment scheduling', `<form><label for="zip">ZIP code</label><input id="zip" required>
+    <label for="topic">Appointment topic</label><input id="topic" required>
+    <button type="button" id="next">Next</button></form><script>
+      document.getElementById('next').addEventListener('click', async () => {
+        await window.recordWizardStep({step:'two',zip:document.getElementById('zip').value,topic:document.getElementById('topic').value});
+        location.assign('${WIZARD_REVIEW}');
+      });
+    </script>`),
+  [WIZARD_REVIEW]: formPage('Final review', '<form><p>Check the fictional appointment before submitting.</p><label for="final-email">Email address</label><input id="final-email" type="email"><button type="submit">Submit</button></form>'),
   [DETAILS]: formPage('Pantry sign-up: your details', '<form><label for="first">First name</label><input id="first" name="first">' +
     '<label for="dob">Date of birth</label><input id="dob" name="dob" type="date"><button type="submit">Submit</button></form>'),
   [GUESS]: formPage('Pantry sign-up: service area', '<form><label for="first">First name</label><input id="first" name="first">' +
@@ -79,11 +110,29 @@ const pages = {
 // service-area question (#185), noting each question it is asked in `questions`.
 async function installDesktop(worker, profile) {
   await worker.evaluate(profile => {
-    globalThis.__desktop = { allSites: false, calls: [], saves: [], prompts: [], profile, holds: [], answers: [], laya: 'unavailable', questions: [] };
+    globalThis.__desktop = { allSites: false, calls: [], saves: [], prompts: [], profile, holds: [], answers: [], laya: 'unavailable', questions: [], customFieldsAvailable: false, holdNavigation: false };
     nativeRequest = async (type, payload = {}) => {
       const desktop = globalThis.__desktop;
       desktop.calls.push({ type, url: payload.url || '', fields: payload.fields || [], ...(payload.sensitive === true ? { sensitive: true } : {}) });
-      if (type === 'status') return { unlocked: true, applicationCount: 0, accessRevision: 0, allSites: desktop.allSites, laya: { state: desktop.laya } };
+      if (type === 'status') return { unlocked: true, applicationCount: 0, accessRevision: 0, allSites: desktop.allSites, laya: { state: desktop.laya }, customFieldsAvailable: desktop.customFieldsAvailable };
+      // The real desktop matcher/consent is tested separately. This stub returns only fictional,
+      // explicitly saved exact labels or aliases and never exposes the whole custom-answer list.
+      if (type === 'getCustomFields') {
+        if (!desktop.customFieldsAvailable) throw new Error('Custom answers were requested without the fixture capability.');
+        const values = {};
+        for (const field of payload.fields) {
+          const matches = desktop.profile.customFields.filter(row => [row.label, ...row.aliases].includes(field.label));
+          if (matches.length === 1 && (!field.options.length || field.options.includes(matches[0].value))) values[field.id] = matches[0].value;
+        }
+        return { values, accessRevision: 0 };
+      }
+      if (type === 'authorizeSiteNavigation') {
+        if (desktop.holdNavigation) {
+          desktop.holdNavigation = false;
+          return new Promise(resolve => { desktop.releaseNavigation = () => resolve({ accessRevision: 0 }); });
+        }
+        return { accessRevision: 0 };
+      }
       if (type === 'trustAllSites') { desktop.allSites = true; return { allSites: true }; }
       if (type === 'untrustAllSites') { desktop.allSites = false; return { allSites: false }; }
       if (type === 'trustSite') return { trusted: true, origin: new URL(payload.url).origin };
@@ -155,6 +204,7 @@ async function main() {
   let context, panel, page;
   const errors = [];
   const requests = [];
+  const wizardSteps = [];
   try {
     // First launch: Chrome grants the test copy's extra host permissions at load.
     await fs.writeFile(manifestPath, JSON.stringify(granting));
@@ -177,7 +227,7 @@ async function main() {
       chrome.runtime.onMessage.addListener((message, sender) => { if (message?.type === 'secondhand:generic:form') globalThis.__smokeProbe.reports.push(sender.url); });
     });
     const probe = () => worker.evaluate(() => ({ complete: globalThis.__smokeProbe.complete, reports: [...globalThis.__smokeProbe.reports],
-      busy: Boolean(clicksUnderway || siteRuns.size || [...autopilots.values()].some(pilot => pilot.running)) }));
+      busy: Boolean(clicksUnderway || siteRuns.size || [...autopilots.values()].some(pilot => pilot.running) || [...sitePilots.values()].some(pilot => pilot.running)) }));
     // Waits until the worker is busy with nothing and, given its record from before a navigation, Chrome has finished
     // loading the page and, for a page SecondHand is on (`reportFrom`), its content script has reported.
     async function settled(since, { reportFrom } = {}) {
@@ -273,6 +323,71 @@ async function main() {
     await page.locator('label[for="detail"]').evaluate(label => { label.firstChild.data = 'Signature'; });
     await expect.poll(cards, { timeout: 10000 }).toBe(0);
     console.log('All websites: text-only label changes reveal and hide the card on an ordinary contact form; one click fills only the saved first name, without sending the form.');
+
+    // A general-purpose wizard, not a benefits adapter. Genuine open-shadow controls,
+    // a multiline editor, and an ARIA checkbox receive only the fictional saved answers.
+    await page.exposeFunction('recordWizardStep', step => { wizardSteps.push(step); });
+    const wizardCallsFrom = (await worker.evaluate(() => globalThis.__desktop.calls.length));
+    await worker.evaluate(() => { globalThis.__desktop.customFieldsAvailable = true; globalThis.__desktop.holdNavigation = true; });
+    await page.goto(WIZARD_ONE, { waitUntil: 'domcontentloaded' });
+    await launcherFrame();
+    await expect.poll(() => panel.visible('#site-continue'), { timeout: 15000 }).toBe(true);
+    assert.equal(await panel.text('#site-continue'), en('panel.fillAndContinue'));
+    assert.match(await panel.text('#site-continue-hint'), /may send and save answers/);
+    assert.equal((await calls('getCustomFields')).filter(call => call.url === WIZARD_ONE).length, 0, 'recognition alone cannot release custom answers');
+    await panel.click('#site-continue');
+    // Hold only the synthetic desktop navigation approval so the actual filled page can be
+    // inspected before Next. Production code contains no test hook or fabricated controls.
+    await expect.poll(() => worker.evaluate(() => typeof globalThis.__desktop.releaseNavigation === 'function'), { timeout: 25000 }).toBe(true);
+    await expect(page.locator('#contact-component #first')).toHaveValue(syntheticProfile.firstName);
+    await expect(page.locator('#contact-component #email')).toHaveValue(syntheticProfile.email);
+    await expect(page.locator('#membership')).toHaveValue(customAnswers[0].value);
+    assert.equal(await page.locator('#biography').textContent(), customAnswers[1].value, 'multiline text is preserved');
+    await expect(page.locator('#delivery')).toHaveAttribute('aria-checked', 'true');
+    assert.deepEqual(wizardSteps, [], 'Next waits for the desktop navigation approval');
+    assert.equal(await page.evaluate(() => window.__submits), 0);
+    const customRequests = (await calls('getCustomFields')).filter(call => call.url === WIZARD_ONE);
+    assert.deepEqual(customRequests[0].fields.map(({ label, type, options }) => ({ label, type, options })), [
+      { label: 'Membership ID', type: 'text', options: [] },
+      { label: 'Biography', type: 'textarea', options: [] },
+      { label: 'Deliver to my door', type: 'checkbox', options: ['Yes', 'No'] }
+    ]);
+    for (const call of customRequests) assert.equal(call.fields.some(field => Object.hasOwn(field, 'value')), false, 'only question metadata is requested');
+    const sidebarText = await panel.evaluate(() => document.body.innerText);
+    for (const answer of customAnswers) assert.equal(sidebarText.includes(answer.value), false, 'saved custom values never appear in the sidebar');
+    // Default caret hiding changes inline styles and rightly invalidates the private Next snapshot.
+    await page.screenshot({ path: path.join(root, 'artifacts/all-websites/custom-controls-filled.png'), caret: 'initial' });
+    await worker.evaluate(() => { globalThis.__desktop.releaseNavigation(); delete globalThis.__desktop.releaseNavigation; });
+    await expect(page).toHaveURL(WIZARD_TWO, { timeout: 20000 });
+    await expect(page.locator('#zip')).toHaveValue(syntheticProfile.zip, { timeout: 20000 });
+    await expect.poll(() => panel.text('#status'), { timeout: 20000 }).toBe(en('worker.siteNext.missing'));
+    await settled();
+    assert.equal(await page.locator('#topic').inputValue(), '');
+    assert.deepEqual(wizardSteps, [{ step: 'one', firstName: syntheticProfile.firstName, email: syntheticProfile.email,
+      membership: customAnswers[0].value, biography: customAnswers[1].value, delivery: 'true' }]);
+    assert.equal(await worker.evaluate(() => sitePilots.size), 0, 'missing information ends automatic continuation until an explicit restart');
+    await panel.screenshot(path.join(root, 'artifacts/all-websites/continue-missing-answer-panel.png'));
+    await page.locator('#topic').fill('Fictional scheduling request');
+    assert.equal(await worker.evaluate(() => sitePilots.size), 0, 'typing an answer does not authorize another Next');
+    assert.equal(page.url(), WIZARD_TWO);
+    assert.equal(wizardSteps.length, 1);
+    await expect.poll(() => panel.visible('#site-continue'), { timeout: 15000 }).toBe(true);
+    await panel.click('#site-continue');
+    await expect(page).toHaveURL(WIZARD_REVIEW, { timeout: 20000 });
+    await expect.poll(() => panel.text('#status'), { timeout: 20000 }).toBe(en('worker.siteNext.protected'));
+    await settled();
+    assert.deepEqual(wizardSteps.map(step => step.step), ['one', 'two'], 'each ordinary Next clicked exactly once');
+    assert.deepEqual(wizardSteps[1], { step: 'two', zip: syntheticProfile.zip, topic: 'Fictional scheduling request' });
+    assert.equal(await page.evaluate(() => window.__submits), 0, 'final submission never runs');
+    assert.equal(await page.locator('#final-email').inputValue(), '', 'the protected final review is not filled either');
+    assert.equal(await worker.evaluate(() => sitePilots.size), 0);
+    const wizardCalls = await worker.evaluate(from => globalThis.__desktop.calls.slice(from), wizardCallsFrom);
+    assert.deepEqual(wizardCalls.filter(call => call.type === 'authorizeSiteNavigation').map(call => call.url), [WIZARD_ONE, WIZARD_TWO]);
+    assert.equal(wizardCalls.some(call => ['getFields', 'getCustomFields', 'authorizeSiteNavigation'].includes(call.type) && call.url === WIZARD_REVIEW), false);
+    assert.equal(wizardCalls.some(call => ['suggestFields', 'answerFields'].includes(call.type)), false, 'Fill and continue never asks a model for guesses');
+    await panel.screenshot(path.join(root, 'artifacts/all-websites/continue-final-review-panel.png'));
+    await worker.evaluate(() => { globalThis.__desktop.customFieldsAvailable = false; });
+    console.log('General wizard: explicit saved custom aliases, multiline text, ARIA checkbox and open-shadow identity fields filled; Next waited for approval, required manual information required an explicit restart, and final review/Submit stayed untouched. Native approvals and values were stubs.');
 
     // #185: a radio question no rule knows gets Laya's best guess. It is filled with its own dotted outline, the side
     // panel says how many Laya guessed and lists the question, and its row finds it on the page.
@@ -512,6 +627,7 @@ async function main() {
     assert.deepEqual(errors, []);
     console.log('All browser fixtures and data were synthetic; native desktop replies were DevTools stubs.');
   } catch (error) {
+    console.error('Synthetic wizard steps/errors:', JSON.stringify({ steps: wizardSteps.map(step => step.step), errors }));
     if (panel) console.error('Synthetic side panel state:', await panel.evaluate(() => document.body.innerText).catch(() => 'unavailable'));
     if (page) await page.screenshot({ path: path.join(root, 'artifacts/all-websites/all-websites-smoke-failure.png') }).catch(() => {});
     throw error;

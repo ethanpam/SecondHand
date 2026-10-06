@@ -12,6 +12,7 @@ const { atomicWrite } = require('./vault.cjs');
 const { REQUEST_FIELDS, SAVE_FIELDS, PORTAL_URL, isPortalUrl, isHttpsSiteUrl, isRequestField } = require('../shared/schema.cjs');
 const { isBandKey } = require('../shared/household.cjs');
 const { recordRequestScope } = require('./record-fields.cjs');
+const { validateCustomQuestions } = require('../shared/custom-fields.cjs');
 const { TEXT_TYPES, CHOICE_TYPES } = require('../shared/laya-prompts.cjs');
 
 const HOST_NAME = 'org.secondhand.bridge';
@@ -170,6 +171,8 @@ function validateRequest(request) {
   if (BARE_REQUESTS.includes(request.type)) allowed = ['id', 'type'];
   else if (request.type === 'getFields') allowed = ['id', 'type', 'url', 'fields', 'sensitive'];
   else if (request.type === 'getRecordFields') allowed = ['id', 'type', 'url', 'pageKey', 'recordType', 'fields', 'personName'];
+  else if (request.type === 'getCustomFields') allowed = ['id', 'type', 'url', 'fields'];
+  else if (request.type === 'authorizeSiteNavigation') allowed = ['id', 'type', 'url'];
   else if (request.type === 'saveFields') allowed = ['id', 'type', 'url', 'fields'];
   else if (request.type === 'trustSite' || request.type === 'untrustSite') allowed = ['id', 'type', 'url'];
   else if (request.type === 'recordProgress') allowed = ['id', 'type', 'url', 'filledCount'];
@@ -178,8 +181,12 @@ function validateRequest(request) {
   if (Object.keys(request).some(key => !allowed.includes(key))) throw new Error('Unexpected request field.');
   if (request.type === 'saveFields') return validateSave(request);
   if (request.type === 'getRecordFields') recordRequestScope(request);
+  if (request.type === 'getCustomFields' || request.type === 'authorizeSiteNavigation') {
+    if (!isHttpsSiteUrl(request.url) || isPortalUrl(request.url)) throw new Error('This request is only supported on other HTTPS sites.');
+    if (request.type === 'getCustomFields') validateCustomQuestions(request.fields);
+  }
   // Field requests, site trust, and Laya may name any HTTPS site; the desktop decides whether it is trusted.
-  if (request.type === 'getFields' || request.type === 'trustSite' || request.type === 'untrustSite' || Object.hasOwn(LAYA_REQUESTS, request.type)) {
+  if (request.type === 'getFields' || request.type === 'getCustomFields' || request.type === 'authorizeSiteNavigation' || request.type === 'trustSite' || request.type === 'untrustSite' || Object.hasOwn(LAYA_REQUESTS, request.type)) {
     if (!isHttpsSiteUrl(request.url)) throw new Error('Only an https site without credentials or a custom port is allowed.');
   } else if (!BARE_REQUESTS.includes(request.type) && !isPortalUrl(request.url)) throw new Error('Only the supported Iowa portal is allowed.');
   if (request.type === 'getFields' && !isIowaNavigationAuthorization(request)) validateFieldScope(request.fields);

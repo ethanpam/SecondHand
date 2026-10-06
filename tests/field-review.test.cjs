@@ -3,6 +3,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { reviewProfile, reviewDocumentFields } = require('../shared/field-review.cjs');
 const { PROFILE_FIELDS, FIELD_LABELS, MEMBER_FIELDS } = require('../shared/schema.cjs');
+const { buildFacts } = require('../shared/facts.cjs');
+// Reviews include fixed record summaries, but applicant-authored custom answers
+// have no deterministic field rules and never enter the review/model path.
+const REVIEW_FIELDS = PROFILE_FIELDS.filter(key => key !== 'customFields');
 const TODAY = { today: '2026-10-05' };
 const rows = profile => Object.fromEntries(reviewProfile(profile, TODAY).map(row => [row.key, row]));
 const self = (extra = {}) => ({ id: '00000000-0000-4000-8000-000000000001', firstName: 'Avery', lastName: 'Example', birthDate: '1985-04-12', relationship: 'self', student: 'no', grade: '', ...extra });
@@ -10,9 +14,9 @@ const child = (extra = {}) => ({ id: '00000000-0000-4000-8000-000000000002', fir
 const profileWith = members => ({ firstName: 'Avery', lastName: 'Example', birthDate: '1985-04-12', householdMembers: members });
 function freeze(value) { if (value && typeof value === 'object') { Object.values(value).forEach(freeze); Object.freeze(value); } return value; }
 
-test('every scalar has a fixed key/label and blank answers remain unknown', () => {
+test('every supported scalar and record summary has a fixed key/label and blank answers remain unknown', () => {
   const result = reviewProfile({}, TODAY);
-  assert.deepEqual(result.map(row => row.key).sort(), [...PROFILE_FIELDS].sort());
+  assert.deepEqual(result.map(row => row.key).sort(), [...REVIEW_FIELDS].sort());
   for (const row of result) {
     assert.deepEqual(Object.keys(row), ['key', 'label', 'status', 'messages']);
     assert.equal(row.label, FIELD_LABELS[row.key]);
@@ -21,6 +25,17 @@ test('every scalar has a fixed key/label and blank answers remain unknown', () =
   }
   assert.equal(rows({ householdAdults: '0', monthlyRent: '0', disabled: 'no' }).householdAdults.status, 'format-passed');
   assert.equal(rows({ disabled: 'no' }).disabled.status, 'check-source');
+});
+
+test('custom answer labels, aliases and values stay out of review results and model facts', () => {
+  const base = { firstName: 'Fictional', householdSize: '1' };
+  const customFields = [{ id: self().id, label: 'Private custom question', value: 'Private custom answer', aliases: ['Private custom alias'] }];
+  const profile = freeze({ ...base, customFields });
+  const reviewed = reviewProfile(profile, TODAY), facts = buildFacts(profile);
+  assert.deepEqual(reviewed, reviewProfile(base, TODAY));
+  assert.deepEqual(facts, buildFacts(base));
+  assert.ok(!reviewed.some(row => row.key === 'customFields' || row.key.startsWith('customFields.')));
+  assert.doesNotMatch(JSON.stringify({ reviewed, facts }), /Private custom/);
 });
 
 test('names and source-dependent answers are never declared verified or corrected', () => {
@@ -112,7 +127,7 @@ test('household structural problems and definite age-count mismatches remain rev
 test('malformed, oversized and accessor-backed profiles stay bounded without executing input code', () => {
   for (const value of [null, [], 'bad', 5, Object.create({ firstName: 'Inherited' })]) {
     const result = reviewProfile(value, TODAY);
-    assert.equal(result.length, PROFILE_FIELDS.length);
+    assert.equal(result.length, REVIEW_FIELDS.length);
     assert.ok(result.every(row => row.status === 'needs-review'));
   }
   const profile = { firstName: 'x'.repeat(201), email: { text: 'secret' }, state: '\u0000IA', householdMembers: Array.from({ length: 1000 }, () => null) };
@@ -120,7 +135,7 @@ test('malformed, oversized and accessor-backed profiles stay bounded without exe
   Object.defineProperty(profile, 'ssn', { get() { accessed = true; throw new Error('secret'); } });
   const result = reviewProfile(profile, TODAY);
   assert.equal(accessed, false);
-  assert.equal(result.length, PROFILE_FIELDS.length + 20 * (MEMBER_FIELDS.length - 1));
+  assert.equal(result.length, REVIEW_FIELDS.length + 20 * (MEMBER_FIELDS.length - 1));
   for (const key of ['firstName', 'email', 'state', 'ssn', 'householdMembers']) assert.equal(result.find(row => row.key === key).status, 'needs-review');
   assert.ok(!JSON.stringify(result).includes('secret'));
 });

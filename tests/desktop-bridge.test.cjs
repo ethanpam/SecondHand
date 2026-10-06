@@ -11,6 +11,19 @@ const { FrameReader, frame, extensionFromOrigin, validateRequest, startBridge, r
 const { PORTAL_URL, PROFILE_FIELDS, REQUEST_FIELDS } = require('../shared/schema.cjs');
 const EXTENSION = 'a'.repeat(32);
 
+test('custom answers have bounded question-only metadata and never permit Iowa, arbitrary fields or source values', () => {
+  const request = { id: 'custom', type: 'getCustomFields', url: 'https://pantry.example.org/form', fields: [{ id: 'field1', label: 'Pickup location', type: 'text' }] };
+  assert.deepEqual(validateRequest(request), request);
+  for (const change of [{ url: PORTAL_URL }, { url: 'http://pantry.example.org' }, { url: 'https://person@pantry.example.org' }, { fields: ['customFields'] }, { values: {} }, { fields: [{ ...request.fields[0], value: 'private' }] }, { fields: [] }]) assert.throws(() => validateRequest({ ...request, ...change }));
+  assert.throws(() => validateRequest({ id: 'old', type: 'getFields', url: request.url, fields: ['customFields'] }));
+});
+
+test('general navigation authorization carries only a non-Iowa HTTPS URL, never fields or click selectors', () => {
+  const request = { id: 'next', type: 'authorizeSiteNavigation', url: 'https://pantry.example.org/form' };
+  assert.deepEqual(validateRequest(request), request);
+  for (const change of [{ url: PORTAL_URL }, { url: `${PORTAL_URL}/applyForBenefits/dynamicQuestions` }, { url: 'http://pantry.example.org' }, { selector: 'button' }, { fields: [] }, { sensitive: true }]) assert.throws(() => validateRequest({ ...request, ...change }));
+});
+
 test('native frames handle split headers, split UTF-8, and multiple messages', () => {
   const reader = new FrameReader();
   const values = [];

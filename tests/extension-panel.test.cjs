@@ -298,7 +298,7 @@ async function panel(t, initial = {}) {
   const requests = [];
   const listeners = {};
   const tabs = { current: initial.tab || { id: 7, url: `${adapter.PORTAL}/applicant` } };
-  // A site other than Iowa: metadata only, never a checklist or autopilot.
+  // General sites expose metadata and may run explicitly requested Fill and continue.
   const state = initial.site ? { page: { kind: 'general', pageKey: 'general' }, result: initial.result || null, autopilot: false, site: { ...initial.site },
     ...(initial.savable ? { savable: structuredClone(initial.savable) } : {}), ...(initial.held ? { held: structuredClone(initial.held) } : {}) } : {
     page: { kind: initial.kind || 'fillable', pageKey: 'iowa-personal-information', reason: 'Complete this step in Iowa’s form.', checklist: [
@@ -335,6 +335,7 @@ async function panel(t, initial = {}) {
     else if (payload.type === 'ui:keepSummary') data = { kept: true };
     else if (payload.type === 'ui:widgetSize') data = { sized: true };
     else if (payload.type === 'ui:autofill') { state.result = initial.autofill || doneResult; state.autopilot = Boolean(initial.autopilotAfterAutofill); data = structuredClone(state.result); }
+    else if (payload.type === 'ui:fillAndContinue') { state.result = initial.fillAndContinue || { state: 'continuing', pageKey: 'general', autoContinue: true, filled: 2, messageKey: 'worker.siteContinuing' }; state.autopilot = state.result.autoContinue === true; data = structuredClone(state.result); }
     else if (payload.type === 'ui:stop') { state.autopilot = false; state.result = { state: 'stopped', filled: 0, needYou: [], message: 'Autofill stopped.', pageKey: 'iowa-personal-information' }; data = structuredClone(state.result); }
     else if (payload.type === 'ui:desktopStatus') data = { ...desktop };
     else if (payload.type === 'ui:focusField') data = { focused: true };
@@ -2068,4 +2069,39 @@ test('#185: the widget says how many Laya guessed, apart from its sure answers, 
   assert.equal(spanishView.get('widget-text').textContent,
     `${strings.text('es', 'widget.filledGuessed', { count: 4, guessed: 1 })} · ${spanish('widget.suggestedByLaya')} · ${strings.text('es', 'widget.layaGuessed', { count: 2 })}`);
   assert.deepEqual(shownText(spanishView).filter(text => englishOnly.has(text)), []);
+});
+
+
+test('Fill and continue is a trusted, explicit side-panel action with an ordinary-Next disclosure and Stop', async t => {
+  const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true, ready: true } });
+  assert.equal(view.get('site-continue').hidden, false);
+  assert.equal(view.get('site-continue').disabled, false);
+  assert.match(view.get('site-continue-hint').textContent, /saved/i);
+  assert.match(view.get('site-continue-hint').textContent, /send|save/i);
+  assert.match(view.get('site-continue-hint').textContent, /consent|signature|submit/i);
+  view.get('site-continue').click(); await tick();
+  assert.equal(view.types().includes('ui:fillAndContinue'), false);
+  await view.userClick('site-continue');
+  assert.deepEqual(plainRequests(view.requests.filter(r => r.type === 'ui:fillAndContinue')), [{ type: 'ui:fillAndContinue', confirmed: true, tabId: 7 }]);
+  assert.equal(view.types().includes('ui:plan'), false, 'this mode never asks Chrome AI for guesses');
+  assert.equal(view.get('site-continue').hidden, true);
+  assert.equal(view.get('panel-autofill').textContent, 'Stop autofill');
+  await view.userClick('panel-autofill');
+  assert.equal(view.types().includes('ui:stop'), true);
+  assert.equal(view.get('site-continue').hidden, false);
+});
+
+test('Fill and continue is unavailable off enabled ready general sites and recovers after a pause', async t => {
+  for (const site of [null, { origin: ORIGIN, enabled: false }, { origin: ORIGIN, enabled: true, ready: false }]) {
+    const view = await panel(t, site ? { tab: SITE, site } : {});
+    assert.equal(view.get('site-continue').hidden, true);
+    await view.userClick('site-continue');
+    assert.equal(view.types().includes('ui:fillAndContinue'), false);
+  }
+  const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true, ready: true }, fillAndContinue: {
+    state: 'waiting', pageKey: 'general', autoContinue: false, messageKey: 'worker.siteNext.missing' } });
+  await view.userClick('site-continue');
+  assert.equal(view.get('site-continue').hidden, false);
+  assert.equal(view.get('panel-autofill').textContent, 'Autofill this page');
+  assert.match(view.get('status').textContent, /required/i);
 });

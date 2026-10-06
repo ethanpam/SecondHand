@@ -14,7 +14,7 @@ if (typeof globalThis.SecondHandTranslation?.create !== 'function') {
 // Must match BUILD in panel.js: change both together, with every change to the extension. The panel
 // compares them to tell when Chrome is still running an older worker than the pages it loaded from
 // disk, and the worker compares it with the build the desktop app ships to update itself (#85).
-const BUILD = '2026-10-06.9';
+const BUILD = '2026-10-06.10';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
@@ -35,6 +35,7 @@ const FRAME_ERROR = 'worker.frameUnsafe';
 const FIELD_ID = /^[A-Za-z][A-Za-z0-9_-]{0,59}$/; // field ids from the site engine's plan
 const results = new Map(); // tabId -> last autofill result: counts, keys, and fixed messages only. Never answers.
 const siteRuns = new Map(); // tabId -> the fill running on an approved site, so two clicks share one request.
+const sitePilots = new Map(); // Explicit Fill and continue sessions, same origin and active tab only.
 // Save to My information (#98). tabId -> { url, origin ('' on Iowa's portal), items: Map(id -> { frameId, documentId, planId, token, key, label }) }:
 // the questions the last Autofill matched to a saved field that has no saved answer. Memory only, forgotten when
 // the tab navigates. Keys and plan ids stay in the worker; the side panel gets each question's id and label.
@@ -406,6 +407,7 @@ async function startAutopilot(tabId) {
 async function stop(tabId) {
   // Revoke first, before any asynchronous inspection, so a pending native reply
   // cannot fill or click while Stop is waiting for a page response.
+  sitePilots.delete(tabId);
   return stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], ...say('worker.autofillStopped'), pageKey: autopilots.get(tabId)?.pageKey || results.get(tabId)?.pageKey || '' });
 }
 async function iowaPageState(tabId) {
@@ -435,7 +437,7 @@ function siteOrigin(raw) {
     return url.protocol === 'https:' && url.hostname && url.hostname !== 'all' && !url.username && !url.password && !url.port && url.origin !== IOWA_ORIGIN ? url.origin : '';
   } catch { return ''; }
 }
-const SITE_FILES = Object.freeze({ js: ['generic-adapter.js', 'page-text.js', 'generic-content.js'] });
+const SITE_FILES = Object.freeze({ js: ['generic-adapter.js', 'generic-navigation.js', 'page-text.js', 'generic-content.js'] });
 const siteScript = origin => ({ id: `site-${new URL(origin).hostname}`, matches: [`${origin}/*`],
   js: [...SITE_FILES.js], allFrames: true, runAt: 'document_idle', persistAcrossSessions: true });
 const frameScriptPrefix = origin => `frame-${new URL(origin).hostname}--`;
@@ -625,6 +627,7 @@ async function enableFrames(tabId) {
 }
 
 async function disableSite(tabId) {
+  sitePilots.delete(tabId);
   const { origin } = await activeSite(tabId);
   // All websites covers every site; one can't be turned off inside it.
   if (await allSitesOn()) throw fault('worker.allSitesCoverSite');
@@ -688,6 +691,7 @@ async function removeAllSites() {
 }
 
 async function disableAllSites() {
+  sitePilots.clear();
   await removeAllSites();
   try {
     const reply = await nativeRequest('untrustAllSites');
@@ -751,7 +755,7 @@ const showsNeedYou = result => ['done', 'waiting'].includes(result?.state) && Ar
 // Laya's best guesses wait for the applicant to check them too (#185).
 const showsLayaGuesses = result => Array.isArray(result?.layaGuesses) && result.layaGuesses.length > 0;
 function reloadWhenIdle() {
-  if (selfUpdate?.state !== 'due' || clicksUnderway || autopilots.size || siteRuns.size || sitePlans.size || savables.size || heldDetails.size ||
+  if (selfUpdate?.state !== 'due' || clicksUnderway || autopilots.size || sitePilots.size || siteRuns.size || sitePlans.size || savables.size || heldDetails.size ||
     [...results.values()].some(result => showsNeedYou(result) || showsLayaGuesses(result))) return;
   selfUpdate = null;
   chrome.runtime.reload();
@@ -856,8 +860,16 @@ const filledSummary = (filled, needYou) => needYou.length ? { key: 'result.fille
 // SecondHand filled (the site engine marks them) that are on screen now: a multi-page form
 // hides its other pages. Also reports whether the page shows a Next button. Counts only.
 function tallyPage() {
+  const query = selector => {
+    const found = [], roots = [document];
+    for (let index = 0; index < roots.length; index++) {
+      found.push(...roots[index].querySelectorAll(selector));
+      for (const node of roots[index].querySelectorAll('*')) if (node.shadowRoot?.mode === 'open') roots.push(node.shadowRoot);
+    }
+    return found;
+  };
   const shown = element => {
-    for (let node = element; node; node = node.parentElement) {
+    for (let node = element; node; node = node.parentElement || node.getRootNode()?.host) {
       const style = getComputedStyle(node);
       if (node.hidden || style.display === 'none' || style.visibility === 'hidden') return false;
     }
@@ -866,7 +878,7 @@ function tallyPage() {
   const counted = new Set();
   // Laya's best guesses (#185) are counted apart from the other guesses.
   const tally = { rule: 0, guess: 0, layaGuess: 0, next: false };
-  for (const element of document.querySelectorAll('[data-secondhand-filled]')) {
+  for (const element of query('[data-secondhand-filled]')) {
     if (!shown(element)) continue;
     // A radio or checkbox group is one question, marked on every option, native or div-based (Google Forms).
     const group = ['radio', 'checkbox'].includes(element.getAttribute('role')) ? element.closest('[role="radiogroup"], [role="group"], [role="list"]') : null;
@@ -877,7 +889,7 @@ function tallyPage() {
     const kind = element.getAttribute('data-secondhand-filled');
     if (kind === 'guess') tally.guess++; else if (kind === 'laya-guess') tally.layaGuess++; else tally.rule++;
   }
-  tally.next = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], [role="button"]'))
+  tally.next = query('button, input[type="button"], input[type="submit"], [role="button"]')
     .some(control => shown(control) && /^next\b/i.test((control.textContent || control.value || '').trim()));
   return tally;
 }
@@ -1119,6 +1131,54 @@ async function fillFrame(tabId, { frameId, documentId }, message, prefix) {
   }
 }
 
+// Explicit saved custom answers take precedence over model guesses. Only unmatched question
+// metadata reaches the app; it returns answers for exact saved labels/aliases, never its catalog.
+async function fillCustomFrames(tabId, url, frames, guard) {
+  const eligible = field => typeof SecondHandGeneric.canCustom === 'function' && SecondHandGeneric.canCustom(field) &&
+    field.label.length <= 120 && field.options.length <= 30 && field.options.every(option => option.length <= 120);
+  if (!frames.some(frame => frame.plan.unmatched.some(eligible))) return { frames, filled: 0 };
+  const desktop = await desktopStatus(); guard();
+  if (!desktop?.unlocked || desktop.customFieldsAvailable !== true) return { frames, filled: 0 };
+  let filled = 0;
+  const updated = [];
+  for (const frame of frames) {
+    let plan = frame.plan, changed = false;
+    for (let pass = 0; pass < MAX_GENERAL_PASSES; pass++) {
+      const fields = [];
+      const requestUrl = safeUrl(frame.url || url);
+      for (const { id, label, type, options } of plan.unmatched.filter(eligible)) {
+        fields.push({ id, label, type, options });
+        if (utf8Length(JSON.stringify({ id: '0'.repeat(36), type: 'getCustomFields', url: requestUrl, fields })) > 48 * 1024) { fields.pop(); break; }
+        if (fields.length === 40) break;
+      }
+      if (!fields.length) break;
+      let values = null;
+      try {
+        const response = await nativeRequest('getCustomFields', { url: requestUrl, fields }); guard();
+        const entries = plainEntries(response?.values);
+        const ids = new Set(fields.map(field => field.id));
+        if (!entries || entries.some(([id, value]) => !ids.has(id) || typeof value !== 'string' || !value || value.length > 1000)) throw fault('worker.desktopUnexpected');
+        if (!entries.length) break;
+        const revision = receiptRevision(response);
+        values = Object.fromEntries(entries);
+        await checkAccess(revision); guard();
+        const current = await activeSite(tabId); guard();
+        if (current.tab.url !== url) throw fault('worker.pageChangedAutofill');
+        await requireSite(siteOrigin(frame.url || url)); guard();
+        const result = await fillFrame(tabId, frame, { type: 'secondhand:generic:fill', token: plan.token,
+          assignments: entries.map(([id]) => ({ id, custom: true })), values }, true);
+        guard();
+        if (!result.filled.length) break;
+        changed = true; filled += result.filled.length;
+        plan = await planGeneral(tabId, frame.frameId, true, frame.documentId); guard();
+        if (result.rejected.length) break;
+      } finally { values = null; }
+    }
+    updated.push(changed ? { ...frame, plan, planned: ruleAssignments(plan) } : frame);
+  }
+  return { frames: updated, filled };
+}
+
 // Fills from a general-engine plan: for each site in the page, one desktop request for the keys planned
 // first in its frames (the rules' matches and any AI guesses), then up to four fill passes so questions
 // revealed by an answer are filled too. Each pass plans the page again. Never continues, submits, or navigates.
@@ -1132,7 +1192,9 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
   let revision = null;
   let sites = [];
   try {
-    const initial = frames.map(frame => ({ ...frame, url: frame.frameId === 0 ? url : frame.url, planned: frame.planned || ruleAssignments(frame.plan) }));
+    const custom = prefix ? await fillCustomFrames(tabId, url, frames, guard) : { frames, filled: 0 };
+    guard();
+    const initial = custom.frames.map(frame => ({ ...frame, url: frame.frameId === 0 ? url : frame.url, planned: frame.planned || ruleAssignments(frame.plan) }));
     sites = answerSites(initial);
     const siteOf = frameId => sites.find(site => site.frameIds.has(frameId));
     const place = id => prefix ? [Number(id.slice(1, id.indexOf(':'))), id.slice(id.indexOf(':') + 1)] : [0, id];
@@ -1217,7 +1279,7 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       for (const [id, option] of prepared.mapAnswers(reply.entries)) addLaya(id, { option });
       for (const [id, option] of prepared.mapAnswers(reply.guesses)) addLaya(id, { option, layaGuess: true });
     }
-    let filled = 0, placedByLaya = 0;
+    let filled = custom.filled, placedByLaya = 0;
     // The questions Laya's best guesses went to, each with its own words, for the side panel to list (#185).
     const needYou = [], savable = [], held = [], layaGuesses = [];
     for (const frame of initial) {
@@ -1281,7 +1343,7 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
 }
 
 // One click on an approved site, with the plan the AI saw when the widget sends guesses.
-async function fillSiteOnce(tabId, url, guesses) {
+async function fillSiteOnce(tabId, url, guesses, { guard = () => {}, automatic = false } = {}) {
   try {
     const stored = sitePlans.get(tabId);
     sitePlans.delete(tabId);
@@ -1310,7 +1372,8 @@ async function fillSiteOnce(tabId, url, guesses) {
       const hosts = pending.map(frame => new URL(frame.origin).hostname).join(', ');
       return siteResult('waiting', say('worker.formInsideFrames', { hosts }));
     }
-    const { needYou, savable, held, laya: suggested, layaGuesses, reason } = await fillPlan(tabId, url, frames, { prefix: true, laya });
+    const { needYou, savable, held, laya: suggested, layaGuesses, reason } = await fillPlan(tabId, url, frames, { prefix: true, laya: automatic ? false : laya, guard });
+    guard();
     keepSavable(tabId, url, siteOrigin(url), savable);
     keepHeld(tabId, url, siteOrigin(url), held, reason);
     const tally = await tallySite(tabId, frames);
@@ -1338,10 +1401,101 @@ async function fillIowaGeneral(tabId, state, plan, guard, laya = null) {
 }
 
 async function fillSite(tabId, guesses) {
+  sitePilots.delete(tabId); // A one-page fill replaces any previous continuous run.
   const { tab, origin } = await activeSite(tabId);
   await requireSite(origin);
   if (!siteRuns.has(tabId)) siteRuns.set(tabId, fillSiteOnce(tabId, tab.url, guesses).then(result => remember(tabId, result)).finally(() => siteRuns.delete(tabId)));
   return siteRuns.get(tabId);
+}
+
+const SITE_NEXT_REASONS = new Set(['ready', 'missing', 'unknown', 'review', 'protected', 'no-next', 'errors', 'changed', 'unsupported', 'frames']);
+function currentSitePilot(tabId, pilot) {
+  if (sitePilots.get(tabId) !== pilot) throw fault('worker.pilotStopped');
+}
+function stopSitePilot(tabId, pilot, result) {
+  if (sitePilots.get(tabId) !== pilot) return results.get(tabId) || result;
+  sitePilots.delete(tabId);
+  return remember(tabId, { ...result, autoContinue: false });
+}
+async function siteNavigation(tabId) {
+  const state = await topSiteMessage(tabId, { type: 'secondhand:generic:navigation' });
+  if (!state || typeof state.canAdvance !== 'boolean' || !SITE_NEXT_REASONS.has(state.reason) || typeof state.step !== 'string' ||
+    (!state.canAdvance && state.reason === 'ready') ||
+    (state.canAdvance && (state.reason !== 'ready' || !state.step || typeof state.token !== 'string' || !state.token))) throw fault('worker.pageCheckUnsafe');
+  return state;
+}
+function sitePilotStep(tabId) {
+  const pilot = sitePilots.get(tabId);
+  if (!pilot) return Promise.resolve(results.get(tabId) || null);
+  if (pilot.running) return pilot.running;
+  const guard = () => currentSitePilot(tabId, pilot);
+  pilot.running = (async () => {
+    let prior = results.get(tabId) || siteResult('waiting', say('worker.siteContinuing'));
+    try {
+      const { tab, origin } = await activeSite(tabId); guard();
+      if (origin !== pilot.origin) return stopSitePilot(tabId, pilot, siteResult('stopped', say('worker.siteOriginChanged')));
+      await requireSite(origin); guard();
+      const before = await siteNavigation(tabId); guard();
+      if (['protected', 'review', 'errors', 'frames'].includes(before.reason)) return stopSitePilot(tabId, pilot, siteResult('waiting', say(`worker.siteNext.${before.reason}`)));
+      if (pilot.awaiting && (!before.step || pilot.attempted.has(before.step))) {
+        if (Date.now() - pilot.awaiting < 15000) return prior;
+        return stopSitePilot(tabId, pilot, siteResult('waiting', say('worker.siteNext.changed')));
+      }
+      pilot.awaiting = null;
+      if (++pilot.steps > MAX_STEPS) return stopSitePilot(tabId, pilot, siteResult('stopped', say('worker.stoppedAfterSteps', { steps: MAX_STEPS })));
+      // This mode uses explicit saved values only. Laya/Chrome guesses remain in one-page Autofill.
+      const filled = await fillSiteOnce(tabId, tab.url, undefined, { automatic: true, guard }); guard();
+      if (filled.state !== 'done' || filled.guessed || filled.layaGuessed || filled.held) return stopSitePilot(tabId, pilot, filled);
+      const navigation = await siteNavigation(tabId); guard();
+      if (!navigation.canAdvance) return stopSitePilot(tabId, pilot, { ...filled, state: 'waiting', ...say(`worker.siteNext.${navigation.reason}`) });
+      if (pilot.attempted.has(navigation.step)) return stopSitePilot(tabId, pilot, { ...filled, state: 'waiting', ...say('worker.siteNext.changed') });
+      const receipt = await nativeRequest('authorizeSiteNavigation', { url: safeUrl(tab.url) }); guard();
+      const revision = receiptRevision(receipt);
+      await checkAccess(revision); guard();
+      const current = await activeSite(tabId); guard();
+      if (current.tab.url !== tab.url || current.origin !== pilot.origin) throw fault('worker.pageChangedAutofill');
+      await requireSite(origin); guard();
+      pilot.attempted.add(navigation.step); // Record before sending: a lost response never retries Next.
+      pilot.awaiting = Date.now();
+      prior = remember(tabId, { ...filled, state: 'continuing', autoContinue: true, ...say('worker.siteContinuing') });
+      let advanced;
+      try { advanced = await topSiteMessage(tabId, { type: 'secondhand:generic:advance', token: navigation.token }); }
+      catch (error) {
+        guard();
+        const moved = await chrome.tabs.get(tabId); guard();
+        if (moved.status === 'loading' || moved.url !== tab.url) return prior;
+        throw error;
+      }
+      guard();
+      if (advanced?.ok !== true || advanced.advanced !== true) return stopSitePilot(tabId, pilot, { ...filled, state: 'waiting', ...say('worker.siteNext.changed') });
+      return prior;
+    } catch (error) {
+      if (sitePilots.get(tabId) !== pilot) return results.get(tabId) || prior;
+      if (error.code === 'site-not-ready' && pilot.awaiting && Date.now() - pilot.awaiting < 15000) return prior;
+      return stopSitePilot(tabId, pilot, siteResult(failed(error).state, failed(error)));
+    }
+  })().finally(() => { pilot.running = null; });
+  return pilot.running;
+}
+async function startSitePilot(tabId) {
+  if (sitePilots.has(tabId)) return sitePilotStep(tabId);
+  if (siteRuns.has(tabId)) throw fault('worker.siteFillBusy');
+  // Install the pending run before the first await, so Stop/tab changes revoke startup too.
+  const pilot = { origin: null, steps: 0, attempted: new Set(), running: null, awaiting: null };
+  sitePilots.set(tabId, pilot);
+  pilot.running = (async () => {
+    const { origin } = await activeSite(tabId); currentSitePilot(tabId, pilot);
+    await requireSite(origin); currentSitePilot(tabId, pilot);
+    pilot.origin = origin;
+  })().then(() => {
+    pilot.running = null;
+    return sitePilotStep(tabId);
+  }).catch(error => {
+    if (sitePilots.get(tabId) !== pilot) return results.get(tabId) || siteResult('stopped', say('worker.pilotStopped'));
+    sitePilots.delete(tabId);
+    throw error;
+  });
+  return pilot.running;
 }
 
 // The side panel routes by the tab's current page; a widget acts only as what it was loaded on.
@@ -1514,8 +1668,10 @@ async function currentPageState(tabId, route) {
   const origin = route === 'iowa' ? '' : siteOrigin(tab.url);
   if (!origin) throw fault('worker.openIowaPortal');
   const enabled = await siteEnabled(origin);
+  if (enabled && sitePilots.has(tabId) && !sitePilots.get(tabId).running) void sitePilotStep(tabId);
+  if (!enabled) sitePilots.delete(tabId);
   const result = results.get(tabId);
-  return { page: { kind: 'general', pageKey: 'general' }, result: enabled && result?.pageKey === 'general' ? result : null, autopilot: false,
+  return { page: { kind: 'general', pageKey: 'general' }, result: enabled && result?.pageKey === 'general' ? result : null, autopilot: sitePilots.has(tabId),
     site: { origin, enabled, ...(enabled ? await siteReadiness(tab, origin) : { frames: [], ready: false }) }, ...(enabled ? summaryLine(tabId, tab.url) : {}) };
 }
 
@@ -1768,6 +1924,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   else if (!Number.isInteger(tabId)) return;
   else if (message.type === 'ui:pageState') run = () => pageState(tabId, route);
   else if (message.type === 'ui:autofill' && message.confirmed === true) run = () => autofill(tabId, route, message.guesses);
+  else if (panel && message.type === 'ui:fillAndContinue' && message.confirmed === true) run = () => startSitePilot(tabId);
   else if (message.type === 'ui:plan' && message.confirmed === true) run = () => planSite(tabId);
   else if (message.type === 'ui:stop' && message.confirmed === true) run = () => stop(tabId);
   else if (message.type === 'ui:focusField' && typeof message.key === 'string' && (FIELD_ID.test(message.key) || SITE_FIELD_ID.test(message.key))) {
@@ -1792,9 +1949,10 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   return true;
 });
 chrome.tabs.onActivated?.addListener(info => {
+  for (const [tabId, pilot] of sitePilots) if (tabId !== info.tabId) stopSitePilot(tabId, pilot, siteResult('stopped', say('worker.stoppedTabChanged')));
   for (const tabId of autopilots.keys()) if (tabId !== info.tabId) stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], ...say('worker.stoppedTabChanged'), pageKey: results.get(tabId)?.pageKey || '' });
 });
-chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); generalPages.delete(tabId); sitePlans.delete(tabId); questionViews.delete(tabId); pageReads.delete(tabId); formFrames.delete(tabId); formChecks.delete(tabId); savables.delete(tabId); heldDetails.delete(tabId); });
+chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); sitePilots.delete(tabId); generalPages.delete(tabId); sitePlans.delete(tabId); questionViews.delete(tabId); pageReads.delete(tabId); formFrames.delete(tabId); formChecks.delete(tabId); savables.delete(tabId); heldDetails.delete(tabId); });
 chrome.tabs.onUpdated?.addListener((tabId, change) => {
   if (change.status === 'loading') {
     results.delete(tabId);
@@ -1814,6 +1972,7 @@ chrome.tabs.onUpdated?.addListener((tabId, change) => {
     }
   }
   if (change.status === 'complete' && autopilots.has(tabId)) void step(tabId);
+  if (change.status === 'complete' && sitePilots.has(tabId)) void sitePilotStep(tabId);
 });
 // Site registrations made by an older version name its older script list; an update brings them current.
 async function refreshSiteScripts() {
@@ -1822,6 +1981,6 @@ async function refreshSiteScripts() {
   if (stale.length) await chrome.scripting.updateContentScripts(stale.map(script => ({ id: script.id, js: [...SITE_FILES.js] })));
 }
 chrome.runtime.onInstalled?.addListener(details => { if (details.reason === 'update') void refreshSiteScripts(); });
-chrome.permissions?.onRemoved?.addListener(() => { forgetRevoked().catch(error => { if (!appClosed(error)) throw error; }); });
+chrome.permissions?.onRemoved?.addListener(() => { sitePilots.clear(); forgetRevoked().catch(error => { if (!appClosed(error)) throw error; }); });
 // Chrome's native panel persists alongside navigation; it never opens itself.
 chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});

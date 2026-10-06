@@ -7,7 +7,7 @@
   const summary = globalThis.SecondHandSummary;
   // Must match BUILD in background.js: change both together. Chrome loads these pages
   // from disk right away but keeps running the old worker until SecondHand is reloaded.
-  const BUILD = '2026-10-06.9';
+  const BUILD = '2026-10-06.10';
   // The applicant's language: the choice saved in this extension's storage, else the browser's.
   let language = strings.language();
   const t = (key, params = {}) => strings.text(language, key, params);
@@ -44,8 +44,8 @@
   // An older worker that still answers is caught by its build.
   const checkBuild = async () => { if ((await send({ type: 'ui:ping' }))?.build !== BUILD) throw outdatedError(); };
   const fieldKeys = value => Array.isArray(value) ? value.filter(key => typeof key === 'string' && (/^[A-Za-z][A-Za-z0-9_-]{0,79}$/.test(key) || /^f\d{1,6}:[A-Za-z][A-Za-z0-9_-]{0,59}$/.test(key))).slice(0, 80) : [];
-  // Autofill keeps going only on Iowa; other sites get one fill per click.
-  const continuing = result => result?.pageKey !== 'general' && !['stopped', 'locked', 'offline', 'error'].includes(result?.state);
+  // General sites continue only after their separate explicit Fill and continue action.
+  const continuing = result => (result?.pageKey !== 'general' || result?.autoContinue === true) && !['stopped', 'locked', 'offline', 'error'].includes(result?.state);
   // The worker's metadata for a site other than Iowa: its origin and whether it is turned on.
   const siteOf = state => state?.site && typeof state.site.origin === 'string' ? { origin: state.site.origin, enabled: state.site.enabled === true, ready: state.site.ready !== false, frames: Array.isArray(state.site.frames) ? state.site.frames.filter(frame => frame && typeof frame.origin === 'string') : [] } : null;
   const hostOf = origin => fixedText(new URL(origin).hostname, 90);
@@ -447,6 +447,9 @@
       $('panel-autofill').hidden = off;
       $('panel-autofill').textContent = t(autopilot ? 'panel.stopAutofill' : 'panel.autofill');
       $('panel-autofill').disabled = !target || (!fillable && !autopilot) || working;
+      $('site-continue').hidden = !target || !site?.enabled || !site.ready || autopilot;
+      $('site-continue').disabled = working || !fillable;
+      $('site-continue-hint').hidden = !target || !site?.enabled || !site.ready;
       document.querySelectorAll('.checklist-item').forEach(button => { button.disabled = working || !target; });
       document.querySelectorAll('.save-row button').forEach(button => { button.disabled = working || !target; });
       $('held-fill').disabled = working || !target;
@@ -958,6 +961,15 @@
       if (reported(result)) show(fromResult(result), result.state === 'error');
       controls();
       if (!stopping) await desktopStatus();
+      await refresh();
+    }));
+    $('site-continue').addEventListener('click', trusted(async () => {
+      if ($('site-continue').disabled || !site?.enabled || !site.ready) return;
+      const result = await act({ type: 'ui:fillAndContinue', confirmed: true }, { key: 'panel.filling' });
+      if (result) autopilot = continuing(result);
+      if (reported(result)) show(fromResult(result), result.state === 'error');
+      controls();
+      await desktopStatus();
       await refresh();
     }));
     $('site-enable').addEventListener('click', trusted(async () => {

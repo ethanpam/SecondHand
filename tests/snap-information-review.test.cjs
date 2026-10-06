@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { reviewProfile, reviewDocumentFields } = require('../shared/field-review.cjs');
 const { createFieldReview, LIMITS } = require('../desktop/field-review.cjs');
 const { SNAP_INFORMATION, PROFILE_FIELDS, MAX_PROFILE_REVIEW_ROWS } = require('../shared/schema.cjs');
+const REVIEW_FIELDS = PROFILE_FIELDS.filter(key => key !== 'customFields');
 const options = { today: '2026-10-05' };
 const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const byKey = input => Object.fromEntries(reviewProfile(input, options).map(row => [row.key, row]));
@@ -49,7 +50,7 @@ test('corrupt record lists cannot execute accessors or make unbounded review res
   const result = byKey({ jobs: [job, { id: id(1) }], assets: Array.from({ length: 1000 }, () => null) });
   assert.equal(accesses, 0); assert.equal(result.jobs.status, 'needs-review'); assert.equal(result.assets.status, 'needs-review');
   assert.equal(result['jobs.0.amount'].status, 'needs-review');
-  const maxRows = PROFILE_FIELDS.length + 2 * SNAP_INFORMATION.records.find(row => row.key === 'jobs').fields.length + 20 * SNAP_INFORMATION.records.find(row => row.key === 'assets').fields.length;
+  const maxRows = REVIEW_FIELDS.length + 2 * SNAP_INFORMATION.records.find(row => row.key === 'jobs').fields.length + 20 * SNAP_INFORMATION.records.find(row => row.key === 'assets').fields.length;
   assert.equal(Object.keys(result).length, maxRows);
   assert.doesNotMatch(JSON.stringify(result), /private/);
 });
@@ -80,6 +81,17 @@ test('employer, payer and issuer provenance stays review-only and is never eligi
     const result = await createFieldReview({ laya: { status() { calls++; throw new Error('must not call'); } } }).review({ useLaya: true, documentFields: [field] }, options);
     assert.equal(calls, 0); assert.equal(result.document[0].status, 'needs-review'); assert.equal(result.laya.state, 'unsupported');
   }
+});
+
+test('desktop review rejects custom answer lists before any model call and does not reflect their contents', async () => {
+  let calls = 0;
+  const fail = () => { calls++; throw new Error('Model must not be called'); };
+  const review = createFieldReview({ laya: { status: fail, format: fail, decideBatch: fail } });
+  const customFields = [{ id: id(1), label: 'Private custom question', value: 'Private custom answer', aliases: ['Private custom alias'] }];
+  await assert.rejects(review.review({ profile: { customFields }, useLaya: true,
+    documentFields: [{ id: 'address', sourceLabel: 'Home address', sourceRole: 'applicant', profileKey: 'addressLine1', value: 'Fictional address' }] }),
+  error => /invalid or too large/.test(error.message) && !/Private custom/.test(error.message));
+  assert.equal(calls, 0);
 });
 
 test('the maximum-sized local review includes the last member and every last record without truncation', async () => {

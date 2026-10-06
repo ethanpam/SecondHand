@@ -21,6 +21,98 @@ const IDLE_MS = 10 * 60 * 1000;
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'secondhand-assistance-main-'));
 test.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
 
+const customRecord = (n = 1, changes = {}) => ({ id: `00000000-0000-4000-a000-${String(n).padStart(12, '0')}`, label: 'Pickup location', value: 'North entrance', aliases: ['Pickup point'], ...changes });
+const customRequest = changes => ({ type: 'getCustomFields', url: 'https://pantry.example.org/intake', fields: [{ id: 'field1', label: 'Pickup point', type: 'text' }], ...changes });
+const customSettings = changes => ({ extensionId, trustedSites: ['https://pantry.example.org'], ...changes });
+
+test('custom answers disclose only exact matched question IDs and values after one sensitive approval, never the saved catalog', async () => {
+  const app = await desktop({ settings: customSettings(), profile: { customFields: [customRecord(), customRecord(2, { label: 'Diet notes', aliases: [], value: 'Private unrelated answer' })] } });
+  const response = plain(await app.request(customRequest()));
+  assert.deepEqual(response.values, { field1: 'North entrance' });
+  assert.deepEqual(Object.keys(response).sort(), ['accessRevision', 'values']);
+  assert.equal(app.prompts.length, 1); assert.equal(app.prompts[0].title, 'Share sensitive details?');
+  assert.match(app.prompts[0].detail, /Pickup point: "North entrance"/);
+  assert.doesNotMatch(app.prompts[0].detail, /Private unrelated answer|00000000/);
+  assert.equal(app.writes.length, 0);
+});
+
+test('custom answer capability appears only for an unlocked nonempty vault and carries no labels or count', async () => {
+  const app = await desktop({ profile: { customFields: [customRecord()] } });
+  const available = plain(await app.request({ type: 'status' }));
+  assert.equal(available.customFieldsAvailable, true); assert.doesNotMatch(JSON.stringify(available), /Pickup|North entrance|customFieldsCount/);
+  await app.invoke('lock');
+  assert.equal((await app.request({ type: 'status' })).customFieldsAvailable, undefined);
+  const empty = await desktop(); assert.equal((await empty.request({ type: 'status' })).customFieldsAvailable, undefined);
+});
+
+test('custom request scope, trust, extension identity and metadata are checked before profile access', async () => {
+  const app = await desktop({ settings: customSettings({ autofillWithoutAsking: true }), profile: { customFields: [customRecord()] } });
+  for (const changes of [{ url: PORTAL_URL }, { url: 'http://pantry.example.org' }, { url: 'https://untrusted.example.org' }, { fields: [{ id: 'field1', label: 'Pickup point', type: 'password' }] }, { customFields: [customRecord()] }]) await assert.rejects(app.request(customRequest(changes)));
+  assert.equal(app.dataReads, 0); assert.equal(app.prompts.length, 0);
+  const other = await desktop({ settings: customSettings({ extensionId: 'b'.repeat(32), autofillWithoutAsking: true }), profile: { customFields: [customRecord()] } });
+  await assert.rejects(other.request(customRequest()), /access changed/); assert.equal(other.dataReads, 0);
+  await app.invoke('lock'); await assert.rejects(app.request(customRequest()), /Unlock/);
+});
+
+test('ambiguous, unsafe, and missing custom answers send no values and show no dialog', async () => {
+  for (const records of [[], [customRecord(), customRecord(2)], [customRecord(1, { label: 'Password', aliases: ['Pickup point'] })]]) {
+    const app = await desktop({ settings: customSettings(), profile: { customFields: records } });
+    assert.deepEqual(plain((await app.request(customRequest())).values), {}); assert.equal(app.prompts.length, 0);
+  }
+});
+
+test('custom answer cancellation returns no values; existing per-site/global Always allow skips the prompt', async () => {
+  const cancelled = await desktop({ settings: customSettings(), profile: { customFields: [customRecord()] } });
+  cancelled.answer(async () => ({ response: 0 })); assert.deepEqual(plain((await cancelled.request(customRequest())).values), {});
+  for (const settings of [customSettings({ autofillWithoutAsking: true }), customSettings({ alwaysAllowedSites: ['https://pantry.example.org'] })]) {
+    const app = await desktop({ settings, profile: { customFields: [customRecord()] } });
+    assert.deepEqual(plain((await app.request(customRequest())).values), { field1: 'North entrance' }); assert.equal(app.prompts.length, 0);
+  }
+});
+
+test('Always allow on this site returns the updated custom receipt and does not authorize another origin', async () => {
+  const app = await desktop({ settings: customSettings({ trustedSites: ['https://pantry.example.org', 'https://other.example.org'] }), profile: { customFields: [customRecord()] } });
+  const before = (await app.request({ type: 'status' })).accessRevision;
+  app.answer(async () => ({ response: 2 })); const result = await app.request(customRequest());
+  assert.equal(result.accessRevision, before + 1);
+  await app.request(customRequest()); assert.equal(app.prompts.length, 1);
+  await app.request(customRequest({ url: 'https://other.example.org/form' })); assert.equal(app.prompts.length, 2);
+});
+
+for (const mutation of ['lock', 'profile', 'registration', 'trust']) test(`pending custom approval releases nothing after ${mutation}`, async () => {
+  const app = await desktop({ settings: customSettings(), profile: { customFields: [customRecord()] } });
+  let resolve; app.answer(() => new Promise(done => { resolve = done; }));
+  const pending = app.request(customRequest()); await tick();
+  await assert.rejects(app.request(customRequest()), /waiting for your approval/);
+  if (mutation === 'lock') { await app.invoke('lock'); await app.invoke('unlock', 'synthetic'); }
+  if (mutation === 'profile') await app.invoke('saveProfile', { customFields: [customRecord(1, { value: 'Changed answer' })] });
+  if (mutation === 'registration') { await app.invoke('connectExtension', 'b'.repeat(32)); await app.invoke('connectExtension', extensionId); }
+  if (mutation === 'trust') await app.request({ type: 'untrustSite', url: 'https://pantry.example.org' });
+  resolve({ response: 1 }); await assert.rejects(pending, /access changed/);
+});
+
+test('general-site navigation returns only a fresh receipt and reads no profile fields', async () => {
+  const app = await desktop({ settings: customSettings() });
+  const result = plain(await app.request({ type: 'authorizeSiteNavigation', url: 'https://pantry.example.org/form' }));
+  assert.deepEqual(Object.keys(result), ['accessRevision']); assert.ok(Number.isSafeInteger(result.accessRevision));
+  assert.equal(app.dataReads, 0); assert.equal(app.prompts.length, 1);
+  assert.match(app.prompts[0].detail, /send entered answers/); assert.match(app.prompts[0].detail, /does not authorize consent, signatures, certification, payments, or final submission/);
+  for (const changes of [{ url: PORTAL_URL }, { url: 'https://other.example.org' }, { url: 'http://pantry.example.org' }, { fields: [] }]) await assert.rejects(app.request({ type: 'authorizeSiteNavigation', url: 'https://pantry.example.org/form', ...changes }));
+  assert.equal(app.dataReads, 0);
+});
+
+test('general-site navigation honors existing Always allow and rejects cancelled or stale approval', async () => {
+  const request = { type: 'authorizeSiteNavigation', url: 'https://pantry.example.org/form' };
+  for (const settings of [customSettings({ autofillWithoutAsking: true }), customSettings({ alwaysAllowedSites: ['https://pantry.example.org'] })]) {
+    const app = await desktop({ settings }); await app.request(request); assert.equal(app.prompts.length, 0); assert.equal(app.dataReads, 0);
+  }
+  const app = await desktop({ settings: customSettings() });
+  app.answer(async () => ({ response: 0 })); await assert.rejects(app.request(request), /cancelled/);
+  let resolve; app.answer(() => new Promise(done => { resolve = done; }));
+  const pending = app.request(request); await tick(); await app.invoke('lock'); await app.invoke('unlock', 'synthetic');
+  resolve({ response: 1 }); await assert.rejects(pending, /access changed/);
+});
+
 test('expanded SNAP answers are Iowa-only even when another site is trusted; record lists never leave the vault', async () => {
   const app = await desktop({ profile: { iowaResident: 'yes', ssnCardFirstName: 'Synthetic', jobs: [{ employer: 'Private' }] },
     settings: { extensionId, autofillWithoutAsking: true, allSites: true, trustedSites: ['https://pantry.example.org'] } });
@@ -533,7 +625,9 @@ test('your citizenship, disability, blindness, health, Medicare and Social Secur
   assert.deepEqual(plain((await app.request({ type: 'getFields', fields: Object.keys(sensitive) })).values), sensitive);
   assert.equal(app.prompts.at(-1).title, 'Let Chrome fill this form?', 'Iowa keeps its own trust rules: never a sensitive prompt');
   await app.request({ type: 'trustSite', url: 'https://wic.example.gov/apply' });
-  assert.match(app.prompts.at(-1).detail, new RegExp(`It never clicks Next or Submit\\. ${escaped(ALWAYS_ALLOW_INCLUDES)}\\. You can remove this site on the Chrome extension page\\.$`));
+  assert.match(app.prompts.at(-1).detail, /Autofill fills only\. If you choose Fill and continue/);
+  assert.match(app.prompts.at(-1).detail, /ordinary Next after checking completeness and desktop authorization/);
+  assert.match(app.prompts.at(-1).detail, new RegExp(`Consent, signatures, and final submission stay with you\\. ${escaped(ALWAYS_ALLOW_INCLUDES)}\\. You can remove this site on the Chrome extension page\\.$`));
 
   const allowed = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'] } });
   await allowed.invoke('saveProfile', { ...sensitive, ...everyday });
@@ -611,8 +705,9 @@ test('trusting all websites asks once, is saved, and lets any https site ask for
   assert.deepEqual(plain(prompt.buttons), ['Cancel', 'Trust all websites']);
   assert.equal(prompt.cancelId, 0);
   assert.match(prompt.detail, /Nothing is filled until you click Autofill/);
-  assert.match(prompt.detail, /never clicks Next or Submit/);
-  assert.match(prompt.detail, new RegExp(`It never clicks Next or Submit\\. ${escaped(ALWAYS_ALLOW_INCLUDES)}, on every site\\. You can turn this off`));
+  assert.match(prompt.detail, /Autofill fills only\. If you choose Fill and continue/);
+  assert.match(prompt.detail, /ordinary Next after checking completeness and desktop authorization/);
+  assert.match(prompt.detail, new RegExp(`Consent, signatures, and final submission stay with you\\. ${escaped(ALWAYS_ALLOW_INCLUDES)}, on every site\\. You can turn this off`));
   assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: true, trustedSites: [], allSites: true });
   assert.equal((await app.request({ type: 'status' })).allSites, true);
   assert.equal((await app.invoke('status')).allSites, true);
