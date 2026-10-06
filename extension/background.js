@@ -1476,7 +1476,7 @@ function sitePilotStep(tabId) {
       await requireSite(origin); guard();
       const before = await siteNavigation(tabId); guard();
       // The next page loaded after this step read the address, so it answered for a page this step doesn't hold. Its own
-      // load event found this step running: the next look (the side panel's or the widget's) takes it.
+      // load event found this step running, and gets a step of its own once this one ends.
       if ((await chrome.tabs.get(tabId)).url !== tab.url) return prior;
       guard();
       if (['protected', 'review', 'errors', 'frames'].includes(before.reason)) return stopSitePilot(tabId, pilot, siteResult('waiting', say(`worker.siteNext.${before.reason}`)));
@@ -1517,14 +1517,17 @@ function sitePilotStep(tabId) {
       if (error.code === 'site-not-ready' && pilot.awaiting && Date.now() - pilot.awaiting < 15000) return prior;
       return stopSitePilot(tabId, pilot, siteResult(failed(error).state, failed(error)));
     }
-  })().finally(() => { pilot.running = null; });
+  })().finally(() => {
+    pilot.running = null;
+    if (pilot.loaded && sitePilots.get(tabId) === pilot) { pilot.loaded = false; void sitePilotStep(tabId); }
+  });
   return pilot.running;
 }
 async function startSitePilot(tabId) {
   if (sitePilots.has(tabId)) return sitePilotStep(tabId);
   if (siteRuns.has(tabId)) throw fault('worker.siteFillBusy');
   // Install the pending run before the first await, so Stop/tab changes revoke startup too.
-  const pilot = { origin: null, steps: 0, attempted: new Set(), running: null, awaiting: null };
+  const pilot = { origin: null, steps: 0, attempted: new Set(), running: null, awaiting: null, loaded: false };
   sitePilots.set(tabId, pilot);
   pilot.running = (async () => {
     const { origin } = await activeSite(tabId); currentSitePilot(tabId, pilot);
@@ -2110,7 +2113,11 @@ chrome.tabs.onUpdated?.addListener((tabId, change) => {
     }
   }
   if (change.status === 'complete' && autopilots.has(tabId)) void step(tabId);
-  if (change.status === 'complete' && sitePilots.has(tabId)) void sitePilotStep(tabId);
+  if (change.status === 'complete' && sitePilots.has(tabId)) {
+    // A page that finishes loading while a step runs gets a step of its own after it: that step read the page before.
+    if (sitePilots.get(tabId).running) sitePilots.get(tabId).loaded = true;
+    void sitePilotStep(tabId);
+  }
 });
 // Site registrations made by an older version name its older script list; an update brings them current.
 async function refreshSiteScripts() {
