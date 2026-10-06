@@ -149,6 +149,32 @@ async function inspectDemoMotion(page) {
   console.log('Text Type and click-to-autofill: typing/deleting, stable layout, field sequence, reduced motion, and visibility suspension passed.');
 }
 
+// The site says only what the extension on main does: the scope note, the update steps, and the card.
+async function inspectWhatItDoes(page) {
+  await page.goto(site, { waitUntil: 'networkidle' });
+  const scope = await page.locator('.scope-note').innerText();
+  for (const phrase of ['first suggested home address', 'guesses', 'Vietnamese', 'Arabic', 'on this computer']) {
+    assert.ok(scope.includes(phrase), `What it does today must mention "${phrase}"`);
+  }
+  // The address the applicant must review ends the first paragraph, where a skimming reader sees it.
+  await expect(page.locator('.scope-note p')).toHaveCount(3);
+  await expect(page.locator('.scope-note p').first()).toContainText(/review that address before you submit\.$/);
+  await page.getByText('Updating from an earlier version', { exact: true }).click();
+  // The extension reloads itself only when the new app ships a newer extension build.
+  await expect(page.locator('#setup details[open] .details-body')).toContainText('If it comes with a newer extension');
+  await expect(page.locator('#setup details[open] .details-body')).toContainText('reloads itself');
+  await expect(page.locator('#setup details[open] .details-body')).toContainText('0.4.0 or earlier');
+  await page.goto(`${site}/chrome-extension`, { waitUntil: 'networkidle' });
+  await inspectLayout(page);
+  await expect(page.locator('main')).not.toContainText(/Details link|\bDetails\b to open/);
+  await expect(page.locator('img.guide-card')).not.toHaveAttribute('alt', /Details/);
+  await expect(page.locator('section[aria-labelledby="after-update"]')).toContainText('If it comes with a newer extension');
+  await expect(page.locator('section[aria-labelledby="after-update"]')).toContainText('reloads itself');
+  await expect(page.locator('section[aria-labelledby="after-update"]')).toContainText('0.4.0 or earlier');
+  await page.goto(site, { waitUntil: 'networkidle' });
+  console.log('What it does today, update steps, and the Chrome guide card passed.');
+}
+
 async function main() {
   await fs.mkdir(artifacts, { recursive: true });
   const browser = await chromium.launch({ channel: process.env.SECONDHAND_BROWSER_CHANNEL || undefined });
@@ -193,6 +219,7 @@ async function main() {
     console.log('Shader rendering, reduced motion, and offscreen suspension passed.');
     await inspectWordmark(page);
     await inspectDemoMotion(page);
+    await inspectWhatItDoes(page);
 
     await page.getByRole('tab', { name: 'Windows', exact: true }).click();
     await page.getByRole('tab', { name: 'Windows', exact: true }).press('ArrowRight');
