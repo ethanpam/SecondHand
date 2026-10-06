@@ -36,6 +36,10 @@ const DETAILS = 'https://pantry.example.org/details';
 const SERVICE = 'https://pantry.example.org/service-area';
 const SERVICE_QUESTION = 'Do you live in our service area?';
 const DESPENSA = 'https://despensa.example.org/registro';
+// #180: household questions asked while no household list is saved. #186: a pantry's own questions no saved field covers.
+const NO_LIST = 'https://pantry.example.org/household-order';
+const NO_LIST_QUESTIONS = { adults: '# of Adults', young: '# of Children 0-5', older: '# of Children 6-18' };
+const VISIT = 'https://pantry.example.org/visit';
 // A shot is asked for by its name, or by the start of its name ending in a hyphen.
 const wanted = name => !only.length || only.some(asked => asked.endsWith('-') ? name.startsWith(asked) : name === asked);
 
@@ -54,6 +58,12 @@ const pages = {
   [SERVICE]: formPage('Pantry sign-up: service area', `<form>${field('first', 'First name')}<fieldset><legend>${SERVICE_QUESTION}</legend>` +
     `${['Yes', 'No', 'Not sure'].map((option, index) => `<label><input type="radio" name="area" id="area-${index}" value="${option}">${option}</label>`).join('')}</fieldset>` +
     '<button type="submit">Submit</button></form>'),
+  [NO_LIST]: formPage('Pantry order: who lives with you', `<form>${field('first', 'First name')}${Object.entries(NO_LIST_QUESTIONS).map(([id, label]) => field(id, label)).join('')}` +
+    '<button type="submit">Submit</button></form>'),
+  [VISIT]: formPage('Pantry visit', `<form>${field('first', 'First name')}${field('emplid', 'EMPLID')}<fieldset><legend>How did you hear about us?</legend>` +
+    `${['Friend', 'Church', 'Flyer'].map((option, index) => `<label><input type="radio" name="heard" id="heard-${index}" value="${option}">${option}</label>`).join('')}</fieldset>` +
+    '<label for="day">Preferred pickup day</label><select id="day" name="day"><option value="">Choose a day</option><option>Monday</option><option>Friday</option></select>' +
+    '<button type="submit">Submit</button></form>'),
   [DESPENSA]: formPage('Registro de la despensa', `<form>${field('nombre', 'Nombre')}${field('apellido', 'Apellido')}${field('cp', 'Código postal')}` +
     `${field('correo', 'Correo electrónico', 'email')}<button type="submit">Enviar</button></form>`, 'es')
 };
@@ -61,15 +71,17 @@ const pages = {
 // The desktop app as the worker sees it over native messaging, with Always allow on. A session changes
 // locked, closed, or laya on globalThis.__desktop to show the app in that state. With `holds`, it plays the app
 // without Always allow, holding those fields back for Fill sensitive details (#176). With `guess` and Laya
-// ready, Laya is sure of nothing and guesses "Yes" for the service-area question (#185).
+// ready, Laya is sure of nothing and guesses "Yes" for the service-area question (#185). With `noList`, no household
+// list is saved (#180); with `customFields`, the app has custom answers, none of them saved yet (#186).
 async function installDesktop(worker) {
   await worker.evaluate(({ profile, serviceQuestion }) => {
-    globalThis.__desktop = { profile, locked: false, closed: false, laya: 'unavailable', allSites: false, holds: [], guess: false };
+    globalThis.__desktop = { profile, locked: false, closed: false, laya: 'unavailable', allSites: false, holds: [], guess: false, noList: false, customFields: false };
     nativeRequest = async (type, payload = {}) => {
       const desktop = globalThis.__desktop;
       if (type === 'openApp') return { opened: 'shown' };
       if (desktop.closed) throw Object.assign(fault('worker.desktopOffline'), { code: 'offline' });
-      if (type === 'status') return { unlocked: !desktop.locked, applicationCount: 0, accessRevision: 0, allSites: desktop.allSites, laya: { state: desktop.laya } };
+      if (type === 'status') return { unlocked: !desktop.locked, applicationCount: 0, accessRevision: 0, allSites: desktop.allSites, laya: { state: desktop.laya }, customFieldsAvailable: desktop.customFields };
+      if (type === 'getCustomFields') return { values: {}, accessRevision: 0 };
       if (type === 'showApp') return { shown: true };
       if (type === 'trustAllSites' || type === 'untrustAllSites') { desktop.allSites = type === 'trustAllSites'; return { allSites: desktop.allSites }; }
       if (type === 'trustSite' || type === 'untrustSite') return { trusted: type === 'trustSite', origin: new URL(payload.url).origin };
@@ -85,8 +97,10 @@ async function installDesktop(worker) {
         // The app is asking the person: the request waits until the capture lets it go.
         if (desktop.hold) await new Promise(resolve => { globalThis.__release = resolve; });
         const held = payload.sensitive === true ? [] : payload.fields.filter(name => desktop.holds.includes(name));
-        return { accessRevision: 0, values: Object.fromEntries(payload.fields.filter(name => desktop.profile[name] && !held.includes(name)).map(name => [name, desktop.profile[name]])),
-          ...(held.length ? { held } : {}) };
+        const fromList = name => /^householdCount:/.test(name) || ['householdSize', 'householdAdults', 'householdChildren', 'householdSeniors', 'studentNameGrade'].includes(name);
+        const answered = name => desktop.profile[name] && !held.includes(name) && !(desktop.noList && fromList(name));
+        return { accessRevision: 0, values: Object.fromEntries(payload.fields.filter(answered).map(name => [name, desktop.profile[name]])),
+          ...(held.length ? { held } : {}), ...(desktop.noList && payload.fields.some(fromList) ? { household: { need: 'list' } } : {}) };
       }
       if (type === 'recordProgress') return { recorded: true };
       if (type === 'saveFields') return { saved: Object.keys(payload.fields) };
@@ -136,7 +150,7 @@ async function launch(userData, extensionDirectory, { viewport = VIEW, scale = 2
   // Leaving the page turns a running autofill off, so every state starts clean.
   async function open(url, desktop = {}) {
     await page.goto('about:blank');
-    await worker.evaluate(desktop => Object.assign(globalThis.__desktop, desktop), { locked: false, closed: false, laya: 'unavailable', holds: [], guess: false, profile: smoke.syntheticProfile, ...desktop });
+    await worker.evaluate(desktop => Object.assign(globalThis.__desktop, desktop), { locked: false, closed: false, laya: 'unavailable', holds: [], guess: false, noList: false, customFields: false, profile: smoke.syntheticProfile, ...desktop });
     await page.goto(url, { waitUntil: 'domcontentloaded' });
     await page.bringToFront();
   }
@@ -179,6 +193,11 @@ async function openPanel(session) {
   assert.deepEqual(size, { width: 360, height: 765, scale: 2 }, 'the side panel is captured at one size');
   return panel;
 }
+// How far to scroll the side panel to show a section just under the button strip that stays in view.
+const sectionTop = (panel, id) => panel.evaluate(id => {
+  const body = document.getElementById('panel-body'), section = document.getElementById(id), strip = document.querySelector('.actions');
+  return Math.max(0, Math.round(section.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop - strip.offsetHeight - 16));
+}, id);
 // The side panel checks the tab every second and a half; `ready` says when it shows the state to capture.
 async function panelShot(session, panel, name, ready, { scroll = 0, clip } = {}) {
   await expect.poll(() => panel.evaluate(ready), { timeout: 20000 }).toBe(true);
@@ -466,6 +485,24 @@ async function sites() {
       await chooseLanguage(panel, 'es');
       await panelShot(running, panel, 'panel-site-guessed-es', () => document.getElementById('language').value === 'es' && !document.getElementById('guesses-section').hidden && !/Guessed/.test(document.getElementById('guesses-title').textContent));
       await chooseLanguage(panel, 'en');
+      // With no household list saved, the household questions stay open and wait for Add your household (#180).
+      await open(NO_LIST, { noList: true });
+      await recheck(panel);
+      await expect.poll(() => panel.evaluate(() => !document.getElementById('panel-autofill').disabled), { timeout: 20000 }).toBe(true);
+      await panel.click('#panel-autofill');
+      await expect.poll(() => panel.evaluate(() => !document.getElementById('household-section').hidden), { timeout: 20000 }).toBe(true);
+      await panelShot(running, panel, 'panel-site-household', () => true, { scroll: await sectionTop(panel, 'household-section') });
+      // The pantry's own questions, answered on the page, offered to Remember for next time (#186).
+      await open(VISIT, { customFields: true });
+      await recheck(panel);
+      await expect.poll(() => panel.evaluate(() => !document.getElementById('panel-autofill').disabled), { timeout: 20000 }).toBe(true);
+      await panel.click('#panel-autofill');
+      await expect(page.locator('#first')).toHaveValue(smoke.syntheticProfile.firstName, { timeout: 20000 });
+      await page.locator('#emplid').fill('SYN-4471');
+      await page.locator('#heard-1').check();
+      await page.locator('#day').selectOption('Friday');
+      await expect.poll(() => panel.evaluate(() => document.querySelectorAll('[data-remember-id]').length === 3), { timeout: 20000 }).toBe(true);
+      await panelShot(running, panel, 'panel-site-remember', () => true, { scroll: await sectionTop(panel, 'remember-section') });
       await panel.close();
     });
     // The card on other sites, with the side panel closed.
@@ -578,7 +615,7 @@ async function recording() {
 const sessions = [
   [iowaCard, ['card-ready', 'card-focus', 'card-hidden', 'card-hidden-focus', 'card-working', 'card-need-you', 'card-hidden-waiting', 'card-ready-again', 'card-message', 'card-need-you-again', 'card-locked', 'card-closed', 'card-pill']],
   [iowaPanel, ['panel-iowa', 'panel-header', 'panel-focus', 'panel-working', 'panel-iowa-filled', 'panel-checklist', 'panel-iowa-again', 'panel-iowa-filled-again', 'panel-locked', 'panel-closed', 'panel-info', 'panel-elsewhere', 'panel-elsewhere-es', 'panel-arabic', 'panel-questions']],
-  [sites, ['panel-site-off', 'panel-site-filled', 'panel-site-filled-open', 'panel-laya-off', 'panel-save', 'panel-site-held', 'panel-site-guessed', 'panel-site-guessed-es', 'panel-all-sites-off', 'card-site', 'card-offer', 'card-offer-filled']],
+  [sites, ['panel-site-off', 'panel-site-filled', 'panel-site-filled-open', 'panel-laya-off', 'panel-save', 'panel-site-held', 'panel-site-guessed', 'panel-site-household', 'panel-site-remember', 'panel-site-guessed-es', 'panel-all-sites-off', 'card-site', 'card-offer', 'card-offer-filled']],
   [outdated, ['card-outdated', 'panel-outdated', 'card-reload']],
   [shortcutsPage, ['chrome-shortcuts']],
   [recording, ['card-autofill']]
