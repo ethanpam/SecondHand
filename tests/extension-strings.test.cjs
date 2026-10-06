@@ -505,8 +505,8 @@ test('French keeps « and » on the same line as the words they quote, with a no
     }
   }
   assert.deepEqual(unique(found), [], 'every « is followed and every » preceded by U+00A0');
-  assert.equal(opening, 55, 'French has 55 «');
-  assert.equal(closing, 55, 'French has 55 »');
+  assert.equal(opening, 58, 'French has 58 «');
+  assert.equal(closing, 58, 'French has 58 »');
 });
 
 test('Remember for next time, its refusals, and the custom answers summary speak all six languages (#186)', () => {

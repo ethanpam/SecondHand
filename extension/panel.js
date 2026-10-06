@@ -124,8 +124,11 @@
         const layaGuessed = Number.isInteger(result.layaGuessed) && result.layaGuessed > 0 ? result.layaGuessed : 0;
         // Answers from the applicant's custom answers (#186).
         const custom = Number.isInteger(result.custom) && result.custom > 0 ? result.custom : 0;
+        // Household questions the household list left open (#180), which the side panel lists with Add your household.
+        const household = Array.isArray(result.household?.questions) ? result.household.questions.length : 0;
         const notes = [ai.note ? words(ai.note) : '', custom ? t('widget.fromCustom', { count: custom }) : '', Number(result.laya) > 0 ? t('widget.suggestedByLaya') : '',
-          layaGuessed ? t('widget.layaGuessed', { count: layaGuessed }) : '', held ? t('widget.held', { count: held }) : ''].filter(Boolean);
+          layaGuessed ? t('widget.layaGuessed', { count: layaGuessed }) : '', held ? t('widget.held', { count: held }) : '',
+          household ? t('widget.household', { count: household }) : ''].filter(Boolean);
         return notes.length ? [summary.replace(/\.$/, ''), ...notes].filter(Boolean).join(' · ') : summary;
       }
       if (result.state === 'done') {
@@ -338,6 +341,10 @@
     // by id and their own words. One button asks the app for all of them.
     let held = [];
     let heldSignature = '';
+    // Add your household (#180): the household questions the last Autofill left open because of what the household list lacks
+    // (no list saved, or a birth date missing on it), by id and their own words. One button opens the app on Your household.
+    let household = null;
+    let householdSignature = '';
     // Laya's best guesses (#185): the questions the last Autofill filled with one, by id and their own words, to find and check.
     let layaGuesses = [];
     let guessesSignature = '';
@@ -462,6 +469,7 @@
       document.querySelectorAll('.checklist-item').forEach(button => { button.disabled = working || !target; });
       document.querySelectorAll('.save-row button').forEach(button => { button.disabled = working || !target; });
       $('held-fill').disabled = working || !target;
+      $('household-open').disabled = working || !target;
       document.querySelectorAll('#remember-list input').forEach(box => { box.disabled = working || !target; });
       $('remember-save').disabled = working || !target || !rememberChecked().length;
       renderQuestionControls();
@@ -471,6 +479,7 @@
       fillable = false; autopilot = false; site = null; page = null; notSaved = []; checklistSignature = '';
       savable = []; savableSignature = '';
       held = []; heldSignature = '';
+      household = null; householdSignature = '';
       layaGuesses = []; guessesSignature = '';
       rememberable = []; rememberSignature = ''; rememberChoices.clear();
       $('remember-list').replaceChildren();
@@ -481,6 +490,8 @@
       $('save-section').hidden = true;
       $('held-list').replaceChildren();
       $('held-section').hidden = true;
+      $('household-list').replaceChildren();
+      $('household-section').hidden = true;
       $('guesses-list').replaceChildren();
       $('guesses-section').hidden = true;
       resetQuestions();
@@ -566,6 +577,38 @@
       }));
       $('held-section').hidden = !held.length;
     }
+    // What the household list lacks and the questions it left open, as the worker gave them, or null (#180).
+    function householdOf(value) {
+      const questions = (Array.isArray(value?.questions) ? value.questions : []).filter(item => fieldKeys([item?.id]).length && typeof item.label === 'string')
+        .slice(0, 40).map(({ id, label }) => ({ id, label }));
+      if (!questions.length) return null;
+      if (value.need === 'list') return { need: 'list', questions };
+      const person = value.need === 'birthDate' && (value.person === 'you' || (Number.isInteger(value.person) && value.person >= 1 && value.person <= 20)) ? value.person : null;
+      return person === null ? null : { need: 'birthDate', person, questions };
+    }
+    // The household questions in their own words, what the list lacks (the person to finish named as My information names them),
+    // and one button: Add your household, or with a list saved, Open your household list.
+    function renderHousehold() {
+      const signature = JSON.stringify([language, household]);
+      if (signature === householdSignature) return;
+      householdSignature = signature;
+      $('household-section').hidden = !household;
+      if (!household) { $('household-list').replaceChildren(); return; }
+      const hint = household.need === 'list' ? { key: 'household.hintList' } : household.person === 'you' ? { key: 'household.hintYou' }
+        : { key: 'household.hintPerson', params: { number: household.person } };
+      $('household-hint').textContent = words(hint);
+      const button = household.need === 'list' ? 'household.add' : 'household.open';
+      $('household-open').textContent = t(button);
+      $('household-list').replaceChildren(...household.questions.map(item => {
+        const row = document.createElement('div');
+        row.className = 'checklist-item'; row.dataset.householdId = item.id;
+        const copy = document.createElement('span'); copy.className = 'checklist-copy';
+        const label = document.createElement('span'); label.className = 'checklist-label'; label.dir = 'auto'; label.textContent = fixedText(item.label, 200);
+        copy.append(label);
+        row.append(copy);
+        return row;
+      }));
+    }
     // One row per open question the page holds an answer for, in its own words, with a Remember for next time checkbox: checked
     // unless its answer changes over time, until the applicant changes it. The section's one button remembers the checked ones.
     function rememberChecked() { return rememberable.filter(item => rememberChoices.get(item.id) ?? !item.timeBound).map(item => item.id); }
@@ -638,6 +681,7 @@
         .slice(0, 40).map(({ id, label, answered }) => ({ id, label, answered }));
       held = (Array.isArray(state.held) ? state.held : []).filter(item => fieldKeys([item?.id]).length && typeof item.label === 'string')
         .slice(0, 40).map(({ id, label }) => ({ id, label }));
+      household = householdOf(result?.household);
       layaGuesses = (Array.isArray(result?.layaGuesses) ? result.layaGuesses : []).filter(item => fieldKeys([item?.id]).length && typeof item.label === 'string')
         .slice(0, 40).map(({ id, label }) => ({ id, label }));
       rememberable = (Array.isArray(state.rememberable) ? state.rememberable : []).filter(item => fieldKeys([item?.id]).length && typeof item.label === 'string' &&
@@ -645,6 +689,7 @@
       renderChecklist();
       renderSaves();
       renderHeld();
+      renderHousehold();
       renderGuesses();
       renderRemember();
       const loading = target?.status === 'loading';
@@ -1097,6 +1142,12 @@
       show(fromResult(result));
       await refresh();
     }));
+    // Add your household (#180): the app opens My information at Your household. The questions stay listed until the next Autofill.
+    $('household-open').addEventListener('click', trusted(async () => {
+      if ($('household-open').disabled) return;
+      const result = await act({ type: 'ui:openHousehold', confirmed: true });
+      if (result?.shown === true) { notice = { message: { key: 'household.opened' }, error: false }; renderStatus(); }
+    }));
     $('site-disable').addEventListener('click', trusted(async () => {
       if ($('site-disable').disabled) return;
       const result = await act({ type: 'ui:disableSite', confirmed: true }, { key: 'panel.turningOff' });
@@ -1116,7 +1167,7 @@
     function relabel() {
       applyStatic();
       $('language').value = language;
-      if (page) { renderChecklist(); renderSaves(); renderGuesses(); renderRemember(); }
+      if (page) { renderChecklist(); renderSaves(); renderHousehold(); renderGuesses(); renderRemember(); }
       renderStatus();
       renderDesktop();
       resetQuestions();
