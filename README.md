@@ -54,7 +54,7 @@ It comes in two parts that work together:
 Think of it like a password manager, but for the questions every assistance form asks. Nothing goes to a SecondHand server, because there isn't one. You stay in charge: the app asks before it shares anything, and you always review, sign, and submit yourself.
 
 <p align="center">
-  <img src="docs/media/autofill.gif" width="880" alt="The SecondHand card in the corner of Iowa's application. A click on Autofill fills the saved answers, a yellow '1 need you' link appears, and clicking it jumps to the empty First Name field, where Daniel is typed.">
+  <img src="docs/media/autofill.gif" width="880" alt="The SecondHand card in the corner of Iowa's application. A click on Autofill fills the saved answers, a yellow '1 need you' link appears, and clicking it jumps to the empty First Name field, where Avery is typed.">
   <br>
   <sub>A fictional applicant on a synthetic copy of Iowa's form. Nothing is sent anywhere.</sub>
 </p>
@@ -108,13 +108,13 @@ SecondHand was built for **Hack Away Hunger**, the DSMHack / CharityHack 2026 ha
 
 | Your saved details, in the desktop app | The overview |
 | --- | --- |
-| <img src="docs/media/desktop-my-information.png" alt="The My information page of the SecondHand desktop app, with the fictional applicant Daniel Ceaser's name, date of birth, and program choices" width="100%"> | <img src="docs/media/desktop-overview.png" alt="The SecondHand desktop app's Overview: a Prepare my application button, three next steps, and one Iowa SNAP application in progress" width="100%"> |
+| <img src="docs/media/desktop-my-information.png" alt="The My information page of the SecondHand desktop app, with the fictional applicant Avery Example's name, date of birth, and student status" width="100%"> | <img src="docs/media/desktop-overview.png" alt="The SecondHand desktop app's Overview: a Prepare my application button, three next steps, and one Iowa SNAP application in progress" width="100%"> |
 
 **2. Click Autofill on the application.** Open Iowa's SNAP application in Chrome and click **Autofill** in the SecondHand card. The app asks first: **Allow once**, or **Always allow on this computer**.
 
 **3. Finish what's left, then submit it yourself.** A yellow **need you** link jumps to each missing answer. Chrome's side panel lists every question on the page as **Done**, **Needs you**, **Optional**, or **Do it yourself**.
 
-<img src="docs/media/side-panel.png" alt="Iowa's Enter Personal Information page with Last Name filled and First Name empty, the SecondHand card showing Stop and 1 need you, and the side panel checklist marking First name as Needs you and Last name as Done" width="100%">
+<img src="docs/media/side-panel.png" alt="Iowa's Enter Personal Information page with First Name empty and the rest filled for the fictional applicant Avery Example, the SecondHand card showing Stop and 1 need you, and Chrome's side panel saying Filled 20, 1 need you, with First name marked not saved in SecondHand and Middle name, Last name, Suffix, and Maiden name marked Done" width="100%">
 
 ## What it does today
 
