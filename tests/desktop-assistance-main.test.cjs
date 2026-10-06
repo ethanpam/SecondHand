@@ -536,6 +536,47 @@ test('suggestFields and answerFields take an untrusted https site only while all
   for (const request of anywhere) await assert.rejects(on.request(request), /isn’t trusted/, request.type);
 });
 
+// #137: an embedded form's requests carry the form's own address, so trust and every prompt follow that site.
+const EMBEDDED_FORM = 'https://forms.example.net/embed';
+test('an embedded form’s requests are trusted and prompted for the form’s own site, never the page around it', async () => {
+  const sixtyThere = answerRequest([sixty], { url: EMBEDDED_FORM });
+  // Only the host page is trusted: its trust doesn't cover a form from another site.
+  const hostOnly = await answering({ extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'] });
+  for (const request of [{ type: 'getFields', url: EMBEDDED_FORM, fields: ['firstName'] }, suggest([box], { url: EMBEDDED_FORM }), sixtyThere]) {
+    await assert.rejects(hostOnly.request(request), /isn’t trusted/, request.type);
+  }
+  await assert.rejects(hostOnly.request({ type: 'saveFields', url: EMBEDDED_FORM, fields: { email: 'synthetic@example.org' } }), /isn’t trusted/, 'saveFields');
+  assert.equal(hostOnly.prompts.length, 0);
+  hostOnly.answer(async () => ({ response: 1 }));
+  await hostOnly.request({ type: 'trustSite', url: EMBEDDED_FORM });
+  assert.deepEqual(plain((await hostOnly.request({ type: 'getFields', url: EMBEDDED_FORM, fields: ['county'] })).values), { county: 'Polk' },
+    'trusting the form’s own site lets it ask');
+
+  // With all websites on, the sensitive prompts name the form's site, the one that gets the answers.
+  const everywhere = await answering({ extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'], allSites: true });
+  await everywhere.invoke('saveProfile', { ...household, firstName: 'Synthetic', assetsOnHand: '250' });
+  everywhere.answer(async () => ({ response: 1 }));
+  assert.deepEqual(plain((await everywhere.request({ type: 'getFields', url: EMBEDDED_FORM, fields: ['firstName', 'assetsOnHand'] })).values), { firstName: 'Synthetic', assetsOnHand: '250' });
+  assert.deepEqual(plain((await everywhere.request(sixtyThere)).answers), { [sixty.id]: 'No' });
+  const [fields, answers] = everywhere.prompts;
+  assert.equal(fields.title, 'Share sensitive details?');
+  assert.equal(fields.message, 'Fill sensitive details on https://forms.example.net?');
+  assert.match(fields.detail, /give these details to https:\/\/forms\.example\.net\./);
+  assert.equal(answers.message, 'Fill this answer on https://forms.example.net? It uses sensitive details.');
+  assert.match(answers.detail, /meant to give these answers to https:\/\/forms\.example\.net:/);
+  // Saving an answer the form's page holds names that site too.
+  assert.deepEqual(plain(await everywhere.request({ type: 'saveFields', url: EMBEDDED_FORM, fields: { email: 'synthetic@example.org' } })), { saved: ['email'] });
+  assert.equal(everywhere.prompts.at(-1).message, 'Save this answer from https://forms.example.net to My information?');
+  for (const prompt of everywhere.prompts) assert.doesNotMatch(`${prompt.message} ${prompt.detail}`, /pantry\.example\.org/);
+
+  // Without Always allow, the everyday prompt names it too.
+  const ordinary = await desktop({ settings: { extensionId, allSites: true } });
+  ordinary.answer(async () => ({ response: 1 }));
+  await ordinary.request({ type: 'getFields', url: EMBEDDED_FORM, fields: ['firstName'] });
+  assert.equal(ordinary.prompts[0].message, 'Fill these saved answers into https://forms.example.net?');
+  assert.match(ordinary.prompts[0].detail, /^Website: https:\/\/forms\.example\.net\n/);
+});
+
 test('before a new install has downloaded the shipped model, both Laya requests answer "not ready" and status says so', async () => {
   const app = await desktop({ settings: trusted });
   assert.deepEqual(plain((await app.request({ type: 'status' })).laya), { state: 'not-downloaded' });
