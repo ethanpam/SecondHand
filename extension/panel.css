@@ -52,7 +52,7 @@ main{padding:0 16px}
 .actions{position:sticky;top:0;z-index:1;margin:0 -16px 16px;padding:16px 16px 4px;background:var(--background);border-bottom:1px solid var(--border)}@media(max-height:480px){.actions{position:static}}
 .actions:not(:has(>button:not([hidden]),>a:not([hidden]),>.status:not(:empty):not([hidden]))){margin-bottom:0;padding:16px 0 0;border:0}
 /* The app needs opening or unlocking. */
-.desktop-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 12px;margin:16px 0 0;padding:12px 14px;background:#fff;border:1px solid var(--border);border-radius:12px}.desktop-row>span{flex:1 1 140px;font-weight:500}.desktop-row.error>span{color:var(--danger)}.desktop-row .button{min-height:36px;padding:6px 16px;font-size:13px}
+.desktop-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 12px;margin:16px 0 0;padding:12px 14px;background:#fff;border:1px solid var(--border);border-radius:12px}.desktop-row>span{flex:1 1 200px;font-weight:500}.desktop-row.error>span{color:var(--danger)}.desktop-row .button{min-height:36px;padding:6px 16px;font-size:13px}
 /* What happened, then the small print. An empty status keeps its place for screen readers and takes no room. */
 .status{margin-bottom:12px;overflow-wrap:anywhere}.status:empty{margin:0}.status.error{color:var(--danger)}
 .note{margin-bottom:12px;color:var(--muted-foreground)}
@@ -64,6 +64,10 @@ button.checklist-item::after{content:"";flex:none;width:7px;height:7px;margin-in
 /* A ring for a row that waits, heavier when it waits for the reader, and the website's check for one that is done. */
 .checklist-mark{display:flex;align-items:center;justify-content:center;flex-shrink:0;width:20px;height:20px;border:1.5px solid var(--control);border-radius:50%}.checklist-mark svg{width:12px;height:12px;fill:none;stroke:#fff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.checklist-item.complete .checklist-mark{background:var(--ring);border-color:var(--ring)}.checklist-item.missing .checklist-mark,.checklist-item.manual .checklist-mark{border:2px solid var(--foreground)}
 .checklist-copy{flex:1;min-width:0}.checklist-label{display:block;font-size:14px;line-height:1.4}.checklist-detail{display:block;color:var(--muted-foreground);margin-top:2px}.checklist-item.complete .checklist-label,.checklist-item.optional .checklist-label{color:var(--muted-foreground)}.checklist-item.missing .checklist-label,.checklist-item.manual .checklist-label,.checklist-item.missing .checklist-detail,.checklist-item.manual .checklist-detail{color:var(--foreground);font-weight:500}
+/* A done row is one line: its check says it, and its name still says "Done" to a screen reader. */
+.checklist-item.complete .checklist-detail{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+/* A narrow panel, as when zoomed in, gives the words the room the arrow and the margins took. */
+@media(max-width:260px){.checklist-item{gap:8px;padding:10px}button.checklist-item::after{display:none}}
 .checklist-section>.note{margin:0 0 8px}
 /* What stays with the reader, in the panel's own dark print. */
 footer{border-top:1px solid var(--border);margin-top:12px;padding:12px 0 16px}
