@@ -56,14 +56,19 @@ const until = async (condition, what) => {
 async function desktop(t, { settings = { extensionId }, settingsText, manifest, updateUrl = null, shipped = false, env = {}, unlocked = true, packaged = false } = {}) {
   assert.ok(manifest || shipped, 'Give the desktop a local manifest, or keep Laya off with the shipped one');
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'secondhand-laya-main-'));
-  t.after(() => fs.rmSync(userData, { recursive: true, force: true }));
+  const created = [];
+  // Laya closes, and every check and download it started ends, before its folder goes: one still writing
+  // would make the folder again.
+  t.after(async () => {
+    for (const { laya, runs } of created) { await laya.close(); await Promise.all(runs); }
+    fs.rmSync(userData, { recursive: true, force: true });
+  });
   if (settingsText !== undefined) fs.writeFileSync(path.join(userData, 'settings.json'), settingsText);
   else if (settings !== null) fs.writeFileSync(path.join(userData, 'settings.json'), JSON.stringify(settings));
   const writes = [];
   const runner = { loads: 0, releases: 0, async load() { runner.loads++; return {
     async run(batch) { return { data: new Float32Array(batch.rows * batch.count), dims: [batch.rows, batch.count] }; },
     async release() { runner.releases++; } }; } };
-  const created = [];
   class Vault {
     constructor() { this.unlocked = unlocked; this.data = { profile: {}, applications: [] }; }
     async exists() { return true; }
@@ -75,12 +80,13 @@ async function desktop(t, { settings = { extensionId }, settingsText, manifest, 
     './vault.cjs': { ...require('../desktop/vault.cjs'), Vault, atomicWrite: async (file, bytes) => { writes.push({ file, json: JSON.parse(bytes.toString()) }); } },
     './laya.cjs': { ...realLaya, createLaya: options => {
       const laya = realLaya.createLaya({ ...options, ...(manifest ? { manifest } : {}), updateUrl, runner, checkEveryMs: 60 * 60 * 1000 });
-      // The update runs main.cjs starts, so a test can wait until they are over.
+      // The checks and downloads main.cjs starts, so a test can wait until they are over.
       const runs = [];
-      const startUpdates = laya.startUpdates;
-      laya.startUpdates = () => { const run = startUpdates(); runs.push(run); return run; };
+      for (const name of ['startUpdates', 'update', 'startDownload']) {
+        const start = laya[name];
+        laya[name] = (...args) => { const run = start(...args); runs.push(run); return run; };
+      }
       created.push({ options, laya, runs });
-      t.after(() => laya.close());
       return laya;
     } }
   } });
