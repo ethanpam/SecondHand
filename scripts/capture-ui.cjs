@@ -31,6 +31,9 @@ const screen = name => `${smoke.portal}${preApplicant.screens[name].path}`;
 const UNKNOWN = `${smoke.portal}/applyForBenefits/householdMembers`;
 const PANTRY = 'https://pantry.example.org/intake';
 const HOUSEHOLD = 'https://pantry.example.org/household';
+const DETAILS = 'https://pantry.example.org/details';
+const SERVICE = 'https://pantry.example.org/service-area';
+const SERVICE_QUESTION = 'Do you live in our service area?';
 const DESPENSA = 'https://despensa.example.org/registro';
 // A shot is asked for by its name, or by the start of its name ending in a hyphen.
 const wanted = name => !only.length || only.some(asked => asked.endsWith('-') ? name.startsWith(asked) : name === asked);
@@ -46,15 +49,21 @@ const pages = {
     `${field('hh', 'Household size', 'number')}${field('pet', 'Do you have a pet?')}<button type="submit">Submit</button></form>`),
   [HOUSEHOLD]: formPage('Pantry order: household', `<form>${field('young', '# of people in your household 0 - 17 yrs old')}${field('apt', 'Apartment number')}` +
     `${field('guardian', 'Guardian first and last name')}<button type="submit">Submit</button></form>`),
+  [DETAILS]: formPage('Pantry sign-up: your details', `<form>${field('first', 'First name')}${field('dob', 'Date of birth', 'date')}<button type="submit">Submit</button></form>`),
+  [SERVICE]: formPage('Pantry sign-up: service area', `<form>${field('first', 'First name')}<fieldset><legend>${SERVICE_QUESTION}</legend>` +
+    `${['Yes', 'No', 'Not sure'].map((option, index) => `<label><input type="radio" name="area" id="area-${index}" value="${option}">${option}</label>`).join('')}</fieldset>` +
+    '<button type="submit">Submit</button></form>'),
   [DESPENSA]: formPage('Registro de la despensa', `<form>${field('nombre', 'Nombre')}${field('apellido', 'Apellido')}${field('cp', 'Código postal')}` +
     `${field('correo', 'Correo electrónico', 'email')}<button type="submit">Enviar</button></form>`, 'es')
 };
 
 // The desktop app as the worker sees it over native messaging, with Always allow on. A session changes
-// locked, closed, or laya on globalThis.__desktop to show the app in that state.
+// locked, closed, or laya on globalThis.__desktop to show the app in that state. With `holds`, it plays the app
+// without Always allow, holding those fields back for Fill sensitive details (#176). With `guess` and Laya
+// ready, Laya is sure of nothing and guesses "Yes" for the service-area question (#185).
 async function installDesktop(worker) {
-  await worker.evaluate(profile => {
-    globalThis.__desktop = { profile, locked: false, closed: false, laya: 'unavailable', allSites: false };
+  await worker.evaluate(({ profile, serviceQuestion }) => {
+    globalThis.__desktop = { profile, locked: false, closed: false, laya: 'unavailable', allSites: false, holds: [], guess: false };
     nativeRequest = async (type, payload = {}) => {
       const desktop = globalThis.__desktop;
       if (type === 'openApp') return { opened: 'shown' };
@@ -64,18 +73,25 @@ async function installDesktop(worker) {
       if (type === 'trustAllSites' || type === 'untrustAllSites') { desktop.allSites = type === 'trustAllSites'; return { allSites: desktop.allSites }; }
       if (type === 'trustSite' || type === 'untrustSite') return { trusted: type === 'trustSite', origin: new URL(payload.url).origin };
       if (type === 'warmLaya') return { state: desktop.laya };
+      if (type === 'suggestFields' && desktop.guess && desktop.laya === 'ready') return { suggestions: {}, accessRevision: 0 };
+      if (type === 'answerFields' && desktop.guess && desktop.laya === 'ready') {
+        const area = payload.questions.find(question => question.label === serviceQuestion);
+        return { answers: {}, guesses: area ? { [area.id]: 'Yes' } : {}, accessRevision: 0 };
+      }
       if (type === 'suggestFields' || type === 'answerFields') throw Object.assign(new Error('Laya isn’t ready on this computer.'), { code: 'LAYA_NOT_READY' });
       if (type === 'getFields') {
         if (desktop.locked) throw new Error('Unlock your local vault first.');
         // The app is asking the person: the request waits until the capture lets it go.
         if (desktop.hold) await new Promise(resolve => { globalThis.__release = resolve; });
-        return { accessRevision: 0, values: Object.fromEntries(payload.fields.filter(name => desktop.profile[name]).map(name => [name, desktop.profile[name]])) };
+        const held = payload.sensitive === true ? [] : payload.fields.filter(name => desktop.holds.includes(name));
+        return { accessRevision: 0, values: Object.fromEntries(payload.fields.filter(name => desktop.profile[name] && !held.includes(name)).map(name => [name, desktop.profile[name]])),
+          ...(held.length ? { held } : {}) };
       }
       if (type === 'recordProgress') return { recorded: true };
       if (type === 'saveFields') return { saved: Object.keys(payload.fields) };
       throw new Error(`Unexpected native request in the UI capture: ${type}`);
     };
-  }, smoke.syntheticProfile);
+  }, { profile: smoke.syntheticProfile, serviceQuestion: SERVICE_QUESTION });
 }
 
 async function launch(userData, extensionDirectory, { viewport = VIEW, scale = 2, video } = {}) {
@@ -119,7 +135,7 @@ async function launch(userData, extensionDirectory, { viewport = VIEW, scale = 2
   // Leaving the page turns a running autofill off, so every state starts clean.
   async function open(url, desktop = {}) {
     await page.goto('about:blank');
-    await worker.evaluate(desktop => Object.assign(globalThis.__desktop, desktop), { locked: false, closed: false, laya: 'unavailable', profile: smoke.syntheticProfile, ...desktop });
+    await worker.evaluate(desktop => Object.assign(globalThis.__desktop, desktop), { locked: false, closed: false, laya: 'unavailable', holds: [], guess: false, profile: smoke.syntheticProfile, ...desktop });
     await page.goto(url, { waitUntil: 'domcontentloaded' });
     await page.bringToFront();
   }
@@ -331,6 +347,9 @@ async function iowaPanel() {
     // A tab SecondHand can't read.
     await page.goto('about:blank');
     await panelShot(session, panel, 'panel-elsewhere', () => document.getElementById('panel-autofill').disabled && Boolean(document.getElementById('status').textContent));
+    await chooseLanguage(panel, 'es');
+    await panelShot(session, panel, 'panel-elsewhere-es', () => document.getElementById('all-sites-note').textContent.startsWith('Para'));
+    await chooseLanguage(panel, 'en');
 
     // Arabic reads right to left. Spanish lists the page's questions in Spanish.
     await open(applicant);
@@ -413,6 +432,18 @@ async function sites() {
       await expect.poll(() => shown('save-section'), { timeout: 20000 }).toBe(true);
       await page.locator('#apt').fill('Unit 5');
       await panelShot(running, panel, 'panel-save', () => Boolean(document.querySelector('[data-save-id] button')));
+      // Without Always allow, the app holds the date of birth back for Fill sensitive details (#176).
+      await open(DETAILS, { holds: ['birthDate'], laya: 'ready', guess: true });
+      await recheck(panel);
+      await expect.poll(() => panel.evaluate(() => !document.getElementById('panel-autofill').disabled), { timeout: 20000 }).toBe(true);
+      await panel.click('#panel-autofill');
+      await panelShot(running, panel, 'panel-site-held', () => !document.getElementById('held-section').hidden);
+      // Laya isn't sure, so it fills its best guess with its own outline and the side panel lists it (#185).
+      await open(SERVICE, { laya: 'ready', guess: true });
+      await recheck(panel);
+      await expect.poll(() => panel.evaluate(() => !document.getElementById('panel-autofill').disabled), { timeout: 20000 }).toBe(true);
+      await panel.click('#panel-autofill');
+      await panelShot(running, panel, 'panel-site-guessed', () => !document.getElementById('guesses-section').hidden);
       // All websites on, then off: the notice says how to remove the access Chrome keeps.
       await panel.click('#all-sites-enable');
       await expect.poll(() => shown('all-sites-disable'), { timeout: 20000 }).toBe(true);
@@ -437,6 +468,10 @@ async function sites() {
       await open(DESPENSA);
       await expect((await card()).locator('#translate-offer')).toBeVisible({ timeout: 20000 });
       await cardShot(running, 'card-offer');
+      // After Autofill, the offer stays beside what it reports.
+      await (await card()).locator('#autofill').click();
+      await expect((await card()).locator('#need-you')).toBeVisible({ timeout: 20000 });
+      await cardShot(running, 'card-offer-filled');
     });
   });
 }
@@ -514,8 +549,8 @@ async function recording() {
 
 const sessions = [
   [iowaCard, ['card-ready', 'card-focus', 'card-hidden', 'card-hidden-focus', 'card-working', 'card-need-you', 'card-hidden-waiting', 'card-ready-again', 'card-message', 'card-locked', 'card-closed', 'card-pill']],
-  [iowaPanel, ['panel-iowa', 'panel-header', 'panel-focus', 'panel-working', 'panel-iowa-filled', 'panel-checklist', 'panel-iowa-again', 'panel-locked', 'panel-closed', 'panel-info', 'panel-elsewhere', 'panel-arabic', 'panel-questions']],
-  [sites, ['panel-site-off', 'panel-site-filled', 'panel-site-filled-open', 'panel-laya-off', 'panel-save', 'panel-all-sites-off', 'card-site', 'card-offer']],
+  [iowaPanel, ['panel-iowa', 'panel-header', 'panel-focus', 'panel-working', 'panel-iowa-filled', 'panel-checklist', 'panel-iowa-again', 'panel-locked', 'panel-closed', 'panel-info', 'panel-elsewhere', 'panel-elsewhere-es', 'panel-arabic', 'panel-questions']],
+  [sites, ['panel-site-off', 'panel-site-filled', 'panel-site-filled-open', 'panel-laya-off', 'panel-save', 'panel-site-held', 'panel-site-guessed', 'panel-all-sites-off', 'card-site', 'card-offer', 'card-offer-filled']],
   [outdated, ['card-outdated', 'panel-outdated', 'card-reload']],
   [recording, ['card-autofill']]
 ];

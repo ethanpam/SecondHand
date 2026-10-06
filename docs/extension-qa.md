@@ -90,7 +90,8 @@ it actually shows.
 
 `npm run capture:ui -- <label>` loads the extension in the same isolated Chromium and saves each state of
 the card and the side panel as `docs/pr-media/<shot>-<label>.png`: ready, working, filled, hidden to its
-logo, locked, the app closed, another website, Spanish, Arabic, and an outdated build. Run it with `before` on main and `after` on a
+logo, locked, the app closed, another website, sensitive details held for Fill sensitive details, Laya's
+guesses, Spanish, Arabic, and an outdated build. Run it with `before` on main and `after` on a
 branch to compare them in a pull request. Shot names after the label limit the run to those shots; a name
 that ends in a hyphen takes every shot that starts with it, as in `npm run capture:ui -- after card- panel-iowa`.
 
