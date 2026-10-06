@@ -22,6 +22,21 @@ const plain = value => JSON.parse(JSON.stringify(value));
 const TODAY = '2026-10-05';
 const IDLE_MS = 10 * 60 * 1000;
 
+test('expanded SNAP answers are Iowa-only even when another site is trusted; record lists never leave the vault', async () => {
+  const app = await desktop({ profile: { iowaResident: 'yes', ssnCardFirstName: 'Synthetic', jobs: [{ employer: 'Private' }] },
+    settings: { extensionId, autofillWithoutAsking: true, allSites: true, trustedSites: ['https://pantry.example.org'] } });
+  for (const key of schema.SNAP_IOWA_ONLY_FIELDS) {
+    await assert.rejects(app.request({ type: 'getFields', url: 'https://pantry.example.org/intake', fields: [key] }), /only be shared with Iowa/);
+  }
+  for (const key of schema.LIST_FIELDS) for (const url of [PORTAL_URL, 'https://pantry.example.org/intake']) {
+    await assert.rejects(app.request({ type: 'getFields', url, fields: [key] }), /doesn’t share/);
+  }
+  assert.equal(app.dataReads, 0, 'blocked requests do not even read the profile');
+  assert.equal(app.prompts.length, 0);
+  const response = await app.request({ type: 'getFields', fields: ['iowaResident', 'ssnCardFirstName'] });
+  assert.deepEqual(plain(response.values), { iowaResident: 'yes', ssnCardFirstName: 'Synthetic' });
+});
+
 async function desktop(options = {}) {
   let bridge;
   let shows = 0;

@@ -47,13 +47,13 @@ function parse(page) {
   const years = [...new Set(title.row.words.map(word => word.text.replace(/^[|([{]+|[|\])},.]+$/g, '')).filter(text => /^(?:19|20)\d{2}$/.test(text)))];
   if (years.length === 1) result.taxYear = years[0];
   else warnings.push('The W-2 tax year could not be identified unambiguously.');
-  const add = (id, label, value, words, profileKey, source, kind) => {
+  const add = (id, label, value, words, profileKey, source, kind, sourceRole = kind === 'amount' ? 'document' : 'applicant') => {
     if (typeof value !== 'string' || !value.trim() || value.length > 200 || /[\u0000-\u001f]/.test(value) || !words.length) return;
     if (profileKey) {
       try { value = validateProfile({ [profileKey]: value })[profileKey]; } catch { return; }
     }
     fields.push({ id, label, value, page: pageNumber, confidence: meanConfidence(words),
-      ...(profileKey ? { profileKey } : {}), sourceLabel: content(source.words).slice(0, 150), sourceRole: kind === 'amount' ? 'document' : 'applicant', ...(kind ? { kind } : {}) });
+      ...(profileKey ? { profileKey } : {}), sourceLabel: content(source.words).slice(0, 150), sourceRole, ...(kind ? { kind } : {}) });
   };
 
   // Each amount is below its own printed caption, above the next caption, and
@@ -85,6 +85,43 @@ function parse(page) {
       const words = afterLabel(rows, anchor, ein, anchor.x0, anchor.x1);
       const value = content(words).replace(/\s+/g, '');
       if (/^\d{3}-?\d{2}-?\d{4}$/.test(value)) add('w2EmployeeSsn', 'Employee Social Security number', value, words, 'ssn', anchor, 'identifier');
+    }
+  }
+
+  // Employer details are historical source references, never applicant fields.
+  // Box c ends at the control-number header, before the employee block. Require
+  // a complete domestic name/street/locality shape rather than guessing which
+  // row is the employer name when a row is absent.
+  const employer = one(rows, "Employer's name address and ZIP code"), control = one(rows, 'Control number');
+  const employerRight = columnStart(boxes['1'], '1');
+  if (employer && control && employerRight && employer.x1 < employerRight && employer.y1 < control.y0) {
+    const employerRows = rows.map(row => row.words.filter(word => centerY(word) > employer.y1 && centerY(word) < control.y0 &&
+      centerX(word) >= employer.x0 && centerX(word) < employerRight)).filter(words => words.length);
+    const inside = employerRows.every(words => words.every(word => word.bbox.x0 >= employer.x0 - (word.bbox.y1 - word.bbox.y0) / 2 && word.bbox.x1 <= employerRight));
+    if (inside && (employerRows.length === 3 || employerRows.length === 4)) {
+      const name = content(employerRows[0]), street = content(employerRows[1]);
+      const locality = /^([\p{L}][\p{L} .'-]{0,99}),?\s+([A-Z]{2})\s+(\d{5}(?:-\d{4})?)$/u.exec(content(employerRows.at(-1)));
+      const unit = employerRows.length === 4 ? content(employerRows[2]) : '';
+      if (locality && /^[\p{L}\p{N}][\p{L}\p{N} .,'’&()/+-]{0,199}$/u.test(name) && /\p{L}/u.test(name) &&
+          /\d/.test(street) && /\p{L}/u.test(street) && (!unit || /^(?:APT\.?|UNIT|SUITE|STE\.?|#)\s*[\p{L}\p{N}][\p{L}\p{N} .#/-]{0,29}$/iu.test(unit))) {
+        try {
+          validateProfile({ city: locality[1], state: locality[2], zip: locality[3] });
+          const addEmployer = (id, label, value, words) => add(id, label, value, words, undefined, employer, undefined, 'employer');
+          addEmployer('w2EmployerName', 'Employer name on W-2 (historical)', name, employerRows[0]);
+          addEmployer('w2EmployerStreet', 'Employer street address on W-2', street, employerRows[1]);
+          if (unit) addEmployer('w2EmployerUnit', 'Employer apartment or suite', unit, employerRows[2]);
+          for (const [id, label, value] of [['w2EmployerCity', 'Employer city', locality[1]], ['w2EmployerState', 'Employer state', locality[2]], ['w2EmployerZip', 'Employer ZIP code', locality[3]]]) {
+            addEmployer(id, label, value, employerRows.at(-1));
+          }
+        } catch { /* Uncertain employer addresses remain in raw text only. */ }
+      }
+    }
+  }
+  if (ein && employer && employerRight && ein.y1 < employer.y0 && ein.x1 < employerRight) {
+    const words = afterLabel(rows, ein, employer, ein.x0, employerRight);
+    const value = content(words).replace(/\s+/g, '');
+    if (/^(?:\d{2}-\d{7}|\d{9})$/.test(value) && words.every(word => word.bbox.x1 <= employerRight)) {
+      add('w2EmployerEin', 'Employer EIN (review only)', value, words, undefined, ein, 'identifier', 'employer');
     }
   }
 

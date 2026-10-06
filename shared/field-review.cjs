@@ -2,19 +2,21 @@
 
 // Advisory checks only: no I/O, model calls, corrections, or profile writes.
 // Messages and labels are fixed; source values never become review text.
-const { PROFILE_FIELDS, FIELD_LABELS, PROFILE_CHOICES, RELATIONSHIPS, MAX_MEMBERS, validateProfile } = require('./schema.cjs');
+const { PROFILE_FIELDS, FIELD_LABELS, PROFILE_CHOICES, RELATIONSHIPS, MAX_MEMBERS, LIST_FIELDS, SNAP_INFORMATION, RECORD_FIELDS, MAX_RECORDS,
+  validateInformationValue, validateRecords, validateProfile } = require('./schema.cjs');
 const household = require('./household.cjs');
-const SCALARS = PROFILE_FIELDS.filter(key => key !== 'householdMembers');
+const SCALARS = PROFILE_FIELDS.filter(key => !LIST_FIELDS.includes(key));
 const SCALAR_SET = new Set(SCALARS);
-const MEMBER_FIELDS = ['firstName', 'lastName', 'birthDate', 'relationship', 'student', 'grade'];
-const MEMBER_LABELS = { firstName: 'First name', lastName: 'Last name', birthDate: 'Date of birth', relationship: 'Relationship', student: 'Student', grade: 'Grade' };
+const MEMBER_FIELDS = SNAP_INFORMATION.memberFields.map(field => field.key);
+const MEMBER_DEFINITIONS = Object.fromEntries(SNAP_INFORMATION.memberFields.map(field => [field.key, field]));
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STATES = new Set('AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC AS GU MP PR VI AA AE AP FM MH PW'.split(' '));
-const PHONES = new Set(['phone', 'homePhone', 'mobilePhone']);
+const PHONES = new Set(['phone', 'homePhone', 'mobilePhone', ...SNAP_INFORMATION.scalarFields.filter(field => field.type === 'tel').map(field => field.key)]);
 const AMOUNTS = new Set(['monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand', 'monthlyMedicalExpenses']);
 const COUNTS = ['householdAdults', 'householdChildren', 'householdSeniors'];
 const SOURCE = new Set(['firstName', 'middleName', 'lastName', 'maidenName', 'addressLine1', 'addressLine2', 'city', 'county',
-  'mailingAddressLine1', 'mailingAddressLine2', 'mailingCity', 'bestContactTime', ...Object.keys(PROFILE_CHOICES)]);
+  'mailingAddressLine1', 'mailingAddressLine2', 'mailingCity', 'bestContactTime', ...Object.keys(PROFILE_CHOICES),
+  ...SNAP_INFORMATION.scalarFields.filter(field => ['text', 'yesno', 'select'].includes(field.type)).map(field => field.key)]);
 const INVALID = Symbol('invalid input');
 const BAD_VALUE = 'This answer has an unsupported format. Check the original and enter it again.';
 const CHECK_SOURCE = 'Compare this answer with the original source or your own records. Its accuracy has not been verified.';
@@ -92,11 +94,56 @@ function scalar(key, raw, options) {
   return result;
 }
 
+function catalogEntry(key, definition, raw, options) {
+  if (definition.key === 'birthDate' || definition.key === 'ssn') return { ...scalar(definition.key, raw, options), key, label: definition.label };
+  const result = entry(key, definition.label, 'empty');
+  if (raw === undefined || raw === '') return result;
+  if (!bounded(raw, definition.maxLength || 200)) { flag(result, BAD_VALUE); return result; }
+  try { validateInformationValue(definition, raw); }
+  catch { flag(result, BAD_VALUE); return result; }
+  if (raw.trim()) {
+    result.status = ['text', 'yesno', 'select'].includes(definition.type) ? 'check-source' : 'format-passed';
+    result.messages.push(result.status === 'check-source' ? CHECK_SOURCE : FORMAT_ONLY);
+  }
+  return result;
+}
+
+function reviewRecords(profile, results, { today }) {
+  for (const [key, definitions] of Object.entries(RECORD_FIELDS)) {
+    const raw = record(profile) ? read(profile, key) : INVALID;
+    const summary = entry(key, FIELD_LABELS[key], 'empty'); results.push(summary);
+    if (raw === undefined) continue;
+    if (!list(raw)) { flag(summary, 'This information list has an unsupported format. Review its entries.'); continue; }
+    const length = read(raw, 'length');
+    if (!Number.isSafeInteger(length) || length < 0) { flag(summary, BAD_VALUE); continue; }
+    if (length > MAX_RECORDS) flag(summary, 'This information list exceeds the supported number of entries.');
+    else if (length) { summary.status = 'check-source'; summary.messages.push(CHECK_SOURCE); }
+    const ids = new Set();
+    for (let index = 0; index < Math.min(length, MAX_RECORDS); index++) {
+      const row = read(raw, String(index)), shape = record(row), id = shape ? read(row, 'id') : INVALID;
+      const copy = Object.fromEntries(definitions.map(field => [field.key, shape ? read(row, field.key) : INVALID]));
+      if (!shape || !bounded(id, 36) || !UUID.test(id) || ids.has(id.toLowerCase())) flag(summary, 'An entry has a missing or duplicate identifier. Review the list before saving.');
+      if (bounded(id, 36)) ids.add(id.toLowerCase());
+      const rows = definitions.map(field => catalogEntry(`${key}.${index}.${field.key}`, field, copy[field.key], { today }));
+      if (typeof copy.startDate === 'string' && typeof copy.endDate === 'string' && copy.startDate && copy.endDate && copy.endDate < copy.startDate) {
+        for (const item of rows.filter(item => /\.(startDate|endDate)$/.test(item.key))) flag(item, 'The end date is before the start date. Review both dates.');
+      }
+      try { validateRecords(key, [{ id, ...copy }]); } catch { flag(summary, 'An entry contains unsupported values. Review its fields before saving.'); }
+      if (key === 'taxStatements') for (const item of rows.filter(item => item.status !== 'empty')) {
+        if (item.status !== 'needs-review') item.status = 'check-source';
+        item.messages.push('Historical statement details do not establish current employment or income. No monthly-income conversion is made.');
+      }
+      results.push(...rows);
+    }
+  }
+}
+
 function reviewProfile(profile, options = {}) {
   const today = record(options) ? read(options, 'today') : undefined;
   const goodShape = record(profile);
   const values = Object.fromEntries(SCALARS.map(key => [key, goodShape ? read(profile, key) : INVALID]));
   const results = SCALARS.map(key => scalar(key, values[key], { today }));
+  reviewRecords(goodShape ? profile : null, results, { today });
   const byKey = new Map(results.map(result => [result.key, result]));
   const mark = (keys, message) => keys.forEach(key => flag(byKey.get(key), message));
   const value = key => cleanText(values[key]);
@@ -137,17 +184,12 @@ function reviewProfile(profile, options = {}) {
     if (bounded(member.id, 36)) ids.add(member.id.toLowerCase());
     for (const field of MEMBER_FIELDS) {
       const key = `householdMembers.${index}.${field}`, rawValue = member[field];
-      const result = field === 'birthDate' ? { ...scalar(field, rawValue, { today }), key, label: MEMBER_LABELS[field] }
-        : entry(key, MEMBER_LABELS[field], 'empty');
-      if (field !== 'birthDate' && rawValue !== undefined && rawValue !== '') {
-        const max = ['firstName', 'lastName'].includes(field) ? 100 : field === 'student' ? 3 : 20;
-        if (!bounded(rawValue, max)) flag(result, BAD_VALUE);
-        else if (rawValue.trim()) { result.status = 'check-source'; result.messages.push(CHECK_SOURCE); }
-      }
+      const result = catalogEntry(key, MEMBER_DEFINITIONS[field], rawValue, { today });
       const text = cleanText(rawValue);
       if (field === 'relationship' && text && !RELATIONSHIPS.includes(text)) flag(result, 'Choose one of the available relationships.');
       if (field === 'student' && text && !['yes', 'no'].includes(text)) flag(result, 'Choose Yes, No, or leave student status unanswered.');
       if (field === 'grade' && text && member.student !== 'yes') flag(result, 'A grade is entered without a Yes answer for student status. Review both answers.');
+      if (['ssn', 'hasSsnAnswer'].includes(field) && cleanText(member.ssn) && member.hasSsnAnswer === 'no') flag(result, 'A number is entered, but having a Social Security number is answered No. Review both answers.');
       if (field === 'firstName' && !text && member.relationship !== 'self') flag(result, 'Add a first name for this household member, or review whether this person belongs on the list.');
       if (member.relationship === 'self' && ['firstName', 'lastName', 'birthDate'].includes(field) && typeof rawValue === 'string' && text !== value(field)) {
         flag(result, 'The household entry for you differs from your own profile details. Review both entries.');
@@ -178,7 +220,9 @@ function reviewDocumentFields(fields, profile, options = {}) {
   if (!list(fields)) return invalidFields();
   const length = read(fields, 'length'), results = [], seenIds = new Map();
   if (!Number.isSafeInteger(length) || length < 0) return invalidFields();
-  const base = record(profile) ? Object.fromEntries(PROFILE_FIELDS.map(key => [key, read(profile, key)])) : {};
+  // Candidate comparisons need scalar and household context, not another full
+  // review of every local expense/job record for each OCR candidate.
+  const base = record(profile) ? Object.fromEntries([...SCALARS, 'householdMembers'].map(key => [key, read(profile, key)])) : {};
   for (let index = 0; index < Math.min(length, 150); index++) {
     const candidate = read(fields, String(index)), shape = record(candidate);
     const get = key => shape ? read(candidate, key) : INVALID;
@@ -191,7 +235,7 @@ function reviewDocumentFields(fields, profile, options = {}) {
       : { ...entry(`document.${index}`, 'Document field', 'check-source', 'This document detail is for source review only. It is not verified as a current profile answer.'), id };
     if (!supported && (rawValue === undefined || rawValue === '')) { result.status = 'empty'; result.messages = []; }
     if (!shape || (rawValue !== undefined && !bounded(rawValue, 500)) || (label !== undefined && !bounded(label, 150)) ||
-        (sourceLabel !== undefined && !bounded(sourceLabel, 150)) || (sourceRole !== undefined && !['applicant', 'spouse', 'document'].includes(sourceRole)) ||
+        (sourceLabel !== undefined && !bounded(sourceLabel, 150)) || (sourceRole !== undefined && !['applicant', 'spouse', 'document', 'employer', 'payer', 'issuer'].includes(sourceRole)) ||
         (rawId !== undefined && !validId) || (rawKey !== undefined && (!bounded(rawKey, 80) || !supported)) ||
         (page !== undefined && (!Number.isSafeInteger(page) || page < 1 || page > 12)) ||
         (confidence !== undefined && (typeof confidence !== 'number' || !Number.isFinite(confidence) || confidence < 0 || confidence > 100))) {
@@ -217,7 +261,7 @@ function reviewDocumentFields(fields, profile, options = {}) {
       if (supported) flag(result, message);
       else if (result.status !== 'needs-review') { result.status = 'check-source'; result.messages.push(message); }
     }
-    if (supported && (otherPerson || sourceRole === 'spouse')) flag(result, 'This field appears to describe someone other than the applicant. Check whose information it is before using it.');
+    if (supported && (otherPerson || ['spouse', 'employer', 'payer', 'issuer'].includes(sourceRole))) flag(result, 'This field appears to describe someone other than the applicant. Check whose information it is before using it.');
     if (result.status === 'format-passed') result.messages.push('OCR can produce incorrect characters even with high confidence. Compare this value with the original.');
     results.push(result);
   }

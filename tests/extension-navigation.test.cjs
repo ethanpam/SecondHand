@@ -155,7 +155,7 @@ test('Tell Us More at dynamicQuestionsStart asks for the applicant’s answers a
   assert.equal(result.state, 'done');
   assert.equal(result.todoKey, 'iowa.startDetailsTodo');
   assert.deepEqual(requests(w).map(request => [request.url, request.fields]),
-    [[`${adapter.PORTAL}/applyForBenefits/dynamicQuestionsStart`, ['sex', 'birthDate', 'hasSsn', 'ssnCardNameMatches', 'usCitizen', 'householdAllCitizens',
+    [[`${adapter.PORTAL}/applyForBenefits/dynamicQuestionsStart`, ['sex', 'birthDate', 'hasSsn', 'ssn', 'ssnCardNameMatches', 'ssnCardFirstName', 'ssnCardMiddleName', 'ssnCardLastName', 'usCitizen', 'householdAllCitizens',
       'maritalStatus', 'militaryOrVeteran', 'disabled', 'householdDisability', 'blind', 'healthLimitation', 'medicare', 'householdMedicare']]]);
   assert.deepEqual(w.calls.content.filter(message => message.type === 'secondhand:fill').map(message => message.values),
     [{ birthDate: '1985-04-12', hasSsn: 'yes', hasDisability: 'no' }]);

@@ -2,6 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { detect, parse } = require('../shared/document-1099nec.cjs');
+const { analyzeDocument } = require('../shared/document-parser.cjs');
 
 // Synthetic positioned words reproduce the observed separate recipient cells,
 // not the supplied PDF's values. No OCR engine or local artifact is required.
@@ -62,11 +63,14 @@ test('recipient and payer stay separate; only explicit recipient address compone
   assert.equal(fields.necRecipientTin, '12-3456789');
   assert.deepEqual(profile(result), { addressLine1: '42 FIXTURE WAY', addressLine2: 'APT 9C', city: 'CEDAR RAPIDS', state: 'IA', zip: '52401-1234' });
   assert.equal(result.fields.find(field => field.id === 'necRecipientTin').kind, 'identifier');
-  assert.ok(result.fields.every(field => field.page === 3 && field.confidence === 91 && field.sourceRole === 'document'));
+  assert.ok(result.fields.every(field => field.page === 3 && field.confidence === 91 && field.sourceRole === (field.id.startsWith('necPayer') ? 'payer' : 'document')));
   assert.ok(result.fields.every(field => !['firstName', 'middleName', 'lastName', 'ssn', 'phone'].includes(field.profileKey)));
-  for (const payerFact of ['FICTIONAL PAYER', '999 PAYER ROAD', 'PAYER CITY', '555-555-0100', '88-8888888', '10001', 'SYNTHETIC-ACCOUNT']) {
-    assert.equal(JSON.stringify(result.fields).includes(payerFact), false);
+  for (const payerFact of ['FICTIONAL PAYER', '999 PAYER ROAD', 'PAYER CITY', '88-8888888', '10001']) {
+    assert.equal(JSON.stringify(result.fields.filter(field => field.sourceRole !== 'payer')).includes(payerFact), false);
   }
+  assert.ok(result.fields.filter(field => field.sourceRole === 'payer').every(field => !field.profileKey));
+  assert.equal(JSON.stringify(result.fields).includes('555-555-0100'), false);
+  assert.equal(JSON.stringify(result.fields).includes('SYNTHETIC-ACCOUNT'), false);
   assert.deepEqual(page, before, 'source words are never corrected or mutated');
 });
 
@@ -101,7 +105,7 @@ test('blank recipient cells never borrow payer name, address, telephone or taxpa
   assert.deepEqual(profile(result), {});
   assert.equal(valuesById(result).necRecipientName, undefined);
   assert.equal(valuesById(result).necRecipientTin, undefined);
-  assert.ok(result.fields.every(field => field.id.startsWith('taxLine')));
+  assert.ok(result.fields.every(field => field.id.startsWith('taxLine') || field.sourceRole === 'payer'));
 });
 
 test('combined person/business names and every supported TIN spelling remain review-only', () => {
@@ -237,4 +241,45 @@ test('recipient-column adjacent labels still stop the city cell at their earlies
   assert.equal(answers.state, 'IA');
   assert.equal(answers.zip, '52401-1234');
   assert.equal(answers.addressLine1, '42 FIXTURE WAY');
+});
+
+test('bounded payer details remain historical references and cannot substitute for recipient details', () => {
+  const { page } = fixture(), result = parse(page), fields = valuesById(result);
+  assert.equal(fields.necPayerName, 'FICTIONAL PAYER BUSINESS LLC');
+  assert.equal(fields.necPayerStreet, '999 PAYER ROAD');
+  assert.equal(fields.necPayerRoom, 'SUITE 500');
+  assert.equal(fields.necPayerCity, 'PAYER CITY');
+  assert.equal(fields.necPayerState, 'NY');
+  assert.equal(fields.necPayerCountry, 'US');
+  assert.equal(fields.necPayerZip, '10001');
+  assert.equal(fields.necPayerTin, '88-8888888');
+  assert.ok(result.fields.filter(field => field.id.startsWith('necPayer')).every(field => field.sourceRole === 'payer' && !field.profileKey));
+  const blank = fixture(); removeRegion(blank.page, 100, 1200, 110, 129);
+  assert.equal(valuesById(parse(blank.page)).necPayerName, undefined);
+  assert.equal(valuesById(parse(blank.page)).necRecipientName, 'RIVER Q EXAMPLE');
+  const missing = fixture(); removeRegion(missing.page, 100, 750, 150, 169);
+  assert.equal(valuesById(parse(missing.page)).necPayerName, undefined);
+  assert.equal(valuesById(parse(missing.page)).necPayerStreet, undefined);
+  const invalid = fixture(); invalid.page.words.find(word => word.text === '88-8888888').text = '88-888B888';
+  assert.equal(valuesById(parse(invalid.page)).necPayerTin, undefined);
+  assert.equal(valuesById(parse(invalid.page)).necRecipientTin, '12-3456789');
+});
+
+test('a NEC historical reference never persists either TIN and does not infer self-employment status', () => {
+  const { page } = fixture(); page.alternative = { text: page.text, words: structuredClone(page.words) };
+  const result = analyzeDocument({ pages: [page] });
+  assert.equal(result.statement.documentType, '1099-nec');
+  assert.equal(result.statement.sourceRole, 'payer');
+  assert.equal(result.statement.sourceName, 'FICTIONAL PAYER BUSINESS LLC');
+  assert.equal(result.statement.recipientName, 'RIVER Q EXAMPLE');
+  assert.equal(result.statement.annualIncome, '20345.67');
+  assert.match(result.statement.annualIncomeLabel, /nonemployee compensation.*1a.*2027/);
+  assert.equal(result.statement.annualWithholding, '765.43');
+  assert.ok(!/88-8888888|12-3456789|selfEmployed|currentlyEmployed/.test(JSON.stringify(result.statement)));
+  page.alternative.words.find(word => word.text === '88-8888888').text = '88-8888889';
+  page.alternative.words.find(word => word.text === '12-3456789').text = '12-3456788';
+  const disputed = analyzeDocument({ pages: [page] });
+  assert.equal(valuesById(disputed).necPayerTin, undefined);
+  assert.equal(valuesById(disputed).necRecipientTin, undefined);
+  assert.equal(disputed.statement.annualIncome, '20345.67');
 });

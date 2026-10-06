@@ -5,11 +5,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { JSDOM } = require('jsdom');
-const { PROFILE_FIELDS, PROFILE_CHOICES, YES_NO_FIELDS } = require('../shared/schema.cjs');
+const { PROFILE_FIELDS, PROFILE_CHOICES, YES_NO_FIELDS, LIST_FIELDS, MEMBER_FIELDS, validateProfile } = require('../shared/schema.cjs');
 const fictionalProfile = require('./fixtures/applicant-profile.json');
 
 const html = fs.readFileSync(path.join(__dirname, '../renderer/index.html'), 'utf8');
-const script = fs.readFileSync(path.join(__dirname, '../renderer/app.js'), 'utf8');
+const script = ['../shared/snap-information.js', '../renderer/snap-information.js', '../renderer/app.js'].map(file => fs.readFileSync(path.join(__dirname, file), 'utf8')).join('\n');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 function deferred() {
@@ -159,15 +159,15 @@ test('new profile choices default to unknown, save explicit no, and clear with a
     assert.equal(view.value(field), '', field);
     assert.deepEqual([...view.choices(field)].sort(), [...PROFILE_CHOICES[field]].sort(), field);
   }
-  for (const [field, value] of Object.entries(fictionalProfile)) if (field !== 'householdMembers') view.answer(field, value);
+  for (const [field, value] of Object.entries(fictionalProfile)) if (!LIST_FIELDS.includes(field)) view.answer(field, value);
   view.submit('profile-form');await tick();
-  assert.deepEqual(saved[0], { ...fictionalProfile, householdMembers: [] });
+  assert.deepEqual(saved[0], validateProfile({ ...fictionalProfile, householdMembers: [] }));
   assert.equal(view.get('programFip').value, 'no');
   assert.equal(view.get('mailingSameAsHome').value, 'no');
   assert.equal(view.get('mailingAddressLine1').value, 'PO Box 123');
   assert.equal(view.get('addressLine1').value, fictionalProfile.addressLine1);
   view.lock();
-  for (const field of PROFILE_FIELDS.filter(field => field !== 'householdMembers')) assert.equal(view.value(field), '', field);
+  for (const field of PROFILE_FIELDS.filter(field => !LIST_FIELDS.includes(field))) assert.equal(view.value(field), '', field);
 });
 
 test('legacy profile loading leaves all new choice fields unknown and does not populate mailing fields', async t => {
@@ -176,6 +176,87 @@ test('legacy profile loading leaves all new choice fields unknown and does not p
   for (const field of [...YES_NO_FIELDS, 'suffix', 'sex', 'maritalStatus', 'maidenName', 'bestContactTime', 'mailingAddressLine1', 'mailingAddressLine2', 'mailingCity', 'mailingState', 'mailingZip']) {
     assert.equal(view.value(field), '', field);
   }
+});
+
+test('SNAP preparation keeps separate owners, unknown amounts and zero through save, reload and lock', async t => {
+  const view = await renderer(t);
+  const doc = view.window.document;
+  doc.querySelector('.nav-item[data-view="profile"]').click();
+  view.answer('iowaResident', 'yes');
+  view.answer('utilityGas', 'no');
+  view.edit('ssnCardFirstName', 'Initial');
+  const rows = key => [...doc.querySelector(`[data-record-list="${key}"]`).children];
+  const add = key => doc.querySelector(`[data-add-record="${key}"]`).click();
+  const edit = (row, key, value) => { const control = row.querySelector(`[data-record-field="${key}"]`); control.value = value; control.dispatchEvent(new view.window.Event('input', { bubbles: true })); };
+  add('jobs'); add('jobs');
+  edit(rows('jobs')[0], 'person', 'Initial Test'); edit(rows('jobs')[0], 'employer', 'Synthetic Bakery');
+  edit(rows('jobs')[0], 'amount', '0'); edit(rows('jobs')[0], 'frequency', 'Weekly');
+  edit(rows('jobs')[1], 'person', 'Other Person'); edit(rows('jobs')[1], 'employer', 'Synthetic Shop');
+  add('taxStatements'); edit(rows('taxStatements')[0], 'documentType', 'w2'); edit(rows('taxStatements')[0], 'annualIncome', '68450.00');
+  view.submit('profile-form'); await tick();
+  const profile = view.database.profile;
+  assert.equal(profile.iowaResident, 'yes'); assert.equal(profile.utilityGas, 'no'); assert.equal(profile.utilityElectricity, '');
+  assert.deepEqual(profile.jobs.map(({ person, amount, frequency }) => ({ person, amount, frequency })), [
+    { person: 'Initial Test', amount: '0', frequency: 'Weekly' }, { person: 'Other Person', amount: '', frequency: '' }
+  ]);
+  assert.equal(profile.taxStatements[0].annualIncome, '68450.00');
+  assert.equal(profile.monthlyEarnedIncome, ''); assert.equal(profile.householdWorking, '');
+  const savedIds = profile.jobs.map(row => row.id);
+  assert.deepEqual(rows('jobs').map(row => row.dataset.recordId), savedIds);
+  assert.doesNotThrow(() => validateProfile(profile));
+  rows('jobs')[0].querySelector('button').click();
+  view.submit('profile-form'); await tick();
+  assert.deepEqual(view.database.profile.jobs.map(row => row.id), [savedIds[1]]);
+  view.lock();
+  assert.equal(rows('jobs').length, 0); assert.equal(rows('taxStatements').length, 0);
+  assert.equal(view.get('iowaResident').value, ''); assert.equal(view.get('ssnCardFirstName').value, '');
+});
+
+test('each household member keeps their own sensitive details, without copying the applicant answers', async t => {
+  const view = await renderer(t);
+  view.get('add-household-member').click();
+  const rows = [...view.get('household-members').children];
+  const member = (index, key) => rows[index].querySelector(`[data-member-field="${key}"]`);
+  view.answer('usCitizen', 'yes'); view.answer('bornInUs', 'yes');
+  assert.equal(member(1, 'usCitizen').value, ''); assert.equal(member(1, 'bornInUs').value, '');
+  member(1, 'usCitizen').value = 'no'; member(1, 'isApplicant').value = 'no';
+  member(1, 'immigrationStatus').value = 'Documented status to review';
+  view.submit('profile-form'); await tick();
+  assert.equal(view.database.profile.householdMembers[1].usCitizen, 'no');
+  assert.equal(view.database.profile.householdMembers[0].usCitizen, '');
+  assert.equal(view.database.profile.householdMembers[1].isApplicant, 'no');
+  assert.equal(view.database.profile.householdMembers[1].immigrationStatus, 'Documented status to review');
+});
+
+test('list review summaries never become records when saving or adding and removing rows', async t => {
+  const view = await renderer(t, { reviewFields: async () => ({ profile: [{ key: 'jobs', label: 'Jobs', status: 'format-passed', messages: [] }] }) });
+  const doc = view.window.document;
+  doc.querySelector('.nav-item[data-view="profile"]').click();
+  const add = doc.querySelector('[data-add-record="jobs"]');
+  const rows = doc.querySelector('[data-record-list="jobs"]');
+  add.click();
+  view.get('check-profile-fields').click(); await tick();
+  assert.equal(doc.querySelectorAll('[data-review-key="jobs"]').length, 1);
+  assert.equal(rows.children.length, 1);
+  view.submit('profile-form'); await tick();
+  assert.equal(view.database.profile.jobs.length, 1);
+  assert.doesNotThrow(() => validateProfile(view.database.profile));
+  view.get('check-profile-fields').click(); await tick();
+  add.click();
+  assert.equal(rows.children.length, 2);
+  rows.firstElementChild.querySelector('button').click();
+  view.submit('profile-form'); await tick();
+  assert.equal(view.database.profile.jobs.length, 1);
+});
+
+test('valid imported record IDs shared across lists still get unique accessible controls', async t => {
+  const id = '4c7b6618-41c4-4d80-9fba-bb11f52babc3';
+  const view = await renderer(t, { getData: async () => ({ profile: { jobs: [{ id, person: 'Job owner' }], housingExpenses: [{ id, person: 'Housing owner' }] }, applications: [] }) });
+  const doc = view.window.document;
+  const first = doc.querySelector('[data-record-list="jobs"] [data-record-field="person"]');
+  const second = doc.querySelector('[data-record-list="housingExpenses"] [data-record-field="person"]');
+  assert.notEqual(first.id, second.id);
+  assert.equal(first.labels[0].control, first); assert.equal(second.labels[0].control, second);
 });
 
 // Iowa's Tell Us More questions about the applicant, in Iowa's own words.
@@ -1592,9 +1673,10 @@ test('the household list starts with the applicant, who mirrors their own name a
   await tick();
   const members = saved[0].householdMembers;
   assert.ok(members.every(member => UUID.test(member.id)) && members[0].id !== members[1].id);
+  const blankMember = Object.fromEntries(MEMBER_FIELDS.filter(key => key !== 'id').map(key => [key, '']));
   assert.deepEqual(members.map(({ id, ...member }) => member), [
-    { firstName: 'Avery', lastName: 'Test', birthDate: '1985-04-12', relationship: 'self', student: 'no', grade: '' },
-    { firstName: 'Riley', lastName: 'Example', birthDate: '2015-09-03', relationship: 'child', student: 'yes', grade: '5th' }]);
+    { ...blankMember, firstName: 'Avery', lastName: 'Test', birthDate: '1985-04-12', relationship: 'self', student: 'no', grade: '' },
+    { ...blankMember, firstName: 'Riley', lastName: 'Example', birthDate: '2015-09-03', relationship: 'child', student: 'yes', grade: '5th' }]);
   // A student answer changed to No clears the grade, so a grade is never saved for someone who isn't a student.
   editRow(view, memberRows(view)[1], 'student', 'no');
   view.submit('profile-form');

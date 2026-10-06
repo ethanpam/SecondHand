@@ -4,17 +4,16 @@
 // not ask the form model to fact-check OCR or a person's answers. No profile or
 // document VALUES enter a model request, and a model result can only add a
 // warning to the independent deterministic review.
-const { PROFILE_FIELDS, MAX_MEMBERS } = require('../shared/schema.cjs');
+const { PROFILE_FIELDS, MAX_MEMBERS, MEMBER_FIELDS, LIST_FIELDS, RECORD_FIELDS, MAX_RECORDS, MAX_PROFILE_REVIEW_ROWS } = require('../shared/schema.cjs');
 const { reviewProfile, reviewDocumentFields } = require('../shared/field-review.cjs');
 const { QUESTIONS, CHOICE, MATCH_CANDIDATES, matchState, offeredFields, matchableBox, unsafeQuestion } = require('../shared/laya-prompts.cjs');
 
-const LIMITS = Object.freeze({ documents: 150, modelLabels: 12, budgetMs: 3000, profileValue: 500, documentValue: 500, label: 150, id: 80 });
+const LIMITS = Object.freeze({ documents: 150, profileResults: MAX_PROFILE_REVIEW_ROWS, modelLabels: 12, budgetMs: 3000, profileValue: 500, documentValue: 500, label: 150, id: 80 });
 const REQUEST_KEYS = ['profile', 'documentFields', 'useLaya'];
-const MEMBER_FIELDS = ['id', 'firstName', 'lastName', 'birthDate', 'relationship', 'student', 'grade'];
 const DOCUMENT_KEYS = ['id', 'label', 'value', 'profileKey', 'page', 'confidence', 'sourceLabel', 'sourceRole'];
 const MODEL_KEYS = new Set(MATCH_CANDIDATES.filter(key => PROFILE_FIELDS.includes(key)));
 const ADDRESS_KEYS = new Set(['addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county']);
-const SOURCE_ROLES = new Set(['applicant', 'spouse', 'document']);
+const SOURCE_ROLES = new Set(['applicant', 'spouse', 'document', 'employer', 'payer', 'issuer']);
 const NO_MODEL = 'Not checked by Laya. Review the value and its source yourself.';
 const LABEL_ONLY = 'Laya checked this source label only; the value and applicant identity still need your review.';
 const UNCERTAIN = 'Laya could not map this source label reliably. Review the label and value in the original document.';
@@ -54,6 +53,13 @@ function validateRequest(request) {
         for (const name of Object.keys(row)) row[name] = boundedString(row[name], LIMITS.profileValue);
         return row;
       });
+    } else if (Object.hasOwn(RECORD_FIELDS, key)) {
+      const allowed = ['id', ...RECORD_FIELDS[key].map(field => field.key)];
+      profile[key] = list(profile[key], MAX_RECORDS).map(record => {
+        const row = plain(record, allowed);
+        for (const name of Object.keys(row)) row[name] = boundedString(row[name], LIMITS.profileValue);
+        return row;
+      });
     } else profile[key] = boundedString(profile[key], LIMITS.profileValue);
   }
   const ids = new Set();
@@ -65,7 +71,7 @@ function validateRequest(request) {
     const id = row.id ?? `document-${index}`;
     if (ids.has(id)) invalid();
     ids.add(id);
-    if (row.profileKey !== undefined && (!PROFILE_FIELDS.includes(row.profileKey) || row.profileKey === 'householdMembers')) invalid();
+    if (row.profileKey !== undefined && (!PROFILE_FIELDS.includes(row.profileKey) || LIST_FIELDS.includes(row.profileKey))) invalid();
     if (row.page !== undefined && (!Number.isInteger(row.page) || row.page < 1 || row.page > 12)) invalid();
     if (row.confidence !== undefined && (typeof row.confidence !== 'number' || !Number.isFinite(row.confidence) || row.confidence < 0 || row.confidence > 100)) invalid();
     if (row.sourceRole !== undefined && !SOURCE_ROLES.has(row.sourceRole)) invalid();

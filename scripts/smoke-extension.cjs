@@ -80,10 +80,12 @@ function selfDetailsFixture(variant = 'verified') {
 
 // The trimmed Tell Us More page at dynamicQuestionsStart, with a QA stand-in for Iowa's
 // hideShowQuestions: each rule is "answer:shown ids:hidden ids", and ids follow the prefix.
-function startDetailsFixture() {
+function startDetailsFixture(variant = 'verified') {
+  const html = variant === 'people' ? tellUsMore.html.replace('People | Unvisited', 'People | Active') : tellUsMore.html;
+  if (!['verified', 'people'].includes(variant)) throw new Error('Unknown Tell Us More QA variant.');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Tell Us More · isolated QA</title>
     <style>body{font:16px system-ui;background:#f7f8f2;color:#294035;margin:0;padding:30px}main{max-width:900px}li{display:inline-block;margin-right:12px}label{margin:0 12px 0 4px}input[type=text],select{padding:8px}button{padding:12px;margin:10px}.questionAnswer{margin:16px 0}</style></head>
-    <body><main><p>ISOLATED QA · FICTIONAL APPLICANT. Trimmed from a sanitized capture; the script below is a QA stand-in for Iowa's.</p>${tellUsMore.html}</main>
+    <body><main><p>ISOLATED QA · FICTIONAL APPLICANT. Trimmed from a sanitized capture; the script below is a QA stand-in for Iowa's.</p>${html}</main>
     <script>
       window.__startQa = { nextClicks: 0, shown: [] };
       function hideShowQuestions(prefix, input, rules) {
@@ -277,7 +279,7 @@ async function main() {
   const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-chromium-smoke-'));
   let context, panel, page, worker;
   const errors = [];
-  let currentAddressVariant = 'original', currentSelfVariant = 'verified';
+  let currentAddressVariant = 'original', currentSelfVariant = 'verified', currentStartVariant = 'verified';
   let verifiedApplicantClicks = 0, verifiedAddressLoads = 0, documentManualLoads = 0;
   const verifiedAddressNext = [];
   try {
@@ -295,7 +297,7 @@ async function main() {
         return route.fulfill({ status: 200, contentType: 'text/html', body: verifiedAddressFixture(currentAddressVariant) });
       }
       if (request.isNavigationRequest() && request.url() === selfDetailsUrl) return route.fulfill({ status: 200, contentType: 'text/html', body: selfDetailsFixture(currentSelfVariant) });
-      if (request.isNavigationRequest() && request.url() === startDetailsUrl) return route.fulfill({ status: 200, contentType: 'text/html', body: startDetailsFixture() });
+      if (request.isNavigationRequest() && request.url() === startDetailsUrl) return route.fulfill({ status: 200, contentType: 'text/html', body: startDetailsFixture(currentStartVariant) });
       if (request.isNavigationRequest() && request.url() === documentManualUrl) {
         documentManualLoads++;
         return route.fulfill({ status: 200, contentType: 'text/html', body: fixture('document-manual-destination') });
@@ -784,11 +786,11 @@ async function main() {
       console.log(`Tell Us More ${variant}: mismatched context stays manual.`);
     }
 
-    // Tell Us More at dynamicQuestionsStart with every answer saved: Autofill types the date of birth,
+    // Tell Us More at dynamicQuestionsStart with the original non-number answers saved: Autofill types the date of birth,
     // picks the marital status and clicks each saved answer, then answers the Social Security card
     // question Iowa's script shows after Yes. The number box stays empty and Save and Continue is never
     // clicked. (The native stub answers hasSsn itself, as the desktop works it out from saved answers.)
-    const startFields = ['sex', 'birthDate', 'hasSsn', 'ssnCardNameMatches', 'usCitizen', 'householdAllCitizens', 'maritalStatus',
+    const startFields = ['sex', 'birthDate', 'hasSsn', 'ssn', 'ssnCardNameMatches', 'ssnCardFirstName', 'ssnCardMiddleName', 'ssnCardLastName', 'usCitizen', 'householdAllCitizens', 'maritalStatus',
       'militaryOrVeteran', 'disabled', 'householdDisability', 'blind', 'healthLimitation', 'medicare', 'householdMedicare'];
     const startRows = ['gender', 'birthDate', 'hasSsn', 'ssnCardName', 'usCitizen', 'maritalStatus', 'militaryOrVeteran', 'hasDisability', 'blind', 'healthLimits', 'hasMedicare'];
     const startChecked = () => page.evaluate(() => Array.from(document.querySelectorAll('#answerSet input[type="radio"]')).filter(element => element.checked).map(element => element.id));
@@ -818,7 +820,62 @@ async function main() {
     for (const value of ['Avery', 'Example', '1985-04-12', '04/12/1985', 'Female', 'Never Married']) {
       assert.equal(startMetadata.includes(value), false, value); assert.equal(startText.includes(value), false, value);
     }
-    console.log('Tell Us More (dynamicQuestionsStart), every answer saved: all ten questions and the revealed card question filled; the SSN box and Save and Continue left to the applicant.');
+    console.log('Tell Us More (dynamicQuestionsStart): all ten original questions and the revealed card question filled; an unsaved SSN stays blank and Next stays manual.');
+
+    // The newly supported follow-ups use the captured controls and the same bounded multi-pass
+    // flow. No masking-script synchronization is fabricated: the submitted hidden mirror stays empty.
+    const sensitiveProfile = { hasSsn: 'yes', ssn: '123456789', ssnCardNameMatches: 'no',
+      ssnCardFirstName: 'Alex', ssnCardMiddleName: 'Quinn', ssnCardLastName: 'Sample' };
+    const cardIds = ['answerSets0.answers12.answerValue', 'answerSets0.answers15.answerValue', 'answerSets0.answers16.answerValue'];
+    const ssnMirror = () => page.locator('input[name="answerSets[0].answers[8].answerValue"]');
+    await resetTo(startDetailsUrl, { profile: sensitiveProfile });
+    await expect(page.locator(`[id="${tellUsMore.SSN_BOX_ID}"]`)).toBeHidden();
+    for (const id of cardIds) await expect(page.locator(`[id="${id}"]`)).toBeHidden();
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await panel.click('#panel-autofill');
+    await expect.poll(startBoxes, { timeout: 20000 }).toEqual(['123-45-6789', 'Alex', 'Quinn', 'Sample']);
+    await expect(page.locator(`[id="${tellUsMore.radioId(11, 2)}"]`)).toBeChecked();
+    for (const key of ['ssnCardFirstName', 'ssnCardMiddleName', 'ssnCardLastName']) await expect.poll(() => panel.text(`[data-key="${key}"]`)).toContain('Done');
+    await expect.poll(() => panel.text('[data-key="ssn"]')).toContain('Do it yourself');
+    await expect(ssnMirror()).toHaveValue('');
+    await page.waitForTimeout(1800);
+    assert.equal(await page.evaluate(() => window.__startQa.nextClicks), 0);
+    assert.deepEqual((await calls('getFields')).map(call => call.fields), [startFields]);
+    for (const index of [9, 13, 14, 17]) await expect(page.locator(`[id="answerSets0.answers${index}.answerValue"]`)).toHaveValue('');
+    const sensitiveMetadata = await panel.evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      return JSON.stringify(await chrome.runtime.sendMessage({ type: 'ui:pageState', tabId: tab.id }));
+    });
+    const sensitiveText = await panel.evaluate(() => document.body.innerText);
+    for (const value of ['123456789', '123-45-6789', 'Alex', 'Quinn', 'Sample']) {
+      assert.equal(sensitiveMetadata.includes(value), false, value); assert.equal(sensitiveText.includes(value), false, value);
+    }
+    console.log('Tell Us More conditional SSN/card-name controls: explicit saved answers filled across fresh scans; hidden mirror/alternatives untouched, SSN manual review and Next manual, sidebar has no answer values.');
+
+    // Existing answers are preserved while other eligible blank card fields still fill.
+    await resetTo(startDetailsUrl, { profile: sensitiveProfile });
+    await page.locator(`[id="${tellUsMore.radioId(6, 1)}"]`).check();
+    await page.locator(`[id="${tellUsMore.radioId(11, 2)}"]`).check();
+    await page.locator(`[id="${tellUsMore.SSN_BOX_ID}"]`).fill('321-54-9876');
+    await page.locator(`[id="${cardIds[0]}"]`).fill('Existing card name');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await panel.click('#panel-autofill');
+    await expect.poll(startBoxes, { timeout: 20000 }).toEqual(['321-54-9876', 'Existing card name', 'Quinn', 'Sample']);
+    await expect(ssnMirror()).toHaveValue('');
+    assert.equal(await page.evaluate(() => window.__startQa.nextClicks), 0);
+    console.log('Tell Us More conditional controls: existing SSN and card first name are preserved.');
+
+    currentStartVariant = 'people';
+    await resetTo(startDetailsUrl, { profile: sensitiveProfile });
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await panel.click('#panel-autofill');
+    await page.waitForTimeout(1800);
+    assert.deepEqual(await calls('getFields'), []);
+    assert.deepEqual(await startBoxes(), ['', '', '', '']);
+    assert.deepEqual(await startChecked(), []);
+    assert.equal(await page.evaluate(() => window.__startQa.nextClicks), 0);
+    currentStartVariant = 'verified';
+    console.log('Tell Us More conditional controls: another-person phase releases no profile fields and fills nothing.');
 
     // With nothing saved, nothing is filled and each row points to My information.
     await resetTo(startDetailsUrl, { profile: Object.fromEntries(startFields.map(field => [field, ''])) });
