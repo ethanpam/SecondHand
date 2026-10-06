@@ -34,6 +34,9 @@ const HOUSEHOLD_QUESTIONS = { young: '# of people in your household 0 - 17 yrs o
 // What the desktop works out from the fictional household list, as the app does: band counts and the one student's name and grade.
 const listed = validateProfile(syntheticProfile);
 const desktopProfile = { ...syntheticProfile, ...Object.fromEntries(['householdCount:18-59', 'householdCount:60+', 'studentNameGrade'].map(key => [key, releasedValue(listed, key)])) };
+// #185: a radio question no rule knows, which the stub Laya can only guess at.
+const GUESS = 'https://pantry.example.org/service-area';
+const GUESS_QUESTION = 'Do you live in our service area?';
 const IOWA_HOST = 'https://hhsservices.iowa.gov/*';
 const en = (key, params) => strings.text('en', key, params);
 
@@ -58,6 +61,9 @@ const pages = {
   [NEVER]: formPage('Never trusted', '<form><label for="first">First name</label><input id="first" name="first"><button type="submit">Submit</button></form>'),
   [DETAILS]: formPage('Pantry sign-up: your details', '<form><label for="first">First name</label><input id="first" name="first">' +
     '<label for="dob">Date of birth</label><input id="dob" name="dob" type="date"><button type="submit">Submit</button></form>'),
+  [GUESS]: formPage('Pantry sign-up: service area', '<form><label for="first">First name</label><input id="first" name="first">' +
+    `<fieldset><legend>${GUESS_QUESTION}</legend>${['Yes', 'No', 'Not sure'].map((option, index) => `<label><input type="radio" name="area" id="area-${index}" value="${option}">${option}</label>`).join('')}</fieldset>` +
+    '<button type="submit">Submit</button></form>'),
   [HOUSEHOLD]: formPage('Pantry order: household', `<form>${Object.entries(HOUSEHOLD_QUESTIONS).map(([id, label]) => `<label for="${id}">${label}</label><input id="${id}" name="${id}">`).join('')}` +
     '<button type="submit">Submit</button></form>')
 };
@@ -67,20 +73,28 @@ const pages = {
 // an answer, it shows the prompt the app shows, naming the site the request names. With `holds`, it plays the
 // app without Always allow (#176): Autofill's request gets those fields held back, and Fill sensitive details'
 // request (`sensitive: true`) gets the sensitive prompt, answered by the next of `answers` ('cancel' or 'allow').
+// Laya isn't ready unless a step makes it so (`laya`); then it is sure of nothing and guesses "Yes" for the
+// service-area question (#185), noting each question it is asked in `questions`.
 async function installDesktop(worker, profile) {
   await worker.evaluate(profile => {
-    globalThis.__desktop = { allSites: false, calls: [], saves: [], prompts: [], profile, holds: [], answers: [] };
+    globalThis.__desktop = { allSites: false, calls: [], saves: [], prompts: [], profile, holds: [], answers: [], laya: 'unavailable', questions: [] };
     nativeRequest = async (type, payload = {}) => {
       const desktop = globalThis.__desktop;
       desktop.calls.push({ type, url: payload.url || '', fields: payload.fields || [], ...(payload.sensitive === true ? { sensitive: true } : {}) });
-      if (type === 'status') return { unlocked: true, applicationCount: 0, accessRevision: 0, allSites: desktop.allSites, laya: { state: 'unavailable' } };
+      if (type === 'status') return { unlocked: true, applicationCount: 0, accessRevision: 0, allSites: desktop.allSites, laya: { state: desktop.laya } };
       if (type === 'trustAllSites') { desktop.allSites = true; return { allSites: true }; }
       if (type === 'untrustAllSites') { desktop.allSites = false; return { allSites: false }; }
       if (type === 'trustSite') return { trusted: true, origin: new URL(payload.url).origin };
       if (type === 'untrustSite') return { trusted: false, origin: new URL(payload.url).origin };
       if (type === 'showApp') return { shown: true };
-      if (type === 'warmLaya') return { state: 'unavailable' };
-      if (type === 'suggestFields' || type === 'answerFields') throw Object.assign(new Error('Laya isn’t ready on this computer.'), { code: 'LAYA_NOT_READY' });
+      if (type === 'warmLaya') return { state: desktop.laya };
+      if ((type === 'suggestFields' || type === 'answerFields') && desktop.laya !== 'ready') throw Object.assign(new Error('Laya isn’t ready on this computer.'), { code: 'LAYA_NOT_READY' });
+      if (type === 'suggestFields') return { suggestions: {} };
+      if (type === 'answerFields') {
+        desktop.questions.push(...payload.questions.map(question => ({ label: question.label, type: question.type, options: question.options })));
+        const area = payload.questions.find(question => question.label === 'Do you live in our service area?');
+        return { answers: {}, guesses: area ? { [area.id]: 'Yes' } : {}, accessRevision: 0 };
+      }
       if (type === 'getFields' && payload.sensitive === true) {
         desktop.prompts.push(`Fill sensitive details on ${new URL(payload.url).origin}?`);
         const answer = desktop.answers.shift();
@@ -236,6 +250,35 @@ async function main() {
       [{ url: PANTRY, fields: ['firstName', 'lastName', 'zip', 'email', 'householdSize'] }], 'one desktop request for this page');
     await page.screenshot({ path: path.join(root, 'artifacts/all-websites/all-websites-filled.png') });
     console.log('All websites: a form on a site never turned on filled from the fictional profile with one click; nothing was submitted.');
+
+    // #185: a radio question no rule knows gets Laya's best guess. It is filled with its own dotted outline, the side
+    // panel says how many Laya guessed and lists the question, and its row finds it on the page.
+    await worker.evaluate(() => { globalThis.__desktop.laya = 'ready'; });
+    await page.goto(GUESS, { waitUntil: 'domcontentloaded' });
+    const guessWidget = await launcherFrame();
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+    await panel.click('#panel-autofill');
+    await expect(page.locator('#area-0')).toBeChecked({ timeout: 20000 });
+    await expect(page.locator('#first')).toHaveValue(syntheticProfile.firstName);
+    await settled();
+    assert.deepEqual(await worker.evaluate(() => globalThis.__desktop.questions.splice(0)), [{ label: GUESS_QUESTION, type: 'radio', options: ['Yes', 'No', 'Not sure'] }],
+      'Laya sees the question’s words and options only');
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('input[name="area"]')].map(input => [input.checked, input.getAttribute('data-secondhand-filled'), getComputedStyle(input).outlineStyle])),
+      [[true, 'laya-guess', 'dotted'], [false, 'laya-guess', 'dotted'], [false, 'laya-guess', 'dotted']], 'the guess has its own dotted outline');
+    assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById('first')).outlineStyle), 'solid', 'a rule’s answer keeps its solid one');
+    const guessed = en('result.layaGuessed', { summary: { key: 'result.siteFilled', params: { count: 2 } }, count: 1 });
+    await expect.poll(() => panel.text('#status'), { timeout: 15000 }).toBe(guessed);
+    await expect.poll(() => panel.visible('#guesses-section'), { timeout: 15000 }).toBe(true);
+    assert.equal(await panel.text('#guesses-title'), en('guesses.title'));
+    assert.equal(await panel.text('#guesses-list'), GUESS_QUESTION);
+    await expect(guessWidget.locator('#widget-text')).toHaveText(`${en('widget.filled', { count: 2 })} · ${en('widget.layaGuessed', { count: 1 })}`, { timeout: 15000 });
+    await page.screenshot({ path: path.join(root, 'artifacts/all-websites/laya-guess-filled.png') });
+    await panel.screenshot(path.join(root, 'artifacts/all-websites/laya-guess-panel.png'));
+    await panel.click('[data-guess-id]');
+    await expect.poll(() => page.evaluate(() => Boolean(document.querySelector('fieldset[data-secondhand-attention], input[name="area"][data-secondhand-attention]'))), { timeout: 15000 }).toBe(true);
+    assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
+    await worker.evaluate(() => { globalThis.__desktop.laya = 'unavailable'; });
+    console.log('#185: a radio question no rule knows got Laya’s best guess, with its own dotted outline; the side panel said "1 guessed by Laya, check it", listed the question, and its row found it on the page.');
 
     // #98: the live QA's household questions fill from the fictional household list: counts by age and the one
     // student's name and grade. The guardian's name is never filled. The apartment, which the profile lacks, is
