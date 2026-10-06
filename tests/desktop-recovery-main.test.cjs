@@ -90,7 +90,7 @@ test('without protected storage, a new password still gets a recovery key and re
 });
 
 test('the Chrome setup guide opens the published page, or a local website only during development', async t => {
-  const published = 'https://secondhand-download.khoidoan00.chatgpt.site/chrome-extension';
+  const published = 'https://secondhand.ethanpam.workers.dev/chrome-extension';
   const opened = [];
   const shell = { openExternal: async url => { opened.push(url); } };
   for (const options of [{}, { env: { SECONDHAND_WEBSITE_URL: 'http://localhost:3002' } }, { env: { SECONDHAND_WEBSITE_URL: 'javascript:alert(1)' } },

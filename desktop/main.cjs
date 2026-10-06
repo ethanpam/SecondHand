@@ -31,7 +31,7 @@ const household = require('../shared/household.cjs');
 app.setName('SecondHand');
 // The step-by-step Chrome setup guide on SecondHand's website. During
 // development, SECONDHAND_WEBSITE_URL can point it at a local website.
-const EXTENSION_GUIDE_URL = 'https://secondhand-download.khoidoan00.chatgpt.site/chrome-extension';
+const EXTENSION_GUIDE_URL = 'https://secondhand.ethanpam.workers.dev/chrome-extension';
 // The Laya model repo's pointer to its newest model (docs/laya-model.md).
 const LAYA_UPDATE_URL = 'https://huggingface.co/JacobTDang/secondhand-laya/resolve/main/latest.json';
 function extensionGuideUrl() {

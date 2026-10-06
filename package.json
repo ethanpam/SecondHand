@@ -5,6 +5,7 @@
   "private": true,
   "description": "A local benefits companion for Iowa SNAP",
   "author": "secondHand contributors",
+  "license": "MIT",
   "main": "desktop/main.cjs",
   "engines": { "node": ">=22.12" },
   "scripts": {
