@@ -100,8 +100,8 @@
     let languageChecked = false;
     let languageTrouble = null;
     // The frame the page's content script was last asked for: a row taller for a message,
-    // and as wide as the widget (0 until it has measured itself).
-    let frame = { line: false, width: 0 };
+    // and the widget's measured size (empty until it has measured itself).
+    let frame = { line: false, size: {} };
     const AI_TIMEOUT_MS = 8000;
     // An outdated worker keeps its reload steps on screen and is not polled again.
     const trouble = error => { if (error.outdated) { outdated = true; outdatedKey = error.messageKey; } return problem(error); };
@@ -158,13 +158,35 @@
       // The widget is as wide as what it shows, up to 272px (see panel.css). An outdated worker
       // is not asked for anything more; its steps fill the frame the widget already has.
       const room = message || !$('translate-offer').hidden;
-      const width = outdated || $('widget').hidden ? frame.width : Math.ceil($('widget').getBoundingClientRect().width);
-      if (!outdated && (room !== frame.line || width !== frame.width)) fitFrame(room, width);
+      const size = outdated || $('widget').hidden ? frame.size : measure(message);
+      if (!outdated && (room !== frame.line || JSON.stringify(size) !== JSON.stringify(frame.size))) fitFrame(room, size);
+    }
+    // The widget's own size, not its frame's, so it can ask for a wider frame than it has. While a
+    // line shows: how tall the widget is at that width, and how wide and tall it is at the width its
+    // buttons take alone, which a narrow page keeps (see content.js). Each read lays the widget out
+    // at once, before anything is drawn.
+    function measure(line) {
+      const card = $('widget'), text = $('widget-text'), box = () => card.getBoundingClientRect();
+      card.style.maxWidth = '272px';
+      const size = { width: Math.ceil(box().width) };
+      if (line) {
+        text.classList.add('visually-hidden');
+        size.narrowWidth = Math.ceil(box().width);
+        text.classList.remove('visually-hidden');
+        card.style.height = 'auto';
+        card.style.width = `${size.width}px`;
+        size.height = Math.ceil(box().height);
+        card.style.width = `${size.narrowWidth}px`;
+        size.narrowHeight = Math.ceil(box().height);
+      }
+      for (const property of ['max-width', 'width', 'height']) card.style.removeProperty(property);
+      // A size it could not measure is left out.
+      return Object.fromEntries(Object.entries(size).filter(([, value]) => value > 0));
     }
     // The widget can't size its own frame: the worker asks this tab's content script for it.
-    async function fitFrame(line, width) {
-      frame = { line, width };
-      try { await send({ type: 'ui:widgetSize', line, ...(width ? { width } : {}) }); }
+    async function fitFrame(line, size) {
+      frame = { line, size };
+      try { await send({ type: 'ui:widgetSize', line, ...size }); }
       catch (error) { note = trouble(error); render(); }
     }
     async function poll() {

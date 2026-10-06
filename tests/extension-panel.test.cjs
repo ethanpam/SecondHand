@@ -672,14 +672,23 @@ test('widget frame fits the logo and its buttons, grows for the yellow link, and
   assert.equal(sizes().length, 2, 'the same width is not asked for again');
 });
 
-test('widget frame is a row taller for a line and stays as wide as the widget with it', async t => {
+test('widget frame is taller for a line and stays as wide as the widget with it', async t => {
   const view = await panel(t, { launcher: true, autofill: { state: 'locked', filled: 0, needYou: [], message: 'Unlock SecondHand to autofill.', pageKey: 'iowa-personal-information' } });
-  view.get('widget').getBoundingClientRect = () => ({ width: view.get('widget-text').classList.contains('visually-hidden') ? 180.4 : 231.8 });
+  // jsdom lays nothing out: as Chrome would, the widget is as wide as its buttons without the line,
+  // and when its height is let go, the line takes more rows the narrower the widget is.
+  const card = view.get('widget');
+  card.getBoundingClientRect = () => {
+    const width = card.style.width ? parseFloat(card.style.width) : view.get('widget-text').classList.contains('visually-hidden') ? 180.4 : 231.8;
+    return { width, height: card.style.height === 'auto' ? (width < 200 ? 97.3 : 71.6) : 86 };
+  };
   const sizes = () => plainRequests(view.requests.filter(request => request.type === 'ui:widgetSize'));
   await view.userClick('autofill');
   assert.deepEqual(sizes(), [{ type: 'ui:widgetSize', line: false, width: 181 }]);
   await view.userClick('unlock');
-  assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: true, width: 232 });
+  assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: true, width: 232, height: 72, narrowWidth: 181, narrowHeight: 98 },
+    'how tall the line makes it at its own width, and at its buttons’ width');
+  assert.equal(card.getAttribute('style'), '', 'measuring leaves nothing behind');
+  assert.equal(view.get('widget-text').classList.contains('visually-hidden'), false);
   await view.userClick('autofill');
   assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: false, width: 181 });
 });
@@ -1608,6 +1617,44 @@ test('the Iowa widget frame is as wide as the widget measured itself, never past
   assert.match(host.style.width, /^min\(272px/, 'a widget that could not measure itself gets the full card');
   for (const width of [0, 1.5, '152', 5000]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: false, width }), undefined, `width ${width}`);
   assert.match(host.style.width, /^min\(272px/);
+});
+
+test('the Iowa widget frame is as tall as its line needs, up to 110px, and narrow on a narrow page', t => {
+  const page = content(t);
+  const host = page.host();
+  const size = { type: 'secondhand:widgetSize', line: true, width: 272, height: 72, narrowWidth: 133, narrowHeight: 97 };
+  assert.deepEqual(plain(page.request(size)), { sized: true });
+  assert.match(host.style.width, /^min\(272px/);
+  assert.equal(host.style.height, '86px', 'never shorter than one row taller');
+  page.request({ ...size, height: 108 });
+  assert.equal(host.style.height, '108px');
+  page.request({ ...size, height: 140 });
+  assert.equal(host.style.height, '110px', 'never taller than 110px');
+  // Under 640px wide, the frame keeps the widget's buttons' width and the line's rows, as the page resizes.
+  page.request(size);
+  Object.defineProperty(page.window, 'innerWidth', { value: 639, configurable: true });
+  page.window.dispatchEvent(new page.window.Event('resize'));
+  assert.match(host.style.width, /^min\(133px, 272px/);
+  assert.equal(host.style.height, '97px');
+  page.request({ ...size, narrowHeight: 140 });
+  assert.equal(host.style.height, '110px');
+  page.request({ type: 'secondhand:widgetSize', line: false, width: 133 });
+  assert.equal(host.style.height, '46px', 'no line, the size at rest');
+  page.request({ type: 'secondhand:widgetSize', line: true, width: 179 });
+  assert.match(host.style.width, /^min\(179px/, 'a widget that sent no narrow size keeps its width');
+  assert.equal(host.style.height, '86px');
+  page.request(size);
+  Object.defineProperty(page.window, 'innerWidth', { value: 640, configurable: true });
+  page.window.dispatchEvent(new page.window.Event('resize'));
+  assert.match(host.style.width, /^min\(272px/);
+  assert.equal(host.style.height, '86px');
+  for (const key of ['height', 'narrowWidth', 'narrowHeight']) {
+    for (const value of [0, 1.5, '97', 5000, null]) assert.equal(page.request({ ...size, [key]: value }), undefined, `${key} ${value}`);
+  }
+  page.setKind('manual');
+  page.window.dispatchEvent(new page.window.Event('popstate'));
+  assert.equal(host.style.height, '46px', 'a pill');
+  assert.equal(host.style.width, '46px');
 });
 
 // SecondHand on all websites.

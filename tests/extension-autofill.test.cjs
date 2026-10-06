@@ -930,6 +930,13 @@ test('the widget’s request for room for its line goes to its own tab’s conte
   assert.deepEqual(plain((await w.launcher({ type: 'ui:widgetSize', line: false, width: 152 })).data), { sized: true });
   assert.deepEqual(plain(w.calls.content.at(-1)), { type: 'secondhand:widgetSize', line: false, width: 152 }, 'the widget’s measured width goes along');
   for (const width of [0, -5, 1.5, '152', 5000, null]) assert.equal(await w.launcher({ type: 'ui:widgetSize', line: false, width }), undefined, `width ${width}`);
+  // The heights for its line, and its size on a narrow page, go along too; nothing else does.
+  const size = { line: true, width: 272, height: 84, narrowWidth: 133, narrowHeight: 97 };
+  await w.launcher({ type: 'ui:widgetSize', ...size, extra: 'synthetic' });
+  assert.deepEqual(plain(w.calls.content.at(-1)), { type: 'secondhand:widgetSize', ...size });
+  for (const key of ['height', 'narrowWidth', 'narrowHeight']) {
+    for (const value of [0, 1.5, '97', 5000, null]) assert.equal(await w.launcher({ type: 'ui:widgetSize', ...size, [key]: value }), undefined, `${key} ${value}`);
+  }
   assert.deepEqual(w.calls.native, []);
 });
 
