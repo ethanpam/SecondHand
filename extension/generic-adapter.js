@@ -11,10 +11,16 @@
     'addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county', 'householdSize', 'householdAdults', 'householdChildren', 'householdSeniors',
     'householdVeteran', 'householdDisability', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand',
     'monthlyMedicalExpenses', 'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare', 'programMedicaid']);
+  // #184: a yes or no about the household getting a benefit now, for each benefit the saved list can hold (deriveValues).
+  const BENEFIT_KEYS = Object.freeze({ snap: 'receivesSnap', wic: 'receivesWic', 'cash-assistance': 'receivesCashAssistance', medicaid: 'receivesMedicaid', ssi: 'receivesSsi',
+    housing: 'receivesHousingAssistance', 'school-meals': 'receivesSchoolMeals' });
+  // Answers chosen from lists, and the yes or no about each benefit worked out from one. Only the rules place them.
+  const CHOICE_KEYS = Object.freeze(['studentLevel', 'incomeSources', 'currentBenefits', 'helpWanted', ...Object.values(BENEFIT_KEYS)]);
   const SOURCES = Object.freeze({ fullName: ['firstName', 'lastName'], phone: ['mobilePhone', 'homePhone', 'phone'],
     cityState: ['city', 'state'], cityZip: ['city', 'zip'], cityStateZip: ['city', 'state', 'zip'], fullAddress: ['addressLine1', 'addressLine2', 'city', 'state', 'zip'],
     ageRange: ['birthDate'], totalMonthlyIncome: ['monthlyEarnedIncome', 'monthlyOtherIncome'], annualIncome: ['monthlyEarnedIncome', 'monthlyOtherIncome'],
-    anyoneSenior: ['householdSeniors'], iowaResident: ['state'], wantsHealthCoverage: ['programMedicaid'] });
+    anyoneSenior: ['householdSeniors'], iowaResident: ['state'], wantsHealthCoverage: ['programMedicaid'],
+    ...Object.fromEntries(Object.values(BENEFIT_KEYS).map(key => [key, ['currentBenefits']])) });
   const GENERIC_KEYS = Object.freeze(['firstName', 'middleName', 'lastName', 'fullName', 'suffix', 'birthDate', 'ssn', 'email', 'phone',
     'addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county', 'ageRange', 'householdSize', 'householdAdults', 'householdChildren', 'householdSeniors',
     'householdVeteran', 'householdDisability', 'totalMonthlyIncome', 'annualIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand',
@@ -74,15 +80,16 @@
     const match = typeof key === 'string' ? BAND_KEY.exec(key) : null;
     return Boolean(match) && Number(match[1]) <= 120 && (Boolean(match[3]) || (Number(match[2]) <= 120 && Number(match[2]) >= Number(match[1])));
   }
-  // Keys the rules may place beyond the profile's own: composites, a member's answer, and band counts.
-  const ruleOnlyKey = key => MEMBER_KEYS.includes(key) || isBandKey(key) || IOWA_KEYS.includes(key);
+  // Keys the rules may place beyond the profile's own: composites, a member's answer, band counts, and answers from lists.
+  const ruleOnlyKey = key => MEMBER_KEYS.includes(key) || isBandKey(key) || IOWA_KEYS.includes(key) || CHOICE_KEYS.includes(key);
   // Answers that are only ever a guess for the applicant to review, however they were matched.
   const GUESS_KEYS = Object.freeze(['iowaResident']);
   const KIND = Object.freeze({ birthDate: 'date', email: 'email', phone: 'tel', state: 'state', ageRange: 'ageRange', householdSize: 'count', householdAdults: 'count',
     householdChildren: 'count', householdSeniors: 'count', householdVeteran: 'yesno', householdDisability: 'yesno', totalMonthlyIncome: 'money',
     annualIncome: 'money', monthlyRent: 'money', monthlyUtilities: 'money', assetsOnHand: 'money', monthlyMedicalExpenses: 'money',
     householdAllCitizens: 'yesno', householdLegalStatus: 'yesno', householdPregnant: 'yesno', householdMedicare: 'yesno', anyoneSenior: 'yesno',
-    iowaResident: 'yesno', wantsHealthCoverage: 'yesno' });
+    iowaResident: 'yesno', wantsHealthCoverage: 'yesno', studentLevel: 'one', incomeSources: 'several', currentBenefits: 'several', helpWanted: 'several',
+    ...Object.fromEntries(Object.values(BENEFIT_KEYS).map(key => [key, 'yesno'])) });
   const AUTOCOMPLETE = Object.freeze({ 'given-name': 'firstName', 'additional-name': 'middleName', 'family-name': 'lastName', name: 'fullName',
     'honorific-suffix': 'suffix', email: 'email', tel: 'phone', 'tel-national': 'phone', 'street-address': 'addressLine1', 'address-line1': 'addressLine1',
     'address-line2': 'addressLine2', 'address-level2': 'city', 'address-level1': 'state', 'postal-code': 'zip', bday: 'birthDate' });
@@ -142,6 +149,57 @@
     [/^(monthly )?(rent|mortgage|rent or mortgage)( payment| amount)?$/, 'monthlyRent'],
     [/^(monthly )?utilit(y|ies)( costs?| bills?)?$/, 'monthlyUtilities']
   ];
+  // #184: questions answered from the saved lists. A benefit's yes or no is asked about the household ("you or anyone in your
+  // family", "anyone in your household", "your household"), never about one person, and never about another state's benefits.
+  const BENEFIT_WORDS = Object.freeze({ snap: 'snap|food stamps|snap food stamps|food stamps snap|calfresh', wic: 'wic',
+    'cash-assistance': 'cash assistance|public assistance|tanf|fip|temporary assistance for needy families|family investment program', medicaid: 'medicaid',
+    ssi: 'ssi|supplemental security income', housing: 'housing assistance|section 8|housing vouchers?|a housing voucher|rental assistance',
+    'school-meals': 'free or reduced (price )?(school )?(meals|lunch|lunches)|free (school )?(meals|lunch|lunches)|school meals' });
+  const HOUSEHOLD_WHO = '(you or anyone (in|of) (your |the )?(household|family|home)|anyone (in|of) (your |the )?(household|family|home)|you or any (member|one) of (your |the )?(household|family)|any (household|family) member|(your |the )?(household|family))';
+  const BENEFIT_RULES = Object.entries(BENEFIT_WORDS).map(([code, words]) => [new RegExp(`^((do|does) ${HOUSEHOLD_WHO} (currently |now )?(receive|get)|(is|are) ${HOUSEHOLD_WHO} (currently |now )?(receiving|getting|on|enrolled in)) ` +
+    `(${words})( benefits?)?( now| currently)?( through (?!.*\\b(another|other|out of) state\\b).+)?$`), BENEFIT_KEYS[code]]);
+  const CHOICE_RULES = [
+    [/^((current |your )?student (status|level|type|classification)|are you (currently |now )?(a |an )?(college |university )?student|what is your (current )?student (status|level))$/, 'studentLevel'],
+    [/^((current |household )?(sources?|types?) of (household )?income( (and |or )?resources?| received)?|(current |household )?income (sources?|types?)|what are (your |the )?(households? )?(current )?sources of income|where does (your |the )?(households? )?income come from|(do|does) (you|your household|you or anyone in (your |the )?(household|family)) (currently )?receive income from (any of )?the following( sources)?)$/, 'incomeSources'],
+    [/^((current|public|government) benefits( received| you receive)?|benefits (currently )?received|(which|what) (of the following )?benefits do (you|your household) (currently )?(receive|get)|(do|does) (you|your household|you or anyone in (your |the )?(household|family)) (currently )?(receive|get) any of the following( benefits| assistance| programs)?|(are you|is anyone in (your |the )?household) (currently )?receiving any of the following( benefits| assistance| programs)?)$/, 'currentBenefits'],
+    [/^(((type|kind)s? of )?(assistance|help|services?|support)( (and |or )?information)? (needed|requested|wanted)|what (kind |type )?(of )?(help|assistance|services?|support) (do you need|are you (looking for|interested in)|would you like)|(which|what) services (are you interested in|do you need|would you like)|how can we help( you)?)$/, 'helpWanted'],
+    ...BENEFIT_RULES
+  ];
+  // What an option says, as codes of the saved lists (shared/schema.cjs PROFILE_CHOICES.studentLevel and SEVERAL_CHOICES). An option
+  // may name more than one ("SSI or SSDI"). One that starts with "not" or "no" names only None or Not a student.
+  const CHOICE_OPTIONS = Object.freeze({
+    studentLevel: Object.freeze({ 'not-student': /^(not a student|not (currently )?(a student|enrolled|in school)|non student)$/, 'high-school': /^high school\b/,
+      undergraduate: /\bundergrad(uate)?\b/, graduate: /\b(graduate|grad|masters?|doctoral|phd)\b/, other: /^other\b/ }),
+    incomeSources: Object.freeze({ job: /(?<!self )\b(jobs?|employment|employed|wages?|salary|paychecks?)\b|^work\b(?! study)/, 'self-employment': /\bself ?employ(ed|ment)\b|\bown business\b/,
+      'financial-aid': /\b(financial aid|student loans?|scholarships?|pell grants?|student aid)\b/,
+      'family-support': /\b(family|parents?|parental|relatives?)( or friends)? (support|help|money|contributions?|assistance)\b|\b(support|help|money) from (family|parents|relatives)\b|^(family|parents|relatives)$/,
+      unemployment: /\bunemployment\b/, 'social-security': /\b(social security|ssi|ssdi|supplemental security income)\b/, 'child-support': /\bchild support\b/, pension: /\bpensions?\b/,
+      other: /^other\b/, none: /^(none( of the (above|these))?|no income)$/ }),
+    currentBenefits: Object.freeze({ snap: /\b(snap|food stamps?|calfresh)\b/, wic: /\bwic\b/, 'cash-assistance': /\b(cash assistance|public assistance|tanf|fip|temporary assistance for needy families|family investment program)\b/,
+      medicaid: /\bmedicaid\b/, ssi: /\b(ssi|supplemental security income)\b/, housing: /\b(housing (assistance|vouchers?|choice vouchers?|subsidy)|section 8|public housing|rental assistance)\b/,
+      'school-meals': /\b(free (or|and) reduced|free (school )?(lunch|lunches|meals)|reduced (price )?(school )?(lunch|lunches|meals)|school (lunch|lunches|meals))\b/,
+      none: /^(none( of the (above|these))?|no benefits)$/ }),
+    helpWanted: Object.freeze({ 'food-pantry': /\bpantry\b/, 'fresh-produce': /\b(fresh (food|produce|fruits?|vegetables?)|produce|fruits? (and|or) vegetables?)\b/,
+      'food-vouchers': /\b(vouchers?|meal (tickets?|swipes?))\b/, 'gift-cards': /\b(gift ?cards?|grocery cards?)\b/, 'snap-help': /\b(snap|food stamps?)\b/,
+      'social-services': /\b(social (services?|work(ers?)?)|case management)\b/, other: /^other\b/ })
+  });
+  const NEGATED = /^(not|no|non)\b/;
+  const optionCodes = (key, option) => {
+    const text = normal(option);
+    return Object.entries(CHOICE_OPTIONS[key]).filter(([code, pattern]) => pattern.test(text) && (!NEGATED.test(text) || ['none', 'not-student'].includes(code))).map(([code]) => code);
+  };
+  // The options a saved answer checks: for each saved choice, the one option that names it. Null when a saved choice names more
+  // than one option (On-Campus Job and Off-Campus Job are both a job): then the whole question stays with the applicant.
+  function chosenOptions(key, options, value) {
+    const named = options.map(option => optionCodes(key, option));
+    const picks = new Set();
+    for (const code of String(value).split(',').filter(Boolean)) {
+      const naming = named.flatMap((codes, index) => codes.includes(code) ? [index] : []);
+      if (naming.length > 1) return null;
+      if (naming.length) picks.add(naming[0]);
+    }
+    return [...picks].sort((a, b) => a - b);
+  }
   const NAME_HINTS = Object.freeze({ fname: 'first name', firstname: 'first name', lname: 'last name', lastname: 'last name', dob: 'date of birth',
     zipcode: 'zip code', postalcode: 'postal code', hhsize: 'household size', tel: 'phone', telephone: 'phone', email: 'email', zip: 'zip', city: 'city', state: 'state' });
   const STATES = Object.freeze({ AL: 'alabama', AK: 'alaska', AZ: 'arizona', AR: 'arkansas', CA: 'california', CO: 'colorado', CT: 'connecticut', DE: 'delaware',
@@ -224,7 +282,7 @@
   const memberRuleFor = text => MEMBER_RULES.find(([pattern]) => pattern.test(question(text)) || pattern.test(question(firstSentence(text))))?.[1] || null;
   function ruleFor(text) {
     const asked = question(text);
-    return RULES.find(([pattern]) => pattern.test(asked))?.[1] || bandRule(asked);
+    return [...RULES, ...CHOICE_RULES].find(([pattern]) => pattern.test(asked))?.[1] || bandRule(asked);
   }
   // Questions only the applicant answers: no saved field and no AI answer goes to consent, signatures,
   // attestations, agreements, terms, Social Security numbers, secrets, texted, emailed or verification codes,
@@ -440,6 +498,9 @@
       options.map(normal).sort().join('|') === 'no|yes';
     if (kind === 'yesno') return (choice || entry.kind === 'select') ? isYesNo(options) : toggle;
     if (kind === 'ageRange') return (choice || entry.kind === 'select') && options.some(ageRange);
+    // A question answered from a list needs options that name its answers: one choice for the student status, any for the rest.
+    if (kind === 'one') return (choice || entry.kind === 'select') && options.some(option => optionCodes(key, option).length);
+    if (kind === 'several') return entry.kind === 'checkbox' && entry.elements.length > 1 && options.some(option => optionCodes(key, option).length);
     if (kind === 'count') return (entry.kind === 'input' && ['number', 'text', 'tel', ''].includes(type)) || ((entry.kind === 'select' || choice) && isNumeric(options.filter(option => normal(option))));
     if (kind === 'state') return ['select', 'ariaCombo', 'ariaListbox'].includes(entry.kind) || (entry.kind === 'input' && type === 'text');
     if (kind === 'date') return entry.kind === 'input' && ['date', 'text', ''].includes(type);
@@ -746,6 +807,9 @@
     // A home state of Iowa suggests residency; any other state settles nothing.
     if (String(values?.state || '').trim().toUpperCase() === 'IA' || normal(values?.state) === 'iowa') result.iowaResident = 'yes';
     if (['yes', 'no'].includes(values?.programMedicaid)) result.wantsHealthCoverage = values.programMedicaid;
+    // The saved benefits list is everything the household gets now (#184): a benefit left off an answered list is a No.
+    const benefits = String(values?.currentBenefits || '').split(',').filter(Boolean);
+    for (const [code, key] of Object.entries(BENEFIT_KEYS)) { if (benefits.length) result[key] = benefits.includes(code) ? 'yes' : 'no'; else delete result[key]; }
     return result;
   }
 
@@ -760,6 +824,7 @@
   function chooseOption(options, key, value) {
     const wanted = normal(value);
     if (answerKind(key) === 'yesno') return options.findIndex(option => new RegExp(`^${wanted}\\b`).test(normal(option)));
+    if (answerKind(key) === 'one') { const picks = chosenOptions(key, options, value); return picks?.length === 1 ? picks[0] : -1; }
     if (answerKind(key) === 'ageRange') return options.findIndex(option => { const range = ageRange(option); return range && Number(value) >= Number(range[1]) && (range[2] === '+' || range[2] === ' and older' || range[2] === ' or older' || Number(value) <= Number(range[2])); });
     if (key === 'state') return options.findIndex(option => [wanted, normal(STATES[String(value).toUpperCase()])].includes(normal(option)));
     if (answerKind(key) === 'count') {
@@ -824,6 +889,12 @@
       const option = entry.elements[index];
       option.click();
       return option.getAttribute('aria-checked') === 'true' || { pending: option };
+    }
+    if (entry.kind === 'checkbox' && entry.elements.length > 1 && answerKind(key) === 'several') {
+      const picks = chosenOptions(key, optionsOf(entry), value);
+      if (!picks?.length) return false;
+      for (const index of picks) entry.elements[index].click();
+      return picks.every(index => entry.elements[index].checked);
     }
     if (entry.kind === 'checkbox' && entry.elements.length === 1 && answerKind(key) === 'yesno') {
       if (value !== 'yes') return false;
@@ -1096,7 +1167,7 @@
     return fields;
   }
 
-  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, SAVE_KEYS, GUESS_KEYS, MEMBER_KEYS, IOWA_KEYS, answeredIds, readAnswer, UNSAFE_QUESTION, OTHER_PERSON_ROLE, MEMBER_DETAIL, CHILD_ROLE, PERSON_DETAIL,
+  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, SAVE_KEYS, GUESS_KEYS, MEMBER_KEYS, IOWA_KEYS, CHOICE_KEYS, answeredIds, readAnswer, UNSAFE_QUESTION, OTHER_PERSON_ROLE, MEMBER_DETAIL, CHILD_ROLE, PERSON_DETAIL,
     COMBINED_ADDRESS_QUESTION, PERSON_NOT_AMOUNT, blockedSuggestion, isBandKey, plan, offers, questions, requestKeys, deriveValues, fillFields, settle, focusField, elementFor,
     canSuggest, canCustom, unsafeQuestion, layaQuestion, deepQueryAll, isRendered: rendered, navigationFields });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
