@@ -101,7 +101,7 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
 }
 
 // `build` runs the worker as another build, and `disk` is the build in the files Chrome would load on a reload (#85).
-function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSites = false, allGranted = allSites, desktop = {}, fields = pantryFields(), next, duringGetFields, duringStatus, frames = [], plan, keepAccess = false, discoveryError = false, topError, framesReply, pageText = { lang: 'en', text: '' }, clock, openTabs, lang = 'en', ai = {}, build, disk } = {}) {
+function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSites = false, allGranted = allSites, desktop = {}, fields = pantryFields(), next, duringGetFields, duringStatus, frames = [], plan, keepAccess = false, discoveryError = false, topError, formFramesError, framesReply, pageText = { lang: 'en', text: '' }, clock, openTabs, lang = 'en', ai = {}, build, disk } = {}) {
   const tab = { id: 7, active: true, url };
   const log = [], native = [], content = [], injected = [], opened = [];
   let reloads = 0;
@@ -149,6 +149,8 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
       query: async () => (openTabs || [tab]).map(open => ({ ...open, url: covered(open.url) ? open.url : undefined })),
       sendMessage: async (tabId, message, options) => {
         content.push({ tabId, frameId: options?.frameId, ...(options?.documentId === undefined ? {} : { documentId: options.documentId }), ...plain(message) });
+        // `formFramesError`: the top page fails the worker's message about its card, for a reason other than not having loaded.
+        if (message.type === 'secondhand:generic:formFrames' && formFramesError) throw new Error(formFramesError);
         if (['secondhand:generic:formFrames', 'secondhand:generic:off'].includes(message.type)) return undefined;
         if (options?.frameId === 0 && topError) throw new Error(topError);
         if (message.type === 'secondhand:generic:frames') return framesReply === undefined ? { origins: frames.map(frame => frame.origin) } : framesReply;
@@ -2050,6 +2052,24 @@ test('after a worker restart, only frames on sites that are on are asked about t
   assert.equal(w.content.some(call => call.frameId === 6), false);
 });
 
+// #178: a report the worker can't count is answered with its error, in the shape of every other error reply.
+const PORT_CLOSED = 'The message port closed before a response was received.';
+const detailReply = text => ({ ok: false, error: text, errorKey: 'detail', errorParams: { detail: text } });
+test('a report the worker can’t count is answered with its usual error: the top page fails its message, or the check of the tab’s frames fails (#178)', async () => {
+  const one = secondFrame({ helps: true });
+  const refused = siteWorker({ url: OTHER_URL, allSites: true, frames: [one], formFramesError: PORT_CLOSED });
+  refused.events.updated(7, { status: 'loading' });
+  assert.deepEqual(plain(await formReporter(refused).report(one, true)), detailReply(PORT_CLOSED));
+
+  // A restarted worker that can't ask the tab's frames counts neither the top page's report nor an embedded frame's.
+  const unchecked = siteWorker({ url: OTHER_URL, allSites: true, frames: [one], discoveryError: true });
+  const { report, card } = formReporter(unchecked);
+  assert.deepEqual(plain(await report(null, false)), detailReply('Cannot access an unapproved frame'));
+  assert.deepEqual(plain(await report(one, true)), detailReply('Cannot access an unapproved frame'));
+  assert.equal(card(), undefined, 'the top page is told nothing');
+  assert.deepEqual([...refused.native, ...unchecked.native], [], 'nothing reaches the desktop');
+});
+
 // #137: saved answers for a form embedded from another site are asked for in that site's name, the address Chrome
 // gives for the frame, and each site's answers are approved and filled apart.
 const EMBED_URL = `${FRAME_ORIGIN}/pantry-signup`;
@@ -2153,6 +2173,21 @@ function livePage(t, html, { url = OTHER_URL, framesReply = { frames: false }, l
     cards: () => window.document.querySelectorAll('[data-secondhand-assistant]').length,
     tell(message) { for (const listener of listeners) listener(message, { id: extensionId }, () => {}); } };
 }
+// The errors Chrome would report as uncaught while `work` runs and the page settles. node:test fails a test on an
+// unhandled rejection, so its own listener steps aside meanwhile.
+async function uncaught(work) {
+  const runner = process.listeners('unhandledRejection');
+  const errors = [];
+  const heard = error => { errors.push(error); };
+  process.removeAllListeners('unhandledRejection');
+  process.on('unhandledRejection', heard);
+  try { await work(); await settle(); }
+  finally {
+    process.off('unhandledRejection', heard);
+    for (const listener of runner) process.on('unhandledRejection', listener);
+  }
+  return errors;
+}
 
 test('with all websites on, the card shows on a form page and stays hidden on a search-only page, a sign-in page, and a page without inputs', async t => {
   assert.equal(livePage(t, forms.plainPantry).cards(), 1);
@@ -2254,6 +2289,22 @@ test('the top page shows the card for an embedded form the worker tells it about
   page.request({ type: 'secondhand:generic:formFrames', helps: true }, { id: 'b'.repeat(32) });
   page.request({ type: 'secondhand:generic:formFrames', helps: false }, { id: 'b'.repeat(32) });
   assert.ok(page.host(), 'another extension changes nothing');
+});
+
+test('a form report the worker answers with an error is reported as uncaught, on the top page and from an embedded frame (#178)', async t => {
+  const reported = errors => errors.map(item => ({ message: item.message, messageKey: item.messageKey, messageParams: plain(item.messageParams) }));
+  const thrown = reply => ({ message: reply.error, messageKey: reply.errorKey, messageParams: reply.errorParams });
+  // The top page's report: the worker couldn't check the tab's frames, as when one answers in a way it can't trust.
+  const unchecked = { ok: false, error: strings.english('worker.frameUnsafe'), errorKey: 'worker.frameUnsafe', errorParams: {} };
+  let page, frame;
+  assert.deepEqual(reported(await uncaught(() => { page = livePage(t, forms.plainPantry, { framesReply: unchecked }); })), [thrown(unchecked)]);
+  assert.equal(page.cards(), 1, 'the page’s own form keeps its card');
+  // An embedded frame's report: the top page failed the worker's message about its card.
+  const refused = detailReply(PORT_CLOSED);
+  const form = '<form><label for="fname">First name</label><input id="fname"></form>';
+  assert.deepEqual(reported(await uncaught(() => { frame = livePage(t, form, { url: `${FRAME_ORIGIN}/form`, top: false, framesReply: refused }); })), [thrown(refused)]);
+  assert.deepEqual(reported(await uncaught(() => { frame.window.dispatchEvent(new frame.window.Event('pagehide')); })), [thrown(refused)], 'and as the frame goes');
+  assert.deepEqual(frame.reports, [{ type: 'secondhand:generic:form', helps: true }, { type: 'secondhand:generic:form', helps: false }]);
 });
 
 test('when SecondHand is turned off for the page, its card goes and the page answers nothing more', async t => {

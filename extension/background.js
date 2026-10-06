@@ -14,7 +14,7 @@ if (typeof globalThis.SecondHandTranslation?.create !== 'function') {
 // Must match BUILD in panel.js: change both together, with every change to the extension. The panel
 // compares them to tell when Chrome is still running an older worker than the pages it loaded from
 // disk, and the worker compares it with the build the desktop app ships to update itself (#85).
-const BUILD = '2026-10-06.1';
+const BUILD = '2026-10-06.2';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
@@ -1506,10 +1506,11 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   const route = !frame ? undefined : SecondHandIowa.isSupportedUrl(sender.tab.url) ? 'iowa' : siteOrigin(sender.tab.url) ? 'site' : '';
   const launcher = Boolean(route);
   // A site page's own content script says whether its frame has a form SecondHand can help with.
-  // Only that yes or no travels, to the page's top frame; nothing reaches the desktop.
+  // Only that yes or no travels, to the page's top frame; nothing reaches the desktop. A report the
+  // worker couldn't count is answered with the error (#178).
   if (!panel && !frame && message.type === 'secondhand:generic:form' && typeof message.helps === 'boolean' && Number.isInteger(sender.tab?.id) &&
     Number.isInteger(sender.frameId) && sender.frameId >= 0 && typeof sender.url === 'string' && !sender.url.startsWith(chrome.runtime.getURL(''))) {
-    formReport(sender, message.helps).then(respond);
+    formReport(sender, message.helps).then(respond, error => respond(errorReply(error)));
     return true;
   }
   // A frame answering the worker's check of where each frame is: Chrome's sender says, never the message.
