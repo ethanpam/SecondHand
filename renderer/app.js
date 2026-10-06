@@ -1067,7 +1067,7 @@
   function renderAllSites() {
     const on = vaultStatus.allSites === true;
     $('all-sites-status').textContent = on
-      ? 'All websites: on. SecondHand can fill forms on any website after you click Autofill there. Sensitive details still ask on each site.'
+      ? 'All websites: on. SecondHand can fill forms on any website after you click Autofill there. It asks first unless you chose Always allow.'
       : 'All websites: off. To turn it on, open SecondHand’s side panel in Chrome and choose Use SecondHand on all websites.';
     $('all-sites-off').hidden = !on;
   }

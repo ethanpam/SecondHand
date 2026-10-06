@@ -88,7 +88,7 @@ if (nativeOrigin) {
   let layaEnabled;
   // What was reset because settings.json couldn't be read at startup, until a setting is saved (#139).
   let settingsNotice = null;
-  // Released only after a named confirmation on sites other than Iowa's portal.
+  // On sites other than Iowa's portal, these get their own named confirmation unless Always allow is on (#175).
   const SENSITIVE_FIELDS = ['ssn', 'hasSsn', 'hasSsnAnswer', 'birthDate', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'assetsOnHand', 'monthlyMedicalExpenses',
     'usCitizen', 'disabled', 'blind', 'healthLimitation', 'medicare'];
   // Household counts aren't among them (#175), age-band counts and those worked out from members' birth dates included.
@@ -219,9 +219,9 @@ if (nativeOrigin) {
     allSites = config.allSites === true;
   }
   // A site other than Iowa's portal may receive saved answers when the person trusted it, or every
-  // https site while all websites is on. Sensitive details still ask on each one.
+  // https site while all websites is on. Always allow covers sensitive details there too (#175).
   const siteAllowed = origin => trustedSites.includes(origin) || (allSites && Boolean(origin));
-  const SITE_RULES = 'Social Security number, date of birth, the ages of the people in your household, income, money on hand, medical expenses, and your answers about citizenship, disability, blindness, health, Medicare, and having a Social Security number still ask every time';
+  const SITE_RULES = 'It asks before filling unless you chose Always allow. Always allow on this computer includes your Social Security number, date of birth, income, money on hand, medical expenses, and your answers about citizenship, disability, blindness, health, Medicare, and having a Social Security number';
   async function turnOffAllSites() {
     if (!allSites) return;
     accessRevision++;
@@ -247,11 +247,12 @@ if (nativeOrigin) {
     return { state };
   }
   // One approval before saved information reaches a website: getFields' values, or the answers
-  // Laya picked from them. Without Always allow, or for another extension ID, it asks with Cancel,
-  // Allow once, and Always allow; `sensitive` details always ask, with Cancel and Allow once.
+  // Laya picked from them. Always allow, for the extension ID it was saved with, covers everything,
+  // `sensitive` details included (#175). Otherwise it asks with Cancel, Allow once, and Always allow,
+  // or for `sensitive` details, with Cancel and Allow once.
   // `generation` is the access revision the information was read under. False when cancelled.
   async function approveRelease({ context, iowa, origin, generation, message, items, sensitive = null }) {
-    if (autofillWithoutAsking && extensionId === context.extensionId && !sensitive) return true;
+    if (autofillWithoutAsking && extensionId === context.extensionId) return true;
     if (fieldRequestPending) throw publicError('Another field request is waiting for your approval.');
     fieldRequestPending = true;
     try {
@@ -261,7 +262,7 @@ if (nativeOrigin) {
         buttons: ['Cancel', 'Allow once'], defaultId: 0, cancelId: 0, noLink: true
       } : {
         type: 'question', title: 'Let Chrome fill this form?', message,
-        detail: `Website: ${iowa ? PORTAL_URL : origin}\n\n${items}\n\nChoose “Always allow” to let the SecondHand extension fill without asking whenever this app is unlocked. You can turn it off on the Chrome extension page. The website may save entered information. Review every answer before continuing.${iowa ? "\n\nOn the verified initial applicant page, SecondHand may click ordinary Save and Continue after checking completeness. On the supported home-address confirmation page, it will automatically select Iowa's first possible home-address suggestion and choose Save and Continue. This applies to home-address suggestions only. These actions send entered answers to Iowa, which may save them immediately. Review the chosen home address before final submission. Other question pages require manual Next. This approval does not authorize consent, signatures, or submitting your application." : ''}`,
+        detail: `Website: ${iowa ? PORTAL_URL : origin}\n\n${items}\n\nChoose “Always allow” to let the SecondHand extension fill without asking whenever this app is unlocked, on every site SecondHand is on. That includes your Social Security number, birth date, income, and citizenship and disability answers. You can turn it off on the Chrome extension page. The website may save entered information. Review every answer before continuing.${iowa ? "\n\nOn the verified initial applicant page, SecondHand may click ordinary Save and Continue after checking completeness. On the supported home-address confirmation page, it will automatically select Iowa's first possible home-address suggestion and choose Save and Continue. This applies to home-address suggestions only. These actions send entered answers to Iowa, which may save them immediately. Review the chosen home address before final submission. Other question pages require manual Next. This approval does not authorize consent, signatures, or submitting your application." : ''}`,
         buttons: ['Cancel', 'Allow once', 'Always allow on this computer'], defaultId: 1, cancelId: 0, noLink: true
       });
       if (answer.response !== 1 && answer.response !== 2) return false;
@@ -330,7 +331,7 @@ if (nativeOrigin) {
       touch();
       if (approved) return { answers, accessRevision, ...reason };
       // Cancel on "Share sensitive details?" drops only the answers that needed sensitive details (#42).
-      // The others follow their own rule: no prompt with Always allow, else "Let Chrome fill this form?".
+      // That prompt shows only without Always allow, so the others then ask "Let Chrome fill this form?".
       const everyday = asksSensitive ? chosen.filter(question => !sensitive.includes(question.id)) : [];
       if (!everyday.length) return { answers: {}, accessRevision, ...reason };
       requireUnlocked();
@@ -437,7 +438,7 @@ if (nativeOrigin) {
         mainWindow.show(); mainWindow.focus();
         const answer = await dialog.showMessageBox(mainWindow, {
           type: 'question', title: 'Trust all websites?', message: 'Let SecondHand fill forms on any website?',
-          detail: `Nothing is filled until you click Autofill on a website. Then SecondHand fills the saved answers it can match there. It never clicks Next or Submit. ${SITE_RULES}, on each site. You can turn this off in SecondHand’s side panel in Chrome or on the Chrome extension page.`,
+          detail: `Nothing is filled until you click Autofill on a website. Then SecondHand fills the saved answers it can match there. It never clicks Next or Submit. ${SITE_RULES}, on every site. You can turn this off in SecondHand’s side panel in Chrome or on the Chrome extension page.`,
           buttons: ['Cancel', 'Trust all websites'], defaultId: 1, cancelId: 0, noLink: true
         });
         if (answer.response !== 1) throw publicError('You cancelled trusting all websites.');
