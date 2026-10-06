@@ -212,3 +212,29 @@ test('source labels remain observed evidence, not generated field labels or answ
     assert.deepEqual(parse(bad).fields, []);
   }
 });
+
+test('Apple Vision far-right instruction boxes do not truncate the recipient city cell', () => {
+  const source = structuredClone(require('./fixtures/document-statement-layouts.json')['1099-nec']);
+  const before = structuredClone(source), result = parse(source);
+  assert.deepEqual(profile(result), {
+    addressLine1: '1847 TEST DATA AVE', addressLine2: 'APT 4B', city: 'DES MOINES', state: 'IA', zip: '50309'
+  });
+  assert.equal(result.taxYear, '2026');
+  assert.deepEqual(source, before);
+});
+
+test('recipient-column adjacent labels still stop the city cell at their earliest edge', () => {
+  const { page } = fixture();
+  // The ZIP label in the same recipient row has an unusually tall box. Its
+  // upper edge is in the preceding cell, so that city is no longer reliable.
+  const zipLabel = page.words.find(word => word.text === 'ZIP' && word.bbox.y0 === 710);
+  zipLabel.bbox.y0 = 650; zipLabel.bbox.y1 = 780;
+  for (const word of page.words.filter(word => word.bbox.x0 < 1200 && word.bbox.y0 === 750)) {
+    word.bbox.y0 += 50; word.bbox.y1 += 50;
+  }
+  const answers = profile(parse(page));
+  assert.equal(answers.city, undefined, 'a recipient-column label must not be ignored like a far-right instruction');
+  assert.equal(answers.state, 'IA');
+  assert.equal(answers.zip, '52401-1234');
+  assert.equal(answers.addressLine1, '42 FIXTURE WAY');
+});

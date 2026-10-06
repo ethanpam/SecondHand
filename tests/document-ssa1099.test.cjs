@@ -47,7 +47,7 @@ const dropLine = (page, y) => { page.words = page.words.filter(word => word.bbox
 test('SSA boxes supply bounded review fields without splitting beneficiary names or deriving income', () => {
   const page = fixture(), before = structuredClone(page), result = parse(page), fields = byId(result);
   assert.equal(detect(page), 1);
-  assert.equal(result.type, 'ssa1099');
+  assert.equal(result.type, 'ssa-1099');
   assert.equal(result.title, 'Form SSA-1099 benefit statement');
   assert.equal(result.taxYear, '2023');
   assert.equal(fields.ssaRecipientName.value, 'MORGAN LEE VAN EXAMPLE');
@@ -78,6 +78,40 @@ test('conflicting heading and box years remain visible per box with no selected 
   assert.match(fields.taxLineSsaBox4.label, /2018/);
   assert.match(fields.taxLineSsaBox5.sourceLabel, /2018/);
   assert.match(result.warnings.join(' '), /years disagree \(2018, 2019\)/);
+});
+
+test('a bounded inline beneficiary name remains review-only and never crosses the SSN column', () => {
+  const page = fixture();
+  for (const word of page.words) {
+    if (word.bbox.y0 === 215 && word.bbox.x0 < 1000) {
+      word.bbox.x0 += 200; word.bbox.x1 += 200;
+      word.bbox.y0 = 170; word.bbox.y1 = 188;
+    }
+  }
+  const fields = byId(parse(page));
+  assert.equal(fields.ssaRecipientName.value, 'MORGAN LEE VAN EXAMPLE');
+  assert.equal(fields.ssaRecipientName.profileKey, undefined);
+  assert.equal(fields.ssaRecipientName.sourceLabel, 'Box 1. Name');
+  assert.equal(fields.applicantSsn.value, '000-12-3456');
+
+  const conflicting = structuredClone(page);
+  conflicting.words.push({ text: 'ANOTHER PERSON', confidence: 93, bbox: { x0: 100, y0: 215, x1: 240, y1: 233 } });
+  assert.equal(byId(parse(conflicting)).ssaRecipientName, undefined, 'both inline and below-label names are ambiguous');
+  const crossing = structuredClone(page);
+  crossing.words.push({ text: 'OTHER', confidence: 93, bbox: { x0: 990, y0: 170, x1: 1030, y1: 188 } });
+  assert.equal(byId(parse(crossing)).ssaRecipientName, undefined, 'a word crossing into Box 2 cannot be part of the name');
+});
+
+test('the Apple Vision statement fixture preserves the inline beneficiary name without guessing name parts', () => {
+  const page = require('./fixtures/document-statement-layouts.json')['ssa-1099'];
+  const before = structuredClone(page), result = parse(page), fields = byId(result);
+  assert.equal(result.type, 'ssa-1099');
+  assert.equal(fields.ssaRecipientName.value, 'ALEXANDER J SAMPLE');
+  assert.equal(fields.ssaRecipientName.profileKey, undefined);
+  assert.equal(result.fields.some(field => ['firstName', 'middleName', 'lastName'].includes(field.profileKey)), false);
+  assert.equal(fields.addressLine1.value, '1847 TEST DATA AVE');
+  assert.equal(fields.city.value, 'DES MOINES');
+  assert.deepEqual(page, before);
 });
 
 test('filled sample values and observed OCR row artifacts preserve cell ownership', () => {

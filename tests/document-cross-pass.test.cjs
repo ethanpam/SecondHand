@@ -67,7 +67,7 @@ function assertAmbiguous(pages) {
 
 test('consistent two-pass statement still proposes anchored fields', () => {
   const result = analyzeDocument({ pages: [paired(ssa())] }), values = fields(result);
-  assert.equal(result.type, 'ssa1099'); assert.equal(result.taxYear, '2023');
+  assert.equal(result.type, 'ssa-1099'); assert.equal(result.taxYear, '2023');
   assert.equal(values.applicantSsn.value, '111-22-3333');
   assert.equal(values.addressLine1.value, '42 FICTIONAL ROAD');
   assert.equal(values.taxLineSsaBox3.value, '123.45');
@@ -108,7 +108,7 @@ test('an alternate-only form is never promoted into suggestions when the primary
 
 test('an alternate conflicting year cannot be lost when the primary has one selected year', () => {
   const result = analyzeDocument({ pages: [paired(ssa({ year: '2023' }), ssa({ year: '2023', repaidYear: '2022', netYear: '2022' }))] });
-  assert.equal(result.type, 'ssa1099'); assert.equal(result.taxYear, '');
+  assert.equal(result.type, 'ssa-1099'); assert.equal(result.taxYear, '');
   assert.match(result.warnings.join(' '), /years disagree.*2022.*2023/);
   const values = fields(result);
   assert.equal(values.taxLineSsaBox3.value, '123.45');

@@ -53,6 +53,30 @@ final class DocumentOCRTests: XCTestCase {
         XCTAssertTrue(try ProfileDocumentParser.analyze(unknown).fields.isEmpty)
     }
 
+    func testAdditionalSyntheticFormsProvideRecipientDetails() throws {
+        for (name, type) in [("synthetic_1099nec_copyb_2026", "1099-nec"), ("synthetic_ssa1099_filled", "ssa-1099"), ("synthetic_w2_page3_2025", "w2")] {
+            let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: name, withExtension: "pdf"))
+            let result = try DocumentOCR.recognize(data: Data(contentsOf: url), isPDF: true, includeLayout: true)
+            let attachment = XCTAttachment(data: try JSONEncoder().encode(result.layoutPages), uniformTypeIdentifier: "public.json")
+            attachment.name = name + " OCR layout"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            let analysis = try ProfileDocumentParser.analyze(result)
+            XCTAssertEqual(analysis.type, type, name)
+            let values = Dictionary(uniqueKeysWithValues: analysis.fields.compactMap { field in field.profileKey.map { ($0, field.value) } })
+            // These samples combine the full name in one cell. The parser
+            // does not guess the first/last name boundaries for an applicant.
+            XCTAssertNil(values["firstName"], name)
+            XCTAssertNil(values["middleName"], name)
+            XCTAssertNil(values["lastName"], name)
+            XCTAssertEqual(values["addressLine1"], type == "w2" ? "1847 TEST DATA AVE, APT 4B" : "1847 TEST DATA AVE", name)
+            XCTAssertEqual(values["addressLine2"], type == "w2" ? nil : "APT 4B", name)
+            XCTAssertEqual(values["city"], "DES MOINES", name)
+            XCTAssertEqual(values["state"], "IA", name)
+            XCTAssertEqual(values["zip"], "50309", name)
+        }
+    }
+
     func testImageRecognitionAndNoTextFailure() throws {
         let size = CGSize(width: 1200, height: 500)
         let format = UIGraphicsImageRendererFormat()

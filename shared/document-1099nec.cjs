@@ -74,7 +74,14 @@ function parse(page) {
   const state = local('State or province'), country = local('Country'), zip = local('ZIP or foreign postal code');
   const pageNumber = Number.isSafeInteger(page.pageNumber) && page.pageNumber > 0 ? page.pageNumber : 1;
   const cell = (from, to, left, right) => {
-    const words = afterLabel(rows, from, to, left, right);
+    // Vision can group the far-right instructions with a recipient label row.
+    // Their taller boxes must not shorten the recipient cell. Keep every
+    // neighboring label in the recipient column, however: Country/ZIP can
+    // start slightly above State and must still stop the preceding city cell.
+    const nextWords = to?.row.words.filter(word => word.bbox.x0 < divider);
+    if (!nextWords?.length) return [];
+    const next = { ...to, row: { ...to.row, words: nextWords } };
+    const words = afterLabel(rows, from, next, left, right);
     // A word whose center happens to be in the cell must not bring in a value
     // crossing into a neighboring person's or address component's column.
     return words.every(word => word.bbox.x0 >= left - (word.bbox.y1 - word.bbox.y0) / 2 && word.bbox.x1 <= right) ? words : [];

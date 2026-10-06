@@ -29,7 +29,7 @@ struct ProfileDocumentImportView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 } footer: {
-                    Text("Choose a completed 1040 or 1040-SR to suggest profile details. You’ll review them before saving.")
+                    Text("Choose a completed 1040, W-2, 1099-NEC, or SSA-1099 to suggest profile details. You’ll review them before saving.")
                 }
                 Section("Saved documents") {
                     if store.data.documents.isEmpty {
@@ -124,7 +124,7 @@ private struct ProfileDocumentReviewView: View {
             } else if fields.isEmpty {
                 Section {
                     Text("No supported profile details found")
-                    Text("Use a clear first page of a completed 1040 or 1040-SR, or enter your details manually.")
+                    Text("Use a clear completed 1040, W-2, 1099-NEC, or SSA-1099, or enter your details manually.")
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
             } else {

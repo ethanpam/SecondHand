@@ -21,7 +21,7 @@ function detect(page) {
 
 function parse(page) {
   const rows = wordRows(page || {}), fields = [], warnings = [];
-  const result = { type: 'ssa1099', title: 'Form SSA-1099 benefit statement', taxYear: '', fields, warnings };
+  const result = { type: 'ssa-1099', title: 'Form SSA-1099 benefit statement', taxYear: '', fields, warnings };
   if (detect(page) !== 1) {
     warnings.push('A single SSA-1099 statement could not be identified reliably. Review the original document.');
     return result;
@@ -63,7 +63,16 @@ function parse(page) {
 
   const header = sameRow(a.name, a.ssn) && sameRow(a.paid, a.repaid) && sameRow(a.repaid, a.net) && a.name.y1 < a.paid.y0;
   if (header) {
-    const nameWords = afterLabel(rows, a.name, a.paid, a.name.x0, a.ssn.x0), fullName = content(nameWords);
+    // Vision can place a filled name on the caption row. Accept that one
+    // bounded row only when the rest of Box 1 is empty; never choose between
+    // an inline name and another name below it or cross into the SSN column.
+    const inlineName = a.name.row.words.filter(word => word.bbox.x0 >= a.name.x1 && word.bbox.x0 < a.ssn.x0);
+    const belowName = rows.filter(row => row !== a.name.row).flatMap(row => row.words.filter(word =>
+      centerY(word) > a.name.y1 && centerY(word) < rowBottom(a.paid) && centerX(word) >= a.name.x0 && centerX(word) < a.ssn.x0));
+    const nameWords = inlineName.length
+      ? (!belowName.length && inlineName.every(word => word.bbox.x1 <= a.ssn.x0) ? inlineName : [])
+      : afterLabel(rows, a.name, a.paid, a.name.x0, a.ssn.x0);
+    const fullName = content(nameWords);
     if (/^[\p{L}][\p{L} .'-]{0,149}$/u.test(fullName)) {
       add('ssaRecipientName', 'Beneficiary name (combined; review only)', fullName, nameWords, a.name, undefined, 'applicant');
       warnings.push('Box 1 combines the beneficiary’s name. Enter first, middle, and last names yourself after checking the original.');

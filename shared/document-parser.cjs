@@ -5,7 +5,7 @@
 const { validateProfile } = require('./schema.cjs');
 const additionalForms = [
   { type: 'w2', ...require('./document-w2.cjs') },
-  { type: 'ssa1099', ...require('./document-ssa1099.cjs') },
+  { type: 'ssa-1099', ...require('./document-ssa1099.cjs') },
   { type: '1099-nec', ...require('./document-1099nec.cjs') }
 ];
 

@@ -24,10 +24,12 @@ const CONFIG = { max_len: 512, head_max_len: 192, temperature: [1.6, 1.25, 1.546
 const DECISION = { type: 'noul', instructions: 'Given the facts about the household, is the candidate the correct answer to the form question?' };
 const MATCH = { type: 'choice', instructions: 'Which saved answer does this form question ask for?', criteria: ['first name', 'last name', 'email address', 'none of these'] };
 const tick = () => new Promise(resolve => setImmediate(resolve));
-// Waits up to 200 turns of the event loop for `condition`; setTimeout may be mocked.
+// Waits up to 5 seconds for `condition`, a turn of the event loop at a time, since setTimeout may be
+// mocked. Loading reads the model folder from disk, which can take hundreds of turns on a busy machine.
 const settles = async (condition, what) => {
-  for (let turn = 0; !condition(); turn++) {
-    if (turn > 200) throw new Error(`Never saw ${what}`);
+  const end = performance.now() + 5000;
+  while (!condition()) {
+    if (performance.now() > end) throw new Error(`Never saw ${what}`);
     await tick();
   }
 };

@@ -766,7 +766,9 @@ function extensionCopy({ exists = true, prepared = true, refresh = async () => {
   return copy;
 }
 const shipped = async app => plain(await app.request({ type: 'status' })).extension;
-const until = async condition => { for (let i = 0; i < 100 && !condition(); i++) await tick(); assert.ok(condition(), 'timed out'); };
+// Waits up to 5 seconds, a turn of the event loop at a time. Status reads the real Laya model
+// folder first, and on a busy machine that disk read can take hundreds of turns.
+const until = async condition => { const end = performance.now() + 5000; while (!condition() && performance.now() < end) await tick(); assert.ok(condition(), 'timed out'); };
 
 test('status reports the extension build the app ships and that the copy it prepared for Chrome has it', async () => {
   const copy = extensionCopy();

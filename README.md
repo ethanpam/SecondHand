@@ -211,7 +211,7 @@ Tests only use the fictional profile in [`tests/fixtures/applicant-profile.json`
 
 ### Releases
 
-There is no hosted CI: pull requests and tags don't run checks or build installers. Run the commands above before sharing changes, and `npm audit` in the root and in `website/` for dependency audits. Installers are built locally with `npm run dist:win` on Windows or `npm run dist:mac` on a Mac, and uploaded by hand. The [download website](website/README.md) explains publishing, which uses a temporary upload token that never ships in the app.
+Every pull request and every push to `main` runs [CI](.github/workflows/ci.yml) on one Linux machine: `npm test` and `npm run check`, then `npm test`, `npm run typecheck`, `npm run lint` and `npm run build` in `website/`. CI installs no Electron, browsers or Laya model, so the Laya parity tests skip there. The Electron, browser, OCR, Laya and iOS smokes stay local: run the ones your change touches before merging (`test:ui`, `test:extension`, `test:translation`, `test:summary`, `test:laya`, `test:ocr`, `test:ocr:ui`, `test:native`, and the [iPhone app's tests](ios/README.md)). The [QA gate list](.claude/agents/qa.md) says which ones each area needs. Tags don't build installers, and nothing runs dependency audits: run `npm audit` in the root and in `website/`. Installers are built locally with `npm run dist:win` on Windows or `npm run dist:mac` on a Mac, and uploaded by hand. The [download website](website/README.md) explains publishing, which uses a temporary upload token that never ships in the app.
 
 ## Project layout
 
