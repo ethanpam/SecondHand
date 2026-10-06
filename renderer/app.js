@@ -13,7 +13,9 @@
     'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare',
     'monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand', 'monthlyMedicalExpenses',
     'sex', 'maritalStatus', 'hasSsnAnswer', 'ssnCardNameMatches', 'usCitizen', 'militaryOrVeteran', 'disabled', 'blind', 'healthLimitation', 'medicare',
-    ...snapCatalog.scalarFields.map(field => field.key)];
+    'studentLevel', 'incomeSources', 'currentBenefits', 'helpWanted', ...snapCatalog.scalarFields.map(field => field.key)];
+  // Questions answered with several of a list's choices (#184): checkboxes, saved as the checked values comma-separated.
+  const severalFields = ['incomeSources', 'currentBenefits', 'helpWanted'];
   const viewNames = { overview: 'Overview', profile: 'My information', documents: 'Documents', applications: 'Applications', extension: 'Chrome extension', privacy: 'Privacy & backups' };
   const statusNames = { draft: 'Draft', in_progress: 'In progress', submitted: 'Submitted', needs_action: 'Needs action', approved: 'Approved', denied: 'Denied' };
   let vaultStatus = { exists: false, unlocked: false, recoveryKey: false, deviceReset: false, deviceResetSupported: false, extensionId: '', bridgeRunning: false };
@@ -52,7 +54,7 @@
     { title: 'Your household', intro: 'Everyone who lives with you and shares food with you. SecondHand works out their ages from their birth dates.' },
     { title: 'Where you live', intro: 'Your home address and where you get mail.' },
     { title: 'Income and money on hand', intro: 'Monthly income, housing costs, money on hand, and medical costs. Leave blank anything you don’t know yet.' },
-    { title: 'Programs', intro: 'The programs you want to ask Iowa for.' },
+    { title: 'Programs', intro: 'The programs you want to ask Iowa for, the benefits your household gets now, and the help you’re looking for.' },
     { title: 'About you', intro: 'Iowa’s questions about you, so SecondHand can answer them on Iowa’s Tell Us More page.' }
   ];
   // How many steps the desktop says are done ({ step, steps }), or null when no setup is under way.
@@ -63,6 +65,8 @@
   let offerSetup = false;
   // The desktop's note that it reset its settings is shown once while the app is open.
   let settingsNoticeShown = false;
+  // Add your household in Chrome's side panel while SecondHand is locked (#180): My information opens at Your household once unlocked.
+  let householdWanted = false;
 
   function icon(name) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -170,6 +174,7 @@
     manualCounts = null;
     renderMembers([]);
     renderSetupResume();
+    $('household-note').hidden = true;
     $('application-form').reset();
     $('application-id').value = '';
     $('auth-form').reset();
@@ -345,6 +350,15 @@
 
   // A profile field's input or select, or its radio buttons: setting a group's value checks that answer.
   const profileControl = (field) => $('profile-form').elements.namedItem(field);
+  // A profile field's answer as it is saved, and showing a saved one. A question with several answers is its checked boxes.
+  function fieldValue(field) {
+    return severalFields.includes(field) ? Array.from(profileControl(field)).filter(box => box.checked).map(box => box.value).join(',') : profileControl(field).value;
+  }
+  function showValue(field, value) {
+    if (!severalFields.includes(field)) { profileControl(field).value = value; return; }
+    const chosen = value ? value.split(',') : [];
+    for (const box of profileControl(field)) box.checked = chosen.includes(box.value);
+  }
   const snapEditor = window.SecondHandSnapEditor.create($('snap-information-fields'), () => {
     clearFieldReviews(); profileRevision++; setProfileDirty(true);
   });
@@ -353,7 +367,7 @@
     clearFieldReviews();
     profileRevision++;
     manualCounts = null;
-    for (const key of profileFields) profileControl(key).value = typeof data.profile[key] === 'string' ? data.profile[key] : '';
+    for (const key of profileFields) showValue(key, typeof data.profile[key] === 'string' ? data.profile[key] : '');
     snapEditor.render(data.profile);
     renderCustomAnswers(data.profile.customFields);
     renderMembers(Array.isArray(data.profile.householdMembers) ? data.profile.householdMembers : []);
@@ -375,22 +389,31 @@
     $('add-custom-answer').disabled = rows.length >= MAX_CUSTOM_ANSWERS;
     $('custom-answers-limit').hidden = rows.length < MAX_CUSTOM_ANSWERS;
   }
+  // An answer saved from a page with Remember for next time (#186) also keeps its question's kind and choices, and the site
+  // it came from. They stay with it when it is edited here, and a choice question's answer is one of its own choices.
+  const CHOICE_TYPES = ['radio', 'select'];
   function customAnswerRow(answer) {
     const row = element('fieldset', 'custom-answer');
     row.dataset.customId = answer.id;
+    if (answer.type !== undefined) { row.dataset.customType = answer.type; row.dataset.customOptions = JSON.stringify(answer.options); }
+    if (answer.site !== undefined) row.dataset.customSite = answer.site;
     row.append(element('legend'));
     const controls = {};
     const field = (key, title, multiline, limit) => {
       const wrapper = element('div', 'field');
       const label = element('label', '', title);
-      const input = element(multiline ? 'textarea' : 'input');
+      const choices = key === 'value' && CHOICE_TYPES.includes(answer.type) ? answer.options : null;
+      const input = element(choices ? 'select' : multiline ? 'textarea' : 'input');
       input.id = `custom-${answer.id}-${key}`;
       input.dataset.customField = key;
-      input.maxLength = limit;
-      input.autocomplete = 'off';
-      input.spellcheck = false;
-      if (multiline) input.rows = key === 'value' ? 3 : 2;
-      else input.type = 'text';
+      if (choices) for (const choice of choices) { const option = element('option', '', choice); option.value = choice; input.append(option); }
+      else {
+        input.maxLength = limit;
+        input.autocomplete = 'off';
+        input.spellcheck = false;
+        if (multiline) input.rows = key === 'value' ? 3 : 2;
+        else input.type = 'text';
+      }
       label.htmlFor = input.id;
       input.value = key === 'aliases' ? (Array.isArray(answer.aliases) ? answer.aliases.join('\n') : '') : (answer[key] || '');
       if (key !== 'aliases') input.setAttribute('aria-required', 'true');
@@ -399,6 +422,10 @@
       return wrapper;
     };
     row.append(field('label', 'Question label', false, 120), field('value', 'Your answer', true, 1000));
+    if (answer.site !== undefined) {
+      const site = element('p', 'field-hint custom-answer-site', `Saved from ${new URL(answer.site).hostname} with Remember for next time.`);
+      row.append(site);
+    }
     const aliases = element('details', 'custom-answer-aliases');
     aliases.append(element('summary', '', 'Other wording for this question (optional)'));
     const aliasField = field('aliases', 'Aliases — one per line', true, 604);
@@ -425,13 +452,29 @@
     clearError('custom-answers-error');
     refreshCustomAnswers();
   }
-  function collectCustomAnswers() {
-    return customAnswerRows().map(row => ({
-      id: row.dataset.customId,
-      label: row.querySelector('[data-custom-field="label"]').value.trim(),
-      value: row.querySelector('[data-custom-field="value"]').value.trim(),
-      aliases: row.querySelector('[data-custom-field="aliases"]').value.split(/\r?\n/).map(value => value.trim()).filter(Boolean)
-    }));
+  // One custom answer as it is saved, from its row or as the desktop gave it.
+  const customAnswer = ({ id, label, value, aliases, type, options, site }) => ({ id, label, value, aliases,
+    ...(type === undefined ? {} : { type, options }), ...(site === undefined ? {} : { site }) });
+  const collectCustomAnswer = row => customAnswer({
+    id: row.dataset.customId,
+    label: row.querySelector('[data-custom-field="label"]').value.trim(),
+    value: row.querySelector('[data-custom-field="value"]').value.trim(),
+    aliases: row.querySelector('[data-custom-field="aliases"]').value.split(/\r?\n/).map(value => value.trim()).filter(Boolean),
+    type: row.dataset.customType, options: row.dataset.customType ? JSON.parse(row.dataset.customOptions) : undefined, site: row.dataset.customSite
+  });
+  const collectCustomAnswers = () => customAnswerRows().map(collectCustomAnswer);
+  // Custom answers remembered in Chrome while My information has unsaved edits (#186): a new one joins the draft, and one
+  // not edited here takes the remembered answer. One edited or removed here keeps the applicant's edit.
+  function mergeCustomAnswers(before, latest) {
+    const earlier = new Map((Array.isArray(before) ? before : []).map(answer => [answer.id, answer]));
+    const rows = new Map(customAnswerRows().map(row => [row.dataset.customId, row]));
+    const unchanged = (row, answer) => JSON.stringify(collectCustomAnswer(row)) === JSON.stringify(customAnswer({ ...answer, aliases: answer.aliases ?? [] }));
+    for (const answer of Array.isArray(latest) ? latest : []) {
+      const row = rows.get(answer.id);
+      if (!row) { if (!earlier.has(answer.id)) $('custom-answer-list').append(customAnswerRow(answer)); }
+      else if (earlier.has(answer.id) && unchanged(row, earlier.get(answer.id))) row.replaceWith(customAnswerRow(answer));
+    }
+    refreshCustomAnswers();
   }
   function customAnswersValid(answers) {
     for (const [index, answer] of answers.entries()) {
@@ -488,7 +531,7 @@
     select.value = value;
     return select;
   }
-  // One person's row. The applicant's own name and birth date come from About you and show here read-only.
+  // One person's row. The applicant's own name, birth date and whether they're a student come from About you and show here read-only.
   function memberRow(member) {
     const self = member.relationship === 'self';
     const row = element('fieldset', 'household-member');
@@ -508,17 +551,28 @@
     const student = memberField(member, 'student', 'A student?', choice([['', 'Not answered yet'], ['yes', 'Yes'], ['no', 'No']], member.student || ''));
     const grade = memberField(member, 'grade', 'Grade (for example 3rd, K, or College)', text('grade', 20));
     grade.hidden = member.student !== 'yes';
-    student.querySelector('select').addEventListener('change', () => {
-      const yes = student.querySelector('select').value === 'yes';
-      grade.hidden = !yes;
-      if (!yes) grade.querySelector('input').value = '';
-    });
+    student.querySelector('select').disabled = self;
+    student.querySelector('select').addEventListener('change', () => showGrade(row));
     grid.append(student, grade);
     row.append(element('legend'), grid);
     window.SecondHandSnapEditor.memberDetails(row, member);
-    if (self) row.append(element('p', 'field-hint', 'Your name and date of birth come from About you.'));
+    if (self) row.append(element('p', 'field-hint', 'Your name, date of birth, and whether you’re a student come from About you.'));
     row.querySelectorAll('[data-member-field="birthDate"]').forEach(input => input.addEventListener('input', renderCounts));
     return row;
+  }
+  // A row's grade is asked only for a student, and cleared for anyone else.
+  function showGrade(row) {
+    const yes = row.querySelector('[data-member-field="student"]').value === 'yes';
+    row.querySelector('[data-member-field="grade"]').closest('.field').hidden = !yes;
+    if (!yes) row.querySelector('[data-member-field="grade"]').value = '';
+  }
+  // The applicant's own row says whether they're a student as their student status does (#184).
+  const studentAnswer = level => level === 'not-student' ? 'no' : level ? 'yes' : '';
+  function syncStudent() {
+    const row = memberRows().find(item => item.dataset.self === 'true');
+    if (!row) return;
+    row.querySelector('[data-member-field="student"]').value = studentAnswer(profileControl('studentLevel').value);
+    showGrade(row);
   }
   // The list's rows, legends, remove buttons and Add button, and the counts worked out from it.
   function renderMembers(members) {
@@ -591,7 +645,7 @@
     if (rows.length >= MAX_MEMBERS) return;
     const blank = relationship => ({ id: window.crypto.randomUUID(), firstName: '', lastName: '', birthDate: '', relationship, student: '', grade: '' });
     // The list starts with the applicant.
-    if (!rows.length) $('household-members').append(memberRow(blank('self')));
+    if (!rows.length) $('household-members').append(memberRow({ ...blank('self'), student: studentAnswer(profileControl('studentLevel').value) }));
     const row = memberRow(blank(''));
     $('household-members').append(row);
     refreshMembers();
@@ -637,6 +691,17 @@
     setupStep = null;
     renderSetupStep();
   }
+  // Overview's note to add the household list (#180): shown until a list is saved, unless the applicant dismissed it.
+  function renderHouseholdNote() {
+    const listed = Array.isArray(data.profile.householdMembers) && data.profile.householdMembers.length > 0;
+    $('household-note').hidden = !vaultStatus.unlocked || listed || vaultStatus.householdNoteDismissed === true;
+  }
+  // My information at Your household, from Overview's note or Chrome's side panel (#180). Locked, it opens there once unlocked.
+  function openHousehold() {
+    if (!vaultStatus.unlocked) { householdWanted = true; return; }
+    closeSetup();
+    if (showView('profile')) $('household-heading').focus();
+  }
   // Overview's "Finish setting up" while a setup is under way.
   function renderSetupResume() {
     $('setup-resume').hidden = !setupProgress;
@@ -668,11 +733,14 @@
       const before = data.profile;
       data = { ...data, profile: latest.profile || {} };
       if (!profileDirty) fillProfile();
-      else for (const field of fields.filter(name => profileFields.includes(name))) {
-        if (String(profileControl(field).value) === String(before[field] ?? '')) profileControl(field).value = typeof data.profile[field] === 'string' ? data.profile[field] : '';
+      else {
+        for (const field of fields.filter(name => profileFields.includes(name))) {
+          if (String(fieldValue(field)) === String(before[field] ?? '')) showValue(field, typeof data.profile[field] === 'string' ? data.profile[field] : '');
+        }
+        if (fields.includes('customFields')) mergeCustomAnswers(before.customFields, data.profile.customFields);
       }
       renderSummary();
-      toast('An answer you saved from Chrome is now in My information.');
+      toast(fields.includes('customFields') ? 'An answer you chose to remember in Chrome is now in My information, under Custom answers.' : 'An answer you saved from Chrome is now in My information.');
     } catch (error) { if (generation === vaultGeneration) toast(error.message || 'Unable to show the answer you saved from Chrome.', true); }
   }
 
@@ -711,7 +779,7 @@
     }
   }
 
-  const reviewProfileDraft = () => ({ ...Object.fromEntries(profileFields.map(key => [key, String(profileControl(key).value || '')])), householdMembers: collectMembers(), ...snapEditor.read() });
+  const reviewProfileDraft = () => ({ ...Object.fromEntries(profileFields.map(key => [key, String(fieldValue(key) || '')])), householdMembers: collectMembers(), ...snapEditor.read() });
   const reviewDocumentCandidates = () => documentReviewFields.map(field => ({ ...field.metadata, value: field.input ? field.input.value : field.value }));
 
   function profileReviewTarget(key) {
@@ -1176,7 +1244,7 @@
   function renderSummary() {
     const hasProfile = profileFields.some((field) => Boolean(data.profile[field]));
     $('profile-step-label').replaceChildren(document.createTextNode(hasProfile ? 'Review my profile ' : 'Set up my profile '), icon('arrow'));
-    renderApplications(); renderSetup(); renderRecovery(); renderTouchId();
+    renderApplications(); renderSetup(); renderRecovery(); renderTouchId(); renderHouseholdNote();
   }
 
   async function loadUnlocked(status) {
@@ -1198,6 +1266,7 @@
     fillProfile(); renderSummary();
     showView('overview', { skipConfirmation: true });
     renderSetupResume();
+    if (householdWanted) { householdWanted = false; openHousehold(); }
     // Problems found while opening, in one toast so none hides another: setup progress that couldn't
     // be read, Touch ID turned off while unlocking (and why), and settings the desktop had to reset.
     const settingsNotice = !settingsNoticeShown && typeof status.settingsNotice === 'string' && status.settingsNotice;
@@ -1437,6 +1506,19 @@
   $('setup-back').addEventListener('click', () => { if (setupStep > 0) { setupStep--; renderSetupStep(); } });
   $('setup-later').addEventListener('click', () => { if (showView('overview')) renderSetupResume(); });
   $('add-household-member').addEventListener('click', addMember);
+  $('household-note-open').addEventListener('click', openHousehold);
+  $('household-note-dismiss').addEventListener('click', () => {
+    const generation = vaultGeneration;
+    pending($('household-note-dismiss'), async () => {
+      try {
+        const status = await api.dismissHouseholdNote();
+        if (generation !== vaultGeneration) return;
+        vaultStatus = { ...vaultStatus, ...status };
+        renderHouseholdNote();
+        $('main-content').focus();
+      } catch (error) { if (generation === vaultGeneration) toast(error.message || 'Unable to dismiss this note.', true); }
+    });
+  });
   for (const [buttonId, method, message] of [
     ['copy-recovery-key', 'copyRecoveryKey', 'Copied. It will be cleared from the clipboard in 1 minute.'],
     ['save-recovery-key', 'saveRecoveryKey', 'Saved. Print it or move it somewhere safe, away from this computer.']
@@ -1519,6 +1601,11 @@
     if (event.target.closest('#custom-answers')) clearError('custom-answers-error');
     profileRevision++; setProfileDirty(true);
     if (['firstName', 'lastName', 'birthDate'].includes(event.target.name)) syncSelf();
+    if (event.target.name === 'studentLevel') syncStudent();
+    // None stands alone among a question's answers.
+    if (severalFields.includes(event.target.name) && event.target.checked) {
+      for (const box of profileControl(event.target.name)) if (box !== event.target && (event.target.value === 'none' || box.value === 'none')) box.checked = false;
+    }
   });
   $('profile-form').addEventListener('change', () => clearFieldReviews());
   $('profile-form').addEventListener('submit', (event) => {
@@ -1746,6 +1833,7 @@
       refreshTouchIdUnlock();
     });
     api.onProfileChanged(change => profileChangedElsewhere(change.fields));
+    api.onOpenHousehold(openHousehold);
     // Unlocked from Chrome's side panel with Touch ID: show the saved information here too.
     api.onUnlocked(async () => {
       if (vaultStatus.unlocked) return;

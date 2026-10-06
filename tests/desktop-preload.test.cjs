@@ -154,3 +154,25 @@ test('preload offers Touch ID as named calls, and an unlock notice with only a v
   assert.equal(removed.channel, 'secondhand:unlocked');
   assert.throws(() => api.onUnlocked('not a function'), /callback is required/);
 });
+
+test('preload tells the window to open Your household with nothing from the event, and dismisses the Overview note (#180)', () => {
+  let api, listener, removed;
+  const calls = [];
+  runFile('desktop/preload.cjs', {
+    require: () => ({
+      contextBridge: { exposeInMainWorld(_name, value) { api = value; } },
+      ipcRenderer: { invoke: (...args) => { calls.push(args); return Promise.resolve(); },
+        on(channel, callback) { assert.equal(channel, 'secondhand:open-household'); listener = callback; },
+        removeListener(channel, callback) { removed = { channel, callback }; } }
+    })
+  });
+  const heard = [];
+  const unsubscribe = api.onOpenHousehold((...args) => heard.push(args));
+  listener({ sender: 'private-electron-event' }, { section: 'privacy', profile: { firstName: 'Private' } });
+  assert.deepEqual(heard, [[]], 'the callback gets nothing');
+  unsubscribe();
+  assert.deepEqual(removed, { channel: 'secondhand:open-household', callback: listener });
+  assert.throws(() => api.onOpenHousehold(), /callback/);
+  api.dismissHouseholdNote();
+  assert.deepEqual(calls, [['secondhand:invoke', 'dismissHouseholdNote']]);
+});

@@ -7,7 +7,7 @@
   const summary = globalThis.SecondHandSummary;
   // Must match BUILD in background.js: change both together. Chrome loads these pages
   // from disk right away but keeps running the old worker until SecondHand is reloaded.
-  const BUILD = '2026-10-06.12';
+  const BUILD = '2026-10-06.18';
   // The applicant's language: the choice saved in this extension's storage, else the browser's.
   let language = strings.language();
   const t = (key, params = {}) => strings.text(language, key, params);
@@ -21,7 +21,7 @@
   // A result's message with its count of what is left for the reader set to `left`, or without it when that is
   // 0: the side panel keeps the count current as the page changes, and the card's own link carries it. A
   // message from an older worker, words only, is left as it came.
-  const LEFT_KEYS = { 'result.filledNeedYou': 'result.filled', 'result.siteFilledNeedYou': 'result.siteFilled', 'result.siteFilledGuessedNeedYou': 'result.siteFilledGuessed' };
+  const LEFT_KEYS = { 'result.filledNeedYou': 'result.filled', 'result.siteFilledNeedYou': 'result.siteFilled', 'result.siteFilledSuggestedNeedYou': 'result.siteFilledSuggested' };
   // Messages that are only the count: without it, what else they say. A count of questions waiting beside held
   // sensitive details (#176) says nothing without its count; the held line after it says the rest.
   const ONLY_LEFT = { 'result.needYouNotSaved': { key: 'result.noSavedAnswers' }, 'result.nothingMatchesNeedYou': { key: 'result.nothingMatches' },
@@ -207,8 +207,11 @@
       // it carries that. While Autofill is on, what Stop would do goes after it: on a page that waits for answers,
       // where SecondHand clicks Save and Continue once nothing is left, that Stop lets the reader check and
       // continue themselves. A reader who has seen a whole run gets the short form, without Stop's note. Why
-      // Chrome's AI guessed nothing stays in the tooltip.
-      const text = words(briefly(withLeft(fromResult(result), 0)), 240);
+      // Chrome's AI guessed nothing stays in the tooltip. Household questions the household list left open (#180)
+      // wait in the side panel, which lists them with Add your household: the card says so after the rest.
+      const household = Array.isArray(result.household?.questions) ? result.household.questions.length : 0;
+      const said = words(briefly(withLeft(fromResult(result), 0)), 240);
+      const text = household ? `${said} ${t('widget.household', { count: household })}` : said;
       if (!autopilot || usedBefore()) return text;
       const stop = t(result.todoKey === CHECK_FIRST ? 'widget.stopToCheck' : 'widget.stopNote');
       return `${/[.!?…。]$/.test(text) ? text : `${text}.`} ${stop}`;
@@ -499,9 +502,19 @@
     // by id and their own words. One button asks the app for all of them.
     let held = [];
     let heldSignature = '';
+    // Add your household (#180): the household questions the last Autofill left open because of what the household list lacks
+    // (no list saved, or a birth date missing on it), by id and their own words. One button opens the app on Your household.
+    let household = null;
+    let householdSignature = '';
     // Laya's best guesses (#185): the questions the last Autofill filled with one, by id and their own words, to find and check.
     let layaGuesses = [];
     let guessesSignature = '';
+    // Remember for next time (#186): the open questions the last Autofill left that a custom answer may fill, by id and their own
+    // words, whether their answer changes over time, and whether the page holds an answer now. Never the answer itself: the
+    // worker reads it after the Remember click. `rememberChoices` keeps each row's checkbox as the applicant left it.
+    let rememberable = [];
+    let rememberSignature = '';
+    const rememberChoices = new Map();
     let contextRevision = 0;
     let checklistSignature = '';
     let working = false;
@@ -658,6 +671,9 @@
       document.querySelectorAll('.checklist-item').forEach(button => { button.disabled = working || !target; });
       document.querySelectorAll('.save-row button').forEach(button => { button.disabled = working || !target; });
       $('held-fill').disabled = working || !target;
+      $('household-open').disabled = working || !target;
+      document.querySelectorAll('#remember-list input').forEach(box => { box.disabled = working || !target; });
+      $('remember-save').disabled = working || !target || !rememberChecked().length;
       renderQuestionControls();
       renderSummary();
     }
@@ -665,7 +681,11 @@
       fillable = false; autopilot = false; told = false; ran = false; checkFirst = false; left = []; leftCursor = 0; named = []; filledNames = []; site = null; page = null; notSaved = []; checklistSignature = '';
       savable = []; savableSignature = '';
       held = []; heldSignature = '';
+      household = null; householdSignature = '';
       layaGuesses = []; guessesSignature = '';
+      rememberable = []; rememberSignature = ''; rememberChoices.clear();
+      $('remember-list').replaceChildren();
+      $('remember-section').hidden = true;
       $('page-checklist').replaceChildren();
       $('checklist-section').hidden = true;
       $('save-list').replaceChildren();
@@ -674,6 +694,8 @@
       renderFilled();
       $('held-list').replaceChildren();
       $('held-section').hidden = true;
+      $('household-list').replaceChildren();
+      $('household-section').hidden = true;
       $('guesses-list').replaceChildren();
       $('guesses-section').hidden = true;
       resetQuestions();
@@ -838,6 +860,78 @@
       }));
       $('held-section').hidden = !held.length;
     }
+    // What the household list lacks and the questions it left open, as the worker gave them, or null (#180).
+    function householdOf(value) {
+      const questions = (Array.isArray(value?.questions) ? value.questions : []).filter(item => fieldKeys([item?.id]).length && typeof item.label === 'string')
+        .slice(0, 40).map(({ id, label }) => ({ id, label }));
+      if (!questions.length) return null;
+      if (value.need === 'list') return { need: 'list', questions };
+      const person = value.need === 'birthDate' && (value.person === 'you' || (Number.isInteger(value.person) && value.person >= 1 && value.person <= 20)) ? value.person : null;
+      return person === null ? null : { need: 'birthDate', person, questions };
+    }
+    // The household questions in their own words, what the list lacks (the person to finish named as My information names them),
+    // and one button: Add your household, or with a list saved, Open your household list.
+    function renderHousehold() {
+      const signature = JSON.stringify([language, household]);
+      if (signature === householdSignature) return;
+      householdSignature = signature;
+      $('household-section').hidden = !household;
+      if (!household) { $('household-list').replaceChildren(); return; }
+      const hint = household.need === 'list' ? { key: 'household.hintList' } : household.person === 'you' ? { key: 'household.hintYou' }
+        : { key: 'household.hintPerson', params: { number: household.person } };
+      $('household-hint').textContent = words(hint);
+      const button = household.need === 'list' ? 'household.add' : 'household.open';
+      $('household-open').textContent = t(button);
+      $('household-list').replaceChildren(...household.questions.map(item => {
+        const row = document.createElement('div');
+        row.className = 'checklist-item'; row.dataset.householdId = item.id;
+        const copy = document.createElement('span'); copy.className = 'checklist-copy';
+        const label = document.createElement('span'); label.className = 'checklist-label'; label.dir = 'auto'; label.textContent = fixedText(item.label, 200);
+        copy.append(label);
+        row.append(copy);
+        return row;
+      }));
+    }
+    // One row per open question the page holds an answer for, in its own words, with a Remember for next time checkbox: checked
+    // unless its answer changes over time, until the applicant changes it. The section's one button remembers the checked ones.
+    function rememberChecked() { return rememberable.filter(item => rememberChoices.get(item.id) ?? !item.timeBound).map(item => item.id); }
+    function renderRemember() {
+      const signature = JSON.stringify([language, rememberable]);
+      if (signature === rememberSignature) return;
+      rememberSignature = signature;
+      $('remember-list').replaceChildren(...rememberable.map(item => {
+        const row = document.createElement('div');
+        row.className = 'checklist-item save-row'; row.dataset.rememberId = item.id;
+        const copy = document.createElement('span'); copy.className = 'checklist-copy';
+        const label = document.createElement('span'); label.className = 'checklist-label'; label.dir = 'auto'; label.textContent = fixedText(item.label, 200);
+        copy.append(label);
+        if (item.timeBound) {
+          const detail = document.createElement('span'); detail.className = 'checklist-detail'; detail.textContent = t('remember.changes');
+          copy.append(detail);
+        }
+        const check = document.createElement('label'); check.className = 'remember-check';
+        const box = document.createElement('input'); box.type = 'checkbox';
+        box.checked = rememberChoices.get(item.id) ?? !item.timeBound;
+        box.disabled = working || !target;
+        box.setAttribute('aria-label', t('remember.checkLabel', { label: fixedText(item.label, 200) }));
+        box.addEventListener('change', () => { rememberChoices.set(item.id, box.checked); controls(); });
+        check.append(box, document.createTextNode(t('remember.check')));
+        row.append(copy, check);
+        return row;
+      }));
+      $('remember-section').hidden = !rememberable.length;
+    }
+    async function rememberAnswers() {
+      const ids = rememberChecked();
+      if (!ids.length) return;
+      const result = await act({ type: 'ui:rememberAnswers', ids, confirmed: true }, { key: 'remember.saving' });
+      // Kept on screen like a saved answer: until the tab changes or another action starts.
+      if (Number.isInteger(result?.remembered) && result.remembered > 0) {
+        notice = { message: { key: 'remember.saved', params: { count: result.remembered } }, error: false };
+        renderStatus();
+        await refresh();
+      }
+    }
     // One row per question Laya guessed, in its own words, with the dotted outline it has on the page. A row finds it there.
     function renderGuesses() {
       const signature = JSON.stringify([language, layaGuesses, translated.size]);
@@ -872,8 +966,11 @@
         .slice(0, 40).map(({ id, label, answered }) => ({ id, label, answered }));
       held = (Array.isArray(state.held) ? state.held : []).filter(item => fieldKeys([item?.id]).length && typeof item.label === 'string')
         .slice(0, 40).map(({ id, label }) => ({ id, label }));
+      household = householdOf(result?.household);
       layaGuesses = (Array.isArray(result?.layaGuesses) ? result.layaGuesses : []).filter(item => fieldKeys([item?.id]).length && typeof item.label === 'string')
         .slice(0, 40).map(({ id, label }) => ({ id, label }));
+      rememberable = (Array.isArray(state.rememberable) ? state.rememberable : []).filter(item => fieldKeys([item?.id]).length && typeof item.label === 'string' &&
+        typeof item.timeBound === 'boolean' && item.answered === true).slice(0, 40).map(({ id, label, timeBound }) => ({ id, label, timeBound }));
       renderChecklist();
       renderSaves();
       // What is left for the reader: on a page with a checklist, its rows as they are now; elsewhere, what Autofill reported.
@@ -892,7 +989,9 @@
         ? result.filledQuestions.filter(item => typeof item?.label === 'string').slice(0, 80).map(item => ({ label: fixedText(item.label.trim(), 200), guessed: item.guessed === true })) : [];
       renderFilled();
       renderHeld();
+      renderHousehold();
       renderGuesses();
+      renderRemember();
       const loading = target?.status === 'loading';
       if (site?.enabled && !site.ready) show({ key: loading ? 'panel.waitingLoad' : 'panel.reloadToRead' });
       // What Autofill reported, with its count of what is left kept current as the reader answers.
@@ -1347,12 +1446,19 @@
     }));
     // Fill sensitive details (#176): the app shows its sensitive prompt for the held questions. What it fills is the tab's
     // new result; a Cancel is said, and the questions stay listed.
+    $('remember-save').addEventListener('click', trusted(() => { if (!$('remember-save').disabled) rememberAnswers(); }));
     $('held-fill').addEventListener('click', trusted(async () => {
       if ($('held-fill').disabled) return;
       const result = await act({ type: 'ui:fillHeld', confirmed: true }, { key: 'held.filling' });
       if (!result) return;
       show(fromResult(result));
       await refresh();
+    }));
+    // Add your household (#180): the app opens My information at Your household. The questions stay listed until the next Autofill.
+    $('household-open').addEventListener('click', trusted(async () => {
+      if ($('household-open').disabled) return;
+      const result = await act({ type: 'ui:openHousehold', confirmed: true });
+      if (result?.shown === true) { notice = { message: { key: 'household.opened' }, error: false }; renderStatus(); }
     }));
     $('site-disable').addEventListener('click', trusted(async () => {
       if ($('site-disable').disabled) return;
@@ -1382,7 +1488,7 @@
       applyStatic();
       $('language').value = language;
       resetQuestions();
-      if (page) { renderChecklist(); renderLeft(); renderFilled(); renderSaves(); renderHeld(); renderGuesses(); }
+      if (page) { renderChecklist(); renderLeft(); renderFilled(); renderSaves(); renderHeld(); renderHousehold(); renderGuesses(); renderRemember(); }
       renderStatus();
       renderDesktop();
       resetSummary();

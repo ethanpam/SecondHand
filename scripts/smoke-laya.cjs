@@ -136,7 +136,7 @@ async function main() {
     // #39: a text box the rules miss is matched by Laya and filled from the vault as a guess.
     let widget = await open(CONTACT, 'ready');
     await widget.locator('#autofill').click();
-    await expect(widget.locator('#widget-text')).toHaveText(en('result.suggestedByLaya', { summary: { key: 'result.siteFilledGuessed', params: { count: 2, guessed: 1 } } }), { timeout: 20000 });
+    await expect(widget.locator('#widget-text')).toHaveText(en('result.suggestedByLaya', { summary: { key: 'result.siteFilledSuggested', params: { count: 2, suggested: 1 } } }), { timeout: 20000 });
     await expect(page.locator('#name')).toHaveValue(`${syntheticProfile.firstName} ${syntheticProfile.lastName}`);
     await expect(page.locator('#reach')).toHaveValue(syntheticProfile.email);
     assert.equal(await mark('#name'), 'rule');
@@ -152,7 +152,7 @@ async function main() {
     // #42: "Is anyone in your household 60 or older?" gets "No" for a household with no seniors; the pet question needs the applicant.
     widget = await open(HOUSEHOLD, 'ready');
     await widget.locator('#autofill').click();
-    await expect(widget.locator('#widget-text')).toHaveText(en('result.suggestedByLaya', { summary: { key: 'result.siteFilledGuessed', params: { count: 2, guessed: 1 } } }), { timeout: 20000 });
+    await expect(widget.locator('#widget-text')).toHaveText(en('result.suggestedByLaya', { summary: { key: 'result.siteFilledSuggested', params: { count: 2, suggested: 1 } } }), { timeout: 20000 });
     await expect(page.locator('input[name="sixty"][value="no"]')).toBeChecked();
     await expect(page.locator('input[name="sixty"][value="yes"]')).not.toBeChecked();
     assert.equal(await mark('input[name="sixty"][value="no"]'), 'guess');
@@ -202,8 +202,8 @@ async function main() {
     await expect(widget.locator('#widget-text')).toHaveAttribute('title', new RegExp(en('widget.aiUnavailable').replace(/[.’]/g, '\\$&')));
     await expect(page.locator('#reach')).toHaveValue('');
     await expect(widget.locator('#need-you')).toHaveText(en('widget.needYou', { count: 1 }));
-    // The second status is the check for saved custom answers to questions no rule knows (#209).
-    assert.deepEqual((await calls()).map(call => call.type), ['warmLaya', 'status', 'status', 'getFields', 'status'], 'one readiness check, then the same requests as before Laya');
+    assert.deepEqual((await calls()).map(call => call.type), ['warmLaya', 'status', 'status', 'getFields', 'status'],
+      'one readiness check, then the same requests as without Laya: custom-answer availability, then the one field release');
     widget = await open(HOUSEHOLD, 'off');
     await widget.locator('#autofill').click();
     await expect(widget.locator('#widget-text')).toHaveText(en('result.siteFilled', { count: 1 }), { timeout: 20000 });
@@ -225,8 +225,8 @@ async function main() {
     await expect.poll(() => panel.text('#panel-autofill')).toBe(en('panel.autofill'));
     await panel.click('#panel-autofill');
     await expect(page.locator('input[name="sixty"][value="no"]')).toBeChecked({ timeout: 20000 });
-    await expect.poll(() => panel.text('#status'), { timeout: 15000 }).toBe(en('result.suggestedByLaya', { summary: { key: 'result.siteFilledGuessedNeedYou', params: { count: 2, guessed: 1, needYou: 1 } } }));
-    // A Laya that is ready has no line of its own: the result names its guesses.
+    await expect.poll(() => panel.text('#status'), { timeout: 15000 }).toBe(en('result.suggestedByLaya', { summary: { key: 'result.siteFilledSuggestedNeedYou', params: { count: 2, suggested: 1, needYou: 1 } } }));
+    // A Laya that is ready has no line of its own: the result names its suggestions.
     await expect.poll(() => panel.visible('#laya-status'), { timeout: 15000 }).toBe(false);
     assert.equal(await panel.text('#laya-status'), '');
     assert.deepEqual((await layaRequests()).map(call => call.type), ['answerFields']);

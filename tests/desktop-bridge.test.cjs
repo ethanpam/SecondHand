@@ -18,6 +18,38 @@ test('custom answers have bounded question-only metadata and never permit Iowa, 
   assert.throws(() => validateRequest({ id: 'old', type: 'getFields', url: request.url, fields: ['customFields'] }));
 });
 
+test('Fill sensitive details asks for held custom answers with sensitive: true, never on Iowa’s portal (#186)', () => {
+  const request = { id: 'custom', type: 'getCustomFields', url: 'https://pantry.example.org/form', fields: [{ id: 'field1', label: 'Monthly income', type: 'number' }], sensitive: true };
+  assert.deepEqual(validateRequest(request), request);
+  for (const sensitive of [false, 'true', 1, null]) assert.throws(() => validateRequest({ ...request, sensitive }), /sensitive details/, JSON.stringify(sensitive));
+  assert.throws(() => validateRequest({ ...request, url: PORTAL_URL }), /other HTTPS sites/);
+});
+
+// Remember for next time (#186): the applicant's answers from a page, each with its question's label, type and choices.
+const heard = (changes = {}) => ({ label: 'How did you hear about us?', type: 'radio', options: ['Friend', 'Church'], answer: 'Church', ...changes });
+const remember = (answers, changes = {}) => ({ id: 'remember-1', type: 'rememberAnswers', url: 'https://pantry.example.org/intake?step=2', answers, ...changes });
+test('rememberAnswers carries up to 20 answers, each with its question’s label, type and choices, from an https site other than Iowa’s portal (#186)', () => {
+  assert.deepEqual(validateRequest(remember([heard()])), remember([heard()]));
+  assert.equal(validateRequest(remember(Array.from({ length: 20 }, (_, n) => heard({ label: `Question ${n}` })))).answers.length, 20);
+  for (const [type, answer] of [['text', 'A'], ['textarea', 'A'], ['number', '3'], ['date', '2026-10-06'], ['email', 'synthetic@example.org'], ['tel', '(515) 555-0100']]) {
+    assert.equal(validateRequest(remember([heard({ type, options: [], answer })])).answers[0].type, type);
+  }
+  assert.throws(() => validateRequest(remember([heard({ type: 'date', options: [], answer: '3' })])), /answers to remember/, 'an answer that doesn’t fit its kind of question');
+  assert.equal(validateRequest(remember([heard({ type: 'textarea', options: [], answer: 'First line\nSecond line' })])).answers[0].answer, 'First line\nSecond line');
+  assert.equal(validateRequest(remember([heard({ type: 'text', options: [], answer: 'A'.repeat(1000) })])).answers[0].answer.length, 1000);
+  const refused = [remember([]), remember(Array.from({ length: 21 }, (_, n) => heard({ label: `Question ${n}` }))), remember('Church'), remember([null]), remember({ 0: heard() }),
+    remember([heard({ answer: '' })]), remember([heard({ answer: '   ' })]), remember([heard({ answer: 7 })]), remember([heard({ type: 'text', options: [], answer: 'A'.repeat(1001) })]),
+    remember([heard({ type: 'text', options: [], answer: 'First line\nSecond line' })]), remember([heard({ answer: 'Neighbor' })]), remember([heard({ label: 'L'.repeat(121) })]),
+    remember([heard({ label: ' ' })]), remember([heard({ type: 'checkbox' })]), remember([heard({ type: 'password' })]), remember([heard({ type: 'text' })]), remember([heard({ options: [] })]),
+    remember([heard({ options: ['Church', 'Church'] })]), remember([heard({ options: [...Array.from({ length: 30 }, (_, n) => `Option ${n}`), 'Church'] })]),
+    remember([heard({ label: 'How did you hear\u202E about us?' })]), remember([heard({ type: 'text', options: [], answer: 'Church\u200B' })]),
+    ...[{ id: 'sh-1-2' }, { key: 'email' }, { value: 'Church' }, { site: 'https://pantry.example.org' }].map(extra => remember([heard(extra)]))];
+  for (const request of refused) assert.throws(() => validateRequest(request), /answers to remember/, JSON.stringify(request).slice(0, 160));
+  for (const extra of [{ fields: { email: 'synthetic@example.org' } }, { questions: [] }, { sensitive: true }]) assert.throws(() => validateRequest(remember([heard()], extra)), /Unexpected request field/, JSON.stringify(extra));
+  assert.throws(() => validateRequest(remember([heard()], { url: `${PORTAL_URL}/applyForBenefits/enterPersonalInfo` })), /other HTTPS sites/);
+  for (const url of ['http://pantry.example.org/', 'https://pantry.example.org:8443/', 'not a url']) assert.throws(() => validateRequest(remember([heard()], { url })), /other HTTPS sites/, url);
+});
+
 test('general navigation authorization carries only a non-Iowa HTTPS URL, never fields or click selectors', () => {
   const request = { id: 'next', type: 'authorizeSiteNavigation', url: 'https://pantry.example.org/form' };
   assert.deepEqual(validateRequest(request), request);
@@ -582,4 +614,22 @@ test('liquid asset projection is exact-route, explicit-owner, and excludes descr
   }
   for (const suffix of ['?page=2', '#review', '/']) assert.throws(() => validateRequest({ ...request, url: request.url + suffix }));
   for (const extra of [{ recordId: 'arbitrary' }, { recordType: 'taxStatements' }, { pageKey: 'iowa-other-assets' }, { personName: 'Avery\nExample' }]) assert.throws(() => validateRequest({ ...request, ...extra }));
+});
+
+// #180: the side panel's Add your household opens the app on My information, at Your household. The request names nothing else.
+test('openHousehold carries nothing but its id, reaches a running app through the host, and starts nothing when the app is closed', async t => {
+  assert.deepEqual(validateRequest({ id: 'household-1', type: 'openHousehold' }), { id: 'household-1', type: 'openHousehold' });
+  for (const extra of [{ url: PORTAL_URL }, { section: 'privacy' }, { fields: ['householdMembers'] }, { person: 3 }, { profile: {} }]) {
+    assert.throws(() => validateRequest({ id: 'household-1', type: 'openHousehold', ...extra }), /Unexpected/, JSON.stringify(extra));
+  }
+  const directory = await temporary(t, 'secondhand-open-household-');
+  const seen = [];
+  const bridge = await startBridge(directory, () => EXTENSION, async request => { seen.push(request); return { shown: true }; });
+  let launches = 0;
+  assert.deepEqual(await hostSession(directory, [{ id: 'household-1', type: 'openHousehold' }], async () => { launches++; }), [{ id: 'household-1', ok: true, data: { shown: true } }]);
+  assert.deepEqual(seen, [{ id: 'household-1', type: 'openHousehold' }], 'relayed as it is');
+  await bridge.close();
+  assert.deepEqual(await hostSession(directory, [{ id: 'household-2', type: 'openHousehold' }], async () => { launches++; }),
+    [{ id: 'household-2', ok: false, error: 'Open SecondHand, connect this extension, and unlock SecondHand.', code: 'DESKTOP_UNREACHABLE' }]);
+  assert.equal(launches, 0, 'only openApp starts the app');
 });

@@ -46,3 +46,4 @@ input[readonly]{background:#f6f7f2}
 #document-statement>.button{margin:16px 0 10px}
 .snap-section summary:focus-visible,.snap-member-details summary:focus-visible,.snap-information>summary:focus-visible{outline:3px solid #9cb693;outline-offset:3px}
 @media(max-width:650px){.snap-record{padding:12px}.tax-statement-summary{grid-template-columns:1fr;gap:6px}.tax-statement-summary dd{margin-bottom:10px}}
+.household-note{display:flex;align-items:center;justify-content:space-between;gap:16px}.household-note-actions{display:flex;gap:16px;flex-shrink:0}.household-note .text-button{white-space:nowrap}

@@ -110,7 +110,9 @@ Passwords, verification codes, signatures, consent, and final submission are not
 
 Under **My information → Custom answers**, save an exact question label and answer. You can keep up to 50 answers, with up to five explicit aliases each; labels/aliases are limited to 120 characters and answers to 1,000. Save the profile after editing.
 
-Matching normalizes case, extra spaces, and trailing colon/required markers; it does not infer arbitrary semantic equivalents. Conflicting matches, protected questions, another person's context, or incompatible choices remain manual. Custom answers are encrypted, treated as sensitive, and excluded from Laya prompts.
+Matching normalizes case, extra spaces, and trailing colon/required markers; it does not infer arbitrary semantic equivalents. Conflicting matches, protected questions, another person's context, or incompatible choices remain manual. Custom answers are encrypted and excluded from Laya prompts. Those about a sensitive subject wait for **Fill sensitive details** unless Always allow covers the site; the others follow the ordinary approval.
+
+After Autofill on another website, the side panel's **Remember for next time** keeps an answer you gave to an open question as a custom answer, after the app's confirmation. It keeps the question's kind of box, its choices, and the site it came from, and fills only that same question.
 
 For supported missing profile values entered on a site, **Save to My information** is a separate user action and requires desktop review. It is not background capture of everything typed into a page.
 

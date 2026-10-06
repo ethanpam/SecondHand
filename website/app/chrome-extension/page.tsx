@@ -86,7 +86,7 @@ export default function ChromeExtensionGuide() {
           <Image
             className="guide-media"
             src="/guide/loaded.jpg"
-            alt="Chrome’s extensions page with Developer mode on and the SecondHand · Iowa SNAP companion extension listed."
+            alt="Chrome’s extensions page with Developer mode on and the SecondHand extension listed."
             width={1800}
             height={880}
             unoptimized

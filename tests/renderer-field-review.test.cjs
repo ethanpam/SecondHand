@@ -39,7 +39,7 @@ async function renderer(t, { available = true } = {}) {
   let profile = { firstName: 'Existing', lastName: 'Person', birthDate: '1985-04-12', email: 'draft@example.invalid', householdMembers: [] };
   window.secondHand = {
     status: async () => status, getData: async () => ({ profile: structuredClone(profile), applications: [] }), setupProgress: async () => null,
-    onLocked: callback => { locked = callback; return () => {}; }, onUnlocked: () => () => {},
+    onLocked: callback => { locked = callback; return () => {}; }, onUnlocked: () => () => {}, onOpenHousehold: () => () => {},
     onProfileChanged: callback => { profileChanged = callback; return () => {}; },
     unlock: async () => { status = { ...status, unlocked: true }; return status; },
     saveProfile: async value => { saves.push(structuredClone(value)); profile = structuredClone(value); return structuredClone(value); },

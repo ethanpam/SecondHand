@@ -5,7 +5,8 @@
 // boxes. Every fill is checked against the answer key (dataset/build.cjs): a wrong fill is an answer the key
 // doesn't give, including any fill where the key says the facts don't say. The click's clock is held still and its
 // time limit left off each request, so every question is decided however long the model takes on a busy
-// computer; tests/laya-parity.test.cjs checks speed.
+// computer; tests/laya-parity.test.cjs checks speed. Laya's best guesses (#185) are asked for too, though Autofill
+// doesn't ask for them, and checked against the same key apart from its sure answers: a report, never a budget (#189).
 //
 //   node ML_model/eval/app_accuracy.cjs --model <export folder> --format <format> [--per-question 8] [--out <report.json>]
 // tests/laya-parity.test.cjs runs it with SECONDHAND_LAYA_ACCURACY=1 and checks WRONG_FILL_BUDGETS.
@@ -34,22 +35,30 @@ const FINAL = Object.freeze({ today: '2026-09-26', count: 400, seed: 11, perQues
 
 const asAsked = ({ id, label, type, options }) => ({ id, label, type, options });
 
-// { answering, matching }: each task's decisions, fills, right fills and wrong fills ({ form, question, filled, key }).
+// { answering, guessing, matching }: each task's decisions, fills, right fills and wrong fills ({ form, question, filled, key }).
+// `guessing` is the best guesses on the answering task's decisions: no decisions of its own, and its wrongRate is
+// the share of the guesses that were wrong (null when there were none).
 async function appAccuracy({ laya, bank, households, today, perQuestion = Infinity }) {
   const still = () => 0;
   const unhurried = { ...laya, decideBatch: (items, { timeoutMs, ...options } = {}) => laya.decideBatch(items, options) };
   const answerer = createFieldAnswers({ laya: unhurried, today, now: still });
   const matcher = createFieldSuggestions({ laya: unhurried, now: still });
   const answering = { decisions: 0, filled: 0, right: 0, wrong: [] };
+  const guesses = { filled: 0, right: 0, wrong: [] };
   const forms = new Map(bank.flatMap(file => file.questions.map(question => [question, formKey(file)])));
+  // A fill is right when it is the key's option; where the key says the facts don't say, every fill is wrong.
+  const check = (task, question, filled, answer) => {
+    task.filled++;
+    if (filled === answer && answer !== ABSTAIN) task.right++;
+    else task.wrong.push({ form: forms.get(question), question: question.label, filled, key: answer === ABSTAIN ? null : answer });
+  };
   for (const { question, index, answer } of choiceDecisions(bank, households, { today, perQuestion })) {
     answering.decisions++;
-    const { answers } = await answerer.answer({ questions: [asAsked(question)], profile: households[index], budgetMs: BUDGET_MS });
-    if (!Object.hasOwn(answers, question.id)) continue;
-    answering.filled++;
-    if (answers[question.id] === answer && answer !== ABSTAIN) answering.right++;
-    else answering.wrong.push({ form: forms.get(question), question: question.label, filled: answers[question.id], key: answer === ABSTAIN ? null : answer });
+    const { answers, guesses: guessed } = await answerer.answer({ questions: [asAsked(question)], profile: households[index], budgetMs: BUDGET_MS, guess: true });
+    if (Object.hasOwn(answers, question.id)) check(answering, question, answers[question.id], answer);
+    else if (Object.hasOwn(guessed, question.id)) check(guesses, question, guessed[question.id], answer);
   }
+  const guessing = { filled: guesses.filled, right: guesses.right, wrongRate: guesses.filled ? guesses.wrong.length / guesses.filled : null, wrong: guesses.wrong };
   const matching = { decisions: 0, filled: 0, right: 0, wrong: [] };
   for (const file of bank) {
     // A date box is never asked (date of birth is never offered), so, as in the reports, it isn't a decision.
@@ -64,7 +73,7 @@ async function appAccuracy({ laya, bank, households, today, perQuestion = Infini
       else matching.wrong.push({ form: formKey(file), question: box.label, filled: suggestions[box.id], key });
     }
   }
-  return { answering, matching };
+  return { answering, guessing, matching };
 }
 
 // The tasks whose wrong fills are over their share of the task's decisions, one line each. A task with no

@@ -166,13 +166,13 @@ test('a document that loses its window while choices settle stops waiting and re
   detach(during.doc);
   t.mock.timers.tick(10); await tick();
   assert.ok(outcome, 'it stops waiting at its next look once the page is gone, not at its 5-second timeout');
-  assert.deepEqual(await settling, { ok: false, pageChanged: true, filled: [], skipped: [during.id], rejected: [], pending: [] });
+  assert.deepEqual(await settling, { ok: false, pageChanged: true, filled: [], skipped: [during.id], rejected: [], pending: [], partial: [] });
   assert.equal(Date.now() - started, 20);
   assert.equal(during.doc.querySelector('[data-secondhand-filled]'), null, 'nothing on the old page is marked as filled');
 
   const before = pendingFill();
   detach(before.doc);
-  assert.deepEqual(await generic.settle(before.doc, before.token, before.filled), { ok: false, pageChanged: true, filled: [], skipped: [before.id], rejected: [], pending: [] },
+  assert.deepEqual(await generic.settle(before.doc, before.token, before.filled), { ok: false, pageChanged: true, filled: [], skipped: [before.id], rejected: [], pending: [], partial: [] },
     'a page already gone is not waited on');
 });
 

@@ -12,7 +12,7 @@ const { atomicWrite } = require('./vault.cjs');
 const { REQUEST_FIELDS, SAVE_FIELDS, PORTAL_URL, isPortalUrl, isHttpsSiteUrl, isRequestField } = require('../shared/schema.cjs');
 const { isBandKey } = require('../shared/household.cjs');
 const { recordRequestScope } = require('./record-fields.cjs');
-const { validateCustomQuestions } = require('../shared/custom-fields.cjs');
+const { validateCustomQuestions, rememberedAnswer } = require('../shared/custom-fields.cjs');
 const { TEXT_TYPES, CHOICE_TYPES } = require('../shared/laya-prompts.cjs');
 
 const HOST_NAME = 'org.secondhand.bridge';
@@ -41,13 +41,16 @@ const MAX_BANDS = 20;
 const MAX_SAVED_VALUE = 200;
 const MAX_OPTIONS = 30;
 const MAX_OPTION = 100;
+// Answers one Remember for next time click may carry (#186).
+const MAX_REMEMBER = 20;
 // Laya's time per Autofill click: each request carries what its click has left.
 const MAX_BUDGET_MS = 3000;
 // Refusals the extension acts on. Only these codes travel back with an error.
 const PUBLIC_CODES = Object.freeze(['LAYA_NOT_READY', 'DESKTOP_UNREACHABLE']);
 // Requests that carry only their id and type. unlockWithTouchId asks the app to show its own
-// Touch ID prompt (#99); a password never comes from Chrome.
-const BARE_REQUESTS = Object.freeze(['status', 'showApp', 'openApp', 'warmLaya', 'trustAllSites', 'untrustAllSites', 'unlockWithTouchId']);
+// Touch ID prompt (#99); a password never comes from Chrome. openHousehold opens the app on My
+// information, at Your household (#180).
+const BARE_REQUESTS = Object.freeze(['status', 'showApp', 'openApp', 'warmLaya', 'trustAllSites', 'untrustAllSites', 'unlockWithTouchId', 'openHousehold']);
 // The native host's answer when the desktop app isn't running (or can't be reached).
 const UNREACHABLE = 'Open SecondHand, connect this extension, and unlock SecondHand.';
 
@@ -147,6 +150,17 @@ function validateSave(request) {
   return request;
 }
 
+// rememberAnswers { url, answers: [{ label, type, options, answer }] } (Remember for next time, #186): answers the applicant
+// gave on a page and chose to keep as custom answers, each with its question's label, type and choices, checked as
+// shared/custom-fields.cjs checks them. The desktop checks them again and asks the applicant before keeping them.
+function validateRemember(answers) {
+  const valid = answer => {
+    if (!answer || typeof answer !== 'object' || Array.isArray(answer) || Object.keys(answer).sort().join() !== 'answer,label,options,type') return false;
+    try { rememberedAnswer(answer); return true; } catch { return false; }
+  };
+  if (!Array.isArray(answers) || !answers.length || answers.length > MAX_REMEMBER || !answers.every(valid)) throw new Error('Invalid answers to remember.');
+}
+
 const questionText = (value, max) => typeof value === 'string' && value.trim() !== '' && value.length <= max && !UNSEEN.test(value);
 function validateQuestions(items, { max, types, choices }) {
   if (!Array.isArray(items) || !items.length || items.length > max) throw new Error('Invalid questions for Laya.');
@@ -171,7 +185,8 @@ function validateRequest(request) {
   if (BARE_REQUESTS.includes(request.type)) allowed = ['id', 'type'];
   else if (request.type === 'getFields') allowed = ['id', 'type', 'url', 'fields', 'sensitive'];
   else if (request.type === 'getRecordFields') allowed = ['id', 'type', 'url', 'pageKey', 'recordType', 'fields', 'personName'];
-  else if (request.type === 'getCustomFields') allowed = ['id', 'type', 'url', 'fields'];
+  else if (request.type === 'getCustomFields') allowed = ['id', 'type', 'url', 'fields', 'sensitive'];
+  else if (request.type === 'rememberAnswers') allowed = ['id', 'type', 'url', 'answers'];
   else if (request.type === 'authorizeSiteNavigation') allowed = ['id', 'type', 'url'];
   else if (request.type === 'saveFields') allowed = ['id', 'type', 'url', 'fields'];
   else if (request.type === 'trustSite' || request.type === 'untrustSite') allowed = ['id', 'type', 'url'];
@@ -181,12 +196,13 @@ function validateRequest(request) {
   if (Object.keys(request).some(key => !allowed.includes(key))) throw new Error('Unexpected request field.');
   if (request.type === 'saveFields') return validateSave(request);
   if (request.type === 'getRecordFields') recordRequestScope(request);
-  if (request.type === 'getCustomFields' || request.type === 'authorizeSiteNavigation') {
+  if (['getCustomFields', 'authorizeSiteNavigation', 'rememberAnswers'].includes(request.type)) {
     if (!isHttpsSiteUrl(request.url) || isPortalUrl(request.url)) throw new Error('This request is only supported on other HTTPS sites.');
     if (request.type === 'getCustomFields') validateCustomQuestions(request.fields);
+    if (request.type === 'rememberAnswers') validateRemember(request.answers);
   }
-  // Field requests, site trust, and Laya may name any HTTPS site; the desktop decides whether it is trusted.
-  if (request.type === 'getFields' || request.type === 'getCustomFields' || request.type === 'authorizeSiteNavigation' || request.type === 'trustSite' || request.type === 'untrustSite' || Object.hasOwn(LAYA_REQUESTS, request.type)) {
+  // Field requests, site trust, custom answers, and Laya may name any HTTPS site; the desktop decides whether it is trusted.
+  if (['getFields', 'getCustomFields', 'authorizeSiteNavigation', 'rememberAnswers', 'trustSite', 'untrustSite'].includes(request.type) || Object.hasOwn(LAYA_REQUESTS, request.type)) {
     if (!isHttpsSiteUrl(request.url)) throw new Error('Only an https site without credentials or a custom port is allowed.');
   } else if (!BARE_REQUESTS.includes(request.type) && !isPortalUrl(request.url)) throw new Error('Only the supported Iowa portal is allowed.');
   if (request.type === 'getFields' && !isIowaNavigationAuthorization(request)) validateFieldScope(request.fields);

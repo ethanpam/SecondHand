@@ -59,6 +59,14 @@ contextBridge.exposeInMainWorld('secondHand', Object.freeze({
     ipcRenderer.on('secondhand:profile-changed', listener);
     return () => ipcRenderer.removeListener('secondhand:profile-changed', listener);
   },
+  // Add your household in Chrome's side panel (#180): open My information at Your household. The event carries nothing.
+  onOpenHousehold: callback => {
+    if (typeof callback !== 'function') throw new TypeError('A callback is required.');
+    const listener = () => callback();
+    ipcRenderer.on('secondhand:open-household', listener);
+    return () => ipcRenderer.removeListener('secondhand:open-household', listener);
+  },
+  dismissHouseholdNote: () => invoke('dismissHouseholdNote'),
   saveApplication: application => invoke('saveApplication', application),
   deleteApplication: id => invoke('deleteApplication', id),
   openPortal: () => invoke('openPortal'),

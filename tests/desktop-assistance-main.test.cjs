@@ -25,12 +25,14 @@ const customRecord = (n = 1, changes = {}) => ({ id: `00000000-0000-4000-a000-${
 const customRequest = changes => ({ type: 'getCustomFields', url: 'https://pantry.example.org/intake', fields: [{ id: 'field1', label: 'Pickup point', type: 'text' }], ...changes });
 const customSettings = changes => ({ extensionId, trustedSites: ['https://pantry.example.org'], ...changes });
 
-test('custom answers disclose only exact matched question IDs and values after one sensitive approval, never the saved catalog', async () => {
+// An everyday custom answer follows getFields' ordinary approval; only one about a sensitive subject waits for Fill
+// sensitive details (#186).
+test('custom answers disclose only exact matched question IDs and values after one approval, never the saved catalog', async () => {
   const app = await desktop({ settings: customSettings(), profile: { customFields: [customRecord(), customRecord(2, { label: 'Diet notes', aliases: [], value: 'Private unrelated answer' })] } });
   const response = plain(await app.request(customRequest()));
   assert.deepEqual(response.values, { field1: 'North entrance' });
   assert.deepEqual(Object.keys(response).sort(), ['accessRevision', 'values']);
-  assert.equal(app.prompts.length, 1); assert.equal(app.prompts[0].title, 'Share sensitive details?');
+  assert.equal(app.prompts.length, 1); assert.equal(app.prompts[0].title, 'Let Chrome fill this form?');
   assert.match(app.prompts[0].detail, /Pickup point: "North entrance"/);
   assert.doesNotMatch(app.prompts[0].detail, /Private unrelated answer|00000000/);
   assert.equal(app.writes.length, 0);
@@ -71,12 +73,15 @@ test('custom answer cancellation returns no values; existing per-site/global Alw
 });
 
 test('Always allow on this site returns the updated custom receipt and does not authorize another origin', async () => {
-  const app = await desktop({ settings: customSettings({ trustedSites: ['https://pantry.example.org', 'https://other.example.org'] }), profile: { customFields: [customRecord()] } });
+  // Always allow on this site comes with the sensitive prompt: a custom answer about a sensitive subject (#186).
+  const income = customRecord(1, { label: 'Monthly income', aliases: [], value: '1200' });
+  const incomeRequest = changes => customRequest({ fields: [{ id: 'field1', label: 'Monthly income', type: 'number' }], sensitive: true, ...changes });
+  const app = await desktop({ settings: customSettings({ trustedSites: ['https://pantry.example.org', 'https://other.example.org'] }), profile: { customFields: [income] } });
   const before = (await app.request({ type: 'status' })).accessRevision;
-  app.answer(async () => ({ response: 2 })); const result = await app.request(customRequest());
+  app.answer(async () => ({ response: 2 })); const result = await app.request(incomeRequest());
   assert.equal(result.accessRevision, before + 1);
-  await app.request(customRequest()); assert.equal(app.prompts.length, 1);
-  await app.request(customRequest({ url: 'https://other.example.org/form' })); assert.equal(app.prompts.length, 2);
+  await app.request(incomeRequest()); assert.equal(app.prompts.length, 1);
+  await app.request(incomeRequest({ url: 'https://other.example.org/form' })); assert.equal(app.prompts.length, 2);
 });
 
 for (const mutation of ['lock', 'profile', 'registration', 'trust']) test(`pending custom approval releases nothing after ${mutation}`, async () => {
@@ -259,7 +264,7 @@ test('untrusted autofill asks once per click with Allow once, Always allow, and 
   assert.equal((await app.request({ type: 'getFields', fields: ['firstName'] })).values.firstName, 'Synthetic');
   assert.deepEqual(plain(app.prompts[0].buttons), ['Cancel', 'Allow once', 'Always allow on this computer']);
   // Always allow covers sensitive details too (#175), and the prompt that turns it on says so.
-  assert.match(app.prompts[0].detail, /Choose “Always allow” to let the SecondHand extension fill without asking whenever this app is unlocked, on every site SecondHand is on\. That includes your Social Security number, birth date, income, and citizenship and disability answers\. You can turn it off on the Chrome extension page\./);
+  assert.match(app.prompts[0].detail, /Choose “Always allow” to let the SecondHand extension fill without asking whenever this app is unlocked, on every site SecondHand is on\. That includes your Social Security number, birth date, income, benefits, and citizenship and disability answers\. You can turn it off on the Chrome extension page\./);
   assert.match(app.prompts[0].detail, /initial applicant page/);
   assert.match(app.prompts[0].detail, /first possible home-address suggestion and choose Save and Continue/);
   assert.match(app.prompts[0].detail, /home-address suggestions only/);
@@ -601,7 +606,7 @@ test('a saved No to having a Social Security number answers Iowa without a numbe
 });
 
 // What "Trust this site?" and "Trust all websites?" say about Always allow (#175).
-const ALWAYS_ALLOW_INCLUDES = 'It asks before filling unless you chose Always allow. Always allow on this computer includes your Social Security number, date of birth, income, money on hand, medical expenses, and your answers about citizenship, disability, blindness, health, Medicare, and having a Social Security number';
+const ALWAYS_ALLOW_INCLUDES = 'It asks before filling unless you chose Always allow. Always allow on this computer includes your Social Security number, date of birth, income and where it comes from, the benefits your household gets, money on hand, medical expenses, and your answers about citizenship, disability, blindness, health, Medicare, and having a Social Security number';
 const escaped = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 test('your citizenship, disability, blindness, health, Medicare and Social Security answers are held back on other sites without Always allow, and fill from the sensitive prompt', async () => {
@@ -655,6 +660,27 @@ test('money on hand and medical expenses are held back on other sites without Al
   await allowed.invoke('saveProfile', { assetsOnHand: '250', monthlyMedicalExpenses: '40', householdPregnant: 'no' });
   assert.deepEqual(plain((await allowed.request({ type: 'getFields', url: PANTRY, fields: ['householdPregnant', 'assetsOnHand', 'monthlyMedicalExpenses'] })).values),
     { householdPregnant: 'no', assetsOnHand: '250', monthlyMedicalExpenses: '40' });
+  assert.equal(allowed.prompts.length, 0, 'Always allow covers them on other sites too');
+});
+
+test('income sources and current benefits are held back on other sites without Always allow; student status and the help wanted are everyday answers (#184)', async () => {
+  const answers = { studentLevel: 'undergraduate', incomeSources: 'financial-aid,family-support', currentBenefits: 'snap,school-meals', helpWanted: 'food-pantry,fresh-produce' };
+  const app = await desktop({ settings: { extensionId, trustedSites: ['https://pantry.example.org'] } });
+  await app.invoke('saveProfile', answers);
+  app.answer(async () => ({ response: 1 }));
+  const autofill = plain(await app.request({ type: 'getFields', url: PANTRY, fields: Object.keys(answers) }));
+  assert.deepEqual([autofill.values, autofill.held], [{ studentLevel: 'undergraduate', helpWanted: 'food-pantry,fresh-produce' }, ['incomeSources', 'currentBenefits']]);
+  assert.equal(app.prompts.at(-1).title, 'Let Chrome fill this form?');
+  assert.deepEqual(plain((await app.request({ type: 'getFields', url: PANTRY, fields: ['incomeSources', 'currentBenefits'], sensitive: true })).values),
+    { incomeSources: 'financial-aid,family-support', currentBenefits: 'snap,school-meals' });
+  assert.equal(app.prompts.at(-1).title, 'Share sensitive details?');
+  assert.match(app.prompts.at(-1).detail, /^Where your household’s income comes from, Benefits your household gets now\n/);
+  assert.deepEqual(plain((await app.request({ type: 'getFields', fields: Object.keys(answers) })).values), answers);
+  assert.equal(app.prompts.at(-1).title, 'Let Chrome fill this form?', 'Iowa keeps its own trust rules: never a sensitive prompt');
+
+  const allowed = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'] } });
+  await allowed.invoke('saveProfile', answers);
+  assert.deepEqual(plain((await allowed.request({ type: 'getFields', url: PANTRY, fields: Object.keys(answers) })).values), answers);
   assert.equal(allowed.prompts.length, 0, 'Always allow covers them on other sites too');
 });
 
@@ -1400,7 +1426,8 @@ test('the desktop stops Laya at the time the click has left, and a decision that
   assert.deepEqual(plain((await slow.request(answerRequest([veteran], { budgetMs: 3000 }))).answers), { 'f0:sh-1-4': 'No' });
 });
 
-// #185: a question Laya has no sure answer for, where its best guess beats "the facts don't say".
+// #185: a question Laya has no sure answer for, where its best guess beats "the facts don't say". Its guesses were
+// mostly wrong on the final holdout (#189: ML_model/eval/reports/*-final-app-fills.json), so Autofill asks for none.
 const sizeQuestion = { id: 'f0:sh-1-5', label: 'How many people live in your household?', type: 'radio', options: ['1', '2', '3 or more'] };
 const guessesSize = state => state.question === sizeQuestion.label ? (state.candidate.startsWith('None') ? 0.3 : { 1: 0.6, 2: 0.1, '3 or more': 0.05 }[state.candidate]) : sixtyFromAge(state);
 async function guessing(settings) {
@@ -1408,64 +1435,21 @@ async function guessing(settings) {
   await app.invoke('saveProfile', household);
   return app;
 }
-const GUESS_NOTE = 'Laya isn’t sure of the answers marked “a guess”. SecondHand marks them on the page for you to check.';
 
-test('#185: off Iowa’s portal, Laya’s best guesses come back beside its sure answers, through the same approval, each marked as a guess in the prompt', async () => {
-  const app = await guessing(asking);
-  app.answer(async () => ({ response: 1 }));
-  const once = plain(await app.request(answerRequest([veteran, sizeQuestion])));
-  assert.deepEqual(once.answers, { [veteran.id]: 'No' });
-  assert.deepEqual(once.guesses, { [sizeQuestion.id]: '1' });
-  assert.equal(app.prompts.length, 1, 'one prompt for the answers and the guesses');
-  const [prompt] = app.prompts;
-  assert.equal(prompt.title, 'Let Chrome fill this form?');
-  assert.equal(prompt.message, 'Fill these answers into https://pantry.example.org?');
-  assert.match(prompt.detail, /“Is anyone in your household a veteran\?”: No\n“How many people live in your household\?”: 1 \(a guess\)\n\nLaya isn’t sure/);
-  assert.ok(prompt.detail.includes(GUESS_NOTE));
-
-  app.answer(async () => ({ response: 0 }));
-  assert.deepEqual(plain(await app.request(answerRequest([sizeQuestion]))), { answers: {}, guesses: {}, accessRevision: once.accessRevision }, 'Cancel releases no guess');
-  assert.equal(app.prompts.at(-1).message, 'Fill this answer into https://pantry.example.org?');
-  assert.match(app.prompts.at(-1).detail, /“How many people live in your household\?”: 1 \(a guess\)/);
-
-  const allowed = await guessing(trusted);
-  assert.deepEqual(plain((await allowed.request(answerRequest([sizeQuestion]))).guesses), { [sizeQuestion.id]: '1' });
-  assert.equal(allowed.prompts.length, 0, 'Always allow covers guesses as it covers sure answers');
-  const sure = await answering(asking);
-  sure.answer(async () => ({ response: 1 }));
-  await sure.request(answerRequest([veteran]));
-  assert.equal(sure.prompts[0].detail.includes(GUESS_NOTE), false, 'without a guess, the prompt says nothing about guesses');
-});
-
-test('#185: on Iowa’s portal Laya never guesses; a question it isn’t sure of stays with the applicant', async () => {
-  const iowa = answerRequest([veteran, sizeQuestion], { url: `${PORTAL_URL}/applyForBenefits/financialInfo` });
-  const app = await guessing({ extensionId, autofillWithoutAsking: true });
-  assert.deepEqual(plain(await app.request(iowa)), { answers: { [veteran.id]: 'No' }, guesses: {}, accessRevision: (await app.request({ type: 'status' })).accessRevision });
-  const asked = await guessing({ extensionId });
-  asked.answer(async () => ({ response: 1 }));
-  await asked.request(iowa);
-  assert.doesNotMatch(asked.prompts[0].detail, /How many people|a guess/);
-});
-
-test('#185: the "Share sensitive details?" prompt lists the guesses too, and its Cancel leaves them to the everyday prompt', async () => {
-  const app = await guessing(asking);
-  app.answer(async () => ({ response: 1 }));
-  const allowed = plain(await app.request(answerRequest([sixty, sizeQuestion])));
-  assert.deepEqual([allowed.answers, allowed.guesses], [{ [sixty.id]: 'No' }, { [sizeQuestion.id]: '1' }]);
-  const [sensitive] = app.prompts;
-  assert.equal(sensitive.title, 'Share sensitive details?');
-  assert.equal(sensitive.message, 'Fill these 2 answers on https://pantry.example.org? 1 of them uses sensitive details.');
-  assert.match(sensitive.detail, /“Is anyone in your household 60 or older\?”: No\n“How many people live in your household\?”: 1 \(a guess\)/);
-  assert.ok(sensitive.detail.includes(GUESS_NOTE));
-
-  const responses = [0, 1];
-  app.answer(async () => ({ response: responses.shift() }));
-  const kept = plain(await app.request(answerRequest([sixty, sizeQuestion])));
-  assert.deepEqual([kept.answers, kept.guesses], [{}, { [sizeQuestion.id]: '1' }], 'Cancel drops only the answer that needed sensitive details');
-  const everyday = app.prompts.at(-1);
-  assert.equal(everyday.title, 'Let Chrome fill this form?');
-  assert.match(everyday.detail, /“How many people live in your household\?”: 1 \(a guess\)/);
-  assert.doesNotMatch(everyday.detail, /60 or older/);
+test('#189: Autofill asks Laya for no best guesses on any site: Laya fills only sure answers, and a question it isn’t sure of stays with the applicant', async () => {
+  for (const url of [PANTRY, `${PORTAL_URL}/applyForBenefits/financialInfo`]) {
+    const allowed = await guessing(trusted);
+    const reply = plain(await allowed.request(answerRequest([veteran, sizeQuestion], { url })));
+    assert.deepEqual(reply, { answers: { [veteran.id]: 'No' }, accessRevision: (await allowed.request({ type: 'status' })).accessRevision }, url);
+    const asked = await guessing(asking);
+    asked.answer(async () => ({ response: 1 }));
+    assert.deepEqual(plain((await asked.request(answerRequest([veteran, sizeQuestion], { url }))).answers), { [veteran.id]: 'No' }, url);
+    assert.equal(asked.prompts.length, 1, url);
+    assert.doesNotMatch(asked.prompts[0].detail, /How many people|a guess/, url);
+    // A question with only a best guess is never offered for approval.
+    assert.deepEqual(plain(await asked.request(answerRequest([sizeQuestion], { url }))), { answers: {}, accessRevision: (await asked.request({ type: 'status' })).accessRevision }, url);
+    assert.equal(asked.prompts.length, 1, url);
+  }
 });
 
 test('warmLaya loads Laya’s model before a click’s questions are asked and answers with Laya’s state; it reads no saved answers and needs no unlock', async () => {
@@ -1743,6 +1727,144 @@ test('a change while the confirmation is open cancels the save', async () => {
   resolve({ response: 1 });
   await assert.rejects(pending, /changed/);
   assert.equal(plain(await app.invoke('getData')).profile.county, '');
+});
+
+// Custom answers by subject (#186): only one about a sensitive subject waits for Fill sensitive details (#176); an everyday
+// one follows getFields' ordinary approval, so Let Chrome fill without asking fills it with no dialog.
+const PICKUP = customRecord(1);
+const INCOME = customRecord(2, { label: 'Monthly income', aliases: [], value: '1200' });
+const PICKUP_QUESTION = { id: 'field1', label: 'Pickup point', type: 'text' };
+const INCOME_QUESTION = { id: 'field2', label: 'Monthly income', type: 'number' };
+const customAsk = changes => ({ type: 'getCustomFields', url: PANTRY, fields: [PICKUP_QUESTION, INCOME_QUESTION], ...changes });
+
+test('a custom answer about a sensitive subject waits for Fill sensitive details; an everyday one follows the ordinary approval (#186)', async () => {
+  const app = await desktop({ settings: asking, profile: { customFields: [PICKUP, INCOME] } });
+  app.answer(async () => ({ response: 1 }));
+  const reply = plain(await app.request(customAsk()));
+  assert.deepEqual(reply, { values: { field1: 'North entrance' }, held: ['field2'], accessRevision: (await app.request({ type: 'status' })).accessRevision });
+  const [prompt] = app.prompts;
+  assert.equal(prompt.title, 'Let Chrome fill this form?');
+  assert.equal(prompt.message, 'Fill this custom answer into https://pantry.example.org?');
+  assert.match(prompt.detail, /^Website: https:\/\/pantry\.example\.org\n\nYour custom answers:\nPickup point: "North entrance"\n\n/);
+  assert.doesNotMatch(JSON.stringify(prompt), /1200|Monthly income/, 'a held answer is never shown');
+  // Only a sensitive answer matched: nothing is asked.
+  assert.deepEqual(plain(await app.request(customAsk({ fields: [INCOME_QUESTION] }))), { values: {}, held: ['field2'], accessRevision: reply.accessRevision });
+  assert.equal(app.prompts.length, 1);
+
+  // Fill sensitive details asks for it alone, with the sensitive prompt.
+  const sensitive = plain(await app.request(customAsk({ fields: [INCOME_QUESTION], sensitive: true })));
+  assert.deepEqual([sensitive.values, sensitive.held], [{ field2: '1200' }, undefined]);
+  const asked = app.prompts.at(-1);
+  assert.equal(asked.title, 'Share sensitive details?');
+  assert.equal(asked.message, 'Fill sensitive details on https://pantry.example.org?');
+  assert.equal(asked.detail, 'Your custom answers:\nMonthly income: "1200"\n\nOnly allow this if you meant to give these details to https://pantry.example.org.\n\n' +
+    'Choose “Always allow on this site” to fill on https://pantry.example.org without asking from now on, sensitive details included. You can remove it on the Chrome extension page.');
+  await assert.rejects(app.request(customAsk({ sensitive: true })), /Only sensitive details/, 'never an everyday answer this way');
+  app.answer(async () => ({ response: 0 }));
+  await assert.rejects(app.request(customAsk({ fields: [INCOME_QUESTION], sensitive: true })), /You cancelled this field request/);
+  assert.deepEqual(plain(await app.request(customAsk())).values, {}, 'Cancel on the ordinary prompt fills nothing, as before');
+
+  for (const settings of [{ ...asking, autofillWithoutAsking: true }, { ...asking, alwaysAllowedSites: [PANTRY_SITE] }]) {
+    const always = await desktop({ settings, profile: { customFields: [PICKUP, INCOME] } });
+    const released = plain(await always.request(customAsk()));
+    assert.deepEqual([released.values, released.held], [{ field1: 'North entrance', field2: '1200' }, undefined], JSON.stringify(settings));
+    assert.equal(always.prompts.length, 0);
+  }
+});
+
+// Remember for next time (#186): the applicant's answers from a page, kept as custom answers after the app's confirmation.
+const HEARD = { label: 'How did you hear about us?', type: 'radio', options: ['Friend', 'Church', 'Flyer'], answer: 'Church' };
+const EMPLID = { label: 'EMPLID', type: 'text', options: [], answer: 'SYN-4471' };
+const REMEMBER = { type: 'rememberAnswers', url: PANTRY };
+const customAnswers = async app => plain(await app.invoke('getData')).profile.customFields;
+
+test('Remember for next time keeps answers as custom answers only after the app’s confirmation naming each question and answer (#186)', async () => {
+  const app = await desktop({ settings: { ...trusted, trustedSites: [PANTRY_SITE, WIC] }, profile: { firstName: 'Synthetic', customFields: [PICKUP] } });
+  const before = (await app.request({ type: 'status' })).accessRevision;
+  app.answer(async () => ({ response: 1 }));
+  assert.deepEqual(plain(await app.request({ ...REMEMBER, answers: [HEARD, { ...EMPLID, answer: ' SYN-4471 ' }] })), { remembered: 2 });
+  const [prompt] = app.prompts;
+  assert.equal(prompt.type, 'question');
+  assert.equal(prompt.title, 'Remember these answers?');
+  assert.equal(prompt.message, 'Remember these answers from https://pantry.example.org for next time?');
+  assert.equal(prompt.detail, '“How did you hear about us?”: "Church"\n“EMPLID”: "SYN-4471"\n\nSecondHand keeps them in My information under Custom answers and fills them when a form asks ' +
+    'the same question with the same choices. You can change or remove them there.');
+  assert.deepEqual(plain(prompt.buttons), ['Cancel', 'Remember']);
+  assert.deepEqual([prompt.defaultId, prompt.cancelId], [1, 0]);
+  const list = await customAnswers(app);
+  assert.deepEqual(list[0], PICKUP, 'the answers already there stay as they were');
+  assert.deepEqual(list.slice(1).map(({ id, ...answer }) => answer), [
+    { label: 'How did you hear about us?', value: 'Church', aliases: [], type: 'radio', options: ['Friend', 'Church', 'Flyer'], site: PANTRY_SITE },
+    { label: 'EMPLID', value: 'SYN-4471', aliases: [], type: 'text', options: [], site: PANTRY_SITE }]);
+  assert.equal(plain(await app.invoke('getData')).profile.firstName, 'Synthetic', 'nothing else in My information changes');
+  assert.ok((await app.request({ type: 'status' })).accessRevision > before, 'a change outdates earlier fill approvals');
+  assert.deepEqual(app.notifications.filter(([channel]) => channel === 'secondhand:profile-changed').map(([, value]) => plain(value)), [{ fields: ['customFields'] }],
+    'My information hears that its custom answers changed, never what they are');
+
+  // The same question on another site takes the new answer; the site it was first saved from stays.
+  await app.request({ ...REMEMBER, url: `${WIC}/apply`, answers: [{ ...EMPLID, label: 'Emplid:', answer: 'SYN-9000' }] });
+  assert.equal(app.prompts.at(-1).title, 'Remember this answer?');
+  assert.equal(app.prompts.at(-1).message, 'Remember this answer from https://wic.example.gov for next time?');
+  assert.match(app.prompts.at(-1).detail, /^“Emplid:”: "SYN-9000"\n\nSecondHand keeps it in My information under Custom answers and fills it when a form asks /);
+  const again = await customAnswers(app);
+  assert.equal(again.length, 3);
+  assert.deepEqual([again[2].id, again[2].value, again[2].site], [list[2].id, 'SYN-9000', PANTRY_SITE]);
+
+  // The next Autofill fills it into the same question, and only that one.
+  const fill = plain(await app.request({ type: 'getCustomFields', url: `${WIC}/apply`, fields: [{ id: 'q1', label: '2. HOW DID YOU HEAR ABOUT US *', type: 'radio', options: ['flyer', 'friend', 'church'] },
+    { id: 'q2', label: 'How did you hear about us?', type: 'select', options: ['Friend', 'Church', 'Flyer'] }] }));
+  assert.deepEqual(fill.values, { q1: 'church' });
+});
+
+test('an answer about a sensitive subject gets the warning confirmation, with Cancel the default (#186)', async () => {
+  const app = await desktop({ settings: trusted });
+  app.answer(async () => ({ response: 1 }));
+  await app.request({ ...REMEMBER, answers: [{ label: 'Monthly income', type: 'number', options: [], answer: '1200' }, HEARD] });
+  const [prompt] = app.prompts;
+  assert.equal(prompt.type, 'warning');
+  assert.equal(prompt.title, 'Remember sensitive details?');
+  assert.equal(prompt.defaultId, 0);
+  assert.match(prompt.detail, /\n\nYour answer to “Monthly income” is sensitive: SecondHand fills it only after you allow it on each site\. SecondHand keeps them in My information/);
+  assert.equal((await customAnswers(app)).length, 2);
+});
+
+test('nothing is remembered without the confirmation, while locked, from a site that isn’t on, for a question only the applicant answers, or past 50 (#186)', async () => {
+  const cancelled = await desktop({ settings: trusted });
+  cancelled.answer(async () => ({ response: 0 }));
+  await assert.rejects(cancelled.request({ ...REMEMBER, answers: [HEARD] }), /You cancelled\. Nothing was remembered\./);
+  assert.deepEqual(await customAnswers(cancelled), undefined);
+  assert.equal(cancelled.notifications.some(([channel]) => channel === 'secondhand:profile-changed'), false);
+
+  const app = await desktop({ settings: trusted, profile: { customFields: [customRecord(1, { label: 'EMPLID', aliases: [] })] } });
+  app.answer(async () => ({ response: 1 }));
+  await assert.rejects(app.request({ ...REMEMBER, url: ANYWHERE, answers: [HEARD] }), /isn’t trusted/);
+  await assert.rejects(app.request({ ...REMEMBER, url: PORTAL_URL, answers: [HEARD] }), /other HTTPS sites/);
+  for (const answer of [{ ...EMPLID, label: 'Signature' }, { ...EMPLID, label: 'Routing number' }, { ...EMPLID, type: 'email', answer: 'not an email' }]) {
+    await assert.rejects(app.request({ ...REMEMBER, answers: [answer] }), error => Boolean(error.publicMessage), JSON.stringify(answer));
+  }
+  await assert.rejects(app.request({ ...REMEMBER, answers: [EMPLID] }), /You already have a custom answer for “EMPLID”\. Change it in My information\./);
+  const full = await desktop({ settings: trusted, profile: { customFields: Array.from({ length: 50 }, (_, n) => customRecord(n, { label: `Question ${n}`, aliases: [] })) } });
+  full.answer(async () => ({ response: 1 }));
+  await assert.rejects(full.request({ ...REMEMBER, answers: [HEARD] }), error => error.publicMessage ===
+    'You have 50 custom answers, the most SecondHand keeps. Remove one in My information, then remember this answer again.');
+  assert.equal(app.prompts.length + full.prompts.length, 0, 'a refused answer is never offered for confirmation');
+  await app.invoke('lock');
+  await assert.rejects(app.request({ ...REMEMBER, answers: [HEARD] }), /Unlock/);
+  assert.equal(app.prompts.length, 0);
+});
+
+test('a lock or the site turned off while “Remember these answers?” is open remembers nothing (#186)', async t => {
+  for (const [change, [apply, refusal]] of Object.entries(ACCESS_CHANGES)) await t.test(change, async () => {
+    const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: [WIC], allSites: true } });
+    const prompt = holdPrompt(app);
+    const pending = app.request({ ...REMEMBER, url: `${WIC}/apply`, answers: [HEARD] });
+    await prompt.shown();
+    await apply(app);
+    prompt.answer(1);
+    await assert.rejects(pending, refusal);
+    if (change === 'lock') await app.invoke('unlock', 'synthetic password');
+    assert.deepEqual(await customAnswers(app), undefined);
+  });
 });
 
 test('the guided setup remembers how many of its six steps are done until it is finished', async () => {
@@ -2084,4 +2206,54 @@ test('liquid asset approval cannot release stale values after a profile access-r
   const pending = app.request(assetRequest()); await tick();
   await app.invoke('saveProfile', { assets: [{ id: jobId(51), person: 'Avery Example', type: 'Cash/Uncashed Check', currentValue: '100' }] });
   resolve({ response: 1 }); await assert.rejects(pending, /access changed/);
+});
+
+// #180: Autofill on a pantry form leaves its household questions open while no household list is saved, and says so.
+test('a household question left open because no household list is saved says so beside the answers; Iowa’s portal never hears it (#180)', async () => {
+  const app = await desktop({ settings: trusted });
+  await app.invoke('saveProfile', { firstName: 'Synthetic', zip: '50309', householdSize: '3' });
+  const reply = plain(await app.request({ type: 'getFields', url: PANTRY, fields: ['householdCount:0-5', 'householdSize', 'zip'] }));
+  assert.deepEqual(reply.values, { householdSize: '3', zip: '50309' });
+  assert.deepEqual(reply.household, { need: 'list' });
+  for (const fields of [['householdAdults'], ['studentNameGrade'], ['householdCount:60+', 'firstName']]) {
+    assert.deepEqual(plain(await app.request({ type: 'getFields', url: PANTRY, fields })).household, { need: 'list' }, JSON.stringify(fields));
+  }
+  // Every household question answered, or none asked: nothing about the list is said.
+  for (const fields of [['householdSize'], ['zip', 'firstName']]) assert.equal(plain(await app.request({ type: 'getFields', url: PANTRY, fields })).household, undefined, JSON.stringify(fields));
+  assert.equal(plain(await app.request({ type: 'getFields', fields: ['householdCount:0-5', 'householdAdults'] })).household, undefined, 'Iowa’s portal');
+});
+
+test('with a household list saved, a count by age left open names the first person without a birth date by their row, never by name (#180)', async () => {
+  const app = await desktop({ settings: trusted });
+  await app.invoke('saveProfile', listedHousehold({ 2: { birthDate: '' }, 3: { birthDate: '' } }));
+  const reply = plain(await app.request({ type: 'getFields', url: PANTRY, fields: [...BANDS, 'householdSize', 'studentNameGrade'] }));
+  assert.deepEqual(reply.values, { householdSize: '4', studentNameGrade: 'Riley Example, 5th' });
+  assert.deepEqual(reply.household, { need: 'birthDate', person: 3 });
+  assert.doesNotMatch(JSON.stringify(reply), /Sam|Morgan|1958|householdMembers/);
+  assert.equal(plain(await app.request({ type: 'getFields', url: PANTRY, fields: ['householdSize'] })).household, undefined, 'the size needs no birth dates');
+  await app.invoke('saveProfile', { ...listedHousehold(), birthDate: '' });
+  assert.deepEqual(plain(await app.request({ type: 'getFields', url: PANTRY, fields: ['householdChildren'] })).household, { need: 'birthDate', person: 'you' }, 'the applicant’s own row');
+  await app.invoke('saveProfile', listedHousehold());
+  assert.equal(plain(await app.request({ type: 'getFields', url: PANTRY, fields: [...BANDS] })).household, undefined, 'every birth date saved');
+});
+
+test('openHousehold brings the window forward on My information, at Your household, even while locked, and reads nothing (#180)', async () => {
+  const app = await desktop();
+  await app.invoke('lock');
+  const before = { shows: app.shows, reads: app.dataReads, sent: app.notifications.length };
+  assert.deepEqual(plain(await app.request({ type: 'openHousehold' })), { shown: true });
+  assert.equal(app.shows, before.shows + 1);
+  assert.deepEqual(app.notifications.slice(before.sent), [['secondhand:open-household']], 'the window hears where to go, and nothing else');
+  assert.equal(app.dataReads, before.reads);
+});
+
+test('the Overview note about the household list is dismissed once, kept with the settings, and reported in status (#180)', async () => {
+  const app = await desktop({ settings: { extensionId } });
+  assert.equal((await app.invoke('status')).householdNoteDismissed, false);
+  assert.equal((await app.invoke('dismissHouseholdNote')).householdNoteDismissed, true);
+  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: false, trustedSites: [], householdNoteDismissed: true });
+  const later = await desktop({ settings: { extensionId, householdNoteDismissed: true } });
+  assert.equal((await later.invoke('status')).householdNoteDismissed, true, 'a later start reads it back');
+  await later.invoke('lock');
+  await assert.rejects(later.invoke('dismissHouseholdNote'), /Unlock/);
 });

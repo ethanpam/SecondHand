@@ -10,6 +10,7 @@ const path = require('node:path');
 const applicantFixture = require('../tests/fixtures/applicant-profile.json');
 const { PROFILE_FIELDS, LIST_FIELDS, validateProfile } = require('../shared/schema.cjs');
 const { MODEL_FILES } = require('../desktop/laya-model.cjs');
+const { relayRequest } = require('../desktop/bridge.cjs');
 const root = path.join(__dirname, '..');
 const passphrase = 'synthetic-test-vault-passphrase';
 // Creating or unlocking the vault derives its key with scrypt (N=2^15, r=8) in the
@@ -26,6 +27,12 @@ const COUNT_FIELDS = ['householdSize', 'householdAdults', 'householdChildren', '
 // Fields My information shows one by one; the household list has its own rows.
 const SCALAR_FIELDS = PROFILE_FIELDS.filter(field => !LIST_FIELDS.includes(field));
 const scalars = profile => Object.fromEntries(SCALAR_FIELDS.map(field => [field, profile[field] || '']));
+// Questions answered with several choices (#184): one checkbox per choice, saved comma-separated.
+const SEVERAL_FIELDS = ['incomeSources', 'currentBenefits', 'helpWanted'];
+async function checkChoices(page, field, value) {
+  const chosen = value ? value.split(',') : [];
+  for (const box of await page.locator(`#profile-form input[type="checkbox"][name="${field}"]`).all()) await box.setChecked(chosen.includes(await box.getAttribute('value')));
+}
 
 async function captureDiagnostic(page, name, options = {}) {
   try {
@@ -106,6 +113,9 @@ async function guidedSetup(page, application, userData) {
   assert.equal(await page.evaluate(() => document.activeElement?.id), 'setup-step-title', 'a screen reader starts at the step’s heading');
   await expect(page.locator('#addressLine1')).toBeHidden();
   for (const field of ['firstName', 'lastName', 'birthDate']) await page.locator(`#${field}`).fill(applicantFixture[field]);
+  // #184: the student status is asked in You; the applicant's row on the household list follows it.
+  await expect(page.locator('#studentLevel-hint')).toBeVisible();
+  await page.locator('#studentLevel').selectOption(applicantFixture.studentLevel);
   await page.locator('#setup-next').click();
   await expect(page.locator('#setup-step-count')).toHaveText('Step 2 of 6');
   await expect(page.locator('#setup-step-title')).toHaveText('Your household');
@@ -121,7 +131,8 @@ async function guidedSetup(page, application, userData) {
   const self = page.locator('.household-member').first();
   await expect(self.locator('legend')).toHaveText('You');
   await expect(self.locator('[data-member-field="firstName"]')).toHaveValue(applicantFixture.firstName);
-  await self.locator('[data-member-field="student"]').selectOption('no');
+  await expect(self.locator('[data-member-field="student"]')).toBeDisabled();
+  await expect(self.locator('[data-member-field="student"]')).toHaveValue('no');
   for (const field of COUNT_FIELDS) await expect(page.locator(`#${field}`)).toHaveValue(applicantFixture[field]);
   await expect(page.locator('#household-counts-note')).toHaveText('Counted from your household list. To change them, change the list.');
   // #135: a birth date after today counts no ages, the note says whose it is, and the app refuses to save it, saying why.
@@ -164,13 +175,64 @@ async function guidedSetup(page, application, userData) {
   await expect(page.locator('#setup-step-count')).toHaveText('Step 3 of 6');
   for (const title of ['Where you live', 'Income and money on hand', 'Programs', 'About you']) {
     await expect(page.locator('#setup-step-title')).toHaveText(title);
+    // #184: where the household's income comes from, the benefits it gets now and the help wanted. None stands alone.
+    if (title === 'Income and money on hand') await checkChoices(page, 'incomeSources', applicantFixture.incomeSources);
+    if (title === 'Programs') {
+      await expect(page.locator('#currentBenefits-hint')).toBeVisible();
+      await page.locator('#currentBenefits-snap').check();
+      await page.locator('#currentBenefits-none').check();
+      await expect(page.locator('#currentBenefits-snap')).not.toBeChecked();
+      await checkChoices(page, 'currentBenefits', applicantFixture.currentBenefits);
+      await checkChoices(page, 'helpWanted', applicantFixture.helpWanted);
+      await captureDiagnostic(page, 'household/setup-programs.png', { fullPage: true });
+    }
     await page.locator('#setup-next').click();
   }
+  const answered = await page.evaluate(async () => (await window.secondHand.getData()).profile);
+  assert.deepEqual(['studentLevel', ...SEVERAL_FIELDS].map(field => answered[field]), ['studentLevel', ...SEVERAL_FIELDS].map(field => applicantFixture[field]),
+    'the setup saved the student status and the answers from lists');
   await expect(page.locator('#view-overview')).toBeVisible();
   await expect(page.locator('#toast')).toHaveText('Your information is set up. Change it any time in My information.');
   await expect(page.locator('#setup-resume')).toBeHidden();
   await assert.rejects(fs.access(progressFile), 'a finished setup keeps no progress file');
   console.log('Guided setup: offered after the recovery key, six steps saved as the applicant moved on, finished later from Overview; the household step listed four people and counted their ages.');
+}
+
+// #186: one answer remembered from https://pantry.example.org through the bridge, shown, changed and removed in My information.
+async function remembered(page, application, userData, pantry) {
+  await application.evaluate(({ dialog }) => {
+    globalThis.__smokeDialogs = [];
+    dialog.showMessageBox = async (_window, options) => { globalThis.__smokeDialogs.push({ title: options.title, message: options.message, detail: options.detail }); return { response: 1 }; };
+  });
+  const request = (type, payload) => relayRequest(userData, 'a'.repeat(32), { id: crypto.randomUUID(), type, url: `${pantry}/visit`, ...payload });
+  const question = { label: 'How did you hear about us?', type: 'radio', options: ['Friend', 'Church', 'Flyer'] };
+  const reply = await request('rememberAnswers', { answers: [{ ...question, answer: 'Church' }] });
+  assert.deepEqual([reply.ok, reply.data], [true, { remembered: 1 }], reply.error);
+  await expect(page.locator('#toast')).toHaveText('An answer you chose to remember in Chrome is now in My information, under Custom answers.');
+  await page.locator('.nav-item[data-view="profile"]').click();
+  await page.locator('#custom-answers > summary').click();
+  const row = page.locator('.custom-answer').filter({ has: page.locator('[data-custom-field="label"]') }).last();
+  await expect(row.locator('[data-custom-field="label"]')).toHaveValue(question.label);
+  await expect(row.locator('.custom-answer-site')).toHaveText('Saved from pantry.example.org with Remember for next time.');
+  await expect(row.locator('select[data-custom-field="value"]')).toHaveValue('Church');
+  assert.deepEqual(await row.locator('select[data-custom-field="value"] option').allTextContents(), question.options);
+  await captureDiagnostic(page, 'remember/desktop-custom-answers.png', { fullPage: true });
+  // Changed in My information, it is what the next Autofill on the same question gets.
+  await row.locator('select[data-custom-field="value"]').selectOption('Flyer');
+  await page.locator('#save-profile').click();
+  await expect(page.locator('#profile-save-state')).toBeHidden();
+  const saved = (await page.evaluate(() => window.secondHand.getData())).profile.customFields;
+  assert.deepEqual(saved.map(({ id, ...answer }) => answer), [{ label: question.label, value: 'Flyer', aliases: [], ...question, site: pantry }]);
+  const fill = await request('getCustomFields', { fields: [{ id: 'f0:sh-1-0', label: '2. How did you hear about us? *', type: 'radio', options: ['flyer', 'friend', 'church'] }] });
+  assert.deepEqual([fill.ok, fill.data?.values], [true, { 'f0:sh-1-0': 'flyer' }], fill.error);
+  assert.deepEqual(await application.evaluate(() => globalThis.__smokeDialogs.map(dialog => dialog.title)), ['Remember this answer?', 'Let Chrome fill this form?'],
+    'the app asked before it kept the answer, and again before it filled it');
+  assert.match(await application.evaluate(() => globalThis.__smokeDialogs[0].detail), /^“How did you hear about us\?”: "Church"\n\n/);
+  await row.getByRole('button', { name: /^Remove custom answer/ }).click();
+  await page.locator('#save-profile').click();
+  await expect(page.locator('#profile-save-state')).toBeHidden();
+  assert.deepEqual((await page.evaluate(() => window.secondHand.getData())).profile.customFields, []);
+  console.log('#186: an answer remembered through the bridge, after the app’s confirmation, showed in Custom answers with its site and choices; changed there, it filled the same question; removed, the profile was as before.');
 }
 
 async function main() {
@@ -237,7 +299,7 @@ async function main() {
     await expect(page.locator('#all-sites-status')).toHaveText('All websites: off. To turn it on, open SecondHand’s side panel in Chrome and choose Use SecondHand on all websites.');
     await expect(page.locator('#all-sites-off')).toBeHidden();
     // Let Chrome autofill without asking says it covers sensitive details on every site, and no site has Always allow on this site yet (#175).
-    await expect(page.locator('#autofill-trust-hint')).toContainText('on every site SecondHand is on. That includes your Social Security number, birth date, income, and citizenship and disability answers.');
+    await expect(page.locator('#autofill-trust-hint')).toContainText('on every site SecondHand is on. That includes your Social Security number, birth date, income, benefits, and citizenship and disability answers.');
     await expect(page.locator('#always-allowed-sites-empty')).toBeVisible();
     await expect(page.locator('#always-allowed-sites li')).toHaveCount(0);
     // Turning it off is saved, and stays off after a restart (checked below).
@@ -247,7 +309,11 @@ async function main() {
     assert.equal(JSON.parse(await fs.readFile(path.join(userData, 'settings.json'), 'utf8')).layaEnabled, false);
     await page.locator('.nav-item[data-view="profile"]').click();
     // What My information shows for every saved field, read the way the form submits it.
-    const shownProfile = () => page.locator('#profile-form').evaluate((form, fields) => Object.fromEntries(fields.map(field => [field, form.elements.namedItem(field).value])), SCALAR_FIELDS);
+    const shownProfile = () => page.locator('#profile-form').evaluate((form, fields) => Object.fromEntries(fields.map(field => {
+      const control = form.elements.namedItem(field);
+      const boxes = control instanceof RadioNodeList && control[0].type === 'checkbox';
+      return [field, boxes ? Array.from(control).filter(box => box.checked).map(box => box.value).join(',') : control.value];
+    })), SCALAR_FIELDS);
     const { householdMembers: _, ...scalarFixture } = applicantFixture;
     for (const field of SCALAR_FIELDS) {
       if (!Object.hasOwn(applicantFixture, field)) continue; // Newly optional answers stay blank in this legacy fixture.
@@ -257,6 +323,7 @@ async function main() {
         await expect(page.locator(`#${field}`)).toHaveValue(applicantFixture[field]);
         continue;
       }
+      if (SEVERAL_FIELDS.includes(field)) { await checkChoices(page, field, applicantFixture[field]); continue; }
       const radios = page.locator(`#profile-form input[type="radio"][name="${field}"]`);
       if (await radios.count()) { await page.locator(`#profile-form input[type="radio"][name="${field}"][value="${applicantFixture[field]}"]`).check(); continue; }
       const control = page.locator(`#${field}`);
@@ -381,6 +448,12 @@ async function main() {
     assert.deepEqual(withoutIds(restored.profile), withoutIds(applicantFixture));
     assert.equal(restored.applications[0].confirmationNumber, 'SYNTHETIC-RECEIPT-ONLY');
 
+    // Remember for next time (#186), through the app's real bridge: the extension asks the app to keep a pantry's question
+    // as a custom answer. The app's confirmation is answered Remember here (Electron's native dialog can't be clicked by a
+    // test); the dialogs it showed are kept to check. My information's Custom answers then lists it with the site it came
+    // from and its own choices; a changed answer is what the next Autofill gets; and removing it leaves the profile as it was.
+    await remembered(page, application, userData, pantry);
+
     // Unlock with Touch ID (#99): turned on with the password, used after an automatic lock, and ready
     // at once after a restart. It stays on until it's turned off.
     await application.close();
@@ -501,8 +574,23 @@ async function main() {
     await expect(page.locator('#setup-dialog')).not.toBeVisible();
     await expect(page.locator('#setup-resume-text')).toHaveText('Finish setting up: 0 of 6 steps');
     assert.deepEqual((await page.evaluate(() => window.secondHand.getData())).profile, {});
+    // #180: with no household list saved, Overview offers Add your household. The extension's Add your household, through the
+    // app's real bridge, opens My information at Your household. Dismiss keeps the note away, and the settings keep it so.
+    await expect(page.locator('#household-note')).toBeVisible();
+    await expect(page.locator('#household-note-text')).toHaveText('Add your household: SecondHand can then answer questions like “# of children 0–5”.');
+    await captureDiagnostic(page, 'household/overview-note.png');
+    const opened = await relayRequest(userData, 'a'.repeat(32), { id: crypto.randomUUID(), type: 'openHousehold' });
+    assert.deepEqual([opened.ok, opened.data], [true, { shown: true }], opened.error);
+    await expect(page.locator('#view-profile')).toBeVisible();
+    await expect(page.locator('#household-heading')).toBeFocused();
+    await captureDiagnostic(page, 'household/opened-from-chrome.png');
+    await page.locator('.nav-item[data-view="overview"]').click();
+    await page.locator('#household-note-dismiss').click();
+    await expect(page.locator('#household-note')).toBeHidden();
+    assert.equal(JSON.parse(await fs.readFile(path.join(userData, 'settings.json'), 'utf8')).householdNoteDismissed, true);
+    console.log('#180: with no household list saved, Overview offered Add your household; openHousehold through the bridge opened My information at Your household; Dismiss kept the note away and was saved.');
     assert.deepEqual(errors, []);
-    console.log('Electron UI smoke passed: guided setup offered after the recovery key, saved step by step with a household list, finished later from Overview and readable at 200% zoom; Laya downloads on its own on a new install and stays off once turned off, create, save full applicant choices, Iowa’s questions about you and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence, Touch ID on (test hook) with a lock-screen lock, a Touch ID unlock, and Touch ID ready at once after a restart, recovery key password reset that keeps Touch ID, clear Iowa’s questions, start over (which removes Touch ID) and its setup offer.');
+    console.log('Electron UI smoke passed: guided setup offered after the recovery key, saved step by step with a household list, the student status and the answers from lists, finished later from Overview and readable at 200% zoom; Laya downloads on its own on a new install and stays off once turned off, create, save full applicant choices, Iowa’s questions about you and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence, Touch ID on (test hook) with a lock-screen lock, a Touch ID unlock, and Touch ID ready at once after a restart, recovery key password reset that keeps Touch ID, clear Iowa’s questions, start over (which removes Touch ID) and its setup offer.');
   } catch (error) {
     if (page && !page.isClosed()) {
       const auth = await page.evaluate(() => ({

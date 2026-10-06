@@ -32,6 +32,8 @@ const FIELD_LABELS = Object.freeze({
   ssnCardNameMatches: 'Your first and last name match your Social Security card', usCitizen: 'You are a U.S. citizen or national',
   militaryOrVeteran: 'You are in the military, a veteran, or a spouse of a veteran', disabled: 'You are disabled', blind: 'You are blind',
   healthLimitation: 'A health condition limits your daily activities, or you live in a medical facility or nursing home', medicare: 'You have Medicare',
+  // The applicant's student status, and answers chosen from lists (SEVERAL_CHOICES) that pantry intake forms ask for (#184).
+  studentLevel: 'Student status', incomeSources: 'Where your household’s income comes from', currentBenefits: 'Benefits your household gets now', helpWanted: 'Help you want',
   // Each person in the household: name, birth date, relationship to the applicant, and whether they are a student.
   householdMembers: 'Household members',
   customFields: 'Custom answers',
@@ -76,8 +78,18 @@ const PROFILE_CHOICES = Object.freeze({
   suffix: Object.freeze(['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'Jr.', 'Sr.']),
   // Iowa's own options, word for word.
   sex: Object.freeze(['', 'Male', 'Female']),
-  maritalStatus: Object.freeze(['', 'Divorced', 'Legally Separated', 'Married (includes common-law)', 'Never Married', 'Separated', 'Widowed'])
+  maritalStatus: Object.freeze(['', 'Divorced', 'Legally Separated', 'Married (includes common-law)', 'Never Married', 'Separated', 'Widowed']),
+  studentLevel: Object.freeze(['', 'not-student', 'high-school', 'undergraduate', 'graduate', 'other'])
 });
+// Questions answered with any of a list's choices (#184), saved as the chosen codes, comma-separated in the list's
+// order. None stands alone: the list is everything that applies, so a choice left out is a No.
+const SEVERAL_CHOICES = Object.freeze({
+  incomeSources: Object.freeze(['job', 'self-employment', 'financial-aid', 'family-support', 'unemployment', 'social-security', 'child-support', 'pension', 'other', 'none']),
+  currentBenefits: Object.freeze(['snap', 'wic', 'cash-assistance', 'medicaid', 'ssi', 'housing', 'school-meals', 'none']),
+  helpWanted: Object.freeze(['food-pantry', 'fresh-produce', 'food-vouchers', 'gift-cards', 'snap-help', 'social-services', 'other'])
+});
+// The applicant's student status as the household list says it: Yes for any level, No for not a student.
+const studentAnswer = level => level === 'not-student' ? 'no' : level ? 'yes' : '';
 const APPLICATION_STATUSES = Object.freeze(['draft', 'in_progress', 'submitted', 'needs_action', 'approved', 'denied']);
 
 function isPortalUrl(value) {
@@ -148,6 +160,7 @@ function checkProfile(input, { today, saving }) {
     if (!choices.includes(result[field])) throw new Error(YES_NO_FIELDS.includes(field) ?
       `${FIELD_LABELS[field]} must be Yes, No, or left unanswered.` : `Choose a supported ${FIELD_LABELS[field].toLowerCase()}, or leave it blank.`);
   }
+  for (const field of Object.keys(SEVERAL_CHOICES)) result[field] = severalChoices(field, result[field]);
   if (result.bestContactTime.length > 30) throw new Error('Best time to call must be 30 characters or fewer.');
   if (result.birthDate && !validDate(result.birthDate)) throw new Error('Enter a valid date of birth.');
   if (saving) checkBirthDate(result.birthDate, 'Your', today);
@@ -176,6 +189,15 @@ function checkProfile(input, { today, saving }) {
   result.customFields = validateCustomFields(input.customFields);
   for (const key of Object.keys(RECORD_FIELDS)) result[key] = validateRecords(key, input[key]);
   return result;
+}
+
+function severalChoices(field, value) {
+  if (!value) return '';
+  const label = FIELD_LABELS[field].toLowerCase(), choices = SEVERAL_CHOICES[field], chosen = value.split(',');
+  if (chosen.some(choice => !choices.includes(choice))) throw new Error(`Choose only answers on the list for ${label}, or leave it blank.`);
+  if (new Set(chosen).size !== chosen.length) throw new Error(`Choose each answer for ${label} once.`);
+  if (chosen.includes('none') && chosen.length > 1) throw new Error(`None can’t be chosen with other answers for ${label}.`);
+  return choices.filter(choice => chosen.includes(choice)).join(',');
 }
 
 const STATE_CODES = new Set('AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC AS GU MP PR VI AA AE AP FM MH PW'.split(' '));
@@ -227,7 +249,7 @@ function validateRecords(key, input) {
 
 const MEMBER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // The household list: up to 20 people, each checked like the rest of the profile. The applicant is its one
-// self row, which always carries their own name and birth date.
+// self row, which always carries their own name and birth date, and whether they are a student once they say.
 function validateMembers(input, applicant, { today, saving }) {
   if (input === undefined) return [];
   if (Array.isArray(input) && input.length > MAX_MEMBERS) throw new Error(`The household list holds up to ${MAX_MEMBERS} people.`);
@@ -247,6 +269,8 @@ function validateMembers(input, applicant, { today, saving }) {
     }
     if (!RELATIONSHIPS.includes(result.relationship) && result.relationship !== '') throw new Error('Choose how each household member is related to you.');
     if (!['', 'yes', 'no'].includes(result.student)) throw new Error('Whether a household member is a student must be Yes, No, or left unanswered.');
+    // The applicant's own row follows their student status (#184). Without one, it keeps an answer saved on it before.
+    if (result.relationship === 'self' && applicant.studentLevel) result.student = studentAnswer(applicant.studentLevel);
     if (result.grade && result.student !== 'yes') throw new Error('Add a grade only for a household member who is a student.');
     if (result.ssn && result.hasSsnAnswer === 'no') throw new Error('A household member has a Social Security number entered but having one is answered No.');
     if (result.relationship === 'self') Object.assign(result, { firstName: applicant.firstName, lastName: applicant.lastName, birthDate: applicant.birthDate });
@@ -318,7 +342,7 @@ function validateStoredApplication(input) {
   return { ...validateApplication(input), createdAt: input.createdAt, updatedAt: input.updatedAt };
 }
 
-module.exports = { PORTAL_URL, FIELD_LABELS, PROFILE_FIELDS, REQUEST_FIELDS, DERIVED_FIELDS, PROFILE_CHOICES, YES_NO_FIELDS, APPLICATION_STATUSES, HOUSEHOLD_COUNT_FIELDS,
+module.exports = { PORTAL_URL, FIELD_LABELS, PROFILE_FIELDS, REQUEST_FIELDS, DERIVED_FIELDS, PROFILE_CHOICES, SEVERAL_CHOICES, YES_NO_FIELDS, APPLICATION_STATUSES, HOUSEHOLD_COUNT_FIELDS,
   RELATIONSHIPS, MAX_MEMBERS, MEMBER_FIELDS, LIST_FIELDS, SNAP_INFORMATION, SNAP_IOWA_ONLY_FIELDS, RECORD_FIELDS, MAX_RECORDS, MAX_PROFILE_REVIEW_ROWS,
   SAVE_FIELDS, isPortalUrl, isHttpsSiteUrl, siteOrigin, isRequestField, fieldLabel, releasedValue, blockedByBirthDate, savedBirthDateRefusal,
   validateInformationValue, validateRecords, validateProfile, validateStoredProfile, validateApplication, validateStoredApplication };

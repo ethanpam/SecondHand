@@ -397,6 +397,23 @@ test('in every language, the lines on the Iowa pages SecondHand fills no longer 
   }
 });
 
+test('#189: in every language, the summary’s count of suggested answers never uses the word for Laya’s best guesses', () => {
+  // Each language's word for a guess, as its "N guessed by Laya, check them" line says it.
+  const guessWords = { en: /guess/i, es: /adivin|suposici/i, vi: /đoán/i, zh: /推测/, fr: /devin|suppos/i, ar: /خم/ };
+  assert.deepEqual(Object.keys(guessWords), [...strings.LANGUAGES]);
+  for (const [code, pattern] of Object.entries(guessWords)) {
+    const catalog = strings.catalogs[code];
+    for (const key of ['widget.layaGuessed', 'result.layaGuessed']) for (const text of [catalog[key].one, catalog[key].other]) assert.match(text, pattern, `${code} ${key} says guess`);
+    assert.match(catalog['guesses.title'], pattern, `${code} guesses.title says guess`);
+    // The fills an AI suggested (or a rule left to check), outlined in dashed amber, and the line that says Laya suggested them.
+    // The counts say "1 answer" or "2 answers", so a count can be one form or two; neither says guess.
+    for (const key of ['widget.filledSuggested', 'result.siteFilledSuggested', 'result.siteFilledSuggestedNeedYou', 'result.suggestedByLaya']) {
+      for (const text of typeof catalog[key] === 'string' ? [catalog[key]] : [catalog[key].one, catalog[key].other]) assert.doesNotMatch(text, pattern, `${code} ${key}`);
+    }
+  }
+  for (const key of ['widget.filledGuessed', 'result.siteFilledGuessed', 'result.siteFilledGuessedNeedYou']) assert.equal(Object.hasOwn(en, key), false, `${key} is gone`);
+});
+
 test('the side panel’s English line about Autofill on Iowa says what it fills, where it continues, and what Laya and you check (#167)', () => {
   const policy = en['panel.iowaPolicy'];
   for (const words of ['first suggested home address', 'Laya', 'Social Security number', 'to check', 'Continue']) assert.ok(policy.includes(words), words);
@@ -485,6 +502,33 @@ test('no catalog text uses an em dash', () => {
   assert.deepEqual(found, []);
 });
 
+test('French keeps « and » on the same line as the words they quote, with a no-break space and no quote mark lost (#196)', () => {
+  const found = [];
+  let opening = 0, closing = 0;
+  for (const [key, value] of Object.entries(strings.catalogs.fr)) {
+    for (const text of typeof value === 'string' ? [value] : [value.one, value.other]) {
+      opening += (text.match(/«/g) || []).length;
+      closing += (text.match(/»/g) || []).length;
+      if (/«(?! )|(?<! )»/.test(text)) found.push(key);
+    }
+  }
+  assert.deepEqual(unique(found), [], 'every « is followed and every » preceded by U+00A0');
+  assert.equal(opening, 73, 'French has 73 «');
+  assert.equal(closing, 73, 'French has 73 »');
+});
+
+test('Remember for next time, its refusals, and the custom answers summary speak all six languages (#186)', () => {
+  const keys = ['remember.title', 'remember.hint', 'remember.check', 'remember.checkLabel', 'remember.changes', 'remember.button', 'remember.saving', 'remember.saved',
+    'worker.rememberEmpty', 'worker.rememberUnreadable', 'worker.rememberRepeated', 'worker.rememberCancelled', 'result.fromCustom', 'widget.fromCustom'];
+  for (const code of strings.LANGUAGES) for (const key of keys) {
+    assert.ok(Object.hasOwn(strings.catalogs[code], key), `${code} ${key}`);
+    if (code !== 'en') assert.notDeepEqual(strings.catalogs[code][key], en[key], `${code} ${key} is translated`);
+  }
+  assert.equal(strings.english('result.fromCustom', { summary: { key: 'result.siteFilled', params: { count: 2 } }, count: 1 }),
+    'Filled 2 answers. Check them before you submit. 1 from your custom answers.');
+  assert.equal(strings.english('remember.check'), 'Remember for next time');
+});
+
 test('every language is named in its own words in every catalog and offered in the picker', () => {
   const natives = { en: 'English', es: 'Español', vi: 'Tiếng Việt', zh: '中文（简体）', fr: 'Français', ar: 'العربية' };
   for (const code of strings.LANGUAGES) for (const [name, native] of Object.entries(natives)) assert.equal(strings.catalogs[code][`language.${name}`], native, `${code} language.${name}`);
@@ -507,4 +551,15 @@ test('regional browser languages pick their catalog; Traditional Chinese stays E
     ['zh-TW', 'en'], ['zh-HK', 'en'], ['zh-Hant', 'en'], ['de-DE', 'en']]) {
     assert.equal(strings.language(scope(browser)), expected, browser);
   }
+});
+
+test('Add your household and its hints speak all six languages, and name the app’s own sections and rows in its words (#180)', () => {
+  const keys = ['household.title', 'household.hintList', 'household.hintYou', 'household.hintPerson', 'household.add', 'household.open', 'household.opened', 'widget.household'];
+  for (const code of strings.LANGUAGES) for (const key of keys) {
+    assert.ok(Object.hasOwn(strings.catalogs[code], key), `${code} ${key}`);
+    if (code !== 'en') assert.notDeepEqual(strings.catalogs[code][key], en[key], `${code} ${key} is translated`);
+  }
+  assert.equal(strings.english('household.add'), 'Add your household');
+  // The app stays in English: every language names its row as My information does.
+  for (const code of strings.LANGUAGES) assert.match(strings.text(code, 'household.hintPerson', { number: 3 }), /Person 3/, code);
 });
