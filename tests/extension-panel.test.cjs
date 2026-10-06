@@ -2377,7 +2377,7 @@ test('when all websites is on, its off button shows, the per-site buttons step a
 test('the off message, with how to remove Chrome’s kept grant, stays on screen until the tab changes', async t => {
   // The side panel checks the page every 1.5 seconds; the test runs that clock itself.
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  const taken = 'SecondHand is off on other websites. Sites you turned on one at a time stay on. Chrome’s own settings may still list SecondHand’s access to all websites; SecondHand no longer uses it.';
+  const taken = 'SecondHand is off on other websites. Sites you turned on one at a time stay on. Chrome may still show SecondHand as allowed on all websites, but SecondHand doesn’t use that while this is off. To remove it, open Details for SecondHand on Chrome’s Extensions page and set Site access to On click.';
   const params = { first: { key: 'worker.allSitesOff', params: {} }, second: { key: 'worker.chromeStillAllows', params: {} } };
   const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, desktop: { allSites: true },
     allSitesOff: { message: taken, messageKey: 'joined', messageParams: params } });
