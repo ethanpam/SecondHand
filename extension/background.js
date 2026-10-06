@@ -15,7 +15,7 @@ if (typeof globalThis.SecondHandTranslation?.create !== 'function') {
 // Must match BUILD in panel.js: change both together, with every change to the extension. The panel
 // compares them to tell when Chrome is still running an older worker than the pages it loaded from
 // disk, and the worker compares it with the build the desktop app ships to update itself (#85).
-const BUILD = '2026-10-06.14';
+const BUILD = '2026-10-06.15';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
@@ -914,7 +914,7 @@ async function tallySite(tabId, frames) {
     return total;
   } catch { throw fault(FRAME_ERROR); }
 }
-// A summary that says when Laya suggested the guesses.
+// A summary that says when the suggestions came from Laya.
 const withLaya = (summary, laya) => laya ? { key: 'result.suggestedByLaya', params: { summary } } : summary;
 const withReason = (summary, reason) => reason ? { key: 'result.withReason', params: { summary, reason } } : summary;
 // A summary that says how many questions wait for Fill sensitive details (#176).
@@ -928,12 +928,14 @@ const reasons = (...list) => list.filter((reason, index) => reason && list.findI
   .reduce((all, next) => all ? joined(all, next) : next, null);
 // `held`: how many of the need-you questions wait for Fill sensitive details. Their saved answers matched, so a page
 // with nothing else filled doesn't say that nothing matched.
+// `guessed`: how many of the filled questions have the dashed mark of an AI's suggestion (or a rule's answer to check).
+// The summary calls them suggested, so they can't be taken for Laya's best guesses (#189).
 // `layaGuessed`: how many of the filled questions have Laya's best guess (#185). `custom`: how many came from custom answers (#186).
 function siteSummary(filled, guessed, needYou, next, laya, reason = null, held = 0, layaGuessed = 0, custom = 0) {
   let summary;
   if (filled) {
-    const key = guessed ? (needYou.length ? 'result.siteFilledGuessedNeedYou' : 'result.siteFilledGuessed') : needYou.length ? 'result.siteFilledNeedYou' : 'result.siteFilled';
-    summary = { key, params: { count: filled, ...(guessed ? { guessed } : {}), ...(needYou.length ? { needYou: needYou.length } : {}) } };
+    const key = guessed ? (needYou.length ? 'result.siteFilledSuggestedNeedYou' : 'result.siteFilledSuggested') : needYou.length ? 'result.siteFilledNeedYou' : 'result.siteFilled';
+    summary = { key, params: { count: filled, ...(guessed ? { suggested: guessed } : {}), ...(needYou.length ? { needYou: needYou.length } : {}) } };
   } else if (needYou.length) summary = { key: held ? 'result.siteNeedYou' : 'result.nothingMatchesNeedYou', params: { count: needYou.length } };
   else summary = { key: next ? 'result.nothingToFillNext' : 'result.nothingToFill', params: {} };
   const shown = withReason(withHeld(withLayaGuesses(withLaya(withCustom(summary, custom), laya), layaGuessed), held), reason);

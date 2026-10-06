@@ -936,7 +936,7 @@ test('on a site that is on, Autofill fills once without Stop, and Turn off asks 
 
 test('widget on a site asks the on-device AI about open questions and sends its guesses with Autofill', async t => {
   const ai = languageModel();
-  const guessed = { state: 'done', filled: 3, guessed: 1, needYou: ['sh-2-0'], message: 'Filled 3 · 1 guessed · 1 need you. Check your answers before you submit.', pageKey: 'general' };
+  const guessed = { state: 'done', filled: 3, guessed: 1, needYou: ['sh-2-0'], message: 'Filled 3 · 1 suggested · 1 need you. Check your answers before you submit.', pageKey: 'general' };
   const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: openPlan, LanguageModel: ai.LanguageModel, autofill: guessed });
   assert.equal(ai.calls.availability, 0, 'nothing is asked before a click');
   await view.userClick('autofill');
@@ -948,7 +948,7 @@ test('widget on a site asks the on-device AI about open questions and sends its 
   assert.match(system, /- email:/);
   assert.match(system, /- phone:/);
   assert.doesNotMatch(system, /ssn|birthDate|Income|firstName/, 'the AI only learns the keys the worker allows');
-  assert.equal(view.get('widget-text').textContent, 'Filled 3 · 1 guessed');
+  assert.equal(view.get('widget-text').textContent, 'Filled 3 · 1 suggested');
   assert.equal(view.get('need-you').textContent, '1 need you');
 });
 
@@ -1410,8 +1410,8 @@ test('when the widget’s offer opened the side panel, the panel shows the list 
 
 // Laya, the desktop's local AI (#39, #42): when it is ready, Chrome's on-device AI stays off.
 const layaDone = { state: 'done', filled: 2, guessed: 1, laya: 1, needYou: ['f0:sh-1-1'], pageKey: 'general',
-  message: 'Filled 2 · 1 guessed · 1 need you. Check your answers before you submit. Guesses were suggested by Laya on this computer.',
-  messageKey: 'result.suggestedByLaya', messageParams: { summary: { key: 'result.siteFilledGuessedNeedYou', params: { count: 2, guessed: 1, needYou: 1 } } } };
+  message: 'Filled 2 · 1 suggested · 1 need you. Check your answers before you submit. Suggestions came from Laya on this computer.',
+  messageKey: 'result.suggestedByLaya', messageParams: { summary: { key: 'result.siteFilledSuggestedNeedYou', params: { count: 2, suggested: 1, needYou: 1 } } } };
 
 test('with Laya ready, the widget leaves Chrome’s on-device AI off, fills the plan Laya answers for, and says who suggested the guesses', async t => {
   const ai = languageModel();
@@ -1419,13 +1419,13 @@ test('with Laya ready, the widget leaves Chrome’s on-device AI off, fills the 
   await view.userClick('autofill');
   assert.deepEqual(plainRequests(view.requests.slice(-2)), [{ type: 'ui:plan', confirmed: true }, { type: 'ui:autofill', confirmed: true, guesses: {} }]);
   assert.equal(ai.calls.availability, 0, 'Chrome’s on-device AI is never asked');
-  assert.equal(view.get('widget-text').textContent, 'Filled 2 · 1 guessed · suggested by Laya');
+  assert.equal(view.get('widget-text').textContent, 'Filled 2 · 1 suggested · suggested by Laya');
   assert.equal(view.get('widget-text').title, layaDone.message);
   assert.equal(view.get('need-you').textContent, '1 need you');
 
   const spanishView = await panel(t, { launcher: true, language: 'es-ES', tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true }, autofill: layaDone });
   await spanishView.userClick('autofill');
-  assert.equal(spanishView.get('widget-text').textContent, `${strings.text('es', 'widget.filledGuessed', { count: 2, guessed: 1 })} · ${spanish('widget.suggestedByLaya')}`);
+  assert.equal(spanishView.get('widget-text').textContent, `${strings.text('es', 'widget.filledSuggested', { count: 2, suggested: 1 })} · ${spanish('widget.suggestedByLaya')}`);
   assert.deepEqual(shownText(spanishView).filter(text => englishOnly.has(text)), []);
 });
 
@@ -2025,9 +2025,9 @@ test('the widget counts held questions under need-you, says they wait in the sid
 
 // #185: Laya's best guesses, listed for the applicant to find and check.
 const GUESSES = [{ id: 'f0:sh-1-1', label: 'How many people live in your household?' }, { id: 'f4:sh-1-3', label: 'Preferred pickup day' }];
-const GUESSED = 'Filled 4 · 1 guessed. Check your answers before you submit. Guesses were suggested by Laya on this computer. 2 guessed by Laya, check them.';
+const GUESSED = 'Filled 4 · 1 suggested. Check your answers before you submit. Suggestions came from Laya on this computer. 2 guessed by Laya, check them.';
 const guessedDone = { state: 'done', filled: 4, guessed: 1, laya: 1, layaGuessed: 2, layaGuesses: GUESSES, needYou: [], pageKey: 'general', message: GUESSED, messageKey: 'result.layaGuessed',
-  messageParams: { summary: { key: 'result.suggestedByLaya', params: { summary: { key: 'result.siteFilledGuessed', params: { count: 4, guessed: 1 } } } }, count: 2 } };
+  messageParams: { summary: { key: 'result.suggestedByLaya', params: { summary: { key: 'result.siteFilledSuggested', params: { count: 4, suggested: 1 } } } }, count: 2 } };
 
 test('#185: the side panel lists Laya’s guesses by their own words, and a trusted row click finds each one on the page', async t => {
   const view = await panel(t, { tab: pantryTab, site: PANTRY_SITE, result: guessedDone });
@@ -2066,7 +2066,7 @@ test('#185: the guess list shows only well-formed questions, in the applicant’
 test('#185: the widget says how many Laya guessed, apart from its sure answers, in the applicant’s language', async t => {
   const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true }, autofill: guessedDone });
   await view.userClick('autofill');
-  assert.equal(view.get('widget-text').textContent, 'Filled 4 · 1 guessed · suggested by Laya · 2 guessed by Laya, check them');
+  assert.equal(view.get('widget-text').textContent, 'Filled 4 · 1 suggested · suggested by Laya · 2 guessed by Laya, check them');
   assert.equal(view.get('widget-text').title, GUESSED);
   const one = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true },
     autofill: { ...guessedDone, filled: 1, guessed: 0, laya: undefined, layaGuessed: 1, layaGuesses: GUESSES.slice(0, 1) } });
@@ -2075,7 +2075,7 @@ test('#185: the widget says how many Laya guessed, apart from its sure answers, 
   const spanishView = await panel(t, { launcher: true, language: 'es', tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true }, autofill: guessedDone });
   await spanishView.userClick('autofill');
   assert.equal(spanishView.get('widget-text').textContent,
-    `${strings.text('es', 'widget.filledGuessed', { count: 4, guessed: 1 })} · ${spanish('widget.suggestedByLaya')} · ${strings.text('es', 'widget.layaGuessed', { count: 2 })}`);
+    `${strings.text('es', 'widget.filledSuggested', { count: 4, suggested: 1 })} · ${spanish('widget.suggestedByLaya')} · ${strings.text('es', 'widget.layaGuessed', { count: 2 })}`);
   assert.deepEqual(shownText(spanishView).filter(text => englishOnly.has(text)), []);
 });
 
