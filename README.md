@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/media/autofill.gif" width="880" alt="The SecondHand card in the corner of Iowa's application. A click on Autofill fills the saved answers, a yellow '1 need you' link appears, and clicking it jumps to the empty First Name field, where Daniel is typed.">
+  <img src="docs/media/autofill.gif" width="880" alt="The SecondHand card in the corner of Iowa's application. A click on Autofill fills the saved answers, a '1 question left' link appears, and clicking it jumps to the empty First Name field, where Daniel is typed. The page is then complete, so SecondHand clicks Save and Continue.">
   <br>
   <sub>A fictional applicant on a synthetic copy of Iowa's form. Nothing is sent anywhere.</sub>
 </p>
@@ -33,10 +33,10 @@
 - **Sets up in about five minutes.** Right after you create your password, a short guided setup walks you through six steps: you, your household, where you live, income and money on hand, programs, and Iowa's questions about you. Each step is saved as you go. Skip it, or stop part way, and finish it later from Overview.
 - **Knows your household.** List the people you live with once, with their birth dates. SecondHand works out the counts forms ask for, such as "How many people 0–17?", "18–59", or "60 and older", and fills a student's name and grade when one person on the list is a student. It never guesses a guardian's name.
 - **Fills Iowa's application in one click.** Click **Autofill** in the corner of Iowa's portal. SecondHand fills the questions it knows, moves past screens that only give information, and stops wherever you're needed.
-- **Shows what still needs you.** A yellow **1 need you** link jumps to each missing answer. Click the SecondHand logo on the card to open Chrome's side panel, which marks every question on the page as **Done**, **Needs you**, **Optional**, or **Do it yourself**.
+- **Shows what is left for you.** The card says what Autofill did, and a **1 question left** link jumps to each missing answer. Click the SecondHand logo on the card to open Chrome's side panel, which marks every question on the page as **Done**, **Needs your answer**, **Optional**, or **Do it yourself**. The card's × hides it to its logo until you want it back.
 - **Saves what you type for next time.** When Autofill finds a question it knows but you hadn't saved an answer for, answer it on the page and click **Save to My information** in the side panel. SecondHand reads that one answer only after your click, and the app asks before it saves it.
 - **Answers the questions the rules miss.** Laya, a small AI model that runs inside the desktop app, picks an answer from your saved facts when it's confident, and marks it as a guess for you to check. When your facts don't say, it leaves the question for you.
-- **Leaves the decisions to you.** The app asks before sharing anything, unless you choose **Always allow**. CAPTCHA, consent, signatures, and final submission are always yours.
+- **Leaves the decisions to you.** The app asks before sharing anything, unless you choose **Always allow**. Iowa's security check (the CAPTCHA), consent, signatures, and final submission are always yours.
 - **Speaks your language.** The side panel works in English, Spanish, Vietnamese, Chinese, French, and Arabic. It can show Iowa's questions in your language and sum up long pages, using Chrome's built-in translator and summarizer on your computer.
 - **Helps with other food-assistance forms.** Turn SecondHand on for a food pantry's form site, or for every site at once with **Use SecondHand on all websites** in Chrome's side panel. It fills what it recognizes, one click at a time, and never navigates or submits on those sites. With all websites on, its card shows only on pages with a form it can help with.
 
@@ -46,9 +46,9 @@
 | --- | --- |
 | <img src="docs/media/desktop-my-information.png" alt="The My information page of the SecondHand desktop app, with the fictional applicant Daniel Ceaser's name, date of birth, and program choices" width="100%"> | <img src="docs/media/desktop-overview.png" alt="The SecondHand desktop app's Overview: a Prepare my application button, three next steps, and one Iowa SNAP application in progress" width="100%"> |
 
-**On Iowa's portal, with Chrome's side panel open.** The card in the corner says one answer still needs you; the side panel shows which one.
+**On Iowa's portal, with Chrome's side panel open.** The card in the corner says one question is left for you; the side panel shows which one.
 
-<img src="docs/media/side-panel.png" alt="Iowa's Enter Personal Information page with Last Name filled and First Name empty, the SecondHand card showing Stop and 1 need you, and the side panel checklist marking First name as Needs you and Last name as Done" width="100%">
+<img src="docs/media/side-panel.png" alt="Iowa's Enter Personal Information page with Last Name filled and First Name empty, the SecondHand card showing Stop and 1 question left, and the side panel checklist marking First name as having no saved answer to type in Iowa's form, and Last name as Done" width="100%">
 
 ## How it works
 
@@ -88,7 +88,7 @@ Rules fill the questions SecondHand knows. For the rest, the desktop app asks La
 2. **The desktop app writes your saved profile as plain facts**, such as "The household has 1 person", on your computer.
 3. **Laya scores every option.** For each one it answers a single yes/no question: given the facts about the household, is this the correct answer to the form question? "None of these, or the facts don't say" is scored too.
 4. **It fills only a sure answer**, one that scores over 0.9 and beats "None of these". The answer gets a dashed amber outline and the summary says it was suggested by Laya, so you know to check it. On sites other than Iowa's portal, the app asks before it uses sensitive details such as your age.
-5. **Otherwise the question stays yours**, marked **Needs you** in the side panel.
+5. **Otherwise the question stays yours**, marked **Needs your answer** in the side panel.
 
 Laya also matches text boxes the rules don't recognize to the saved detail they ask for, such as a differently worded name or phone field.
 
@@ -100,14 +100,14 @@ Laya is [fine-tuned](docs/laya-model.md) from the open [Laya](https://huggingfac
 2. **Create a password.** Save the recovery key the app shows you somewhere safe, away from the computer. If you ever forget your password, choose **Forgot password?** and use that key, or reset it on the same computer if you left that option on. With neither, **Start over** erases the saved information so you can make a new password.
 3. **Add the extension to Chrome.** In the app, open **Chrome extension** and click **Prepare Chrome extension**. In Chrome, go to `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and choose the folder the app prepared (**Copy folder path** helps you find it). You only do this once.
 4. **Apply.** Keep SecondHand unlocked and open [Iowa's portal](https://hhsservices.iowa.gov/apspssp/ssp.portal) in Chrome 116 or newer. Start your application and click **Autofill** in the bottom-right corner. The first time, the app asks: choose **Allow once**, or **Always allow on this computer**.
-5. **Finish it yourself.** Click **need you** to jump to anything missing. Review every answer, including the home address SecondHand picked. Then do the consent, signatures, and submission, and save Iowa's confirmation number under **Applications** in the app.
+5. **Finish it yourself.** Click **1 question left** on the card to jump to anything missing. Review every answer, including the home address SecondHand picked. Then do the consent, signatures, and submission, and save Iowa's confirmation number under **Applications** in the app.
 
 The [setup guide](docs/setup.md) covers each step in detail, including how to find the folder on a Mac and what to do when something goes wrong.
 
 <details>
 <summary><strong>Updating from an earlier version</strong></summary>
 
-Install the new app and open it. The next time you use the extension, SecondHand refreshes its files and reloads itself in Chrome, once nothing is filling. The side panel then says it was updated. Reload any form page that was open, after you save or finish it, so reloading doesn't lose unsaved answers. Keep **Developer mode** on at `chrome://extensions`, or Chrome turns SecondHand off.
+Install the new app and open it. The next time you use the extension, SecondHand refreshes its files and reloads itself in Chrome, once nothing is filling. The side panel then says it was updated. On a form page that was open, the card says SecondHand is back on the next page: reload that page, after you save or finish it so reloading doesn't lose unsaved answers, or go on to the next one. If the card instead says SecondHand was updated and offers **Restart**, click it first. Keep **Developer mode** on at `chrome://extensions`, or Chrome turns SecondHand off.
 
 Coming from a version without automatic updates, such as the public 0.4 downloads, do it by hand once: open **Chrome extension** in the app and click **Refresh extension files**, then click **Reload** for SecondHand at `chrome://extensions` and reload your Iowa tab. If Chrome asks, review the updated permissions.
 
@@ -119,14 +119,14 @@ Autofill works screen by screen and stays on for the tab until you click **Stop*
 
 | Iowa screen | What SecondHand does |
 | --- | --- |
-| Household Application Information | Picks **Yes** when one of your saved programs is a clear yes. You solve the CAPTCHA and continue. |
+| Household Application Information | Picks **Yes** when one of your saved programs is a clear yes. You type the characters in Iowa's security check and continue. |
 | Before You Start, Important Information, Instructions | Clicks Continue for you. These screens send no answers. |
 | Let's get started, About you | Waits for you to accept Iowa's consent or click Continue. |
 | **Enter Personal Information** | Fills your saved names, phones, home and mailing addresses, and program choices. Waits for missing required answers, then clicks Save and Continue. |
 | Select Address (verified home-only layout) | Picks Iowa's first suggested home address and continues. Check it before you submit. |
 | Tell Us More | Fills your saved date of birth and the answers you saved under About you in My information. Anything not saved stays with you. |
 | Other Iowa pages | May fill matching saved answers after you approve, and Laya's sure answers to other questions, marked as guesses. You continue. |
-| CAPTCHA, consent, signatures, final Submit | Never touched. |
+| Security check (CAPTCHA), consent, signatures, final Submit | Never touched. |
 
 The Select Address and Tell Us More steps and Laya are in this code but not yet in the public 0.4 downloads. SecondHand never changes an answer already on the page, and any answer Laya picks is marked as a guess for you to check. [Portal coverage](docs/iowa-portal.md) has the exact field list.
 
