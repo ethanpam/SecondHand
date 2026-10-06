@@ -151,7 +151,9 @@ async function main() {
     await expect.poll(() => panel.text('#desktop-status'), { timeout: 30000 }).toBe(strings.english('desktop.locked'));
     assert.equal(await panel.visible('#desktop-action') && await panel.text('#desktop-action') === strings.english('panel.restart'), false, 'the side panel and the worker agree on the build');
     await panel.screenshot(path.join(root, 'artifacts/self-update/self-update-panel.png'));
-    await page.waitForTimeout(3000);
+    // The worker read that status: with no newer build to reload into, it has no update waiting, and a reload comes
+    // only from one that is waiting (#143: state, not a 3-second wait).
+    await expect.poll(() => updated.evaluate(() => selfUpdate), { timeout: 15000 }).toBe(null);
     assert.equal(await updated.evaluate(() => globalThis.__selfUpdateSmoke), 'same worker', 'no second reload');
     assert.equal(starts.length - started, 1);
     await panel.evaluate(() => { setTimeout(() => location.reload(), 0); });

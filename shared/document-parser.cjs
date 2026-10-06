@@ -165,6 +165,43 @@ function recognizedForms(page) {
   return found;
 }
 
+// A proposed historical reference is separate from the applicant profile. It
+// contains no document bytes, taxpayer identifier, or current-income answers.
+// The renderer must obtain an explicit review/save action and assign its ID.
+function statementProposal(result, alternate) {
+  if (!alternate || alternate.type !== result.type) return null;
+  const other = new Map(alternate.fields.map(field => [field.id, field]));
+  const agreed = id => {
+    const field = result.fields.find(candidate => candidate.id === id), match = other.get(id);
+    return field && match && field.value === match.value && field.label === match.label &&
+      field.sourceRole === match.sourceRole && field.profileKey === match.profileKey ? field : null;
+  };
+  const text = id => agreed(id)?.value || '';
+  const parts = (first, middle, last) => {
+    if (!text(first) || !text(last)) return '';
+    if ((result.fields.some(field => field.id === middle) || other.has(middle)) && !text(middle)) return '';
+    const name = [text(first), text(middle), text(last)].filter(Boolean).join(' ');
+    return name.length <= 200 ? name : '';
+  };
+  const mappings = {
+    w2: { role: 'employer', source: 'w2EmployerName', recipient: () => text('w2EmployeeName') || parts('w2EmployeeFirstName', 'w2EmployeeMiddleName', 'w2EmployeeLastName'), income: ['taxLineW2Box1'], withholding: 'taxLineW2Box2' },
+    '1099-nec': { role: 'payer', source: 'necPayerName', recipient: () => text('necRecipientName'), income: ['taxLineNecBox1a'], withholding: 'taxLineNecBox4' },
+    'ssa-1099': { role: 'issuer', source: 'ssaIssuerName', recipient: () => text('ssaRecipientName'), income: ['taxLineSsaBox5'], withholding: 'taxLineSsaBox6' },
+    '1040': { role: 'taxpayer', recipient: () => parts('applicantFirstName', 'applicantMiddleName', 'applicantLastName'), income: ['taxLine1z', 'taxLine1a'] },
+    '1040-sr': { role: 'taxpayer', recipient: () => parts('applicantFirstName', 'applicantMiddleName', 'applicantLastName'), income: ['taxLine1z', 'taxLine1a'] }
+  };
+  const mapping = mappings[result.type];
+  if (!mapping) return null;
+  const taxYear = /^(?:19|20)\d{2}$/.test(result.taxYear) && result.taxYear === alternate.taxYear ? result.taxYear : '';
+  const amount = ids => taxYear ? ids.map(agreed).find(field => field && /^\d{1,8}(?:\.\d{1,2})?$/.test(field.value)) : null;
+  const income = amount(mapping.income), withholding = amount(mapping.withholding ? [mapping.withholding] : []);
+  const statement = { documentType: result.type, taxYear, sourceName: mapping.source ? text(mapping.source) : '', sourceRole: mapping.role,
+    recipientName: mapping.recipient(), annualIncome: income?.value || '', annualIncomeLabel: income?.label || '',
+    annualWithholding: withholding?.value || '', annualWithholdingLabel: withholding?.label || '' };
+  if (!statement.sourceName && !statement.recipientName && !statement.annualIncome && !statement.annualWithholding) return null;
+  return statement;
+}
+
 function analyzeDocument(document) {
   const pages = Array.isArray(document?.pages) ? document.pages.slice(0, 12) : [];
   const found = pages.flatMap((page, pageIndex) => recognizedForms(page).map(form => ({ ...form, pageIndex })));
@@ -208,6 +245,8 @@ function analyzeDocument(document) {
     if (sameForm) for (const warning of alternate.warnings.filter(message => /year/i.test(message))) {
       if (!result.warnings.includes(warning)) result.warnings.push(warning);
     }
+    const statement = statementProposal(result, sameForm ? alternate : null);
+    if (statement) result.statement = statement;
     result.warnings.unshift('OCR can misread letters or digits even when confidence is high. Check every selected value against the original document.');
     return result;
   }

@@ -101,6 +101,9 @@ private struct ProfileDocumentReviewView: View {
     let apply: (PersonalProfile) -> Void
     @EnvironmentObject private var store: AppStore
     @State private var fields: [ProfileDocumentField] = []
+    @State private var validationError: String?
+    @State private var incomeYear = ""
+    @State private var showingSSN = false
     @State private var analysis: ProfileDocumentAnalysis?
     @State private var recognized: RecognizedDocument?
     @State private var confirmed = false
@@ -132,24 +135,45 @@ private struct ProfileDocumentReviewView: View {
                     ForEach($fields) { $field in
                         VStack(alignment: .leading, spacing: 8) {
                             Toggle(field.label, isOn: $field.selected)
-                            TextField(field.label, text: $field.value)
-                                .disabled(!field.selected)
-                                .accessibilityIdentifier("profile.import.\(field.profileKey ?? field.id)")
+                            if field.profileKey == "ssn" && !showingSSN {
+                                SecureField("Social Security number", text: $field.value)
+                                    .keyboardType(.numbersAndPunctuation).disabled(!field.selected)
+                                    .accessibilityIdentifier("profile.import.ssn")
+                            } else {
+                                TextField(field.label, text: $field.value)
+                                    .keyboardType(field.isAnnualIncome ? .decimalPad : .default)
+                                    .disabled(!field.selected)
+                                    .accessibilityIdentifier("profile.import.\(field.profileKey ?? field.id)")
+                            }
+                            if field.profileKey == "ssn" {
+                                Button(showingSSN ? "Hide SSN" : "Show SSN") { showingSSN.toggle() }
+                            }
+                            if field.isAnnualIncome { Text("Annual amount • \(incomeYear.isEmpty ? "Confirm year below" : incomeYear)").font(.caption).foregroundStyle(.secondary) }
                             if let key = field.profileKey, let path = ProfileDocumentField.paths[key], !currentProfile[keyPath: path].isEmpty {
-                                Text("Current: \(currentProfile[keyPath: path])").font(.caption).foregroundStyle(.secondary)
+                                Text("Current: \(key == "ssn" ? "•••-••-" + String(currentProfile.ssn.suffix(4)) : currentProfile[keyPath: path])").font(.caption).foregroundStyle(.secondary)
                             }
                         }
                     }
                 } header: { Text("Review detected details") } footer: {
                     Text("Check every selected value against the original. Selected details replace those fields in your draft.")
                 }
+                if fields.contains(where: { $0.isAnnualIncome }) {
+                    Section("Annual income year") {
+                        TextField("Year (confirm from document)", text: $incomeYear).keyboardType(.numberPad)
+                        Text("Keep each amount’s type and source. Do not add overlapping lines or convert these historical amounts into current monthly income.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 Section {
-                    Toggle("These are my details and the address is current", isOn: $confirmed)
+                    Toggle("I checked the selected details against my document", isOn: $confirmed)
                         .accessibilityIdentifier("profile.import.confirm")
                     Button("Use selected details") {
                         guard var result = analysis else { return }
                         result.fields = fields
-                        apply(result.applying(to: currentProfile))
+                        result.taxYear = incomeYear.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let draft = result.applying(to: currentProfile, documentID: document.id, documentName: document.name)
+                        do { try AppStore.validate(draft); apply(draft) }
+                        catch { self.validationError = error.localizedDescription }
                     }
                     .disabled(!confirmed || !fields.contains(where: { $0.selected && !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }))
                     .accessibilityIdentifier("profile.import.apply")
@@ -165,6 +189,9 @@ private struct ProfileDocumentReviewView: View {
         }
         .navigationTitle("Review document details")
         .navigationBarTitleDisplayMode(.inline)
+        .alert("Check your details", isPresented: Binding(get: { validationError != nil }, set: { if !$0 { validationError = nil } })) {
+            Button("OK", role: .cancel) { validationError = nil }
+        } message: { Text(validationError ?? "") }
         .quickLookPreview($previewURL)
         .onChange(of: previewURL) { old, new in if old != nil && new == nil { store.cleanupPreviews() } }
         .task {
@@ -175,6 +202,7 @@ private struct ProfileDocumentReviewView: View {
                 recognized = text
                 analysis = result
                 fields = result.fields
+                incomeYear = result.taxYear
             } catch is CancellationError { return }
             catch { self.error = error.localizedDescription }
             loading = false

@@ -5,16 +5,16 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
-const { readFileSync, constants } = require('node:fs');
+const { constants } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
-const vm = require('node:vm');
 const crypto = require('node:crypto');
 const { once } = require('node:events');
 const { spawn, execFileSync } = require('node:child_process');
 const { PassThrough } = require('node:stream');
 const { FrameReader, frame, startBridge, relayRequest, runNativeHost } = require('../desktop/bridge.cjs');
+const { runFile } = require('./helpers/harness.cjs');
 
 const root = path.resolve(__dirname, '..');
 const EXTENSION = 'a'.repeat(32);
@@ -291,7 +291,7 @@ test('the native host answers 8 requests at once, and 8 more once those are answ
 // bridge.cjs loaded with stand-ins for node:fs, to see what nativeStreams does with descriptors 0 and 1.
 function bridgeWithFs(stand) {
   const module = { exports: {} };
-  vm.runInNewContext(readFileSync(path.join(root, 'desktop/bridge.cjs'), 'utf8'), {
+  runFile('desktop/bridge.cjs', {
     module, exports: module.exports, Buffer, process,
     require: name => name === 'node:fs' ? { ...require('node:fs'), ...stand } : require(name.startsWith('.') ? path.join(root, 'desktop', name) : name)
   });

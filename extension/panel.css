@@ -87,3 +87,5 @@ details.filled>summary>span{display:flex;align-items:center;gap:10px}details.fil
 .summary-group li{font-size:14px;line-height:1.5;margin:4px 0}.summary-empty{color:var(--muted-foreground)}
 /* Save to My information: the question, then its button, side by side when both fit. */
 .save-hint{color:var(--muted-foreground);margin:0 0 8px}.save-row{flex-wrap:wrap;cursor:default}.save-row .checklist-copy{flex:1 1 120px}.save-row .button{min-height:36px;padding:6px 14px;font-size:13px}
+/* Laya's best guess (#185): the dotted outline it has on the page. */
+.guess-mark{border:2px dotted #9b3d8f}

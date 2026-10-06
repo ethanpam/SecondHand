@@ -18,11 +18,11 @@ test("local multi-page application: automatic known fill, explicit mapping, sign
   const storage = {};
   let dom;
   let submitted = 0;
-  const profile = { firstName: "Example", lastName: "Applicant", monthlyIncome: "1234.50", hasHomeAddress: "yes",
+  const profile = { firstName: "Example", lastName: "Applicant", monthlyIncome: "1234.50", ssn: "000-12-3456", annualIncome: "68450.00", annualIncomeYear: "2025", hasHomeAddress: "yes",
     addressLine1: "100 Example Road", city: "Des Moines", state: "IA", postalCode: "50309" };
   const pages = {
     enterPersonalInfo: applicantFixture.html,
-    income: '<h1>Income</h1><form action="income"><label>Monthly earnings<input id="earnings" required></label><button>Continue</button></form>',
+    income: '<h1>Income</h1><form action="income"><label>Monthly earnings<input id="earnings" required></label><label>Your Social Security number<input id="ssn"></label><label>Annual wages<input id="annual"></label><label>Tax year<input id="year"></label><button>Continue</button></form>',
     signature: '<h1>E-Signature</h1><form action="signature"><p>I certify these answers are accurate.</p><label>Your signature<input id="signature" required></label><label>Check to Sign<input id="signed" type="checkbox" required></label><button>Submit Application</button></form>',
     confirmation: '<h1>Application Confirmation</h1><p>Confirmation number: EXAMPLE-123</p>'
   };
@@ -103,6 +103,21 @@ test("local multi-page application: automatic known fill, explicit mapping, sign
   assert.equal(dom.window.document.querySelector("#earnings").value, "");
   view = await workflow.dispatch({ command: "fill", previewToken: view.scan.previewToken, assignments: [{ id: view.scan.fields[0].id, key: "monthlyIncome" }] });
   assert.equal(dom.window.document.querySelector("#earnings").value, "1234.50");
+  assert.equal(dom.window.document.querySelector("#ssn").value, "");
+  assert.equal(nativeCalls.some(call => call.keys?.includes("ssn")), false);
+  const sensitiveAssignments = ["ssn", "annualIncome", "annualIncomeYear"].map(key => ({
+    id: view.scan.fields.find(field => field.allowedKeys.length === 1 && field.allowedKeys[0] === key).id, key
+  }));
+  view = await workflow.dispatch({command: "fill", previewToken: view.scan.previewToken, assignments: sensitiveAssignments});
+  assert.equal(dom.window.document.querySelector("#ssn").value, "000-12-3456");
+  assert.equal(dom.window.document.querySelector("#annual").value, "68450.00");
+  assert.equal(dom.window.document.querySelector("#year").value, "2025");
+  assert.deepEqual(nativeCalls.at(-1).keys, ["ssn", "annualIncome", "annualIncomeYear"]);
+  for (const secret of ["000-12-3456", "68450.00"]) {
+    assert.equal(JSON.stringify(view).includes(secret), false);
+    assert.equal(JSON.stringify(storage).includes(secret), false);
+  }
+
   await workflow.dispatch({ command: "act", previewToken: view.scan.previewToken, actionID: view.scan.actions[0].id });
   view = await workflow.dispatch({ command: "status" });
   assert.equal(view.scan.kind, "signature");

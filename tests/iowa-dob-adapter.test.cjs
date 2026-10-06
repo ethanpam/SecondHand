@@ -4,13 +4,9 @@ const assert = require('node:assert/strict');
 const { JSDOM } = require('jsdom');
 const adapter = require('../extension/iowa-adapter.js');
 const fixture = require('./fixtures/iowa-self-details.cjs');
+const { layoutElements } = require('./helpers/harness.cjs');
 function page(html = fixture.html, url = fixture.URL) {
-  const doc = new JSDOM(`<!doctype html><main>${html}</main>`, { url, pretendToBeVisual: true }).window.document;
-  for (const element of doc.querySelectorAll('*')) {
-    element.getBoundingClientRect = () => ({ left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 });
-    element.getClientRects = () => [element.getBoundingClientRect()];
-  }
-  return doc;
+  return layoutElements(new JSDOM(`<!doctype html><main>${html}</main>`, { url, pretendToBeVisual: true }).window);
 }
 const input = doc => doc.getElementById(fixture.DOB_ID);
 

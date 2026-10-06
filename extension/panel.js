@@ -7,21 +7,25 @@
   const summary = globalThis.SecondHandSummary;
   // Must match BUILD in background.js: change both together. Chrome loads these pages
   // from disk right away but keeps running the old worker until SecondHand is reloaded.
-  const BUILD = '2026-10-05.7';
+  const BUILD = '2026-10-06.6';
   // The applicant's language: the choice saved in this extension's storage, else the browser's.
   let language = strings.language();
   const t = (key, params = {}) => strings.text(language, key, params);
   const fixedText = (value, length = 360) => typeof value === 'string' ? value.slice(0, length) : '';
   // A message is { key, params } from the catalog, or { text } as it arrived from an older worker.
   // Only text from outside the catalog is cut to length.
-  const words = (message, length) => message?.key ? t(message.key, message.params || {}) : fixedText(message?.text, length);
+  // A message whose first part says nothing without its count (see ONLY_LEFT) leaves no space in front.
+  const words = (message, length) => message?.key ? t(message.key, message.params || {}).trim() : fixedText(message?.text, length);
   const fromResult = result => ({ key: result?.messageKey, params: result?.messageParams, text: result?.message });
   const hasMessage = result => Boolean(result?.message || result?.messageKey);
   // A result's message with its count of what is left for the reader set to `left`, or without it when that is
   // 0: the side panel keeps the count current as the page changes, and the card's own link carries it. A
   // message from an older worker, words only, is left as it came.
   const LEFT_KEYS = { 'result.filledNeedYou': 'result.filled', 'result.siteFilledNeedYou': 'result.siteFilled', 'result.siteFilledGuessedNeedYou': 'result.siteFilledGuessed' };
-  const ONLY_LEFT = { 'result.needYouNotSaved': 'result.noSavedAnswers', 'result.nothingMatchesNeedYou': 'result.nothingMatches' };
+  // Messages that are only the count: without it, what else they say. A count of questions waiting beside held
+  // sensitive details (#176) says nothing without its count; the held line after it says the rest.
+  const ONLY_LEFT = { 'result.needYouNotSaved': { key: 'result.noSavedAnswers' }, 'result.nothingMatchesNeedYou': { key: 'result.nothingMatches' },
+    'result.siteNeedYou': { key: 'detail', params: { detail: '' } } };
   function withLeft(message, left) {
     if (!message?.key) return message;
     const params = Object.fromEntries(Object.entries(message.params || {}).map(([name, value]) => [name, value?.key ? withLeft(value, left) : value]));
@@ -30,7 +34,7 @@
       const { needYou, ...rest } = params;
       return { key: LEFT_KEYS[message.key], params: rest };
     }
-    if (Object.hasOwn(ONLY_LEFT, message.key)) return left > 0 ? { key: message.key, params: { ...params, count: left } } : { key: ONLY_LEFT[message.key], params: {} };
+    if (Object.hasOwn(ONLY_LEFT, message.key)) return left > 0 ? { key: message.key, params: { ...params, count: left } } : { params: {}, ...ONLY_LEFT[message.key] };
     return { key: message.key, params };
   }
   // An error as the applicant reads it: its catalog key, or its own words passed on as a detail.
@@ -250,8 +254,9 @@
           known = page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo) || Boolean(site?.enabled);
           autopilot = Boolean(state?.autopilot);
           // While autofill runs, the worker moves ahead between polls. Otherwise keep
-          // this widget's own result and adopt the worker's only after a reload.
-          if (autopilot || !result) result = state?.result || result;
+          // this widget's own result and adopt the worker's only after a reload, or while
+          // questions wait for the side panel's Fill sensitive details, which changes it (#176).
+          if (autopilot || !result || Number(result.held) > 0) result = state?.result || result;
           note = null;
         } catch (error) { note = trouble(error); }
         render();
@@ -402,6 +407,13 @@
     // whether the page holds an answer now. Never the answer itself: the worker reads it after the Save click.
     let savable = [];
     let savableSignature = '';
+    // Fill sensitive details (#176): the questions whose saved answers the app held back until the applicant allows them,
+    // by id and their own words. One button asks the app for all of them.
+    let held = [];
+    let heldSignature = '';
+    // Laya's best guesses (#185): the questions the last Autofill filled with one, by id and their own words, to find and check.
+    let layaGuesses = [];
+    let guessesSignature = '';
     let contextRevision = 0;
     let checklistSignature = '';
     let working = false;
@@ -536,18 +548,25 @@
       $('panel-autofill').disabled = !target || (!fillable && !autopilot) || working;
       document.querySelectorAll('.checklist-item').forEach(button => { button.disabled = working || !target; });
       document.querySelectorAll('.save-row button').forEach(button => { button.disabled = working || !target; });
+      $('held-fill').disabled = working || !target;
       renderQuestionControls();
       renderSummary();
     }
     function clearPage() {
       fillable = false; autopilot = false; told = false; ran = false; left = []; leftCursor = 0; named = []; filledNames = []; site = null; page = null; notSaved = []; checklistSignature = '';
       savable = []; savableSignature = '';
+      held = []; heldSignature = '';
+      layaGuesses = []; guessesSignature = '';
       $('page-checklist').replaceChildren();
       $('checklist-section').hidden = true;
       $('save-list').replaceChildren();
       $('save-section').hidden = true;
       renderLeft();
       renderFilled();
+      $('held-list').replaceChildren();
+      $('held-section').hidden = true;
+      $('guesses-list').replaceChildren();
+      $('guesses-section').hidden = true;
       resetQuestions();
       resetSummary();
     }
@@ -609,7 +628,7 @@
           if (item.done) mark.append(checkMark());
           const copy = document.createElement('span'); copy.className = 'checklist-copy';
           const label = document.createElement('span'); label.className = 'checklist-label'; label.dir = 'auto'; label.textContent = item.label || t('left.unnamed');
-          const status = t(item.done ? 'checklist.complete' : 'checklist.missing');
+          const status = t(item.done ? 'checklist.complete' : item.held ? 'left.held' : 'checklist.missing');
           const detail = document.createElement('span'); detail.className = 'checklist-detail'; detail.textContent = status;
           copy.append(label, detail);
           button.setAttribute('aria-label', t('checklist.rowLabel', { label: item.label || t('left.unnamed'), status }));
@@ -674,6 +693,42 @@
       // Kept on screen like a change to all websites: until the tab changes or another action starts.
       if (result?.saved === true) { notice = { message: { key: 'save.saved' }, error: false }; renderStatus(); await refresh(); }
     }
+    // One row per held question, in its own words. The section's one button fills them all.
+    function renderHeld() {
+      const signature = JSON.stringify(held);
+      if (signature === heldSignature) return;
+      heldSignature = signature;
+      $('held-list').replaceChildren(...held.map(item => {
+        const row = document.createElement('div');
+        row.className = 'checklist-item'; row.dataset.heldId = item.id;
+        const copy = document.createElement('span'); copy.className = 'checklist-copy';
+        const label = document.createElement('span'); label.className = 'checklist-label'; label.dir = 'auto'; label.textContent = fixedText(item.label, 200);
+        copy.append(label);
+        row.append(copy);
+        return row;
+      }));
+      $('held-section').hidden = !held.length;
+    }
+    // One row per question Laya guessed, in its own words, with the dotted outline it has on the page. A row finds it there.
+    function renderGuesses() {
+      const signature = JSON.stringify([language, layaGuesses]);
+      if (signature === guessesSignature) return;
+      guessesSignature = signature;
+      $('guesses-list').replaceChildren(...layaGuesses.map(item => {
+        const button = document.createElement('button');
+        button.type = 'button'; button.className = 'checklist-item'; button.dataset.guessId = item.id;
+        button.disabled = working || !target;
+        const mark = document.createElement('span'); mark.className = 'checklist-mark guess-mark'; mark.setAttribute('aria-hidden', 'true');
+        const copy = document.createElement('span'); copy.className = 'checklist-copy';
+        const label = document.createElement('span'); label.className = 'checklist-label'; label.dir = 'auto'; label.textContent = fixedText(item.label, 200);
+        copy.append(label);
+        button.setAttribute('aria-label', t('guesses.rowLabel', { label: fixedText(item.label, 200) }));
+        button.append(mark, copy);
+        button.addEventListener('click', trusted(() => { if (!button.disabled) focusField(item.id); }));
+        return button;
+      }));
+      $('guesses-section').hidden = !layaGuesses.length;
+    }
     function render(state) {
       if (!state || typeof state !== 'object') throw keyedError('panel.pageUnreadable');
       page = state.page || {};
@@ -686,6 +741,10 @@
       notSaved = fieldKeys(result?.notSaved);
       savable = (Array.isArray(state.savable) ? state.savable : []).filter(item => fieldKeys([item?.id]).length && typeof item.label === 'string' && typeof item.answered === 'boolean')
         .slice(0, 40).map(({ id, label, answered }) => ({ id, label, answered }));
+      held = (Array.isArray(state.held) ? state.held : []).filter(item => fieldKeys([item?.id]).length && typeof item.label === 'string')
+        .slice(0, 40).map(({ id, label }) => ({ id, label }));
+      layaGuesses = (Array.isArray(result?.layaGuesses) ? result.layaGuesses : []).filter(item => fieldKeys([item?.id]).length && typeof item.label === 'string')
+        .slice(0, 40).map(({ id, label }) => ({ id, label }));
       renderChecklist();
       renderSaves();
       // What is left for the reader: on a page with a checklist, its rows as they are now; elsewhere, what Autofill reported.
@@ -696,11 +755,15 @@
       const names = new Map((Array.isArray(result?.left) ? result.left : []).filter(item => typeof item?.key === 'string' && typeof item.label === 'string').map(item => [item.key, fixedText(item.label.trim(), 200)]));
       // The page says which of the questions it may save now hold an answer: those rows are done.
       const answered = new Set(savable.filter(item => item.answered).map(item => item.id));
-      named = ran && !listed.length ? left.map(key => ({ key, label: names.get(key) || '', done: answered.has(key) })) : [];
+      // A question held back for Fill sensitive details (#176) says so on its row.
+      const waiting = new Set(held.map(item => item.id));
+      named = ran && !listed.length ? left.map(key => ({ key, label: names.get(key) || '', done: answered.has(key), held: waiting.has(key) })) : [];
       renderLeft();
       filledNames = ran && !listed.length && Array.isArray(result.filledQuestions)
         ? result.filledQuestions.filter(item => typeof item?.label === 'string').slice(0, 80).map(item => ({ label: fixedText(item.label.trim(), 200), guessed: item.guessed === true })) : [];
       renderFilled();
+      renderHeld();
+      renderGuesses();
       const loading = target?.status === 'loading';
       if (site?.enabled && !site.ready) show({ key: loading ? 'panel.waitingLoad' : 'panel.reloadToRead' });
       // What Autofill reported, with its count of what is left kept current as the reader answers.
@@ -1139,6 +1202,15 @@
       await refresh();
       if (result?.enabled) show({ key: 'panel.framesOn' });
     }));
+    // Fill sensitive details (#176): the app shows its sensitive prompt for the held questions. What it fills is the tab's
+    // new result; a Cancel is said, and the questions stay listed.
+    $('held-fill').addEventListener('click', trusted(async () => {
+      if ($('held-fill').disabled) return;
+      const result = await act({ type: 'ui:fillHeld', confirmed: true }, { key: 'held.filling' });
+      if (!result) return;
+      show(fromResult(result));
+      await refresh();
+    }));
     $('site-disable').addEventListener('click', trusted(async () => {
       if ($('site-disable').disabled) return;
       const result = await act({ type: 'ui:disableSite', confirmed: true }, { key: 'panel.turningOff' });
@@ -1165,7 +1237,7 @@
     function relabel() {
       applyStatic();
       $('language').value = language;
-      if (page) { renderChecklist(); renderLeft(); renderFilled(); renderSaves(); }
+      if (page) { renderChecklist(); renderLeft(); renderFilled(); renderSaves(); renderGuesses(); }
       renderStatus();
       renderDesktop();
       resetQuestions();

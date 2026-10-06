@@ -1,18 +1,11 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { JSDOM } = require('jsdom');
 const generic = require('../extension/generic-adapter.js');
 const forms = require('./fixtures/pantry-forms.cjs');
+const { tick, laidOut } = require('./helpers/harness.cjs');
 
-// jsdom has no layout: give every node a visible box.
-function page(html, url = 'https://pantry.example.org/intake') {
-  const dom = new JSDOM(`<!doctype html><body>${html}</body>`, { url, pretendToBeVisual: true });
-  const { document } = dom.window;
-  const box = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 };
-  for (const node of document.querySelectorAll('*')) { node.getBoundingClientRect = () => box; node.getClientRects = () => [box]; }
-  return document;
-}
+const page = (html, url = 'https://pantry.example.org/intake') => laidOut(html, url);
 // Radio groups are named by the group, other controls by their id.
 const controlName = element => (element?.type === 'radio' ? element.name : element?.id || element?.name);
 const byElement = (doc, result) => Object.fromEntries(result.matched.map(item => [controlName(generic.elementFor(item.id)) || item.id, item.key]));
@@ -148,7 +141,9 @@ test('number words and "or more" choices pick the right count; a click Google ig
   assert.deepEqual(filled.filled, [], 'without Google registering the click, nothing counts as filled');
 });
 
-test('a document that loses its window while choices settle stops waiting and reports that the page changed', async () => {
+test('a document that loses its window while choices settle stops waiting and reports that the page changed', async t => {
+  // The test runs the clock: settle looks at the page every 10 ms until its timeout.
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   // Google never confirms these clicks, so each choice waits to settle.
   const pendingFill = () => {
     const doc = page(forms.googleChoices);
@@ -163,11 +158,16 @@ test('a document that loses its window while choices settle stops waiting and re
 
   const during = pendingFill();
   const started = Date.now();
+  let outcome;
   const settling = generic.settle(during.doc, during.token, during.filled, { timeoutMs: 5000 });
-  await new Promise(resolve => setTimeout(resolve, 30));
+  settling.then(result => { outcome = result; }, error => { outcome = error; });
+  t.mock.timers.tick(10); await tick();
+  assert.equal(outcome, undefined, 'it waits while the page is there');
   detach(during.doc);
+  t.mock.timers.tick(10); await tick();
+  assert.ok(outcome, 'it stops waiting at its next look once the page is gone, not at its 5-second timeout');
   assert.deepEqual(await settling, { ok: false, pageChanged: true, filled: [], skipped: [during.id], rejected: [], pending: [] });
-  assert.ok(Date.now() - started < 1000, 'it stops waiting once the page is gone');
+  assert.equal(Date.now() - started, 20);
   assert.equal(during.doc.querySelector('[data-secondhand-filled]'), null, 'nothing on the old page is marked as filled');
 
   const before = pendingFill();
@@ -449,6 +449,48 @@ test('text dates, state names, and pre-filled answers are handled without overwr
   assert.equal(doc.getElementById('s').value, 'Iowa');
   assert.equal(doc.getElementById('c').value, 'Already typed');
   assert.equal(filled.filled.length, 2);
+});
+
+// #156: a text date box gets the saved date in the order it asks for, read as Save reads a typed date (#142).
+function fillDate(html) {
+  const doc = page(html);
+  const result = generic.plan(doc);
+  const dob = result.matched.find(item => item.key === 'birthDate');
+  assert.ok(dob, `${html}: matched to the birth date`);
+  const filled = generic.fillFields(doc, result.token, [{ id: dob.id, key: 'birthDate', guessed: false }], { birthDate: '1985-04-12' });
+  return { value: doc.getElementById('dob').value, filled: filled.filled.includes(dob.id) };
+}
+const dobBox = (label, attributes = '') => `<label for="dob">${label}</label><input id="dob" ${attributes}><span id="hint">Use DD/MM/YYYY</span>`;
+test('a text date box gets the saved date in the order its label, placeholder, description or title asks for', () => {
+  for (const [label, attributes, value] of [
+    ['Date of birth (MM/DD/YYYY)', '', '04/12/1985'],
+    ['Date of birth (DD/MM/YYYY)', '', '12/04/1985'],
+    ['Date of birth (YYYY-MM-DD)', '', '1985-04-12'],
+    // The hint only in the placeholder.
+    ['Date of birth', 'placeholder="MM/DD/YYYY"', '04/12/1985'],
+    ['Date of birth', 'placeholder="dd/mm/yyyy"', '12/04/1985'],
+    ['Date of birth', 'placeholder="YYYY-MM-DD"', '1985-04-12'],
+    // Spanish and French forms write the year as AAAA, and French the day as JJ.
+    ['Fecha de nacimiento (DD/MM/AAAA)', 'autocomplete="bday"', '12/04/1985'],
+    ['Fecha de nacimiento', 'autocomplete="bday" placeholder="dd/mm/aaaa"', '12/04/1985'],
+    ['Fecha de nacimiento (AAAA-MM-DD)', 'autocomplete="bday"', '1985-04-12'],
+    ['Date de naissance', 'autocomplete="bday" placeholder="jj/mm/aaaa"', '12/04/1985'],
+    ['Date of birth', 'aria-describedby="hint"', '12/04/1985'],
+    ['Date of birth', 'title="Day, month and year: DD-MM-YYYY"', '12/04/1985'],
+    // The same hint in the label and the placeholder is one order.
+    ['Date of birth (MM/DD/YYYY)', 'placeholder="MM/DD/YYYY"', '04/12/1985'],
+    ['Date of birth (YYYY-MM-DD)', 'placeholder="YYYY-MM-DD"', '1985-04-12']]) {
+    assert.deepEqual(fillDate(dobBox(label, attributes)), { value, filled: true }, `${label} ${attributes}`);
+  }
+});
+
+test('a date box with no hint gets the date month first, a date input gets it as ISO, and a box asking for two orders gets nothing', () => {
+  for (const label of ['Date of birth', 'Birthday', 'DOB']) assert.deepEqual(fillDate(`<label for="dob">${label}</label><input id="dob">`), { value: '04/12/1985', filled: true }, label);
+  for (const label of ['Date of birth (DD/MM/YYYY)', 'Date of birth (MM/DD/YYYY)', 'Date of birth']) {
+    assert.deepEqual(fillDate(dobBox(label, 'type="date"')), { value: '1985-04-12', filled: true }, `${label}: the browser shows a date input in its own order`);
+  }
+  // Which order the page wants can't be told: the applicant answers it.
+  assert.deepEqual(fillDate(dobBox('Date of birth (MM/DD/YYYY)', 'placeholder="DD/MM/YYYY"')), { value: '', filled: false });
 });
 
 test('a stale plan, an unknown key, or a field changed since planning is never filled', () => {

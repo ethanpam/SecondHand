@@ -80,9 +80,13 @@
     birthDate: { label: 'Date of birth', question: 'question02', index: 5, date: true, profile: 'birthDate' },
     hasSsn: { label: 'Do you have a Social Security number?', question: 'question02420', index: 6, wording: 'Do you have a Social Security Number?',
       reveals: '::3,4068,4070,4071,4072|Yes:3,4068,4070,4071,4072:|No::3,4068,4070,4071,4072', profile: 'hasSsn' },
+    ssn: { label: 'Social Security number: review in Iowa’s form', question: 'question03', index: 8, wording: 'Social Security Number (ie 123-45-6789)', text: true, sensitive: true, profile: 'ssn' },
     ssnCardName: { label: 'Is your first and last name the same as on your Social Security card?', question: 'question04068', index: 11,
       wording: 'Is the first and last name you provided the same name that appears on your Social Security card?',
       reveals: '::4070,4071,4072|Yes::4070,4071,4072|No:4070,4071,4072:', profile: 'ssnCardNameMatches' },
+    ssnCardFirstName: { label: 'First name on Social Security card', question: 'question04070', index: 12, wording: 'First Name', text: true, cardName: true, profile: 'ssnCardFirstName' },
+    ssnCardMiddleName: { label: 'Middle name on Social Security card', question: 'question04071', index: 15, wording: 'Middle Name', text: true, cardName: true, optional: true, profile: 'ssnCardMiddleName' },
+    ssnCardLastName: { label: 'Last name on Social Security card', question: 'question04072', index: 16, wording: 'Last Name', text: true, cardName: true, profile: 'ssnCardLastName' },
     usCitizen: { label: 'Are you a U.S. citizen or national?', question: 'question06001', index: 18, wording: 'Are you a U.S. Citizen or National?',
       reveals: '::6181|Yes:6181:|No::6181', profile: 'usCitizen', household: { field: 'householdAllCitizens', settles: 'yes' } },
     maritalStatus: { label: 'Marital status', question: 'question04', index: 22, wording: 'Marital Status',
@@ -105,7 +109,7 @@
   // The applicant's own saved answer, else the household answer where it settles the question, else null.
   function startAnswer(spec, values) {
     const own = values?.[spec.profile];
-    if (spec.date) return typeof own === 'string' ? own : null;
+    if (spec.date || spec.text) return typeof own === 'string' ? own : null;
     if (startAnswers(spec).includes(own)) return own;
     return spec.household && values?.[spec.household.field] === spec.household.settles ? spec.household.settles : null;
   }
@@ -273,7 +277,8 @@
         const elements = start.controls[key];
         if (elements && startOpen(elements, doc)) {
           result.fields.push({ key, label: startQuestions[key].label });
-          result.bindings.push({ key, element: elements[0], elements, startDetails });
+          result.bindings.push({ key, element: elements[0], elements, startDetails,
+            ...(key === 'ssn' ? { ssnMirror: elements[0].parentElement.querySelector('[name="ssndiv"] input') } : {}) });
         } else result.skipped++;
       }
       return result;
@@ -304,6 +309,13 @@
   function formatValue(key, raw, element) {
     if (typeof raw !== 'string' || !raw.trim() || raw.length > 250 || /[\u0000-\u001f]/.test(raw)) return null;
     let value = raw.trim();
+    if (key === 'ssn') {
+      if (!/^\d{3}-?\d{2}-?\d{4}$/.test(value)) return null;
+      const digits = value.replace(/-/g, '');
+      if (/^(000|666|9)/.test(digits) || digits.slice(3, 5) === '00' || digits.slice(5) === '0000') return null;
+      value = `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+    }
+    if (key.startsWith('ssnCard') && value.length > 100) return null;
     if (key === 'birthDate') {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
       const date = new Date(`${value}T00:00:00.000Z`);
@@ -481,6 +493,22 @@
       return birthDate ? [birthDate] : null;
     }
     const named = lookup.named(`answerSets[0].answers[${spec.index}].answerValue`);
+    if (spec.text) {
+      const input = lookup.only(`answerSets0.answers${spec.index}.answerValue`);
+      const row = question.querySelector(':scope > div.answer > div.fullrow');
+      if (!input || !row || input.parentElement !== row || input.tagName !== 'INPUT' || input.form !== form || input.maxLength !== -1 ||
+          input.hasAttribute('pattern') || input.required || Array.from(input.attributes).some(attribute => attribute.name.startsWith('on')) ||
+          namesFor(input, doc).join('|') !== normal(spec.wording)) return null;
+      if (spec.sensitive) {
+        const mirror = named[0];
+        if (named.length !== 1 || input.type !== 'tel' || input.hasAttribute('name') || input.className !== 'masking  ssn-num' ||
+            !mirror || mirror.tagName !== 'INPUT' || mirror.type !== 'text' || mirror.form !== form || mirror.hasAttribute('id') ||
+            mirror.getAttribute('aria-label') !== mirror.name || mirror.parentElement?.getAttribute('name') !== 'ssndiv' ||
+            mirror.parentElement.parentElement !== row || rendered(mirror, doc) ||
+            Array.from(mirror.attributes).some(attribute => attribute.name.startsWith('on'))) return null;
+      } else if (named.length !== 1 || named[0] !== input || input.type !== 'text' || input.className || input.autocomplete !== 'off') return null;
+      return [input];
+    }
     if (spec.choices) {
       const select = lookup.only(`answerSets0.answers${spec.index}.answerValue`);
       if (!select || named.length !== 1 || named[0] !== select || select.tagName !== 'SELECT' || select.type !== 'select-one' || select.form !== form || select.className !== 'hasScript' ||
@@ -541,6 +569,11 @@
       const found = copies === 1 ? startControls(doc, form, question, spec, lookup) : null;
       if (found) controls[key] = found;
     }
+    // A visible follow-up alone doesn't establish what it asks. Its recorded parent answers must
+    // still identify the applicant's number, and the distinct name on that person's card.
+    const yesSsn = controls.hasSsn?.[0].checked && !controls.hasSsn?.[1].checked;
+    const differentCardName = controls.ssnCardName?.[1].checked && !controls.ssnCardName?.[0].checked;
+    for (const [key, spec] of Object.entries(startQuestions)) if ((spec.sensitive && !yesSsn) || (spec.cardName && (!yesSsn || !differentCardName))) delete controls[key];
     if (controls.birthDate && controls.birthDate[0] !== birthDates[0]) return null;
     return { ...page, nameGroup: nameGroups[0], nameHeading: nameHeadings[0], panel: panels[0], group, questions, controls };
   }
@@ -551,7 +584,15 @@
   }
 
   const hasAnswer = elements => elements.some(element => element.type === 'radio' ? element.checked : Boolean(String(element.value || '').trim()));
-  const startOpen = (elements, doc) => elements.every(element => editable(element, doc)) && !hasAnswer(elements);
+  function startDependentAnswer(element, doc) {
+    const questions = element.name === 'answerSets[0].answers[6].answerValue' ? ['question03', 'question04068', 'question04070', 'question04071', 'question04072']
+      : element.name === 'answerSets[0].answers[11].answerValue' ? ['question04070', 'question04071', 'question04072'] : [];
+    return questions.some(id => Array.from(doc.getElementById(id)?.querySelectorAll('input,select,textarea') || []).some(control =>
+      control.type !== 'hidden' && (['radio', 'checkbox'].includes(control.type) ? control.checked : Boolean(String(control.value || '').trim()))));
+  }
+  const startOpen = (elements, doc) => elements.every(element => editable(element, doc)) && !hasAnswer(elements) &&
+    !startDependentAnswer(elements[0], doc) &&
+    !(elements[0].classList.contains('ssn-num') && String(elements[0].parentElement.querySelector('[name="ssndiv"] input')?.value || '').trim());
 
   // One question at a time, each after verifying the page again: a click runs Iowa's own scripts,
   // which can reveal questions (filled on a later pass) or change the page.
@@ -564,16 +605,17 @@
         const context = startDetailsContext(doc, rawUrl);
         const elements = context?.controls[key];
         if (!spec || !binding.startDetails || doc.location.href !== rawUrl || !elements || elements.length !== binding.elements?.length ||
-            elements.some((element, index) => element !== binding.elements[index]) || !startOpen(elements, doc)) return false;
+            elements.some((element, index) => element !== binding.elements[index]) || !startOpen(elements, doc) ||
+            (spec.sensitive && binding.ssnMirror !== elements[0].parentElement.querySelector('[name="ssndiv"] input'))) return false;
         const state = startDetailsState(context);
         return Object.keys(state).every(name => state[name] === binding.startDetails[name]);
       };
       if (!current()) { skipped.push(key); continue; }
       const value = Object.hasOwn(values, key) ? values[key] : null;
-      if (spec.date || spec.choices) {
-        const text = spec.date ? formatValue(key, value, binding.element) : startAnswers(spec).includes(value) ? value : null;
+      if (spec.date || spec.text || spec.choices) {
+        const text = spec.date || spec.text ? formatValue(key, value, binding.element) : startAnswers(spec).includes(value) ? value : null;
         if (text === null || !scrollToField(binding.element, doc) || !current()) { skipped.push(key); continue; }
-        const prototype = spec.date ? doc.defaultView.HTMLInputElement.prototype : doc.defaultView.HTMLSelectElement.prototype;
+        const prototype = spec.date || spec.text ? doc.defaultView.HTMLInputElement.prototype : doc.defaultView.HTMLSelectElement.prototype;
         Object.getOwnPropertyDescriptor(prototype, 'value').set.call(binding.element, text);
         binding.element.dispatchEvent(new doc.defaultView.Event('input', { bubbles: true }));
         binding.element.dispatchEvent(new doc.defaultView.Event('change', { bubbles: true }));
@@ -872,8 +914,11 @@
       for (const [key, spec] of Object.entries(startQuestions)) {
         if (!start.questions[key]) continue;
         const elements = start.controls[key];
-        const status = elements && hasAnswer(elements) ? 'complete' : elements && startOpen(elements, doc) ? 'missing' : 'manual';
-        checklist.push({ key, label: spec.label, status, required: true, fillable: fields.some(field => field.key === key) });
+        // The captured SSN control submits through a separate masked mirror. We don't write it or
+        // claim submission readiness from the visible box; the applicant reviews it in Iowa.
+        const status = spec.sensitive && elements && hasAnswer(elements) ? 'manual' : elements && hasAnswer(elements) ? 'complete'
+          : elements && startOpen(elements, doc) ? (spec.optional ? 'optional' : 'missing') : 'manual';
+        checklist.push({ key, label: spec.label, status, required: !spec.optional, fillable: fields.some(field => field.key === key) });
       }
       checklist.push({ key: 'startDetailsReview', label: 'Answer the remaining questions, then click Save and Continue in Iowa’s form', status: 'manual', required: false, fillable: false });
       return { ...result, kind: 'fillable', pageKey: 'iowa-tell-us-more', heading: 'Tell Us More', fields, checklist, canAdvance: false,
@@ -881,7 +926,19 @@
         todo: 'Answer the remaining questions, then click Save and Continue in Iowa’s form yourself.',
         reason: 'SecondHand can fill the answers you saved in My information on this page. Answer the other questions yourself, then click Save and Continue in Iowa’s form.' };
     }
-    if (headings.includes('tell us more') || rawUrl === `${PORTAL}/applyForBenefits/dynamicQuestions`) return { ...result, pageKey: 'iowa-self-details-unverified', heading: 'Applicant questions', todo: 'Answer any questions on this page yourself, then go to the next page in Iowa’s form.', reason: 'SecondHand doesn’t fill this page. Answer any questions yourself, then go to the next page in Iowa’s form.' };
+    // dynamicQuestions is reused later. Only these independently observed household-screening
+    // headings open the rules-only parser; this is never a navigation or personal-template match.
+    const screeningHeadings = ['job information', 'income information', 'expenses information', 'property information'];
+    const mainHeadings = Array.from(doc.querySelectorAll('h2')).filter(element => rendered(element, doc));
+    const screeningForms = doc.querySelectorAll('form#answerSet');
+    const screening = rawUrl === `${PORTAL}/applyForBenefits/dynamicQuestions` && mainHeadings.length === 1 && screeningHeadings.includes(normal(mainHeadings[0].textContent)) &&
+      !headings.includes('tell us more') && screeningForms.length === 1 && screeningForms[0].getAttribute('action') === 'simple' && screeningForms[0].method === 'post' &&
+      !screeningForms[0].hasAttribute('target') && !screeningForms[0].hasAttribute('onsubmit') &&
+      !Array.from(doc.querySelectorAll('select,input')).some(element => rendered(element, doc) && /personSelection|householdMember|employer|helper|representative|signature/i.test(`${element.name} ${element.id}`)) &&
+      !headings.some(heading => /\b(employer|helper|assisting|representative|another person|other person)\b/.test(heading)) &&
+      !Array.from(doc.querySelectorAll('label,legend')).some(element => rendered(element, doc) && /\b(consent|certify|certification|attest|signature|i agree)\b/.test(normal(element.textContent)));
+    if (screening) return { ...result, pageKey: 'iowa-household-screening-rules', heading: mainHeadings[0].textContent.trim() };
+    if (headings.includes('tell us more') || new URL(rawUrl).pathname.replace(/\/$/, '') === '/apspssp/ssp.portal/applyForBenefits/dynamicQuestions') return { ...result, pageKey: 'iowa-self-details-unverified', heading: 'Applicant questions', todo: 'Answer any questions on this page yourself, then go to the next page in Iowa’s form.', reason: 'SecondHand doesn’t fill this page. Answer any questions yourself, then go to the next page in Iowa’s form.' };
     const pageId = identifyPage(doc);
     if (pageId === 'household') {
       const definition = householdDefinitions.householdApplyProg;

@@ -8,7 +8,7 @@ const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const applicantFixture = require('../tests/fixtures/applicant-profile.json');
-const { PROFILE_FIELDS } = require('../shared/schema.cjs');
+const { PROFILE_FIELDS, LIST_FIELDS, validateProfile } = require('../shared/schema.cjs');
 const { MODEL_FILES } = require('../desktop/laya-model.cjs');
 const root = path.join(__dirname, '..');
 const passphrase = 'synthetic-test-vault-passphrase';
@@ -21,10 +21,11 @@ const resetPassword = 'synthetic-reset-password';
 const IOWA_QUESTIONS = ['sex', 'maritalStatus', 'hasSsnAnswer', 'ssnCardNameMatches', 'usCitizen', 'militaryOrVeteran', 'disabled', 'blind', 'healthLimitation', 'medicare'];
 const startOverPassword = 'synthetic-start-over-password';
 // The household list (#98): member ids are made when a person is added, so profiles are compared without them.
-const withoutIds = profile => ({ ...profile, householdMembers: (profile.householdMembers || []).map(({ id, ...member }) => member) });
+const withoutIds = profile => { const normalized = validateProfile(profile); return { ...normalized, householdMembers: normalized.householdMembers.map(({ id, ...member }) => member) }; };
 const COUNT_FIELDS = ['householdSize', 'householdAdults', 'householdChildren', 'householdSeniors'];
 // Fields My information shows one by one; the household list has its own rows.
-const SCALAR_FIELDS = PROFILE_FIELDS.filter(field => field !== 'householdMembers');
+const SCALAR_FIELDS = PROFILE_FIELDS.filter(field => !LIST_FIELDS.includes(field));
+const scalars = profile => Object.fromEntries(SCALAR_FIELDS.map(field => [field, profile[field] || '']));
 
 async function captureDiagnostic(page, name, options = {}) {
   try {
@@ -235,6 +236,10 @@ async function main() {
     // All websites starts off, and only the extension's side panel can turn it on.
     await expect(page.locator('#all-sites-status')).toHaveText('All websites: off. To turn it on, open SecondHand’s side panel in Chrome and choose Use SecondHand on all websites.');
     await expect(page.locator('#all-sites-off')).toBeHidden();
+    // Let Chrome autofill without asking says it covers sensitive details on every site, and no site has Always allow on this site yet (#175).
+    await expect(page.locator('#autofill-trust-hint')).toContainText('on every site SecondHand is on. That includes your Social Security number, birth date, income, and citizenship and disability answers.');
+    await expect(page.locator('#always-allowed-sites-empty')).toBeVisible();
+    await expect(page.locator('#always-allowed-sites li')).toHaveCount(0);
     // Turning it off is saved, and stays off after a restart (checked below).
     await page.locator('#laya-toggle').uncheck();
     await expect(page.locator('#toast')).toHaveText('Laya is off.');
@@ -245,6 +250,7 @@ async function main() {
     const shownProfile = () => page.locator('#profile-form').evaluate((form, fields) => Object.fromEntries(fields.map(field => [field, form.elements.namedItem(field).value])), SCALAR_FIELDS);
     const { householdMembers: _, ...scalarFixture } = applicantFixture;
     for (const field of SCALAR_FIELDS) {
+      if (!Object.hasOwn(applicantFixture, field)) continue; // Newly optional answers stay blank in this legacy fixture.
       // The guided setup saved the household list, so the counts come from it, read-only.
       if (COUNT_FIELDS.includes(field)) {
         await expect(page.locator(`#${field}`)).toHaveJSProperty('readOnly', true);
@@ -295,7 +301,7 @@ async function main() {
     await page.locator('.nav-item[data-view="profile"]').click();
     await expect(page.locator('#firstName')).toHaveValue(applicantFixture.firstName);
     // After unlocking, My information shows every saved answer again, Iowa's questions and the household list included.
-    assert.deepEqual(await shownProfile(), scalarFixture);
+    assert.deepEqual(await shownProfile(), scalars(scalarFixture));
     assert.deepEqual(await page.locator('.household-member [data-member-field="firstName"]').evaluateAll(inputs => inputs.map(input => input.value)),
       applicantFixture.householdMembers.map(member => member.firstName));
     await expect(page.locator('#sex-female')).toBeChecked();
@@ -332,9 +338,12 @@ async function main() {
     application = null;
 
     const layaRequests = layaServer.requests.length;
-    // As if the extension had turned on all websites before this start: the app's page offers Turn off.
+    // As if the extension had turned on all websites before this start: the app's page offers Turn off. And as if the
+    // applicant had chosen Always allow on this site on two sites they trusted and on one all websites let in (#175).
     const settingsPath = path.join(userData, 'settings.json');
-    await fs.writeFile(settingsPath, JSON.stringify({ ...JSON.parse(await fs.readFile(settingsPath, 'utf8')), allSites: true }));
+    const [pantry, wic, forms] = ['https://pantry.example.org', 'https://wic.example.gov', 'https://forms.example.net'];
+    await fs.writeFile(settingsPath, JSON.stringify({ ...JSON.parse(await fs.readFile(settingsPath, 'utf8')), extensionId: 'a'.repeat(32), allSites: true,
+      trustedSites: [pantry, wic], alwaysAllowedSites: [pantry, wic, forms] }));
     page = await launch();
     await page.locator('#passphrase').fill(passphrase);
     await submitAuthForm(page);
@@ -343,12 +352,30 @@ async function main() {
     await expect(page.locator('#laya-toggle')).not.toBeChecked();
     await expect(page.locator('#laya-status')).toHaveText(/^Off\. /);
     await expect(page.locator('#all-sites-status')).toHaveText(/^All websites: on\. /);
+    await expect(page.locator('#always-allowed-sites code')).toHaveText([pantry, wic, forms]);
     await captureDiagnostic(page, 'desktop-all-websites-on.png', { fullPage: true });
     await page.locator('#all-sites-off').click();
     await expect(page.locator('#toast')).toHaveText('SecondHand will no longer fill forms on every website. Sites you trusted one by one stay on.');
     await expect(page.locator('#all-sites-status')).toHaveText(/^All websites: off\. /);
     assert.equal(JSON.parse(await fs.readFile(settingsPath, 'utf8')).allSites, undefined, 'turning it off is saved');
-    await page.waitForTimeout(1500);
+    // Always allow on the site all websites let in goes with it; the sites trusted on their own keep theirs.
+    await expect(page.locator('#always-allowed-sites code')).toHaveText([pantry, wic]);
+    assert.deepEqual(JSON.parse(await fs.readFile(settingsPath, 'utf8')).alwaysAllowedSites, [pantry, wic]);
+    // Remove takes back Always allow on one site, which stays trusted; removing a trusted site takes back its Always allow too.
+    await page.locator('#always-allowed-sites li').first().getByRole('button', { name: 'Remove' }).click();
+    await expect(page.locator('#toast')).toHaveText(`Always allow on this site is off for ${pantry}.`);
+    await expect(page.locator('#always-allowed-sites code')).toHaveText([wic]);
+    await expect(page.locator('#trusted-sites code')).toHaveText([pantry, wic]);
+    await page.locator('#trusted-sites li').nth(1).getByRole('button', { name: 'Remove' }).click();
+    await expect(page.locator('#trusted-sites code')).toHaveText([pantry]);
+    await expect(page.locator('#always-allowed-sites li')).toHaveCount(0);
+    await expect(page.locator('#always-allowed-sites-empty')).toBeVisible();
+    const saved = JSON.parse(await fs.readFile(settingsPath, 'utf8'));
+    assert.deepEqual([saved.trustedSites, saved.alwaysAllowedSites], [[pantry], undefined], 'both removals are saved');
+    await captureDiagnostic(page, 'desktop-always-allowed-sites.png', { fullPage: true });
+    // The app's Laya runtime is off: it checks and downloads nothing while off, and this start never turned it on, so a
+    // request could only have come from a check the start began, before the window opened (#143: state, not a wait).
+    assert.deepEqual(await page.evaluate(() => window.secondHand.layaStatus().then(status => [status.state, status.enabled])), ['off', false]);
     assert.equal(layaServer.requests.length, layaRequests, 'Laya, turned off, checked and downloaded nothing after the restart');
     const restored = await page.evaluate(() => window.secondHand.getData());
     assert.deepEqual(withoutIds(restored.profile), withoutIds(applicantFixture));
@@ -447,7 +474,7 @@ async function main() {
     await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('.nav-item[data-view="profile"]').click();
     const { householdMembers: __, ...scalarUnanswered } = unanswered;
-    assert.deepEqual(await shownProfile(), scalarUnanswered);
+    assert.deepEqual(await shownProfile(), scalars(scalarUnanswered));
     for (const field of IOWA_QUESTIONS.filter(field => field !== 'maritalStatus')) await expect(page.locator(`#${field}-none`)).toBeChecked();
 
     // Locked out with no password or recovery key: start over from the reset screen.

@@ -96,6 +96,35 @@ function parse(page) {
       ...(source?.words ? { sourceLabel: content(source.words).slice(0, 150) } : {}), ...(profileKey ? { profileKey } : {}), ...(kind ? { kind } : {}) });
   };
 
+  // Payer cells are a separate historical source block. They never receive a
+  // profileKey, and their identifier is never treated as a recipient's SSN.
+  const payerLocal = label => payerTin && unique(matches(rows, label).filter(mark =>
+    mark.y0 > payer.y1 && mark.y1 < payerTin.y0 && mark.x0 < divider));
+  const payerStreet = payerLocal('Street address'), payerRoom = payerLocal('Room or suite no'), payerCity = payerLocal('City or town');
+  const payerPhone = payerLocal('Telephone number'), payerState = payerLocal('State or province'), payerCountry = payerLocal('Country'), payerZip = payerLocal('ZIP or foreign postal code');
+  const addPayer = (id, label, words, source, pattern) => {
+    const value = content(words);
+    if (pattern.test(value)) add(id, label, value, words, source, { sourceRole: 'payer' });
+  };
+  if (payerStreet) addPayer('necPayerName', 'Payer name on 1099-NEC (historical)', cell(payer, payerStreet, payer.x0, divider), payer, /^[\p{L}\p{N}][\p{L}\p{N} .,'’&()/+-]{0,199}$/u);
+  const payerAddressShape = payerStreet && payerRoom && payerCity && payerPhone && payerState && payerCountry && payerZip &&
+    aligned(payerStreet, payerRoom) && payerStreet.x1 < payerRoom.x0 && payerRoom.x1 < divider &&
+    aligned(payerCity, payerPhone) && payerCity.x1 < payerPhone.x0 && payerPhone.x1 < divider &&
+    payerStreet.y1 < payerCity.y0 && payerCity.y1 < payerState.y0 &&
+    aligned(payerState, payerCountry) && aligned(payerState, payerZip) && payerState.x1 < payerCountry.x0 && payerCountry.x1 < payerZip.x0 && payerZip.x1 < divider;
+  if (payerAddressShape) {
+    addPayer('necPayerStreet', 'Payer street address', cell(payerStreet, payerCity, payerStreet.x0, payerRoom.x0), payerStreet, /^(?=.*\d)(?=.*\p{L})[\p{L}\p{N} .#'/-]{1,150}$/u);
+    addPayer('necPayerRoom', 'Payer room or suite', cell(payerRoom, payerCity, payerRoom.x0, divider), payerRoom, /^[\p{L}\p{N} #./-]{1,40}$/u);
+    addPayer('necPayerCity', 'Payer city or town', cell(payerCity, payerState, payerCity.x0, payerPhone.x0), payerCity, /^[\p{L}][\p{L} .'-]{0,99}$/u);
+    addPayer('necPayerState', 'Payer state or province', cell(payerState, payerTin, payerState.x0, payerCountry.x0), payerState, /^[\p{L}][\p{L} .'-]{0,39}$/u);
+    addPayer('necPayerCountry', 'Payer country', cell(payerCountry, payerTin, payerCountry.x0, payerZip.x0), payerCountry, /^[\p{L}][\p{L} .'-]{0,59}$/u);
+    addPayer('necPayerZip', 'Payer postal code', cell(payerZip, payerTin, payerZip.x0, divider), payerZip, /^(?=.*\d)[\p{L}\p{N} -]{2,20}$/u);
+  }
+  if (payerTin && recipientTin && aligned(payerTin, recipientTin) && payerTin.x1 < recipientTin.x0 && recipientTin.y1 < recipient.y0) {
+    const words = cell(payerTin, recipient, payerTin.x0, recipientTin.x0), value = content(words).replace(/\s+/g, '');
+    if (/^(?:\d{9}|\d{3}-\d{2}-\d{4}|\d{2}-\d{7})$/.test(value)) add('necPayerTin', 'Payer taxpayer identifier (review only)', value, words, payerTin, { sourceRole: 'payer', kind: 'identifier' });
+  }
+
   // Never use payer address/TIN as a fallback. Every recipient value is below
   // its own label and above the next recipient label in the left-hand column.
   if (street) {

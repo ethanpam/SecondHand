@@ -5,11 +5,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { JSDOM } = require('jsdom');
-const { PROFILE_FIELDS, PROFILE_CHOICES, YES_NO_FIELDS } = require('../shared/schema.cjs');
+const { loadRenderer } = require('./helpers/harness.cjs');
+const { PROFILE_FIELDS, PROFILE_CHOICES, YES_NO_FIELDS, LIST_FIELDS, MEMBER_FIELDS, validateProfile } = require('../shared/schema.cjs');
 const fictionalProfile = require('./fixtures/applicant-profile.json');
 
 const html = fs.readFileSync(path.join(__dirname, '../renderer/index.html'), 'utf8');
-const script = fs.readFileSync(path.join(__dirname, '../renderer/app.js'), 'utf8');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 function deferred() {
@@ -50,7 +50,7 @@ async function renderer(t, { initialSetup = null, ...overrides } = {}) {
     onProfileChanged: callback => { onProfileChanged = callback; return () => {}; },
     ...overrides
   };
-  window.eval(script);
+  loadRenderer(window);
   await tick();
   const get = id => window.document.getElementById(id);
   // A profile field's control: its input or select, or its group of radio buttons.
@@ -159,15 +159,15 @@ test('new profile choices default to unknown, save explicit no, and clear with a
     assert.equal(view.value(field), '', field);
     assert.deepEqual([...view.choices(field)].sort(), [...PROFILE_CHOICES[field]].sort(), field);
   }
-  for (const [field, value] of Object.entries(fictionalProfile)) if (field !== 'householdMembers') view.answer(field, value);
+  for (const [field, value] of Object.entries(fictionalProfile)) if (!LIST_FIELDS.includes(field)) view.answer(field, value);
   view.submit('profile-form');await tick();
-  assert.deepEqual(saved[0], { ...fictionalProfile, householdMembers: [] });
+  assert.deepEqual(saved[0], validateProfile({ ...fictionalProfile, householdMembers: [] }));
   assert.equal(view.get('programFip').value, 'no');
   assert.equal(view.get('mailingSameAsHome').value, 'no');
   assert.equal(view.get('mailingAddressLine1').value, 'PO Box 123');
   assert.equal(view.get('addressLine1').value, fictionalProfile.addressLine1);
   view.lock();
-  for (const field of PROFILE_FIELDS.filter(field => field !== 'householdMembers')) assert.equal(view.value(field), '', field);
+  for (const field of PROFILE_FIELDS.filter(field => !LIST_FIELDS.includes(field))) assert.equal(view.value(field), '', field);
 });
 
 test('legacy profile loading leaves all new choice fields unknown and does not populate mailing fields', async t => {
@@ -176,6 +176,87 @@ test('legacy profile loading leaves all new choice fields unknown and does not p
   for (const field of [...YES_NO_FIELDS, 'suffix', 'sex', 'maritalStatus', 'maidenName', 'bestContactTime', 'mailingAddressLine1', 'mailingAddressLine2', 'mailingCity', 'mailingState', 'mailingZip']) {
     assert.equal(view.value(field), '', field);
   }
+});
+
+test('SNAP preparation keeps separate owners, unknown amounts and zero through save, reload and lock', async t => {
+  const view = await renderer(t);
+  const doc = view.window.document;
+  doc.querySelector('.nav-item[data-view="profile"]').click();
+  view.answer('iowaResident', 'yes');
+  view.answer('utilityGas', 'no');
+  view.edit('ssnCardFirstName', 'Initial');
+  const rows = key => [...doc.querySelector(`[data-record-list="${key}"]`).children];
+  const add = key => doc.querySelector(`[data-add-record="${key}"]`).click();
+  const edit = (row, key, value) => { const control = row.querySelector(`[data-record-field="${key}"]`); control.value = value; control.dispatchEvent(new view.window.Event('input', { bubbles: true })); };
+  add('jobs'); add('jobs');
+  edit(rows('jobs')[0], 'person', 'Initial Test'); edit(rows('jobs')[0], 'employer', 'Synthetic Bakery');
+  edit(rows('jobs')[0], 'amount', '0'); edit(rows('jobs')[0], 'frequency', 'Weekly');
+  edit(rows('jobs')[1], 'person', 'Other Person'); edit(rows('jobs')[1], 'employer', 'Synthetic Shop');
+  add('taxStatements'); edit(rows('taxStatements')[0], 'documentType', 'w2'); edit(rows('taxStatements')[0], 'annualIncome', '68450.00');
+  view.submit('profile-form'); await tick();
+  const profile = view.database.profile;
+  assert.equal(profile.iowaResident, 'yes'); assert.equal(profile.utilityGas, 'no'); assert.equal(profile.utilityElectricity, '');
+  assert.deepEqual(profile.jobs.map(({ person, amount, frequency }) => ({ person, amount, frequency })), [
+    { person: 'Initial Test', amount: '0', frequency: 'Weekly' }, { person: 'Other Person', amount: '', frequency: '' }
+  ]);
+  assert.equal(profile.taxStatements[0].annualIncome, '68450.00');
+  assert.equal(profile.monthlyEarnedIncome, ''); assert.equal(profile.householdWorking, '');
+  const savedIds = profile.jobs.map(row => row.id);
+  assert.deepEqual(rows('jobs').map(row => row.dataset.recordId), savedIds);
+  assert.doesNotThrow(() => validateProfile(profile));
+  rows('jobs')[0].querySelector('button').click();
+  view.submit('profile-form'); await tick();
+  assert.deepEqual(view.database.profile.jobs.map(row => row.id), [savedIds[1]]);
+  view.lock();
+  assert.equal(rows('jobs').length, 0); assert.equal(rows('taxStatements').length, 0);
+  assert.equal(view.get('iowaResident').value, ''); assert.equal(view.get('ssnCardFirstName').value, '');
+});
+
+test('each household member keeps their own sensitive details, without copying the applicant answers', async t => {
+  const view = await renderer(t);
+  view.get('add-household-member').click();
+  const rows = [...view.get('household-members').children];
+  const member = (index, key) => rows[index].querySelector(`[data-member-field="${key}"]`);
+  view.answer('usCitizen', 'yes'); view.answer('bornInUs', 'yes');
+  assert.equal(member(1, 'usCitizen').value, ''); assert.equal(member(1, 'bornInUs').value, '');
+  member(1, 'usCitizen').value = 'no'; member(1, 'isApplicant').value = 'no';
+  member(1, 'immigrationStatus').value = 'Documented status to review';
+  view.submit('profile-form'); await tick();
+  assert.equal(view.database.profile.householdMembers[1].usCitizen, 'no');
+  assert.equal(view.database.profile.householdMembers[0].usCitizen, '');
+  assert.equal(view.database.profile.householdMembers[1].isApplicant, 'no');
+  assert.equal(view.database.profile.householdMembers[1].immigrationStatus, 'Documented status to review');
+});
+
+test('list review summaries never become records when saving or adding and removing rows', async t => {
+  const view = await renderer(t, { reviewFields: async () => ({ profile: [{ key: 'jobs', label: 'Jobs', status: 'format-passed', messages: [] }] }) });
+  const doc = view.window.document;
+  doc.querySelector('.nav-item[data-view="profile"]').click();
+  const add = doc.querySelector('[data-add-record="jobs"]');
+  const rows = doc.querySelector('[data-record-list="jobs"]');
+  add.click();
+  view.get('check-profile-fields').click(); await tick();
+  assert.equal(doc.querySelectorAll('[data-review-key="jobs"]').length, 1);
+  assert.equal(rows.children.length, 1);
+  view.submit('profile-form'); await tick();
+  assert.equal(view.database.profile.jobs.length, 1);
+  assert.doesNotThrow(() => validateProfile(view.database.profile));
+  view.get('check-profile-fields').click(); await tick();
+  add.click();
+  assert.equal(rows.children.length, 2);
+  rows.firstElementChild.querySelector('button').click();
+  view.submit('profile-form'); await tick();
+  assert.equal(view.database.profile.jobs.length, 1);
+});
+
+test('valid imported record IDs shared across lists still get unique accessible controls', async t => {
+  const id = '4c7b6618-41c4-4d80-9fba-bb11f52babc3';
+  const view = await renderer(t, { getData: async () => ({ profile: { jobs: [{ id, person: 'Job owner' }], housingExpenses: [{ id, person: 'Housing owner' }] }, applications: [] }) });
+  const doc = view.window.document;
+  const first = doc.querySelector('[data-record-list="jobs"] [data-record-field="person"]');
+  const second = doc.querySelector('[data-record-list="housingExpenses"] [data-record-field="person"]');
+  assert.notEqual(first.id, second.id);
+  assert.equal(first.labels[0].control, first); assert.equal(second.labels[0].control, second);
 });
 
 // Iowa's Tell Us More questions about the applicant, in Iowa's own words.
@@ -662,6 +743,15 @@ test('Chrome extension view toggles autofill trust through the desktop API', asy
   assert.doesNotMatch(view.get('view-extension').textContent, /guided/i);
 });
 
+test('the trust setting says plainly that it fills sensitive details without asking too, on every site SecondHand is on (#175)', async t => {
+  const view = await renderer(t);
+  const hint = view.get('autofill-trust-hint');
+  assert.equal(view.get('autofill-trust').getAttribute('aria-describedby'), 'autofill-trust-hint', 'a screen reader reads it with the checkbox');
+  assert.equal(text(hint), 'When SecondHand is unlocked, Chrome can fill your saved answers without another pop-up, on every site SecondHand is on. ' +
+    'That includes your Social Security number, birth date, income, and citizenship and disability answers. ' +
+    'It also continues through verified Iowa applicant and home-address screens. Review the first suggested home address before submitting. Lock SecondHand to stop.');
+});
+
 test('a failed trust change restores the checkbox and shows the error', async t => {
   const view = await renderer(t, { setAutofillTrust: async () => { throw new Error('Unlock SecondHand first.'); } });
   view.get('autofill-trust').checked = true;
@@ -675,6 +765,11 @@ test('Privacy & backups names everything autofill fills or clicks today and keep
   const view = await renderer(t);
   view.window.document.querySelector('.nav-item[data-view="privacy"]').click();
   const card = text(view.window.document.querySelector('#view-privacy .autofill-card'));
+  // Always allow covers sensitive details too, on every site SecondHand is on (#175).
+  assert.equal(text(view.window.document.querySelector('#view-privacy .autofill-card p')), 'Autofill asks the first time. Choose Always allow to skip the pop-up while SecondHand is unlocked, ' +
+    'on every site SecondHand is on. That includes your Social Security number, birth date, income, and citizenship and disability answers. ' +
+    'When another site’s pop-up asks about those details, Always allow on this site skips it there alone. Only the saved answers a page needs leave SecondHand.');
+  assert.doesNotMatch(card, /every time/);
   for (const phrase of ['first applicant page', 'Household Application Information', 'Tell Us More', 'date of birth', 'Iowa’s questions about you',
     'first suggested home address', 'Information-only screens', 'Laya', 'guesses', 'Other sites you trust', 'Chrome’s built-in AI', 'on this computer',
     'never guesses on Iowa’s form', 'Iowa pages SecondHand doesn’t know', 'A complete live submission has not been validated.']) assert.ok(card.includes(phrase), phrase);
@@ -683,7 +778,20 @@ test('Privacy & backups names everything autofill fills or clicks today and keep
   assert.match(chrome, /only/);
   assert.match(chrome, /on this computer/);
   assert.match(chrome, /marked to check/);
+  // It says both times Chrome's AI may guess, and never that it takes what Laya skipped: with Laya ready, it stays off for the whole click.
+  assert.match(chrome, /Laya isn’t ready/);
+  assert.match(chrome, /can’t take any of/);
+  assert.doesNotMatch(chrome, /the rest|questions Laya can’t take/);
   assert.doesNotMatch(card, /—|passphrase|vault|the rules/i);
+  // The sites you turned on get one short paragraph for saved answers and another for Laya's and Chrome's guesses.
+  const paragraphs = Array.from(view.window.document.querySelectorAll('#view-privacy .autofill-card p'), text);
+  const sites = paragraphs.filter(paragraph => paragraph.includes('Other sites you trust'));
+  assert.equal(sites.length, 1);
+  assert.doesNotMatch(sites[0], /Laya|Chrome’s/);
+  const guesses = paragraphs.filter(paragraph => paragraph.includes('Chrome’s built-in AI'));
+  assert.equal(guesses.length, 1);
+  for (const phrase of ['Laya', 'Iowa pages SecondHand doesn’t know', 'never guesses on Iowa’s form']) assert.ok(guesses[0].includes(phrase), phrase);
+  for (const paragraph of [sites[0], guesses[0]]) assert.ok(paragraph.split(/\s+/).length <= 75, `${paragraph.split(/\s+/).length} words: ${paragraph}`);
   // The one value SecondHand picks for the applicant gets its own paragraph, ending on the instruction to check it.
   const address = Array.from(view.window.document.querySelectorAll('#view-privacy .autofill-card p'), text).filter(paragraph => paragraph.includes('first suggested home address'));
   assert.equal(address.length, 1);
@@ -763,14 +871,57 @@ test('trusted sites are listed with a Remove button that calls the desktop', asy
   assert.equal(view.get('trusted-sites-empty').hidden, false);
 });
 
-test('the Chrome extension view says whether all websites is on and turns it off through the desktop; sites trusted one by one stay', async t => {
-  const calls = [];
-  let status = { exists: true, unlocked: true, extensionId: '', bridgeRunning: true, trustedSites: ['https://pantry.example.org'], allSites: true };
+test('sites with Always allow on this site are listed under their own heading, each with a Remove button that calls the desktop (#175)', async t => {
+  const removed = [];
+  const [pantry, wic] = ['https://pantry.example.org', 'https://wic.example.gov'];
+  let status = { exists: true, unlocked: true, extensionId: '', bridgeRunning: true, trustedSites: [pantry, wic], alwaysAllowedSites: [pantry, wic] };
+  const without = (list, origin) => list.filter(site => site !== origin);
   const view = await renderer(t, {
     status: async () => status,
-    turnOffAllSites: async () => { calls.push('off'); status = { ...status, allSites: false }; return status; }
+    removeAlwaysAllowedSite: async origin => { removed.push(['Always allow', origin]); status = { ...status, alwaysAllowedSites: without(status.alwaysAllowedSites, origin) }; return status; },
+    // As the desktop does, removing a trusted site takes its Always allow too.
+    removeTrustedSite: async origin => {
+      removed.push(['trusted', origin]);
+      status = { ...status, trustedSites: without(status.trustedSites, origin), alwaysAllowedSites: without(status.alwaysAllowedSites, origin) };
+      return status;
+    }
   });
-  assert.equal(view.get('all-sites-status').textContent, 'All websites: on. SecondHand can fill forms on any website after you click Autofill there. Sensitive details still ask on each site.');
+  const sites = id => Array.from(view.get(id).querySelectorAll('code'), code => code.textContent);
+  assert.equal(text(view.get('always-allowed-heading')), 'Sites that fill sensitive details without asking');
+  assert.equal(view.get('always-allowed-sites').getAttribute('aria-labelledby'), 'always-allowed-heading');
+  assert.deepEqual(sites('always-allowed-sites'), [pantry, wic]);
+  assert.equal(view.get('always-allowed-sites-empty').hidden, true);
+  view.get('always-allowed-sites').querySelector('button').click();
+  await tick(); await tick();
+  assert.deepEqual(removed, [['Always allow', pantry]]);
+  assert.deepEqual(sites('always-allowed-sites'), [wic]);
+  assert.deepEqual(sites('trusted-sites'), [pantry, wic], 'the site stays trusted');
+  assert.equal(view.get('toast').textContent, 'Always allow on this site is off for https://pantry.example.org.');
+  view.get('trusted-sites').querySelectorAll('button')[1].click();
+  await tick(); await tick();
+  assert.deepEqual(removed.at(-1), ['trusted', wic]);
+  assert.deepEqual(sites('trusted-sites'), [pantry]);
+  assert.deepEqual(sites('always-allowed-sites'), [], 'turning a site off takes its Always allow too');
+  assert.equal(view.get('always-allowed-sites-empty').hidden, false);
+  assert.equal(text(view.get('always-allowed-sites-empty')), 'None yet. When SecondHand asks before filling sensitive details on a site, choose Always allow on this site to add it here.');
+
+  const failing = await renderer(t, { status: async () => ({ ...status, alwaysAllowedSites: [pantry] }), removeAlwaysAllowedSite: async () => { throw new Error('Unlock SecondHand first.'); } });
+  failing.get('always-allowed-sites').querySelector('button').click();
+  await tick(); await tick();
+  assert.match(failing.get('autofill-trust-error').textContent, /Unlock SecondHand first\./);
+  assert.deepEqual(Array.from(failing.get('always-allowed-sites').querySelectorAll('code'), code => code.textContent), [pantry]);
+});
+
+test('the Chrome extension view says whether all websites is on and turns it off through the desktop; sites trusted one by one stay', async t => {
+  const calls = [];
+  let status = { exists: true, unlocked: true, extensionId: '', bridgeRunning: true, trustedSites: ['https://pantry.example.org'], allSites: true,
+    alwaysAllowedSites: ['https://pantry.example.org', 'https://never.example.net'] };
+  const view = await renderer(t, {
+    status: async () => status,
+    // As the desktop does, Always allow stays only on sites trusted on their own.
+    turnOffAllSites: async () => { calls.push('off'); status = { ...status, allSites: false, alwaysAllowedSites: ['https://pantry.example.org'] }; return status; }
+  });
+  assert.equal(view.get('all-sites-status').textContent, 'All websites: on. SecondHand can fill forms on any website after you click Autofill there. It asks first unless you chose Always allow.');
   assert.equal(view.get('all-sites-off').hidden, false);
   assert.equal(view.get('all-sites-off').textContent, 'Turn off');
   view.get('all-sites-off').click();
@@ -780,6 +931,8 @@ test('the Chrome extension view says whether all websites is on and turns it off
   assert.equal(view.get('all-sites-off').hidden, true);
   assert.match(view.get('toast').textContent, /no longer fill forms on every website/);
   assert.deepEqual(Array.from(view.get('trusted-sites').querySelectorAll('code'), code => code.textContent), ['https://pantry.example.org']);
+  assert.deepEqual(Array.from(view.get('always-allowed-sites').querySelectorAll('code'), code => code.textContent), ['https://pantry.example.org'],
+    'Always allow goes with the sites all websites let in');
 
   const failing = await renderer(t, { status: async () => ({ ...status, allSites: true }), turnOffAllSites: async () => { throw new Error('Unlock SecondHand first.'); } });
   failing.get('all-sites-off').click();
@@ -1351,6 +1504,10 @@ test('a refused restore says why on the unlock screen, and declining the warning
 });
 
 const LAYA_BYTES = 428699034;
+// How often renderer/app.js asks for Laya's status while a download or update runs. A test that sees polls
+// mocks setTimeout and moves the clock this far for each one.
+const LAYA_POLL_MS = 500;
+const nextPoll = async t => { t.mock.timers.tick(LAYA_POLL_MS); await tick(); await tick(); };
 const layaView = view => ({
   checked: view.get('laya-toggle').checked, disabled: view.get('laya-toggle').disabled, text: view.get('laya-status').textContent,
   progress: view.get('laya-progress').hidden ? null : Number(view.get('laya-progress').value),
@@ -1358,6 +1515,7 @@ const layaView = view => ({
 });
 
 test('the Laya toggle shows the model size, and turning it on downloads with visible progress until ready', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const calls = [];
   let polled = 0;
   const view = await renderer(t, {
@@ -1372,11 +1530,12 @@ test('the Laya toggle shows the model size, and turning it on downloads with vis
   await tick(); await tick();
   assert.deepEqual(calls, [true]);
   assert.deepEqual(layaView(view), { checked: true, disabled: false, text: 'Downloading 25% of 429 MB…', progress: 25, buttons: ['Pause download'] });
-  await new Promise(resolve => setTimeout(resolve, 600));
+  assert.equal(polled, 0, 'the first poll waits its turn');
+  await nextPoll(t);
   assert.equal(layaView(view).text, 'Downloading 50% of 429 MB…');
-  await new Promise(resolve => setTimeout(resolve, 600));
+  await nextPoll(t);
   assert.deepEqual(layaView(view), { checked: true, disabled: false, text: 'Ready. The model (429 MB) is on this computer.', progress: null, buttons: ['Remove model'] });
-  await new Promise(resolve => setTimeout(resolve, 600));
+  await nextPoll(t);
   assert.equal(polled, 2, 'polling stops once the download is finished');
 });
 
@@ -1433,17 +1592,19 @@ test('a Laya error shows its message with a way to try again, and a failed toggl
 });
 
 test('a new install shows Laya on and downloading in the background, with its progress', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const view = await renderer(t, {
     status: async () => ({ exists: true, unlocked: true, extensionId: '', bridgeRunning: true, laya: { state: 'downloading', enabled: true, progress: 0, sizeBytes: LAYA_BYTES } }),
     layaStatus: async () => ({ state: 'downloading', enabled: true, progress: 0.1, sizeBytes: LAYA_BYTES })
   });
   assert.match(view.get('view-extension').textContent, /While it’s on, SecondHand downloads it in the background, checks for a newer version once a day, and runs it on this computer\./);
   assert.deepEqual(layaView(view), { checked: true, disabled: false, text: 'Downloading 0% of 429 MB…', progress: 0, buttons: ['Pause download'] });
-  await new Promise(resolve => setTimeout(resolve, 600));
+  await nextPoll(t);
   assert.equal(layaView(view).text, 'Downloading 10% of 429 MB…');
 });
 
 test('an update note shows beside the model’s status: a failed check, a model that needs a newer SecondHand, or an update downloading until it is installed', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const failed = await renderer(t, {
     status: async () => ({ exists: true, unlocked: true, extensionId: '', bridgeRunning: true,
       laya: { state: 'ready', enabled: true, sizeBytes: LAYA_BYTES, update: { state: 'error', message: 'Update check failed: the server answered 404.' } } })
@@ -1463,11 +1624,11 @@ test('an update note shows beside the model’s status: a failed check, a model 
       { state: 'ready', enabled: true, sizeBytes: 431e6 }
   });
   assert.deepEqual(layaView(updating), { checked: true, disabled: false, text: 'Ready. The model (429 MB) is on this computer. Downloading an update: 30% of 431 MB…', progress: null, buttons: ['Remove model'] });
-  await new Promise(resolve => setTimeout(resolve, 600));
+  await nextPoll(t);
   assert.equal(layaView(updating).text, 'Ready. The model (429 MB) is on this computer. Downloading an update: 90% of 431 MB…');
-  await new Promise(resolve => setTimeout(resolve, 600));
+  await nextPoll(t);
   assert.equal(layaView(updating).text, 'Ready. The model (431 MB) is on this computer.');
-  await new Promise(resolve => setTimeout(resolve, 600));
+  await nextPoll(t);
   assert.equal(polled, 2, 'polling stops once the update is installed');
 });
 
@@ -1592,9 +1753,10 @@ test('the household list starts with the applicant, who mirrors their own name a
   await tick();
   const members = saved[0].householdMembers;
   assert.ok(members.every(member => UUID.test(member.id)) && members[0].id !== members[1].id);
+  const blankMember = Object.fromEntries(MEMBER_FIELDS.filter(key => key !== 'id').map(key => [key, '']));
   assert.deepEqual(members.map(({ id, ...member }) => member), [
-    { firstName: 'Avery', lastName: 'Test', birthDate: '1985-04-12', relationship: 'self', student: 'no', grade: '' },
-    { firstName: 'Riley', lastName: 'Example', birthDate: '2015-09-03', relationship: 'child', student: 'yes', grade: '5th' }]);
+    { ...blankMember, firstName: 'Avery', lastName: 'Test', birthDate: '1985-04-12', relationship: 'self', student: 'no', grade: '' },
+    { ...blankMember, firstName: 'Riley', lastName: 'Example', birthDate: '2015-09-03', relationship: 'child', student: 'yes', grade: '5th' }]);
   // A student answer changed to No clears the grade, so a grade is never saved for someone who isn't a student.
   editRow(view, memberRows(view)[1], 'student', 'no');
   view.submit('profile-form');

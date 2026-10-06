@@ -8,6 +8,7 @@
     email: "Email", homePhone: "Home phone", mobilePhone: "Mobile phone",
     addressLine1: "Home address line 1", addressLine2: "Home address line 2",
     city: "Home city", state: "Home state", postalCode: "Home ZIP code",
+    ssn: "My Social Security number", annualIncome: "Selected annual income (check type and year)", annualIncomeYear: "Selected annual income year",
     monthlyIncome: "Monthly income", monthlyHousingCost: "Monthly housing cost"
   });
   // The applicant's explicit saved answer to "Do you have a home address?". Never inferred.
@@ -136,7 +137,8 @@
       const ids = new Set(), keys = new Set();
       return input.map(item => {
         if (!item || typeof item.id !== "string" || !Object.hasOwn(SAVED_FIELDS, item.key)
-          || ids.has(item.id) || keys.has(item.key) || !scan.fields.some(field => field.id === item.id && (!field.key || field.key === item.key))) throw problem("mapping");
+          || ids.has(item.id) || keys.has(item.key) || !scan.fields.some(field => field.id === item.id && (!field.key || field.key === item.key)
+            && (field.allowedKeys ? field.allowedKeys.includes(item.key) : !["ssn", "annualIncome", "annualIncomeYear"].includes(item.key)))) throw problem("mapping");
         ids.add(item.id); keys.add(item.key);
         return { id: item.id, key: item.key };
       });

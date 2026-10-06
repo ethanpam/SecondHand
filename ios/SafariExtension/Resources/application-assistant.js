@@ -8,11 +8,11 @@
   const mapper = typeof module !== "undefined" ? require("./field-mapper.js") : root.SecondHandAutofill;
   const iowa = typeof module !== "undefined" ? require("../../../extension/iowa-adapter.js") : root.SecondHandIowa;
   const keys = new Set(["firstName", "middleName", "lastName", "email", "homePhone", "mobilePhone",
-    "addressLine1", "addressLine2", "city", "state", "postalCode", "monthlyIncome", "monthlyHousingCost"]);
+    "addressLine1", "addressLine2", "city", "state", "postalCode", "ssn", "annualIncome", "annualIncomeYear", "monthlyIncome", "monthlyHousingCost"]);
   const documents = new WeakMap();
   const normalize = value => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
   const words = value => String(value || "").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]/g, " ");
-  const forbidden = /\b(ssn|social security|birth|dob|signature|sign here|check to sign|certif\w*|attest\w*|password|captcha|security code|verification code|one time|username|user name|account number|routing number)\b/i;
+  const forbidden = /\b(birth|dob|signature|sign here|check to sign|certif\w*|attest\w*|password|captcha|security code|verification code|one time|username|user name|account number|routing number)\b/i;
   const otherPerson = /\b(spouse|child|children|dependent|household member|family member|other person|other member|representative|assisting|employer)\b/i;
   const blockedRoute = /signup|register|registration|createaccount|createanaccount|account|profile|login|logon|signin|authentication|password|recovery|logout/;
 
@@ -135,7 +135,23 @@
     if (!names.length || names.some(name => name.length > 180 || forbidden.test(words(name)))) return false;
     if (forbidden.test(words(`${element.id} ${element.name} ${element.autocomplete}`))
       || otherPerson.test(words(`${element.id} ${element.name} ${names.join(" ")} ${context(element)}`))) return false;
+    const description = words(`${element.id} ${element.name} ${names.join(" ")}`);
+    if (/\bssn\b|\bsocial security (?:number|no\b)/i.test(description) && !isOwnSSN(element, doc)) return false;
     return true;
+  }
+
+  function isOwnSSN(element, doc) {
+    return labels(element, doc).some(label => /^(?:your|my|applicant[’']?s?) (?:social security (?:number|no\.?)|ssn)(?:\s*\(ssn\))?\s*[:*]?$/i.test(label.trim()));
+  }
+
+  function permittedKeys(element, doc) {
+    if (isOwnSSN(element, doc)) return ["ssn"];
+    const label = labels(element, doc).join(" ");
+    const annual = /\b(annual|annually|yearly|tax year)\b/i.test(label) && !/\b(month|monthly|weekly|hourly|current|last 30 days)\b/i.test(label);
+    const year = annual && /\byear\b/i.test(label) && !/\b(amount|income|earnings|wages)\b/i.test(label.replace(/income (tax )?year/i, "year"));
+    if (year) return ["annualIncomeYear"];
+    if (annual && /\b(income|earnings|wages|benefits|compensation|amount)\b/i.test(label)) return ["annualIncome"];
+    return [...keys].filter(key => !["ssn", "annualIncome", "annualIncomeYear"].includes(key));
   }
 
   function fieldIdentity(element, doc) {
@@ -164,7 +180,7 @@
       if (key === false) continue;
       if (String(element.value || "").trim()) { populated++; continue; }
       // Unmapped applicant controls remain an explicit choice, even on the known page.
-      result.push({ element, key, identity: fieldIdentity(element, doc), label: labels(element, doc).join(" / ").slice(0, 180), type: element.type });
+      result.push({ element, key, identity: fieldIdentity(element, doc), label: labels(element, doc).join(" / ").slice(0, 180), type: element.type, allowedKeys: permittedKeys(element, doc) });
     }
     return { result, ambiguous, populated };
   }
@@ -257,7 +273,7 @@
     const token = doc.defaultView.crypto.randomUUID();
     state.pending = { token, url, generation: state.generation, created: Date.now(), fields, actions, homeChoice, kind: page.kind, snapshot: snapshot(doc) };
     return { token, documentID: state.documentID, pageURL: url, ...page,
-      fields: fields.map(({ id, label, key, type }) => ({ id, label, key, type })),
+      fields: fields.map(({ id, label, key, type, allowedKeys }) => ({ id, label, key, type, allowedKeys })),
       actions: actions.map(({ id, label, kind }) => ({ id, label, kind })),
       canAnswerHomeAddress: Boolean(homeChoice),
       populated: scan.populated, ambiguous: scan.ambiguous };
@@ -290,11 +306,17 @@
       if (!/^\d{10}$/.test(digits)) return null;
       value = `(${digits.slice(0, 3)})${digits.slice(3, 6)}-${digits.slice(6)}`;
     }
+    if (key === "ssn") {
+      if (!/^(?:[0-9]{9}|[0-9]{3}-[0-9]{2}-[0-9]{4})$/.test(value)) return null;
+      const digits = value.replace(/-/g, "");
+      value = element.maxLength === 9 ? digits : `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+    }
+    if (key === "annualIncomeYear" && !/^(19|20)[0-9]{2}$/.test(value)) return null;
     if (key === "postalCode" && !/^\d{5}$/.test(value)) return null;
-    if (["monthlyIncome", "monthlyHousingCost"].includes(key) && !/^\d+(\.\d{1,2})?$/.test(value)) return null;
+    if (["monthlyIncome", "monthlyHousingCost", "annualIncome"].includes(key) && !/^\d+(\.\d{1,2})?$/.test(value)) return null;
     if (element.type === "email" && key !== "email") return null;
-    if (element.type === "tel" && !["homePhone", "mobilePhone"].includes(key)) return null;
-    if (element.type === "number" && !["monthlyIncome", "monthlyHousingCost"].includes(key)) return null;
+    if (element.type === "tel" && !["homePhone", "mobilePhone", "ssn"].includes(key)) return null;
+    if (element.type === "number" && !["monthlyIncome", "monthlyHousingCost", "annualIncome", "annualIncomeYear"].includes(key)) return null;
     if (element.tagName === "SELECT") {
       const options = Array.from(element.options).filter(option => !option.disabled && option.value &&
         (normalize(option.value) === normalize(value) || normalize(option.textContent) === normalize(value)
@@ -339,7 +361,7 @@
     const selected = new Set();
     for (const assignment of assignments) {
       if (!assignment || Object.keys(assignment).sort().join(",") !== "id,key" || selected.has(assignment.id)
-        || !keys.has(assignment.key) || !plan.fields.some(field => field.id === assignment.id && (!field.key || field.key === assignment.key))) return { error: "invalid_fields" };
+        || !keys.has(assignment.key) || !plan.fields.some(field => field.id === assignment.id && field.allowedKeys.includes(assignment.key) && (!field.key || field.key === assignment.key))) return { error: "invalid_fields" };
       selected.add(assignment.id);
     }
     if (Object.entries(values).some(([key, value]) => !assignments.some(item => item.key === key) || typeof value !== "string" || value.length > 500)) return { error: "invalid_fields" };
@@ -349,7 +371,7 @@
       const field = plan.fields.find(item => item.id === assignment.id);
       const element = field.element;
       if (cancelled(doc, plan) || !validDocument(doc, url) || Date.now() >= expiresAt || pageContext(doc, url).kind !== plan.kind) break;
-      if (!eligible(element, doc, url) || String(element.value || "").trim() || fieldIdentity(element, doc) !== field.identity) { skipped++; continue; }
+      if (!eligible(element, doc, url) || !permittedKeys(element, doc).includes(assignment.key) || String(element.value || "").trim() || fieldIdentity(element, doc) !== field.identity) { skipped++; continue; }
       if (field.key) {
         const fresh = mapper.candidates(doc, true).get(field.key);
         if (fresh?.length !== 1 || fresh[0] !== element) { skipped++; continue; }
@@ -359,7 +381,7 @@
       if (value === null || !await reveal(element, doc, active)) { skipped++; continue; }
       // Scrolling/rendering is asynchronous. Repeat identity/context checks immediately before writing.
       if (cancelled(doc, plan) || !validDocument(doc, url) || Date.now() >= expiresAt || !eligible(element, doc, url)
-        || pageContext(doc, url).kind !== plan.kind || String(element.value || "").trim()
+        || !permittedKeys(element, doc).includes(assignment.key) || pageContext(doc, url).kind !== plan.kind || String(element.value || "").trim()
         || fieldIdentity(element, doc) !== field.identity) { skipped++; continue; }
       if (field.key) {
         const fresh = mapper.candidates(doc, true).get(field.key);

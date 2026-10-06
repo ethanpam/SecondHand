@@ -5,8 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { JSDOM } = require('jsdom');
+const { loadRenderer } = require('./helpers/harness.cjs');
 const html = fs.readFileSync(path.join(__dirname, '../renderer/index.html'), 'utf8');
-const script = fs.readFileSync(path.join(__dirname, '../renderer/app.js'), 'utf8');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 const documentResult = () => ({ cancelled: false, document: {
@@ -50,7 +50,7 @@ async function renderer(t) {
     onDocumentProgress: callback => { const record = { callback, active: true }; subscriptions.push(record); return () => { record.active = false; }; },
     saveProfile: async value => { saves.push(structuredClone(value)); Object.assign(profile, value); return structuredClone(value); }
   };
-  window.eval(script);
+  loadRenderer(window);
   await tick();
   const get = id => window.document.getElementById(id);
   const navigate = view => window.document.querySelector(`.nav-item[data-view="${view}"]`).click();
@@ -63,6 +63,51 @@ async function renderer(t) {
     approve() { get('document-confirm-applicant').click(); get('apply-document-fields').click(); }
   };
 }
+
+test('historical reference needs its own review and saves separately from current income or job answers', async t => {
+  const view = await renderer(t);
+  const result = documentResult();
+  result.document.analysis.statement = { documentType: 'w2', taxYear: '2025', sourceName: 'Synthetic Employer', sourceRole: 'employer',
+    recipientName: 'Avery Example', annualIncome: '68450.00', annualIncomeLabel: 'Box 1 — wages', annualWithholding: '0.00', annualWithholdingLabel: 'Box 2 — federal withholding', ssn: '111-22-3333' };
+  await view.read(result);
+  assert.equal(view.get('document-statement').hidden, false);
+  assert.equal(view.get('add-document-statement').disabled, true);
+  assert.equal(view.get('document-statement-summary').textContent.includes('111-22-3333'), false);
+  view.get('document-confirm-applicant').click();
+  assert.equal(view.get('add-document-statement').disabled, true, 'identity approval does not approve a tax record');
+  view.get('document-confirm-statement').click();
+  view.get('add-document-statement').click();
+  assert.equal(view.saves.length, 0);
+  assert.equal(view.get('monthlyEarnedIncome').value, '1200');
+  assert.equal(view.get('householdWorking').value, '');
+  const row = view.window.document.querySelector('[data-record-list="taxStatements"]>fieldset');
+  assert.ok(row);
+  assert.equal(row.querySelector('[data-record-field="annualIncome"]').value, '68450.00');
+  assert.equal(row.querySelector('[data-record-field="annualWithholding"]').value, '0.00');
+  assert.equal(view.get('snap-information').open, true);
+  view.get('profile-form').dispatchEvent(new view.window.Event('submit', { bubbles: true, cancelable: true }));
+  await tick();
+  assert.equal(view.saves[0].taxStatements.length, 1);
+  assert.equal(view.saves[0].taxStatements[0].sourceName, 'Synthetic Employer');
+  assert.equal(Object.hasOwn(view.saves[0].taxStatements[0], 'ssn'), false);
+  assert.deepEqual(view.saves[0].jobs, []);
+  view.lock();
+  assert.equal(view.get('document-statement-summary').textContent, '');
+  assert.equal(view.get('document-confirm-statement').checked, false);
+  assert.equal(view.window.document.querySelector('[data-record-list="taxStatements"]').children.length, 0);
+});
+
+test('locking or discarding a read clears historical reference approval and prevents adding it', async t => {
+  const view = await renderer(t);
+  const result = documentResult(); result.document.analysis.statement = { documentType: 'ssa-1099', sourceName: 'SOCIAL SECURITY', sourceRole: 'issuer' };
+  await view.read(result);
+  view.get('document-confirm-statement').click();
+  view.lock();
+  view.get('add-document-statement').click();
+  assert.equal(view.get('add-document-statement').disabled, true);
+  assert.equal(view.saves.length, 0);
+  assert.equal(view.get('document-statement-summary').textContent, '');
+});
 
 test('reading shows type/year, page confidence, warnings and raw text without saving or changing profile', async t => {
   const view = await renderer(t);

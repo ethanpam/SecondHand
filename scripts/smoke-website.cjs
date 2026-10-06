@@ -9,6 +9,107 @@ const site = process.env.SECONDHAND_WEBSITE_URL || 'http://localhost:5173';
 const artifacts = path.join(__dirname, '..', 'artifacts', 'website');
 const errors = [];
 const externalRequests = new Set();
+const watchedContexts = new Set();
+const sameSite = url => new URL(url).origin === new URL(site).origin;
+const syntheticInstaller = {
+  status: 200,
+  headers: { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="test-installer.txt"' },
+  body: 'Synthetic installer fixture',
+};
+// Names that analytics and tracking scripts define on window.
+const trackingGlobals = ['gtag', 'dataLayer', 'ga', '_gaq', 'google_tag_manager', '_paq', 'plausible', 'posthog', 'mixpanel', 'amplitude', 'analytics', 'fbq', '_fbq', 'hj', 'clarity', '_hsq', 'heap', 'umami', 'fathom', '__cfBeacon', 'Sentry', 'DD_RUM', 'LogRocket'];
+
+// Every browser context gets the same listeners, so a runtime error or a request to another
+// site from any page fails the smoke, and installer downloads stay synthetic.
+async function openContext(browser, options = {}) {
+  const context = await browser.newContext(options);
+  watchedContexts.add(context);
+  context.setDefaultTimeout(15_000);
+  context.on('page', page => {
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('download', download => console.log('Download started:', download.url()));
+  });
+  context.on('request', request => {
+    if (!sameSite(request.url())) externalRequests.add(request.url());
+  });
+  await context.route('**/download/**', route => route.fulfill(syntheticInstaller));
+  return context;
+}
+
+// robots.txt and the sitemap as the site serves them. Returns the site address and the sitemap's pages.
+async function inspectRobotsAndSitemap(context) {
+  const robots = await context.request.get(`${site}/robots.txt`);
+  assert.equal(robots.status(), 200);
+  assert.match(robots.headers()['content-type'], /^text\/plain/);
+  const rules = (await robots.text()).split('\n');
+  for (const line of ['User-Agent: *', 'Allow: /', 'Disallow: /api/', 'Disallow: /download/']) {
+    assert.ok(rules.includes(line), `robots.txt must say "${line}"`);
+  }
+  const sitemapLine = rules.find(line => line.startsWith('Sitemap: '));
+  assert.ok(sitemapLine, 'robots.txt must name the sitemap');
+  const sitemapUrl = new URL(sitemapLine.slice('Sitemap: '.length));
+  assert.equal(sitemapUrl.protocol, 'https:');
+  assert.equal(sitemapUrl.pathname, '/sitemap.xml');
+  const sitemap = await context.request.get(`${site}/sitemap.xml`);
+  assert.equal(sitemap.status(), 200);
+  assert.match(sitemap.headers()['content-type'], /^application\/xml/);
+  const locations = [...(await sitemap.text()).matchAll(/<loc>([^<]+)<\/loc>/g)].map(([, location]) => new URL(location));
+  assert.ok(locations.length > 0, 'The sitemap must list pages');
+  for (const location of locations) assert.equal(location.origin, sitemapUrl.origin, 'Sitemap pages must use the site address');
+  const paths = locations.map(location => location.pathname);
+  assert.ok(paths.includes('/chrome-extension'), 'The sitemap must list the Chrome extension guide');
+  console.log('robots.txt and sitemap.xml passed.');
+  return { origin: sitemapUrl.origin, paths };
+}
+
+// Every page: the sitemap's pages, the three download confirmations, and a 404. None may request
+// another site, send a beacon, set a cookie or load analytics. Only sitemap pages may be indexed.
+async function inspectEveryPage(context, { origin, paths }) {
+  const pages = [
+    ...paths.map(path => ({ path, status: 200, indexed: true })),
+    ...['windows', 'mac-apple-silicon', 'mac-intel'].map(platform => ({ path: `/thank-you/${platform}`, status: 200, indexed: false })),
+    { path: '/does-not-exist', status: 404, indexed: false },
+  ];
+  for (const { path: route, status, indexed } of pages) {
+    const page = await context.newPage();
+    const requests = [];
+    page.on('request', request => requests.push(request));
+    const response = await page.goto(`${site}${route}`, { waitUntil: 'networkidle' });
+    assert.equal(response.status(), status, `${route} status`);
+    assert.deepEqual(requests.map(request => request.url()).filter(url => !sameSite(url)), [], `${route} must not request other sites`);
+    assert.deepEqual(requests.filter(request => ['ping', 'beacon'].includes(request.resourceType())).map(request => request.url()), [], `${route} must not send beacons`);
+    const found = await page.evaluate(names => {
+      const resources = [...document.querySelectorAll('link[href]:not([rel~="canonical"]):not([rel~="alternate"]), script[src], img[src], img[srcset], source[src], source[srcset], video[src], video[poster], audio[src], track[src], iframe[src], embed[src], object[data]')]
+        .flatMap(element => [
+          ...['href', 'src', 'poster', 'data'].map(name => element.getAttribute(name)),
+          ...(element.getAttribute('srcset') ?? '').split(',').map(candidate => candidate.trim().split(/\s+/)[0]),
+        ])
+        .filter(Boolean)
+        .map(url => new URL(url, document.baseURI));
+      return {
+        globals: names.filter(name => name in window),
+        cookie: document.cookie,
+        pings: document.querySelectorAll('a[ping]').length,
+        offSite: resources.filter(url => url.protocol.startsWith('http') && url.origin !== location.origin).map(url => url.href),
+        robots: document.querySelector('meta[name="robots"]')?.content ?? '',
+        canonical: document.querySelector('link[rel="canonical"]')?.href ?? null,
+      };
+    }, trackingGlobals);
+    assert.deepEqual(found.globals, [], `${route} must not load analytics`);
+    assert.equal(found.cookie, '', `${route} must not set cookies`);
+    assert.equal(found.pings, 0, `${route} links must not ping`);
+    assert.deepEqual(found.offSite, [], `${route} must not load resources from other sites`);
+    if (indexed) {
+      assert.doesNotMatch(found.robots, /noindex/, `${route} is in the sitemap, so it must be indexable`);
+      assert.equal(found.canonical, `${origin}${route}`, `${route} canonical`);
+    } else {
+      assert.match(found.robots, /noindex/, `${route} is not in the sitemap, so it must not be indexed`);
+    }
+    await page.close();
+  }
+  assert.deepEqual(await context.cookies(), [], 'The site must not set cookies');
+  console.log(`No tracking passed on ${pages.length} pages: ${pages.map(({ path }) => path).join(', ')}.`);
+}
 
 async function inspectLayout(page) {
   assert.equal(await page.locator('h1').count(), 1);
@@ -123,12 +224,18 @@ async function inspectDemoMotion(page) {
   async function assertSuspended() {
     await expect(text).toHaveAttribute('data-running', 'false');
     await expect(demo).toHaveAttribute('data-running', 'false');
-    const previousText = await content.innerText();
-    const previousPhase = await demo.getAttribute('data-phase');
     assert.equal(await page.locator('.text-type__cursor').evaluate(element => getComputedStyle(element).animationPlayState), 'paused');
-    await page.waitForTimeout(500);
-    assert.equal(await content.innerText(), previousText);
-    assert.equal(await demo.getAttribute('data-phase'), previousPhase);
+    // data-running="false" means their timers are cleared. A change in the next 30 rendered frames would show one
+    // still running (#143: rendered frames, not a fixed wait).
+    const changes = await page.evaluate(() => new Promise(resolve => {
+      const seen = [];
+      const observer = new MutationObserver(records => seen.push(...records.map(record => record.type)));
+      for (const selector of ['.text-type__content', '.autofill-demo']) observer.observe(document.querySelector(selector), { subtree: true, childList: true, characterData: true, attributes: true });
+      let frames = 30;
+      const frame = () => { if (--frames) requestAnimationFrame(frame); else { observer.disconnect(); resolve(seen); } };
+      requestAnimationFrame(frame);
+    }));
+    assert.deepEqual(changes, [], 'Nothing moves while suspended');
   }
 
   await page.evaluate(() => {
@@ -179,20 +286,11 @@ async function main() {
   await fs.mkdir(artifacts, { recursive: true });
   const browser = await chromium.launch({ channel: process.env.SECONDHAND_BROWSER_CHANNEL || undefined });
   try {
-    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-    context.setDefaultTimeout(15_000);
-    context.on('page', page => {
-      page.on('pageerror', error => errors.push(error.message));
-      page.on('download', download => console.log('Download started:', download.url()));
-      page.on('request', request => {
-        if (new URL(request.url()).origin !== new URL(site).origin) externalRequests.add(request.url());
-      });
-    });
-    await context.route('**/download/**', route => route.fulfill({
-      status: 200,
-      headers: { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="test-installer.txt"' },
-      body: 'Synthetic installer fixture',
-    }));
+    const tracking = await openContext(browser, { viewport: { width: 1440, height: 1000 } });
+    await inspectEveryPage(tracking, await inspectRobotsAndSitemap(tracking));
+    await tracking.close();
+
+    const context = await openContext(browser, { viewport: { width: 1440, height: 1000 } });
     const page = await context.newPage();
     await page.goto(site, { waitUntil: 'networkidle' });
     await expect(page.locator('.gradient-background canvas')).toBeVisible();
@@ -209,8 +307,11 @@ async function main() {
     await page.screenshot({ path: path.join(artifacts, 'desktop.png'), fullPage: true });
 
     await page.emulateMedia({ reducedMotion: 'reduce' });
+    const shaderSpeed = () => page.locator('.gradient-canvas[data-paper-shader]').evaluate(element => element.paperShaderMount.currentSpeed);
+    await expect.poll(shaderSpeed).toBe(0);
     const reducedFrame = await shaderFrame();
-    await page.waitForTimeout(200);
+    // A shader that still ran would draw a new frame within the next rendered frames (#143: frames, not a fixed wait).
+    await page.evaluate(() => new Promise(resolve => { let frames = 10; const frame = () => (--frames ? requestAnimationFrame(frame) : resolve()); requestAnimationFrame(frame); }));
     assert.equal(await shaderFrame(), reducedFrame, 'Reduced motion must stop animation');
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await expect.poll(shaderFrame).toBeGreaterThan(reducedFrame);
@@ -281,8 +382,8 @@ async function main() {
       await page.screenshot({ path: path.join(artifacts, `${route.replaceAll('/', '-')}.png`), fullPage: true });
     }
 
-    const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
-    mobile.on('pageerror', error => errors.push(error.message));
+    const mobileContext = await openContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
+    const mobile = await mobileContext.newPage();
     await mobile.goto(site, { waitUntil: 'networkidle' });
     await expect(mobile.locator('.phone-note')).toBeVisible();
     await mobile.screenshot({ path: path.join(artifacts, 'mobile-hero.png') });
@@ -319,18 +420,13 @@ async function main() {
     await fallback.getByRole('tab', { name: 'Mac', exact: true }).click();
     await expect(fallback.getByRole('link', { name: 'Apple Silicon' })).toBeVisible();
     await fallback.screenshot({ path: path.join(artifacts, 'webgl-fallback.png') });
-    const staticPage = await browser.newPage({ javaScriptEnabled: false });
+    const staticPage = await (await openContext(browser, { javaScriptEnabled: false })).newPage();
     await staticPage.goto(site);
     await expect(staticPage.getByRole('heading', { level: 1 })).toBeVisible();
     await inspectHeroLayout(staticPage);
     await inspectLayout(staticPage);
     await inspectStaticDemo(staticPage);
     await expect(staticPage.getByRole('link', { name: 'Download for Windows' })).toBeAttached();
-    await staticPage.route('**/download/**', route => route.fulfill({
-      status: 200,
-      headers: { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="test-installer.txt"' },
-      body: 'Synthetic installer fixture',
-    }));
     await staticPage.goto(`${site}/thank-you/windows`);
     await expect(staticPage.locator('meta[http-equiv="refresh"]')).toHaveCount(0);
     await expect(staticPage.getByRole('heading', { level: 1 })).toHaveText('Thanks for downloading SecondHand');
@@ -340,9 +436,10 @@ async function main() {
     ]);
     assert.match(manualDownload.url(), /\/download\/secondHand-.*-win-x64\.exe$/);
     await expect(staticPage).toHaveURL(`${site}/thank-you/windows`);
+    assert.deepEqual(browser.contexts().filter(open => !watchedContexts.has(open)), [], 'Every browser context must be watched');
     assert.deepEqual(errors, [], 'No browser runtime errors');
     assert.deepEqual([...externalRequests], [], 'Fonts and shaders must stay self-hosted');
-    console.log('Website smoke passed: shader animation, reduced motion, offscreen suspension, context loss, WebGL fallback, responsive layouts, keyboard tabs, downloads, FAQ, privacy, and 404.');
+    console.log('Website smoke passed: no tracking on any page, robots.txt and sitemap, shader animation, reduced motion, offscreen suspension, context loss, WebGL fallback, responsive layouts, keyboard tabs, downloads, FAQ, privacy, and 404.');
   } finally {
     await browser.close();
   }

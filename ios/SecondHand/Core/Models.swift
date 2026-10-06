@@ -19,6 +19,16 @@ enum HomeAddressAnswer: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+struct AnnualIncomeEntry: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var amount = ""
+    var year = ""
+    var source = ""
+    var category = ""
+    var documentID: UUID?
+    var fieldID = ""
+}
+
 struct PersonalProfile: Codable, Equatable {
     var firstName = ""
     var middleName = ""
@@ -35,6 +45,8 @@ struct PersonalProfile: Codable, Equatable {
     var postalCode = ""
     var hasHomeAddress = HomeAddressAnswer.unanswered
     var household: [HouseholdMember] = []
+    var ssn = ""
+    var annualIncome: [AnnualIncomeEntry] = []
     var monthlyIncome = ""
     var monthlyHousingCost = ""
     var notes = ""
@@ -45,7 +57,7 @@ struct PersonalProfile: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case firstName, middleName, lastName, email, phone, homePhone, mobilePhone
         case addressLine1, addressLine2, city, state, postalCode, hasHomeAddress, household
-        case monthlyIncome, monthlyHousingCost, notes, reviewedAt
+        case ssn, annualIncome, monthlyIncome, monthlyHousingCost, notes, reviewedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -64,6 +76,8 @@ struct PersonalProfile: Codable, Equatable {
         postalCode = try values.decodeIfPresent(String.self, forKey: .postalCode) ?? ""
         hasHomeAddress = try values.decodeIfPresent(HomeAddressAnswer.self, forKey: .hasHomeAddress) ?? .unanswered
         household = try values.decodeIfPresent([HouseholdMember].self, forKey: .household) ?? []
+        ssn = try values.decodeIfPresent(String.self, forKey: .ssn) ?? ""
+        annualIncome = try values.decodeIfPresent([AnnualIncomeEntry].self, forKey: .annualIncome) ?? []
         monthlyIncome = try values.decodeIfPresent(String.self, forKey: .monthlyIncome) ?? ""
         monthlyHousingCost = try values.decodeIfPresent(String.self, forKey: .monthlyHousingCost) ?? ""
         notes = try values.decodeIfPresent(String.self, forKey: .notes) ?? ""
@@ -86,6 +100,17 @@ struct PersonalProfile: Codable, Equatable {
          "monthlyIncome": monthlyIncome, "monthlyHousingCost": monthlyHousingCost]
             .filter { !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
+    /// Explicit session choices; never sum tax lines or infer monthly income.
+    func applicationFields(sharingSSN: Bool, annualIncomeID: UUID?) -> [String: String] {
+        var fields = applicationFields
+        if sharingSSN && !ssn.isEmpty { fields["ssn"] = ssn }
+        if let annualIncomeID, let entry = annualIncome.first(where: { $0.id == annualIncomeID }) {
+            fields["annualIncome"] = entry.amount
+            fields["annualIncomeYear"] = entry.year
+        }
+        return fields.filter { !$0.value.isEmpty }
+    }
+
 }
 
 enum RenewalStatus: String, Codable, CaseIterable, Identifiable {
@@ -193,7 +218,7 @@ struct AppData: Codable, Equatable {
 enum IowaApplicationBridge {
     static let allowedFieldKeys: Set<String> = [
         "firstName", "middleName", "lastName", "email", "homePhone", "mobilePhone",
-        "addressLine1", "addressLine2", "city", "state", "postalCode", "hasHomeAddress", "monthlyIncome", "monthlyHousingCost"
+        "addressLine1", "addressLine2", "city", "state", "postalCode", "hasHomeAddress", "monthlyIncome", "monthlyHousingCost", "ssn", "annualIncome", "annualIncomeYear"
     ]
 
     static func allowsApplicationPage(_ string: String) -> Bool {

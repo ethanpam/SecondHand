@@ -143,6 +143,19 @@ async function main() {
     assert.deepEqual(pantryText.split('\n').filter(line => ['4', 'Story', 'Tuesday', 'Friday'].includes(line)), [], 'answers and choices are not page text');
     console.log(`Page reader: the pantry form reads as ${pantryText.split('\n').length} lines of instructions and question labels, with no typed or chosen answer.`);
 
+    // The other branch, so every run checks both: a Chrome whose Summarizer is ready, played by a stand-in (this
+    // smoke's only) that writes two points, one of them a verdict the section never shows.
+    await panel.evaluate(() => {
+      window.Summarizer = { availability: async () => 'available', create: async () => ({ inputQuota: 4000, measureInputUsage: async text => Math.ceil(text.length / 4),
+        summarize: async () => '* Have your documents ready before you start.\n* You qualify for SNAP.' }) };
+    });
+    await page.goto(screenUrl('importantInfo'), { waitUntil: 'domcontentloaded' });
+    const summaryPoints = () => panel.evaluate(() => [...document.querySelectorAll('#summary-list li')].map(item => item.textContent));
+    await expect.poll(summaryPoints, { timeout: 15000 }).toEqual(['Have your documents ready before you start.']);
+    assert.equal(await panel.visible('#summary'), true, 'the section shows the points');
+    assert.equal(await panel.visible('#summary-note'), false, 'with no line about a missing model');
+    console.log(`Side panel: with a ready Summarizer (a stand-in), the section shows its points: ${JSON.stringify(await summaryPoints())}`);
+
     // Nothing left the computer: every request was SecondHand's own page or a local fixture, and the extension's pages fetched only their own files.
     const outside = requests.filter(url => !url.startsWith(`chrome-extension://${extensionId}/`) && !url.startsWith('https://hhsservices.iowa.gov/') && !url.startsWith(PANTRY_URL) && url !== 'about:blank');
     assert.deepEqual(outside, []);

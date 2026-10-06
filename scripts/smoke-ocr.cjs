@@ -23,6 +23,7 @@ if (!process.versions.electron) {
   const { createOcrEngine } = require('../desktop/ocr-engine.cjs');
   const { readSelectedFile } = require('../desktop/ocr-service.cjs');
   const { analyzeDocument } = require('../shared/document-parser.cjs');
+  const { checkOcrResult } = require('./smoke-checks.cjs');
   let temporary, engine;
   app.on('window-all-closed', () => {});
   async function syntheticImage() {
@@ -64,8 +65,8 @@ if (!process.versions.electron) {
     const assetsDirectory = argument('--assets') || path.join(root, 'build/ocr');
     engine = createOcrEngine({ BrowserWindow, session, ipcMain, assetsDirectory });
     const result = await engine.read(bytes, { onProgress: value => process.stdout.write(`OCR ${value.phase} ${value.page}/${value.total}\n`) });
-    assert.ok(result.pages.every(page => page.text.length && page.words.length), 'OCR must return text and positioned words');
-    assert.ok(result.pages.every(page => page.alternative?.words.length), 'Both segmentation passes must return positioned words');
+    // Every page it counted, with words from both passes: a result with no pages fails. The synthetic image is one page.
+    checkOcrResult(result, input ? {} : { pages: 1 });
     if (!input) assert.match(result.pages[0].text, /Avery Example/i);
     const document = { name: input ? path.basename(input) : 'synthetic-smoke.png', ...result };
     document.analysis = analyzeDocument(document);

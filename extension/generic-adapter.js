@@ -27,6 +27,46 @@
   // Answers about a household member, worked out by the desktop from the household list. Only the
   // rules place them, and only in a box that asks for that member: never a guess, never an applicant box.
   const MEMBER_KEYS = Object.freeze(['studentNameGrade']);
+  // These are explicit saved Iowa answers, not general-site fields or model guesses. The question
+  // must state its scope and match a whole phrase. Person/amount/source detail rows stay manual.
+  const IOWA_RULES = Object.freeze([
+    [/^are you an iowa resident$/, 'applicantIowaResident', 'applicant'],
+    [/^were you born in (the )?(united states|u s|us)$/, 'bornInUs', 'applicant'],
+    [/^are you a naturalized (united states|u s|us) citizen$/, 'naturalizedCitizen', 'applicant'],
+    [/^do you need an interpreter$/, 'needsInterpreter', 'applicant'],
+    [/^do you (purchase|buy) and prepare (food|meals) with (this|your) household$/, 'eatsWithHousehold', 'applicant'],
+    [/^are you pregnant$/, 'pregnant', 'applicant'],
+    [/^are you a migrant or seasonal farmworker$/, 'migrantSeasonalFarmworker', 'applicant'],
+    [/^does anyone in (your|the) household (attend|go to) school or college$/, 'householdInSchool', 'household'],
+    [/^is anyone in (your|the) household on strike$/, 'householdOnStrike', 'household'],
+    [/^does anyone in (your|the) household work expect to work or (is |are )?(self employed|selfemployed)$/, 'householdWorking', 'household'],
+    [/^has anyone in (your|the) household ended a job in the (last|past) 30 days$/, 'householdJobEnded30Days', 'household'],
+    [/^does (your|the) household receive (money )?from friends or relatives$/, 'incomeFriendsRelatives', 'household'],
+    [/^does (your|the) household receive educational grants or loans$/, 'incomeEducationGrantsLoans', 'household'],
+    [/^does (your|the) household pay (for )?dependent care( expenses)?$/, 'paysDependentCare', 'household'],
+    [/^does (your|the) household pay housing expenses$/, 'paysHousing', 'household'],
+    [/^does (your|the) household live in low rent or subsidized housing$/, 'lowRentHousing', 'household'],
+    [/^does (your|the) household pay child support$/, 'paysChildSupport', 'household'],
+    [/^does (your|the) household pay (for )?utilities$/, 'paysUtilities', 'household'],
+    [/^has (your|the) household received energy assistance in the (past|last) year$/, 'receivedEnergyAssistance', 'household'],
+    [/^does (your|the) household pay medical expenses$/, 'paysMedical', 'household'],
+    [/^does (your|the) household pay medicare expenses$/, 'paysMedicare', 'household'],
+    [/^does (your|the) household own real property$/, 'hasRealProperty', 'household'],
+    [/^does (your|the) household have a trust$/, 'hasTrust', 'household'],
+    [/^has (your|the) household sold or transferred property in the (last|past) 90 days$/, 'transferredProperty90Days', 'household'],
+    [/^does (your|the) household have (other )?personal property$/, 'hasPersonalProperty', 'household'],
+    [/^does (your|the) household own a vehicle$/, 'hasVehicle', 'household'],
+    [/^does (your|the) household share resources with someone outside (your|the) household$/, 'sharesResourcesOutsideHousehold', 'household'],
+    [/^has anyone in (your|the) household aged out of foster care$/, 'agedOutFosterCare', 'household'],
+    [/^is anyone in (your|the) household homeless$/, 'householdHomeless', 'household'],
+    [/^does anyone in (your|the) household have an iowa ebt card$/, 'hasIowaEbt', 'household'],
+    [/^does anyone in (your|the) household receive benefits from another state$/, 'benefitsAnotherState', 'household']
+  ]);
+  const IOWA_KEYS = Object.freeze(IOWA_RULES.map(([, key]) => key));
+  // Unlike the older general rules, keep parenthetical qualifications: "excluding heating" or
+  // "for this person" changes what a saved household answer means.
+  const iowaRule = text => IOWA_RULES.find(([pattern]) => pattern.test(normal(String(text || '').replace(QUESTION_NUMBER, '')).replace(/ (required|optional)$/, '')));
+  const householdRulesOnly = doc => doc?.location?.href === 'https://hhsservices.iowa.gov/apspssp/ssp.portal/applyForBenefits/dynamicQuestions';
   // A household count by age, worked out by the desktop from birth dates: "householdCount:0-5" or
   // "householdCount:60+", whole numbers 0 to 120 without leading zeros. shared/household.cjs reads them the same way.
   const BAND_KEY = /^householdCount:(0|[1-9]\d{0,2})(?:-(0|[1-9]\d{0,2})|(\+))$/;
@@ -35,7 +75,7 @@
     return Boolean(match) && Number(match[1]) <= 120 && (Boolean(match[3]) || (Number(match[2]) <= 120 && Number(match[2]) >= Number(match[1])));
   }
   // Keys the rules may place beyond the profile's own: composites, a member's answer, and band counts.
-  const ruleOnlyKey = key => MEMBER_KEYS.includes(key) || isBandKey(key);
+  const ruleOnlyKey = key => MEMBER_KEYS.includes(key) || isBandKey(key) || IOWA_KEYS.includes(key);
   // Answers that are only ever a guess for the applicant to review, however they were matched.
   const GUESS_KEYS = Object.freeze(['iowaResident']);
   const KIND = Object.freeze({ birthDate: 'date', email: 'email', phone: 'tel', state: 'state', ageRange: 'ageRange', householdSize: 'count', householdAdults: 'count',
@@ -205,7 +245,7 @@
   const layaText = (value, max) => typeof value === 'string' && value.trim() !== '' && value.length <= max && !UNSEEN.test(value);
   function layaQuestion({ label, type, options }) {
     if (!layaText(label, LAYA.label) || !Array.isArray(options) || options.length > LAYA.options || options.some(option => !layaText(option, LAYA.option)) ||
-      new Set(options).size !== options.length || unsafeQuestion({ label, options })) return '';
+      new Set(options).size !== options.length || unsafeQuestion({ label, options }) || iowaRule(label)) return '';
     if (LAYA.text.includes(type)) return blockedSuggestion(label) ? '' : 'text';
     return LAYA.choice.includes(type) && options.length ? 'choice' : '';
   }
@@ -214,7 +254,7 @@
   // a month box, or a child's birthday.
   function canSuggest(key, field) {
     if (!GENERIC_KEYS.includes(key)) return false;
-    if (unsafeQuestion(field) || blockedSuggestion(field?.label)) return false;
+    if (unsafeQuestion(field) || blockedSuggestion(field?.label) || iowaRule(field?.label)) return false;
     if (key !== 'birthDate') return true;
     const text = question(field?.label);
     return /\b(birth|born|dob)/.test(text) && !/\b(month|day|year|time|hours?|minutes?)\b/.test(text) && !OTHER_PERSON.test(text);
@@ -353,13 +393,15 @@
   const ageRange = option => /^(\d+) (\d+)( yrs?| years?)?$/.exec(normal(option)) || /^(\d+)(\+| and older| or older)( yrs?| years?)?$/.exec(normal(option));
   // A key is only placed on a control that can hold its kind of answer. Div checkboxes and
   // listboxes are only ever left for the applicant.
-  const answerKind = key => isBandKey(key) ? 'count' : KIND[key] || 'text';
+  const answerKind = key => IOWA_KEYS.includes(key) ? 'yesno' : isBandKey(key) ? 'count' : KIND[key] || 'text';
   function compatible(key, entry) {
     if (entry.kind === 'ariaCheckbox' || entry.kind === 'ariaListbox') return false;
     const kind = answerKind(key);
     const type = (entry.elements[0].type || 'text').toLowerCase();
     const options = optionsOf(entry);
     const choice = entry.kind === 'radio' || entry.kind === 'ariaRadio';
+    if (IOWA_KEYS.includes(key)) return (choice || entry.kind === 'select') && options.length === 2 &&
+      options.map(normal).sort().join('|') === 'no|yes';
     if (kind === 'yesno') return (choice || entry.kind === 'select') ? isYesNo(options) : entry.kind === 'checkbox' && entry.elements.length === 1;
     if (kind === 'ageRange') return (choice || entry.kind === 'select') && options.some(ageRange);
     if (kind === 'count') return (entry.kind === 'input' && ['number', 'text', 'tel', ''].includes(type)) || ((entry.kind === 'select' || choice) && isNumeric(options.filter(option => normal(option))));
@@ -378,8 +420,46 @@
     const result = ruleMatch(entry);
     return result.key && result.key !== 'ssn' && applicantOnly(entry) ? { key: null, confidence: null } : result;
   }
+  function iowaScope(entry, scope) {
+    const doc = entry.elements[0].ownerDocument;
+    if (entry.elements.some(element => element.matches(':disabled'))) return false;
+    let url;
+    try { url = new URL(doc.location.href); } catch { return false; }
+    if (url.origin !== 'https://hhsservices.iowa.gov' || url.username || url.password || /[%\\]/.test(url.pathname) ||
+        !(url.pathname === '/apspssp/ssp.portal' || url.pathname.startsWith('/apspssp/ssp.portal/'))) return false;
+    const form = entry.elements[0].form || entry.elements[0].closest('form');
+    if (!form || entry.elements.some(element => (element.form || element.closest('form')) !== form)) return false;
+    for (let node = entry.elements[0].parentElement; node; node = node.parentElement) {
+      const context = `${node.getAttribute('aria-label') || ''} ${idsText(doc, node.getAttribute('aria-labelledby'))}`;
+      if (otherPersonQuestion(context) || /\b(employer|helper|assisting|representative|another person|other person)\b/.test(normal(context))) return false;
+    }
+    // A selected person or detail row cannot silently turn an applicant/household answer into
+    // somebody else's answer. Names/identifiers are not used to infer who that person is.
+    if (Array.from(form.querySelectorAll('select, input')).some(element => rendered(element) && /personSelection|householdMember|employer|helper|representative/i.test(`${element.name} ${element.id}`))) return false;
+    const headings = Array.from(doc.querySelectorAll('h1,h2,h3,h4,legend')).filter(element => rendered(element)).map(element => clean(element.textContent));
+    if (headings.some(text => otherPersonQuestion(text) || /\b(employer|helper|assisting|representative|another person|other person|certification|e signature)\b/.test(normal(text)))) return false;
+    if (scope === 'household') return true;
+    const start = doc.querySelectorAll('a[title="Start Application | Active"]'), people = doc.querySelectorAll('a[title="People | Unvisited"]');
+    return start.length === 1 && people.length === 1 && start[0].parentElement.classList.contains('current') && people[0].parentElement.classList.contains('next') &&
+      rendered(start[0]) && rendered(people[0]) && Array.from(doc.querySelectorAll('p')).some(element => rendered(element) &&
+        clean(element.textContent).startsWith('Please give us additional information about yourself. If you cannot answer a question you can skip it.'));
+  }
+  function iowaEntryState(entry) {
+    const doc = entry.elements[0].ownerDocument, form = entry.elements[0].form || entry.elements[0].closest('form');
+    return JSON.stringify({ url: doc.location.href, labels: entry.labels, options: optionsOf(entry),
+      controls: entry.elements.map(element => [element.id, element.name, element.type, element.getAttribute('value'), element.getAttribute('onchange'), element.getAttribute('onclick')]),
+      form: form && [form.id, form.getAttribute('action'), form.getAttribute('method')],
+      headings: Array.from(doc.querySelectorAll('h1,h2,h3,h4,legend,p,a[title]')).filter(element => rendered(element)).map(element => [element.tagName, element.getAttribute('title'), clean(element.textContent)]) });
+  }
   function ruleMatch(entry) {
     const element = entry.elements[0];
+    const iowa = entry.labels.map(iowaRule).filter(Boolean);
+    if (iowa.length) {
+      const [, key, scope] = iowa[0];
+      return iowa.every(rule => rule[1] === key) && (!householdRulesOnly(element.ownerDocument) || scope === 'household') && iowaScope(entry, scope) && compatible(key, entry)
+        ? { key, confidence: 'high' } : { key: null, confidence: null };
+    }
+    if (householdRulesOnly(element.ownerDocument)) return { key: null, confidence: null };
     // A member's own question takes that member's answer; it names another person, so nothing of the applicant's.
     for (const text of entry.labels) {
       const key = memberRuleFor(text);
@@ -469,10 +549,13 @@
     const token = `plan-${Date.now().toString(36)}-${++sequence}`;
     const map = new Map();
     const matched = [], unmatched = [];
-    scan(doc).forEach((entry, index) => {
+    const entries = scan(doc), rules = entries.map(match);
+    entries.forEach((entry, index) => {
       const id = `sh-${sequence}-${index}`;
       map.set(id, entry);
-      const result = match(entry);
+      const result = rules[index];
+      if (IOWA_KEYS.includes(result.key) && rules.filter(rule => rule.key === result.key).length !== 1) { unmatched.push({ id, ...fieldOf(entry) }); return; }
+      if (IOWA_KEYS.includes(result.key)) entry.iowaState = iowaEntryState(entry);
       if (result.confidence === 'high') { matched.push({ id, key: result.key, confidence: 'high', label: entry.labels[0] || '' }); return; }
       unmatched.push({ id, ...fieldOf(entry) });
     });
@@ -491,18 +574,22 @@
   // the box may not be read; { empty } when it holds no answer; { unreadable } when its answer doesn't fit the field;
   // { repeated } when the page asks for the field in more than one box.
   const DATE_TYPED = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/;
-  // The order a typed date is in (#142): as its box asks for it ("MM/DD/YYYY", "dd/mm/aaaa", "jj/mm/aaaa") in its labels,
-  // placeholder, description or title, or as its numbers allow only one way. Null when it can't be told: never guessed.
-  const MONTH_FIRST = /\bmm? dd? (yyyy|yy|aaaa|aa)\b/;
-  const DAY_FIRST = /\b(dd?|jj?) mm? (yyyy|yy|aaaa|aa)\b/;
+  // The orders a date box asks for ("MM/DD/YYYY", "dd/mm/aaaa", "jj/mm/aaaa", "YYYY-MM-DD") in its labels, placeholder,
+  // description or title, each read on its own. Save reads a typed date in it (#142), and a fill writes the saved date in it (#156).
+  const DATE_ORDERS = Object.freeze({ month: /\bmm? dd? (yyyy|yy|aaaa|aa)\b/, day: /\b(dd?|jj?) mm? (yyyy|yy|aaaa|aa)\b/, year: /\b(yyyy|aaaa) mm? dd?\b/ });
+  function dateOrders(entry) {
+    const element = entry.elements[0];
+    const hints = [...entry.labels, idsText(element.ownerDocument, element.getAttribute('aria-describedby')), element.getAttribute('title') || ''].map(normal);
+    return new Set(Object.keys(DATE_ORDERS).filter(order => hints.some(hint => DATE_ORDERS[order].test(hint))));
+  }
+  // The order a typed date is in: as its box asks for it, or as its numbers allow only one way. Null when it can't be told: never guessed.
   function typedDate(text, entry) {
     if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
     const typed = DATE_TYPED.exec(text);
     if (!typed) return null;
-    const element = entry.elements[0];
-    const words = normal([...entry.labels, idsText(element.ownerDocument, element.getAttribute('aria-describedby')), element.getAttribute('title') || ''].join(' '));
+    const orders = dateOrders(entry);
     const [first, second] = [Number(typed[1]), Number(typed[2])];
-    const monthFirst = MONTH_FIRST.test(words), dayFirst = DAY_FIRST.test(words);
+    const monthFirst = orders.has('month'), dayFirst = orders.has('day');
     let leads = null;
     if (monthFirst !== dayFirst) leads = monthFirst ? 'month' : 'day';
     else if (first === second || (first <= 12 && second > 12)) leads = 'month';
@@ -577,12 +664,15 @@
   }
 
   function requestKeys(keys) {
-    return [...new Set((Array.isArray(keys) ? keys : []).flatMap(key => SOURCES[key] || [key]))].filter(key => PROFILE_KEYS.includes(key) || ruleOnlyKey(key));
+    return [...new Set((Array.isArray(keys) ? keys : []).flatMap(key => key === 'applicantIowaResident' ? ['iowaResident'] : SOURCES[key] || [key]))]
+      .filter(key => PROFILE_KEYS.includes(key) || ruleOnlyKey(key) || key === 'iowaResident');
   }
   const cents = value => /^\d{1,8}(\.\d{1,2})?$/.test(String(value || '')) ? Math.round(Number(value) * 100) : null;
   const dollars = amount => amount % 100 ? (amount / 100).toFixed(2) : String(amount / 100);
   function deriveValues(values) {
     const result = { ...(values || {}) };
+    if (['yes', 'no'].includes(values?.iowaResident)) result.applicantIowaResident = values.iowaResident;
+    else delete result.applicantIowaResident;
     if (result.firstName && result.lastName) result.fullName = `${result.firstName} ${result.lastName}`;
     if (result.city && result.state) result.cityState = `${result.city}, ${result.state}`; else delete result.cityState;
     if (result.city && result.zip) result.cityZip = `${result.city}, ${result.zip}`; else delete result.cityZip;
@@ -633,11 +723,17 @@
     }
     return options.findIndex(option => normal(option) === wanted);
   }
-  function formatted(key, value, element) {
+  // A saved value as the box takes it. Null when the box asks for more than one date order: which it wants can't be told.
+  function formatted(key, value, entry) {
+    const element = entry.elements[0];
     const text = String(value);
     if (key === 'birthDate') {
+      if (element.type === 'date') return text;
       const [year, month, day] = text.split('-');
-      return element.type === 'date' ? text : `${month}/${day}/${year}`;
+      // In the order the box asks for (#156); month first when it doesn't say, as US forms write it.
+      const orders = dateOrders(entry);
+      if (orders.size > 1) return null;
+      return orders.has('year') ? `${year}-${month}-${day}` : orders.has('day') ? `${day}/${month}/${year}` : `${month}/${day}/${year}`;
     }
     if (key === 'phone') {
       const digits = text.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
@@ -649,8 +745,8 @@
   function fillEntry(entry, key, value) {
     const first = entry.elements[0];
     if (entry.kind === 'input' || entry.kind === 'textarea') {
-      const text = formatted(key, value, first);
-      if (first.maxLength > 0 && text.length > first.maxLength) return false;
+      const text = formatted(key, value, entry);
+      if (text === null || (first.maxLength > 0 && text.length > first.maxLength)) return false;
       return setValue(first, text);
     }
     if (entry.kind === 'select') {
@@ -707,11 +803,13 @@
     }
     return false;
   }
+  // A rule's answer has a solid green outline, a guess a dashed amber one, and Laya's best guess (#185) a dotted plum one.
   function ensureStyle(doc) {
     if (doc.getElementById('secondhand-filled-style')) return;
     const style = doc.createElement('style');
     style.id = 'secondhand-filled-style';
     style.textContent = '[data-secondhand-filled="rule"]{outline:2px solid #5f9b62!important;outline-offset:1px!important}[data-secondhand-filled="guess"]{outline:2px dashed #d99a2b!important;outline-offset:1px!important}' +
+      '[data-secondhand-filled="laya-guess"]{outline:3px dotted #9b3d8f!important;outline-offset:2px!important}' +
       '[data-secondhand-attention]{outline:3px solid #d99a2b!important;outline-offset:3px!important;box-shadow:0 0 0 7px #d99a2b40!important}';
     (doc.head || doc.documentElement).append(style);
   }
@@ -720,9 +818,19 @@
     return entry.elements.some(element => element.getAttribute('aria-invalid') === 'true') || container?.classList.contains('form-line-error') ||
       Boolean(container && Array.from(container.querySelectorAll('[role="alert"]')).some(rendered));
   }
-  function mark(doc, entry, guess) {
+  // Laya's best guess (#185) goes only to a single-choice question, never a checkbox group, and never on Iowa's portal.
+  const LAYA_GUESS_KINDS = Object.freeze(['radio', 'ariaRadio', 'select']);
+  const layaGuessable = (doc, entry) => LAYA_GUESS_KINDS.includes(entry.kind) && doc.location.origin !== 'https://hhsservices.iowa.gov';
+  // Laya's best guesses on this page, by the id each was filled under: answered questions leave the next plan, but the
+  // side panel lists each one for the applicant to find and check.
+  let layaGuessed = null;
+  // `kind` is 'rule', 'guess', or 'laya-guess'.
+  function mark(doc, entry, kind, id) {
     ensureStyle(doc);
-    entry.elements.forEach(element => element.setAttribute('data-secondhand-filled', guess ? 'guess' : 'rule'));
+    entry.elements.forEach(element => element.setAttribute('data-secondhand-filled', kind));
+    if (kind !== 'laya-guess') return;
+    if (layaGuessed?.doc !== doc) layaGuessed = { doc, map: new Map() };
+    layaGuessed.map.set(id, entry);
   }
   function fillFields(doc, token, assignments, values) {
     const ids = (Array.isArray(assignments) ? assignments : []).map(item => item?.id);
@@ -733,25 +841,28 @@
       const entry = current.map.get(assignment?.id);
       const key = assignment?.key;
       const value = values?.[key];
-      const usable = entry && !answered(entry) && entry.elements.every(element => element.isConnected && (ARIA_TYPES[entry.kind] ? ariaUsable(element) : eligible(element)));
+      const freshIowa = entry && IOWA_KEYS.includes(key) ? questionsOn(doc).find(candidate => candidate.elements.length === entry.elements.length && candidate.elements.every((element, index) => element === entry.elements[index])) : null;
+      const usable = entry && !answered(entry) && entry.elements.every(element => element.isConnected && (ARIA_TYPES[entry.kind] ? ariaUsable(element) : eligible(element))) &&
+        (!IOWA_KEYS.includes(key) || (['yes', 'no'].includes(value) && entry.iowaState && freshIowa && match(freshIowa).key === key && entry.iowaState === iowaEntryState(freshIowa)));
       // An option Laya picked from the saved profile is always a guess, and never for a question only the applicant answers.
       const option = assignment?.option;
       const answering = typeof option === 'string' && key === undefined;
+      const layaGuess = answering && assignment.layaGuess === true;
       // A key the rules did not choose for this question is a guess: never for a question only the applicant
       // answers, by any of its labels, and only a key a guess may offer.
-      const allowed = entry && (match(entry).key === key || (!applicantOnly(entry) && canSuggest(key, { label: entry.labels[0] || '' })));
+      const allowed = entry && (match(entry).key === key || (!householdRulesOnly(doc) && !applicantOnly(entry) && canSuggest(key, { label: entry.labels[0] || '' })));
       const placed = !usable ? false
-        : answering ? !applicantOnly(entry) && fillOption(entry, option)
+        : answering ? !householdRulesOnly(doc) && !applicantOnly(entry) && !entry.labels.some(iowaRule) && (!layaGuess || layaGuessable(doc, entry)) && fillOption(entry, option)
         : option === undefined && (GENERIC_KEYS.includes(key) || COMPOSITE_KEYS.includes(key) || ruleOnlyKey(key)) && allowed && typeof value === 'string' && value && compatible(key, entry) && fillEntry(entry, key, value);
       if (!placed) { skipped.push(assignment?.id); continue; }
-      const guess = answering || assignment.guessed || GUESS_KEYS.includes(key);
-      if (placed.pending) { current.pending.set(assignment.id, { option: placed.pending, entry, guess }); pending.push(assignment.id); continue; }
+      const kind = layaGuess ? 'laya-guess' : answering || assignment.guessed || GUESS_KEYS.includes(key) ? 'guess' : 'rule';
+      if (placed.pending) { current.pending.set(assignment.id, { option: placed.pending, entry, kind }); pending.push(assignment.id); continue; }
       entry.elements[0].dispatchEvent(new entry.elements[0].ownerDocument.defaultView.Event('blur'));
       if (rejectedByPage(entry)) {
         if (entry.kind === 'input' || entry.kind === 'textarea' || entry.kind === 'select') setValue(entry.elements[0], '');
         rejected.push(assignment.id); continue;
       }
-      mark(doc, entry, guess);
+      mark(doc, entry, kind, assignment.id);
       filled.push(assignment.id);
     }
     return { ok: true, filled, skipped, rejected, pending };
@@ -775,7 +886,7 @@
       const item = live.get(id);
       if (!checked(id)) settled.skipped.push(id);
       else if (rejectedByPage(item.entry)) settled.rejected.push(id);
-      else { mark(doc, item.entry, item.guess); settled.filled.push(id); }
+      else { mark(doc, item.entry, item.kind, id); settled.filled.push(id); }
       live.delete(id);
     }
     return settled;
@@ -792,7 +903,7 @@
   // Scrolls a question into view and highlights it. Keyboard focus is never moved: focusing
   // and then leaving an empty field makes sites such as Google Forms flag it as required.
   function focusField(doc, id) {
-    const entry = (current?.doc === doc ? current.map.get(id) : null) || (listed?.doc === doc ? listed.map.get(id) : null);
+    const entry = (current?.doc === doc ? current.map.get(id) : null) || (listed?.doc === doc ? listed.map.get(id) : null) || (layaGuessed?.doc === doc ? layaGuessed.map.get(id) : null);
     const element = entry?.elements[0];
     if (!element || !element.isConnected || !rendered(element)) return false;
     clearAttention();
@@ -809,7 +920,7 @@
   }
   const elementFor = id => current?.map.get(id)?.elements[0] || null;
 
-  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, SAVE_KEYS, GUESS_KEYS, MEMBER_KEYS, answeredIds, readAnswer, UNSAFE_QUESTION, OTHER_PERSON_ROLE, MEMBER_DETAIL, CHILD_ROLE, PERSON_DETAIL,
+  const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, SAVE_KEYS, GUESS_KEYS, MEMBER_KEYS, IOWA_KEYS, answeredIds, readAnswer, UNSAFE_QUESTION, OTHER_PERSON_ROLE, MEMBER_DETAIL, CHILD_ROLE, PERSON_DETAIL,
     COMBINED_ADDRESS_QUESTION, PERSON_NOT_AMOUNT, blockedSuggestion, isBandKey, plan, offers, questions, requestKeys, deriveValues, fillFields, settle, focusField, elementFor,
     canSuggest, unsafeQuestion, layaQuestion });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

@@ -7,6 +7,8 @@ struct SettingsView: View {
     @State private var isWorking = false
     @State private var editingProfile = false
     @State private var authorizingApplication = false
+    @State private var sharingSSN = false
+    @State private var annualIncomeID: UUID?
 
     var body: some View {
         NavigationStack {
@@ -36,6 +38,19 @@ struct SettingsView: View {
                             Text("Review your profile today before allowing autofill.")
                                 .font(.subheadline).foregroundStyle(.secondary)
                         }
+                        Toggle("Include my SSN for this Iowa session", isOn: $sharingSSN)
+                            .disabled(store.data.profile.ssn.isEmpty || store.autofillExpiresAt.map { $0 > Date() } == true)
+                        Text("Annual income to share").font(.subheadline.weight(.semibold))
+                        Picker("Annual income to share", selection: $annualIncomeID) {
+                            Text("None").tag(nil as UUID?)
+                            ForEach(store.data.profile.annualIncome) { entry in
+                                Text("\(entry.category) · $\(entry.amount) · \(entry.year.isEmpty ? "Unknown year" : entry.year) · \(entry.source)")
+                                    .tag(Optional(entry.id))
+                            }
+                        }
+                        .disabled(store.autofillExpiresAt.map { $0 > Date() } == true)
+                        Text("Choose one reviewed annual amount only if the website asks for that income type and year. Annual amounts cannot fill monthly-income questions. Revoke an active session to change what is shared.")
+                            .font(.caption).foregroundStyle(.secondary)
                         TimelineView(.periodic(from: .now, by: 1)) { context in
                             if let expiry = store.autofillExpiresAt, expiry > context.date {
                                 VStack(alignment: .leading, spacing: 12) {
@@ -73,7 +88,7 @@ struct SettingsView: View {
                         }
                         Text("The link opens your default browser. If that isn’t Safari, open this address in Safari to use the extension.")
                             .font(.caption).foregroundStyle(.secondary)
-                        Text("Shared for 10 minutes: first, middle, and last name; email; home and mobile phone; home address; your saved Yes or No to ‘Do you have a home address?’; monthly income; monthly housing cost. The assistant selects your saved Yes or No on Iowa’s form. It doesn’t guess answers. General phone, household notes, written notes, and documents stay in the app. The website can save information as it is filled, before final submission. Revoking access doesn’t clear fields or withdraw information already sent.")
+                        Text("Shared for 10 minutes: first, middle, and last name; email; home and mobile phone; home address; your saved Yes or No to ‘Do you have a home address?’; monthly income; monthly housing cost; plus SSN and one annual amount/year if selected above. The assistant selects your saved Yes or No on Iowa’s form. It doesn’t guess answers. General phone, household notes, written notes, and documents stay in the app. The website can save information as it is filled, before final submission. Revoking access doesn’t clear fields or withdraw information already sent.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
 
@@ -131,14 +146,14 @@ struct SettingsView: View {
                 Button("Allow application sharing") {
                     isWorking = true
                     Task {
-                        do { try await store.authorizeAutofill() }
+                        do { try await store.authorizeAutofill(sharingSSN: sharingSSN, annualIncomeID: annualIncomeID) }
                         catch { self.error = error.localizedDescription }
                         isWorking = false
                     }
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This includes name, email, home and mobile phone, home address, your saved Yes or No to ‘Do you have a home address?’, monthly income, and monthly housing cost. The assistant doesn’t guess answers. Iowa’s website can save filled information before submission. You still review answers and approve final submission.")
+                Text("This includes name, email, home and mobile phone, home address, your saved Yes or No to ‘Do you have a home address?’, monthly income, and monthly housing cost. SSN: \(sharingSSN ? "included" : "not included"). Annual income: \(annualIncomeID == nil ? "not included" : "the selected amount and year"). The assistant doesn’t guess answers. Iowa’s website can save filled information before submission. You still review answers and approve final submission.")
             }
             .confirmationDialog("Permanently delete all app data?", isPresented: $deletingData, titleVisibility: .visible) {
                 Button("Delete all app data", role: .destructive) {
