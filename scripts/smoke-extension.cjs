@@ -563,6 +563,15 @@ async function main() {
     for (const code of strings.LANGUAGES) {
       await resetTo(wholeSteps[0].url);
       await (await launcherFrame()).evaluate(code => globalThis.SecondHandStrings.setLanguage(code), code);
+      // Until Autofill is first started from this Chrome, the line says all of what it does, and all of it shows.
+      await (await launcherFrame()).evaluate(() => localStorage.removeItem('secondhand.autofillStarted'));
+      await resetTo(wholeSteps[0].url);
+      widget = await launcherFrame();
+      await expect(widget.locator('#autofill')).toBeVisible({ timeout: 20000 });
+      await expect.poll(() => lineProblems(widget, strings.text(code, 'widget.iowaReady'), code), { timeout: 10000, message: `${code} before the first Autofill` }).toEqual([]);
+      const first = await frameBox();
+      measured.push(`${code} before the first Autofill: ${first.width}x${first.height}`);
+      await widget.evaluate(() => localStorage.setItem('secondhand.autofillStarted', '1'));
       for (const step of wholeSteps) {
         await resetTo(step.url);
         widget = await launcherFrame();
