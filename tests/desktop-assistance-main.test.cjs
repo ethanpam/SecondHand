@@ -561,7 +561,9 @@ test('removing a trusted site stops field release; a locked vault cannot trust s
   await assert.rejects(app.request({ type: 'getFields', url: PANTRY, fields: ['firstName'] }), /isn’t trusted/);
   await app.invoke('lock');
   await assert.rejects(app.request({ type: 'trustSite', url: PANTRY }), /Unlock/);
-  const stored = await desktop({ settings: { extensionId, trustedSites: ['https://ok.example.org', 'http://bad.example.org', 'javascript:1', 42] } });
+  // A host name longer than DNS allows (254 characters) is never a trusted site either.
+  const tooLong = `https://${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(62)}`;
+  const stored = await desktop({ settings: { extensionId, trustedSites: ['https://ok.example.org', 'http://bad.example.org', 'javascript:1', 42, tooLong] } });
   assert.deepEqual(plain((await stored.invoke('status')).trustedSites), ['https://ok.example.org']);
 });
 

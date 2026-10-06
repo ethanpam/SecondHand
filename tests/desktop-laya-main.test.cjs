@@ -212,7 +212,7 @@ test('a settings file that can’t be read is reset and the app says what was re
     ['damaged where Laya’s choice was', `${written.slice(0, written.indexOf('"layaEnabled"'))}"layaEnab\u0000`, BACK_ON],
     ['not settings', '[false]', BACK_ON],
     ['empty', '', BACK_ON],
-    ['too large', JSON.stringify({ extensionId, layaEnabled: false, padding: 'x'.repeat(5000) }), BACK_ON]
+    ['too large', JSON.stringify({ extensionId, layaEnabled: false, padding: 'x'.repeat(16 * 1024) }), BACK_ON]
   ];
   for (const [name, settingsText, notice] of cases) {
     const server = await modelServer(t);
