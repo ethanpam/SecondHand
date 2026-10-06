@@ -25,6 +25,22 @@
   const fits = width => Number.isInteger(width) && width > 0 && width <= 1000;
   const tall = height => Number.isInteger(height) && height >= 46 && height <= 150;
   const frameWidth = width => `min(${width || 272}px, 272px, calc(100vw - 24px))`;
+  const SIZES = ['width', 'height', 'narrowWidth', 'narrowHeight'];
+  let line = false; // the widget shows a line to read, above its row
+  let card = {}; // the widget's measured size; empty until it measures
+  let pill = false; // the reader hid the widget: its frame is the logo alone
+  // The frame is as wide and as tall as the widget measured itself: 46px for its row alone, up to 150px with
+  // all it can hold. A page under 640px wide keeps the widget as narrow as its buttons, or the least wider
+  // that shows its whole line, and gives the line more rows instead, so the widget covers little more of the
+  // page than it does without a line. A widget the reader
+  // hid is the round logo alone.
+  function fitHost() {
+    const size = line && card.narrowWidth && innerWidth < 640 ? { width: card.narrowWidth, height: card.narrowHeight } : card;
+    panelHost.setAttribute('data-secondhand-size', pill ? 'pill' : 'full');
+    panelHost.style.setProperty('border-radius', pill ? '50%' : '12px', 'important');
+    panelHost.style.setProperty('width', pill ? '46px' : frameWidth(size.width), 'important');
+    panelHost.style.setProperty('height', pill ? '46px' : `${size.height || (line ? 86 : 46)}px`, 'important');
+  }
 
   function withOwnPanelHidden(work) {
     if (!panelHost) return work();
@@ -120,6 +136,7 @@
   observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true });
   // Pages that rebuild their body (single-page forms) get the widget back.
   const watch = topFrame ? setInterval(placeCard, 1000) : null;
+  if (topFrame) window.addEventListener('resize', () => { if (panelHost) fitHost(); });
   window.addEventListener('pagehide', () => {
     stop();
     if (!topFrame && helps && !off) chrome.runtime.sendMessage({ type: 'secondhand:generic:form', helps: false });
@@ -185,17 +202,12 @@
         // Every question's label for the applicant's translated list, and the language this document declares.
         const listed = withOwnPanelHidden(() => engine.questions(document));
         respond({ lang: document.documentElement.lang || '', questions: listed.map(({ id, label }) => ({ id, label })) });
-      } else if (message.type === 'secondhand:widgetSize' && typeof message.line === 'boolean' && (message.width === undefined || fits(message.width)) &&
-        (message.height === undefined || tall(message.height)) && (message.pill === undefined || message.pill === true) && topFrame) {
-        // As wide and as tall as the widget measured itself: 46px for its row alone, more with a line to read above it.
-        // A widget the reader hid is the round logo alone.
-        if (panelHost) {
-          const pill = message.pill === true;
-          panelHost.setAttribute('data-secondhand-size', pill ? 'pill' : 'full');
-          panelHost.style.setProperty('border-radius', pill ? '50%' : '12px', 'important');
-          panelHost.style.setProperty('width', pill ? '46px' : frameWidth(message.width), 'important');
-          panelHost.style.setProperty('height', pill ? '46px' : `${message.height || (message.line ? 86 : 46)}px`, 'important');
-        }
+      } else if (message.type === 'secondhand:widgetSize' && typeof message.line === 'boolean' && SIZES.every(key => message[key] === undefined || (/height$/i.test(key) ? tall : fits)(message[key])) &&
+        (message.pill === undefined || message.pill === true) && topFrame) {
+        line = message.line;
+        card = Object.fromEntries(SIZES.filter(key => message[key] !== undefined).map(key => [key, message[key]]));
+        pill = message.pill === true;
+        if (panelHost) fitHost();
         respond({ sized: Boolean(panelHost) });
       } else if (message.type === 'secondhand:generic:pageText') {
         // This frame's own words for the side panel's summary, and the language it declares. Never form values.

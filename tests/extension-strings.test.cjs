@@ -58,6 +58,13 @@ function adapterTexts(raw) {
   for (const match of code.matchAll(/\b(?:radio|fail)\(\s*/g)) texts.add(literals(expressionAt(code, match.index + match[0].length))[0]?.text);
   const known = code.match(/const known = \[([\s\S]*?)\]\.find/);
   if (known) for (const row of known[1].matchAll(/\[([^\]]*)\]/g)) texts.add(literals(row[1])[3].text);
+  // The question names on the date-of-birth Tell Us More page, labels reached through Object.entries.
+  if (/\bselfQuestions\b/.test(code)) {
+    const start = /const selfQuestions = Object\.freeze\(\{/.exec(code);
+    if (!start) throw new Error('selfQuestions is no longer an Object.freeze({ ... }) literal, so its labels cannot be read.');
+    const body = expressionAt(code, start.index + start[0].length - 1).slice(1, -1);
+    for (const entry of body.matchAll(/(?:^|,)\s*\w+:\s*/g)) texts.add(literals(expressionAt(body, entry.index + entry[0].length))[0]?.text);
+  }
   return [...texts].filter(text => text && /^[A-Z]|^template:/.test(text));
 }
 // Literals that reach the screen through show(...), .textContent =, .title =, or an aria-label.
@@ -195,6 +202,13 @@ test('on Tell Us More, SecondHand says which saved answers it can fill and leave
   assert.equal(en['iowa.startDetailsReason'], 'SecondHand can fill the answers you saved in My information on this page. Answer the other questions yourself, then click Save and Continue in Iowa’s form.');
 });
 
+test('on the date-of-birth Tell Us More page, every question left to the applicant is named in the catalog', () => {
+  const page = adapter.probePage(onScreen(selfDetails.html, selfDetails.URL), selfDetails.URL);
+  assert.equal(page.pageKey, 'iowa-self-details');
+  assert.equal(page.checklist.filter(item => item.key.startsWith('self-question')).length, 8);
+  assert.deepEqual(page.checklist.filter(item => strings.describeEnglish(item.label).key === 'detail').map(item => item.label), []);
+});
+
 test('on Select Address when SecondHand selects nothing, it says so without claiming an address', () => {
   const page = probe('/applyForBenefits/addressValidation', '<h2>Select Address</h2>');
   assert.deepEqual(keyed(page), { pageKey: 'iowa-select-address', todo: 'iowa.addressManualTodo', reason: 'iowa.addressManualReason' });
@@ -231,6 +245,40 @@ test('Iowa’s security check is named in plain words: no catalog says "CAPTCHA"
     assert.deepEqual(found, [], code);
   }
   assert.equal(en['iowa.solveCaptcha'], 'Type the characters shown in Iowa’s security check, then click Continue.');
+});
+
+test('on Enter Personal Information, when SecondHand will not save and continue, it does not say it will', () => {
+  const url = `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo`;
+  const filled = () => {
+    const doc = onScreen(personal.html, url);
+    personal.attachConditionalHandlers(doc);
+    for (let pass = 0; pass < 3; pass++) adapter.fill(doc, url, adapter.scan(doc, url).bindings, syntheticProfile);
+    assert.equal(adapter.probePage(doc, url).canAdvance, true, 'the filled page is ready before the change');
+    return doc;
+  };
+  const waiting = (doc, why) => {
+    const page = adapter.probePage(doc, url);
+    assert.equal(page.canAdvance, false, why);
+    assert.equal(strings.describeEnglish(page.todo).key, 'iowa.reviewSaveContinue', why);
+  };
+  // Iowa turns Save and Continue off, either way it can.
+  const disabled = filled();
+  disabled.querySelector('.saveAndContinueButton').setAttribute('disabled', '');
+  waiting(disabled, 'disabled');
+  const ariaDisabled = filled();
+  ariaDisabled.querySelector('.saveAndContinueButton').setAttribute('aria-disabled', 'true');
+  waiting(ariaDisabled, 'aria-disabled');
+  // A field found twice: outside the form, a second element carries the id of a question this page hides
+  // (Medicaid isn't chosen, so its medical bills follow-up is not shown). Nothing is missing, yet SecondHand won't continue.
+  const twice = filled();
+  assert.equal(twice.querySelector('#faDiv').style.display, 'none');
+  twice.querySelector('main').append(Object.assign(twice.createElement('input'), { type: 'radio', id: 'helpPayMedBill1' }));
+  assert.ok(adapter.scan(twice, url).ambiguous.length > 0);
+  const page = adapter.probePage(twice, url);
+  assert.equal(page.requiredRemaining, 0);
+  assert.equal(page.manualRemaining, 0);
+  waiting(twice, 'a field found twice');
+  assert.equal(en['iowa.reviewSaveContinue'], 'Review your answers, then click Save and Continue in Iowa’s form.');
 });
 
 test('no Iowa English says "verified", "controls", "context", or "facts"', () => {

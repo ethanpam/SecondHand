@@ -13,14 +13,15 @@
   let panelFrame = null;
   let generalUrl = ''; // the unverified page where the general engine found fields
   let messageRow = false; // the widget shows a line to read above its row
-  let cardWidth = 0; // the widget's measured width; 0 until it measures
-  let cardHeight = 0; // and its measured height: 46px for its row alone, up to 150px with all it can hold
-  let cardHidden = false; // the reader hid the widget on this page: its frame is the logo alone
+  let card = {}; // the widget's measured size; empty until it measures
+  let full = false; // the page gets the full widget, not the pill
+  let cardHidden = false; // the reader hid the widget: its frame is the logo alone
   const strings = value => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
   // The widget's frame is as wide as the widget measured itself, never past 272px or the screen.
   const fits = width => Number.isInteger(width) && width > 0 && width <= 1000;
   const tall = height => Number.isInteger(height) && height >= 46 && height <= 150;
   const frameWidth = width => `min(${width || 272}px, 272px, calc(100vw - 24px))`;
+  const SIZES = ['width', 'height', 'narrowWidth', 'narrowHeight'];
 
   function withOwnPanelHidden(work) {
     if (!panelHost) return work();
@@ -36,16 +37,23 @@
 
   // A full widget on application screens SecondHand knows; a small pill elsewhere.
   function sizePanel() {
-    let full = false;
     try {
       const page = withOwnPanelHidden(() => adapter.probePage(document, location.href));
       full = page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo) || generalUrl === location.href;
     } catch { full = false; }
     full = full && !cardHidden;
     panelHost.setAttribute('data-secondhand-size', full ? 'full' : 'pill');
+    fitHost();
+  }
+  // The frame is as wide and as tall as the widget measured itself: 46px for its row alone, up to 150px with
+  // all it can hold. A page under 640px wide keeps the widget as narrow as its buttons, or the least wider
+  // that shows its whole line, and gives the line more rows instead, so the widget covers little more of the
+  // page than it does without a line.
+  function fitHost() {
+    const size = messageRow && card.narrowWidth && innerWidth < 640 ? { width: card.narrowWidth, height: card.narrowHeight } : card;
     panelHost.style.setProperty('border-radius', full ? '12px' : '50%', 'important');
-    panelHost.style.setProperty('width', full ? frameWidth(cardWidth) : '46px', 'important');
-    panelHost.style.setProperty('height', full ? `${cardHeight || (messageRow ? 86 : 46)}px` : '46px', 'important');
+    panelHost.style.setProperty('width', full ? frameWidth(size.width) : '46px', 'important');
+    panelHost.style.setProperty('height', full ? `${size.height || (messageRow ? 86 : 46)}px` : '46px', 'important');
   }
 
   function ensurePanel() {
@@ -181,6 +189,7 @@
   document.addEventListener('input', () => { revision++; }, true);
   document.addEventListener('change', () => { revision++; }, true);
   window.addEventListener('popstate', ensurePanel);
+  window.addEventListener('resize', () => { if (panelHost) fitHost(); });
   const watch = setInterval(ensurePanel, 1000);
   window.addEventListener('pagehide', () => { clearInterval(watch); observer.disconnect(); pending = null; navigation = null; }, { once: true });
 
@@ -224,11 +233,10 @@
         respond(withOwnPanelHidden(questions));
       } else if (message.type === 'secondhand:pageText') {
         respond(withOwnPanelHidden(pageText));
-      } else if (message.type === 'secondhand:widgetSize' && typeof message.line === 'boolean' && (message.width === undefined || fits(message.width)) &&
-        (message.height === undefined || tall(message.height)) && (message.pill === undefined || message.pill === true)) {
+      } else if (message.type === 'secondhand:widgetSize' && typeof message.line === 'boolean' && SIZES.every(key => message[key] === undefined || (/height$/i.test(key) ? tall : fits)(message[key])) &&
+        (message.pill === undefined || message.pill === true)) {
         messageRow = message.line;
-        cardWidth = message.width || 0;
-        cardHeight = message.height || 0;
+        card = Object.fromEntries(SIZES.filter(key => message[key] !== undefined).map(key => [key, message[key]]));
         cardHidden = message.pill === true;
         if (panelHost) sizePanel();
         respond({ sized: Boolean(panelHost) });

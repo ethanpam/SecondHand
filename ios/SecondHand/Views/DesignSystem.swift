@@ -69,16 +69,6 @@ struct DetailRow: View {
     }
 }
 
-struct LocalStorageNote: View {
-    var body: some View {
-        Label("Saved on this iPhone", systemImage: "lock.shield")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-    }
-}
-
 struct OptionalDateField: View {
     var title: String
     @Binding var date: Date?

@@ -294,13 +294,20 @@
     return result;
   }
 
+  // A date of birth Iowa may get, checked as the app checks it (#135): today or earlier and no more than
+  // 130 years ago, on this computer's own calendar, never the UTC date.
+  function usableBirthDate(value) {
+    const now = new Date();
+    const day = (year, month, date) => `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(date).padStart(2, '0')}`;
+    return value <= day(now.getFullYear(), now.getMonth() + 1, now.getDate()) && value >= day(now.getFullYear() - 130, now.getMonth() + 1, now.getDate());
+  }
   function formatValue(key, raw, element) {
     if (typeof raw !== 'string' || !raw.trim() || raw.length > 250 || /[\u0000-\u001f]/.test(raw)) return null;
     let value = raw.trim();
     if (key === 'birthDate') {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
       const date = new Date(`${value}T00:00:00.000Z`);
-      if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value || value > new Date().toISOString().slice(0, 10)) return null;
+      if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value || !usableBirthDate(value)) return null;
       value = `${value.slice(5, 7)}/${value.slice(8, 10)}/${value.slice(0, 4)}`;
     }
     if (key === 'homePhone' || key === 'mobilePhone') {
@@ -890,9 +897,10 @@
       const scanResult = scan(doc, rawUrl);
       const issues = personalIssues(doc.querySelector(forms.personal), doc);
       const next = navigationButton(doc, rawUrl);
-      return { ...result, ...issues, kind: 'fillable', pageKey: 'iowa-personal-information', heading: 'Enter Personal Information', fields: scanResult.fields,
-        canAdvance: Boolean(next && issues.requiredRemaining === 0 && issues.manualRemaining === 0 && scanResult.ambiguous.length === 0),
-        todo: issues.requiredRemaining || issues.manualRemaining ? 'Answer what is left in Iowa’s form. When the page is complete, SecondHand goes to the next one.' : 'SecondHand can save this page and continue. Review every answer before final submission.',
+      const canAdvance = Boolean(next && issues.requiredRemaining === 0 && issues.manualRemaining === 0 && scanResult.ambiguous.length === 0);
+      return { ...result, ...issues, kind: 'fillable', pageKey: 'iowa-personal-information', heading: 'Enter Personal Information', fields: scanResult.fields, canAdvance,
+        todo: issues.requiredRemaining || issues.manualRemaining ? 'Answer what is left in Iowa’s form. When the page is complete, SecondHand goes to the next one.'
+          : canAdvance ? 'SecondHand can save this page and continue. Review every answer before final submission.' : 'Review your answers, then click Save and Continue in Iowa’s form.',
         reason: issues.manualRemaining ? 'Answer the remaining questions and correct any errors in Iowa’s form.' : issues.requiredRemaining ? 'Complete the required applicant fields in Iowa’s form.' : 'Review your answers, then click Save and Continue in Iowa’s form.' };
     }
     if (rawUrl === `${PORTAL}/applyForBenefits/enterPersonalInfo` || headings.includes('enter personal information')) return { ...result, pageKey: 'iowa-personal-unverified', todo: 'Fill in this page yourself, then click Save and Continue in Iowa’s form.', reason: 'This page doesn’t look like the applicant page SecondHand knows, so it fills nothing here.' };

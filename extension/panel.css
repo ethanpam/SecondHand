@@ -19,15 +19,16 @@ button,select{font:inherit;color:inherit;cursor:pointer;-webkit-tap-highlight-co
 .text-button{display:flex;align-items:center;width:fit-content;min-height:32px;margin-bottom:4px;padding:0;border:0;background:none;font-weight:500;text-align:start;text-decoration:underline;text-underline-offset:4px}.text-button:hover:enabled,a.text-button:hover{text-decoration-thickness:2px}a.text-button{color:inherit}.actions>.text-button{margin:-4px 0 12px}.actions>.note{margin:-4px 0 12px}
 /* On-page widget: an extension iframe the page cannot script. It is as tall as what it holds, 46px for its row alone,
    and asks for a frame that size; the row sits at the bottom, so its button stays where it was when a line comes or goes. */
-body.launcher-surface{background:none}#launcher{width:100%;height:100%;display:flex;align-items:flex-end;justify-content:center}#widget{width:max-content;max-width:272px;margin-inline-start:auto}
+body.launcher-surface{background:none}#launcher{width:100%;height:100%;display:flex;align-items:flex-end;justify-content:center}#widget{flex:none;width:max-content;max-width:min(272px,100%);margin-inline-start:auto}
 .widget{display:flex;flex-direction:column;justify-content:center;gap:4px;padding:6px 8px;background:#fff;border:1px solid var(--border);border-radius:12px}.widget .brand{width:30px;height:30px}.widget-logo{display:flex;flex:none;margin-inline-end:auto;padding:0;border:0;border-radius:30%;background:none}
 .widget-row{display:flex;align-items:center;gap:8px;min-width:0}
 .widget-primary{flex:none;height:32px;padding:0 14px;border:0;border-radius:100px;background:var(--primary);color:#fff;font-weight:500;white-space:nowrap}.widget-primary:hover:enabled{background:var(--pressed)}
 /* The card's text is the side panel's size. */
 .widget-link{padding:0;border:0;background:none;font-weight:500;line-height:16px;text-decoration:underline;text-underline-offset:3px;white-space:nowrap}#need-you{font-weight:600}#translate-offer{align-self:flex-start}
 #widget-text{line-height:16px;min-width:0;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:5}
-/* A line to read widens the widget to its 272px. Five lines of it and the translation offer make the widget 150px tall, the most its frame allows. */
-#widget-text:not(.visually-hidden){width:max-content;max-width:254px}
+/* A line to read widens the widget to its 272px. Five lines of it and the translation offer make the widget 150px tall, the most its
+   frame allows; without the offer there is room for a sixth line, which a narrow page's narrower widget may need. */
+#widget-text:not(.visually-hidden){width:max-content;max-width:min(254px,100%)}#widget:not(.outdated):has(#translate-offer[hidden]) #widget-text{-webkit-line-clamp:6}
 /* An outdated worker may not give the widget another frame (one is asked for), so the notice fits the frame the
    widget already has: a row of the logo, up to three lines of 12px, and a button when one helps. */
 #widget.outdated{width:100%;height:100%;flex-direction:row;align-items:center;gap:8px;padding:0 8px}.widget.outdated .widget-row{display:contents}.widget.outdated .widget-logo{order:-1;margin:0}

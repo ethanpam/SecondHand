@@ -175,3 +175,19 @@ test('a household with no children says so; a household list never puts a name i
   const fromFixture = factsText(buildFacts({ ...fixture, county: 'Story' }, { today: TODAY }));
   for (const member of fixture.householdMembers) assert.equal(fromFixture.includes(member.firstName), false, member.firstName);
 });
+
+test('a saved birth date in the future or more than 130 years ago never stops the facts: only the ages it gives are left out (#135)', () => {
+  // The applicant's own date: no age facts, every other fact stays.
+  const ahead = byId(buildFacts({ ...household, birthDate: '2026-09-27' }, { today: TODAY }));
+  assert.equal(ahead['applicant.age'], undefined);
+  assert.equal(ahead['applicant.ageBand'], undefined);
+  assert.equal(ahead['household.size'], 'The household has 3 people.');
+  assert.equal(ahead['income.total'], 'The household’s total income is $1,000 a month ($12,000 a year).');
+  assert.equal(byId(buildFacts({ birthDate: '1825-06-01' }, { today: TODAY }))['applicant.age'], undefined);
+  // A member's date: every count by age and every member's age are left out; the applicant's own age, the size and students stay.
+  const listedFacts = byId(buildFacts(listed({ Sam: { birthDate: '2026-09-27' }, Morgan: { birthDate: '1825-06-01' } }), { today: TODAY }));
+  assert.equal(listedFacts['applicant.age'], 'The applicant is 41 years old.');
+  assert.equal(listedFacts['household.size'], 'The household has 4 people.');
+  for (const id of ['household.adults', 'household.children', 'household.seniors', 'household.ages', 'household.childAges']) assert.equal(listedFacts[id], undefined, id);
+  assert.equal(listedFacts['household.students'], 'One household member is a student in 5th grade.');
+});

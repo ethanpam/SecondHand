@@ -133,8 +133,9 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
               const reply = data => onMessage({ id: request.id, ok: true, data });
               const fail = error => onMessage({ id: request.id, ok: false, error });
               if (request.type === 'status') return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: 0, ...(vault.layaState ? { laya: { state: vault.layaState } } : {}),
-                ...(vault.extension ? { extension: structuredClone(vault.extension) } : {}) });
+                ...(vault.extension ? { extension: structuredClone(vault.extension) } : {}), ...(vault.touchId ? { touchId: vault.touchId } : {}) });
               if (request.type === 'showApp') return reply({ shown: true });
+              if (request.type === 'unlockWithTouchId' && vault.touchIdUnlock) return reply(structuredClone(vault.touchIdUnlock));
               if (request.type === 'openApp') return vault.openError ? fail(vault.openError) : reply(vault.opened || { opened: 'shown' });
               if (request.type === 'recordProgress') return reply({ recorded: true });
               if (request.type === 'saveFields') return reply({ saved: Object.keys(request.fields) });
@@ -148,7 +149,9 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
               if (request.type === 'getFields') {
                 duringGetFields?.(tab);
                 if (vault.getFieldsError) return fail(vault.getFieldsError);
-                return reply({ accessRevision: 0, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])) });
+                // `fieldsReason`: why the app left saved answers out (#135).
+                return reply({ accessRevision: 0, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])),
+                  ...(vault.fieldsReason !== undefined ? { reason: vault.fieldsReason } : {}) });
               }
               fail('Unsupported bridge request.');
             });
@@ -462,6 +465,39 @@ test('desktop status, showApp, and focusField pass through; guided and manual-fi
   assert.deepEqual(plain((await w.send({ type: 'ui:desktopStatus' }, noTab)).data), { connected: true, unlocked: true, laya: 'unavailable', allSites: false });
   assert.deepEqual(plain((await w.send({ type: 'ui:showApp', confirmed: true }, noTab)).data), { shown: true });
   assert.equal(await w.send({ type: 'ui:pageState' }, noTab), undefined);
+});
+
+test('the side panel can ask the app to unlock with Touch ID; only whether it unlocked, or why not, comes back', async () => {
+  const w = worker({ desktop: { unlocked: false, touchId: 'ready', touchIdUnlock: { unlocked: true } } });
+  assert.deepEqual(plain((await w.panel({ type: 'ui:desktopStatus' })).data), { connected: true, unlocked: false, laya: 'unavailable', touchId: 'ready', allSites: false });
+  assert.deepEqual(plain((await w.panel({ type: 'ui:unlockWithTouchId', confirmed: true })).data), { unlocked: true });
+  const sent = w.calls.native.find(call => call.type === 'unlockWithTouchId');
+  assert.deepEqual(Object.keys(sent).sort(), ['id', 'type'], 'nothing but the request itself goes to the app');
+  for (const reason of ['off', 'cancelled']) {
+    const refused = worker({ desktop: { unlocked: false, touchId: 'ready', touchIdUnlock: { unlocked: false, reason } } });
+    assert.deepEqual(plain((await refused.panel({ type: 'ui:unlockWithTouchId', confirmed: true })).data), { unlocked: false, reason }, reason);
+  }
+  // Touch ID stays available until it's turned off: there is no "password first" answer.
+  for (const odd of [{ unlocked: false, reason: 'password' }, { unlocked: false, reason: 'later' }, { unlocked: false }, { unlocked: 'yes' }, { unlocked: true, reason: 'off' }]) {
+    const reply = await worker({ desktop: { unlocked: false, touchId: 'ready', touchIdUnlock: odd } }).panel({ type: 'ui:unlockWithTouchId', confirmed: true });
+    assert.equal(reply.ok, false, JSON.stringify(odd));
+    assert.equal(reply.errorKey, 'worker.desktopUnexpected', JSON.stringify(odd));
+  }
+  // Only a click in the side panel asks: not the page's widget, and not without a click.
+  assert.equal(await w.launcher({ type: 'ui:unlockWithTouchId', confirmed: true }), undefined);
+  assert.equal(await w.panel({ type: 'ui:unlockWithTouchId' }), undefined);
+  assert.equal(w.calls.native.filter(call => call.type === 'unlockWithTouchId').length, 1);
+  const closed = await worker({ desktop: { reachable: false } }).panel({ type: 'ui:unlockWithTouchId', confirmed: true });
+  assert.equal(closed.errorKey, 'worker.desktopOffline');
+});
+
+test('desktop status passes on Touch ID’s state only as ready or off', async () => {
+  for (const touchId of ['ready', 'off']) {
+    assert.equal(plain((await worker({ desktop: { unlocked: false, touchId } }).panel({ type: 'ui:desktopStatus' })).data).touchId, touchId);
+  }
+  for (const touchId of ['password', 'maybe']) {
+    assert.equal((await worker({ desktop: { unlocked: false, touchId } }).panel({ type: 'ui:desktopStatus' })).ok, false, `${touchId}: a state SecondHand doesn’t know is an error, not a guess`);
+  }
 });
 
 // What a native host answers when the desktop app isn't running: this host's code, and the fixed
@@ -899,6 +935,12 @@ test('the widget’s request for room for its line goes to its own tab’s conte
   assert.deepEqual(plain((await w.launcher({ type: 'ui:widgetSize', line: true, width: 254, height: 95 })).data), { sized: true });
   assert.deepEqual(plain(w.calls.content.at(-1)), { type: 'secondhand:widgetSize', line: true, width: 254, height: 95 }, 'and its measured height');
   for (const height of [0, 45, 151, 80.5, '95', null]) assert.equal(await w.launcher({ type: 'ui:widgetSize', line: true, width: 254, height }), undefined, `height ${height}`);
+  // Its size on a narrow page goes along too; nothing else does.
+  const size = { line: true, width: 272, height: 84, narrowWidth: 133, narrowHeight: 97 };
+  await w.launcher({ type: 'ui:widgetSize', ...size, extra: 'synthetic' });
+  assert.deepEqual(plain(w.calls.content.at(-1)), { type: 'secondhand:widgetSize', ...size });
+  for (const value of [0, 1.5, '133', 5000, null]) assert.equal(await w.launcher({ type: 'ui:widgetSize', ...size, narrowWidth: value }), undefined, `narrowWidth ${value}`);
+  for (const value of [0, 45, 151, 1.5, '97', null]) assert.equal(await w.launcher({ type: 'ui:widgetSize', ...size, narrowHeight: value }), undefined, `narrowHeight ${value}`);
   // A widget the reader hid asks for the logo alone.
   assert.deepEqual(plain((await w.launcher({ type: 'ui:widgetSize', line: true, width: 254, height: 95, pill: true })).data), { sized: true });
   assert.deepEqual(plain(w.calls.content.at(-1)), { type: 'secondhand:widgetSize', line: true, width: 254, height: 95, pill: true });
@@ -1003,4 +1045,12 @@ test('an approval prompt in a click holds the reload until the click is answered
   await w.panel({ type: 'ui:stop', confirmed: true });
   await settle();
   assert.equal(w.reloads(), 1);
+});
+
+test('on a verified Iowa page, an answer the app left out because of a saved date of birth is said, and the rest still fill (#135)', async () => {
+  const w = worker({ desktop: { fieldsReason: 'birthDate' } });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.state, 'done');
+  assert.deepEqual(w.filled(), ['firstName', 'hasHomeAddress', 'mailingCity']);
+  assert.match(result.message, /^Filled 3 · 1 left for you\. .*SecondHand left the answers that need a date of birth for you: a date of birth in My information is after today or more than 130 years ago\. Check it in the SecondHand app\./);
 });
