@@ -111,6 +111,11 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
   const permissions = new Set([...(granted ? [`${ORIGIN}/*`] : []), ...(allGranted ? [ALL] : [])]);
   // Iowa's site is a manifest permission. Chrome takes it back with https://*/* until it restarts.
   const iowa = { held: true };
+  function takeBack(origins) {
+    origins.forEach(origin => permissions.delete(origin));
+    if (origins.includes(ALL)) { for (const origin of [...permissions]) if (origin.startsWith('https://')) permissions.delete(origin); iowa.held = false; }
+    setImmediate(() => events.permissionsRemoved?.({ permissions: [], origins: [...origins] }));
+  }
   const registered = new Map([...(enabled ? [[SCRIPT_ID, structuredClone(SITE_SCRIPT)]] : []), ...(allSites ? [['site-all', structuredClone(ALL_SCRIPT)]] : [])]);
   for (const frame of frames) {
     if (frame.granted || frame.enabled) permissions.add(`${frame.origin}/*`);
@@ -178,11 +183,12 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
       remove: async ({ origins }) => {
         log.push('permissions.remove');
         if (keepAccess) return true;
-        origins.forEach(origin => permissions.delete(origin));
-        if (origins.includes(ALL)) { for (const origin of [...permissions]) if (origin.startsWith('https://')) permissions.delete(origin); iowa.held = false; }
+        takeBack(origins);
         return true;
       },
-      request: async () => { log.push('permissions.request'); throw new Error('Only the side panel may request access, inside a click.'); }
+      request: async () => { log.push('permissions.request'); throw new Error('Only the side panel may request access, inside a click.'); },
+      // Chrome says when access goes, whoever took it back: SecondHand, the person in Chrome's settings, or Chrome.
+      onRemoved: event('permissionsRemoved')
     },
     scripting: {
       executeScript: async details => {
@@ -299,6 +305,8 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
   return {
     tab, page, vault, log, native, content, injected, tallies, opened, permissions, registered, events, send, iowa,
     reloads: () => reloads,
+    // The person removes SecondHand's access in Chrome's settings (#142).
+    revoke: origins => takeBack(origins),
     nativeTypes: () => native.map(call => call.type),
     contentTypes: () => content.map(call => call.type),
     panel: message => send({ tabId: 7, ...message }, { id: 'testextension', url: PANEL_URL }),
@@ -991,6 +999,102 @@ test('with Chrome’s grant for every https site kept, turning one site off unre
   assert.equal((await declined.panel({ type: 'ui:enableSite', confirmed: true })).ok, false);
   assert.equal(declined.registered.size, 0);
   assert.equal(declined.log.includes('permissions.remove'), false);
+});
+
+// Chrome takes access back (#142): the person removed it in Chrome's settings, or Chrome did.
+const untrusted = w => w.native.filter(call => call.type === 'untrustSite').map(call => call.url);
+test('when Chrome takes a site back, SecondHand stops using it and the app stops trusting it', async () => {
+  const w = siteWorker({ enabled: true });
+  w.revoke([`${ORIGIN}/*`]);
+  await settle();
+  assert.equal(w.registered.size, 0, 'its script is gone');
+  assert.deepEqual(untrusted(w), [ORIGIN]);
+  assert.equal((await w.panel({ type: 'ui:pageState' })).data.site.enabled, false);
+  assert.equal((await autofill(w)).ok, false);
+  assert.deepEqual(w.nativeTypes(), ['untrustSite'], 'nothing more reaches the app');
+  // Chrome's access given back in its settings turns nothing on: only SecondHand's own Turn on does.
+  w.permissions.add(`${ORIGIN}/*`);
+  assert.equal((await w.panel({ type: 'ui:pageState' })).data.site.enabled, false);
+});
+
+test('Chrome taking a site back takes the embedded forms it turned on; taking an embedded form’s site back leaves the page’s site on', async () => {
+  const w = siteWorker({ enabled: true, frames: [secondFrame({ enabled: true })] });
+  w.revoke([`${ORIGIN}/*`]);
+  await settle();
+  assert.equal(w.registered.size, 0);
+  assert.equal(w.permissions.size, 0, 'Chrome’s access to the embedded form goes too, as when the site is turned off');
+  assert.deepEqual(untrusted(w), [ORIGIN, FRAME_ORIGIN]);
+
+  const form = siteWorker({ enabled: true, frames: [secondFrame({ enabled: true })] });
+  form.revoke([`${FRAME_ORIGIN}/*`]);
+  await settle();
+  assert.deepEqual([...form.registered.keys()], [SCRIPT_ID]);
+  assert.deepEqual(untrusted(form), [FRAME_ORIGIN]);
+  assert.equal((await form.panel({ type: 'ui:pageState' })).data.site.enabled, true);
+});
+
+test('with the app closed when Chrome takes a site back, the site is off at once and the app hears at its next status', async () => {
+  const w = siteWorker({ enabled: true, desktop: { reachable: false } });
+  w.revoke([`${ORIGIN}/*`]);
+  await settle();
+  assert.deepEqual([...w.registered.keys()], [SCRIPT_ID], 'kept as the reminder that the app hasn’t heard');
+  assert.equal((await w.panel({ type: 'ui:pageState' })).data.site.enabled, false, 'without Chrome’s access it runs nothing');
+  w.vault.reachable = true;
+  assert.equal((await w.panel({ type: 'ui:desktopStatus' })).ok, true);
+  assert.deepEqual(w.nativeTypes(), ['untrustSite', 'status', 'untrustSite'], 'tried while closed, then before anything else is asked');
+  assert.equal(w.registered.size, 0);
+  // An app that answers but doesn't say it stopped trusting the site fails loudly.
+  const odd = siteWorker({ enabled: true, desktop: { reachable: false } });
+  odd.revoke([`${ORIGIN}/*`]);
+  await settle();
+  Object.assign(odd.vault, { reachable: true, untrustSiteError: 'The request could not be completed.' });
+  assert.equal((await odd.panel({ type: 'ui:desktopStatus' })).errorKey, 'worker.siteStillTrustedInApp');
+  assert.deepEqual([...odd.registered.keys()], [SCRIPT_ID]);
+});
+
+test('when Chrome takes back every https site, all websites turns off and the app stops trusting every site', async () => {
+  const w = siteWorker({ url: OTHER_URL, allSites: true });
+  w.revoke([ALL]);
+  await settle();
+  assert.equal(w.registered.size, 0);
+  assert.deepEqual(w.nativeTypes(), ['untrustAllSites']);
+  assert.equal(w.vault.allSites, false);
+  // A site turned on by itself goes too: Chrome took it back with every https site.
+  const both = siteWorker({ enabled: true, allSites: true });
+  both.revoke([ALL]);
+  await settle();
+  assert.equal(both.registered.size, 0);
+  assert.deepEqual(both.native.map(({ type, url }) => url ? `${type} ${url}` : type), ['untrustAllSites', `untrustSite ${ORIGIN}`]);
+});
+
+test('Chrome taking back a site SecondHand never had on asks nothing of the app; SecondHand’s own Turn off tells the app once', async () => {
+  const w = siteWorker({ granted: true });
+  w.revoke([`${ORIGIN}/*`]);
+  await settle();
+  assert.deepEqual(w.native, []);
+  // Turn off takes Chrome's access back too, and Chrome says so.
+  const off = siteWorker({ enabled: true, frames: [secondFrame({ enabled: true })] });
+  assert.equal((await off.panel({ type: 'ui:disableSite', confirmed: true })).ok, true);
+  await settle();
+  assert.deepEqual(untrusted(off), [ORIGIN, FRAME_ORIGIN]);
+});
+
+test('the Save offers and page words kept for a site Chrome took back are forgotten', async () => {
+  const w = siteWorker({ enabled: true, pageText: { lang: 'en', text: 'Synthetic pantry hours' } });
+  await autofill(w);
+  const [read] = (await w.panel({ type: 'ui:pageText' })).data.pages;
+  assert.equal((await w.panel({ type: 'ui:keepSummary', id: read.id, summary: { language: 'en', english: true, points: ['Open on Mondays.'] } })).ok, true);
+  const before = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.equal(before.savable.length, 1);
+  assert.equal(before.summary.point, 'Open on Mondays.');
+  w.revoke([`${ORIGIN}/*`]);
+  await settle();
+  // The person turns the site on again in the side panel.
+  w.permissions.add(`${ORIGIN}/*`);
+  assert.equal((await w.panel({ type: 'ui:enableSite', confirmed: true })).ok, true);
+  assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).savable, undefined);
+  assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).summary, undefined);
+  assert.equal(w.content.filter(call => call.type === 'secondhand:generic:answered').length, 1, 'the forgotten offer is never asked about again');
 });
 
 test('visible iframe discovery is https only, deduplicated, and excludes the page origin', t => {
