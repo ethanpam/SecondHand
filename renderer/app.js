@@ -199,7 +199,8 @@
     $('auth-view').hidden = false;
     const exists = Boolean(vaultStatus.exists);
     $('auth-title').textContent = exists ? 'Welcome back' : 'Create a password';
-    $('auth-description').textContent = exists ? 'Enter your password to pick up where you left off. Your information is right here on this computer.' : 'Your password protects the information you save in SecondHand. It is encrypted and stays on this computer.';
+    $('auth-description').textContent = exists ? '' : 'Your password protects the information you save in SecondHand. It is encrypted and stays on this computer.';
+    $('auth-description').hidden = exists;
     $('confirm-passphrase-field').hidden = exists;
     $('confirm-passphrase').required = !exists;
     $('passphrase').minLength = exists ? 1 : 12;
@@ -271,6 +272,7 @@
     if (!active) return;
     $('reset-form').hidden = true;
     $('auth-title').textContent = 'Start over';
+    $('auth-description').hidden = false;
     $('auth-description').textContent = 'If you can’t reset your password, you can erase your saved information and create a new password.';
     $('start-over-confirm').focus();
   }
@@ -288,6 +290,7 @@
     $('reset-submit').hidden = !available;
     if (!active) return;
     $('auth-title').textContent = 'Reset your password';
+    $('auth-description').hidden = false;
     $('reset-method').hidden = !(vaultStatus.recoveryKey && vaultStatus.deviceReset);
     if (!available) { $('auth-description').textContent = 'Without your password or a recovery key, SecondHand can’t open your saved information.'; return; }
     renderResetMethod();
