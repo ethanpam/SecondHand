@@ -198,3 +198,21 @@ test('optional radio choices do not block Next, while required groups accept any
   dom.window.document.querySelectorAll('input')[1].checked=true;
   assert.equal(inspect(dom).actions[0].ready,true);
 });
+
+test('different approved websites support contact aliases, address selects, and explicitly mapped SSN/income', async () => {
+  const cases = [
+    {origin:'https://college.example.test',html:'<form><label>Given name<input required></label><label>Family name<input required></label><label>Email<input type="email" required></label><button>Next</button></form>', keys:['firstName','lastName','email'], values:{firstName:'Example',lastName:'Applicant',email:'example@example.test'}},
+    {origin:'https://benefits.example.test',html:'<form><label>City or town<input required></label><label>State<select required><option value="">Choose</option><option value="IA">Iowa</option></select></label><label>Postal code<input required></label><button>Continue</button></form>',keys:['city','state','postalCode'],values:{city:'Des Moines',state:'IA',postalCode:'50309'}},
+    {origin:'https://jobs.example.test',html:'<form><label>Your Social Security number<input type="tel" maxlength="9" required></label><label>Annual income<input type="number" required></label><label>Tax year<input type="number" required></label><button>Next</button></form>',keys:['ssn','annualIncome','annualIncomeYear'],values:{ssn:'000-12-3456',annualIncome:'68450.00',annualIncomeYear:'2025'}}
+  ];
+  for(const item of cases){
+    const url=item.origin+'/application';const dom=page(item.html,url);const doc=dom.window.document;
+    let scan=engine.inspect(doc,url,item.origin);
+    assert.equal(scan.fields.length,3,item.origin);
+    const assignments=scan.fields.map((f,i)=>({id:f.id,key:item.keys[i]}));
+    assert.equal((await engine.fill(doc,url,scan.token,assignments,item.values,Date.now()+60000)).filled,3,item.origin);
+    scan=engine.inspect(doc,url,item.origin);assert.equal(scan.actions[0].ready,true,item.origin);
+    if(item.values.ssn)assert.equal(doc.querySelector('input').value,'000123456');
+    dom.window.close();
+  }
+});
