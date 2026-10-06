@@ -764,7 +764,7 @@
     // question list's own button under it, which puts them in the reader's.
     const questionsOffered = () => Boolean(target) && fillable && service.supported() && (language !== 'en' || Boolean(questions)) && !questionBusy;
     const wordsHinted = () => Boolean(site) && language !== 'en' && !translated.size && questionsOffered() &&
-      (named.length || held.length || layaGuesses.length || filledNames.length || savable.length) > 0;
+      (named.length || held.length || layaGuesses.length || filledNames.length || savable.length || household?.questions.length || rememberable.length) > 0;
     function renderWordsHint() {
       $('words-hint').hidden = !wordsHinted();
       $('words-translate').textContent = needsDownload ? t('translate.download', { language: languageName(language) }) : t('questions.show');
@@ -872,7 +872,7 @@
     // The household questions in their own words, what the list lacks (the person to finish named as My information names them),
     // and one button: Add your household, or with a list saved, Open your household list.
     function renderHousehold() {
-      const signature = JSON.stringify([language, household]);
+      const signature = JSON.stringify([language, household, translated.size]);
       if (signature === householdSignature) return;
       householdSignature = signature;
       $('household-section').hidden = !household;
@@ -886,8 +886,7 @@
         const row = document.createElement('div');
         row.className = 'checklist-item'; row.dataset.householdId = item.id;
         const copy = document.createElement('span'); copy.className = 'checklist-copy';
-        const label = document.createElement('span'); label.className = 'checklist-label'; label.dir = 'auto'; label.textContent = fixedText(item.label, 200);
-        copy.append(label);
+        copy.append(...questionWords(item.label));
         row.append(copy);
         return row;
       }));
@@ -896,15 +895,14 @@
     // unless its answer changes over time, until the applicant changes it. The section's one button remembers the checked ones.
     function rememberChecked() { return rememberable.filter(item => rememberChoices.get(item.id) ?? !item.timeBound).map(item => item.id); }
     function renderRemember() {
-      const signature = JSON.stringify([language, rememberable]);
+      const signature = JSON.stringify([language, rememberable, translated.size]);
       if (signature === rememberSignature) return;
       rememberSignature = signature;
       $('remember-list').replaceChildren(...rememberable.map(item => {
         const row = document.createElement('div');
         row.className = 'checklist-item save-row'; row.dataset.rememberId = item.id;
         const copy = document.createElement('span'); copy.className = 'checklist-copy';
-        const label = document.createElement('span'); label.className = 'checklist-label'; label.dir = 'auto'; label.textContent = fixedText(item.label, 200);
-        copy.append(label);
+        copy.append(...questionWords(item.label));
         if (item.timeBound) {
           const detail = document.createElement('span'); detail.className = 'checklist-detail'; detail.textContent = t('remember.changes');
           copy.append(detail);
@@ -913,7 +911,7 @@
         const box = document.createElement('input'); box.type = 'checkbox';
         box.checked = rememberChoices.get(item.id) ?? !item.timeBound;
         box.disabled = working || !target;
-        box.setAttribute('aria-label', t('remember.checkLabel', { label: fixedText(item.label, 200) }));
+        box.setAttribute('aria-label', t('remember.checkLabel', { label: copy.firstChild.textContent }));
         box.addEventListener('change', () => { rememberChoices.set(item.id, box.checked); controls(); });
         check.append(box, document.createTextNode(t('remember.check')));
         row.append(copy, check);
@@ -1246,7 +1244,7 @@
         translated = results;
         translatedFrom = source;
         renderQuestionList();
-        renderLeft(); renderFilled(); renderSaves(); renderHeld(); renderGuesses(); renderWordsHint();
+        renderLeft(); renderFilled(); renderSaves(); renderHeld(); renderHousehold(); renderGuesses(); renderRemember(); renderWordsHint();
         say({ key: 'translate.done' });
       } catch (error) {
         say({ key: 'translate.failed', params: { detail: fixedText(error.message, 200) } }, true);

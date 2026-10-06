@@ -100,5 +100,5 @@ details.filled>summary>span{display:flex;align-items:center;gap:10px}details.fil
 .remember-check{display:flex;align-items:center;gap:6px;flex-shrink:0;color:var(--muted-foreground);cursor:pointer}.remember-check input{width:16px;height:16px;margin:0;accent-color:var(--primary)}#remember-save{margin-top:8px}
 .guess-mark{border:2px dotted #9b3d8f}
 /* What Fill sensitive details will fill: a plain list above its button, not boxes that look like fields to type in. */
-#held-list{background:none;border:0;border-radius:0;margin:0 0 12px}#held-list .checklist-item{position:relative;padding:2px 0;padding-inline-start:16px}
-#held-list .checklist-item::before{content:"";position:absolute;inset-inline-start:3px;top:50%;width:5px;height:5px;margin-top:-2.5px;border-radius:50%;background:var(--foreground)}
+#held-list,#household-list{background:none;border:0;border-radius:0;margin:0 0 12px}:is(#held-list,#household-list) .checklist-item{position:relative;padding:2px 0;padding-inline-start:16px;border-bottom:0}
+:is(#held-list,#household-list) .checklist-item::before{content:"";position:absolute;inset-inline-start:3px;top:50%;width:5px;height:5px;margin-top:-2.5px;border-radius:50%;background:var(--foreground)}
