@@ -16,10 +16,15 @@
   // embedded in it does. After a page change, the check waits a moment so a burst of changes is one check.
   let helps = false;
   let framesHelp = false;
+  let frameRevision = 0;
   let checkTimer = null;
   const CHECK_MS = 500;
   // SecondHand was turned off for this page: its card is gone and nothing more is answered.
   let off = false;
+  let suspended = false; // A cached document resumes on pageshow; an off document never does.
+  let restoring = false; // Wait for the worker to recheck site access after a cached page returns.
+  let activation = 0;
+  let watch = null;
   const strings = value => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
   // The widget's frame is as wide as the widget measured itself, never past 272px or the screen.
   const fits = width => Number.isInteger(width) && width > 0 && width <= 1000;
@@ -99,7 +104,7 @@
   }
 
   function placeCard() {
-    if (!topFrame || off) return;
+    if (!topFrame || off || suspended || restoring) return;
     if (helps || framesHelp) ensurePanel();
     else panelHost?.remove();
   }
@@ -112,7 +117,7 @@
   // The top page places its card; an embedded frame tells the worker, which tells the top page.
   function check() {
     checkTimer = null;
-    if (off) return;
+    if (off || suspended || restoring) return;
     const now = engine.offers(document) === true;
     const changed = now !== helps;
     helps = now;
@@ -121,40 +126,91 @@
   }
   function stop() {
     clearTimeout(checkTimer);
+    checkTimer = null;
     clearInterval(watch);
+    watch = null;
     observer.disconnect();
+  }
+  function turnOff() {
+    off = true;
+    restoring = false;
+    activation++;
+    stop();
+    panelHost?.remove();
+    panelHost = null;
+  }
+  // A reply for an earlier page activation must not restore stale embedded-form state.
+  function refreshFrames() {
+    const current = activation, framesAtRequest = frameRevision;
+    report(helps).then(reply => {
+      if (off || suspended || current !== activation) return;
+      if (frameRevision === framesAtRequest) framesHelp = reply?.frames === true;
+      placeCard();
+    });
+  }
+  // Forms that load late or change: check again once the page settles. Text-node updates
+  // count too; a framework can change a question without replacing its label element.
+  const observer = new MutationObserver(records => {
+    if (off || suspended || restoring || checkTimer || records.every(record => panelHost && (record.target === panelHost || panelHost.contains(record.target)))) return;
+    checkTimer = setTimeout(check, CHECK_MS);
+  });
+  function observe() {
+    observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+    // Pages that rebuild their body (single-page forms) get the widget back.
+    if (topFrame && watch === null) watch = setInterval(placeCard, 1000);
   }
 
   check();
   // A form embedded before this page loaded was reported to the worker already.
-  if (topFrame) report(helps).then(reply => { framesHelp = reply?.frames === true; placeCard(); });
+  if (topFrame) refreshFrames();
   document.addEventListener('DOMContentLoaded', check, { once: true });
-  // Forms that load late or change: check again once the page settles. SecondHand's own card doesn't count.
-  const observer = new MutationObserver(records => {
-    if (off || checkTimer || records.every(record => panelHost && (record.target === panelHost || panelHost.contains(record.target)))) return;
-    checkTimer = setTimeout(check, CHECK_MS);
-  });
-  observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true });
-  // Pages that rebuild their body (single-page forms) get the widget back.
-  const watch = topFrame ? setInterval(placeCard, 1000) : null;
+  observe();
   if (topFrame) window.addEventListener('resize', () => { if (panelHost) fitHost(); });
   window.addEventListener('pagehide', () => {
+    if (suspended) return;
+    suspended = true;
+    restoring = false;
+    activation++;
     stop();
+    panelHost?.remove();
     if (!topFrame && helps && !off) report(false);
-  }, { once: true });
+    helps = false;
+    framesHelp = false;
+  });
+  window.addEventListener('pageshow', event => {
+    if (!event.persisted || !suspended || off) return;
+    suspended = false;
+    restoring = true;
+    const current = ++activation, framesAtRequest = frameRevision;
+    helps = engine.offers(document) === true;
+    // The off broadcast may never have reached a frozen document. The worker returns
+    // no report when either this frame or its top-level site is no longer approved.
+    report(helps).then(reply => {
+      if (off || suspended || current !== activation) return;
+      if (typeof reply?.frames !== 'boolean') { turnOff(); return; }
+      restoring = false;
+      if (frameRevision === framesAtRequest) framesHelp = reply.frames;
+      observe();
+      check(); // Recheck changes made while the worker answered; one fresh frame report was already sent.
+    });
+  });
 
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (off || sender.id !== chrome.runtime.id || !message || typeof message !== 'object') return;
     if (message.type === 'secondhand:generic:off') {
-      off = true;
-      stop();
-      panelHost?.remove();
-      panelHost = null;
+      turnOff();
       return;
     }
+    if (suspended) return;
     if (message.type === 'secondhand:generic:formFrames' && typeof message.helps === 'boolean' && topFrame) {
       framesHelp = message.helps;
-      placeCard();
+      frameRevision++;
+      placeCard(); // While restoring, the metadata is retained but the card still waits for approval.
+      return;
+    }
+    if (restoring) {
+      // A worker checking all embedded forms may ask while this frame's approval reply waits.
+      if (!topFrame && message.type === 'secondhand:generic:helps') respond({ helps });
       return;
     }
     // A restarted worker asks an embedded frame what it reported before (#157): yes or no only.

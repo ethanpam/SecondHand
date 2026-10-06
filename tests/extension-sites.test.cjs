@@ -2321,6 +2321,161 @@ test('a form that appears after the page loads brings the card, and the card goe
   assert.equal(page.cards(), 0);
 });
 
+test('text-only question label changes update form detection without replacing the label or control', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const page = livePage(t, '<label for="detail">Signature</label><input id="detail">');
+  await tick();
+  const label = page.window.document.querySelector('label'), input = page.window.document.querySelector('input');
+  assert.equal(page.cards(), 0);
+  label.firstChild.data = 'First name';
+  await checkAfterChange(t);
+  assert.equal(page.cards(), 1);
+  assert.equal(page.window.document.querySelector('label'), label);
+  assert.equal(page.window.document.querySelector('input'), input);
+  label.firstChild.data = 'Signature';
+  await checkAfterChange(t);
+  assert.equal(page.cards(), 0, 'the card also leaves when the only question becomes one the applicant must answer');
+});
+
+const historyEvent = (page, name, persisted = true) => page.window.dispatchEvent(new page.window.PageTransitionEvent(name, { persisted }));
+test('back-forward-cache restoration restarts late-form detection, including a check canceled before the page hid', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const page = livePage(t, '<main id="app">Loading</main>');
+  await tick();
+  const app = page.window.document.getElementById('app');
+  app.append(page.window.document.createElement('p'));
+  await tick(); // A check is pending when the page enters the back-forward cache.
+  historyEvent(page, 'pagehide');
+  historyEvent(page, 'pageshow');
+  assert.equal(page.cards(), 0);
+  app.innerHTML = '<label for="name">First name</label><input id="name">';
+  await checkAfterChange(t);
+  assert.equal(page.cards(), 1);
+  historyEvent(page, 'pagehide');
+  app.innerHTML = '<p>Completed</p>';
+  await tick();
+  historyEvent(page, 'pageshow');
+  assert.equal(page.cards(), 0, 'restoration checks the current DOM immediately');
+  app.innerHTML = '<label for="zip">ZIP code</label><input id="zip">';
+  await checkAfterChange(t);
+  assert.equal(page.cards(), 1, 'a second cache cycle also rearms its observer');
+});
+
+test('restored embedded frames report fresh form state once and never create a second widget', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const frame = livePage(t, '<main><label for="name">First name</label><input id="name"></main>', { top: false, url: `${FRAME_ORIGIN}/form` });
+  await tick();
+  historyEvent(frame, 'pagehide');
+  historyEvent(frame, 'pagehide');
+  historyEvent(frame, 'pageshow');
+  historyEvent(frame, 'pageshow');
+  await tick();
+  assert.deepEqual(frame.reports.map(item => item.helps), [true, false, true]);
+  assert.equal(frame.cards(), 0);
+  historyEvent(frame, 'pagehide');
+  frame.window.document.querySelector('main').textContent = 'No form remains';
+  historyEvent(frame, 'pageshow');
+  await tick();
+  assert.deepEqual(frame.reports.map(item => item.helps), [true, false, true, false, false], 'even a restored empty frame corrects any missed departure report');
+  let reply;
+  frame.listeners[0]({ type: 'secondhand:generic:helps' }, { id: extensionId }, value => { reply = plain(value); });
+  assert.deepEqual(reply, { helps: false });
+});
+
+test('restoring a page refreshes embedded-form state and ignoring duplicate pageshow creates no duplicate repair timer', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const page = livePage(t, '<main>No local form</main>', { framesReply: { frames: true } });
+  await tick(); assert.equal(page.cards(), 1);
+  let started = 0, cleared = 0;
+  const set = page.window.setInterval.bind(page.window), clear = page.window.clearInterval.bind(page.window);
+  page.window.setInterval = (...args) => { started++; return set(...args); };
+  page.window.clearInterval = id => { if (id !== null) cleared++; return clear(id); };
+  page.window.chrome.runtime.sendMessage = async message => { page.reports.push(plain(message)); return { frames: false }; };
+  historyEvent(page, 'pagehide');
+  historyEvent(page, 'pageshow');
+  historyEvent(page, 'pageshow');
+  await tick();
+  assert.equal(page.cards(), 0, 'old embedded-frame visibility is not reused after restoration');
+  assert.equal(page.reports.length, 2, 'one top-level frame query per activation');
+  assert.equal(started, 1); assert.equal(cleared, 1);
+  historyEvent(page, 'pagehide'); historyEvent(page, 'pageshow'); await tick();
+  assert.equal(started, 2); assert.equal(cleared, 2);
+});
+
+test('turning a suspended page off cannot be undone by restoration, late reports, or DOM changes', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const page = livePage(t, '<main>No local form</main>'); await tick();
+  let answer;
+  page.window.chrome.runtime.sendMessage = message => { page.reports.push(plain(message)); return new Promise(resolve => { answer = resolve; }); };
+  historyEvent(page, 'pagehide'); historyEvent(page, 'pageshow');
+  historyEvent(page, 'pagehide');
+  page.tell({ type: 'secondhand:generic:off' });
+  historyEvent(page, 'pageshow');
+  answer?.({ frames: true });
+  page.window.document.querySelector('main').innerHTML = '<label for="zip">ZIP code</label><input id="zip">';
+  await checkAfterChange(t);
+  assert.equal(page.cards(), 0);
+  let replied = false;
+  page.listeners[0]({ type: 'secondhand:generic:plan' }, { id: extensionId }, () => { replied = true; });
+  assert.equal(replied, false);
+  assert.equal(page.reports.length, 2);
+});
+
+test('a cached page waits for current site approval and stays off if access was revoked while it was frozen', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const top of [true, false]) {
+    const page = livePage(t, '<label for="name">First name</label><input id="name">', { top });
+    await tick();
+    historyEvent(page, 'pagehide');
+    let answer;
+    page.window.chrome.runtime.sendMessage = message => { page.reports.push(plain(message)); return new Promise(resolve => { answer = resolve; }); };
+    historyEvent(page, 'pageshow');
+    assert.equal(page.cards(), 0, 'no card until the restored site is confirmed');
+    let replied = false;
+    page.listeners[0]({ type: 'secondhand:generic:plan' }, { id: extensionId }, () => { replied = true; });
+    assert.equal(replied, false, 'no plans or fills while current access is being checked');
+    if (!top) {
+      let status;
+      page.listeners[0]({ type: 'secondhand:generic:helps' }, { id: extensionId }, value => { status = plain(value); });
+      assert.deepEqual(status, { helps: true }, 'the worker can still count this frame without a form answer');
+    }
+    answer(undefined); // The worker returns nothing for a site no longer approved.
+    await tick();
+    historyEvent(page, 'pagehide'); historyEvent(page, 'pageshow');
+    page.window.document.querySelector('label').firstChild.data = 'Last name';
+    await checkAfterChange(t);
+    assert.equal(page.cards(), 0);
+    page.listeners[0]({ type: 'secondhand:generic:plan' }, { id: extensionId }, () => { replied = true; });
+    assert.equal(replied, false, 'returning again cannot revive a revoked script');
+  }
+});
+
+test('an approval report from an earlier cached activation cannot overwrite fresh restored frame state', async t => {
+  const page = livePage(t, '<main>No local form</main>'); await tick();
+  const replies = [];
+  page.window.chrome.runtime.sendMessage = message => { page.reports.push(plain(message)); return new Promise(resolve => replies.push(resolve)); };
+  historyEvent(page, 'pagehide'); historyEvent(page, 'pageshow');
+  historyEvent(page, 'pagehide'); historyEvent(page, 'pageshow');
+  assert.equal(replies.length, 2);
+  replies[1]({ frames: false }); await tick();
+  replies[0]({ frames: true }); await tick();
+  assert.equal(page.cards(), 0, 'the later approved activation wins even when old replies arrive last');
+});
+
+test('newer embedded-form reports received during restoration survive the older approval reply', async t => {
+  const page = livePage(t, '<main>No local form</main>'); await tick();
+  historyEvent(page, 'pagehide');
+  let answer;
+  page.window.chrome.runtime.sendMessage = () => new Promise(resolve => { answer = resolve; });
+  historyEvent(page, 'pageshow');
+  page.tell({ type: 'secondhand:generic:formFrames', helps: true });
+  assert.equal(page.cards(), 0, 'frame metadata alone cannot approve restoration');
+  answer({ frames: false }); await tick();
+  assert.equal(page.cards(), 1, 'the newer frame message wins after the worker approves the site');
+  page.tell({ type: 'secondhand:generic:formFrames', helps: false });
+  assert.equal(page.cards(), 0);
+});
+
 test('the scripts run once when a site’s own registration and all websites both match the page', async t => {
   const page = livePage(t, forms.plainPantry, { loads: 2 });
   assert.equal(page.cards(), 1);
