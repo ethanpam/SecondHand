@@ -1270,10 +1270,13 @@ function keepSummary(tabId, id, summary) {
   return { kept: true };
 }
 // The widget can't size its own frame, so its tab's content script fits the frame to the
-// widget's measured width, one row taller while it shows a line.
+// widget's measured size, taller while it shows a line.
 const cardWidth = width => Number.isInteger(width) && width > 0 && width <= 1000; // CSS pixels; the page caps it
-async function widgetSize(tabId, line, width) {
-  const reply = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:widgetSize', line, ...(width === undefined ? {} : { width }) }, { frameId: 0 });
+const CARD_SIZES = ['width', 'height', 'narrowWidth', 'narrowHeight'];
+const cardSize = message => CARD_SIZES.every(key => message[key] === undefined || cardWidth(message[key]));
+async function widgetSize(tabId, line, message) {
+  const size = Object.fromEntries(CARD_SIZES.filter(key => message[key] !== undefined).map(key => [key, message[key]]));
+  const reply = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:widgetSize', line, ...size }, { frameId: 0 });
   if (reply?.sized !== true) throw fault('worker.requestFailed');
   return { sized: true };
 }
@@ -1351,7 +1354,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   else if (panel && message.type === 'ui:pageText') run = () => pageText(tabId);
   else if (panel && message.type === 'ui:keepSummary' && typeof message.id === 'string') run = async () => keepSummary(tabId, message.id, message.summary);
   else if (panel && message.type === 'ui:saveAnswer' && message.confirmed === true && typeof message.id === 'string') run = () => saveAnswer(tabId, message.id);
-  else if (launcher && message.type === 'ui:widgetSize' && typeof message.line === 'boolean' && (message.width === undefined || cardWidth(message.width))) run = () => widgetSize(tabId, message.line, message.width);
+  else if (launcher && message.type === 'ui:widgetSize' && typeof message.line === 'boolean' && cardSize(message)) run = () => widgetSize(tabId, message.line, message);
   else return;
   // A click holds off an update until it settles; after any request, a waiting update may reload.
   const action = message.confirmed === true;

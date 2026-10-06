@@ -24,6 +24,17 @@
   // The widget's frame is as wide as the widget measured itself, never past 272px or the screen.
   const fits = width => Number.isInteger(width) && width > 0 && width <= 1000;
   const frameWidth = width => `min(${width || 272}px, 272px, calc(100vw - 24px))`;
+  const SIZES = ['width', 'height', 'narrowWidth', 'narrowHeight'];
+  let line = false; // the widget shows a line the reader must act on, taller
+  let card = {}; // the widget's measured size; empty until it measures
+  // With a line, the frame is as tall as the widget measured itself, from 86px up to 110px. A page
+  // under 640px wide keeps the widget as narrow as its buttons and gives the line more rows instead,
+  // so the widget covers no more of the page than it does without a line.
+  function fitHost() {
+    const size = line && card.narrowWidth && innerWidth < 640 ? { width: card.narrowWidth, height: card.narrowHeight } : card;
+    panelHost.style.setProperty('width', frameWidth(size.width), 'important');
+    panelHost.style.setProperty('height', line ? `${Math.min(110, Math.max(86, size.height || 0))}px` : '46px', 'important');
+  }
 
   function withOwnPanelHidden(work) {
     if (!panelHost) return work();
@@ -119,6 +130,7 @@
   observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true });
   // Pages that rebuild their body (single-page forms) get the widget back.
   const watch = topFrame ? setInterval(placeCard, 1000) : null;
+  if (topFrame) window.addEventListener('resize', () => { if (panelHost) fitHost(); });
   window.addEventListener('pagehide', () => {
     stop();
     if (!topFrame && helps && !off) chrome.runtime.sendMessage({ type: 'secondhand:generic:form', helps: false });
@@ -184,12 +196,10 @@
         // Every question's label for the applicant's translated list, and the language this document declares.
         const listed = withOwnPanelHidden(() => engine.questions(document));
         respond({ lang: document.documentElement.lang || '', questions: listed.map(({ id, label }) => ({ id, label })) });
-      } else if (message.type === 'secondhand:widgetSize' && typeof message.line === 'boolean' && (message.width === undefined || fits(message.width)) && topFrame) {
-        // As wide as the widget, and one row taller while it shows a line the reader must act on.
-        if (panelHost) {
-          panelHost.style.setProperty('width', frameWidth(message.width), 'important');
-          panelHost.style.setProperty('height', message.line ? '86px' : '46px', 'important');
-        }
+      } else if (message.type === 'secondhand:widgetSize' && typeof message.line === 'boolean' && SIZES.every(key => message[key] === undefined || fits(message[key])) && topFrame) {
+        line = message.line;
+        card = Object.fromEntries(SIZES.filter(key => message[key] !== undefined).map(key => [key, message[key]]));
+        if (panelHost) fitHost();
         respond({ sized: Boolean(panelHost) });
       } else if (message.type === 'secondhand:generic:pageText') {
         // This frame's own words for the side panel's summary, and the language it declares. Never form values.
