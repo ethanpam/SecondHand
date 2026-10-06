@@ -102,6 +102,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
       onActivated: w.event('activated'), onRemoved: w.event('removed'), onUpdated: w.event('updated')
     },
     sidePanel: { setPanelBehavior: async () => {}, open: async () => {} },
+    commands: { onCommand: w.event('command') },
     scripting: { executeScript: async details => { calls.injected.push(plain(details)); }, getRegisteredContentScripts: async () => [] },
     // Iowa's site is the extension's own host permission; no other site is on.
     permissions: { contains: async ({ origins }) => origins.every(origin => origin === 'https://hhsservices.iowa.gov/*') },
@@ -154,6 +155,46 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
   };
 }
 const autofill = w => w.panel({ type: 'ui:autofill', confirmed: true });
+
+// Keyboard shortcuts: Chrome sends a command only for keys the person pressed, with the tab in front.
+const settleShortcut = async () => { for (let i = 0; i < 30; i++) await new Promise(resolve => setImmediate(resolve)); };
+test('the Autofill shortcut does what the tab’s Autofill button does, and stops Autofill while it runs', async () => {
+  const w = worker();
+  w.events.command('autofill', { id: 7 });
+  await settleShortcut();
+  assert.deepEqual(w.filled(), ['firstName', 'hasHomeAddress', 'mailingCity'], 'one press fills as one click does');
+  assert.deepEqual(w.calls.native.map(call => call.type).filter(type => type !== 'status'), ['getFields', 'recordProgress'], 'and asks the app the same way');
+  const state = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.equal(state.autopilot, true, 'Autofill goes on, as after a click');
+  assert.match(state.result.message, /^Filled 3 · 1 left for you/);
+  w.events.command('autofill', { id: 7 });
+  await settleShortcut();
+  assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).autopilot, false, 'a second press stops it');
+  assert.deepEqual(w.filled(), ['firstName', 'hasHomeAddress', 'mailingCity'], 'and Stop erases nothing');
+});
+
+test('the next-question shortcut goes to each question the tab’s result left, in turn, and does nothing before there is one', async () => {
+  const w = worker({ desktop: { values: { hasHomeAddress: 'yes', mailingCity: 'Synthetic private city' } } });
+  const focused = () => w.calls.content.filter(message => message.type === 'secondhand:focusField').map(message => message.key);
+  w.events.command('next-question', { id: 7 });
+  await settleShortcut();
+  assert.deepEqual(focused(), [], 'nothing is left before Autofill has run');
+  await autofill(w);
+  for (let i = 0; i < 3; i++) { w.events.command('next-question', { id: 7 }); await settleShortcut(); }
+  assert.deepEqual(focused(), ['firstName', 'lastName', 'firstName']);
+});
+
+test('a shortcut on a tab that is neither Iowa’s form nor a site that is on does nothing, and an unknown command is ignored', async () => {
+  const w = worker();
+  w.tab.url = 'https://unknown.example/form';
+  w.events.command('autofill', { id: 7 });
+  w.events.command('next-question', { id: 7 });
+  w.events.command('something-else', { id: 7 });
+  w.events.command('autofill', {});
+  await settleShortcut();
+  assert.deepEqual(w.calls.native.filter(call => call.type === 'getFields'), []);
+  assert.deepEqual(w.filled(), []);
+});
 
 test('one click makes one status and one getFields request, fills revealed fields, and records progress', async () => {
   const w = worker();

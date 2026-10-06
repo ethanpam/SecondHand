@@ -1739,10 +1739,33 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     .finally(() => { if (action) clicksUnderway--; reloadWhenIdle(); });
   return true;
 });
+// Keyboard shortcuts (chrome://extensions/shortcuts). Chrome sends them only for keys the person pressed, never for a
+// page's script. "autofill" does what the tab's Autofill button does, Stop while Autofill runs, on the tab in front;
+// the SecondHand app still asks before it shares anything. "next-question" goes to the next question the tab's
+// result left, in turn, as the card's link does.
+const questionTurns = new Map(); // tabId -> { result, index } of the last question the shortcut went to
+async function nextQuestion(tabId) {
+  const result = results.get(tabId);
+  const keys = (Array.isArray(result?.needYou) ? result.needYou : []).filter(key => typeof key === 'string' && (FIELD_ID.test(key) || SITE_FIELD_ID.test(key)));
+  if (!keys.length) return null;
+  const last = questionTurns.get(tabId);
+  const index = last?.result === result ? (last.index + 1) % keys.length : 0;
+  questionTurns.set(tabId, { result, index });
+  return focusField(tabId, keys[index]);
+}
+chrome.commands?.onCommand.addListener((command, tab) => {
+  const tabId = tab?.id;
+  if (!Number.isInteger(tabId)) return;
+  if (command === 'next-question') { nextQuestion(tabId).catch(() => {}); return; }
+  if (command !== 'autofill') return;
+  // As a click does, the shortcut holds off an update until it settles.
+  clicksUnderway++;
+  (autopilots.has(tabId) ? stop(tabId) : autofill(tabId)).catch(() => {}).finally(() => { clicksUnderway--; reloadWhenIdle(); });
+});
 chrome.tabs.onActivated?.addListener(info => {
   for (const tabId of autopilots.keys()) if (tabId !== info.tabId) stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], ...say('worker.stoppedTabChanged'), pageKey: results.get(tabId)?.pageKey || '' });
 });
-chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); generalPages.delete(tabId); sitePlans.delete(tabId); questionViews.delete(tabId); pageReads.delete(tabId); formFrames.delete(tabId); formChecks.delete(tabId); savables.delete(tabId); heldDetails.delete(tabId); });
+chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); questionTurns.delete(tabId); generalPages.delete(tabId); sitePlans.delete(tabId); questionViews.delete(tabId); pageReads.delete(tabId); formFrames.delete(tabId); formChecks.delete(tabId); savables.delete(tabId); heldDetails.delete(tabId); });
 chrome.tabs.onUpdated?.addListener((tabId, change) => {
   if (change.status === 'loading') {
     results.delete(tabId);

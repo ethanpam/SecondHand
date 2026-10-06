@@ -105,6 +105,20 @@
   const startedBefore = () => { try { return localStorage.getItem(STARTED_KEY) === '1'; } catch { return false; } };
   const noteStarted = () => { try { localStorage.setItem(STARTED_KEY, '1'); } catch { /* storage is a convenience here */ } };
   const followStarted = rerender => { window.addEventListener('storage', event => { if (event.key === STARTED_KEY) rerender(); }); };
+  // The keyboard shortcuts Chrome gives SecondHand (chrome://extensions/shortcuts), by command: a button's tooltip
+  // names the one set for it. Read once; `rerender` runs when they are known.
+  // The manifest's command names.
+  const COMMANDS = Object.freeze({ autofill: 'autofill', nextQuestion: 'next-question' });
+  let shortcuts = {};
+  function readShortcuts(rerender) {
+    const reading = chrome.commands?.getAll?.();
+    if (!reading) return;
+    reading.then(list => {
+      shortcuts = Object.fromEntries(list.filter(command => command.shortcut).map(command => [command.name, command.shortcut]));
+      rerender();
+    }).catch(() => {});
+  }
+  const withShortcut = (title, name) => [title, shortcuts[name] ? t('shortcut.keys', { keys: shortcuts[name] }) : ''].filter(Boolean).join(' ');
 
   applyStatic();
   if (location.search === '?surface=launcher' && !location.hash) { widget(); return; }
@@ -187,9 +201,10 @@
       // Answers still to give show as a link that finds each one in the form.
       $('need-you').hidden = outdated || !needYou.length;
       $('need-you').textContent = t('widget.needYou', { count: needYou.length });
-      $('need-you').title = t('widget.needYouTitle');
+      $('need-you').title = withShortcut(t('widget.needYouTitle'), COMMANDS.nextQuestion);
       $('widget-text').textContent = statusText();
-      $('autofill').title = site ? t('widget.autofillSiteTitle') : t('widget.autofillIowaTitle');
+      $('autofill').title = withShortcut(site ? t('widget.autofillSiteTitle') : t('widget.autofillIowaTitle'), COMMANDS.autofill);
+      $('stop').title = withShortcut(t('widget.stopTitle'), COMMANDS.autofill);
       const details = [hasMessage(result) ? words(fromResult(result)) : '', ai.note ? words(ai.note) : '', ai.reason, fixedText(languageTrouble?.message, 160)];
       $('widget-text').title = outdated ? statusText() : fixedText(details.filter(Boolean).join(' '), 240);
       // The status is always read to screen readers, and shown as a line whenever it says something the
@@ -366,6 +381,7 @@
     }));
     followLanguage(() => { applyStatic(); render(); });
     followStarted(render);
+    readShortcuts(render);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
     window.addEventListener('pagehide', () => clearTimeout(pollTimer), { once: true });
     render();
@@ -513,6 +529,8 @@
       // from this Chrome. Once it has run on this page, the status line says what it did.
       $('iowa-policy').hidden = !target || Boolean(site) || autopilot || told;
       $('iowa-policy').textContent = t(startedBefore() ? 'panel.iowaPolicyAgain' : 'panel.iowaPolicy');
+      $('panel-autofill').title = withShortcut('', COMMANDS.autofill);
+      $('panel-left').title = withShortcut('', COMMANDS.nextQuestion);
       const pending = site?.enabled && site.ready ? site.frames.filter(frame => !frame.enabled) : [];
       $('frames-enable').hidden = !target || !pending.length;
       $('frames-enable').disabled = working;
@@ -1253,6 +1271,7 @@
     });
     followLanguage(relabel);
     followStarted(controls);
+    readShortcuts(controls);
     function halt(error) {
       if (halted) return;
       show(null);

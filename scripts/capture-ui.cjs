@@ -505,6 +505,18 @@ async function outdated() {
   }));
 }
 
+// Chrome's own list of SecondHand's keyboard shortcuts (chrome://extensions/shortcuts).
+async function shortcutsPage() {
+  await withSession(smoke.extensionDirectory, {}, async session => {
+    const page = await session.context.newPage();
+    await page.goto('chrome://extensions/shortcuts');
+    await expect.poll(() => page.evaluate(() => document.querySelector('extensions-manager')?.shadowRoot?.querySelector('extensions-keyboard-shortcuts') !== null), { timeout: 15000 }).toBe(true);
+    await page.waitForTimeout(800);
+    await save('chrome-shortcuts', 'png', file => page.screenshot({ path: file, clip: { x: 0, y: 0, width: VIEW.width, height: 420 } }));
+    await page.close();
+  });
+}
+
 // A short recording of the card at work: Autofill, then the link to the answer that is missing.
 async function recording() {
   const run = promisify(execFile);
@@ -556,6 +568,7 @@ const sessions = [
   [iowaPanel, ['panel-iowa', 'panel-header', 'panel-focus', 'panel-working', 'panel-iowa-filled', 'panel-checklist', 'panel-iowa-again', 'panel-locked', 'panel-closed', 'panel-info', 'panel-elsewhere', 'panel-elsewhere-es', 'panel-arabic', 'panel-questions']],
   [sites, ['panel-site-off', 'panel-site-filled', 'panel-site-filled-open', 'panel-laya-off', 'panel-save', 'panel-site-held', 'panel-site-guessed', 'panel-site-guessed-es', 'panel-all-sites-off', 'card-site', 'card-offer', 'card-offer-filled']],
   [outdated, ['card-outdated', 'panel-outdated', 'card-reload']],
+  [shortcutsPage, ['chrome-shortcuts']],
   [recording, ['card-autofill']]
 ];
 

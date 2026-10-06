@@ -316,7 +316,10 @@ async function panel(t, initial = {}) {
     autopilot: Boolean(initial.autopilot)
   };
   const desktop = { connected: true, unlocked: true, ...initial.desktop };
-  window.chrome = { tabs: {
+  window.chrome = {
+    // `shortcuts`: the keys Chrome lists for SecondHand's commands, as chrome://extensions/shortcuts sets them.
+    ...(initial.shortcuts ? { commands: { getAll: async () => structuredClone(initial.shortcuts) } } : {}),
+    tabs: {
     query: async () => [tabs.current],
     onActivated: { addListener: callback => { listeners.activated = callback; } },
     onUpdated: { addListener: callback => { listeners.updated = callback; } }
@@ -2469,6 +2472,27 @@ test('the widget counts held questions under need-you, says they wait in the sid
   const spanish = await panel(t, { launcher: true, language: 'es', tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: heldDone });
   await spanish.userClick('autofill');
   assert.equal(spanish.get('widget-text').textContent, 'Completadas: 1. Revise sus respuestas antes de enviar. 2 datos sensibles esperan hasta que usted haga clic en “Llenar datos sensibles” en el panel lateral.');
+});
+
+test('the buttons that the keyboard shortcuts work name them in their tooltips, in the applicant’s language, and say nothing of one that is unset', async t => {
+  const shortcuts = [{ name: 'autofill', shortcut: '⌥⇧F', description: 'Start Autofill on this page, or stop it' }, { name: 'next-question', shortcut: '', description: 'Go to the next question left' },
+    { name: '_execute_action', shortcut: '' }];
+  const widget = await panel(t, { launcher: true, shortcuts });
+  await settle();
+  assert.equal(widget.get('autofill').title, `${EN['widget.autofillIowaTitle']} Keyboard shortcut: ⌥⇧F.`);
+  assert.equal(widget.get('stop').title, `${EN['widget.stopTitle']} Keyboard shortcut: ⌥⇧F.`);
+  assert.equal(widget.get('need-you').title, EN['widget.needYouTitle'], 'no shortcut is set for the next question');
+  const side = await panel(t, { shortcuts: [...shortcuts.slice(0, 1), { name: 'next-question', shortcut: '⌥⇧N' }] });
+  await settle();
+  assert.equal(side.get('panel-autofill').title, 'Keyboard shortcut: ⌥⇧F.');
+  assert.equal(side.get('panel-left').title, 'Keyboard shortcut: ⌥⇧N.');
+  const spanish = await panel(t, { language: 'es', shortcuts });
+  await settle();
+  assert.equal(spanish.get('panel-autofill').title, 'Atajo de teclado: ⌥⇧F.');
+  // Without the commands API (an older Chrome, or none set), no tooltip names one.
+  const none = await panel(t, {});
+  await settle();
+  assert.equal(none.get('panel-autofill').title, '');
 });
 
 // #185: Laya's best guesses, listed for the applicant to find and check.

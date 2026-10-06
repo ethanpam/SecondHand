@@ -226,6 +226,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
       }
     },
     sidePanel: { setPanelBehavior: async () => {}, open: async options => { opened.push(plain(options)); } },
+    commands: { onCommand: event('command') },
     runtime: {
       id: 'testextension', getURL: file => `chrome-extension://testextension/${file}`,
       onMessage: w.onMessage,
@@ -1113,7 +1114,7 @@ test('the Save offers and page words kept for a site Chrome took back are forgot
 test('a restarted worker listens for every event before its first one, and the sites turned on stay on, from Chrome’s records', async () => {
   const w = siteWorker({ enabled: true, frames: [secondFrame({ enabled: true })] });
   w.restart();
-  assert.deepEqual(w.listening(), ['activated', 'installed', 'message', 'permissionsRemoved', 'removed', 'updated'],
+  assert.deepEqual(w.listening(), ['activated', 'command', 'installed', 'message', 'permissionsRemoved', 'removed', 'updated'],
     'registered while the worker starts, so the event that woke it is heard');
   assert.deepEqual(plain((await w.panel({ type: 'ui:pageState' })).data.site), { origin: ORIGIN, enabled: true, ready: true, frames: [{ origin: FRAME_ORIGIN, enabled: true }] });
   const result = plain((await autofill(w)).data);
