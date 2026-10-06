@@ -93,6 +93,8 @@ if (nativeOrigin) {
   let allSites = false;
   // Laya is on unless the person turned it off. Until they choose, this is undefined and not saved.
   let layaEnabled;
+  // Overview's note to add the household list (#180), once the person dismissed it. Saved only once dismissed.
+  let householdNoteDismissed = false;
   // What was reset because settings.json couldn't be read at startup, until a setting is saved (#139).
   let settingsNotice = null;
   // On sites other than Iowa's portal, these get their own named confirmation unless Always allow is on (#175).
@@ -183,7 +185,7 @@ if (nativeOrigin) {
     const details = await vault.inspect().catch(() => null);
     return { exists: await vault.exists(), unlocked: vault.unlocked, lockRevision, recoveryKey: Boolean(details?.recoveryKey),
       deviceReset: Boolean(details?.deviceReset) && await hasDeviceSecret(), deviceResetSupported, extensionId, autofillWithoutAsking, trustedSites: [...trustedSites], allSites,
-      alwaysAllowedSites: [...alwaysAllowedSites],
+      alwaysAllowedSites: [...alwaysAllowedSites], householdNoteDismissed,
       touchId: await touchIdUnlock.state(), touchIdSupported: touchIdUnlock.supported(), touchIdNotice: touchIdUnlock.notice, settingsNotice,
       bridgeRunning: Boolean(bridge), platform: process.platform, laya: await layaStatus(),
       extensionSetup: await getExtensionSetup(app).catch(() => ({ prepared: false, available: false })) };
@@ -207,7 +209,7 @@ if (nativeOrigin) {
   }
   async function saveSettings() {
     await atomicWrite(configPath, Buffer.from(JSON.stringify({ extensionId, autofillWithoutAsking, trustedSites, layaEnabled, ...(allSites && { allSites }),
-      ...(alwaysAllowedSites.length > 0 && { alwaysAllowedSites }) })));
+      ...(alwaysAllowedSites.length > 0 && { alwaysAllowedSites }), ...(householdNoteDismissed && { householdNoteDismissed }) })));
     settingsNotice = null;
   }
   // settings.json at startup. None is a new install. A file that can't be read, or isn't settings, leaves
@@ -230,6 +232,7 @@ if (nativeOrigin) {
     trustedSites = savedSites(config.trustedSites);
     if (typeof config.layaEnabled === 'boolean') layaEnabled = config.layaEnabled;
     allSites = config.allSites === true;
+    householdNoteDismissed = config.householdNoteDismissed === true;
     // Always allow on this site belongs to the saved extension ID, on sites SecondHand is still on.
     if (extensionId) alwaysAllowedSites = savedSites(config.alwaysAllowedSites).filter(siteAllowed);
   }
@@ -555,9 +558,11 @@ if (nativeOrigin) {
       return { unlocked: true };
     }
     // On Windows the native relay passes openApp on as it is; the app is running, so it comes forward.
-    if (request.type === 'showApp' || request.type === 'openApp') {
+    if (request.type === 'showApp' || request.type === 'openApp' || request.type === 'openHousehold') {
       if (mainWindow) { if (mainWindow.isMinimized?.()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); }
-      return request.type === 'showApp' ? { shown: true } : { opened: 'shown' };
+      // The side panel's Add your household (#180): the window opens My information at Your household, once unlocked.
+      if (request.type === 'openHousehold' && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('secondhand:open-household');
+      return request.type === 'openApp' ? { opened: 'shown' } : { shown: true };
     }
     if (request.type === 'warmLaya') return warmLaya();
     if (request.type === 'suggestFields' || request.type === 'answerFields') return layaRequest(request, context);
@@ -649,7 +654,7 @@ if (nativeOrigin) {
       }
       if (navigationOnly) { touch(); return { values: {}, accessRevision }; }
       const values = {};
-      let blocked = false;
+      let blocked = false, need = null;
       // Nothing is read when every field asked for was held back.
       if (fields.length) {
         const profile = vault.getData().profile;
@@ -660,9 +665,12 @@ if (nativeOrigin) {
         }
         // An answer left out because a saved birth date can't be used stays with the applicant, who is told why (#135).
         blocked = fields.some(field => !Object.hasOwn(values, field) && blockedByBirthDate(profile, field, { today: now }));
+        // A household question left open because no household list is saved, or because a birth date on it is missing, says
+        // which (#180), on sites other than Iowa's portal: the person by their row on the list, never by name.
+        if (!iowa) need = household.listNeed(profile, fields.filter(field => !Object.hasOwn(values, field)));
       }
       touch();
-      return { values, accessRevision, ...(held.length ? { held } : {}), ...(blocked ? { reason: 'birthDate' } : {}) };
+      return { values, accessRevision, ...(held.length ? { held } : {}), ...(blocked ? { reason: 'birthDate' } : {}), ...(need ? { household: need } : {}) };
     }
     if (request.type === 'saveFields') return saveAnswers(request, context);
     if (request.type === 'recordProgress') {
@@ -920,6 +928,13 @@ if (nativeOrigin) {
       if (typeof id !== 'string' || id.length > 64) throw publicError('Invalid application record.');
       await vault.update(data => { data.applications = data.applications.filter(item => item.id !== id); });
       touch(); return true;
+    },
+    // Overview's note to add the household list (#180) stays dismissed.
+    async dismissHouseholdNote() {
+      requireUnlocked();
+      householdNoteDismissed = true;
+      await saveSettings();
+      touch(); return status();
     },
     async setAutofillTrust(enabled) {
       requireUnlocked();

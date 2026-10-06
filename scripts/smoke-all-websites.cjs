@@ -49,6 +49,9 @@ const STUDENT_QUESTIONS = [['radio', 3, 'Student Status', ['Undergraduate', 'Gra
 const jotformQuestion = ([type, q, label, options]) => `<li class="form-line jf-required"><label class="form-label" id="label_${q}">${label}<span class="form-required">*</span></label>` +
   `<div role="${type === 'radio' ? 'radiogroup' : 'group'}" aria-labelledby="label_${q}">${options.map((value, n) => `<span class="form-${type}-item"><input type="${type}" id="input_${q}_${n}" name="q${q}[]" value="${value}" required>` +
   `<label for="input_${q}_${n}">${value}</label></span>`).join('')}</div></li>`;
+// #180: a Jotform's household questions from the live QA, asked while no household list is saved.
+const NO_LIST = 'https://pantry.example.org/household-order';
+const NO_LIST_QUESTIONS = { adults: '# of Adults', young: '# of Children 0-5', older: '# of Children 6-18' };
 // What the desktop works out from the fictional household list, as the app does: band counts and the one student's name and grade.
 const listed = validateProfile(syntheticProfile);
 const desktopProfile = { ...syntheticProfile, customFields: customAnswers, ...Object.fromEntries(['householdCount:18-59', 'householdCount:60+', 'studentNameGrade'].map(key => [key, releasedValue(listed, key)])) };
@@ -114,6 +117,8 @@ const pages = {
     `<fieldset><legend>${HEARD}</legend>${['Friend', 'Church', 'Flyer'].map((option, index) => `<label><input type="radio" name="heard" id="heard-${index}" value="${option}">${option}</label>`).join('')}</fieldset>` +
     '<label for="day">Preferred pickup day</label><select id="day" name="day"><option value="">Choose a day</option><option>Monday</option><option>Friday</option></select>' +
     '<button type="submit">Submit</button></form>'),
+  [NO_LIST]: formPage('Pantry order: who lives with you', `<form><label for="first">First name</label><input id="first" name="first">${Object.entries(NO_LIST_QUESTIONS)
+    .map(([id, label]) => `<label for="${id}">${label}</label><input id="${id}" name="${id}">`).join('')}<button type="submit">Submit</button></form>`),
   [HOUSEHOLD]: formPage('Pantry order: household', `<form>${Object.entries(HOUSEHOLD_QUESTIONS).map(([id, label]) => `<label for="${id}">${label}</label><input id="${id}" name="${id}">`).join('')}` +
     '<button type="submit">Submit</button></form>'),
   [STUDENT_PANTRY]: formPage('Student pantry intake', `<form><ul>${STUDENT_QUESTIONS.map(jotformQuestion).join('')}</ul><button type="submit">Submit</button></form>`)
@@ -126,7 +131,8 @@ const pages = {
 // request (`sensitive: true`) gets the sensitive prompt, answered by the next of `answers` ('cancel' or 'allow').
 // Laya isn't ready unless a step makes it so (`laya`); then it is sure of nothing and guesses "Yes" for the
 // service-area question (#185), noting each question it is asked in `questions`. Asked to remember answers (#186), it shows
-// the app's confirmation, as Remember, and keeps them as custom answers with their type, choices and site.
+// the app's confirmation, as Remember, and keeps them as custom answers with their type, choices and site. With `noList` it
+// plays an app with no household list saved (#180): household questions get no answer, and the reply says the list is missing.
 async function installDesktop(worker, profile) {
   await worker.evaluate(profile => {
     globalThis.__desktop = { allSites: false, calls: [], saves: [], prompts: [], profile, holds: [], answers: [], laya: 'unavailable', questions: [], customFieldsAvailable: false, holdNavigation: false, remembered: [] };
@@ -175,9 +181,13 @@ async function installDesktop(worker, profile) {
       } else if (type === 'getFields' && payload.fields.includes('assetsOnHand')) desktop.prompts.push(`Fill sensitive details on ${new URL(payload.url).origin}?`);
       if (type === 'getFields') {
         const held = payload.sensitive === true ? [] : payload.fields.filter(field => desktop.holds.includes(field));
-        return { accessRevision: 0, values: Object.fromEntries(payload.fields.filter(field => desktop.profile[field] && !held.includes(field)).map(field => [field, desktop.profile[field]])),
-          ...(held.length ? { held } : {}) };
+        const fromList = field => /^householdCount:/.test(field) || ['householdSize', 'householdAdults', 'householdChildren', 'householdSeniors', 'studentNameGrade'].includes(field);
+        const answered = field => desktop.profile[field] && !held.includes(field) && !(desktop.noList && fromList(field));
+        return { accessRevision: 0, values: Object.fromEntries(payload.fields.filter(answered).map(field => [field, desktop.profile[field]])),
+          ...(held.length ? { held } : {}), ...(desktop.noList && payload.fields.some(fromList) ? { household: { need: 'list' } } : {}) };
       }
+      // Add your household (#180): the app opens My information at Your household.
+      if (type === 'openHousehold') return { shown: true };
       if (type === 'recordProgress') return { recorded: true };
       if (type === 'rememberAnswers') {
         desktop.prompts.push(`Remember ${payload.answers.length === 1 ? 'this answer' : 'these answers'} from ${new URL(payload.url).origin} for next time?`);
@@ -480,6 +490,34 @@ async function main() {
     await settled();
     assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
     console.log('#98: a pantry form’s household questions filled from the fictional household list (0-17, 18-59, 60+, and the student’s name and grade); the guardian stayed blank; the typed apartment was saved to My information after the Save click.');
+
+    // #180: with no household list saved, the Jotform's household questions (adults, and children by age) stay open. The widget
+    // says they wait in the side panel, which lists them with Add your household; its click asks the app to open Your household.
+    await worker.evaluate(() => { globalThis.__desktop.noList = true; });
+    await page.goto(NO_LIST, { waitUntil: 'domcontentloaded' });
+    const noListWidget = await launcherFrame();
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+    await panel.click('#panel-autofill');
+    await expect(page.locator('#first')).toHaveValue(syntheticProfile.firstName, { timeout: 20000 });
+    await settled();
+    for (const id of Object.keys(NO_LIST_QUESTIONS)) assert.equal(await page.locator(`#${id}`).inputValue(), '', `${id} stays open`);
+    assert.deepEqual((await calls('getFields')).filter(call => call.url === NO_LIST).map(call => call.fields), [['firstName', 'householdAdults', 'householdCount:0-5', 'householdCount:6-18']]);
+    await expect(noListWidget.locator('#need-you')).toHaveText(en('widget.needYou', { count: 3 }), { timeout: 15000 });
+    await expect(noListWidget.locator('#widget-text')).toHaveText(`${en('widget.filled', { count: 1 })} · ${en('widget.household', { count: 3 })}`);
+    await expect.poll(() => panel.visible('#household-section'), { timeout: 15000 }).toBe(true);
+    assert.equal(await panel.text('#household-hint'), en('household.hintList'));
+    assert.equal(await panel.text('#household-list'), Object.values(NO_LIST_QUESTIONS).join(''));
+    assert.equal(await panel.text('#household-open'), en('household.add'));
+    assert.deepEqual(await calls('openHousehold'), [], 'nothing opens before the click');
+    await panel.screenshot(path.join(root, 'artifacts/household/side-panel-add-household.png'));
+    await panel.click('#household-open');
+    await expect.poll(() => panel.text('#status'), { timeout: 15000 }).toBe(en('household.opened'));
+    assert.deepEqual(await calls('openHousehold'), [{ type: 'openHousehold', url: '', fields: [] }], 'one request, carrying nothing');
+    assert.equal(await panel.visible('#household-section'), true, 'the questions stay listed until the next Autofill');
+    await settled();
+    assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
+    await worker.evaluate(() => { globalThis.__desktop.noList = false; });
+    console.log('#180: with no household list saved, a Jotform’s adults and children-by-age questions stayed open; the widget said they wait in the side panel, which listed them with Add your household, and its click asked the app to open Your household.');
 
     // #176: without Always allow, the app holds the date of birth back. One click fills the first name at once; the date of
     // birth counts under need-you and waits in the side panel's list. Fill sensitive details asks the app for it alone:

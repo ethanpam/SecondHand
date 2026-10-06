@@ -43,7 +43,7 @@ async function renderer(t) {
     onLocked: callback => { onLocked = callback; return () => {}; },
     onProfileChanged: () => () => {},
     setupProgress: async () => null,
-    onUnlocked: () => () => {},
+    onUnlocked: () => () => {}, onOpenHousehold: () => () => {},
     unlock: async () => { status = { ...status, unlocked: true }; return status; },
     readDocument: requestId => { const completion = deferred(); reads.push({ requestId, completion }); return completion.promise; },
     cancelDocumentRead: async requestId => { cancels.push(requestId); return true; },

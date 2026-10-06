@@ -28,7 +28,7 @@ async function renderer(t, initial = {}, overrides = {}) {
     status: async () => { calls.push(['status']); return structuredClone(view.status); },
     getData: async () => ({ profile: { firstName: 'Synthetic' }, applications: [] }),
     onLocked: callback => { listeners.locked = callback; return () => {}; },
-    onUnlocked: callback => { listeners.unlocked = callback; return () => {}; },
+    onUnlocked: callback => { listeners.unlocked = callback; return () => {}; }, onOpenHousehold: () => () => {},
     // The guided household setup (#100) has nothing in progress here.
     onProfileChanged: () => () => {},
     setupProgress: async () => null,

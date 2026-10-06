@@ -505,8 +505,8 @@ test('French keeps « and » on the same line as the words they quote, with a no
     }
   }
   assert.deepEqual(unique(found), [], 'every « is followed and every » preceded by U+00A0');
-  assert.equal(opening, 55, 'French has 55 «');
-  assert.equal(closing, 55, 'French has 55 »');
+  assert.equal(opening, 58, 'French has 58 «');
+  assert.equal(closing, 58, 'French has 58 »');
 });
 
 test('Remember for next time, its refusals, and the custom answers summary speak all six languages (#186)', () => {
@@ -542,4 +542,15 @@ test('regional browser languages pick their catalog; Traditional Chinese stays E
     ['zh-TW', 'en'], ['zh-HK', 'en'], ['zh-Hant', 'en'], ['de-DE', 'en']]) {
     assert.equal(strings.language(scope(browser)), expected, browser);
   }
+});
+
+test('Add your household and its hints speak all six languages, and name the app’s own sections and rows in its words (#180)', () => {
+  const keys = ['household.title', 'household.hintList', 'household.hintYou', 'household.hintPerson', 'household.add', 'household.open', 'household.opened', 'widget.household'];
+  for (const code of strings.LANGUAGES) for (const key of keys) {
+    assert.ok(Object.hasOwn(strings.catalogs[code], key), `${code} ${key}`);
+    if (code !== 'en') assert.notDeepEqual(strings.catalogs[code][key], en[key], `${code} ${key} is translated`);
+  }
+  assert.equal(strings.english('household.add'), 'Add your household');
+  // The app stays in English: every language names its row as My information does.
+  for (const code of strings.LANGUAGES) assert.match(strings.text(code, 'household.hintPerson', { number: 3 }), /Person 3/, code);
 });

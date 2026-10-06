@@ -65,6 +65,8 @@
   let offerSetup = false;
   // The desktop's note that it reset its settings is shown once while the app is open.
   let settingsNoticeShown = false;
+  // Add your household in Chrome's side panel while SecondHand is locked (#180): My information opens at Your household once unlocked.
+  let householdWanted = false;
 
   function icon(name) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -172,6 +174,7 @@
     manualCounts = null;
     renderMembers([]);
     renderSetupResume();
+    $('household-note').hidden = true;
     $('application-form').reset();
     $('application-id').value = '';
     $('auth-form').reset();
@@ -687,6 +690,17 @@
     if (setupStep === null) return;
     setupStep = null;
     renderSetupStep();
+  }
+  // Overview's note to add the household list (#180): shown until a list is saved, unless the applicant dismissed it.
+  function renderHouseholdNote() {
+    const listed = Array.isArray(data.profile.householdMembers) && data.profile.householdMembers.length > 0;
+    $('household-note').hidden = !vaultStatus.unlocked || listed || vaultStatus.householdNoteDismissed === true;
+  }
+  // My information at Your household, from Overview's note or Chrome's side panel (#180). Locked, it opens there once unlocked.
+  function openHousehold() {
+    if (!vaultStatus.unlocked) { householdWanted = true; return; }
+    closeSetup();
+    if (showView('profile')) $('household-heading').focus();
   }
   // Overview's "Finish setting up" while a setup is under way.
   function renderSetupResume() {
@@ -1230,7 +1244,7 @@
   function renderSummary() {
     const hasProfile = profileFields.some((field) => Boolean(data.profile[field]));
     $('profile-step-label').replaceChildren(document.createTextNode(hasProfile ? 'Review my profile ' : 'Set up my profile '), icon('arrow'));
-    renderApplications(); renderSetup(); renderRecovery(); renderTouchId();
+    renderApplications(); renderSetup(); renderRecovery(); renderTouchId(); renderHouseholdNote();
   }
 
   async function loadUnlocked(status) {
@@ -1252,6 +1266,7 @@
     fillProfile(); renderSummary();
     showView('overview', { skipConfirmation: true });
     renderSetupResume();
+    if (householdWanted) { householdWanted = false; openHousehold(); }
     // Problems found while opening, in one toast so none hides another: setup progress that couldn't
     // be read, Touch ID turned off while unlocking (and why), and settings the desktop had to reset.
     const settingsNotice = !settingsNoticeShown && typeof status.settingsNotice === 'string' && status.settingsNotice;
@@ -1491,6 +1506,19 @@
   $('setup-back').addEventListener('click', () => { if (setupStep > 0) { setupStep--; renderSetupStep(); } });
   $('setup-later').addEventListener('click', () => { if (showView('overview')) renderSetupResume(); });
   $('add-household-member').addEventListener('click', addMember);
+  $('household-note-open').addEventListener('click', openHousehold);
+  $('household-note-dismiss').addEventListener('click', () => {
+    const generation = vaultGeneration;
+    pending($('household-note-dismiss'), async () => {
+      try {
+        const status = await api.dismissHouseholdNote();
+        if (generation !== vaultGeneration) return;
+        vaultStatus = { ...vaultStatus, ...status };
+        renderHouseholdNote();
+        $('main-content').focus();
+      } catch (error) { if (generation === vaultGeneration) toast(error.message || 'Unable to dismiss this note.', true); }
+    });
+  });
   for (const [buttonId, method, message] of [
     ['copy-recovery-key', 'copyRecoveryKey', 'Copied. It will be cleared from the clipboard in 1 minute.'],
     ['save-recovery-key', 'saveRecoveryKey', 'Saved. Print it or move it somewhere safe, away from this computer.']
@@ -1805,6 +1833,7 @@
       refreshTouchIdUnlock();
     });
     api.onProfileChanged(change => profileChangedElsewhere(change.fields));
+    api.onOpenHousehold(openHousehold);
     // Unlocked from Chrome's side panel with Touch ID: show the saved information here too.
     api.onUnlocked(async () => {
       if (vaultStatus.unlocked) return;

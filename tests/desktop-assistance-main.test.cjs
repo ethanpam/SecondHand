@@ -2207,3 +2207,53 @@ test('liquid asset approval cannot release stale values after a profile access-r
   await app.invoke('saveProfile', { assets: [{ id: jobId(51), person: 'Avery Example', type: 'Cash/Uncashed Check', currentValue: '100' }] });
   resolve({ response: 1 }); await assert.rejects(pending, /access changed/);
 });
+
+// #180: Autofill on a pantry form leaves its household questions open while no household list is saved, and says so.
+test('a household question left open because no household list is saved says so beside the answers; Iowa’s portal never hears it (#180)', async () => {
+  const app = await desktop({ settings: trusted });
+  await app.invoke('saveProfile', { firstName: 'Synthetic', zip: '50309', householdSize: '3' });
+  const reply = plain(await app.request({ type: 'getFields', url: PANTRY, fields: ['householdCount:0-5', 'householdSize', 'zip'] }));
+  assert.deepEqual(reply.values, { householdSize: '3', zip: '50309' });
+  assert.deepEqual(reply.household, { need: 'list' });
+  for (const fields of [['householdAdults'], ['studentNameGrade'], ['householdCount:60+', 'firstName']]) {
+    assert.deepEqual(plain(await app.request({ type: 'getFields', url: PANTRY, fields })).household, { need: 'list' }, JSON.stringify(fields));
+  }
+  // Every household question answered, or none asked: nothing about the list is said.
+  for (const fields of [['householdSize'], ['zip', 'firstName']]) assert.equal(plain(await app.request({ type: 'getFields', url: PANTRY, fields })).household, undefined, JSON.stringify(fields));
+  assert.equal(plain(await app.request({ type: 'getFields', fields: ['householdCount:0-5', 'householdAdults'] })).household, undefined, 'Iowa’s portal');
+});
+
+test('with a household list saved, a count by age left open names the first person without a birth date by their row, never by name (#180)', async () => {
+  const app = await desktop({ settings: trusted });
+  await app.invoke('saveProfile', listedHousehold({ 2: { birthDate: '' }, 3: { birthDate: '' } }));
+  const reply = plain(await app.request({ type: 'getFields', url: PANTRY, fields: [...BANDS, 'householdSize', 'studentNameGrade'] }));
+  assert.deepEqual(reply.values, { householdSize: '4', studentNameGrade: 'Riley Example, 5th' });
+  assert.deepEqual(reply.household, { need: 'birthDate', person: 3 });
+  assert.doesNotMatch(JSON.stringify(reply), /Sam|Morgan|1958|householdMembers/);
+  assert.equal(plain(await app.request({ type: 'getFields', url: PANTRY, fields: ['householdSize'] })).household, undefined, 'the size needs no birth dates');
+  await app.invoke('saveProfile', { ...listedHousehold(), birthDate: '' });
+  assert.deepEqual(plain(await app.request({ type: 'getFields', url: PANTRY, fields: ['householdChildren'] })).household, { need: 'birthDate', person: 'you' }, 'the applicant’s own row');
+  await app.invoke('saveProfile', listedHousehold());
+  assert.equal(plain(await app.request({ type: 'getFields', url: PANTRY, fields: [...BANDS] })).household, undefined, 'every birth date saved');
+});
+
+test('openHousehold brings the window forward on My information, at Your household, even while locked, and reads nothing (#180)', async () => {
+  const app = await desktop();
+  await app.invoke('lock');
+  const before = { shows: app.shows, reads: app.dataReads, sent: app.notifications.length };
+  assert.deepEqual(plain(await app.request({ type: 'openHousehold' })), { shown: true });
+  assert.equal(app.shows, before.shows + 1);
+  assert.deepEqual(app.notifications.slice(before.sent), [['secondhand:open-household']], 'the window hears where to go, and nothing else');
+  assert.equal(app.dataReads, before.reads);
+});
+
+test('the Overview note about the household list is dismissed once, kept with the settings, and reported in status (#180)', async () => {
+  const app = await desktop({ settings: { extensionId } });
+  assert.equal((await app.invoke('status')).householdNoteDismissed, false);
+  assert.equal((await app.invoke('dismissHouseholdNote')).householdNoteDismissed, true);
+  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: false, trustedSites: [], householdNoteDismissed: true });
+  const later = await desktop({ settings: { extensionId, householdNoteDismissed: true } });
+  assert.equal((await later.invoke('status')).householdNoteDismissed, true, 'a later start reads it back');
+  await later.invoke('lock');
+  await assert.rejects(later.invoke('dismissHouseholdNote'), /Unlock/);
+});

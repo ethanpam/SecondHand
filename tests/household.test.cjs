@@ -191,3 +191,27 @@ test('a member born “tomorrow” (saved on an Iowa evening) or long ago leaves
   assert.equal(household.hasUnusableBirthDate({ birthDate: '2026-10-06', householdMembers: [] }), true, 'the applicant’s own date counts too');
   assert.equal(household.hasUnusableBirthDate({ birthDate: '2026-10-06', householdMembers: [] }, { today: '2026-10-06' }), false, 'in UTC it is already October 6');
 });
+
+// #180: a household question the list couldn't answer says what the list lacks, so Autofill can point to it.
+test('a household question left open says the list is missing, or names the first person whose birth date is missing as My information does', () => {
+  const noList = validateProfile({ firstName: 'Avery', householdSize: '3' });
+  for (const field of ['householdCount:0-5', 'householdSize', 'householdAdults', 'householdChildren', 'householdSeniors', 'studentNameGrade']) {
+    assert.deepEqual(household.listNeed(noList, [field]), { need: 'list' }, field);
+  }
+  assert.equal(household.listNeed(noList, ['firstName', 'birthDate', 'zip']), null, 'no household question: nothing to say');
+  assert.equal(household.listNeed(noList, []), null);
+  // With a list saved, only counts by age need birth dates: the first member without one is named by its row.
+  const missing = profile([{ birthDate: '2015-09-03' }, { birthDate: '' }, { birthDate: '' }]);
+  for (const field of ['householdCount:0-17', 'householdAdults', 'householdChildren', 'householdSeniors']) {
+    assert.deepEqual(household.listNeed(missing, ['zip', field]), { need: 'birthDate', person: 3 }, field);
+  }
+  assert.equal(household.listNeed(missing, ['householdSize', 'studentNameGrade']), null, 'the size and the student need no birth dates');
+  // The applicant's own row is "you", wherever it is on the list.
+  assert.deepEqual(household.listNeed(profile([{ birthDate: '2015-09-03' }], { birthDate: '' }), ['householdCount:60+']), { need: 'birthDate', person: 'you' });
+  const selfSecond = { birthDate: '', householdMembers: [{ id: id(1), firstName: 'Riley', birthDate: '2015-09-03', relationship: 'child' }, { id: SELF, birthDate: '', relationship: 'self' }] };
+  assert.deepEqual(household.listNeed(selfSecond, ['householdChildren']), { need: 'birthDate', person: 'you' });
+  // Every birth date saved: a count by age the list left open is not the list's to explain (#135 says why for one it can't use).
+  assert.equal(household.listNeed(profile([{ birthDate: '2015-09-03' }]), ['householdCount:0-5']), null);
+  const future = { birthDate: '1985-04-12', householdMembers: [{ id: SELF, birthDate: '1985-04-12', relationship: 'self' }, { id: id(1), birthDate: '2999-01-01', relationship: 'child' }] };
+  assert.equal(household.listNeed(future, ['householdCount:0-5']), null);
+});

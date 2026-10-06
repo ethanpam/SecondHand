@@ -615,3 +615,21 @@ test('liquid asset projection is exact-route, explicit-owner, and excludes descr
   for (const suffix of ['?page=2', '#review', '/']) assert.throws(() => validateRequest({ ...request, url: request.url + suffix }));
   for (const extra of [{ recordId: 'arbitrary' }, { recordType: 'taxStatements' }, { pageKey: 'iowa-other-assets' }, { personName: 'Avery\nExample' }]) assert.throws(() => validateRequest({ ...request, ...extra }));
 });
+
+// #180: the side panel's Add your household opens the app on My information, at Your household. The request names nothing else.
+test('openHousehold carries nothing but its id, reaches a running app through the host, and starts nothing when the app is closed', async t => {
+  assert.deepEqual(validateRequest({ id: 'household-1', type: 'openHousehold' }), { id: 'household-1', type: 'openHousehold' });
+  for (const extra of [{ url: PORTAL_URL }, { section: 'privacy' }, { fields: ['householdMembers'] }, { person: 3 }, { profile: {} }]) {
+    assert.throws(() => validateRequest({ id: 'household-1', type: 'openHousehold', ...extra }), /Unexpected/, JSON.stringify(extra));
+  }
+  const directory = await temporary(t, 'secondhand-open-household-');
+  const seen = [];
+  const bridge = await startBridge(directory, () => EXTENSION, async request => { seen.push(request); return { shown: true }; });
+  let launches = 0;
+  assert.deepEqual(await hostSession(directory, [{ id: 'household-1', type: 'openHousehold' }], async () => { launches++; }), [{ id: 'household-1', ok: true, data: { shown: true } }]);
+  assert.deepEqual(seen, [{ id: 'household-1', type: 'openHousehold' }], 'relayed as it is');
+  await bridge.close();
+  assert.deepEqual(await hostSession(directory, [{ id: 'household-2', type: 'openHousehold' }], async () => { launches++; }),
+    [{ id: 'household-2', ok: false, error: 'Open SecondHand, connect this extension, and unlock SecondHand.', code: 'DESKTOP_UNREACHABLE' }]);
+  assert.equal(launches, 0, 'only openApp starts the app');
+});
