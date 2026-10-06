@@ -539,6 +539,8 @@
     // The question list for the page on screen: the worker's items, and Chrome's translations of their words.
     let questions = null;
     let translated = new Map();
+    // The language Chrome's translator took the page's questions from.
+    let translatedFrom = '';
     let questionNote = null;
     let needsDownload = false;
     let questionBusy = false;
@@ -730,6 +732,8 @@
       const label = document.createElement('span'); label.className = 'checklist-label'; label.dir = 'auto'; label.textContent = own ? fixedText(own, 400) : words || fallback;
       if (!own || own === words) return [label];
       const original = document.createElement('span'); original.className = 'checklist-detail'; original.dir = 'auto'; original.textContent = words;
+      // The page's words are in the language they were translated from, for a screen reader's voice.
+      if (translatedFrom) original.lang = translatedFrom;
       return [label, original];
     }
     // Until then, in a language other than English, one line says the questions are the form's words, with the
@@ -1038,7 +1042,7 @@
     // only: nothing translated is ever sent toward the page or written into a field.
     function resetQuestions() {
       questionRun++;
-      questions = null; translated = new Map(); questionNote = null; needsDownload = false; questionBusy = false;
+      questions = null; translated = new Map(); translatedFrom = ''; questionNote = null; needsDownload = false; questionBusy = false;
       service.forget();
       renderQuestionList();
     }
@@ -1081,6 +1085,7 @@
       original.hidden = !original.textContent;
       // SecondHand's own label stands for English words of the form; a page's words are in the page's language.
       if (item.labelKey) original.lang = 'en';
+      else if (translatedFrom) original.lang = translatedFrom;
       copy.append(label, original);
       row.append(copy);
       return row;
@@ -1138,6 +1143,7 @@
         const results = await service.translate(translator, source, chosen, texts);
         if (!current()) return;
         translated = results;
+        translatedFrom = source;
         renderQuestionList();
         renderLeft(); renderFilled(); renderSaves(); renderHeld(); renderGuesses(); renderWordsHint();
         say({ key: 'translate.done' });

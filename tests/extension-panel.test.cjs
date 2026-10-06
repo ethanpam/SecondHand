@@ -1142,6 +1142,11 @@ test('once Autofill has been started again from this Chrome, both surfaces say t
   assert.match(first.get('widget-text').textContent, /once nothing is left, SecondHand clicks Save and Continue\. To check and continue yourself, click Stop\. It erases nothing\.$/);
 });
 
+test('each language in the menu is marked as that language, for a screen reader’s voice', async t => {
+  const view = await panel(t, {});
+  assert.deepEqual([...view.get('language').options].map(option => [option.value, option.lang]), ['en', 'es', 'vi', 'zh', 'fr', 'ar'].map(code => [code, code]));
+});
+
 test('the side panel’s name is its first heading, so a screen reader’s list of headings starts there', async t => {
   const view = await panel(t, {});
   const headings = [...view.window.document.querySelectorAll('#sidepanel h1, #sidepanel h2, #sidepanel h3')];
@@ -1802,7 +1807,7 @@ test('the side panel lists every question in Spanish; a row click finds it throu
     ['BUTTON', '[es] Preferred pickup day', 'Preferred pickup day']]);
   assert.equal(rows[1].querySelector('.checklist-detail').hidden, false);
   assert.equal(rows[1].querySelector('.checklist-detail').getAttribute('lang'), 'en', 'the English under SecondHand’s own label is marked as English');
-  assert.equal(rows[2].querySelector('.checklist-detail').getAttribute('lang'), null, 'a page’s own words are in the page’s language');
+  assert.equal(rows[2].querySelector('.checklist-detail').getAttribute('lang'), 'en', 'a page’s own words carry the language Chrome translated them from');
   assert.equal(view.get('questions').hidden, false);
   assert.equal(view.get('questions-summary').textContent, strings.text('es', 'questions.count', { count: 2 }));
   assert.equal(view.get('questions-note').textContent, spanish('translate.done'));
@@ -2721,6 +2726,7 @@ test('in another language, a site’s question lists point to the translated vie
   assert.deepEqual([...row.querySelectorAll('.checklist-label, .checklist-detail')].map(element => element.textContent),
     ['[es] How many people live in your household?', 'How many people live in your household?'], 'the reader’s language on top, the form’s words under it');
   assert.equal(row.getAttribute('aria-label'), strings.text('es', 'guesses.rowLabel', { label: '[es] How many people live in your household?' }));
+  assert.equal(row.querySelector('.checklist-detail').lang, 'en', 'the form’s words, in the language they came from, for a screen reader’s voice');
   assert.equal(view.get('words-hint').hidden, true, 'translated, the line has nothing left to say');
   assert.equal(view.get('questions-show').textContent, spanish('questions.refresh'));
   assert.equal(view.get('questions-show').hidden, false);

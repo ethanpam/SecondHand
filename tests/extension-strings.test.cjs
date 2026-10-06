@@ -489,7 +489,8 @@ test('every language is named in its own words in every catalog and offered in t
   const natives = { en: 'English', es: 'Español', vi: 'Tiếng Việt', zh: '中文（简体）', fr: 'Français', ar: 'العربية' };
   for (const code of strings.LANGUAGES) for (const [name, native] of Object.entries(natives)) assert.equal(strings.catalogs[code][`language.${name}`], native, `${code} language.${name}`);
   const html = source('panel.html');
-  for (const code of strings.LANGUAGES) assert.match(html, new RegExp(`<option value="${code}" data-i18n="language\\.${code}"></option>`));
+  // Each one marked as its language, for a screen reader's voice.
+  for (const code of strings.LANGUAGES) assert.match(html, new RegExp(`<option value="${code}" lang="${code}" data-i18n="language\\.${code}"></option>`));
 });
 
 test('Arabic reads right to left; the others left to right', () => {
