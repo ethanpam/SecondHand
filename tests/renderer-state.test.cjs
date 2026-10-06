@@ -37,6 +37,7 @@ async function renderer(t, { initialSetup = null, ...overrides } = {}) {
     status: async () => status,
     getData: async () => structuredClone(database),
     onLocked: callback => { onLocked = callback; return () => {}; },
+    onUnlocked: () => () => {},
     unlock: async () => { status = { ...status, unlocked: true }; return status; },
     saveProfile: async profile => { database.profile = structuredClone(profile); return structuredClone(profile); },
     setupProgress: async () => structuredClone(setup.progress),
@@ -405,6 +406,32 @@ test('restoring a backup while locked refreshes create-vault UI despite an uncha
   assert.equal(view.get('workspace').hidden, true);
 });
 
+test('when the desktop reset its settings, the saved information opens with the notice once, beside a Touch ID notice', async t => {
+  const settingsNotice = 'SecondHand couldn’t read its settings file, so it reset the Chrome connection, Always allow, your trusted sites, and all websites. Set them up again on the Chrome extension page. Laya stays off.';
+  const touchIdNotice = 'Touch ID was turned off because its key file on this Mac is damaged.';
+  let status = { exists: true, unlocked: false, lockRevision: 0, extensionId: '', bridgeRunning: true, settingsNotice, touchIdNotice };
+  const view = await renderer(t, {
+    status: async () => status,
+    unlock: async () => { status = { ...status, unlocked: true }; return status; },
+    lock: async () => { status = { ...status, unlocked: false, lockRevision: status.lockRevision + 1, touchIdNotice: null }; return status; }
+  });
+  assert.equal(view.get('toast').hidden, true, 'nothing shows on the lock screen');
+  view.edit('passphrase', 'synthetic password');
+  view.submit('auth-form');
+  await tick(); await tick();
+  assert.equal(view.get('workspace').hidden, false);
+  assert.equal(view.get('toast').textContent, `${touchIdNotice} ${settingsNotice}`);
+  assert.equal(view.get('toast').classList.contains('error'), true);
+
+  view.get('lock-button').click();
+  await tick();
+  view.edit('passphrase', 'synthetic password');
+  view.submit('auth-form');
+  await tick(); await tick();
+  assert.equal(view.get('workspace').hidden, false);
+  assert.equal(view.get('toast').hidden, true, 'shown once while the app is open');
+});
+
 test('opening Applications or Overview refreshes progress recorded while another view was active', async t => {
   for (const destination of ['applications', 'overview']) await t.test(destination, async t => {
     const view = await renderer(t);
@@ -644,6 +671,32 @@ test('a failed trust change restores the checkbox and shows the error', async t 
   assert.match(view.get('autofill-trust-error').textContent, /Unlock/);
 });
 
+test('Privacy & backups names everything autofill fills or clicks today and keeps the live-submission caveat', async t => {
+  const view = await renderer(t);
+  view.window.document.querySelector('.nav-item[data-view="privacy"]').click();
+  const card = text(view.window.document.querySelector('#view-privacy .autofill-card'));
+  for (const phrase of ['first applicant page', 'Household Application Information', 'Tell Us More', 'date of birth', 'Iowa’s questions about you',
+    'first suggested home address', 'Information-only screens', 'Laya', 'guesses', 'Other sites you trust', 'Chrome’s built-in AI', 'on this computer',
+    'never guesses on Iowa’s form', 'Iowa pages SecondHand doesn’t know', 'A complete live submission has not been validated.']) assert.ok(card.includes(phrase), phrase);
+  // Chrome's AI is named with where it runs, that its answers are marked, and that it stays off Iowa's form.
+  const chrome = card.split(/(?<=\.)\s+/).find(sentence => sentence.includes('Chrome’s built-in AI'));
+  assert.match(chrome, /only/);
+  assert.match(chrome, /on this computer/);
+  assert.match(chrome, /marked to check/);
+  assert.doesNotMatch(card, /—|passphrase|vault|the rules/i);
+  // The one value SecondHand picks for the applicant gets its own paragraph, ending on the instruction to check it.
+  const address = Array.from(view.window.document.querySelectorAll('#view-privacy .autofill-card p'), text).filter(paragraph => paragraph.includes('first suggested home address'));
+  assert.equal(address.length, 1);
+  assert.match(address[0], /^On the verified home-address page, .*\. Check that this address is yours before you submit\.$/);
+});
+
+test('the document review card opens with the file name as its heading, with no line above it', async t => {
+  const view = await renderer(t);
+  const summary = view.window.document.querySelector('#document-review .document-summary > div');
+  assert.equal(summary.firstElementChild, view.get('document-name'));
+  assert.equal(summary.firstElementChild.tagName, 'H2');
+});
+
 test('the profile form saves household counts and household flags', async t => {
   const view = await renderer(t);
   view.window.document.querySelector('.nav-item[data-view="profile"]').click();
@@ -767,6 +820,169 @@ test('creating a password shows the recovery key once and requires acknowledgeme
   assert.equal(view.get('recovery-done').disabled, false);
   view.get('recovery-done').click();
   assert.equal(view.get('recovery-dialog').open, false);
+});
+
+test('a pending or failed setup save does not hide the new recovery key or its reset warning', async t => {
+  const completion = deferred();
+  const recoveryKey = 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789';
+  let setupRequests = 0;
+  const view = await renderer(t, {
+    status: async () => ({ exists: false, unlocked: false, lockRevision: 0 }),
+    createVault: async () => ({
+      status: { exists: true, unlocked: true, recoveryKey: true, lockRevision: 0 },
+      recoveryKey, deviceResetFailed: true
+    }),
+    startSetup: () => { setupRequests++; return completion.promise; }
+  });
+  view.edit('passphrase', 'synthetic long password');
+  view.edit('confirm-passphrase', 'synthetic long password');
+  view.submit('auth-form');
+  await tick();
+  assert.equal(setupRequests, 1);
+  assert.equal(view.get('workspace').hidden, false);
+  assert.equal(view.get('recovery-dialog').open, true, 'the key must be available before the setup save settles');
+  assert.equal(view.get('recovery-key-value').textContent, recoveryKey);
+  assert.match(view.get('recovery-feedback').textContent, /couldn’t save a reset option/);
+  assert.equal(view.get('recovery-done').disabled, true);
+  view.get('recovery-done').click();
+  assert.equal(view.get('recovery-dialog').open, true, 'a slow setup save does not bypass acknowledgement');
+
+  completion.reject(new Error('Synthetic setup progress write failed'));
+  await tick();
+  assert.equal(view.get('recovery-dialog').open, true);
+  assert.equal(view.get('recovery-key-value').textContent, recoveryKey);
+  assert.match(view.get('recovery-feedback').textContent, /setup/i, 'the failure is reported in the open recovery dialog');
+  assert.match(view.get('recovery-feedback').textContent, /couldn’t save a reset option/, 'the earlier reset warning is preserved');
+  assert.equal(view.get('auth-error').hidden, true, 'setup failure must not be routed to the hidden authentication form');
+  assert.equal(view.get('auth-error').textContent, '');
+  assert.equal(view.get('recovery-done').disabled, true);
+  const cancel = new view.window.Event('cancel', { cancelable: true });
+  view.get('recovery-dialog').dispatchEvent(cancel);
+  assert.equal(cancel.defaultPrevented, true);
+  view.get('recovery-saved').checked = true;
+  view.get('recovery-saved').dispatchEvent(new view.window.Event('change'));
+  view.get('recovery-done').click();
+  assert.equal(view.get('recovery-dialog').open, false);
+  assert.equal(view.get('setup-dialog').open, false, 'failed setup persistence must not offer a setup that was never started');
+});
+
+test('setup responses after recovery acknowledgement never redisplay the key', async t => {
+  for (const result of ['success', 'failure']) await t.test(result, async t => {
+    const completion = deferred();
+    const view = await renderer(t, {
+      status: async () => ({ exists: false, unlocked: false, lockRevision: 0 }),
+      createVault: async () => ({
+        status: { exists: true, unlocked: true, recoveryKey: true, lockRevision: 0 },
+        recoveryKey: 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789'
+      }),
+      startSetup: () => completion.promise
+    });
+    view.edit('passphrase', 'synthetic long password');
+    view.edit('confirm-passphrase', 'synthetic long password');
+    view.submit('auth-form');
+    await tick();
+    assert.equal(view.get('recovery-dialog').open, true);
+    view.get('recovery-saved').checked = true;
+    view.get('recovery-saved').dispatchEvent(new view.window.Event('change'));
+    view.get('recovery-done').click();
+    // JSDOM's dialog mock does not queue the browser's close event.
+    view.get('recovery-dialog').dispatchEvent(new view.window.Event('close'));
+    assert.equal(view.get('recovery-dialog').open, false);
+    assert.equal(view.get('recovery-key-value').textContent, '');
+    assert.equal(view.get('setup-dialog').open, false, 'setup cannot open before persistence succeeds');
+
+    if (result === 'success') completion.resolve({ step: 0, steps: 6 });
+    else completion.reject(new Error('Synthetic setup progress write failed'));
+    await tick();
+    assert.equal(view.get('recovery-dialog').open, false);
+    assert.equal(view.get('recovery-key-value').textContent, '');
+    assert.equal(view.get('auth-error').hidden, true);
+    assert.equal(view.get('auth-error').textContent, '');
+    assert.equal(view.get('setup-dialog').open, false, 'finishing a slow setup save must not open a surprise modal');
+    assert.equal(view.get('setup-resume').hidden, result !== 'success');
+    if (result === 'failure') {
+      assert.equal(view.get('toast').hidden, false, 'a failure after acknowledgment still has visible feedback');
+      assert.match(view.get('toast').textContent, /setup/i);
+      assert.equal(view.get('setup-resume').hidden, true);
+    }
+  });
+});
+
+test('a pending initial setup save never treats a replacement recovery key as its own dialog', async t => {
+  for (const result of ['success', 'failure']) await t.test(result, async t => {
+    const completion = deferred();
+    const replacementKey = 'NEWK-EYAB-CDEF-GHJK-MNPQ-RSTV-WXYZ-2345';
+    const view = await renderer(t, {
+      status: async () => ({ exists: false, unlocked: false, lockRevision: 0 }),
+      createVault: async () => ({
+        status: { exists: true, unlocked: true, recoveryKey: true, lockRevision: 0 },
+        recoveryKey: 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789'
+      }),
+      startSetup: () => completion.promise,
+      replaceRecoveryKey: async () => ({ recoveryKey: replacementKey })
+    });
+    view.edit('passphrase', 'synthetic long password');
+    view.edit('confirm-passphrase', 'synthetic long password');
+    view.submit('auth-form');
+    await tick();
+    view.get('recovery-saved').checked = true;
+    view.get('recovery-saved').dispatchEvent(new view.window.Event('change'));
+    view.get('recovery-done').click();
+    view.get('recovery-dialog').dispatchEvent(new view.window.Event('close'));
+    view.get('replace-recovery-key').click();
+    await tick();
+    assert.equal(view.get('recovery-dialog').open, true);
+    assert.equal(view.get('recovery-key-value').textContent, replacementKey);
+    if (result === 'success') completion.resolve({ step: 0, steps: 6 });
+    else completion.reject(new Error('Synthetic setup progress write failed'));
+    await tick();
+    assert.equal(view.get('recovery-dialog').open, true);
+    assert.equal(view.get('recovery-key-value').textContent, replacementKey);
+    assert.equal(view.get('recovery-feedback').textContent, '', 'the setup response must not alter a different key’s feedback');
+    assert.equal(view.get('recovery-done').disabled, true);
+    if (result === 'failure') {
+      assert.equal(view.get('toast').hidden, false);
+      assert.match(view.get('toast').textContent, /setup/i);
+    }
+    view.get('recovery-saved').checked = true;
+    view.get('recovery-saved').dispatchEvent(new view.window.Event('change'));
+    view.get('recovery-done').click();
+    assert.equal(view.get('setup-dialog').open, false, 'acknowledging a replacement key must not open the initial setup offer');
+  });
+});
+
+test('locking while setup is being saved discards late success and failure without restoring recovery UI', async t => {
+  for (const result of ['success', 'failure']) await t.test(result, async t => {
+    const completion = deferred();
+    const view = await renderer(t, {
+      status: async () => ({ exists: false, unlocked: false, lockRevision: 0 }),
+      createVault: async () => ({
+        status: { exists: true, unlocked: true, recoveryKey: true, lockRevision: 0 },
+        recoveryKey: 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789', deviceResetFailed: true
+      }),
+      startSetup: () => completion.promise
+    });
+    view.edit('passphrase', 'synthetic long password');
+    view.edit('confirm-passphrase', 'synthetic long password');
+    view.submit('auth-form');
+    await tick();
+    assert.equal(view.get('recovery-dialog').open, true);
+    view.lock(1);
+    view.edit('passphrase', 'newer lock-screen input');
+    if (result === 'success') completion.resolve({ step: 0, steps: 6 });
+    else completion.reject(new Error('Synthetic setup progress write failed'));
+    await tick();
+    assert.equal(view.get('workspace').hidden, true);
+    assert.equal(view.get('auth-view').hidden, false);
+    assert.equal(view.get('recovery-dialog').open, false);
+    assert.equal(view.get('recovery-key-value').textContent, '');
+    assert.equal(view.get('recovery-feedback').textContent, '');
+    assert.equal(view.get('setup-dialog').open, false);
+    assert.equal(view.get('setup-resume').hidden, true);
+    assert.equal(view.get('auth-error').hidden, true);
+    assert.equal(view.get('toast').hidden, true);
+    assert.equal(view.get('passphrase').value, 'newer lock-screen input');
+  });
 });
 
 test('locking during initial profile loading cannot redisplay the newly created recovery key', async t => {
@@ -962,6 +1178,175 @@ test('a lock notification arriving after the lock response cannot clear an unloc
   view.lock(1);
   assert.equal(view.get('auth-error').hidden, false, 'A late lock notice must not hide the unlock error');
   assert.match(view.get('auth-error').textContent, /Unable to unlock/);
+  assert.equal(view.get('workspace').hidden, true);
+});
+
+// Privacy & backups and the Chrome extension page (#140): what each button asks the desktop, and what it shows.
+const unlockedStatus = (changes = {}) => ({ exists: true, unlocked: true, recoveryKey: true, deviceReset: false, deviceResetSupported: true, extensionId: '', bridgeRunning: true, ...changes });
+const NEW_KEY = 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789';
+
+test('a new recovery key asks first when one exists, shows once in its dialog, and Copy and Save say what happened', async t => {
+  const calls = [];
+  let questions = 0;
+  let save = async () => ({ cancelled: true });
+  let copy = async () => true;
+  const view = await renderer(t, {
+    status: async () => unlockedStatus(),
+    replaceRecoveryKey: async () => { calls.push('replace'); return { recoveryKey: NEW_KEY }; },
+    copyRecoveryKey: async key => { calls.push(['copy', key]); return copy(); },
+    saveRecoveryKey: async key => { calls.push(['save', key]); return save(); }
+  });
+  assert.equal(view.get('replace-recovery-key').textContent, 'Create a new recovery key');
+  assert.match(view.get('recovery-status').textContent, /^You have a recovery key\. Creating a new one stops the old key from working\./);
+  view.window.confirm = () => { questions++; return false; };
+  view.get('replace-recovery-key').click();
+  await tick();
+  assert.equal(questions, 1);
+  assert.deepEqual(calls, [], 'declined: nothing is asked of the desktop');
+  view.window.confirm = () => true;
+  view.get('replace-recovery-key').click();
+  await tick(); await tick();
+  assert.deepEqual(calls, ['replace']);
+  assert.equal(view.get('recovery-dialog').open, true);
+  assert.equal(view.get('recovery-key-value').textContent, NEW_KEY);
+
+  view.get('save-recovery-key').click();
+  await tick();
+  assert.deepEqual(calls.at(-1), ['save', NEW_KEY]);
+  assert.equal(view.get('recovery-feedback').textContent, '', 'a cancelled save says nothing');
+  save = async () => ({ cancelled: false });
+  view.get('save-recovery-key').click();
+  await tick();
+  assert.equal(view.get('recovery-feedback').textContent, 'Saved. Print it or move it somewhere safe, away from this computer.');
+  view.get('copy-recovery-key').click();
+  await tick();
+  assert.deepEqual(calls.at(-1), ['copy', NEW_KEY]);
+  assert.equal(view.get('recovery-feedback').textContent, 'Copied. It will be cleared from the clipboard in 1 minute.');
+  copy = async () => { throw new view.window.Error('Enter the recovery key exactly as it was shown, like ABCD-EFGH-1234.'); };
+  view.get('copy-recovery-key').click();
+  await tick();
+  assert.equal(view.get('recovery-feedback').textContent, 'Enter the recovery key exactly as it was shown, like ABCD-EFGH-1234.');
+
+  view.get('recovery-saved').click();
+  view.get('recovery-done').click();
+  assert.equal(view.get('recovery-dialog').open, false);
+  // The browser tells the page its dialog closed.
+  view.get('recovery-dialog').dispatchEvent(new view.window.Event('close'));
+  assert.equal(view.get('recovery-key-value').textContent, '', 'the key leaves the page when the dialog closes');
+
+  let first;
+  first = await renderer(t, { status: async () => unlockedStatus({ recoveryKey: false }), replaceRecoveryKey: async () => { throw new first.window.Error('Could not create a recovery key. Please try again.'); } });
+  assert.equal(first.get('replace-recovery-key').textContent, 'Create recovery key');
+  first.window.confirm = () => assert.fail('nothing to replace, so nothing to ask');
+  first.get('replace-recovery-key').click();
+  await tick(); await tick();
+  assert.equal(first.get('toast').textContent, 'Could not create a recovery key. Please try again.');
+  assert.equal(first.get('toast').classList.contains('error'), true);
+  assert.equal(first.get('recovery-dialog').open, false);
+});
+
+test('letting this computer reset the password turns on and off through the desktop, and a failed change is undone', async t => {
+  const calls = [];
+  let fail = false;
+  let status = unlockedStatus();
+  let view;
+  view = await renderer(t, {
+    status: async () => status,
+    setDeviceReset: async enabled => {
+      calls.push(enabled);
+      if (fail) throw new view.window.Error('This computer couldn’t save a reset option. Your recovery key still works.');
+      status = { ...status, deviceReset: enabled };
+      return status;
+    }
+  });
+  const toggle = view.get('device-reset-toggle');
+  assert.equal(view.get('device-reset-setting').hidden, false);
+  assert.equal(toggle.checked, false);
+  const change = async checked => { toggle.checked = checked; toggle.dispatchEvent(new view.window.Event('change')); await tick(); await tick(); };
+  await change(true);
+  assert.deepEqual(calls, [true]);
+  assert.equal(toggle.checked, true);
+  assert.equal(view.get('toast').textContent, 'This computer can now reset your password.');
+  await change(false);
+  assert.deepEqual(calls, [true, false]);
+  assert.equal(view.get('toast').textContent, 'Reset on this computer is turned off.');
+  fail = true;
+  await change(true);
+  assert.equal(toggle.checked, false, 'a failed change is undone');
+  assert.equal(toggle.disabled, false);
+  assert.equal(view.get('toast').textContent, 'This computer couldn’t save a reset option. Your recovery key still works.');
+  assert.equal(view.get('toast').classList.contains('error'), true);
+  const elsewhere = await renderer(t, { status: async () => unlockedStatus({ deviceResetSupported: false }) });
+  assert.equal(elsewhere.get('device-reset-setting').hidden, true, 'shown only where the system can keep the secret');
+});
+
+test('a custom extension ID is checked before it is sent, and the desktop’s answer is shown', async t => {
+  const calls = [];
+  let fail = false;
+  let view;
+  view = await renderer(t, {
+    status: async () => unlockedStatus(),
+    connectExtension: async id => {
+      calls.push(id);
+      if (fail) throw new view.window.Error('Could not prepare the Chrome connection. Try again or see the setup instructions.');
+      return { extensionId: id };
+    }
+  });
+  for (const id of ['', 'abc', 'q'.repeat(32), 'A'.repeat(32)]) {
+    view.get('extension-id').value = id;
+    view.submit('extension-form');
+    await tick();
+    assert.equal(view.get('extension-error').textContent, 'Use the 32-letter ID shown for SecondHand in Chrome’s extensions page.', JSON.stringify(id));
+  }
+  assert.deepEqual(calls, [], 'nothing is sent');
+  view.get('extension-id').value = ` ${'b'.repeat(32)} `;
+  view.submit('extension-form');
+  await tick(); await tick();
+  assert.deepEqual(calls, ['b'.repeat(32)]);
+  assert.equal(view.get('extension-error').hidden, true);
+  assert.equal(view.get('toast').textContent, 'Extension registered. Keep SecondHand open while you use it.');
+  fail = true;
+  view.submit('extension-form');
+  await tick(); await tick();
+  assert.equal(view.get('extension-error').textContent, 'Could not prepare the Chrome connection. Try again or see the setup instructions.');
+  assert.equal(view.get('extension-error').hidden, false);
+});
+
+test('Export says when the backup is saved, nothing when it is cancelled, and why it failed', async t => {
+  let result = async () => ({ cancelled: true });
+  const view = await renderer(t, { status: async () => unlockedStatus(), exportBackup: () => result() });
+  view.get('export-backup').click();
+  await tick();
+  assert.equal(view.get('toast').hidden, true, 'cancelled: nothing to say');
+  result = async () => { throw new view.window.Error('Create a password before saving a backup.'); };
+  view.get('export-backup').click();
+  await tick();
+  assert.equal(view.get('toast').textContent, 'Create a password before saving a backup.');
+  assert.equal(view.get('toast').classList.contains('error'), true);
+  result = async () => ({ cancelled: false });
+  view.get('export-backup').click();
+  await tick();
+  assert.equal(view.get('toast').textContent, 'Encrypted backup saved. You’ll need your password to restore it.');
+  assert.equal(view.get('toast').classList.contains('error'), false);
+});
+
+test('a refused restore says why on the unlock screen, and declining the warning asks the desktop nothing', async t => {
+  let imports = 0;
+  let view;
+  view = await renderer(t, {
+    status: async () => ({ exists: true, unlocked: false, lockRevision: 0, recoveryKey: true }),
+    importBackup: async () => { imports++; throw new view.window.Error('This is not a supported encrypted backup.'); }
+  });
+  view.window.confirm = () => false;
+  view.get('auth-import').click();
+  await tick();
+  assert.equal(imports, 0);
+  view.window.confirm = () => true;
+  view.get('auth-import').click();
+  await tick();
+  assert.equal(imports, 1);
+  assert.equal(view.get('auth-error').textContent, 'This is not a supported encrypted backup.');
+  assert.equal(view.get('auth-error').hidden, false);
   assert.equal(view.get('workspace').hidden, true);
 });
 
@@ -1305,6 +1690,7 @@ test('the guided setup shows one step at a time, saves each step as the applican
   assert.equal(view.get('setup-step-count').textContent, 'Step 1 of 6');
   assert.equal(view.get('setup-step-title').textContent, 'You');
   assert.equal(view.window.document.activeElement, view.get('setup-step-title'), 'the step’s heading is read first');
+  assert.ok(view.get('setup-step-title').compareDocumentPosition(view.get('setup-step-count')) & view.window.Node.DOCUMENT_POSITION_FOLLOWING, 'the step’s heading comes before the step count, with no line above it');
   assert.deepEqual(shownSteps(), ['1']);
   assert.equal(view.get('save-profile').closest('.form-save-bar').hidden, true);
   assert.equal(view.get('setup-back').disabled, true);
@@ -1384,4 +1770,47 @@ test('an answer saved from Chrome shows in My information without losing the app
   view.profileChanged(['zip']);
   await tick(); await tick();
   assert.equal(view.get('zip').value, '50011', 'a field the applicant is editing keeps their edit');
+});
+
+// #135: a birth date after today, or more than 130 years ago, on this computer's calendar. My information
+// counts no ages from it and says whose date it is, as the app refuses to save it.
+// Pins the clock the page reads, at local noon on `day`.
+function pinDay(view, day) {
+  const RealDate = view.window.Date;
+  const [year, month, date] = day.split('-').map(Number);
+  const noon = new RealDate(year, month - 1, date, 12).getTime();
+  view.window.Date = class extends RealDate { constructor(...args) { super(...(args.length ? args : [noon])); } static now() { return noon; } };
+}
+const COUNT_VALUES = view => ['householdSize', 'householdAdults', 'householdChildren', 'householdSeniors'].map(view.value);
+const withDates = dates => ({ ...fictionalProfile, householdMembers: fictionalProfile.householdMembers.map((member, index) => ({ ...member, ...(dates[index] !== undefined ? { birthDate: dates[index] } : {}) })),
+  ...(dates[0] !== undefined ? { birthDate: dates[0] } : {}) });
+
+test('a saved birth date after today or more than 130 years ago counts no ages, and the note says whose date to check', async t => {
+  const view = await renderer(t, { getData: async () => structuredClone({ profile: withDates({ 2: '2999-01-01' }), applications: [] }) });
+  openProfile(view);
+  assert.deepEqual(COUNT_VALUES(view), ['4', '', '', ''], 'the size still counts everyone');
+  assert.equal(view.get('household-counts-note').textContent, 'Counted from your household list. Person 3’s date of birth is after today, so ages can’t be counted. Check the date.');
+  editRow(view, memberRows(view)[2], 'birthDate', '1825-06-01');
+  assert.equal(view.get('household-counts-note').textContent, 'Counted from your household list. Person 3’s date of birth is more than 130 years ago, so ages can’t be counted. Check the date.');
+  editRow(view, memberRows(view)[2], 'birthDate', '2021-02-14');
+  assert.deepEqual(COUNT_VALUES(view), ['4', '1', '2', '1']);
+  assert.equal(view.get('household-counts-note').textContent, 'Counted from your household list. To change them, change the list.');
+  view.edit('birthDate', '2999-01-01');
+  assert.equal(view.get('household-counts-note').textContent, 'Counted from your household list. Your date of birth is after today, so ages can’t be counted. Check the date.');
+});
+
+test('the day My information counts from is this computer’s own: born today counts, born tomorrow doesn’t', async t => {
+  const view = await renderer(t, { getData: async () => structuredClone({ profile: withDates({ 2: '2026-10-05' }), applications: [] }) });
+  pinDay(view, '2026-10-05');
+  openProfile(view);
+  editRow(view, memberRows(view)[2], 'birthDate', '2026-10-05');
+  assert.deepEqual(COUNT_VALUES(view), ['4', '1', '2', '1'], 'a newborn is a child');
+  editRow(view, memberRows(view)[2], 'birthDate', '2026-10-06');
+  assert.deepEqual(COUNT_VALUES(view), ['4', '', '', '']);
+  assert.match(view.get('household-counts-note').textContent, /Person 3’s date of birth is after today/);
+  editRow(view, memberRows(view)[3], 'birthDate', '1896-10-05');
+  editRow(view, memberRows(view)[2], 'birthDate', '2021-02-14');
+  assert.deepEqual(COUNT_VALUES(view), ['4', '1', '2', '1'], 'exactly 130 years ago still counts');
+  editRow(view, memberRows(view)[3], 'birthDate', '1896-10-04');
+  assert.match(view.get('household-counts-note').textContent, /Person 4’s date of birth is more than 130 years ago/);
 });

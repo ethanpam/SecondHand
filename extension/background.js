@@ -14,7 +14,7 @@ if (typeof globalThis.SecondHandTranslation?.create !== 'function') {
 // Must match BUILD in panel.js: change both together, with every change to the extension. The panel
 // compares them to tell when Chrome is still running an older worker than the pages it loaded from
 // disk, and the worker compares it with the build the desktop app ships to update itself (#85).
-const BUILD = '2026-10-03.3';
+const BUILD = '2026-10-05.4';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
@@ -35,7 +35,7 @@ const FRAME_ERROR = 'worker.frameUnsafe';
 const FIELD_ID = /^[A-Za-z][A-Za-z0-9_-]{0,59}$/; // field ids from the site engine's plan
 const results = new Map(); // tabId -> last autofill result: counts, keys, and fixed messages only. Never answers.
 const siteRuns = new Map(); // tabId -> the fill running on an approved site, so two clicks share one request.
-// Save to My information (#98). tabId -> { url, origin ('' on Iowa's portal), items: Map(id -> { frameId, planId, token, key, label }) }:
+// Save to My information (#98). tabId -> { url, origin ('' on Iowa's portal), items: Map(id -> { frameId, documentId, planId, token, key, label }) }:
 // the questions the last Autofill matched to a saved field that has no saved answer. Memory only, forgotten when
 // the tab navigates. Keys and plan ids stay in the worker; the side panel gets each question's id and label.
 const savables = new Map();
@@ -137,6 +137,12 @@ function failed(error) {
   return { state: 'error', message: text, messageKey: 'detail', messageParams: { detail: text } };
 }
 
+// Why the desktop left saved answers out (#135): a saved date of birth it can't use. Null when it left none out.
+function desktopReason(response) {
+  if (response?.reason === undefined) return null;
+  if (response.reason !== 'birthDate') throw fault('worker.desktopUnexpected');
+  return { key: 'worker.birthDateUnusable', params: {} };
+}
 // Desktop receipt revisions are authorization metadata, never profile values.
 function receiptRevision(response) {
   if (!Number.isSafeInteger(response?.accessRevision) || response.accessRevision < 0) throw fault('worker.authorizationOutdated');
@@ -167,6 +173,7 @@ async function fillPage(tabId, state, pilot) {
     currentPilot(tabId, pilot);
     const revision = receiptRevision(response);
     if (!response?.values || typeof response.values !== 'object' || Array.isArray(response.values)) throw fault('worker.noProfileFields');
+    const reason = desktopReason(response);
     values = SecondHandIowa.pageValues(pageKey, response.values);
     let filled = 0;
     const attempted = pilot.attempted;
@@ -203,8 +210,8 @@ async function fillPage(tabId, state, pilot) {
     if (filled > 0) await nativeRequest('recordProgress', { url: safeUrl(url), filledCount: Math.min(filled, 100) }).catch(() => {});
     currentPilot(tabId, pilot);
     const missing = needYou(after.page);
-    const summary = filled ? filledSummary(filled, missing)
-      : missing.length ? { key: 'result.needYouNotSaved', params: { count: missing.length } } : { key: 'result.nothingNew', params: {} };
+    const summary = withReason(filled ? filledSummary(filled, missing)
+      : missing.length ? { key: 'result.needYouNotSaved', params: { count: missing.length } } : { key: 'result.nothingNew', params: {} }, reason);
     // This receipt stays only in the worker. It never reaches a panel result.
     pilot.accessRevision = revision;
     const todo = after.page.todo ? adapterSays(after.page.todo, 'todo') : { todo: '' };
@@ -648,17 +655,37 @@ async function formReport(sender, helps) {
   return { frames: now };
 }
 
-// Chrome supplies frame ids only after access has been granted. Never message
-// an origin just because it appeared in the top document or in these results.
+// Where each frame is, as Chrome says (#137). The worker has every frame it can reach send it one message, and
+// Chrome gives each message's sender: the frame, its document, and its address. Nothing a page says about itself
+// places a frame. nonce -> { tabId, heard: Map(frameId -> { documentId, url }) }
+const frameChecks = new Map();
+// Runs in each frame, so Chrome serializes it and it must stand alone.
+function announceFrame(nonce) { return chrome.runtime.sendMessage({ type: 'secondhand:frame', nonce }); }
+function frameHeard(nonce, sender) {
+  const check = frameChecks.get(nonce);
+  if (!check || check.tabId !== sender.tab.id || check.heard.has(sender.frameId)) return false;
+  check.heard.set(sender.frameId, { documentId: sender.documentId, url: sender.url });
+  return true;
+}
+// Chrome supplies frame ids only after access has been granted. Never message an origin just because it
+// appeared in the top document. Each frame that is on, with the document and address Chrome gave for it.
 async function enabledSiteFrames(tabId, origin) {
-  const frames = await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func: () => location.origin });
-  if (!Array.isArray(frames) || !frames.some(frame => frame.frameId === 0 && frame.result === origin)) throw fault(FRAME_ERROR);
+  const nonce = crypto.randomUUID();
+  const heard = new Map();
+  frameChecks.set(nonce, { tabId, heard });
+  let frames;
+  try { frames = await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func: announceFrame, args: [nonce] }); }
+  finally { frameChecks.delete(nonce); }
+  if (!Array.isArray(frames)) throw fault(FRAME_ERROR);
+  const placed = frames.map(frame => {
+    const where = heard.get(frame.frameId);
+    // A frame Chrome reached but didn't place is never written to.
+    if (!Number.isInteger(frame.frameId) || frame.frameId < 0 || frame.frameId > 999999 || typeof frame.documentId !== 'string' || where?.documentId !== frame.documentId) throw fault(FRAME_ERROR);
+    return { frameId: frame.frameId, documentId: frame.documentId, url: where.url, origin: siteOrigin(where.url) };
+  });
+  if (!placed.some(frame => frame.frameId === 0 && frame.origin === origin)) throw fault(FRAME_ERROR);
   const enabled = [];
-  for (const frame of frames) {
-    if (!Number.isInteger(frame.frameId) || frame.frameId < 0 || frame.frameId > 999999) throw fault(FRAME_ERROR);
-    const frameOrigin = siteOrigin(frame.result);
-    if (frameOrigin && await siteEnabled(frameOrigin)) enabled.push({ frameId: frame.frameId, origin: frameOrigin });
-  }
+  for (const frame of placed) if (frame.origin && await siteEnabled(frame.origin)) enabled.push(frame);
   return enabled;
 }
 
@@ -708,6 +735,9 @@ async function tallySite(tabId, frames) {
 // A summary that says when Laya suggested the guesses.
 const withLaya = (summary, laya) => laya ? { key: 'result.suggestedByLaya', params: { summary } } : summary;
 const withReason = (summary, reason) => reason ? { key: 'result.withReason', params: { summary, reason } } : summary;
+// A click's reasons as one, each said once.
+const reasons = (...list) => list.filter((reason, index) => reason && list.findIndex(other => other?.key === reason.key) === index)
+  .reduce((all, next) => all ? joined(all, next) : next, null);
 function siteSummary(filled, guessed, needYou, next, laya, reason = null) {
   let summary;
   if (filled) {
@@ -721,10 +751,13 @@ function siteSummary(filled, guessed, needYou, next, laya, reason = null) {
 
 // The general engine's plan for the page: field ids, keys, and labels only.
 const strings = value => Array.isArray(value) && value.every(item => typeof item === 'string');
-async function planGeneral(tabId, frameId = 0, prefix = false) {
+// An embedded frame is messaged only in the document Chrome placed it in: once that document is gone, Chrome
+// delivers nothing, so answers for one site never reach a page that has since loaded in its frame.
+const frameTarget = (frameId, documentId) => documentId === undefined ? { frameId } : { frameId, documentId };
+async function planGeneral(tabId, frameId = 0, prefix = false, documentId = undefined) {
   try {
     const message = { type: 'secondhand:generic:plan' };
-    const plan = prefix && frameId === 0 ? await topSiteMessage(tabId, message) : await chrome.tabs.sendMessage(tabId, message, { frameId });
+    const plan = prefix && frameId === 0 ? await topSiteMessage(tabId, message) : await chrome.tabs.sendMessage(tabId, message, frameTarget(frameId, documentId));
     if (!plan || typeof plan.token !== 'string' || typeof plan.lang !== 'string' || !Array.isArray(plan.matched) || !Array.isArray(plan.unmatched) ||
       plan.unmatched.some(field => typeof field?.id !== 'string' || !FIELD_ID.test(field.id) || typeof field.label !== 'string' || typeof field.type !== 'string' ||
         !strings(field.options) || typeof field.required !== 'boolean')) throw fault('worker.pageCheckUnsafe');
@@ -743,15 +776,17 @@ const ruleAssignments = plan => plan.matched.map(field => ({ id: field.id, key: 
 
 // Chrome's on-device AI runs only in extension pages, so the widget asks for the questions
 // the rules left open and sends back its guesses with Autofill. Labels and options only.
+// Each frame keeps its own address, the one its answers are asked for in: the tab's for the top frame.
 async function siteFramePlans(tabId, url, stopForPending = false) {
   try {
     const origin = siteOrigin(url);
     const embedded = await siteFrames(tabId, origin);
-    const top = { frameId: 0, plan: await planGeneral(tabId, 0, true) };
+    const top = { frameId: 0, url, plan: await planGeneral(tabId, 0, true) };
     const pending = embedded.filter(frame => !frame.enabled);
     if (stopForPending && !top.plan.matched.length && !top.plan.unmatched.length && pending.length) return { frames: [top], pending };
     const enabled = await enabledSiteFrames(tabId, origin);
-    const frames = [top, ...await Promise.all(enabled.filter(frame => frame.frameId !== 0).map(async ({ frameId }) => ({ frameId, plan: await planGeneral(tabId, frameId, true) })))];
+    const frames = [top, ...await Promise.all(enabled.filter(frame => frame.frameId !== 0).map(async ({ frameId, documentId, url: frameUrl }) =>
+      ({ frameId, documentId, url: frameUrl, plan: await planGeneral(tabId, frameId, true, documentId) })))];
     return { frames, pending };
   } catch (error) {
     if (error.code === 'site-not-ready') throw error;
@@ -766,17 +801,20 @@ async function planSite(tabId) {
   const { boxes, choices } = layaQuestions(frames, true);
   const laya = boxes.length || choices.length ? await layaReady() : null;
   sitePlans.set(tabId, { url: tab.url, frames, laya });
-  return { unmatched: frames.flatMap(({ frameId, plan }) => plan.unmatched.map(({ id, label, type, options, required }) => ({ id: `f${frameId}:${id}`, label, type, options, required }))),
+  return { unmatched: frames.flatMap(({ frameId, plan }) => plan.unmatched.filter(guessable).map(({ id, label, type, options, required }) => ({ id: `f${frameId}:${id}`, label, type, options, required }))),
     allowedKeys: AI_KEYS, laya: laya === true };
 }
+// Chrome's AI never sees a question only the applicant answers (consent, signatures, codes, security
+// questions, user names, SSN…), so a guess for one names a field outside what it was asked, and is refused.
+const guessable = field => !SecondHandGeneric.unsafeQuestion(field);
 // Guesses name fields of the plan the AI saw; a fresh plan would give the fields other ids.
 function guessAssignments(stored, url, guesses) {
   if (stored?.url !== url) throw fault('worker.pageChangedAutofill');
-  const open = new Set(stored.frames.flatMap(({ frameId, plan }) => plan.unmatched.map(field => `f${frameId}:${field.id}`)));
+  const open = new Set(stored.frames.flatMap(({ frameId, plan }) => plan.unmatched.filter(guessable).map(field => `f${frameId}:${field.id}`)));
   const entries = plainEntries(guesses);
   // With Laya ready the widget never runs Chrome's AI, so it has no guesses to send.
   if (!entries || (stored.laya === true && entries.length) || entries.some(([id, key]) => !SITE_FIELD_ID.test(id) || !open.has(id) || !AI_KEYS.includes(key))) throw fault('worker.aiMatchesUnusable');
-  return stored.frames.map(({ frameId, plan }) => ({ frameId, plan, planned: [...ruleAssignments(plan),
+  return stored.frames.map(({ frameId, documentId, url: frameUrl, plan }) => ({ frameId, documentId, url: frameUrl, plan, planned: [...ruleAssignments(plan),
     ...entries.filter(([id]) => id.startsWith(`f${frameId}:`)).map(([id, key]) => ({ id: id.split(':')[1], key, guessed: true }))] }));
 }
 
@@ -858,30 +896,54 @@ async function layaAnswers(url, choices, budgetMs) {
   const sent = new Map(payload.questions.map(question => [question.id, question.options]));
   const entries = plainEntries(reply?.answers);
   if (!entries || entries.some(([id, option]) => !sent.has(id) || typeof option !== 'string' || !sent.get(id).includes(option))) throw fault('worker.layaUnusable');
-  return { entries, revision: receiptRevision(reply) };
+  return { entries, revision: receiptRevision(reply), reason: desktopReason(reply) };
 }
 
-// Fills from a general-engine plan: one desktop request for the keys planned first (the rules'
-// matches and any AI guesses), then up to four fill passes so questions revealed by an answer are
-// filled too. Each pass plans the page again. Never continues, submits, or navigates.
-// Laya is asked unless this click already found it not ready (`laya: false`). Both of its requests
-// share the click's time budget (#90): text boxes first, then choice questions with what is left.
+// The sites a click's answers go to, in page order, each with its frames (#137). A frame's site is its own
+// address as Chrome gave it (the tab's for the top frame and on Iowa's portal), never the page around it, so
+// every request for a site's answers names that site and its approval covers that site's frames only.
+function answerSites(frames) {
+  const sites = new Map();
+  for (const { frameId, url } of frames) {
+    // An embedded frame without the address Chrome gave for it is never filled under another's.
+    if (typeof url !== 'string') throw fault(FRAME_ERROR);
+    const origin = new URL(url).origin;
+    if (!sites.has(origin)) sites.set(origin, { url, frameIds: new Set(), keys: [], values: null, reason: null });
+    sites.get(origin).frameIds.add(frameId);
+  }
+  return [...sites.values()];
+}
+
+// Fills from a general-engine plan: for each site in the page, one desktop request for the keys planned
+// first in its frames (the rules' matches and any AI guesses), then up to four fill passes so questions
+// revealed by an answer are filled too. Each pass plans the page again. Never continues, submits, or navigates.
+// Laya is asked unless this click already found it not ready (`laya: false`). All of its requests
+// share the click's time budget (#90): every site's text boxes first, then choice questions with what is left.
 // A text box's candidates are short saved-field descriptions, while a choice question's each carry the
 // whole facts sheet, so the boxes take a fraction of the time and a long checklist can't starve them;
 // the desktop then decides the choice questions with the fewest options first. Its text-box matches
-// join the one request for saved values.
+// join each site's one request for saved values.
 async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, laya = null } = {}) {
   let revision = null;
-  let values = null;
+  let sites = [];
   try {
-    const initial = frames.map(frame => ({ ...frame, planned: frame.planned || ruleAssignments(frame.plan) }));
+    const initial = frames.map(frame => ({ ...frame, url: frame.frameId === 0 ? url : frame.url, planned: frame.planned || ruleAssignments(frame.plan) }));
+    sites = answerSites(initial);
+    const siteOf = frameId => sites.find(site => site.frameIds.has(frameId));
+    const place = id => prefix ? [Number(id.slice(1, id.indexOf(':'))), id.slice(id.indexOf(':') + 1)] : [0, id];
     const open = laya === false ? { boxes: [], choices: [] } : layaQuestions(initial, prefix);
     const fromLaya = new Set();
     const addLaya = (id, answer) => {
-      const [frameId, own] = prefix ? [Number(id.slice(1, id.indexOf(':'))), id.slice(id.indexOf(':') + 1)] : [0, id];
+      const [frameId, own] = place(id);
       const frame = initial.find(candidate => candidate.frameId === frameId);
       frame.planned = [...frame.planned, { id: own, ...answer, guessed: true }];
       fromLaya.add(`${frameId}|${own}`);
+    };
+    // Every receipt in a click must agree: an Always allow in a later prompt outdates the earlier ones,
+    // and outdated answers are never filled.
+    const receipt = value => {
+      if (revision !== null && value !== revision) throw fault('worker.accessChanged');
+      revision = value;
     };
     // Once Laya says it isn't ready, it isn't asked again in this click. Unless the widget's plan
     // already readied it, it is readied now, before the click's budget starts.
@@ -900,41 +962,59 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
     guard();
     const prepared = { ...english, boxes: english.boxes.filter(box => SecondHandGeneric.layaQuestion(box) === 'text'),
       choices: english.choices.filter(question => SecondHandGeneric.layaQuestion(question) === 'choice') };
+    const onSite = (site, questions) => questions.filter(question => site.frameIds.has(place(question.id)[0]));
     const budget = layaBudget();
     // null: Laya isn't ready; undefined: the budget was spent before this request.
-    if (layaOn && prepared.boxes.length) {
-      const suggestions = await budget.use(budgetMs => layaSuggestions(url, prepared.boxes, budgetMs));
+    if (layaOn) for (const site of sites) {
+      const boxes = onSite(site, prepared.boxes);
+      if (!boxes.length) continue;
+      const suggestions = await budget.use(budgetMs => layaSuggestions(site.url, boxes, budgetMs));
       guard();
-      if (suggestions === null) layaOn = false;
+      if (suggestions === null) { layaOn = false; break; }
       if (suggestions) for (const [id, key] of suggestions) addLaya(id, { key });
     }
-    let answers;
-    if (layaOn && prepared.choices.length) {
-      answers = await budget.use(budgetMs => layaAnswers(url, prepared.choices, budgetMs));
+    const answers = [];
+    if (layaOn) for (const site of sites) {
+      const choices = onSite(site, prepared.choices);
+      if (!choices.length) continue;
+      const reply = await budget.use(budgetMs => layaAnswers(site.url, choices, budgetMs));
       guard();
+      if (reply === null) break;
+      if (reply) answers.push(reply);
     }
-    const keys = [...new Set(SecondHandGeneric.requestKeys(initial.flatMap(frame => frame.planned.filter(item => item.key !== undefined).map(item => item.key))))];
-    if (keys.some(key => !plannedKey(key))) throw fault('worker.fieldRequestFailed');
-    if (keys.length) {
-      const desktop = await desktopStatus();
-      if (!desktop?.unlocked) throw fault('worker.unlockToAutofill');
-      const response = await nativeRequest('getFields', { url: safeUrl(url), fields: keys });
+    for (const site of sites) {
+      site.keys = [...new Set(SecondHandGeneric.requestKeys(initial.filter(frame => site.frameIds.has(frame.frameId))
+        .flatMap(frame => frame.planned.filter(item => item.key !== undefined).map(item => item.key))))];
+      if (site.keys.some(key => !plannedKey(key))) throw fault('worker.fieldRequestFailed');
+    }
+    let unlocked = false;
+    for (const site of sites) {
+      if (!site.keys.length) continue;
+      if (!unlocked) {
+        const desktop = await desktopStatus();
+        if (!desktop?.unlocked) throw fault('worker.unlockToAutofill');
+        unlocked = true;
+      }
+      const response = await nativeRequest('getFields', { url: safeUrl(site.url), fields: site.keys });
       if (!response?.values || typeof response.values !== 'object' || Array.isArray(response.values)) throw fault('worker.noProfileFields');
       guard();
-      revision = receiptRevision(response);
-      values = SecondHandGeneric.deriveValues(response.values);
+      receipt(receiptRevision(response));
+      site.reason = desktopReason(response);
+      site.values = SecondHandGeneric.deriveValues(response.values);
     }
-    // The answers came before getFields: an Always allow in its prompt outdates their receipt, and
-    // outdated answers are never filled. Without answers to fill, their receipt doesn't matter.
-    if (answers?.entries.length) {
-      if (revision !== null && answers.revision !== revision) throw fault('worker.accessChanged');
-      revision = answers.revision;
-      for (const [id, option] of prepared.mapAnswers(answers.entries)) addLaya(id, { option });
+    // The answers came before getFields: an Always allow in its prompt outdates their receipt.
+    // Without answers to fill, their receipt doesn't matter.
+    for (const reply of answers) {
+      if (!reply.entries.length) continue;
+      receipt(reply.revision);
+      for (const [id, option] of prepared.mapAnswers(reply.entries)) addLaya(id, { option });
     }
     let filled = 0, placedByLaya = 0;
     const needYou = [], savable = [];
     for (const frame of initial) {
-      const { frameId } = frame;
+      const { frameId, documentId } = frame;
+      // A frame gets only its own site's saved values.
+      const { keys, values } = siteOf(frameId);
       let { plan, planned } = frame;
       const refused = new Map(); // Refused answers stay local to this frame.
       if (revision !== null) for (let pass = 1; ; pass++) {
@@ -951,7 +1031,7 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
         let result;
         try {
           const message = { type: 'secondhand:generic:fill', token: plan.token, assignments, values: placing };
-          result = prefix && frameId === 0 ? await topSiteMessage(tabId, message) : await chrome.tabs.sendMessage(tabId, message, { frameId });
+          result = prefix && frameId === 0 ? await topSiteMessage(tabId, message) : await chrome.tabs.sendMessage(tabId, message, frameTarget(frameId, documentId));
           const assigned = new Set(assignments.map(item => item.id));
           const validIds = ids => Array.isArray(ids) && ids.every(id => typeof id === 'string' && assigned.has(id)) && new Set(ids).size === ids.length;
           // The page changed while its choices settled: the fill starts over from a new click.
@@ -966,7 +1046,7 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
         if (!placed.length) break;
         filled += placed.length;
         placedByLaya += placed.filter(({ id }) => fromLaya.has(`${frameId}|${id}`)).length;
-        plan = await planGeneral(tabId, frameId, prefix);
+        plan = await planGeneral(tabId, frameId, prefix, documentId);
         planned = ruleAssignments(plan);
         if (pass === MAX_GENERAL_PASSES) break;
       }
@@ -976,12 +1056,16 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       // Questions the rules matched to a saved field with no saved answer: the side panel offers to save the applicant's own (#98).
       for (const field of plan.matched) {
         if (!SecondHandGeneric.SAVE_KEYS.includes(field.key) || !keys.includes(field.key) || (typeof values?.[field.key] === 'string' && values[field.key])) continue;
-        savable.push({ id: prefix ? `f${frameId}:${field.id}` : field.id, frameId, planId: field.id, token: plan.token, key: field.key,
+        savable.push({ id: prefix ? `f${frameId}:${field.id}` : field.id, frameId, documentId, planId: field.id, token: plan.token, key: field.key,
           label: typeof field.label === 'string' ? field.label.trim().slice(0, LABEL_LIMIT) : '' });
       }
     }
-    return { filled, needYou, savable, laya: placedByLaya, reason: prepared.reason };
-  } finally { values = null; questionTranslation.forget(); }
+    // Why the desktop left answers out, from every site's replies, each reason said once.
+    return { filled, needYou, savable, laya: placedByLaya, reason: reasons(prepared.reason, ...answers.map(reply => reply.reason), ...sites.map(site => site.reason)) };
+  } finally {
+    for (const site of sites) site.values = null;
+    questionTranslation.forget();
+  }
 }
 
 // One click on an approved site, with the plan the AI saw when the widget sends guesses.
@@ -999,8 +1083,9 @@ async function fillSiteOnce(tabId, url, guesses) {
       laya = stored.laya;
       try {
         pending = (await siteFrames(tabId, siteOrigin(url))).filter(frame => !frame.enabled);
+        // Each frame the AI saw must still hold the document it saw there.
         const enabled = await enabledSiteFrames(tabId, siteOrigin(url));
-        if (frames.some(frame => !enabled.some(item => item.frameId === frame.frameId))) throw fault(FRAME_ERROR);
+        if (frames.some(frame => !enabled.some(item => item.frameId === frame.frameId && (frame.frameId === 0 || item.documentId === frame.documentId)))) throw fault(FRAME_ERROR);
       } catch (error) {
         if (error.code === 'site-not-ready') throw error;
         throw fault(FRAME_ERROR);
@@ -1058,16 +1143,23 @@ function keepSavable(tabId, url, origin, items) {
   if (items.length) savables.set(tabId, { url, origin, items: new Map(items.map(item => [item.id, item])) });
   else savables.delete(tabId);
 }
-// A message to the frame a kept question is in: on a site, only while the site (and that embedded form) is on.
-async function savableMessage(tabId, kept, frameId, message) {
+// The frame a kept question is in, with its address as Chrome gives it (#137): on a site, only while the site
+// (and that embedded form) is on. Null once an embedded form's frame holds another document: its questions
+// went with the page they were on.
+async function savableFrame(tabId, kept, { frameId, documentId }) {
   if (!kept.origin) {
     await activePortal(tabId);
-    return chrome.tabs.sendMessage(tabId, message, { frameId: 0 });
+    return { frameId: 0, url: kept.url };
   }
   await requireSite(kept.origin);
-  if (frameId === 0) return topSiteMessage(tabId, message);
-  if (!(await enabledSiteFrames(tabId, kept.origin)).some(frame => frame.frameId === frameId)) throw fault('worker.turnOnFrameFirst');
-  return chrome.tabs.sendMessage(tabId, message, { frameId });
+  if (frameId === 0) return { frameId: 0, url: kept.url };
+  const frame = (await enabledSiteFrames(tabId, kept.origin)).find(candidate => candidate.frameId === frameId);
+  if (!frame) throw fault('worker.turnOnFrameFirst');
+  return frame.documentId === documentId ? frame : null;
+}
+function savableMessage(tabId, kept, frame, message) {
+  if (frame.frameId !== 0) return chrome.tabs.sendMessage(tabId, message, frameTarget(frame.frameId, frame.documentId));
+  return kept.origin ? topSiteMessage(tabId, message) : chrome.tabs.sendMessage(tabId, message, { frameId: 0 });
 }
 // Each kept question's id and label, and whether its box holds an answer now. The page says which listed
 // boxes are answered, by id; nothing they hold is read here.
@@ -1082,24 +1174,30 @@ async function savableState(tabId) {
   }
   const answered = new Set();
   for (const items of groups.values()) {
-    const reply = await savableMessage(tabId, kept, items[0].frameId, { type: 'secondhand:generic:answered', token: items[0].token, ids: items.map(item => item.planId) });
+    const frame = await savableFrame(tabId, kept, items[0]);
+    if (!frame) { for (const item of items) kept.items.delete(item.id); continue; }
+    const reply = await savableMessage(tabId, kept, frame, { type: 'secondhand:generic:answered', token: items[0].token, ids: items.map(item => item.planId) });
     if (!Array.isArray(reply?.answered) || reply.answered.some(id => typeof id !== 'string')) throw fault('worker.pageCheckUnsafe');
     for (const item of items) if (reply.answered.includes(item.planId)) answered.add(item.id);
   }
+  if (!kept.items.size) savables.delete(tabId);
   return [...kept.items.values()].map(({ id, label }) => ({ id, label, answered: answered.has(id) }));
 }
 // After the applicant's Save click in the side panel: that one box's answer is read, then the desktop app
-// saves it after its own confirmation. The answer goes only to the app, and is not kept.
+// saves it after its own confirmation, in the name of the site whose page holds the box. The answer goes
+// only to the app, and is not kept.
 async function saveAnswer(tabId, id) {
   const kept = savables.get(tabId);
   const item = kept?.items.get(id);
   if (!item || (await chrome.tabs.get(tabId)).url !== kept.url) throw fault('worker.answerGone');
-  const read = await savableMessage(tabId, kept, item.frameId, { type: 'secondhand:generic:read', token: item.token, id: item.planId, key: item.key });
+  const frame = await savableFrame(tabId, kept, item);
+  if (!frame) throw fault('worker.answerGone');
+  const read = await savableMessage(tabId, kept, frame, { type: 'secondhand:generic:read', token: item.token, id: item.planId, key: item.key });
   if (read?.empty === true) throw fault('worker.answerFirst');
   if (read?.unreadable === true) throw fault('worker.answerUnreadable');
   if (typeof read?.value !== 'string' || !read.value.trim() || read.value.length > 200) throw fault('worker.answerGone');
   let reply;
-  try { reply = await nativeRequest('saveFields', { url: safeUrl(kept.url), fields: { [item.key]: read.value } }); }
+  try { reply = await nativeRequest('saveFields', { url: safeUrl(frame.url), fields: { [item.key]: read.value } }); }
   catch (error) { throw error.code !== 'offline' && /cancelled/i.test(error.message) ? fault('worker.saveCancelled') : error; }
   if (!Array.isArray(reply?.saved) || !reply.saved.includes(item.key)) throw fault('worker.desktopUnexpected');
   kept.items.delete(id);
@@ -1270,10 +1368,13 @@ function keepSummary(tabId, id, summary) {
   return { kept: true };
 }
 // The widget can't size its own frame, so its tab's content script fits the frame to the
-// widget's measured width, one row taller while it shows a line.
+// widget's measured size, taller while it shows a line.
 const cardWidth = width => Number.isInteger(width) && width > 0 && width <= 1000; // CSS pixels; the page caps it
-async function widgetSize(tabId, line, width) {
-  const reply = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:widgetSize', line, ...(width === undefined ? {} : { width }) }, { frameId: 0 });
+const CARD_SIZES = ['width', 'height', 'narrowWidth', 'narrowHeight'];
+const cardSize = message => CARD_SIZES.every(key => message[key] === undefined || cardWidth(message[key]));
+async function widgetSize(tabId, line, message) {
+  const size = Object.fromEntries(CARD_SIZES.filter(key => message[key] !== undefined).map(key => [key, message[key]]));
+  const reply = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:widgetSize', line, ...size }, { frameId: 0 });
   if (reply?.sized !== true) throw fault('worker.requestFailed');
   return { sized: true };
 }
@@ -1281,6 +1382,20 @@ async function widgetSize(tabId, line, width) {
 function summaryLine(tabId, url) {
   const summary = pageReads.get(tabId)?.get(url)?.summary;
   return summary?.points.length ? { summary: { language: summary.language, point: summary.points[0], english: summary.english } } : {};
+}
+
+// Unlock with Touch ID (#99). The desktop's status says whether it's ready or off; an app from before
+// it says nothing. Asked from a click in the side panel, the app shows its own Touch ID prompt and
+// answers whether it unlocked, or why not. No password ever passes through Chrome.
+const TOUCH_ID_STATES = Object.freeze(['ready', 'off']);
+const TOUCH_ID_REFUSALS = Object.freeze(['off', 'cancelled']);
+const knownTouchId = state => { if (!TOUCH_ID_STATES.includes(state)) throw fault('worker.desktopUnexpected'); return state; };
+async function unlockWithTouchId() {
+  const reply = await nativeRequest('unlockWithTouchId');
+  const keys = reply && typeof reply === 'object' ? Object.keys(reply).length : 0;
+  if (reply?.unlocked === true && keys === 1) return { unlocked: true };
+  if (reply?.unlocked === false && keys === 2 && TOUCH_ID_REFUSALS.includes(reply.reason)) return { unlocked: false, reason: reply.reason };
+  throw fault('worker.desktopUnexpected');
 }
 
 // Brings the desktop app forward, or has the native host start it when it isn't running.
@@ -1314,6 +1429,12 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     formReport(sender, message.helps).then(respond);
     return true;
   }
+  // A frame answering the worker's check of where each frame is: Chrome's sender says, never the message.
+  if (!panel && !frame && message.type === 'secondhand:frame' && typeof message.nonce === 'string' && Number.isInteger(sender.tab?.id) &&
+    Number.isInteger(sender.frameId) && sender.frameId >= 0 && typeof sender.documentId === 'string' && typeof sender.url === 'string' && !sender.url.startsWith(chrome.runtime.getURL(''))) {
+    if (frameHeard(message.nonce, sender)) respond(true);
+    return;
+  }
   if (!panel && !launcher) return;
   if (message.type === 'ui:ping') { respond({ ok: true, data: { build: BUILD } }); return; }
   if (launcher && message.type === 'ui:openPanel' && message.confirmed === true) {
@@ -1331,11 +1452,13 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   else if (panel && message.type === 'ui:desktopStatus') {
     run = async () => {
       const desktop = await desktopStatus().then(data => ({ connected: true, unlocked: Boolean(data?.unlocked), laya: layaState(data),
+        ...(data?.touchId === undefined ? {} : { touchId: knownTouchId(data.touchId) }),
         ...(selfUpdate?.state === 'failed' || selfUpdate?.state === 'elsewhere' ? { update: selfUpdate.state } : {}) }),
         error => { if (error.code === 'offline') return { connected: false, unlocked: false, laya: 'unavailable' }; throw error; });
       return { ...desktop, allSites: await allSitesOn() };
     };
-  } else if (panel && message.type === 'ui:enableAllSites' && message.confirmed === true) run = () => enableAllSites(tabId);
+  } else if (panel && message.type === 'ui:unlockWithTouchId' && message.confirmed === true) run = unlockWithTouchId;
+  else if (panel && message.type === 'ui:enableAllSites' && message.confirmed === true) run = () => enableAllSites(tabId);
   else if (panel && message.type === 'ui:disableAllSites' && message.confirmed === true) run = disableAllSites;
   else if (!Number.isInteger(tabId)) return;
   else if (message.type === 'ui:pageState') run = () => pageState(tabId, route);
@@ -1351,7 +1474,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   else if (panel && message.type === 'ui:pageText') run = () => pageText(tabId);
   else if (panel && message.type === 'ui:keepSummary' && typeof message.id === 'string') run = async () => keepSummary(tabId, message.id, message.summary);
   else if (panel && message.type === 'ui:saveAnswer' && message.confirmed === true && typeof message.id === 'string') run = () => saveAnswer(tabId, message.id);
-  else if (launcher && message.type === 'ui:widgetSize' && typeof message.line === 'boolean' && (message.width === undefined || cardWidth(message.width))) run = () => widgetSize(tabId, message.line, message.width);
+  else if (launcher && message.type === 'ui:widgetSize' && typeof message.line === 'boolean' && cardSize(message)) run = () => widgetSize(tabId, message.line, message);
   else return;
   // A click holds off an update until it settles; after any request, a waiting update may reload.
   const action = message.confirmed === true;

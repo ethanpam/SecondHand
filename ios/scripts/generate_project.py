@@ -65,6 +65,9 @@ qa_resources += [ref("SafariExtension/Resources/" + name, "sourcecode.javascript
 qa_resources += [ref("../extension/" + name, "sourcecode.javascript") for name in
                  ["iowa-adapter.js", "address-policy.js"]]
 
+profile_import_resources = [ref("../shared/" + name + ".cjs", "sourcecode.javascript") for name in
+                            ["household", "schema", "facts", "document-layout", "document-w2", "document-ssa1099", "document-1099nec", "document-parser"]]
+
 products = {}
 for name, ext, kind in [("SecondHand", "app", "wrapper.application"), ("SafariExtension", "appex", "wrapper.app-extension"),
                          ("SecondHandTests", "xctest", "wrapper.cfbundle"), ("SecondHandUITests", "xctest", "wrapper.cfbundle")]:
@@ -99,13 +102,14 @@ target("SafariExtension", extension_sources, extension_resources,
         "INFOPLIST_FILE": "SafariExtension/Info.plist", "CODE_SIGN_ENTITLEMENTS": "SafariExtension/SafariExtension.entitlements",
         "APPLICATION_EXTENSION_API_ONLY": "YES", "SKIP_INSTALL": "YES",
         "LD_RUNPATH_SEARCH_PATHS": ["$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks"]}, "com.apple.product-type.app-extension")
-target("SecondHand", app_sources, [assets] + qa_resources,
+target("SecondHand", app_sources, [assets] + qa_resources + profile_import_resources,
        {"PRODUCT_BUNDLE_IDENTIFIER": "com.ethanpam.secondhand", "PRODUCT_NAME": "$(TARGET_NAME)",
         "INFOPLIST_FILE": "SecondHand/Info.plist", "CODE_SIGN_ENTITLEMENTS": "SecondHand/SecondHand.entitlements",
         "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon", "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME": "AccentColor",
         "LD_RUNPATH_SEARCH_PATHS": ["$(inherited)", "@executable_path/Frameworks"]},
        "com.apple.product-type.application", [ext_dep], [embed])
-target("SecondHandTests", test_sources, [],
+test_resources = [ref(str(p.relative_to(ROOT)), "image.pdf") for p in sorted((ROOT / "Tests/Fixtures").glob("*.pdf"))]
+target("SecondHandTests", test_sources, test_resources,
        {"PRODUCT_BUNDLE_IDENTIFIER": "com.ethanpam.secondhand.tests", "PRODUCT_NAME": "$(TARGET_NAME)", "GENERATE_INFOPLIST_FILE": "YES",
         "TEST_HOST": "$(BUILT_PRODUCTS_DIR)/SecondHand.app/SecondHand", "BUNDLE_LOADER": "$(TEST_HOST)",
         "LD_RUNPATH_SEARCH_PATHS": ["$(inherited)", "@executable_path/Frameworks", "@loader_path/Frameworks"]},
@@ -115,7 +119,7 @@ target("SecondHandUITests", ui_sources, [],
         "TEST_TARGET_NAME": "SecondHand", "LD_RUNPATH_SEARCH_PATHS": ["$(inherited)", "@executable_path/Frameworks", "@loader_path/Frameworks"]},
        "com.apple.product-type.bundle.ui-testing", [app_dep])
 product_group = obj("products", "PBXGroup", children=list(products.values()), name="Products", sourceTree="<group>")
-all_files = list(dict.fromkeys(app_sources + extension_sources + test_sources + ui_sources + [assets] + extension_resources + qa_resources))
+all_files = list(dict.fromkeys(app_sources + extension_sources + test_sources + test_resources + ui_sources + [assets] + extension_resources + qa_resources + profile_import_resources))
 main_group = obj("main", "PBXGroup", children=all_files + [product_group], sourceTree="<group>")
 obj("project", "PBXProject", attributes={"BuildIndependentTargetsInParallel": "YES", "LastUpgradeCheck": "2600"},
     buildConfigurationList=config_list("project", {"ENABLE_TESTABILITY": "YES", "CLANG_WARN_DOCUMENTATION_COMMENTS": "YES"}),

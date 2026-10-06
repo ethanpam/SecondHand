@@ -344,6 +344,11 @@ async function panel(t, initial = {}) {
       data = { saved: true };
     }
     else if (payload.type === 'ui:showApp') data = { shown: true };
+    else if (payload.type === 'ui:unlockWithTouchId' && initial.unlockWithTouchId) {
+      const reply = await initial.unlockWithTouchId(desktop);
+      if (reply?.ok === false) return reply;
+      data = reply;
+    }
     else if (payload.type === 'ui:openApp') { if (initial.openApp) return initial.openApp(desktop); data = { opened: 'launched' }; }
     else if (payload.type === 'ui:openPanel') data = { opened: true };
     else if (payload.type === 'ui:enableFrames') { state.site.frames.forEach(frame => { frame.enabled = true; }); data = { enabled: true }; }
@@ -437,9 +442,9 @@ test('after Autofill, a question whose answer isn’t saved says so and points t
   const detail = key => view.row(key).querySelector('.checklist-detail').textContent;
   assert.equal(detail('firstName'), 'Needs you');
   await view.userClick('panel-autofill');
-  assert.equal(detail('firstName'), 'Not saved in SecondHand — add it in My information');
-  assert.equal(detail('middleName'), 'Not saved in SecondHand — add it in My information');
-  assert.equal(view.row('firstName').getAttribute('aria-label'), 'First name: Not saved in SecondHand — add it in My information. Find it in Iowa’s form.');
+  assert.equal(detail('firstName'), 'Not saved in SecondHand: add it in My information');
+  assert.equal(detail('middleName'), 'Not saved in SecondHand: add it in My information');
+  assert.equal(view.row('firstName').getAttribute('aria-label'), 'First name: Not saved in SecondHand: add it in My information. Find it in Iowa’s form.');
   // A question answered since shows as done; one SecondHand can't fill still says to do it yourself.
   assert.equal(detail('lastName'), 'Done');
   assert.equal(detail('unverified'), 'Do it yourself');
@@ -463,6 +468,62 @@ test('desktop line shows locked with Unlock, and not running with Open SecondHan
   assert.equal(offline.get('desktop-status').textContent, 'SecondHand isn’t running. Open the app on this computer.');
   assert.equal(offline.get('desktop-action').hidden, false);
   assert.equal(offline.get('desktop-action').textContent, 'Open SecondHand');
+});
+
+// Unlock with Touch ID (#99): the side panel asks the app to show its own Touch ID prompt when the
+// app's status says it's ready. Otherwise, or when Touch ID doesn't unlock, Unlock brings SecondHand
+// forward as before.
+test('when the app says Touch ID is ready, Unlock asks the app for Touch ID and the line then says unlocked', async t => {
+  let answer;
+  const view = await panel(t, { desktop: { unlocked: false, touchId: 'ready' },
+    unlockWithTouchId: desktop => new Promise(resolve => { answer = () => { desktop.unlocked = true; resolve({ unlocked: true }); }; }) });
+  assert.equal(view.get('desktop-action').hidden, false);
+  assert.equal(view.get('desktop-action').textContent, 'Unlock with Touch ID');
+  view.get('desktop-action').click(); await tick();
+  assert.equal(view.types().includes('ui:unlockWithTouchId'), false, 'only a trusted click asks');
+  await view.userClick('desktop-action');
+  assert.deepEqual(plainRequests(view.requests.filter(request => request.type === 'ui:unlockWithTouchId')), [{ type: 'ui:unlockWithTouchId', confirmed: true }]);
+  assert.equal(view.get('desktop-status').textContent, 'Use Touch ID to unlock SecondHand.');
+  assert.equal(view.get('desktop-action').hidden, true, 'no second click while Touch ID asks');
+  answer(); await tick(); await tick(); await tick();
+  assert.match(view.get('desktop-status').textContent, /unlocked/);
+  assert.equal(view.get('desktop-action').hidden, true);
+  assert.equal(view.types().includes('ui:showApp'), false, 'the app stays where it is');
+});
+
+test('when Touch ID doesn’t unlock, Unlock does what it does today: brings SecondHand forward, and says why', async t => {
+  const lines = { cancelled: 'Touch ID didn’t unlock SecondHand. Enter your password in SecondHand, then click Autofill.',
+    off: 'Unlock SecondHand, then click Autofill.' };
+  for (const [reason, line] of Object.entries(lines)) {
+    const view = await panel(t, { desktop: { unlocked: false, touchId: 'ready' }, unlockWithTouchId: () => ({ unlocked: false, reason }) });
+    await view.userClick('desktop-action'); await tick();
+    assert.deepEqual(plainRequests(view.requests.filter(request => ['ui:unlockWithTouchId', 'ui:showApp'].includes(request.type))),
+      [{ type: 'ui:unlockWithTouchId', confirmed: true }, { type: 'ui:showApp', confirmed: true }], reason);
+    assert.equal(view.get('desktop-status').textContent, line, reason);
+    assert.equal(view.get('desktop-action').hidden, false, `${reason}: Unlock can be clicked again`);
+  }
+  const failing = await panel(t, { desktop: { unlocked: false, touchId: 'ready' }, unlockWithTouchId: () => ({ ok: false, error: 'The request could not be completed. Check the desktop app.' }) });
+  await failing.userClick('desktop-action'); await tick();
+  assert.equal(failing.get('desktop-status').textContent, 'The request could not be completed. Check the desktop app.');
+  assert.equal(failing.types().includes('ui:showApp'), false);
+});
+
+test('when Touch ID is off, or the app says nothing about it, Unlock only brings SecondHand forward, as before', async t => {
+  for (const touchId of ['off', undefined]) {
+    const view = await panel(t, { desktop: { unlocked: false, ...(touchId ? { touchId } : {}) }, unlockWithTouchId: () => assert.fail('Touch ID was asked for') });
+    assert.equal(view.get('desktop-action').textContent, 'Unlock', String(touchId));
+    await view.userClick('desktop-action');
+    assert.equal(view.types().includes('ui:unlockWithTouchId'), false, String(touchId));
+    assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:showApp')), { type: 'ui:showApp', confirmed: true }, String(touchId));
+    assert.equal(view.get('desktop-status').textContent, 'Unlock SecondHand, then click Autofill.', String(touchId));
+  }
+});
+
+test('Unlock with Touch ID speaks the applicant’s language', async t => {
+  const view = await panel(t, { language: 'es', desktop: { unlocked: false, touchId: 'ready' }, unlockWithTouchId: () => ({ unlocked: false, reason: 'cancelled' }) });
+  assert.equal(view.get('desktop-action').textContent, strings.text('es', 'panel.unlockTouchId'));
+  await view.userClick('desktop-action'); await tick();
+  assert.equal(view.get('desktop-status').textContent, strings.text('es', 'desktop.touchIdDidntUnlock'));
 });
 
 // Waits for the panel to reach a state; each open check is about a second apart.
@@ -611,14 +672,23 @@ test('widget frame fits the logo and its buttons, grows for the yellow link, and
   assert.equal(sizes().length, 2, 'the same width is not asked for again');
 });
 
-test('widget frame is a row taller for a line and stays as wide as the widget with it', async t => {
+test('widget frame is taller for a line and stays as wide as the widget with it', async t => {
   const view = await panel(t, { launcher: true, autofill: { state: 'locked', filled: 0, needYou: [], message: 'Unlock SecondHand to autofill.', pageKey: 'iowa-personal-information' } });
-  view.get('widget').getBoundingClientRect = () => ({ width: view.get('widget-text').classList.contains('visually-hidden') ? 180.4 : 231.8 });
+  // jsdom lays nothing out: as Chrome would, the widget is as wide as its buttons without the line,
+  // and when its height is let go, the line takes more rows the narrower the widget is.
+  const card = view.get('widget');
+  card.getBoundingClientRect = () => {
+    const width = card.style.width ? parseFloat(card.style.width) : view.get('widget-text').classList.contains('visually-hidden') ? 180.4 : 231.8;
+    return { width, height: card.style.height === 'auto' ? (width < 200 ? 97.3 : 71.6) : 86 };
+  };
   const sizes = () => plainRequests(view.requests.filter(request => request.type === 'ui:widgetSize'));
   await view.userClick('autofill');
   assert.deepEqual(sizes(), [{ type: 'ui:widgetSize', line: false, width: 181 }]);
   await view.userClick('unlock');
-  assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: true, width: 232 });
+  assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: true, width: 232, height: 72, narrowWidth: 181, narrowHeight: 98 },
+    'how tall the line makes it at its own width, and at its buttons’ width');
+  assert.equal(card.getAttribute('style'), '', 'measuring leaves nothing behind');
+  assert.equal(view.get('widget-text').classList.contains('visually-hidden'), false);
   await view.userClick('autofill');
   assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: false, width: 181 });
 });
@@ -1547,6 +1617,44 @@ test('the Iowa widget frame is as wide as the widget measured itself, never past
   assert.match(host.style.width, /^min\(272px/, 'a widget that could not measure itself gets the full card');
   for (const width of [0, 1.5, '152', 5000]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: false, width }), undefined, `width ${width}`);
   assert.match(host.style.width, /^min\(272px/);
+});
+
+test('the Iowa widget frame is as tall as its line needs, up to 110px, and narrow on a narrow page', t => {
+  const page = content(t);
+  const host = page.host();
+  const size = { type: 'secondhand:widgetSize', line: true, width: 272, height: 72, narrowWidth: 133, narrowHeight: 97 };
+  assert.deepEqual(plain(page.request(size)), { sized: true });
+  assert.match(host.style.width, /^min\(272px/);
+  assert.equal(host.style.height, '86px', 'never shorter than one row taller');
+  page.request({ ...size, height: 108 });
+  assert.equal(host.style.height, '108px');
+  page.request({ ...size, height: 140 });
+  assert.equal(host.style.height, '110px', 'never taller than 110px');
+  // Under 640px wide, the frame keeps the widget's buttons' width and the line's rows, as the page resizes.
+  page.request(size);
+  Object.defineProperty(page.window, 'innerWidth', { value: 639, configurable: true });
+  page.window.dispatchEvent(new page.window.Event('resize'));
+  assert.match(host.style.width, /^min\(133px, 272px/);
+  assert.equal(host.style.height, '97px');
+  page.request({ ...size, narrowHeight: 140 });
+  assert.equal(host.style.height, '110px');
+  page.request({ type: 'secondhand:widgetSize', line: false, width: 133 });
+  assert.equal(host.style.height, '46px', 'no line, the size at rest');
+  page.request({ type: 'secondhand:widgetSize', line: true, width: 179 });
+  assert.match(host.style.width, /^min\(179px/, 'a widget that sent no narrow size keeps its width');
+  assert.equal(host.style.height, '86px');
+  page.request(size);
+  Object.defineProperty(page.window, 'innerWidth', { value: 640, configurable: true });
+  page.window.dispatchEvent(new page.window.Event('resize'));
+  assert.match(host.style.width, /^min\(272px/);
+  assert.equal(host.style.height, '86px');
+  for (const key of ['height', 'narrowWidth', 'narrowHeight']) {
+    for (const value of [0, 1.5, '97', 5000, null]) assert.equal(page.request({ ...size, [key]: value }), undefined, `${key} ${value}`);
+  }
+  page.setKind('manual');
+  page.window.dispatchEvent(new page.window.Event('popstate'));
+  assert.equal(host.style.height, '46px', 'a pill');
+  assert.equal(host.style.width, '46px');
 });
 
 // SecondHand on all websites.

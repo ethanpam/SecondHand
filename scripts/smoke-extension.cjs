@@ -14,6 +14,7 @@ const preApplicant = require('../tests/fixtures/iowa-pre-applicant.cjs');
 const addressFixture = require('../tests/fixtures/iowa-select-address.cjs');
 const selfFixture = require('../tests/fixtures/iowa-self-details.cjs');
 const tellUsMore = require('../tests/fixtures/iowa-tell-us-more.cjs');
+const strings = require('../extension/strings.js');
 const root = path.join(__dirname, '..');
 const portal = 'https://hhsservices.iowa.gov/apspssp/ssp.portal';
 const applicant = `${portal}/applyForBenefits/enterPersonalInfo`;
@@ -51,6 +52,13 @@ function verifiedAddressFixture(variant) {
 }
 
 function selfDetailsFixture(variant = 'verified') {
+  // Iowa serves Job Information at the same address. SecondHand fills nothing there.
+  if (variant === 'job') {
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Job Information · isolated QA</title></head>
+      <body><main><p>ISOLATED QA · FICTIONAL APPLICANT. No government connection.</p><h2>Job Information</h2>
+      <form id="qaJob"><fieldset><legend>Does anyone in your household have a job? (QA only)</legend><label><input name="qaJob" type="radio" value="yes">Yes</label><label><input name="qaJob" type="radio" value="no">No</label></fieldset>
+      <button type="button">Save and Continue</button></form></main></body></html>`;
+  }
   let html = selfFixture.html;
   if (variant === 'people') html = html.replace('People | Unvisited', 'People | Active');
   else if (variant === 'form') html = html.replace('action="simple"', 'action="otherPerson"');
@@ -99,6 +107,12 @@ function fixture(nextStep) {
       <h1>Household Members</h1><label>Fictional household member<input id="qa-household-member" name="qaHouseholdMember"></label>
       <button id="qa-manual-continue" type="button">Continue (QA only)</button></main>
       <script>window.__manualNextClicks=0;document.getElementById('qa-manual-continue').addEventListener('click',()=>{window.__manualNextClicks++;});</script></body></html>`;
+  }
+  // An applicant page whose form SecondHand doesn't recognize, so it fills nothing.
+  if (nextStep === 'unexpected') {
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Unexpected applicant page · test only</title></head>
+      <body><main><p class="test-only">SYNTHETIC TEST FIXTURE. No government connection or real applicant data.</p><h1>Enter Personal Information</h1>
+      <form id="qaPersonal"><label>QA first name<input name="qaFirstName"></label><button type="button">Save and Continue</button></form></main></body></html>`;
   }
   // Address controls below are hypothetical QA controls, not an observed Iowa
   // schema. They verify the shipping adapter's refusal to operate this step.
@@ -443,6 +457,123 @@ async function main() {
     assert.equal(await page.evaluate(() => window.__continues), 0);
     console.log('Autopilot: the household question is answered from saved programs and the CAPTCHA is left to the applicant.');
 
+    // After Autofill, the widget draws the whole next step inside its frame, in every language.
+    // The language is chosen as the side panel saves it, in the extension's own storage.
+    const frameBox = () => page.locator('[data-secondhand-assistant]').boundingBox();
+    const widgetLine = frame => frame.evaluate(() => {
+      const text = document.getElementById('widget-text'), box = text.getBoundingClientRect(), card = document.getElementById('widget').getBoundingClientRect();
+      const inside = rect => rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight;
+      return { text: text.textContent, shown: !text.classList.contains('visually-hidden') && box.width > 0 && box.height > 0,
+        clipped: text.scrollHeight > text.clientHeight, inFrame: inside(box) && inside(card), dir: document.documentElement.dir };
+    });
+    const lineProblems = async (frame, expected, code) => {
+      const line = await widgetLine(frame), box = await frameBox();
+      return [line.text !== expected && `text "${line.text}"`, !line.shown && 'line hidden', line.clipped && 'line clipped',
+        !line.inFrame && 'line past the frame', box.width > 272 && `frame ${box.width}px wide`, box.height > 110 && `frame ${box.height}px tall`,
+        line.dir !== strings.direction(code) && `dir ${line.dir}`].filter(Boolean);
+    };
+    const wholeSteps = [
+      { name: 'Job Information', url: selfDetailsUrl, pageKey: 'iowa-self-details-unverified', line: code => strings.text(code, 'iowa.selfUnverifiedTodo') },
+      { name: 'unexpected Enter Personal Information', url: `${applicant}?next=unexpected`, pageKey: 'iowa-personal-unverified', line: code => strings.text(code, 'iowa.personalUnverifiedTodo') },
+      // Save and Continue disabled: SecondHand fills the page and does not continue.
+      { name: 'Enter Personal Information, Save and Continue disabled', url: `${applicant}?next=stay`, pageKey: 'iowa-personal-information', disabled: true,
+        line: (code, filled) => `${strings.text(code, 'widget.filled', { count: filled })} · ${strings.text(code, 'iowa.reviewSaveContinue')}` }
+    ];
+    // Before Autofill there is no line, so the frame is 46px tall. On these English pages the
+    // widget may offer the page in the applicant's language instead, and that offer gets the row.
+    const beforeProblems = async (frame, code) => {
+      const state = await frame.evaluate(() => ({ line: !document.getElementById('widget-text').classList.contains('visually-hidden'), offer: !document.getElementById('translate-offer').hidden }));
+      const box = await frameBox();
+      return [state.line && 'line shown before Autofill', code === 'en' && state.offer && 'offer on an English page',
+        !state.offer && box.height !== 46 && `frame ${box.height}px tall without a line`, box.width > 272 && `frame ${box.width}px wide`, box.height > 110 && `frame ${box.height}px tall`].filter(Boolean);
+    };
+    const measured = [];
+    currentSelfVariant = 'job';
+    for (const code of strings.LANGUAGES) {
+      await resetTo(wholeSteps[0].url);
+      await (await launcherFrame()).evaluate(code => globalThis.SecondHandStrings.setLanguage(code), code);
+      for (const step of wholeSteps) {
+        await resetTo(step.url);
+        widget = await launcherFrame();
+        await expect(widget.locator('#autofill')).toBeVisible();
+        if (step.disabled) await page.locator('.saveAndContinueButton').evaluate(button => button.setAttribute('disabled', ''));
+        await expect.poll(() => beforeProblems(widget, code), { timeout: 10000, message: `${code} ${step.name} before Autofill` }).toEqual([]);
+        const before = await frameBox();
+        const offered = await widget.locator('#translate-offer').isVisible();
+        await widget.locator('#autofill').click();
+        await expect.poll(async () => (await widget.evaluate(() => chrome.runtime.sendMessage({ type: 'ui:pageState' })))?.data?.result?.state, { timeout: 20000 }).toMatch(/^(waiting|done)$/);
+        const { page: probed, result } = (await widget.evaluate(() => chrome.runtime.sendMessage({ type: 'ui:pageState' }))).data;
+        assert.equal(probed.pageKey, step.pageKey, `${step.name} is classified as ${step.pageKey}`);
+        if (step.disabled) assert.ok(result.filled > 0, 'SecondHand fills the applicant page');
+        // A disabled button fires no click, so the worker's own result says it never tried to continue
+        // (it would say it is continuing, or waiting after a try).
+        if (step.disabled) assert.equal(result.state, 'done', 'SecondHand does not try to continue');
+        const expected = step.line(code, result.filled);
+        await expect.poll(() => lineProblems(widget, expected, code), { timeout: 10000, message: `${code} ${step.name}` }).toEqual([]);
+        assert.equal(await page.evaluate(() => window.__nextClicks || 0), 0, 'SecondHand does not continue');
+        const after = await frameBox();
+        measured.push(`${code} ${step.name}: ${before.width}x${before.height} before${offered ? ' (language offer)' : ''}, ${after.width}x${after.height} after`);
+      }
+    }
+    for (const line of measured) console.log(`Widget frame, ${line}.`);
+    console.log('Widget: after Autofill, the whole next step shows inside the frame in all six languages, and Arabic reads right to left.');
+
+    // A narrow page (an old laptop at high zoom with the side panel open leaves about 260px): the
+    // widget keeps its buttons' width and its line takes more rows, all of it inside the frame.
+    const settledLine = async (code, expected) => {
+      await expect.poll(async () => (await widget.evaluate(() => chrome.runtime.sendMessage({ type: 'ui:pageState' })))?.data?.result?.state, { timeout: 20000 }).toMatch(/^(waiting|done)$/);
+      const { result } = (await widget.evaluate(() => chrome.runtime.sendMessage({ type: 'ui:pageState' }))).data;
+      await expect.poll(() => lineProblems(widget, expected(result.filled), code), { timeout: 10000, message: `${code} at ${page.viewportSize().width}px` }).toEqual([]);
+    };
+    const narrow = [];
+    await page.setViewportSize({ width: 260, height: 900 });
+    for (const code of strings.LANGUAGES) {
+      await (await launcherFrame()).evaluate(code => globalThis.SecondHandStrings.setLanguage(code), code);
+      await resetTo(selfDetailsUrl);
+      widget = await launcherFrame();
+      await expect.poll(() => beforeProblems(widget, code), { timeout: 10000, message: `${code} at 260px before Autofill` }).toEqual([]);
+      const before = await frameBox();
+      await widget.locator('#autofill').click();
+      await settledLine(code, () => wholeSteps[0].line(code));
+      const after = await frameBox();
+      assert.ok(after.width <= before.width, `${code} at 260px: the line makes the widget no wider`);
+      narrow.push(`${code} Job Information at 260px: ${before.width}x${before.height} before, ${after.width}x${after.height} after`);
+    }
+    currentSelfVariant = 'verified';
+
+    // Save and Continue stays as clear of the widget as main left it, on Enter Personal Information
+    // scrolled to the bottom. At 390px main's widget already covers its right edge. Under 640px the
+    // widget's width doesn't depend on the page's, so 390px also shows each language's line fits.
+    const clearOf = { 390: ['left', 'center'], 427: ['left', 'center', 'right'], 455: ['left', 'center', 'right'], 512: ['left', 'center', 'right'], 640: ['left', 'center', 'right'] };
+    for (const code of strings.LANGUAGES) {
+      await (await launcherFrame()).evaluate(code => globalThis.SecondHandStrings.setLanguage(code), code);
+      for (const [width, points] of Object.entries(clearOf).filter(([width]) => ['en', 'es'].includes(code) || width === '390')) {
+        await page.setViewportSize({ width: Number(width), height: 700 });
+        await resetTo(`${applicant}?next=stay`);
+        widget = await launcherFrame();
+        await expect(widget.locator('#autofill')).toBeVisible();
+        await page.locator('.saveAndContinueButton').evaluate(button => button.setAttribute('disabled', ''));
+        await expect.poll(() => beforeProblems(widget, code), { timeout: 10000, message: `${code} at ${width}px before Autofill` }).toEqual([]);
+        const before = await frameBox();
+        await widget.locator('#autofill').click();
+        await settledLine(code, filled => wholeSteps[2].line(code, filled));
+        const after = await frameBox();
+        if (Number(width) < 640) assert.ok(after.width <= before.width, `${code} at ${width}px: the line makes the widget no wider`);
+        await page.evaluate(() => window.scrollTo(0, document.scrollingElement.scrollHeight));
+        const clear = await page.evaluate(() => {
+          const button = document.querySelector('.saveAndContinueButton'), box = button.getBoundingClientRect(), y = box.top + box.height / 2;
+          return [['left', box.left + 2], ['center', box.left + box.width / 2], ['right', box.right - 2]]
+            .filter(([, x]) => button.contains(document.elementFromPoint(x, y))).map(([point]) => point);
+        });
+        for (const point of points) assert.ok(clear.includes(point), `${code} at ${width}px: Save and Continue's ${point} is clear of the widget (clear: ${clear.join(', ') || 'none'})`);
+        narrow.push(`${code} Save and Continue disabled at ${width}px: ${before.width}x${before.height} before, ${after.width}x${after.height} after; button clear at ${clear.join(', ') || 'no point'}`);
+      }
+    }
+    await page.setViewportSize({ width: 1200, height: 900 });
+    await widget.evaluate(key => localStorage.removeItem(key), strings.STORAGE_KEY);
+    for (const line of narrow) console.log(`Widget frame, ${line}.`);
+    console.log('Widget: on narrow pages it stays inside its frame, keeps its buttons\' width, and leaves Save and Continue as clear as before.');
+
     // Other portal pages show only a small pill and never contact the desktop.
     await resetTo(`${portal}/applyForBenefits/householdMembers`);
     await expect(page.locator('[data-secondhand-assistant]')).toHaveAttribute('data-secondhand-size', 'pill');
@@ -694,7 +825,7 @@ async function main() {
     await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
     await panel.click('#panel-autofill');
     for (const key of startRows.filter(key => key !== 'ssnCardName')) {
-      await expect.poll(() => panel.text(`[data-key="${key}"]`), { timeout: 20000 }).toContain('Not saved in SecondHand — add it in My information');
+      await expect.poll(() => panel.text(`[data-key="${key}"]`), { timeout: 20000 }).toContain('Not saved in SecondHand: add it in My information');
     }
     await page.waitForTimeout(1800);
     assert.deepEqual(await startChecked(), []);

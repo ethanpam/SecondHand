@@ -1,0 +1,53 @@
+name: CI
+# Light CI: the unit tests, static checks and website checks, on one Linux job. The Electron,
+# browser, OCR, Laya and iOS smokes stay local (see the README's Develop section). Pushes to
+# feature branches are covered by their pull request, so only main runs on push.
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+# A newer push to the same pull request or branch cancels the run it replaces.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  checks:
+    name: Unit tests and checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            website/package-lock.json
+      # The install scripts only download binaries these checks don't use: the postinstall fetches
+      # Electron, and onnxruntime-node fetches CUDA libraries on Linux. The tests stub Electron.
+      - name: Install
+        run: npm ci --ignore-scripts
+      - name: Unit tests
+        run: npm test
+      - name: Syntax and extension permission checks
+        run: npm run check
+      - name: Install website
+        working-directory: website
+        run: npm ci
+      - name: Website tests
+        working-directory: website
+        run: npm test
+      - name: Website typecheck
+        working-directory: website
+        run: npm run typecheck
+      - name: Website lint
+        working-directory: website
+        run: npm run lint
+      - name: Website build
+        working-directory: website
+        run: npm run build

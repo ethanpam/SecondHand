@@ -28,8 +28,11 @@
   let documentRequestId = null;
   let documentBusy = false;
   let documentFields = [];
+  let documentReviewFields = [];
   let stopDocumentProgress = null;
   const documentProfileKeys = new Set(['firstName', 'middleName', 'lastName', 'ssn', 'addressLine1', 'addressLine2', 'city', 'state', 'zip']);
+  const fieldReview = { profile: { revision: 0, busy: false, descriptions: [] }, document: { revision: 0, busy: false, descriptions: [] } };
+  const fieldReviewLabels = { empty: 'Blank', 'format-passed': 'Format checks passed', 'needs-review': 'Needs review', 'check-source': 'Check source' };
   let layaPoll;
   const LAYA_POLL_MS = 500;
   // The household list (#98): each person who lives with the applicant, the applicant's own row first.
@@ -55,6 +58,8 @@
   let setupStep = null;
   // A new password offers the setup once its recovery key is saved.
   let offerSetup = false;
+  // The desktop's note that it reset its settings is shown once while the app is open.
+  let settingsNoticeShown = false;
 
   function icon(name) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -142,6 +147,7 @@
 
   function clearSensitiveUI() {
     vaultGeneration++;
+    clearFieldReviews({ resetOptIn: true });
     offerSetup = false;
     setupProgress = null;
     closeSetup();
@@ -164,12 +170,13 @@
     $('reset-form').reset();
     if ($('recovery-dialog').open) $('recovery-dialog').close();
     clearRecoveryKey();
+    closeTouchIdDialog();
     $('application-list').replaceChildren();
     $('overview-applications').replaceChildren();
         $('application-count').textContent = '0';
     if ($('application-dialog').open) $('application-dialog').close();
     clearTimeout(layaPoll);
-    for (const id of ['auth-error', 'reset-error', 'profile-error', 'application-error', 'extension-error', 'extension-prepare-error', 'autofill-trust-error', 'laya-error']) clearError(id);
+    for (const id of ['auth-error', 'reset-error', 'profile-error', 'application-error', 'extension-error', 'extension-prepare-error', 'autofill-trust-error', 'laya-error', 'touch-id-error']) clearError(id);
     setProfileDirty(false);
     clearTimeout(toastTimer);
     $('toast').hidden = true;
@@ -200,7 +207,40 @@
     $('device-reset-field').hidden = exists || !vaultStatus.deviceResetSupported;
     $('allow-device-reset').checked = true;
     setResetMode(false);
+    renderTouchIdUnlock();
     if (api) $('passphrase').focus();
+  }
+
+  // The lock screen's Unlock with Touch ID, when it's ready, or a line saying why Touch ID was turned off.
+  function renderTouchIdUnlock() {
+    const locked = Boolean(vaultStatus.exists) && !vaultStatus.unlocked;
+    $('touch-id-unlock').hidden = !(locked && vaultStatus.touchId === 'ready');
+    const notice = locked && typeof vaultStatus.touchIdNotice === 'string' ? vaultStatus.touchIdNotice : '';
+    $('touch-id-note').textContent = notice;
+    $('touch-id-note').hidden = !notice;
+  }
+
+  // Touch ID's state can change while the lock screen shows (an auto-lock, a failed attempt).
+  async function refreshTouchIdUnlock() {
+    const generation = vaultGeneration;
+    try {
+      const status = await api.status();
+      if (generation !== vaultGeneration || vaultStatus.unlocked || status.unlocked) return;
+      vaultStatus = { ...vaultStatus, touchId: status.touchId, touchIdSupported: status.touchIdSupported, touchIdNotice: status.touchIdNotice };
+      renderTouchIdUnlock();
+    } catch (error) { if (generation === vaultGeneration) showError('auth-error', error); }
+  }
+
+  // Unlock with Touch ID in Privacy & backups: shown only on a Mac that can use it.
+  function renderTouchId() {
+    $('touch-id-setting').hidden = !vaultStatus.touchIdSupported;
+    $('touch-id-toggle').checked = vaultStatus.touchId === 'ready';
+  }
+
+  function closeTouchIdDialog() {
+    if ($('touch-id-dialog').open) $('touch-id-dialog').close();
+    $('touch-id-form').reset();
+    clearError('touch-id-error');
   }
 
   function resetWithDevice() {
@@ -280,6 +320,7 @@
       if (!window.confirm('Leave without saving your profile changes?')) return;
       fillProfile();
     }
+    if (view !== currentView) clearFieldReviews({ resetOptIn: true });
     if (view !== 'profile') closeSetup();
     if (currentView === 'documents' && view !== 'documents') clearDocumentReview();
     currentView = view;
@@ -297,6 +338,7 @@
   const profileControl = (field) => $('profile-form').elements.namedItem(field);
 
   function fillProfile() {
+    clearFieldReviews();
     profileRevision++;
     manualCounts = null;
     for (const key of profileFields) profileControl(key).value = typeof data.profile[key] === 'string' ? data.profile[key] : '';
@@ -304,10 +346,24 @@
     setProfileDirty(false);
   }
 
-  // Whole years on this computer's calendar today; a birthday counts on the day itself. Null without a date.
-  function ageOn(birthDate) {
+  // Why a birth date can't be used on this computer's calendar today: 'future', 'tooOld' (more than 130
+  // years ago), or null. The desktop checks a date the same way when it is saved (#135).
+  function dateProblem(birthDate) {
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(birthDate || '');
     if (!match) return null;
+    const now = new Date();
+    const today = [now.getFullYear(), now.getMonth() + 1, now.getDate()];
+    const birth = match.slice(1).map(Number);
+    const compare = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+    if (compare(birth, today) > 0) return 'future';
+    if (compare(birth, [today[0] - 130, today[1], today[2]]) < 0) return 'tooOld';
+    return null;
+  }
+  // Whole years on this computer's calendar today; a birthday counts on the day itself. Null without a date
+  // or with one that can't be used.
+  function ageOn(birthDate) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(birthDate || '');
+    if (!match || dateProblem(birthDate)) return null;
     const now = new Date();
     const [year, month, day] = match.slice(1).map(Number);
     return now.getFullYear() - year - (now.getMonth() + 1 < month || (now.getMonth() + 1 === month && now.getDate() < day) ? 1 : 0);
@@ -366,6 +422,7 @@
     refreshMembers();
   }
   function refreshMembers() {
+    clearFieldReviews();
     const rows = memberRows();
     rows.forEach((row, index) => {
       const self = row.dataset.self === 'true';
@@ -416,7 +473,12 @@
     profileControl('householdAdults').value = count(18, 64);
     profileControl('householdChildren').value = count(0, 17);
     profileControl('householdSeniors').value = count(65, Infinity);
-    $('household-counts-note').textContent = known ? 'Counted from your household list. To change them, change the list.'
+    // A birth date after today or more than 130 years ago: whose it is, named as its row is.
+    const unusable = members.findIndex(member => dateProblem(member.birthDate));
+    const whose = unusable < 0 ? '' : members[unusable].relationship === 'self' ? 'Your' : `Person ${unusable + 1}’s`;
+    const when = unusable < 0 ? '' : dateProblem(members[unusable].birthDate) === 'future' ? 'after today' : 'more than 130 years ago';
+    $('household-counts-note').textContent = unusable >= 0 ? `Counted from your household list. ${whose} date of birth is ${when}, so ages can’t be counted. Check the date.`
+      : known ? 'Counted from your household list. To change them, change the list.'
       : 'Counted from your household list. Add every person’s birth date to count their ages.';
   }
   function addMember() {
@@ -435,6 +497,7 @@
 
   // The guided setup on screen: one step's cards, its title, and Back, Finish later, and Save and continue.
   function renderSetupStep() {
+    clearFieldReviews();
     const active = setupStep !== null;
     // Each section of My information belongs to one step; a card shows while any of its sections does.
     for (const part of $('profile-form').querySelectorAll('[data-setup-step]')) part.hidden = active && Number(part.dataset.setupStep) !== setupStep + 1;
@@ -491,10 +554,12 @@
   // a field the applicant is editing keeps their unsaved edit.
   async function profileChangedElsewhere(fields) {
     if (!vaultStatus.unlocked) return;
+    clearFieldReviews();
     const generation = vaultGeneration;
     try {
       const latest = await api.getData();
       if (generation !== vaultGeneration || !vaultStatus.unlocked) return;
+      clearFieldReviews();
       const before = data.profile;
       data = { ...data, profile: latest.profile || {} };
       if (!profileDirty) fillProfile();
@@ -506,6 +571,122 @@
     } catch (error) { if (generation === vaultGeneration) toast(error.message || 'Unable to show the answer you saved from Chrome.', true); }
   }
 
+  function fieldReviewControls() {
+    for (const scope of ['profile', 'document']) {
+      const button = $(`check-${scope}-fields`);
+      button.disabled = !api?.reviewFields || !vaultStatus.unlocked || fieldReview[scope].busy || (scope === 'document' && (documentBusy || !documentReviewFields.length));
+      button.setAttribute('aria-busy', String(fieldReview[scope].busy));
+      const optIn = $(`${scope}-review-laya`);
+      if (optIn) optIn.disabled = !api?.reviewFields;
+    }
+  }
+
+  // Review results describe one exact draft, never a saved validation flag.
+  // Invalidation also cancels model work, but correctness never depends on cancellation arriving first.
+  function clearFieldReviews({ resetOptIn = false, scopes = ['profile', 'document'] } = {}) {
+    const cancel = scopes.some(scope => fieldReview[scope].busy);
+    for (const scope of scopes) {
+      const review = fieldReview[scope];
+      review.revision++;
+      review.busy = false;
+      for (const { control, id } of review.descriptions) {
+        const remaining = (control.getAttribute('aria-describedby') || '').split(/\s+/).filter(value => value && value !== id);
+        if (remaining.length) control.setAttribute('aria-describedby', remaining.join(' ')); else control.removeAttribute('aria-describedby');
+      }
+      review.descriptions = [];
+      document.querySelectorAll(`.field-review-result[data-review-scope="${scope}"]`).forEach(node => node.remove());
+      $(`${scope}-review-other`).replaceChildren();
+      $(`${scope}-review-summary`).textContent = '';
+      $(`${scope}-review-laya-status`).textContent = '';
+      if (resetOptIn && $(`${scope}-review-laya`)) $(`${scope}-review-laya`).checked = false;
+    }
+    fieldReviewControls();
+    if (cancel && api?.cancelFieldReview) {
+      try { Promise.resolve(api.cancelFieldReview()).catch(() => {}); } catch { /* Old results still fail the revision guard. */ }
+    }
+  }
+
+  const reviewProfileDraft = () => ({ ...Object.fromEntries(profileFields.map(key => [key, String(profileControl(key).value || '')])), householdMembers: collectMembers() });
+  const reviewDocumentCandidates = () => documentReviewFields.map(field => ({ ...field.metadata, value: field.input ? field.input.value : field.value }));
+
+  function profileReviewTarget(key) {
+    let controls = [], container;
+    if (profileFields.includes(key)) {
+      const control = profileControl(key);
+      controls = control instanceof window.RadioNodeList ? Array.from(control) : [control];
+      container = controls[0]?.closest('.choice-question, .field');
+    } else if (key === 'householdMembers') container = $('household-members');
+    else {
+      const match = /^householdMembers\.(\d+)\.(firstName|lastName|birthDate|relationship|student|grade)$/.exec(key);
+      if (match) {
+        const row = memberRows()[Number(match[1])];
+        const control = row?.querySelector(`[data-member-field="${match[2]}"]`);
+        controls = control ? [control] : [];
+        container = control?.closest('.field') || row;
+      }
+    }
+    return { container: container || $('profile-review-other'), controls };
+  }
+
+  function renderFieldReview(scope, response) {
+    const results = Array.isArray(response?.[scope]) ? response[scope].slice(0, 250) : [];
+    let count = 0, needsReview = 0, checkSource = 0;
+    for (const [index, result] of results.entries()) {
+      if (!result || !Object.hasOwn(fieldReviewLabels, result.status) || typeof result.key !== 'string') continue;
+      let target;
+      if (scope === 'profile') target = profileReviewTarget(result.key);
+      else {
+        const field = documentReviewFields[index];
+        if (!field || (field.metadata.id && field.metadata.id !== result.id)) continue;
+        target = { container: field.row, controls: field.input ? [field.input] : [] };
+      }
+      const node = element('p', `field-review-result ${result.status}`);
+      node.dataset.reviewScope = scope;
+      node.dataset.reviewKey = result.key;
+      node.id = `field-review-${scope}-${index}`;
+      const label = typeof result.label === 'string' ? result.label.slice(0, 160) : 'Field';
+      const messages = Array.isArray(result.messages) ? result.messages.filter(message => typeof message === 'string').slice(0, 8).map(message => message.slice(0, 500)) : [];
+      node.append(element('span', 'field-review-sr-label', `${label}: `), element('strong', '', fieldReviewLabels[result.status]));
+      if (messages.length) node.append(document.createTextNode(` · ${messages.join(' ')}`));
+      target.container.append(node);
+      for (const control of target.controls) {
+        const ids = (control.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean);
+        control.setAttribute('aria-describedby', [...new Set([...ids, node.id])].join(' '));
+        fieldReview[scope].descriptions.push({ control, id: node.id });
+      }
+      count++;
+      if (result.status === 'needs-review') needsReview++;
+      if (result.status === 'check-source') checkSource++;
+    }
+    $(`${scope}-review-summary`).textContent = `${count} fields checked · ${needsReview} need review · ${checkSource} need a source check. These checks do not verify your answers.`;
+    $(`${scope}-review-laya-status`).textContent = typeof response?.laya?.message === 'string' ? response.laya.message.slice(0, 500) : '';
+  }
+
+  async function checkFields(scope, { rulesOnly = false } = {}) {
+    const requiredView = scope === 'profile' ? 'profile' : 'documents';
+    if (!api?.reviewFields || !vaultStatus.unlocked || currentView !== requiredView || (scope === 'document' && !documentReviewFields.length)) return;
+    clearFieldReviews({ scopes: [scope] });
+    const review = fieldReview[scope], revision = review.revision, generation = vaultGeneration;
+    const request = { profile: reviewProfileDraft(), ...(scope === 'document' ? { documentFields: reviewDocumentCandidates() } : {}), useLaya: scope === 'document' && !rulesOnly && $(`${scope}-review-laya`).checked };
+    const snapshot = JSON.stringify(request);
+    const current = () => generation === vaultGeneration && vaultStatus.unlocked && currentView === requiredView && revision === review.revision &&
+      snapshot === JSON.stringify({ profile: reviewProfileDraft(), ...(scope === 'document' ? { documentFields: reviewDocumentCandidates() } : {}), useLaya: request.useLaya });
+    review.busy = true;
+    fieldReviewControls();
+    $(`${scope}-review-summary`).textContent = request.useLaya ? 'Checking formats and requesting experimental Laya suggestions…' : 'Checking fields on this computer…';
+    try {
+      const response = await api.reviewFields(request);
+      if (current()) renderFieldReview(scope, response);
+    } catch {
+      if (current()) $(`${scope}-review-summary`).textContent = 'Checks could not be completed. Your information has not changed. Try again or review it yourself.';
+    } finally {
+      if (revision === review.revision && generation === vaultGeneration) {
+        review.busy = false;
+        fieldReviewControls();
+      }
+    }
+  }
+
   function documentControls() {
     $('read-document').disabled = documentBusy || !api?.readDocument;
     $('read-document').setAttribute('aria-busy', String(documentBusy));
@@ -514,9 +695,11 @@
     const selected = documentFields.filter(field => field.checkbox?.checked);
     $('document-selection-count').textContent = selected.length ? `${selected.length} ${selected.length === 1 ? 'detail' : 'details'} selected · profile draft only` : 'No details selected. Nothing will be changed.';
     $('apply-document-fields').disabled = documentBusy || !selected.length || !$('document-confirm-applicant').checked || !vaultStatus.unlocked;
+    fieldReviewControls();
   }
 
   function clearDocumentReview({ cancel = true } = {}) {
+    clearFieldReviews({ resetOptIn: true });
     const requestId = documentRequestId;
     const wasBusy = documentBusy;
     documentRevision++;
@@ -525,6 +708,7 @@
     if (stopDocumentProgress) { try { stopDocumentProgress(); } catch { /* Cleared generation still blocks late events. */ } }
     stopDocumentProgress = null;
     documentFields = [];
+    documentReviewFields = [];
     for (const id of ['document-fields', 'document-pages', 'document-warning-list']) $(id).replaceChildren();
     for (const id of ['document-name', 'document-type', 'document-page-summary', 'document-status', 'document-progress-label']) $(id).textContent = '';
     $('document-review').hidden = true;
@@ -586,6 +770,17 @@
       const page = Number.isInteger(field.page) && field.page > 0 ? `Page ${field.page} · ` : '';
       label.append(element('span', 'document-field-source', page + confidenceText(field.confidence)));
       const values = element('div', 'document-field-value');
+      const metadata = { label: documentText(field.label, 150) };
+      if (typeof field.id === 'string' && /^[A-Za-z0-9_.:-]{1,80}$/.test(field.id)) metadata.id = field.id;
+      if (profileFields.includes(field.profileKey)) metadata.profileKey = field.profileKey;
+      if (Number.isInteger(field.page) && field.page >= 1 && field.page <= 12) metadata.page = field.page;
+      if (typeof field.confidence === 'number' && Number.isFinite(field.confidence) && field.confidence >= 0 && field.confidence <= 100) metadata.confidence = field.confidence;
+      if (typeof field.sourceLabel === 'string' && field.sourceLabel.length <= 150) {
+        metadata.sourceLabel = field.sourceLabel;
+        label.append(element('span', 'document-field-source', `Document label: ${field.sourceLabel}`));
+      }
+      if (['applicant', 'spouse', 'document'].includes(field.sourceRole)) metadata.sourceRole = field.sourceRole;
+      const reviewField = { metadata, row, value: documentText(field.value, 500), input: null };
       if (eligible) {
         const checkbox = element('input'); checkbox.type = 'checkbox'; checkbox.id = `document-select-${index}`;
         checkbox.dataset.profileKey = key;
@@ -595,6 +790,7 @@
         const current = element('div', 'document-current'); current.append(element('span', '', 'Current profile draft'));
         const currentValue = element('div'); current.append(currentValue);
         const record = { key, checkbox, input, currentValue, current: '' };
+        reviewField.input = input;
         documentCurrent(record);
         documentFields.push(record);
         checkbox.addEventListener('change', () => {
@@ -605,13 +801,14 @@
           $('document-confirm-applicant').checked = false;
           documentControls();
         });
-        input.addEventListener('input', () => { $('document-confirm-applicant').checked = false; documentControls(); });
+        input.addEventListener('input', () => { clearFieldReviews(); $('document-confirm-applicant').checked = false; documentControls(); });
         values.append(input);
         row.append(checkbox, label, values, current);
       } else {
         values.append(element('strong', '', documentText(field.value, 500)));
         row.append(label, values, element('span', 'document-review-only', 'Review only · not added to profile'));
       }
+      documentReviewFields.push(reviewField);
       $('document-fields').append(row);
     }
     $('document-no-fields').hidden = $('document-fields').childElementCount > 0;
@@ -619,6 +816,8 @@
     $('document-review').hidden = false;
     $('document-status').textContent = 'Read locally. No information has been saved or shared.';
     documentControls();
+    // Automatic checks use rules only, even if a previous manual check opted into Laya.
+    checkFields('document', { rulesOnly: true });
   }
 
   async function readDocument() {
@@ -679,7 +878,9 @@
       documentControls();
       return;
     }
+    clearFieldReviews();
     for (const field of selected) profileControl(field.key).value = field.input.value.trim();
+    syncSelf();
     profileRevision++;
     setProfileDirty(true);
     showView('profile', { skipConfirmation: true });
@@ -846,7 +1047,7 @@
   function renderSummary() {
     const hasProfile = profileFields.some((field) => Boolean(data.profile[field]));
     $('profile-step-label').replaceChildren(document.createTextNode(hasProfile ? 'Review my profile ' : 'Set up my profile '), icon('arrow'));
-    renderApplications(); renderSetup(); renderRecovery();
+    renderApplications(); renderSetup(); renderRecovery(); renderTouchId();
   }
 
   async function loadUnlocked(status) {
@@ -868,7 +1069,13 @@
     fillProfile(); renderSummary();
     showView('overview', { skipConfirmation: true });
     renderSetupResume();
-    if (progress.error) toast(progress.error.message || 'SecondHand couldn’t read your setup progress.', true);
+    // Problems found while opening, in one toast so none hides another: setup progress that couldn't
+    // be read, Touch ID turned off while unlocking (and why), and settings the desktop had to reset.
+    const settingsNotice = !settingsNoticeShown && typeof status.settingsNotice === 'string' && status.settingsNotice;
+    if (settingsNotice) settingsNoticeShown = true;
+    const problems = [progress.error && (progress.error.message || 'SecondHand couldn’t read your setup progress.'),
+      typeof status.touchIdNotice === 'string' && status.touchIdNotice, settingsNotice].filter(Boolean);
+    if (problems.length) toast(problems.join(' '), true);
   }
 
   async function lockVault() {
@@ -929,17 +1136,53 @@
           if (generation !== vaultGeneration) return;
           await loadUnlocked(created.status);
           if (generation !== vaultGeneration) return;
-          // The guided setup starts with the new password, so it can be resumed; it is offered after the recovery key.
-          setupProgress = await api.startSetup();
-          if (generation !== vaultGeneration) return;
-          renderSetupResume();
-          offerSetup = true;
+          // The recovery key must be available even if optional setup progress
+          // is slow or cannot be saved. Setup is offered after the key is saved.
+          offerSetup = false;
           showRecoveryKey(created.recoveryKey);
           if (created.deviceResetFailed) $('recovery-feedback').textContent = 'This computer couldn’t save a reset option, so keep this key safe.';
+          const showingCreatedKey = () => $('recovery-dialog').open && $('recovery-key-value').textContent === created.recoveryKey;
+          try {
+            const progress = await api.startSetup();
+            if (generation !== vaultGeneration || !vaultStatus.unlocked) return;
+            setupProgress = progress;
+            renderSetupResume();
+            // If the key was already acknowledged, leave the resume link
+            // available without interrupting the user's next action.
+            offerSetup = showingCreatedKey();
+          } catch {
+            if (generation !== vaultGeneration || !vaultStatus.unlocked) return;
+            setupProgress = null;
+            offerSetup = false;
+            renderSetupResume();
+            if (showingCreatedKey()) {
+              $('recovery-feedback').textContent = [$('recovery-feedback').textContent,
+                'Guided setup couldn’t start. After saving this key, you can enter your details in My information.'].filter(Boolean).join(' ');
+            } else toast('Guided setup couldn’t start. You can enter your details in My information.', true);
+          }
         }
       } catch (error) { if (generation === vaultGeneration) showError('auth-error', error); }
       finally {
         if (generation === vaultGeneration) { $('passphrase').value = ''; $('confirm-passphrase').value = ''; }
+      }
+    });
+  });
+
+  // The prompt is macOS's own. A refusal says why and leaves the password field ready.
+  $('touch-id-unlock').addEventListener('click', () => {
+    if (!api) return;
+    clearError('auth-error');
+    const generation = vaultGeneration;
+    pending($('touch-id-unlock'), async () => {
+      try {
+        const status = await api.unlockWithTouchId();
+        if (generation !== vaultGeneration) return;
+        await loadUnlocked(status);
+      } catch (error) {
+        if (generation !== vaultGeneration) return;
+        showError('auth-error', error);
+        $('passphrase').focus();
+        await refreshTouchIdUnlock();
       }
     });
   });
@@ -1008,6 +1251,48 @@
       toast(error.message || 'Unable to change this setting.', true);
     }).finally(() => { if (generation === vaultGeneration) $('device-reset-toggle').disabled = false; });
   });
+  // Turning Touch ID on asks for the password first, in the app's own dialog; turning it off doesn't.
+  $('touch-id-toggle').addEventListener('change', () => {
+    const enabled = $('touch-id-toggle').checked;
+    if (enabled) {
+      $('touch-id-toggle').checked = false;
+      closeTouchIdDialog();
+      $('touch-id-dialog').showModal();
+      $('touch-id-password').focus();
+      return;
+    }
+    const generation = vaultGeneration;
+    $('touch-id-toggle').disabled = true;
+    api.setTouchIdUnlock({ enabled: false }).then((status) => {
+      if (generation !== vaultGeneration) return;
+      vaultStatus = status; renderTouchId();
+      toast('Touch ID is off. Unlock with your password.');
+    }).catch((error) => {
+      if (generation !== vaultGeneration) return;
+      $('touch-id-toggle').checked = true;
+      toast(error.message || 'Unable to change this setting.', true);
+    }).finally(() => { if (generation === vaultGeneration) $('touch-id-toggle').disabled = false; });
+  });
+  $('touch-id-form').addEventListener('submit', (event) => {
+    event.preventDefault(); clearError('touch-id-error');
+    if (!api) return;
+    const generation = vaultGeneration;
+    pending($('touch-id-confirm'), async () => {
+      try {
+        const status = await api.setTouchIdUnlock({ enabled: true, password: $('touch-id-password').value });
+        if (generation !== vaultGeneration) return;
+        vaultStatus = status; renderTouchId();
+        closeTouchIdDialog();
+        toast('Touch ID is on. Use it on the lock screen or from SecondHand’s side panel in Chrome.');
+      } catch (error) {
+        if (generation !== vaultGeneration) return;
+        showError('touch-id-error', error);
+        $('touch-id-password').select();
+      }
+    });
+  });
+  $('touch-id-cancel').addEventListener('click', closeTouchIdDialog);
+  $('touch-id-dialog').addEventListener('close', () => { $('touch-id-form').reset(); clearError('touch-id-error'); });
   $('recovery-saved').addEventListener('change', () => { $('recovery-done').disabled = !$('recovery-saved').checked; });
   $('recovery-done').addEventListener('click', () => $('recovery-dialog').close());
   $('recovery-dialog').addEventListener('cancel', (event) => { if (!$('recovery-saved').checked) event.preventDefault(); });
@@ -1083,14 +1368,20 @@
   });
   $('document-confirm-applicant').addEventListener('change', documentControls);
   $('apply-document-fields').addEventListener('click', applyDocumentFields);
+  for (const scope of ['profile', 'document']) {
+    $(`check-${scope}-fields`).addEventListener('click', () => checkFields(scope));
+    $(`${scope}-review-laya`)?.addEventListener('change', () => clearFieldReviews({ scopes: [scope] }));
+  }
   documentControls();
   $('overview-start').addEventListener('click', () => showView('profile'));
   $('lock-button').addEventListener('click', lockVault);
   $('privacy-lock').addEventListener('click', lockVault);
   $('profile-form').addEventListener('input', (event) => {
+    clearFieldReviews();
     profileRevision++; setProfileDirty(true);
     if (['firstName', 'lastName', 'birthDate'].includes(event.target.name)) syncSelf();
   });
+  $('profile-form').addEventListener('change', () => clearFieldReviews());
   $('profile-form').addEventListener('submit', (event) => {
     event.preventDefault(); clearError('profile-error');
     const generation = vaultGeneration;
@@ -1297,8 +1588,21 @@
     // revision lets showLocked skip a repeat of a lock already shown, so a late notice
     // cannot reset an unlock attempt the person has started, while a newer lock still
     // cancels any pending unlock or profile load.
-    api.onLocked(notification => showLocked({ ...vaultStatus, exists: true, unlocked: false, lockRevision: notification?.lockRevision }));
+    api.onLocked(notification => {
+      showLocked({ ...vaultStatus, exists: true, unlocked: false, lockRevision: notification?.lockRevision });
+      refreshTouchIdUnlock();
+    });
     api.onProfileChanged(change => profileChangedElsewhere(change.fields));
+    // Unlocked from Chrome's side panel with Touch ID: show the saved information here too.
+    api.onUnlocked(async () => {
+      if (vaultStatus.unlocked) return;
+      const generation = vaultGeneration;
+      try {
+        const status = await api.status();
+        if (generation !== vaultGeneration || vaultStatus.unlocked || !status.unlocked) return;
+        await loadUnlocked(status);
+      } catch (error) { if (generation === vaultGeneration) showError('auth-error', error); }
+    });
     try {
       const status = await api.status();
       if (status.unlocked) await loadUnlocked(status); else showLocked(status);

@@ -16,7 +16,9 @@ function calendarDate(value, what) {
   if (!date || date.getUTCMonth() !== Number(match[2]) - 1 || date.getUTCDate() !== Number(match[3])) throw new Error(`${what} must be a real date written YYYY-MM-DD.`);
   return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
 }
-// Today on this computer's calendar, or the day a caller names (a Date or YYYY-MM-DD).
+// Today on this computer's calendar, or the day a caller names (a Date or YYYY-MM-DD). This one "today"
+// is what a birth date is checked against when it is saved and what ages are worked out from (#135):
+// the computer's own date, in its own timezone, never the UTC date.
 function localToday(today) {
   if (today === undefined) {
     const now = new Date();
@@ -26,20 +28,41 @@ function localToday(today) {
   if (typeof today === 'object' && today && Number.isInteger(today.year)) return today;
   return calendarDate(today, 'today');
 }
-// Whole years on `today`; a birthday counts on the day itself. Null when no birth date is saved.
-function ageOn(birthDate, today) {
+const pad = (value, size) => String(value).padStart(size, '0');
+// The same day written YYYY-MM-DD.
+function localDate(today) {
+  const { year, month, day } = localToday(today);
+  return `${pad(year, 4)}-${pad(month, 2)}-${pad(day, 2)}`;
+}
+// A birth date is used only when it is today or earlier and no more than this many years ago.
+const MAX_YEARS_BACK = 130;
+const before = (a, b) => a.year !== b.year ? a.year < b.year : a.month !== b.month ? a.month < b.month : a.day < b.day;
+// Why a saved birth date can't be used on `today`: 'future', 'tooOld', or null when it can (or none is saved).
+// A date that isn't a real YYYY-MM-DD date throws: the schema never saves one.
+function birthDateProblem(birthDate, today) {
   if (typeof birthDate !== 'string' || !birthDate.trim()) return null;
   const birth = calendarDate(birthDate.trim(), 'Birth date');
   const now = localToday(today);
-  const age = now.year - birth.year - (now.month < birth.month || (now.month === birth.month && now.day < birth.day) ? 1 : 0);
-  if (age < 0 || age > 130) throw new Error('Birth date must be in the past 130 years.');
-  return age;
+  if (before(now, birth)) return 'future';
+  if (before(birth, { ...now, year: now.year - MAX_YEARS_BACK })) return 'tooOld';
+  return null;
+}
+// Whole years on `today`; a birthday counts on the day itself. Null when no birth date is saved, or when
+// the saved one can't be used: then nothing worked out from it is answered.
+function ageOn(birthDate, today) {
+  if (typeof birthDate !== 'string' || !birthDate.trim() || birthDateProblem(birthDate, today)) return null;
+  const birth = calendarDate(birthDate.trim(), 'Birth date');
+  const now = localToday(today);
+  return now.year - birth.year - (now.month < birth.month || (now.month === birth.month && now.day < birth.day) ? 1 : 0);
 }
 
 const members = profile => Array.isArray(profile?.householdMembers) ? profile.householdMembers : [];
 // Whether the household list is in use: then it, not the manual counts, answers household questions.
 const listed = profile => members(profile).length > 0;
-// Every member's age, or null when the list is empty or a birth date is missing.
+// Whether the applicant's own birth date, or anyone's on the household list, can't be used on `today`.
+const hasUnusableBirthDate = (profile, { today } = {}) =>
+  [profile?.birthDate, ...members(profile).map(member => member.birthDate)].some(birthDate => birthDateProblem(birthDate, today) !== null);
+// Every member's age, or null when the list is empty or a birth date is missing or can't be used.
 function memberAges(profile, { today } = {}) {
   const list = members(profile);
   if (!list.length) return null;
@@ -90,4 +113,5 @@ function studentNameGrade(profile) {
   return name && grade ? `${name}, ${grade}` : '';
 }
 
-module.exports = { BAND_PREFIX, COUNT_BANDS, calendarDate, localToday, ageOn, listed, memberAges, householdCounts, parseBand, isBandKey, bandCount, bandLabel, studentNameGrade };
+module.exports = { BAND_PREFIX, COUNT_BANDS, MAX_YEARS_BACK, calendarDate, localToday, localDate, birthDateProblem, ageOn, listed, hasUnusableBirthDate, memberAges, householdCounts,
+  parseBand, isBandKey, bandCount, bandLabel, studentNameGrade };

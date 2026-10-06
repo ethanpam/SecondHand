@@ -16,6 +16,9 @@ const { TEXT_TYPES, CHOICE_TYPES } = require('../shared/laya-prompts.cjs');
 const HOST_NAME = 'org.secondhand.bridge';
 const MAX_MESSAGE_BYTES = 64 * 1024;
 const EXTENSION_ID = /^[a-p]{32}$/;
+// The native host sends each request to the desktop with the session token and the extension ID beside it,
+// all in one frame. A request must leave room for them.
+const ENVELOPE_BYTES = Buffer.byteLength(JSON.stringify({ token: '0'.repeat(64), extensionId: 'a'.repeat(32), request: {} })) - '{}'.length;
 const IOWA_NAVIGATION_URLS = new Set(['enterPersonalInfo', 'addressValidation'].map(page => `${PORTAL_URL}/applyForBenefits/${page}`));
 // Questions for Laya, the desktop's local AI: text boxes to match to a saved field (#39) and
 // choice questions to answer from the saved profile (#42). Labels, types, and options only.
@@ -35,6 +38,9 @@ const MAX_OPTION = 100;
 const MAX_BUDGET_MS = 3000;
 // Refusals the extension acts on. Only these codes travel back with an error.
 const PUBLIC_CODES = Object.freeze(['LAYA_NOT_READY', 'DESKTOP_UNREACHABLE']);
+// Requests that carry only their id and type. unlockWithTouchId asks the app to show its own
+// Touch ID prompt (#99); a password never comes from Chrome.
+const BARE_REQUESTS = Object.freeze(['status', 'showApp', 'openApp', 'warmLaya', 'trustAllSites', 'untrustAllSites', 'unlockWithTouchId']);
 // The native host's answer when the desktop app isn't running (or can't be reached).
 const UNREACHABLE = 'Open SecondHand, connect this extension, and unlock SecondHand.';
 
@@ -112,20 +118,29 @@ function validateFieldScope(fields) {
   return fields;
 }
 
+// Page text the desktop shows in its dialogs: a Laya question's label and options (“label”: option, where the option
+// is the exact text the extension fills) and an answer to save (“Field: answer”). Refused, not stripped, when it has
+// a character that reorders, hides, or breaks the words around it: controls (C0, DEL, C1), format characters (bidi
+// controls, zero-width characters, tags), line and paragraph separators, and other invisible characters (variation
+// selectors, fillers). Stripped text would no longer be the page's own, and two options that differ only by such a
+// character would look the same in the dialog. U+200C ZERO WIDTH NON-JOINER and U+200D ZERO WIDTH JOINER are allowed:
+// Persian, Arabic, and Indic words need them. extension/generic-adapter.js (layaText) keeps the same rule.
+const UNSEEN = /[[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]--[\u200C\u200D]]/v;
+
 // saveFields { url, fields: { key: value } }: like getFields, any HTTPS site (the desktop decides whether it is
 // trusted), and saved profile fields the side panel may offer, each the applicant's own answer from one box: a
-// nonblank string of at most 200 characters without control characters. The desktop still checks each value
-// against the schema and asks the applicant before saving.
+// nonblank string of at most 200 characters without a character UNSEEN refuses. The desktop still checks each
+// value against the schema and asks the applicant before saving.
 function validateSave(request) {
   if (!isHttpsSiteUrl(request.url)) throw new Error('Only an https site without credentials or a custom port is allowed.');
   const { fields } = request;
   const entries = fields && typeof fields === 'object' && !Array.isArray(fields) && Object.getPrototypeOf(fields) === Object.prototype ? Object.entries(fields) : [];
   if (!entries.length || entries.length > SAVE_FIELDS.length || entries.some(([key, value]) => !SAVE_FIELDS.includes(key) || typeof value !== 'string' ||
-      !value.trim() || value.length > MAX_SAVED_VALUE || /[\u0000-\u001f\u007f]/.test(value))) throw new Error('Invalid answers to save.');
+      !value.trim() || value.length > MAX_SAVED_VALUE || UNSEEN.test(value))) throw new Error('Invalid answers to save.');
   return request;
 }
 
-const questionText = (value, max) => typeof value === 'string' && value.trim() !== '' && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
+const questionText = (value, max) => typeof value === 'string' && value.trim() !== '' && value.length <= max && !UNSEEN.test(value);
 function validateQuestions(items, { max, types, choices }) {
   if (!Array.isArray(items) || !items.length || items.length > max) throw new Error('Invalid questions for Laya.');
   const ids = new Set();
@@ -146,7 +161,7 @@ function validateRequest(request) {
   if (!request || typeof request !== 'object' || Array.isArray(request) ||
       typeof request.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(request.id)) throw new Error('Invalid request identifier.');
   let allowed;
-  if (['status', 'showApp', 'openApp', 'warmLaya', 'trustAllSites', 'untrustAllSites'].includes(request.type)) allowed = ['id', 'type'];
+  if (BARE_REQUESTS.includes(request.type)) allowed = ['id', 'type'];
   else if (request.type === 'getFields') allowed = ['id', 'type', 'url', 'fields'];
   else if (request.type === 'saveFields') allowed = ['id', 'type', 'url', 'fields'];
   else if (request.type === 'trustSite' || request.type === 'untrustSite') allowed = ['id', 'type', 'url'];
@@ -158,7 +173,7 @@ function validateRequest(request) {
   // Field requests, site trust, and Laya may name any HTTPS site; the desktop decides whether it is trusted.
   if (request.type === 'getFields' || request.type === 'trustSite' || request.type === 'untrustSite' || Object.hasOwn(LAYA_REQUESTS, request.type)) {
     if (!isHttpsSiteUrl(request.url)) throw new Error('Only an https site without credentials or a custom port is allowed.');
-  } else if (!['status', 'showApp', 'openApp', 'warmLaya', 'trustAllSites', 'untrustAllSites'].includes(request.type) && !isPortalUrl(request.url)) throw new Error('Only the supported Iowa portal is allowed.');
+  } else if (!BARE_REQUESTS.includes(request.type) && !isPortalUrl(request.url)) throw new Error('Only the supported Iowa portal is allowed.');
   if (request.type === 'getFields' && !isIowaNavigationAuthorization(request)) validateFieldScope(request.fields);
   if (Object.hasOwn(LAYA_REQUESTS, request.type)) {
     validateQuestions(request[LAYA_REQUESTS[request.type].list], LAYA_REQUESTS[request.type]);
@@ -167,6 +182,7 @@ function validateRequest(request) {
   if (request.type === 'recordProgress' && (!Number.isInteger(request.filledCount) || request.filledCount < 1 || request.filledCount > 100)) {
     throw new Error('Invalid filled field count.');
   }
+  if (Buffer.byteLength(JSON.stringify(request)) > MAX_MESSAGE_BYTES - ENVELOPE_BYTES) throw new Error('Request exceeds the local bridge limit.');
   return request;
 }
 
@@ -265,7 +281,7 @@ async function relayRequest(userData, extensionId, request) {
 // Packaged, with no arguments; in development, with the app path. Never Chrome's origin or anything
 // from the request. The data folder setting carries over; test-only settings don't.
 function appLaunch({ execPath, appPath, packaged, env }) {
-  const { SECONDHAND_TEST_MODE, SECONDHAND_TEST_USER_DATA, ...kept } = env;
+  const { SECONDHAND_TEST_MODE, SECONDHAND_TEST_USER_DATA, SECONDHAND_TEST_TOUCH_ID, ...kept } = env;
   return { command: execPath, args: packaged ? [] : [appPath], options: { detached: true, stdio: 'ignore', env: kept } };
 }
 

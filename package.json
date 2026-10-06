@@ -1,5 +1,6 @@
 {
   "name": "secondhand",
+  "productName": "SecondHand",
   "version": "0.4.0",
   "private": true,
   "description": "A local benefits companion for Iowa SNAP",
@@ -29,7 +30,8 @@
     "prestart": "npm run ocr:prepare",
     "predev": "npm run ocr:prepare",
     "test:ocr": "npm run ocr:prepare && node scripts/smoke-ocr.cjs",
-    "test:ocr:ui": "npm run ocr:prepare && node scripts/smoke-document-ui.cjs"
+    "test:ocr:ui": "npm run ocr:prepare && node scripts/smoke-document-ui.cjs",
+    "review:evaluate": "node scripts/evaluate-field-review.cjs"
   },
   "dependencies": {
     "onnxruntime-node": "1.30.0"
@@ -45,7 +47,7 @@
   },
   "build": {
     "appId": "org.secondhand.desktop",
-    "productName": "secondHand",
+    "productName": "SecondHand",
     "artifactName": "secondHand-${version}-${os}-${arch}.${ext}",
     "directories": { "output": "release" },
     "icon": "desktop/icon.png",
@@ -69,6 +71,8 @@
       "createDesktopShortcut": true
     },
     "mac": {
+      "executableName": "SecondHand",
+      "icon": "desktop/icon.icns",
       "category": "public.app-category.productivity",
       "files": ["!node_modules/onnxruntime-node/bin/napi-v6/{linux,win32}/**", "!node_modules/onnxruntime-node/bin/napi-v6/darwin/!(${arch})/**"],
       "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }],
@@ -77,7 +81,7 @@
       "notarize": false
     },
     "dmg": {
-      "title": "secondHand ${version}",
+      "title": "SecondHand ${version}",
       "contents": [
         { "x": 130, "y": 200, "type": "file" },
         { "x": 410, "y": 200, "type": "link", "path": "/Applications" }

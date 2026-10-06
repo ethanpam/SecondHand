@@ -3,95 +3,38 @@
 // Review candidates only. This module never writes a profile, infers eligibility,
 // or converts historical/joint tax amounts into current monthly income.
 const { validateProfile } = require('./schema.cjs');
+const additionalForms = [
+  { type: 'w2', ...require('./document-w2.cjs') },
+  { type: 'ssa-1099', ...require('./document-ssa1099.cjs') },
+  { type: '1099-nec', ...require('./document-1099nec.cjs') }
+];
 
 const PROFILE_KEYS = new Set(['firstName', 'middleName', 'lastName', 'ssn', 'addressLine1', 'addressLine2', 'city', 'state', 'zip']);
-const normalize = text => String(text || '').toLowerCase().replace(/[’‘]/g, "'").replace(/[^a-z0-9']/g, '').replace(/^'+|'+$/g, '');
-const centerY = word => (word.bbox.y0 + word.bbox.y1) / 2;
-const centerX = word => (word.bbox.x0 + word.bbox.x1) / 2;
-const phrase = text => text.split(/\s+/).map(normalize);
-const meanConfidence = words => Math.round(words.reduce((sum, word) => sum + word.confidence, 0) / (words.length || 1));
-const content = words => words.slice().sort((a, b) => a.bbox.x0 - b.bbox.x0).map(word => word.text).join(' ').trim();
-
-function wordRows(page) {
-  const width = Number(page.width), height = Number(page.height);
-  if (!(width > 0 && height > 0) || !Array.isArray(page.words)) return [];
-  const words = page.words.slice(0, 12000).filter(word => typeof word?.text === 'string' && word.text.trim() && word.text.length <= 250 &&
-    Number.isFinite(word.confidence) && word.confidence >= 0 && word.confidence <= 100 && word.bbox &&
-    ['x0', 'y0', 'x1', 'y1'].every(key => Number.isFinite(word.bbox[key])) &&
-    word.bbox.x0 >= 0 && word.bbox.y0 >= 0 && word.bbox.x1 <= width && word.bbox.y1 <= height &&
-    word.bbox.x1 > word.bbox.x0 && word.bbox.y1 > word.bbox.y0)
-    .map(word => ({ ...word, text: word.text.trim() }));
-  const heights = words.map(word => word.bbox.y1 - word.bbox.y0).sort((a, b) => a - b);
-  const tolerance = Math.max(2, (heights[Math.floor(heights.length / 2)] || 10) * 0.5);
-  const rows = [];
-  for (const word of words.sort((a, b) => centerY(a) - centerY(b))) {
-    const recent = rows[rows.length - 1];
-    if (recent && Math.abs(centerY(word) - recent.y) <= tolerance) {
-      recent.words.push(word);
-      recent.y = recent.words.reduce((sum, item) => sum + centerY(item), 0) / recent.words.length;
-    } else rows.push({ y: centerY(word), words: [word] });
-  }
-  for (const row of rows) {
-    row.words.sort((a, b) => a.bbox.x0 - b.bbox.x0);
-    row.text = content(row.words);
-  }
-  return rows;
-}
-
-function matches(rows, label) {
-  const wanted = phrase(label).join(''), found = [];
-  for (const row of rows) for (let index = 0; index < row.words.length; index++) {
-    if (!normalize(row.words[index].text)) continue;
-    let joined = '';
-    for (let end = index; end < Math.min(row.words.length, index + 20); end++) {
-      joined += normalize(row.words[end].text);
-      if (!wanted.startsWith(joined)) break;
-      if (joined !== wanted) continue;
-      const words = row.words.slice(index, end + 1);
-      found.push({ row, words, x0: words[0].bbox.x0, x1: words.at(-1).bbox.x1,
-        y0: Math.min(...words.map(word => word.bbox.y0)), y1: Math.max(...words.map(word => word.bbox.y1)) });
-      break;
-    }
-  }
-  return found;
-}
-
-function afterLabel(rows, anchor, next, x0, x1) {
-  // The next header's columns can have slightly different vertical bounds.
-  // Stop at its entire row so a short word in an adjacent label cannot become
-  // part of the preceding cell (especially the taxpayer's SSN).
-  const bottom = next && Math.min(...next.row.words.map(word => word.bbox.y0));
-  if (!anchor || !next || bottom <= anchor.y1 || !(x1 > x0)) return [];
-  // One value row in a bounded cell only. Never search farther down the page
-  // when a primary value is blank (a spouse/dependent could be there).
-  const candidates = rows.map(row => row.words.filter(word => centerY(word) > anchor.y1 && centerY(word) < bottom &&
-    centerX(word) >= x0 && centerX(word) < x1)).filter(words => words.length);
-  return candidates.length === 1 ? candidates[0] : [];
-}
+const { wordRows, matches, content, afterLabel, money, normalize, centerX, meanConfidence } = require('./document-layout.cjs');
 
 function recognizedType(page) {
   const text = typeof page?.text === 'string' ? page.text.slice(0, 10000) : '';
-  if (/\b1\s*040\s*[-–]?\s*SR\b/i.test(text) && /Income Tax Return\s+\w+\s+Seniors/i.test(text)) return '1040-sr';
-  if (/\b1040\b/.test(text) && /U\.?\s*S\.?\s*(?:Individual )?Income Tax Return/i.test(text)) return '1040';
+  // Sparse segmentation can split the initial I of Income onto its own line.
+  // Allow whitespace at that boundary, preserving the full printed title.
+  if (/\b1\s*040\s*[-–]?\s*SR\b/i.test(text) && /\bI\s*ncome\s+Tax\s+Return\s+\w+\s+Seniors/i.test(text)) return '1040-sr';
+  if (/\b1040\b/.test(text) && /U\.?\s*S\.?\s*(?:Individual\s+)?I\s*ncome\s+Tax\s+Return/i.test(text)) return '1040';
   return null;
-}
-
-function money(raw) {
-  const value = raw.trim().replace(/\s+/g, '').replace(/^\$/, '');
-  if (!/^(?:\d{1,3}(?:,\d{3})+|\d{1,9})(?:\.\d{2})?$/.test(value)) return null;
-  return value.replace(/,/g, '');
 }
 
 function parseTaxPage(page, type) {
   const rows = wordRows(page), fields = [], warnings = [];
   const pageNumber = Number.isSafeInteger(page.pageNumber) && page.pageNumber > 0 ? page.pageNumber : 1;
-  const add = (id, label, value, words, profileKey) => {
+  const add = (id, label, value, words, profileKey, source, sourceRole = 'document') => {
     if (!value || !words.length || value.length > 200 || /[\u0000-\u001f]/.test(value)) return;
     if (profileKey) {
       if (!PROFILE_KEYS.has(profileKey)) return;
       try { value = validateProfile({ [profileKey]: value })[profileKey]; } catch { return; }
     }
-    fields.push({ id, label, value, page: pageNumber, confidence: meanConfidence(words), ...(profileKey ? { profileKey } : {}) });
+    // Preserve the printed label separately from our display label. A model
+    // comparing our own display label to our own mapping would check no evidence.
+    const sourceLabel = source?.words ? content(source.words).slice(0, 150) : '';
+    fields.push({ id, label, value, page: pageNumber, confidence: meanConfidence(words),
+      ...(profileKey ? { profileKey } : {}), ...(sourceLabel ? { sourceLabel, sourceRole } : {}) });
   };
   const one = label => {
     const found = matches(rows, label);
@@ -120,13 +63,13 @@ function parseTaxPage(page, type) {
     // name. Preserve a multiword first name unless the final token is one letter.
     if (/^[\p{L}][\p{L} .'-]{0,99}$/u.test(first)) {
       const parts = first.split(/\s+/), initial = parts.length > 1 && /^[\p{L}]\.?$/u.test(parts.at(-1)) ? parts.pop().replace('.', '') : '';
-      add(`${prefix}FirstName`, primaryPerson ? 'First name' : 'Spouse first name', parts.join(' '), firstWords, primaryPerson ? 'firstName' : undefined);
-      if (initial) add(`${prefix}MiddleName`, primaryPerson ? 'Middle initial' : 'Spouse middle initial', initial, firstWords, primaryPerson ? 'middleName' : undefined);
+      add(`${prefix}FirstName`, primaryPerson ? 'First name' : 'Spouse first name', parts.join(' '), firstWords, primaryPerson ? 'firstName' : undefined, start, primaryPerson ? 'applicant' : 'spouse');
+      if (initial) add(`${prefix}MiddleName`, primaryPerson ? 'Middle initial' : 'Spouse middle initial', initial, firstWords, primaryPerson ? 'middleName' : undefined, start, primaryPerson ? 'applicant' : 'spouse');
     }
     const lastWords = afterLabel(rows, last, end, last.x0, social.x0), surname = content(lastWords);
-    if (/^[\p{L}][\p{L} .'-]{0,99}$/u.test(surname)) add(`${prefix}LastName`, primaryPerson ? 'Last name' : 'Spouse last name', surname, lastWords, primaryPerson ? 'lastName' : undefined);
+    if (/^[\p{L}][\p{L} .'-]{0,99}$/u.test(surname)) add(`${prefix}LastName`, primaryPerson ? 'Last name' : 'Spouse last name', surname, lastWords, primaryPerson ? 'lastName' : undefined, last, primaryPerson ? 'applicant' : 'spouse');
     const ssnWords = afterLabel(rows, social, end, social.x0, page.width), ssn = content(ssnWords).replace(/\s+/g, '');
-    if (/^\d{3}-?\d{2}-?\d{4}$/.test(ssn)) add(`${prefix}Ssn`, primaryPerson ? 'Social Security number' : 'Spouse Social Security number', ssn, ssnWords, primaryPerson ? 'ssn' : undefined);
+    if (/^\d{3}-?\d{2}-?\d{4}$/.test(ssn)) add(`${prefix}Ssn`, primaryPerson ? 'Social Security number' : 'Spouse Social Security number', ssn, ssnWords, primaryPerson ? 'ssn' : undefined, social, primaryPerson ? 'applicant' : 'spouse');
   };
   names(primary, spouse, 'applicant', true);
   names(spouse, home, 'spouse', false);
@@ -141,21 +84,21 @@ function parseTaxPage(page, type) {
     else {
       const addressWords = apt ? afterLabel(rows, home, city, home.x0, apt.x0) : [];
       const street = content(addressWords);
-      if (/\d/.test(street) && /[a-z]/i.test(street)) add('addressLine1', 'Address on tax return', street, addressWords, 'addressLine1');
+      if (/\d/.test(street) && /[a-z]/i.test(street)) add('addressLine1', 'Address on tax return', street, addressWords, 'addressLine1', home);
       if (apt) {
         const apartmentWords = afterLabel(rows, apt, city, apt.x0, rightColumn.x0);
         const apartment = content(apartmentWords);
-        if (/^[a-z0-9 #./-]{1,30}$/i.test(apartment)) add('addressLine2', 'Apartment or unit', apartment, apartmentWords, 'addressLine2');
+        if (/^[a-z0-9 #./-]{1,30}$/i.test(apartment)) add('addressLine2', 'Apartment or unit', apartment, apartmentWords, 'addressLine2', apt);
       }
       if (state && zip && city.x0 < state.x0 && state.x0 < zip.x0) {
         const cityWords = afterLabel(rows, city, foreign, city.x0, state.x0), town = content(cityWords);
-        if (/^[\p{L}][\p{L} .'-]{0,99}$/u.test(town)) add('city', 'City', town, cityWords, 'city');
+        if (/^[\p{L}][\p{L} .'-]{0,99}$/u.test(town)) add('city', 'City', town, cityWords, 'city', city);
         const stateWords = afterLabel(rows, state, foreign, state.x0, zip.x0);
-        add('state', 'State', content(stateWords), stateWords, 'state');
+        add('state', 'State', content(stateWords), stateWords, 'state', state);
       }
       if (zip) {
         const zipWords = afterLabel(rows, zip, foreign, zip.x0, rightColumn.x0);
-        add('zip', 'ZIP code', content(zipWords).replace(/\s+/g, ''), zipWords, 'zip');
+        add('zip', 'ZIP code', content(zipWords).replace(/\s+/g, ''), zipWords, 'zip', zip);
       }
     }
   }
@@ -191,7 +134,7 @@ function parseTaxPage(page, type) {
     const numbers = words.filter(word => /[\d]/.test(word.text));
     if (words.some(word => /[a-z]/i.test(word.text)) || numbers.length !== 1) return;
     const value = money(numbers[0].text);
-    if (value !== null) add(`taxLine${code}`, `${label}${taxYear ? ` — ${taxYear}` : ''}`, value, numbers);
+    if (value !== null) add(`taxLine${code}`, `${label}${taxYear ? ` — ${taxYear}` : ''}`, value, numbers, undefined, anchor);
   };
   for (const [code, label, caption, left] of taxLines) amount(code, label, one(caption), left);
   for (const [code, caption, label] of [
@@ -209,26 +152,43 @@ function parseTaxPage(page, type) {
   return { type, title: type === '1040-sr' ? 'Form 1040-SR tax return' : 'Form 1040 tax return', taxYear, fields, warnings };
 }
 
+// Require a single recognizable document, even when different form types share
+// a page or PDF. Each parser establishes its own printed-label boundaries.
+function recognizedForms(page) {
+  const type = recognizedType(page);
+  const taxHeaders = type ? matches(wordRows(page), 'Your first name and middle initial') : [];
+  const found = taxHeaders.map(() => ({ page, parse: candidate => parseTaxPage(candidate, type), type }));
+  for (const parser of additionalForms) {
+    const count = parser.detect(page);
+    for (let index = 0; index < count; index++) found.push({ page, parse: parser.parse, type: parser.type });
+  }
+  return found;
+}
+
 function analyzeDocument(document) {
   const pages = Array.isArray(document?.pages) ? document.pages.slice(0, 12) : [];
-  const found = pages.flatMap(page => {
-    const type = recognizedType(page);
-    const headers = type ? matches(wordRows(page), 'Your first name and middle initial') : [];
-    return headers.map(() => ({ page, type }));
-  });
-  if (found.length === 1) {
-    const { page, type } = found[0];
-    const result = parseTaxPage(page, type);
-    const alternate = page.alternative && Array.isArray(page.alternative.words)
-      ? parseTaxPage({ ...page, ...page.alternative, alternative: undefined }, type) : null;
-    const alternateFields = new Map(alternate?.fields.map(field => [field.id, field]) || []);
-    const omitted = [], omittedSsn = [];
+  const found = pages.flatMap((page, pageIndex) => recognizedForms(page).map(form => ({ ...form, pageIndex })));
+  const alternates = pages.flatMap((page, pageIndex) => page?.alternative && Array.isArray(page.alternative.words)
+    ? recognizedForms({ ...page, ...page.alternative, alternative: undefined }).map(form => ({ ...form, pageIndex })) : []);
+  // A second form seen in either pass is evidence of ambiguity, even when the
+  // other pass misses its heading or cannot read its applicant cells.
+  const ambiguous = found.length > 1 || alternates.length > 1 || (found.length === 1 &&
+    alternates.some(form => form.pageIndex !== found[0].pageIndex || form.type !== found[0].type));
+  if (found.length === 1 && !ambiguous) {
+    const { page, parse } = found[0];
+    const result = parse(page);
+    const alternate = alternates.length === 1 ? alternates[0].parse(alternates[0].page) : null;
+    const sameForm = alternate?.type === result.type;
+    const alternateFields = new Map(sameForm ? alternate.fields.map(field => [field.id, field]) : []);
+    const omitted = [], omittedSsn = [], omittedIdentifier = [];
     result.fields = result.fields.filter(field => {
       const isAmount = field.id.startsWith('taxLine'), isSsn = field.id.endsWith('Ssn');
-      if (!isAmount && !isSsn) return true;
+      const isIdentifier = isSsn || field.kind === 'identifier';
+      if (!isAmount && !isIdentifier) return true;
       const other = alternateFields.get(field.id);
-      if (!other || other.value !== field.value) {
-        (isSsn ? omittedSsn : omitted).push(field.id);
+      if (!other || other.value !== field.value || other.profileKey !== field.profileKey || other.sourceRole !== field.sourceRole ||
+          (isAmount && other.label !== field.label)) {
+        (isSsn ? omittedSsn : isIdentifier ? omittedIdentifier : omitted).push(field.id);
         return false;
       }
       field.confidence = Math.min(field.confidence, other.confidence);
@@ -240,12 +200,20 @@ function analyzeDocument(document) {
       result.warnings.push('Some tax amounts could not be read consistently and were left out. Review the amounts in the original document.');
     }
     if (omittedSsn.length) result.warnings.push('A Social Security number could not be read consistently and was left out. Enter it yourself after checking the original document.');
+    if (omittedIdentifier.length) result.warnings.push('A taxpayer identifier could not be read consistently and was left out. Check the original document.');
+    if (sameForm && result.taxYear !== alternate.taxYear) {
+      result.taxYear = '';
+      result.warnings.push('The tax year is missing or inconsistent between OCR passes. Check each printed year in the original document.');
+    }
+    if (sameForm) for (const warning of alternate.warnings.filter(message => /year/i.test(message))) {
+      if (!result.warnings.includes(warning)) result.warnings.push(warning);
+    }
     result.warnings.unshift('OCR can misread letters or digits even when confidence is high. Check every selected value against the original document.');
     return result;
   }
-  return { type: 'unknown', title: 'Scanned document', taxYear: '', fields: [], warnings: [found.length > 1
-    ? 'More than one tax-return header was found. Review each person’s document separately; no profile values were proposed.'
-    : 'This document does not have a supported tax-return layout. Review the extracted text and enter any useful details yourself.'] };
+  return { type: 'unknown', title: 'Scanned document', taxYear: '', fields: [], warnings: [ambiguous
+    ? 'More than one tax-return or statement header was found. Review each document separately; no profile values were proposed.'
+    : 'This document does not have a supported tax-form layout. Review the extracted text and enter any useful details yourself.'] };
 }
 
 module.exports = { analyzeDocument, wordRows };

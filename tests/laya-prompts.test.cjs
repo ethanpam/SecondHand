@@ -44,20 +44,30 @@ test('AI never matches a text box to a saved answer SecondHand keeps from guesse
   assert.ok(prompts.MATCH_CANDIDATES.every(key => generic.GENERIC_KEYS.includes(key)), 'every candidate is a key the engine can fill');
 });
 
-test('consent, signature, attestation, agreement, terms, and SSN questions are never asked about', () => {
-  const unsafe = ['I certify that the information above is true and correct.', 'Signature', 'Applicant signature', 'I agree to the terms', 'Consent to share information',
-    'Social Security Number', 'SSN', 'SS#', 'By entering your initials below you are signing this form', 'I attest that I live in the service area',
-    'I acknowledge the rules of the pantry', 'Do you authorize us to contact your landlord?', 'I understand that food is limited', 'Password', 'Terms of service'];
-  for (const label of unsafe) assert.equal(prompts.unsafeQuestion({ label, options: [] }), true, label);
+// Questions only the applicant answers. The second half is #134's: signatures typed as a name, texted or
+// emailed codes, security questions and user names.
+const UNSAFE_LABELS = ['I certify that the information above is true and correct.', 'Signature', 'Applicant signature', 'I agree to the terms', 'Consent to share information',
+  'Social Security Number', 'SSN', 'SS#', 'By entering your initials below you are signing this form', 'I attest that I live in the service area',
+  'I acknowledge the rules of the pantry', 'Do you authorize us to contact your landlord?', 'I understand that food is limited', 'Password', 'Terms of service',
+  'Type your full name as your electronic signature', 'Applicant initials', 'Enter the code we texted you', 'Enter the code we emailed you', 'We texted you a code. Enter it here',
+  'Enter the 6-digit code sent to your phone', 'Code from the text message', 'Confirmation code', 'Authentication code', 'OTP', 'Enter code', 'Security question',
+  'Answer to your security question', 'Secret answer', 'In what city were you born?', 'What city were you born in?', 'What is your mother’s maiden name?',
+  'What was the name of your first pet?', 'What street did you grow up on?', 'Username', 'User name', 'Create a user name', 'User ID', 'Login ID'];
+// Ordinary questions with words near those: still asked.
+const SAFE_LABELS = ['Is anyone in your household 60 or older?', 'How many children under 18?', 'Where can we email you?', 'Do you live in Polk County?', 'Confirm email address',
+  'Full name', 'City', 'Email', 'ZIP code', 'Postal code', 'Middle initial', 'Date of birth', 'When were you born?', 'Place of residence', 'Phone number (we may text you)',
+  'Maiden name', 'Number of pets', 'Name'];
+
+test('consent, signature, attestation, agreement, terms, SSN, code, security and user-name questions are never asked about', () => {
+  for (const label of UNSAFE_LABELS) assert.equal(prompts.unsafeQuestion({ label, options: [] }), true, label);
   assert.equal(prompts.unsafeQuestion({ label: 'Please confirm', options: ['I agree', 'I do not agree'] }), true, 'an option can make a question unsafe');
-  for (const label of ['Is anyone in your household 60 or older?', 'How many children under 18?', 'Where can we email you?', 'Do you live in Polk County?', 'Confirm email address']) {
-    assert.equal(prompts.unsafeQuestion({ label, options: ['Yes', 'No'] }), false, label);
-  }
+  for (const label of SAFE_LABELS) assert.equal(prompts.unsafeQuestion({ label, options: ['Yes', 'No'] }), false, label);
 });
 
 test('the desktop’s unsafe-question check is the extension engine’s, on every question in the bank', () => {
   assert.equal(prompts.UNSAFE_QUESTION.source, generic.UNSAFE_QUESTION.source);
   assert.equal(prompts.UNSAFE_QUESTION.flags, generic.UNSAFE_QUESTION.flags);
+  for (const label of [...UNSAFE_LABELS, ...SAFE_LABELS]) assert.equal(prompts.unsafeQuestion({ label, options: [] }), generic.unsafeQuestion({ label, options: [] }), label);
   const bank = [...loadQuestionBank(), ...loadSyntheticBank()];
   let unsafe = 0;
   for (const file of bank) for (const question of file.questions) {
@@ -74,20 +84,31 @@ test('the desktop and extension keep identical applicant-only box guards', () =>
     assert.equal(prompts[name].source, generic[name].source, `${name} source`);
     assert.equal(prompts[name].flags, generic[name].flags, `${name} flags`);
   }
+  // #136: possessives with ’ and ', dependents, household members with or without a number, and labels under
+  // another person's section heading (read as "<heading>: <label>").
+  const others = ['Child’s name', "Child's date of birth", 'Childs phone', 'Children’s Names, Schools and Grades', 'Grandchild’s birthdate', 'Partner’s phone',
+    "Partner's first name", 'Spouse’s email', 'Husband’s name', 'Wife’s phone number', 'Landlord’s phone number', 'Proxy’s address', "Representative's last name",
+    'Emergency contact’s phone', 'Household member’s name', "Family member's name", 'Dependent name', 'Dependent 1 date of birth', 'Dependent’s relationship to you',
+    'Household member name', 'Household member phone', 'Household member', 'Household member 2 name', 'Household member #3: First name',
+    'Other members of the household: Full name', 'Additional household member: Email', 'Nombre del miembro del hogar', 'Child 1: First name', 'Dependent: Name',
+    'Household member: Phone', 'Partner’s information: Email', 'Additional household members: Last name', 'Other adults in the home: Full name'];
+  // #83's exceptions and ordinary applicant boxes, still matched.
+  const applicant = ['Household Representative: First', 'Household representative: First name', 'Number of children', 'How many children under 18?', 'Number of dependents',
+    'How many household members?', 'Number of household members ages 18 to 64', 'Name (Head of Household)', 'Name of household member', 'Applicant phone',
+    'Are you a student?', 'Full name'];
   const labels = [
     "Spouse's first name", 'Family Member: First Name', 'Household Members: First Name', 'Name of Proxy', 'Address of Proxy',
     'Emergency contact phone', 'Landlord name', 'Spouse Name Etan Karejeram̗ Nombre del cónyuge: First', 'Nombre del representante autorizado',
     'City/State', 'City and Zip Code', 'City, State and Zip code', 'Complete Physical Address (including Town/City!)',
     'Ciudad/Estado', 'Ciudad y Código Postal', 'Dirección completa', 'Who pays the rent?', '¿Quién paga?',
-    'Household Representative: First', 'Number of children', 'How many children under 18?', 'Applicant phone',
-    'Guardian first and last name', 'Parent/Guardian Name', 'Student name and grade', 'Student name', 'Are you a student?'
+    'Guardian first and last name', 'Parent/Guardian Name', 'Student name and grade', 'Student name', ...others, ...applicant
   ];
   for (const label of labels) {
     const matchable = prompts.matchableBox({ label });
     assert.equal(generic.blockedSuggestion(label), !matchable, label);
   }
-  assert.equal(prompts.matchableBox({ label: 'Household Representative: First' }), true);
-  assert.equal(prompts.matchableBox({ label: 'Number of children' }), true);
+  for (const label of others) assert.deepEqual(prompts.offeredFields({ label, type: 'text' }), [], label);
+  for (const label of applicant) assert.equal(prompts.matchableBox({ label }), true, label);
 });
 
 test('choice-v2: a box of a type the model wasn’t trained on is refused, not described', () => {

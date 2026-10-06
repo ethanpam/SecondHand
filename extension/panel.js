@@ -7,7 +7,7 @@
   const summary = globalThis.SecondHandSummary;
   // Must match BUILD in background.js: change both together. Chrome loads these pages
   // from disk right away but keeps running the old worker until SecondHand is reloaded.
-  const BUILD = '2026-10-03.3';
+  const BUILD = '2026-10-05.4';
   // The applicant's language: the choice saved in this extension's storage, else the browser's.
   let language = strings.language();
   const t = (key, params = {}) => strings.text(language, key, params);
@@ -100,8 +100,8 @@
     let languageChecked = false;
     let languageTrouble = null;
     // The frame the page's content script was last asked for: a row taller for a message,
-    // and as wide as the widget (0 until it has measured itself).
-    let frame = { line: false, width: 0 };
+    // and the widget's measured size (empty until it has measured itself).
+    let frame = { line: false, size: {} };
     const AI_TIMEOUT_MS = 8000;
     // An outdated worker keeps its reload steps on screen and is not polled again.
     const trouble = error => { if (error.outdated) { outdated = true; outdatedKey = error.messageKey; } return problem(error); };
@@ -158,13 +158,35 @@
       // The widget is as wide as what it shows, up to 272px (see panel.css). An outdated worker
       // is not asked for anything more; its steps fill the frame the widget already has.
       const room = message || !$('translate-offer').hidden;
-      const width = outdated || $('widget').hidden ? frame.width : Math.ceil($('widget').getBoundingClientRect().width);
-      if (!outdated && (room !== frame.line || width !== frame.width)) fitFrame(room, width);
+      const size = outdated || $('widget').hidden ? frame.size : measure(message);
+      if (!outdated && (room !== frame.line || JSON.stringify(size) !== JSON.stringify(frame.size))) fitFrame(room, size);
+    }
+    // The widget's own size, not its frame's, so it can ask for a wider frame than it has. While a
+    // line shows: how tall the widget is at that width, and how wide and tall it is at the width its
+    // buttons take alone, which a narrow page keeps (see content.js). Each read lays the widget out
+    // at once, before anything is drawn.
+    function measure(line) {
+      const card = $('widget'), text = $('widget-text'), box = () => card.getBoundingClientRect();
+      card.style.maxWidth = '272px';
+      const size = { width: Math.ceil(box().width) };
+      if (line) {
+        text.classList.add('visually-hidden');
+        size.narrowWidth = Math.ceil(box().width);
+        text.classList.remove('visually-hidden');
+        card.style.height = 'auto';
+        card.style.width = `${size.width}px`;
+        size.height = Math.ceil(box().height);
+        card.style.width = `${size.narrowWidth}px`;
+        size.narrowHeight = Math.ceil(box().height);
+      }
+      for (const property of ['max-width', 'width', 'height']) card.style.removeProperty(property);
+      // A size it could not measure is left out.
+      return Object.fromEntries(Object.entries(size).filter(([, value]) => value > 0));
     }
     // The widget can't size its own frame: the worker asks this tab's content script for it.
-    async function fitFrame(line, width) {
-      frame = { line, width };
-      try { await send({ type: 'ui:widgetSize', line, ...(width ? { width } : {}) }); }
+    async function fitFrame(line, size) {
+      frame = { line, size };
+      try { await send({ type: 'ui:widgetSize', line, ...size }); }
       catch (error) { note = trouble(error); render(); }
     }
     async function poll() {
@@ -317,9 +339,12 @@
     // SecondHand on all websites, as the worker last said (null until it has).
     let allSites = null;
     let desktopLine = null;
-    // What the desktop row's button does: open a closed app, or bring a locked one forward to unlock.
+    // What the desktop row's button does: open a closed app, bring a locked one forward to unlock, or
+    // ask it for Touch ID when its status says Touch ID is ready (#99).
     let desktopAction = null;
-    const ACTIONS = { open: 'desktop.open', unlock: 'panel.unlock' };
+    const ACTIONS = { open: 'desktop.open', unlock: 'panel.unlock', touchId: 'panel.unlockTouchId' };
+    // Why Touch ID didn't unlock, said as SecondHand comes forward for the password.
+    const TOUCH_ID_LINES = { cancelled: 'desktop.touchIdDidntUnlock', off: 'desktop.unlockThenAutofill' };
     // While SecondHand opens, the panel checks about once a second for about 20 seconds.
     let opening = false;
     let desktopRun = 0;
@@ -556,7 +581,7 @@
       updateSteps = Object.hasOwn(UPDATE_STEPS, desktop?.update) ? UPDATE_STEPS[desktop.update] : null;
       desktopLine = { key: !desktop?.connected ? 'desktop.notRunning' : desktop.unlocked ? 'desktop.unlocked' : 'desktop.locked' };
       layaLine = desktop?.connected && Object.hasOwn(LAYA_LINES, desktop.laya) ? { key: LAYA_LINES[desktop.laya] } : null;
-      desktopAction = !desktop?.connected ? 'open' : desktop.unlocked ? null : 'unlock';
+      desktopAction = !desktop?.connected ? 'open' : desktop.unlocked ? null : desktop.touchId === 'ready' ? 'touchId' : 'unlock';
       $('desktop-status').parentElement.classList.toggle('error', !(desktop?.connected && desktop.unlocked));
     }
     function desktopProblem(message) {
@@ -599,6 +624,23 @@
         if (desktop?.connected) return desktop;
       }
       return null;
+    }
+    // Unlock with Touch ID: the app shows macOS's prompt over Chrome. While it asks, the row keeps its
+    // line (as while SecondHand opens). When it doesn't unlock, Unlock does what it always did: SecondHand
+    // comes forward for the password, and the line says why.
+    async function unlockWithTouchId() {
+      opening = true; desktopRun++;
+      desktopLine = { key: 'desktop.touchIdWaiting' }; desktopAction = null;
+      renderDesktop();
+      let reply;
+      try { reply = await send({ type: 'ui:unlockWithTouchId', confirmed: true }); }
+      catch (error) { desktopLine = problem(error); desktopAction = 'touchId'; renderDesktop(); return; }
+      finally { opening = false; }
+      if (reply.unlocked) { await desktopStatus(); return; }
+      desktopAction = reply.reason === 'cancelled' ? 'touchId' : 'unlock';
+      try { await send({ type: 'ui:showApp', confirmed: true }); desktopLine = { key: TOUCH_ID_LINES[reply.reason] }; }
+      catch (error) { desktopLine = problem(error); }
+      renderDesktop();
     }
     // Every action re-reads the active tab so a stale checklist can never act on another page.
     async function act(payload, waiting) {
@@ -922,6 +964,7 @@
     }));
     $('desktop-action').addEventListener('click', trusted(async () => {
       if (desktopAction === 'open') return openApp();
+      if (desktopAction === 'touchId') return unlockWithTouchId();
       try { await send({ type: 'ui:showApp', confirmed: true }); desktopLine = { key: 'desktop.unlockThenAutofill' }; }
       catch (error) { desktopLine = problem(error); }
       renderDesktop();

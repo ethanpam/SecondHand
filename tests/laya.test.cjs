@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const fsp = require('node:fs/promises');
 const http = require('node:http');
 const https = require('node:https');
 const os = require('node:os');
@@ -23,10 +24,12 @@ const CONFIG = { max_len: 512, head_max_len: 192, temperature: [1.6, 1.25, 1.546
 const DECISION = { type: 'noul', instructions: 'Given the facts about the household, is the candidate the correct answer to the form question?' };
 const MATCH = { type: 'choice', instructions: 'Which saved answer does this form question ask for?', criteria: ['first name', 'last name', 'email address', 'none of these'] };
 const tick = () => new Promise(resolve => setImmediate(resolve));
-// Waits up to 200 turns of the event loop for `condition`; setTimeout may be mocked.
+// Waits up to 5 seconds for `condition`, a turn of the event loop at a time, since setTimeout may be
+// mocked. Loading reads the model folder from disk, which can take hundreds of turns on a busy machine.
 const settles = async (condition, what) => {
-  for (let turn = 0; !condition(); turn++) {
-    if (turn > 200) throw new Error(`Never saw ${what}`);
+  const end = performance.now() + 5000;
+  while (!condition()) {
+    if (performance.now() > end) throw new Error(`Never saw ${what}`);
     await tick();
   }
 };
@@ -69,7 +72,8 @@ function stubRunner(overrides = {}) {
         async run(batch) {
           runner.runs.push(batch);
           if (overrides.run) await overrides.run(batch);
-          return { data: Float32Array.from({ length: batch.rows * batch.count }, (_, index) => scoreFor(batch, Math.floor(index / batch.count), index % batch.count)), dims: [batch.rows, batch.count] };
+          const data = Float32Array.from({ length: batch.rows * batch.count }, (_, index) => scoreFor(batch, Math.floor(index / batch.count), index % batch.count));
+          return { data: overrides.scores ? overrides.scores(data) : data, dims: [batch.rows, batch.count] };
         },
         async release() { runner.releases++; }
       };
@@ -350,6 +354,47 @@ test('a model that fails to load is reported as an error and decisions are refus
   assert.match((await missing.status()).message, /model folder is missing model\.onnx/);
 });
 
+test('non-finite scores are refused, not answered, and the next request with finite scores is answered', async t => {
+  for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+    let poisoned = true;
+    const runner = stubRunner({ scores: data => { if (poisoned) data[data.length - 1] = bad; return data; } });
+    const laya = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: NO_MODEL, runner, enabled: true });
+    await assert.rejects(laya.decide(rowState('3'), { correct: DECISION, match: MATCH }), { name: 'RangeError', message: /non-finite scores/ }, String(bad));
+    poisoned = false;
+    const { answers } = await laya.decide(rowState('3'), { correct: DECISION, match: MATCH });
+    assert.ok(Number.isFinite(answers.correct.noul) && Object.values(answers.match.probabilities).every(Number.isFinite), String(bad));
+  }
+});
+
+test('turning Laya off during a load leaves nothing loaded: a model process that hasn’t started never starts, and one loading is released', async t => {
+  const runner = stubRunner();
+  const laya = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: NO_MODEL, runner, enabled: true, timeoutMs: 60000 });
+  const early = laya.decide(rowState('3'), { correct: DECISION }).catch(error => error);
+  await laya.setEnabled(false); // while the model's files are read, before its process starts
+  let refused = await early;
+  assert.equal(refused.code, LAYA_NOT_READY);
+  assert.match(refused.message, /turned off while the model was loading/);
+  assert.equal(runner.loads.length, 0, 'no model process was started');
+
+  let open;
+  const gate = new Promise(resolve => { open = resolve; });
+  const slow = stubRunner({ load: () => gate });
+  const loading = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: NO_MODEL, runner: slow, enabled: true, timeoutMs: 60000 });
+  const decision = loading.decide(rowState('3'), { correct: DECISION }).catch(error => error);
+  await settles(() => slow.loads.length === 1, 'the model process to start loading');
+  await loading.setEnabled(false);
+  open();
+  refused = await decision;
+  assert.equal(refused.code, LAYA_NOT_READY);
+  assert.match(refused.message, /turned off while the model was loading/);
+  assert.equal(slow.releases, 1, 'the model that finished loading was released');
+  assert.equal((await loading.status()).state, 'off');
+  await loading.setEnabled(true);
+  assert.equal((await loading.status()).state, 'ready', 'no load error is left behind');
+  assert.equal((await loading.decide(rowState('3'), { correct: DECISION })).answers.correct.type, 'noul');
+  assert.equal(slow.loads.length, 2, 'the next request loads the model again');
+});
+
 test('download, then decisions work with the network off; tampered files are refused before use', async t => {
   const files = modelFiles();
   const server = await localServer(t, files);
@@ -574,6 +619,52 @@ test('a decision running when an update is ready finishes on the old model; the 
   assert.equal(runner.loads.at(-1), modelPath(userDataDir, NEW));
 });
 
+test('latest.json naming a model Laya already replaced is refused, even after a restart; a rollback published as a new commit installs', async t => {
+  const hub = await modelHub(t);
+  const shipped = hub.publish(OLD);
+  hub.latest = shipped;
+  const userDataDir = temporary(t, 'secondhand-laya-');
+  const runner = stubRunner();
+  const laya = createLaya({ userDataDir, manifest: shipped, updateUrl: hub.updateUrl, runner, enabled: true });
+  await laya.update();
+  const newer = hub.publish(NEW);
+  hub.latest = newer;
+  await laya.update();
+  assert.equal(installedRevision(userDataDir), NEW);
+
+  hub.latest = shipped; // back to the model NEW replaced
+  const downloaded = hub.fileRequests(OLD).length;
+  await laya.update();
+  const refused = { state: 'error', message: 'The update list names a Laya model SecondHand already replaced with a newer one, so SecondHand keeps the one it has.' };
+  assert.deepEqual(await laya.status(), { state: 'ready', enabled: true, sizeBytes: sizeOf(newer), update: refused });
+  assert.equal(installedRevision(userDataDir), NEW);
+  assert.equal(hub.fileRequests(OLD).length, downloaded, 'nothing of the older model is downloaded');
+  await laya.decide(rowState('3'), { correct: DECISION });
+  assert.equal(runner.loads.at(-1), modelPath(userDataDir, NEW));
+  await laya.close();
+
+  const restarted = createLaya({ userDataDir, manifest: shipped, updateUrl: hub.updateUrl, runner, enabled: true });
+  t.after(() => restarted.close());
+  await restarted.update();
+  assert.deepEqual((await restarted.status()).update, refused, 'installed.json keeps the revisions Laya replaced');
+  fs.rmSync(path.join(userDataDir, 'models/laya', NEW), { recursive: true });
+  await restarted.update();
+  assert.equal(installedRevision(userDataDir), NEW, 'a missing installed model downloads again, not the one it replaced');
+  assert.equal(hub.fileRequests(OLD).length, downloaded);
+  assert.equal((await restarted.status()).state, 'ready');
+
+  // A rollback is published as a new commit, so it has a new revision.
+  const ROLLBACK = 'c'.repeat(40);
+  hub.latest = hub.publish(ROLLBACK);
+  await restarted.update();
+  assert.equal(installedRevision(userDataDir), ROLLBACK);
+  assert.deepEqual(stored(userDataDir), [ROLLBACK, 'installed.json']);
+  hub.latest = newer;
+  await restarted.update();
+  assert.deepEqual((await restarted.status()).update, refused, 'every replaced revision is refused');
+  assert.equal(installedRevision(userDataDir), ROLLBACK);
+});
+
 test('a model in a format this app can’t run is ignored with a note, and the installed or shipped model is used', async t => {
   const hub = await modelHub(t);
   const shipped = hub.publish(OLD);
@@ -644,6 +735,69 @@ test('a tampered update is deleted, the installed model keeps working, and the n
   assert.equal(installedRevision(userDataDir), NEW);
 });
 
+test('a full disk stops an update with a clear note while the installed model keeps working, and the update installs once there is room', async t => {
+  const hub = await modelHub(t);
+  const shipped = hub.publish(OLD);
+  hub.latest = shipped;
+  const userDataDir = temporary(t, 'secondhand-laya-');
+  const runner = stubRunner();
+  const laya = createLaya({ userDataDir, manifest: shipped, updateUrl: hub.updateUrl, runner, enabled: true });
+  await laya.update();
+  const newer = hub.publish(NEW);
+  hub.latest = newer;
+  const noSpace = syscall => Object.assign(new Error(`ENOSPC: no space left on device, ${syscall}`), { code: 'ENOSPC', syscall });
+  const saved = 'The Laya model couldn’t be saved on this computer (ENOSPC). Free some space and try again.';
+  // The disk is full: writing the update's files fails.
+  const update = path.join(userDataDir, 'models/laya', NEW);
+  const open = fs.open;
+  const full = new Set();
+  t.mock.method(fs, 'open', (file, flags, mode, callback) => open(file, flags, mode, (error, fd) => {
+    if (!error && file.startsWith(update)) full.add(fd);
+    callback(error, fd);
+  }));
+  for (const method of ['write', 'writev']) {
+    const original = fs[method];
+    t.mock.method(fs, method, (fd, ...args) => full.has(fd) ? process.nextTick(args.at(-1), noSpace('write')) : original(fd, ...args));
+  }
+  await laya.update();
+  let status = await laya.status();
+  assert.equal(status.state, 'ready');
+  assert.deepEqual(status.update, { state: 'error', message: `Update download failed: ${saved}` });
+  assert.deepEqual(fs.readdirSync(update, { recursive: true }).filter(name => name.endsWith('.partial')), [], 'the partial file is deleted, freeing its space');
+  assert.equal(installedRevision(userDataDir), OLD);
+  await laya.decide(rowState('3'), { correct: DECISION });
+  assert.equal(runner.loads.at(-1), modelPath(userDataDir, OLD), 'the installed model keeps answering');
+  t.mock.restoreAll();
+
+  // The files fit, but recording the update as installed doesn't.
+  const openFile = fsp.open;
+  t.mock.method(fsp, 'open', (file, ...rest) => file.startsWith(path.join(userDataDir, 'models/laya/installed.json')) ? Promise.reject(noSpace('open')) : openFile(file, ...rest));
+  await laya.update();
+  status = await laya.status();
+  assert.equal(status.state, 'ready');
+  assert.deepEqual(status.update, { state: 'error', message: `Update failed: ${saved}` });
+  assert.equal(installedRevision(userDataDir), OLD);
+  await laya.decide(rowState('4'), { correct: DECISION });
+  assert.equal(runner.loads.at(-1), modelPath(userDataDir, OLD), 'the installed model keeps answering');
+  t.mock.restoreAll();
+
+  await laya.update();
+  assert.deepEqual(await laya.status(), { state: 'ready', enabled: true, sizeBytes: sizeOf(newer) });
+  assert.equal(installedRevision(userDataDir), NEW);
+});
+
+test('with nothing installed, a full disk while recording the model says so plainly', async t => {
+  const hub = await modelHub(t);
+  const shipped = hub.publish(OLD);
+  const userDataDir = temporary(t, 'secondhand-laya-');
+  const openFile = fsp.open;
+  t.mock.method(fsp, 'open', (file, ...rest) => file.startsWith(path.join(userDataDir, 'models/laya/installed.json'))
+    ? Promise.reject(Object.assign(new Error('ENOSPC: no space left on device, open'), { code: 'ENOSPC', syscall: 'open' })) : openFile(file, ...rest));
+  const laya = createLaya({ userDataDir, manifest: shipped, runner: stubRunner(), enabled: true });
+  await laya.update();
+  assert.deepEqual((await laya.status()).update, { state: 'error', message: 'The Laya model couldn’t be saved on this computer (ENOSPC). Free some space and try again.' });
+});
+
 test('nothing is checked or downloaded while Laya is off, and turning it off stops an update download, keeping what arrived', async t => {
   const hub = await modelHub(t);
   const shipped = hub.publish(OLD);
@@ -673,6 +827,44 @@ test('nothing is checked or downloaded while Laya is off, and turning it off sto
   await laya.update();
   assert.equal(installedRevision(userDataDir), NEW);
   assert.equal(hub.fileRequests(NEW).filter(name => name === `${NEW}/model.onnx`).length, 1, 'the update resumed');
+});
+
+test('a restart while offline keeps a partial update download, and the next check that works resumes it', async t => {
+  const hub = await modelHub(t);
+  const shipped = hub.publish(OLD);
+  hub.latest = shipped;
+  const userDataDir = temporary(t, 'secondhand-laya-');
+  const laya = createLaya({ userDataDir, manifest: shipped, updateUrl: hub.updateUrl, runner: stubRunner(), enabled: true });
+  await laya.update();
+  hub.latest = hub.publish(NEW);
+  hub.serve = name => name === `${NEW}/model.onnx.data` ? undefined : false; // never answers
+  const update = laya.update();
+  await until(() => hub.requests.includes(`${NEW}/model.onnx.data`), 'the new weights');
+  await laya.close();
+  await update;
+  const arrived = path.join(userDataDir, 'models/laya', NEW, 'model.onnx');
+  assert.ok(fs.existsSync(arrived), 'part of the update arrived before the app quit');
+
+  const blocked = () => { throw new Error('The network is off in this test.'); };
+  for (const [module, name] of [[http, 'get'], [http, 'request'], [https, 'get'], [https, 'request']]) t.mock.method(module, name, blocked);
+  const runner = stubRunner();
+  const offline = createLaya({ userDataDir, manifest: shipped, updateUrl: hub.updateUrl, runner, enabled: true });
+  await offline.update();
+  const status = await offline.status();
+  assert.equal(status.state, 'ready');
+  assert.deepEqual(status.update, { state: 'error', message: 'Update check failed: The network is off in this test.' });
+  assert.ok(fs.existsSync(arrived), 'a failed check keeps the partial update');
+  await offline.decide(rowState('3'), { correct: DECISION });
+  assert.equal(runner.loads.at(-1), modelPath(userDataDir, OLD), 'the installed model keeps answering');
+  await offline.close();
+
+  t.mock.restoreAll();
+  hub.serve = null;
+  const online = createLaya({ userDataDir, manifest: shipped, updateUrl: hub.updateUrl, runner: stubRunner(), enabled: true });
+  await online.update();
+  assert.equal(installedRevision(userDataDir), NEW);
+  assert.equal(hub.fileRequests(NEW).filter(name => name === `${NEW}/model.onnx`).length, 1, 'the update resumed');
+  assert.deepEqual(stored(userDataDir), [NEW, 'installed.json']);
 });
 
 test('pausing the first download stops it and says so at once, even while the check that starts it runs', async t => {
@@ -740,6 +932,20 @@ test('an installed.json SecondHand can’t use leaves the shipped model in place
   const status = await downgraded.status();
   assert.equal(status.state, 'ready', 'the shipped model’s files are still there');
   assert.deepEqual(status.update, { state: 'incompatible', message: 'The installed Laya model needs a newer version of SecondHand, so SecondHand uses one it can run.' });
+});
+
+test('an app that can’t run the installed model installs the shipped one, even one an update replaced', async t => {
+  const hub = await modelHub(t);
+  const shipped = hub.publish(OLD);
+  const userDataDir = temporary(t, 'secondhand-laya-');
+  const record = path.join(userDataDir, 'models/laya/installed.json');
+  fs.mkdirSync(path.dirname(record), { recursive: true });
+  fs.writeFileSync(record, JSON.stringify({ ...hub.publish(NEW, modelFiles(), 'noul-v9'), replaced: [OLD] }));
+  const laya = createLaya({ userDataDir, manifest: shipped, runner: stubRunner(), enabled: true });
+  await laya.update();
+  assert.deepEqual(await laya.status(), { state: 'ready', enabled: true, sizeBytes: sizeOf(shipped) });
+  assert.equal(installedRevision(userDataDir), OLD);
+  assert.deepEqual(JSON.parse(fs.readFileSync(record, 'utf8')).replaced, [], 'the installed revision isn’t listed as replaced');
 });
 
 test('remove turns Laya off and deletes every revision; turned on again, it downloads the newest model', async t => {
