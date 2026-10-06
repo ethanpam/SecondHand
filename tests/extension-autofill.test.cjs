@@ -1038,6 +1038,21 @@ test('an approval prompt in a click holds the reload until the click is answered
   assert.equal(w.reloads(), 1);
 });
 
+test('Save offers on an unknown Iowa page hold the reload after Autofill stops, until the last one is saved (#142)', async () => {
+  const plan = financialPlan();
+  const w = worker({ kind: 'manual', engine: generalEngine, general: plan, build: RUNNING, disk: '2026-10-04.1',
+    desktop: { values: financialValues, extension: { build: '2026-10-04.1', copy: 'ready' } } });
+  assert.equal((await autofill(w)).data.state, 'done');
+  await w.panel({ type: 'ui:stop', confirmed: true });
+  await desktopRow(w);
+  assert.equal(w.reloads(), 0, 'the household seniors question has no saved answer');
+  assert.deepEqual(plain((await w.panel({ type: 'ui:pageState' })).data).savable, [{ id: 'sh-1-2', label: '', answered: false }], 'the offer is still there');
+  plan.matched[2].typed = '1';
+  assert.equal((await w.panel({ type: 'ui:saveAnswer', id: 'sh-1-2', confirmed: true })).ok, true);
+  await settle();
+  assert.equal(w.reloads(), 1, 'nothing is left to keep');
+});
+
 test('on a verified Iowa page, an answer the app left out because of a saved date of birth is said, and the rest still fill (#135)', async () => {
   const w = worker({ desktop: { fieldsReason: 'birthDate' } });
   const result = plain((await autofill(w)).data);

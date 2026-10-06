@@ -2148,6 +2148,35 @@ test('the app’s prompt to trust all websites holds the reload until it is answ
   assert.equal(w.reloads(), 1);
 });
 
+test('after a click, the need-you list and Save offers stay: the reload waits until the tab moves on or closes (#142)', async () => {
+  const w = updating({ enabled: true });
+  assert.equal((await autofill(w)).data.state, 'done');
+  await statusRow(w);
+  assert.equal(w.reloads(), 0, 'the click left two questions for the applicant');
+  const size = `f0:${w.page.idOf('size')}`;
+  const state = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.deepEqual(state.result.needYou, [`f0:${w.page.idOf('pickup')}`, size]);
+  assert.deepEqual(state.savable, [{ id: size, label: 'size', answered: false }]);
+  // Saving one answer leaves the need-you list: still no reload.
+  w.page.type('size', '3');
+  assert.equal((await w.panel({ type: 'ui:saveAnswer', id: size, confirmed: true })).ok, true);
+  await statusRow(w);
+  assert.equal(w.reloads(), 0);
+  assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).result.needYou.length, 2);
+  // The tab moves on: nothing is left to keep, and the next message reloads.
+  w.events.updated(7, { status: 'loading' });
+  await statusRow(w);
+  assert.equal(w.reloads(), 1);
+
+  const closed = updating({ enabled: true });
+  await autofill(closed);
+  await statusRow(closed);
+  assert.equal(closed.reloads(), 0);
+  closed.events.removed(7);
+  await statusRow(closed);
+  assert.equal(closed.reloads(), 1, 'a closed tab keeps nothing');
+});
+
 // Save to My information (#98).
 const saveAnswer = (w, id) => w.panel({ type: 'ui:saveAnswer', id, confirmed: true });
 const savable = async w => plain((await w.panel({ type: 'ui:pageState' })).data).savable;
