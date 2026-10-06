@@ -18,6 +18,7 @@ const strings = require('../extension/strings.js');
 // gives the shared fixture a fictional household list; Laya's side of a household list is in tests/facts.test.cjs).
 const syntheticProfile = { ...require('../tests/fixtures/applicant-profile.json'), householdSize: '1', householdAdults: '1', householdChildren: '0', householdSeniors: '0', householdMembers: [] };
 const { attachNativePanel } = require('./smoke-extension.cjs');
+const { checkLayaRequests } = require('./smoke-checks.cjs');
 
 const root = path.join(__dirname, '..');
 const ORIGIN = 'https://pantry.example.org';
@@ -46,13 +47,15 @@ const pages = {
 // The desktop app with Laya, as the worker sees it over native messaging, with Always allow on. Laya's
 // decisions here stand in for the model: the email box is the saved email address, and a household of
 // one with no seniors answers "No" to 60 or older. "Do you have a pet?" is something the facts never say.
-// Each Laya request must carry the milliseconds its click has left, as the bridge requires.
+// Each Laya request must carry the milliseconds its click has left, as the bridge requires. `calls` holds the
+// requests since the last page opened, and `all` every request of the run.
 async function installDesktop(worker, profile) {
   await worker.evaluate(profile => {
-    globalThis.__desktop = { laya: 'ready', calls: [], profile };
+    globalThis.__desktop = { laya: 'ready', calls: [], all: [], profile };
     nativeRequest = async (type, payload = {}) => {
       const desktop = globalThis.__desktop;
       desktop.calls.push({ type, ...JSON.parse(JSON.stringify(payload)) });
+      desktop.all.push({ type, ...JSON.parse(JSON.stringify(payload)) });
       if (type === 'status') return { unlocked: true, applicationCount: 0, accessRevision: 0, laya: { state: desktop.laya } };
       if (type === 'warmLaya') return { state: desktop.laya };
       if (type === 'showApp') return { shown: true };
@@ -162,14 +165,6 @@ async function main() {
       { label: 'Is anyone in your household 60 or older?', type: 'radio', options: ['Yes', 'No'] }, { label: 'Do you have a pet?', type: 'radio', options: ['Yes', 'No'] }]);
     console.log(`#42: 60 or older answered "No" as a guess, the pet question is under need you; the widget says "${await widget.locator('#widget-text').textContent()}".`);
 
-    // No saved value ever reaches Laya: its requests carry labels, types, and options only.
-    for (const call of await calls()) {
-      if (!['suggestFields', 'answerFields'].includes(call.type)) continue;
-      assert.deepEqual(Object.keys(call).sort(), call.type === 'suggestFields' ? ['budgetMs', 'fields', 'type', 'url'] : ['budgetMs', 'questions', 'type', 'url']);
-      assert.ok(call.budgetMs >= 1 && call.budgetMs <= 3000, 'each request carries the time its click has left');
-      for (const value of savedValues) assert.equal(JSON.stringify(call).includes(value), false, `${call.type} carried a saved value`);
-    }
-
     // #84: a Spanish form. Laya reads English, so the worker reads the question with Chrome's own LanguageDetector and
     // Translator, here in this Chromium's service worker, before Laya sees it. What they report decides the path.
     const chromeAI = await worker.evaluate(async () => ({
@@ -239,6 +234,9 @@ async function main() {
       console.log(`#84: the side panel's Autofill on the Spanish form says: "${await panel.text('#status')}"`);
     }
 
+    // No saved value ever reached Laya on any page: every request of the run carried labels, types, and options only.
+    const checked = checkLayaRequests(await worker.evaluate(() => globalThis.__desktop.all), savedValues);
+    console.log(`Laya's requests over the whole run: ${checked.suggestFields} suggestFields and ${checked.answerFields} answerFields, each with labels only and its click's time left.`);
     assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing was submitted');
     const outside = requests.filter(url => !url.startsWith(`chrome-extension://${extensionId}/`) && !Object.hasOwn(pages, url) && url !== 'about:blank');
     assert.deepEqual(outside, [], 'nothing left the computer');
