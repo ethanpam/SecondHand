@@ -1437,10 +1437,10 @@ test('a worker too old to plan for the AI gets the update notice, not a fill', a
 });
 
 test('widget and side panel say when nothing on a site matches the saved profile instead of Filled 0', async t => {
-  const nothing = { state: 'done', filled: 0, guessed: [], needYou: ['sh-1-0', 'f4:sh-1-1'], message: 'Nothing here matches your saved profile. 2 left for you.', messageKey: 'result.nothingMatchesNeedYou', messageParams: { count: 2 }, pageKey: 'general' };
+  const nothing = { state: 'done', filled: 0, guessed: [], needYou: ['sh-1-0', 'f4:sh-1-1'], message: 'No question here matches your answers in My information. 2 left for you.', messageKey: 'result.nothingMatchesNeedYou', messageParams: { count: 2 }, pageKey: 'general' };
   const widget = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: nothing });
   await widget.userClick('autofill');
-  assert.equal(widget.get('widget-text').textContent, 'Nothing here matches your saved profile.');
+  assert.equal(widget.get('widget-text').textContent, 'No question here matches your answers in My information.');
   assert.equal(widget.get('widget-text').title, nothing.message);
   assert.equal(widget.get('need-you').textContent, '2 questions left');
   const side = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: nothing });

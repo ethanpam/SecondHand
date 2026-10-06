@@ -507,11 +507,11 @@ test('a page where nothing matches the saved profile says so instead of Filled 0
   const unknown = siteWorker({ enabled: true, fields: [{ ...PICKUP }, { name: 'shoe', label: 'Shoe size', type: 'text' }] });
   const result = plain((await autofill(unknown)).data);
   assert.equal(result.filled, 0);
-  assert.equal(result.message, 'Nothing here matches your saved profile. 2 left for you.');
+  assert.equal(result.message, 'No question here matches your answers in My information. 2 left for you.');
   const unsaved = siteWorker({ enabled: true, desktop: { values: {} } });
   const empty = plain((await autofill(unsaved)).data);
   assert.deepEqual(unsaved.nativeTypes(), ['status', 'getFields']);
-  assert.equal(empty.message, 'Nothing here matches your saved profile. 4 left for you.');
+  assert.equal(empty.message, 'No question here matches your answers in My information. 4 left for you.');
 });
 
 test('a page with nothing to fill points to Next when the form has one', async () => {
@@ -657,7 +657,7 @@ test('a form with nothing SecondHand recognizes never contacts the desktop', asy
   assert.equal(result.state, 'done');
   assert.equal(result.filled, 0);
   assert.deepEqual(result.needYou, ['f0:sh-1-0']);
-  assert.equal(result.message, 'Nothing here matches your saved profile. 1 left for you.');
+  assert.equal(result.message, 'No question here matches your answers in My information. 1 left for you.');
 });
 
 test('sites that are not turned on never reach the vault or the page', async () => {
