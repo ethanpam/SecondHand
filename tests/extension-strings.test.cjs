@@ -563,3 +563,11 @@ test('Add your household and its hints speak all six languages, and name the app
   // The app stays in English: every language names its row as My information does.
   for (const code of strings.LANGUAGES) assert.match(strings.text(code, 'household.hintPerson', { number: 3 }), /Person 3/, code);
 });
+
+test('the hidden card’s name begins with the words it shows, in every language, so it can be said to be clicked (WCAG 2.5.3)', () => {
+  for (const code of strings.LANGUAGES) {
+    const catalog = strings.catalogs[code];
+    assert.ok(catalog['widget.showTitle'].startsWith(catalog['widget.show']), `${code} widget.showTitle`);
+    assert.ok(catalog['widget.showWaitingTitle'].startsWith(catalog['widget.showWaiting']), `${code} widget.showWaitingTitle`);
+  }
+});

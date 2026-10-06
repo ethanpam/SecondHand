@@ -705,7 +705,7 @@ async function main() {
     await expect(page.locator('#householdApplyProgYes')).toBeChecked({ timeout: 20000 });
     await widget.locator('#hide').click();
     await expect(widget.locator('#pill')).toHaveClass(/waiting/);
-    await expect(widget.locator('#pill')).toHaveAttribute('aria-label', 'Show SecondHand’s card: it needs you');
+    await expect(widget.locator('#pill')).toHaveAttribute('aria-label', 'Show · needs you: SecondHand’s card');
     await widget.locator('#pill').click();
     await expect(widget.locator('#stop')).toBeVisible();
     console.log('Widget: Tab reaches its hide control; Enter leaves the round logo, and Enter on the logo brings the widget back. Hidden, it stays hidden on the next page, and the logo says when it needs the reader.');
