@@ -10,9 +10,8 @@ const adapter = require('../extension/iowa-adapter.js');
 const strings = require('../extension/strings.js');
 const forms = require('./fixtures/pantry-forms.cjs');
 const translation = require('../extension/translation.js');
+const { plain, layout } = require('./helpers/harness.cjs');
 
-// Values created inside the worker's vm context have foreign prototypes.
-const plain = value => JSON.parse(JSON.stringify(value));
 const source = file => fs.readFileSync(path.join(__dirname, '../extension', file), 'utf8');
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
 const SITE_URL = 'https://pantry.example.org/intake?step=1';
@@ -1761,8 +1760,7 @@ test('a site frame answers the page-text request with its declared language and 
   doc.documentElement.lang = 'en';
   doc.body.insertAdjacentHTML('afterbegin', '<p>Bring a photo ID to pickup.</p>');
   doc.getElementById('name').value = 'Synthetic private name';
-  const box = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 };
-  for (const node of doc.querySelectorAll('*')) { node.getBoundingClientRect = () => box; node.getClientRects = () => [box]; }
+  layout(doc);
   assert.deepEqual(plain(page.request({ type: 'secondhand:generic:pageText' })), { lang: 'en', text: 'Bring a photo ID to pickup.\nYour name\nPickup day' });
   assert.equal(page.request({ type: 'secondhand:generic:pageText' }, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
   delete page.window.SecondHandPageText;

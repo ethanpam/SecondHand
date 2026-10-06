@@ -2,17 +2,11 @@
 // Failing-first tests for GitHub issues #24, #25, #26, #27, #29 (live-form QA findings).
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { JSDOM } = require('jsdom');
 const generic = require('../extension/generic-adapter.js');
+const { laidOut } = require('./helpers/harness.cjs');
 
-// jsdom has no layout: give every node a visible box. Opacity still comes from styles.
-function page(html) {
-  const dom = new JSDOM(`<!doctype html><body>${html}</body>`, { url: 'https://pantry.example.org/intake', pretendToBeVisual: true });
-  const { document } = dom.window;
-  const box = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 };
-  for (const node of document.querySelectorAll('*')) { node.getBoundingClientRect = () => box; node.getClientRects = () => [box]; }
-  return document;
-}
+// Every node has a visible box. Opacity still comes from styles.
+const page = html => laidOut(html, 'https://pantry.example.org/intake');
 const keysOf = result => result.matched.map(item => item.key);
 const fillAll = (doc, result, profile) => generic.fillFields(doc, result.token, result.matched.map(({ id, key }) => ({ id, key, guessed: false })), generic.deriveValues(profile));
 

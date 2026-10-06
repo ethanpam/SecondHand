@@ -10,10 +10,10 @@ const { JSDOM } = require('jsdom');
 const adapter = require('../extension/iowa-adapter.js');
 const personal = require('./fixtures/iowa-personal-information.cjs');
 const tellUsMore = require('./fixtures/iowa-tell-us-more.cjs');
+const { plain, layout } = require('./helpers/harness.cjs');
 
 const extensionId = 'a'.repeat(32);
 const source = file => fs.readFileSync(path.join(__dirname, '../extension', file), 'utf8');
-const plain = value => JSON.parse(JSON.stringify(value));
 const REFUSED = { ok: false, error: 'SecondHand fills this page with its Iowa rules.' };
 const UNSAFE = { ok: false, error: 'This page could not be checked safely. Review it manually, then rescan.' };
 const EXPENSES = `${adapter.PORTAL}/applyForBenefits/expenses`;
@@ -30,9 +30,7 @@ function iowaTab(t, html = expenses, url = EXPENSES, { engine = true } = {}) {
   t.after(() => dom.window.close());
   const { window } = dom;
   const { document } = window;
-  const box = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 };
-  const layout = () => { for (const node of document.querySelectorAll('*')) { node.getBoundingClientRect = () => box; node.getClientRects = () => [box]; } };
-  layout();
+  layout(document);
   let listener;
   window.chrome = { runtime: { id: extensionId, getURL: file => `chrome-extension://${extensionId}/${file}`, onMessage: { addListener: callback => { listener = callback; } } } };
   for (const file of ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js']) window.eval(source(file));
@@ -43,7 +41,7 @@ function iowaTab(t, html = expenses, url = EXPENSES, { engine = true } = {}) {
     readAnswer: (...args) => { engineCalls.push('readAnswer'); return real.readAnswer(...args); } } : undefined;
   window.eval(source('content.js'));
   return {
-    document, engineCalls, layout,
+    document, engineCalls, layout: () => layout(document),
     type(id, value) { const element = document.getElementById(id); element.value = value; element.dispatchEvent(new window.Event('input', { bubbles: true })); },
     request(message, sender = { id: extensionId }) { let response; listener(message, sender, value => { response = value; }); return response; }
   };

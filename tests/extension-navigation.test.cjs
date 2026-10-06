@@ -8,7 +8,7 @@ const adapter = require('../extension/iowa-adapter.js');
 const generic = require('../extension/generic-adapter.js');
 const strings = require('../extension/strings.js');
 const translation = require('../extension/translation.js');
-const plain = value => JSON.parse(JSON.stringify(value));
+const { plain } = require('./helpers/harness.cjs');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 

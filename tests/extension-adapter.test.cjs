@@ -1,12 +1,12 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { JSDOM } = require('jsdom');
 const fs = require('node:fs');
 const path = require('node:path');
 const adapter = require('../extension/iowa-adapter.js');
 const fixture = require('./fixtures/iowa-personal-information.cjs');
 const mockProfile = require('./fixtures/applicant-profile.json');
+const { BOX, laidOut } = require('./helpers/harness.cjs');
 const URL = `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo`;
 
 // Sanitized structure transcribed from the blank live applicant form.
@@ -15,16 +15,8 @@ const basic = '<h1>Enter Personal Information</h1><form><label for="firstName">F
 function page(html = basic, url = URL) {
   const attrs = 'id="personalInformation" action="enterPersonalInfo" method="post"';
   html = html.includes('<form>') ? html.replace('<form>', `<form ${attrs}>`) : html.includes('<form ') ? html : `<form ${attrs}>${html}</form>`;
-  const dom = new JSDOM(`<!doctype html><main>${html}</main>`, { url, pretendToBeVisual: true });
-  const { document } = dom.window;
-  // jsdom has no layout engine; explicitly model in-viewport geometry. Tests
-  // for offscreen fields override these values without relaxing production code.
-  const box = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 };
-  for (const node of document.querySelectorAll('*')) {
-    node.getBoundingClientRect = () => box;
-    node.getClientRects = () => [box];
-  }
-  return document;
+  // Every element is in the viewport. Tests for offscreen fields override this without relaxing production code.
+  return laidOut(`<!doctype html><main>${html}</main>`, url);
 }
 const keys = doc => adapter.scan(doc, doc.location.href).fields.map(field => field.key);
 const needsYou = result => result.requiredRemaining + result.manualRemaining > 0;
@@ -392,15 +384,12 @@ test('Select Address is a manual checklist from official help, with no guessed f
 const preApplicant = require('./fixtures/iowa-pre-applicant.cjs');
 function screen(name, change) {
   const { html, path } = preApplicant.screens[name];
-  const dom = new JSDOM(`<!doctype html><body>${html}</body>`, { url: `${adapter.PORTAL}${path}`, pretendToBeVisual: true });
-  const { document } = dom.window;
-  const box = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 };
-  for (const node of document.querySelectorAll('*')) { node.getBoundingClientRect = () => box; node.getClientRects = () => [box]; }
+  const document = laidOut(html, `${adapter.PORTAL}${path}`);
   preApplicant.attach(document);
   change?.(document);
   return document;
 }
-const withBox = element => { const box = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 }; element.getBoundingClientRect = () => box; element.getClientRects = () => [box]; return element; };
+const withBox = element => { element.getBoundingClientRect = () => BOX; element.getClientRects = () => [BOX]; return element; };
 const clicks = (doc, selector) => { let count = 0; doc.querySelectorAll(selector).forEach(element => element.addEventListener('click', () => count++)); return () => count; };
 
 test('household question is a fillable page answered only from an explicit saved program choice', () => {

@@ -10,6 +10,7 @@ const personal = require('./fixtures/iowa-personal-information.cjs');
 const selfDetails = require('./fixtures/iowa-self-details.cjs');
 const tellUsMore = require('./fixtures/iowa-tell-us-more.cjs');
 const syntheticProfile = require('./fixtures/applicant-profile.json');
+const { layoutElements } = require('./helpers/harness.cjs');
 
 const source = file => fs.readFileSync(path.join(__dirname, '../extension', file), 'utf8');
 const { en, es } = strings.catalogs;
@@ -181,11 +182,7 @@ test('on an applicant page that does not look as expected, SecondHand says plain
 
 // A fixture page with every element given an on-screen box, as the adapter sees it in Chrome.
 function onScreen(html, url) {
-  const doc = new JSDOM(`<!doctype html><main>${html}</main>`, { url, pretendToBeVisual: true }).window.document;
-  const { Element } = doc.defaultView;
-  Element.prototype.getBoundingClientRect = () => ({ left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 });
-  Element.prototype.getClientRects = function () { return [this.getBoundingClientRect()]; };
-  return doc;
+  return layoutElements(new JSDOM(`<!doctype html><main>${html}</main>`, { url, pretendToBeVisual: true }).window);
 }
 const saveButton = doc => doc.querySelector('#dqButtonId309').textContent.trim();
 

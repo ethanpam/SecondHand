@@ -5,6 +5,7 @@ const { JSDOM } = require('jsdom');
 const adapter = require('../extension/iowa-adapter.js');
 const fixture = require('./fixtures/iowa-tell-us-more.cjs');
 const oldFixture = require('./fixtures/iowa-self-details.cjs');
+const { layoutElements } = require('./helpers/harness.cjs');
 
 const PAGE_KEY = 'iowa-tell-us-more';
 // The questions on screen before any answer, in page order. Each fills from a saved answer.
@@ -17,11 +18,7 @@ const values = (profile = saved) => adapter.pageValues(PAGE_KEY, profile);
 
 // Every element, including ones a test adds or clones, has an on-screen box unless its style hides it.
 function page(html = fixture.html, url = fixture.URL) {
-  const doc = new JSDOM(`<!doctype html><main>${html}</main>`, { url, pretendToBeVisual: true }).window.document;
-  const { Element } = doc.defaultView;
-  Element.prototype.getBoundingClientRect = () => ({ left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 });
-  Element.prototype.getClientRects = function () { return [this.getBoundingClientRect()]; };
-  return doc;
+  return layoutElements(new JSDOM(`<!doctype html><main>${html}</main>`, { url, pretendToBeVisual: true }).window);
 }
 const byId = (doc, id) => doc.getElementById(id);
 const dob = doc => byId(doc, fixture.DOB_ID);

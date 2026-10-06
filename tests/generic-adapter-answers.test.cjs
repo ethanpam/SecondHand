@@ -3,18 +3,11 @@
 // exactly that text, as a guess, and never overwrites, unchecks, or answers an unsafe question.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { JSDOM } = require('jsdom');
 const generic = require('../extension/generic-adapter.js');
 const forms = require('./fixtures/pantry-forms.cjs');
+const { laidOut } = require('./helpers/harness.cjs');
 
-// jsdom has no layout: give every node a visible box.
-function page(html) {
-  const dom = new JSDOM(`<!doctype html><body>${html}</body>`, { url: 'https://pantry.example.org/intake', pretendToBeVisual: true });
-  const { document } = dom.window;
-  const box = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 };
-  for (const node of document.querySelectorAll('*')) { node.getBoundingClientRect = () => box; node.getClientRects = () => [box]; }
-  return document;
-}
+const page = html => laidOut(html, 'https://pantry.example.org/intake');
 const open = (result, label) => result.unmatched.find(field => field.label === label);
 const answer = (doc, result, label, option) => generic.fillFields(doc, result.token, [{ id: open(result, label).id, option, guessed: true }], {});
 const sixty = '<fieldset><legend>Is anyone in your household 60 or older?</legend><label><input type="radio" name="sixty" value="y">Yes</label><label><input type="radio" name="sixty" value="n">No</label></fieldset>';

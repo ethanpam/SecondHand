@@ -1,5 +1,6 @@
 'use strict';
-// Harnesses the test files share. Desktop modules load only when a harness needs them.
+// Harnesses the test files share: the Electron main process and jsdom pages with layout. Desktop modules
+// and jsdom load only when a harness needs them.
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const vm = require('node:vm');
@@ -30,6 +31,26 @@ async function until(condition, what) {
 
 // A repository file, by its path from the repository root.
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+
+// jsdom has no layout engine. `layout` gives every element now in the document the same visible,
+// in-viewport box; a test that needs one off screen or hidden overrides it on that element.
+const BOX = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 };
+function layout(document) {
+  for (const node of document.querySelectorAll('*')) { node.getBoundingClientRect = () => BOX; node.getClientRects = () => [BOX]; }
+  return document;
+}
+// The same box for every element of the window, now and later; an element's getClientRects follows its own
+// getBoundingClientRect.
+function layoutElements(window) {
+  window.Element.prototype.getBoundingClientRect = () => ({ ...BOX });
+  window.Element.prototype.getClientRects = function () { return [this.getBoundingClientRect()]; };
+  return window.document;
+}
+// A jsdom document of `markup` at `url`, laid out by `layout`. Markup without a doctype goes inside <body>.
+function laidOut(markup, url) {
+  const { JSDOM } = require('jsdom');
+  return layout(new JSDOM(/^<!doctype/i.test(markup) ? markup : `<!doctype html><body>${markup}</body>`, { url, pretendToBeVisual: true }).window.document);
+}
 
 // desktop/main.cjs, run as Electron runs it, with Electron simulated. A test file says what differs:
 //   userData        the folder app.getPath gives
@@ -121,4 +142,4 @@ function runMain(modules, globals) {
   });
 }
 
-module.exports = { root, plain, tick, deferred, until, read, startMain, runMain, safeStorage };
+module.exports = { root, plain, tick, deferred, until, read, BOX, layout, layoutElements, laidOut, startMain, runMain, safeStorage };

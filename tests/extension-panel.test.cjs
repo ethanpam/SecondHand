@@ -7,6 +7,7 @@ const test = require('node:test');
 const { JSDOM } = require('jsdom');
 const adapter = require('../extension/iowa-adapter.js');
 const strings = require('../extension/strings.js');
+const { plain, layout } = require('./helpers/harness.cjs');
 const extensionId = 'a'.repeat(32);
 const extensionURL = file => `chrome-extension://${extensionId}/${file}`;
 const source = file => fs.readFileSync(path.join(__dirname, '../extension', file), 'utf8');
@@ -14,7 +15,6 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 const BUILD = source('panel.js').match(/const BUILD = '([^']+)'/)[1];
 const OUTDATED = 'SecondHand was updated. Open chrome://extensions and click the reload arrow on SecondHand, then reload this page.';
 
-const plain = value => JSON.parse(JSON.stringify(value));
 
 // Stand-in for generic-adapter.js; the real engine has its own tests. Plans carry
 // elements and values so the tests can prove only metadata leaves the page.
@@ -1090,8 +1090,7 @@ test('the Iowa page-text request answers only an information-only screen’s wor
   const doc = page.window.document;
   doc.documentElement.lang = 'en';
   doc.body.insertAdjacentHTML('afterbegin', '<main><h1>Important Information when applying and what to expect.</h1><p>What you need to do.</p><input value="Synthetic private value"></main>');
-  const box = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 };
-  for (const node of doc.querySelectorAll('*')) { node.getBoundingClientRect = () => box; node.getClientRects = () => [box]; }
+  layout(doc);
   page.window.SecondHandIowa.informationScreen = () => 'iowa-information';
   assert.deepEqual(plain(page.request({ type: 'secondhand:pageText' })), { lang: 'en', pageKey: 'iowa-information', text: 'Important Information when applying and what to expect.\nWhat you need to do.' });
   page.window.SecondHandIowa.informationScreen = () => '';

@@ -7,9 +7,8 @@ const { webcrypto } = require('node:crypto');
 const adapter = require('../extension/iowa-adapter.js');
 const strings = require('../extension/strings.js');
 const translation = require('../extension/translation.js');
+const { plain } = require('./helpers/harness.cjs');
 
-// Values created inside the worker's vm context have foreign prototypes.
-const plain = value => JSON.parse(JSON.stringify(value));
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
 const { GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey } = require('../extension/generic-adapter.js');
 // Verified Iowa pages never use the general engine; any call there is a bug.

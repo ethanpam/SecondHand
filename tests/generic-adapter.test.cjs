@@ -1,18 +1,11 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { JSDOM } = require('jsdom');
 const generic = require('../extension/generic-adapter.js');
 const forms = require('./fixtures/pantry-forms.cjs');
+const { laidOut } = require('./helpers/harness.cjs');
 
-// jsdom has no layout: give every node a visible box.
-function page(html, url = 'https://pantry.example.org/intake') {
-  const dom = new JSDOM(`<!doctype html><body>${html}</body>`, { url, pretendToBeVisual: true });
-  const { document } = dom.window;
-  const box = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 };
-  for (const node of document.querySelectorAll('*')) { node.getBoundingClientRect = () => box; node.getClientRects = () => [box]; }
-  return document;
-}
+const page = (html, url = 'https://pantry.example.org/intake') => laidOut(html, url);
 // Radio groups are named by the group, other controls by their id.
 const controlName = element => (element?.type === 'radio' ? element.name : element?.id || element?.name);
 const byElement = (doc, result) => Object.fromEntries(result.matched.map(item => [controlName(generic.elementFor(item.id)) || item.id, item.key]));
