@@ -683,7 +683,20 @@ test('Privacy & backups names everything autofill fills or clicks today and keep
   assert.match(chrome, /only/);
   assert.match(chrome, /on this computer/);
   assert.match(chrome, /marked to check/);
+  // It says both times Chrome's AI may guess, and never that it takes what Laya skipped: with Laya ready, it stays off for the whole click.
+  assert.match(chrome, /Laya isn’t ready/);
+  assert.match(chrome, /can’t take any of/);
+  assert.doesNotMatch(chrome, /the rest|questions Laya can’t take/);
   assert.doesNotMatch(card, /—|passphrase|vault|the rules/i);
+  // The sites you turned on get one short paragraph for saved answers and another for Laya's and Chrome's guesses.
+  const paragraphs = Array.from(view.window.document.querySelectorAll('#view-privacy .autofill-card p'), text);
+  const sites = paragraphs.filter(paragraph => paragraph.includes('Other sites you trust'));
+  assert.equal(sites.length, 1);
+  assert.doesNotMatch(sites[0], /Laya|Chrome’s/);
+  const guesses = paragraphs.filter(paragraph => paragraph.includes('Chrome’s built-in AI'));
+  assert.equal(guesses.length, 1);
+  for (const phrase of ['Laya', 'Iowa pages SecondHand doesn’t know', 'never guesses on Iowa’s form']) assert.ok(guesses[0].includes(phrase), phrase);
+  for (const paragraph of [sites[0], guesses[0]]) assert.ok(paragraph.split(/\s+/).length <= 75, `${paragraph.split(/\s+/).length} words: ${paragraph}`);
   // The one value SecondHand picks for the applicant gets its own paragraph, ending on the instruction to check it.
   const address = Array.from(view.window.document.querySelectorAll('#view-privacy .autofill-card p'), text).filter(paragraph => paragraph.includes('first suggested home address'));
   assert.equal(address.length, 1);
