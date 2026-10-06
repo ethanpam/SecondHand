@@ -1094,26 +1094,35 @@ const listedHousehold = (changes = {}) => ({ firstName: 'Synthetic', lastName: '
   ].map((member, n) => ({ ...member, ...changes[n] })) });
 const BANDS = ['householdCount:0-17', 'householdCount:18-59', 'householdCount:60+'];
 
-test('band counts and the student answer come from the household list; counts by birth date ask as the birth date does off Iowa', async () => {
+test('band counts and the student answer come from the household list; counts by birth date are everyday answers on every site (#175)', async () => {
   const app = await desktop({ settings: trusted });
   await app.invoke('saveProfile', listedHousehold());
-  app.answer(async () => ({ response: 1 }));
   const { values } = await app.request({ type: 'getFields', url: PANTRY, fields: [...BANDS, 'studentNameGrade', 'householdSize'] });
   assert.deepEqual(plain(values), { 'householdCount:0-17': '2', 'householdCount:18-59': '1', 'householdCount:60+': '1', studentNameGrade: 'Riley Example, 5th', householdSize: '4' });
-  assert.equal(app.prompts.length, 1, 'Always allow doesn’t cover counts by birth date on other sites');
-  assert.equal(app.prompts[0].title, 'Share sensitive details?');
-  assert.deepEqual(plain(app.prompts[0].buttons), ['Cancel', 'Allow once']);
-  assert.match(app.prompts[0].detail, /^People in the household aged 0 to 17, People in the household aged 18 to 59, People in the household aged 60 or older\n/);
-  assert.match(app.prompts[0].detail, /Other fields: Student name and grade, Household size\./);
-  assert.doesNotMatch(JSON.stringify(app.prompts[0]), /Riley|2015|1958/, 'the prompt names fields, never members’ details');
-  // The profile's own age counts, worked out from the list, are counts by birth date too.
-  await app.request({ type: 'getFields', url: PANTRY, fields: ['householdChildren'] });
-  assert.equal(app.prompts.length, 2);
-  assert.match(app.prompts[1].detail, /^Children in household\n/);
-  // Iowa keeps its own trust rules: Always allow, no sensitive prompt.
+  // A food-pantry intake asking for people aged 0 to 5 and 6 to 18, and the profile's own age counts worked out from the list.
+  assert.deepEqual(plain((await app.request({ type: 'getFields', url: PANTRY, fields: ['householdCount:0-5', 'householdCount:6-18', 'householdAdults', 'householdChildren', 'householdSeniors'] })).values),
+    { 'householdCount:0-5': '1', 'householdCount:6-18': '1', householdAdults: '1', householdChildren: '2', householdSeniors: '1' });
+  assert.equal(app.prompts.length, 0, 'Always allow covers counts by birth date as it covers any everyday answer');
+  // Iowa keeps its own trust rules.
   assert.deepEqual(plain((await app.request({ type: 'getFields', fields: ['householdCount:0-5', 'householdChildren'] })).values), { 'householdCount:0-5': '1', householdChildren: '2' });
-  assert.equal(app.prompts.length, 2);
+  assert.equal(app.prompts.length, 0);
   assert.equal(app.dataReads > 0, true);
+
+  // Without Always allow, the counts get the everyday prompt, never the sensitive one.
+  const asked = await desktop({ settings: asking });
+  await asked.invoke('saveProfile', listedHousehold());
+  asked.answer(async () => ({ response: 1 }));
+  assert.deepEqual(plain((await asked.request({ type: 'getFields', url: PANTRY, fields: [...BANDS, 'householdChildren', 'studentNameGrade'] })).values),
+    { 'householdCount:0-17': '2', 'householdCount:18-59': '1', 'householdCount:60+': '1', householdChildren: '2', studentNameGrade: 'Riley Example, 5th' });
+  assert.equal(asked.prompts.length, 1);
+  assert.equal(asked.prompts[0].title, 'Let Chrome fill this form?');
+  assert.match(asked.prompts[0].detail, /\n\nPeople in the household aged 0 to 17, People in the household aged 18 to 59, People in the household aged 60 or older, Children in household, Student name and grade\n\n/);
+  assert.doesNotMatch(JSON.stringify(asked.prompts[0]), /Riley|2015|1958/, 'the prompt names fields, never members’ details');
+  // Beside a sensitive field, the sensitive prompt names that field alone; the counts are among the other fields.
+  await asked.request({ type: 'getFields', url: PANTRY, fields: ['householdCount:0-5', 'birthDate'] });
+  assert.equal(asked.prompts[1].title, 'Share sensitive details?');
+  assert.match(asked.prompts[1].detail, /^Date of birth\n/);
+  assert.match(asked.prompts[1].detail, /Other fields: People in the household aged 0 to 5\.$/);
 });
 
 test('without the household list, the manual counts are everyday answers and band counts have no answer', async () => {
