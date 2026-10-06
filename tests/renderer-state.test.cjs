@@ -406,6 +406,32 @@ test('restoring a backup while locked refreshes create-vault UI despite an uncha
   assert.equal(view.get('workspace').hidden, true);
 });
 
+test('when the desktop reset its settings, the saved information opens with the notice once, beside a Touch ID notice', async t => {
+  const settingsNotice = 'SecondHand couldn’t read its settings file, so it reset the Chrome connection, Always allow, your trusted sites, and all websites. Set them up again on the Chrome extension page. Laya stays off.';
+  const touchIdNotice = 'Touch ID was turned off because its key file on this Mac is damaged.';
+  let status = { exists: true, unlocked: false, lockRevision: 0, extensionId: '', bridgeRunning: true, settingsNotice, touchIdNotice };
+  const view = await renderer(t, {
+    status: async () => status,
+    unlock: async () => { status = { ...status, unlocked: true }; return status; },
+    lock: async () => { status = { ...status, unlocked: false, lockRevision: status.lockRevision + 1, touchIdNotice: null }; return status; }
+  });
+  assert.equal(view.get('toast').hidden, true, 'nothing shows on the lock screen');
+  view.edit('passphrase', 'synthetic password');
+  view.submit('auth-form');
+  await tick(); await tick();
+  assert.equal(view.get('workspace').hidden, false);
+  assert.equal(view.get('toast').textContent, `${touchIdNotice} ${settingsNotice}`);
+  assert.equal(view.get('toast').classList.contains('error'), true);
+
+  view.get('lock-button').click();
+  await tick();
+  view.edit('passphrase', 'synthetic password');
+  view.submit('auth-form');
+  await tick(); await tick();
+  assert.equal(view.get('workspace').hidden, false);
+  assert.equal(view.get('toast').hidden, true, 'shown once while the app is open');
+});
+
 test('opening Applications or Overview refreshes progress recorded while another view was active', async t => {
   for (const destination of ['applications', 'overview']) await t.test(destination, async t => {
     const view = await renderer(t);
@@ -1152,6 +1178,175 @@ test('a lock notification arriving after the lock response cannot clear an unloc
   view.lock(1);
   assert.equal(view.get('auth-error').hidden, false, 'A late lock notice must not hide the unlock error');
   assert.match(view.get('auth-error').textContent, /Unable to unlock/);
+  assert.equal(view.get('workspace').hidden, true);
+});
+
+// Privacy & backups and the Chrome extension page (#140): what each button asks the desktop, and what it shows.
+const unlockedStatus = (changes = {}) => ({ exists: true, unlocked: true, recoveryKey: true, deviceReset: false, deviceResetSupported: true, extensionId: '', bridgeRunning: true, ...changes });
+const NEW_KEY = 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789';
+
+test('a new recovery key asks first when one exists, shows once in its dialog, and Copy and Save say what happened', async t => {
+  const calls = [];
+  let questions = 0;
+  let save = async () => ({ cancelled: true });
+  let copy = async () => true;
+  const view = await renderer(t, {
+    status: async () => unlockedStatus(),
+    replaceRecoveryKey: async () => { calls.push('replace'); return { recoveryKey: NEW_KEY }; },
+    copyRecoveryKey: async key => { calls.push(['copy', key]); return copy(); },
+    saveRecoveryKey: async key => { calls.push(['save', key]); return save(); }
+  });
+  assert.equal(view.get('replace-recovery-key').textContent, 'Create a new recovery key');
+  assert.match(view.get('recovery-status').textContent, /^You have a recovery key\. Creating a new one stops the old key from working\./);
+  view.window.confirm = () => { questions++; return false; };
+  view.get('replace-recovery-key').click();
+  await tick();
+  assert.equal(questions, 1);
+  assert.deepEqual(calls, [], 'declined: nothing is asked of the desktop');
+  view.window.confirm = () => true;
+  view.get('replace-recovery-key').click();
+  await tick(); await tick();
+  assert.deepEqual(calls, ['replace']);
+  assert.equal(view.get('recovery-dialog').open, true);
+  assert.equal(view.get('recovery-key-value').textContent, NEW_KEY);
+
+  view.get('save-recovery-key').click();
+  await tick();
+  assert.deepEqual(calls.at(-1), ['save', NEW_KEY]);
+  assert.equal(view.get('recovery-feedback').textContent, '', 'a cancelled save says nothing');
+  save = async () => ({ cancelled: false });
+  view.get('save-recovery-key').click();
+  await tick();
+  assert.equal(view.get('recovery-feedback').textContent, 'Saved. Print it or move it somewhere safe, away from this computer.');
+  view.get('copy-recovery-key').click();
+  await tick();
+  assert.deepEqual(calls.at(-1), ['copy', NEW_KEY]);
+  assert.equal(view.get('recovery-feedback').textContent, 'Copied. It will be cleared from the clipboard in 1 minute.');
+  copy = async () => { throw new view.window.Error('Enter the recovery key exactly as it was shown, like ABCD-EFGH-1234.'); };
+  view.get('copy-recovery-key').click();
+  await tick();
+  assert.equal(view.get('recovery-feedback').textContent, 'Enter the recovery key exactly as it was shown, like ABCD-EFGH-1234.');
+
+  view.get('recovery-saved').click();
+  view.get('recovery-done').click();
+  assert.equal(view.get('recovery-dialog').open, false);
+  // The browser tells the page its dialog closed.
+  view.get('recovery-dialog').dispatchEvent(new view.window.Event('close'));
+  assert.equal(view.get('recovery-key-value').textContent, '', 'the key leaves the page when the dialog closes');
+
+  let first;
+  first = await renderer(t, { status: async () => unlockedStatus({ recoveryKey: false }), replaceRecoveryKey: async () => { throw new first.window.Error('Could not create a recovery key. Please try again.'); } });
+  assert.equal(first.get('replace-recovery-key').textContent, 'Create recovery key');
+  first.window.confirm = () => assert.fail('nothing to replace, so nothing to ask');
+  first.get('replace-recovery-key').click();
+  await tick(); await tick();
+  assert.equal(first.get('toast').textContent, 'Could not create a recovery key. Please try again.');
+  assert.equal(first.get('toast').classList.contains('error'), true);
+  assert.equal(first.get('recovery-dialog').open, false);
+});
+
+test('letting this computer reset the password turns on and off through the desktop, and a failed change is undone', async t => {
+  const calls = [];
+  let fail = false;
+  let status = unlockedStatus();
+  let view;
+  view = await renderer(t, {
+    status: async () => status,
+    setDeviceReset: async enabled => {
+      calls.push(enabled);
+      if (fail) throw new view.window.Error('This computer couldn’t save a reset option. Your recovery key still works.');
+      status = { ...status, deviceReset: enabled };
+      return status;
+    }
+  });
+  const toggle = view.get('device-reset-toggle');
+  assert.equal(view.get('device-reset-setting').hidden, false);
+  assert.equal(toggle.checked, false);
+  const change = async checked => { toggle.checked = checked; toggle.dispatchEvent(new view.window.Event('change')); await tick(); await tick(); };
+  await change(true);
+  assert.deepEqual(calls, [true]);
+  assert.equal(toggle.checked, true);
+  assert.equal(view.get('toast').textContent, 'This computer can now reset your password.');
+  await change(false);
+  assert.deepEqual(calls, [true, false]);
+  assert.equal(view.get('toast').textContent, 'Reset on this computer is turned off.');
+  fail = true;
+  await change(true);
+  assert.equal(toggle.checked, false, 'a failed change is undone');
+  assert.equal(toggle.disabled, false);
+  assert.equal(view.get('toast').textContent, 'This computer couldn’t save a reset option. Your recovery key still works.');
+  assert.equal(view.get('toast').classList.contains('error'), true);
+  const elsewhere = await renderer(t, { status: async () => unlockedStatus({ deviceResetSupported: false }) });
+  assert.equal(elsewhere.get('device-reset-setting').hidden, true, 'shown only where the system can keep the secret');
+});
+
+test('a custom extension ID is checked before it is sent, and the desktop’s answer is shown', async t => {
+  const calls = [];
+  let fail = false;
+  let view;
+  view = await renderer(t, {
+    status: async () => unlockedStatus(),
+    connectExtension: async id => {
+      calls.push(id);
+      if (fail) throw new view.window.Error('Could not prepare the Chrome connection. Try again or see the setup instructions.');
+      return { extensionId: id };
+    }
+  });
+  for (const id of ['', 'abc', 'q'.repeat(32), 'A'.repeat(32)]) {
+    view.get('extension-id').value = id;
+    view.submit('extension-form');
+    await tick();
+    assert.equal(view.get('extension-error').textContent, 'Use the 32-letter ID shown for SecondHand in Chrome’s extensions page.', JSON.stringify(id));
+  }
+  assert.deepEqual(calls, [], 'nothing is sent');
+  view.get('extension-id').value = ` ${'b'.repeat(32)} `;
+  view.submit('extension-form');
+  await tick(); await tick();
+  assert.deepEqual(calls, ['b'.repeat(32)]);
+  assert.equal(view.get('extension-error').hidden, true);
+  assert.equal(view.get('toast').textContent, 'Extension registered. Keep SecondHand open while you use it.');
+  fail = true;
+  view.submit('extension-form');
+  await tick(); await tick();
+  assert.equal(view.get('extension-error').textContent, 'Could not prepare the Chrome connection. Try again or see the setup instructions.');
+  assert.equal(view.get('extension-error').hidden, false);
+});
+
+test('Export says when the backup is saved, nothing when it is cancelled, and why it failed', async t => {
+  let result = async () => ({ cancelled: true });
+  const view = await renderer(t, { status: async () => unlockedStatus(), exportBackup: () => result() });
+  view.get('export-backup').click();
+  await tick();
+  assert.equal(view.get('toast').hidden, true, 'cancelled: nothing to say');
+  result = async () => { throw new view.window.Error('Create a password before saving a backup.'); };
+  view.get('export-backup').click();
+  await tick();
+  assert.equal(view.get('toast').textContent, 'Create a password before saving a backup.');
+  assert.equal(view.get('toast').classList.contains('error'), true);
+  result = async () => ({ cancelled: false });
+  view.get('export-backup').click();
+  await tick();
+  assert.equal(view.get('toast').textContent, 'Encrypted backup saved. You’ll need your password to restore it.');
+  assert.equal(view.get('toast').classList.contains('error'), false);
+});
+
+test('a refused restore says why on the unlock screen, and declining the warning asks the desktop nothing', async t => {
+  let imports = 0;
+  let view;
+  view = await renderer(t, {
+    status: async () => ({ exists: true, unlocked: false, lockRevision: 0, recoveryKey: true }),
+    importBackup: async () => { imports++; throw new view.window.Error('This is not a supported encrypted backup.'); }
+  });
+  view.window.confirm = () => false;
+  view.get('auth-import').click();
+  await tick();
+  assert.equal(imports, 0);
+  view.window.confirm = () => true;
+  view.get('auth-import').click();
+  await tick();
+  assert.equal(imports, 1);
+  assert.equal(view.get('auth-error').textContent, 'This is not a supported encrypted backup.');
+  assert.equal(view.get('auth-error').hidden, false);
   assert.equal(view.get('workspace').hidden, true);
 });
 

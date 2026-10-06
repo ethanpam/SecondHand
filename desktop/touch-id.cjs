@@ -4,7 +4,8 @@
 // `touchId` slot. This Mac's Keychain keeps that key through Electron's safeStorage, in
 // `touch-unlock.bin`. The app releases the key only after systemPreferences.promptTouchID succeeds.
 // Touch ID stays available until it's turned off, the information is erased or replaced, or its key
-// can't be used: there is no password-first rule after a restart and no time limit (the owner's choice).
+// file or slot is damaged: there is no password-first rule after a restart and no time limit (the
+// owner's choice). A Keychain or file error may not happen next time, so it never turns Touch ID off (#140).
 const fs = require('node:fs/promises');
 const crypto = require('node:crypto');
 const { atomicWrite } = require('./vault.cjs');
@@ -14,6 +15,8 @@ const MAX_SEALED_BYTES = 4096;
 const publicError = message => Object.assign(new Error(message), { publicMessage: message });
 // Why Touch ID can't go on: its message ends a sentence that starts "Touch ID was turned off because".
 const reasonError = reason => Object.assign(new Error(reason), { touchIdReason: true });
+// Why Touch ID didn't work this time; it stays on.
+const temporaryError = reason => Object.assign(new Error(reason), { temporary: true });
 
 // What main.cjs uses of macOS: Touch ID, and the Keychain through safeStorage.
 // SECONDHAND_TEST_TOUCH_ID=approve, with SECONDHAND_TEST_MODE=1 (which also keeps the app's data
@@ -65,14 +68,15 @@ function createTouchIdUnlock({ vault, platform, filePath, revision }) {
   async function readSealed() {
     let bytes;
     try {
-      if ((await fs.stat(filePath)).size > MAX_SEALED_BYTES) throw reasonError('its key file on this Mac is damaged');
+      const { size } = await fs.stat(filePath);
+      if (size === 0 || size > MAX_SEALED_BYTES) throw reasonError('its key file on this Mac is damaged');
       bytes = await fs.readFile(filePath);
     } catch (error) {
       if (error.touchIdReason) throw error;
-      throw reasonError(`its key file on this Mac couldn’t be read (${error.code || error.message})`);
+      throw temporaryError(`its key file on this Mac couldn’t be read (${error.code || error.message})`);
     }
     let text;
-    try { text = platform.unseal(bytes); } catch { throw reasonError('this Mac’s Keychain couldn’t open its key'); }
+    try { text = platform.unseal(bytes); } catch { throw temporaryError('this Mac’s Keychain couldn’t open its key'); }
     let record;
     try { record = JSON.parse(text); } catch { throw reasonError('its key file on this Mac is damaged'); }
     const key = typeof record?.key === 'string' ? Buffer.from(record.key, 'base64') : null;
@@ -83,7 +87,7 @@ function createTouchIdUnlock({ vault, platform, filePath, revision }) {
     return { key };
   }
   const removeSealed = () => fs.rm(filePath, { force: true });
-  // Turns Touch ID off because its key or slot can't be used. While locked, the slot stays until
+  // Turns Touch ID off because its key file or slot is damaged. While locked, the slot stays until
   // the next password unlock removes it; without the key it opens nothing.
   async function turnOffBecause(reason) {
     notice = `Touch ID was turned off because ${reason}.`;
@@ -131,7 +135,8 @@ function createTouchIdUnlock({ vault, platform, filePath, revision }) {
   }
 
   // After a password unlock: checks that the sealed key can still be read and has a slot, or finishes
-  // turning Touch ID off. Problems turn it off and become the notice; they never undo the unlock.
+  // turning Touch ID off. Problems turn it off and become the notice; they never undo the unlock. A
+  // Keychain or file error leaves Touch ID on: the next Touch ID unlock says if it happens again.
   async function passwordUnlocked() {
     notice = null;
     let record;
@@ -143,11 +148,12 @@ function createTouchIdUnlock({ vault, platform, filePath, revision }) {
       record = await readSealed();
       if (!vault.hasTouchIdSlot) throw reasonError('your saved information has no Touch ID key');
     } catch (error) {
+      if (error.temporary) return;
       await turnOffBecause(error.touchIdReason ? error.message : `of an error (${error.message})`);
     } finally { record?.key.fill(0); }
   }
 
-  // A restored backup or a new password: the information is a different one, so the key goes.
+  // A new password: the information is a different one, so the key goes.
   async function forget() {
     try { await removeSealed(); }
     catch (error) { notice = `Touch ID’s key on this Mac couldn’t be removed (${error.message}). Turn Touch ID off in Privacy & backups.`; }
@@ -170,6 +176,11 @@ function createTouchIdUnlock({ vault, platform, filePath, revision }) {
     } catch (error) {
       // A password unlock finished first.
       if (vault.unlocked) return { unlocked: true };
+      if (error.temporary) {
+        // Its key was removed while Touch ID asked: a restored backup, or starting over.
+        if (!await sealedExists()) return refuse('off', 'Touch ID is off. Enter your password.');
+        return refuse('cancelled', `Touch ID didn’t work this time (${error.message}). Use your password.`);
+      }
       const reason = error.touchIdReason ? error.message : error.code === 'TOUCH_ID_MISSING' ? 'your saved information has no Touch ID key' :
         error.code === 'TOUCH_ID_KEY' ? 'its key doesn’t open your saved information' : null;
       if (!reason) throw error;
@@ -178,7 +189,8 @@ function createTouchIdUnlock({ vault, platform, filePath, revision }) {
     } finally { record?.key.fill(0); }
     return { unlocked: true };
   }
-  // { unlocked: true }, or { unlocked: false, reason: 'off' | 'cancelled', message }.
+  // { unlocked: true }, or { unlocked: false, reason: 'off' | 'cancelled', message }. After 'cancelled'
+  // (a cancelled prompt, or Touch ID didn't work this time), Touch ID can be tried again.
   function unlock() {
     pending ||= attempt().finally(() => { pending = null; });
     return pending;
