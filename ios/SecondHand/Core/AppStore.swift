@@ -288,9 +288,9 @@ final class AppStore: ObservableObject {
         autofillExpiresAt = nil
     }
 
-    func importDocument(from url: URL) async throws {
-        let vault = try storage()
-        guard data.documents.count < 50 else { throw AppError.documentLimit }
+    @discardableResult
+    func importDocument(from url: URL) async throws -> SavedDocument {
+        _ = try storage()
         let allowed = url.startAccessingSecurityScopedResource()
         defer { if allowed { url.stopAccessingSecurityScopedResource() } }
         let values = try url.resourceValues(forKeys: [.fileSizeKey, .contentTypeKey, .isRegularFileKey])
@@ -298,8 +298,16 @@ final class AppStore: ObservableObject {
               let type = values.contentType, type.conforms(to: .pdf) || type.conforms(to: .image) else { throw VaultError.invalidFile }
         let bytes = try Data(contentsOf: url)
         guard bytes.count <= 20 * 1_024 * 1_024 else { throw VaultError.invalidFile }
-        let document = SavedDocument(id: UUID(), name: String(url.lastPathComponent.prefix(250)), importedAt: Date(),
-                                     byteCount: bytes.count, fileExtension: type.preferredFilenameExtension ?? "dat")
+        return try saveDocument(bytes: bytes, name: url.lastPathComponent, fileExtension: type.preferredFilenameExtension ?? "dat")
+    }
+
+    @discardableResult
+    func saveDocument(bytes: Data, name: String, fileExtension: String) throws -> SavedDocument {
+        let vault = try storage()
+        guard data.documents.count < 50 else { throw AppError.documentLimit }
+        guard !bytes.isEmpty, bytes.count <= 20 * 1_024 * 1_024 else { throw VaultError.invalidFile }
+        let document = SavedDocument(id: UUID(), name: String(name.prefix(250)), importedAt: Date(),
+                                     byteCount: bytes.count, fileExtension: fileExtension)
         let filename = "\(document.id.uuidString).sealed"
         try vault.write(bytes, named: filename)
         do {
@@ -311,6 +319,22 @@ final class AppStore: ObservableObject {
             try? vault.remove(named: filename)
             throw error
         }
+        return document
+    }
+
+    func recognizeDocument(_ document: SavedDocument, includeLayout: Bool = false) async throws -> RecognizedDocument {
+        let vault = try storage()
+        let generation = unlockGeneration
+        guard data.documents.contains(where: { $0.id == document.id }),
+              let bytes = try vault.read(named: "\(document.id.uuidString).sealed") else { throw VaultError.invalidFile }
+        let worker = Task.detached(priority: .userInitiated) {
+            try DocumentOCR.recognize(data: bytes, isPDF: document.fileExtension.lowercased() == "pdf", includeLayout: includeLayout)
+        }
+        let result = try await withTaskCancellationHandler(operation: { try await worker.value }, onCancel: { worker.cancel() })
+        try Task.checkCancellation()
+        guard isUnlocked, generation == unlockGeneration,
+              data.documents.contains(where: { $0.id == document.id }) else { throw AppError.locked }
+        return result
     }
 
     func deleteDocument(_ document: SavedDocument) throws {

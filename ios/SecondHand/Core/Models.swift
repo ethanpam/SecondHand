@@ -70,7 +70,7 @@ struct PersonalProfile: Codable, Equatable {
         reviewedAt = try values.decodeIfPresent(Date.self, forKey: .reviewedAt)
     }
 
-    var displayName: String { firstName.isEmpty ? "Your next step starts here" : "Welcome back, \(firstName)" }
+    var displayName: String { firstName.isEmpty ? "" : "Welcome back, \(firstName)" }
     var contactFields: [String: String] {
         ["firstName": firstName, "lastName": lastName,
          "addressLine1": addressLine1, "addressLine2": addressLine2, "city": city,
@@ -119,7 +119,7 @@ struct RenewalPlan: Codable, Equatable {
     }
 }
 
-struct SavedDocument: Codable, Identifiable, Equatable {
+struct SavedDocument: Codable, Identifiable, Equatable, Hashable {
     var id: UUID
     var name: String
     var importedAt: Date

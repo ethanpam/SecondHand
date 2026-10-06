@@ -11,6 +11,18 @@ contextBridge.exposeInMainWorld('secondHand', Object.freeze({
   startOver: request => invoke('startOver', request),
   replaceRecoveryKey: () => invoke('replaceRecoveryKey'),
   setDeviceReset: enabled => invoke('setDeviceReset', enabled),
+  setTouchIdUnlock: request => invoke('setTouchIdUnlock', request),
+  unlockWithTouchId: () => invoke('unlockWithTouchId'),
+  // SecondHand was unlocked from Chrome's side panel with Touch ID. Only the lock revision it
+  // happened at is passed on, as for onLocked.
+  onUnlocked: callback => {
+    if (typeof callback !== 'function') throw new TypeError('A callback is required.');
+    const listener = (_event, notification) => {
+      if (Number.isSafeInteger(notification?.lockRevision) && notification.lockRevision >= 0) callback({ lockRevision: notification.lockRevision });
+    };
+    ipcRenderer.on('secondhand:unlocked', listener);
+    return () => ipcRenderer.removeListener('secondhand:unlocked', listener);
+  },
   saveRecoveryKey: recoveryKey => invoke('saveRecoveryKey', recoveryKey),
   copyRecoveryKey: recoveryKey => invoke('copyRecoveryKey', recoveryKey),
   lock: () => invoke('lock'),

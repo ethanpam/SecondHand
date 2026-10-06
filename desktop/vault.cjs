@@ -4,7 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { promisify } = require('node:util');
-const { validateProfile, validateStoredApplication } = require('../shared/schema.cjs');
+const { validateStoredProfile, validateStoredApplication } = require('../shared/schema.cjs');
 
 const scrypt = promisify(crypto.scrypt);
 const MAX_VAULT_BYTES = 8 * 1024 * 1024;
@@ -13,8 +13,9 @@ const AAD = Buffer.from('SecondHand encrypted vault v1');
 const AAD_V2 = Buffer.from('SecondHand encrypted vault v2');
 // Version 2 encrypts contents with a random data key. Each slot stores that key
 // wrapped by one secret, so a recovery key or this computer's protected secret
-// can set a new password without re-encrypting or exposing the password.
-const SLOT_NAMES = Object.freeze(['password', 'recovery', 'device']);
+// can set a new password without re-encrypting or exposing the password, and a
+// key this Mac keeps for Touch ID can unlock it.
+const SLOT_NAMES = Object.freeze(['password', 'recovery', 'device', 'touchId']);
 const slotAad = name => Buffer.from(`SecondHand vault key slot v2:${name}`);
 // Crockford base32: no I, L, O, or U, so handwritten keys are hard to misread.
 const RECOVERY_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -95,6 +96,14 @@ function deriveDeviceKey(deviceSecret, salt) {
   return Buffer.from(crypto.hkdfSync('sha256', deviceSecret, salt, 'SecondHand device reset', 32));
 }
 
+// The Touch ID key is 32 random bytes sealed in this Mac's Keychain, so HKDF is enough here too.
+// Its errors carry a code: main.cjs turns Touch ID off and names the reason.
+const touchIdError = (code, message) => Object.assign(new Error(message), { code });
+function deriveTouchIdKey(touchIdKey, salt) {
+  if (!Buffer.isBuffer(touchIdKey) || touchIdKey.length !== 32) throw touchIdError('TOUCH_ID_KEY', 'This Mac’s Touch ID key doesn’t open this information.');
+  return Buffer.from(crypto.hkdfSync('sha256', touchIdKey, salt, 'SecondHand Touch ID unlock', 32));
+}
+
 function wrapKey(dataKey, wrappingKey, name, salt) {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', wrappingKey, iv);
@@ -136,11 +145,13 @@ function encode(data, state) {
   return bytes;
 }
 
+// The vault's contents as they are read back or written. Birth dates are checked against today where a
+// profile is saved (desktop/main.cjs), not here: a clock set back never keeps the information from opening (#135).
 function validateData(data) {
   if (!data || data.version !== 1 || !Array.isArray(data.applications) || data.applications.length > 2000) {
     throw new Error('Invalid vault contents.');
   }
-  const profile = validateProfile(data.profile);
+  const profile = validateStoredProfile(data.profile);
   const applications = data.applications.map(item => validateStoredApplication(item));
   if (new Set(applications.map(item => item.id)).size !== applications.length) throw new Error('Duplicate application records.');
   return { version: 1, profile, applications };
@@ -175,6 +186,7 @@ class Vault {
     this.pending = Promise.resolve();
   }
   get unlocked() { return this.key !== null; }
+  get hasTouchIdSlot() { return Boolean(this.slots?.touchId); }
   async exists() {
     try { await fs.access(this.filePath); return true; }
     catch (error) { if (error.code === 'ENOENT') return false; throw error; }
@@ -231,6 +243,38 @@ class Vault {
         key?.fill(0); this.data = null;
         throw new Error('Unable to unlock. Check your password or restore an intact backup.');
       } finally { if (key !== passwordKey) passwordKey.fill(0); }
+    });
+  }
+  // Unlocks with the key this Mac released after Touch ID. Nothing is written.
+  unlockWithTouchIdKey(touchIdKey) {
+    return this.enqueue(async () => {
+      if (this.unlocked) throw new Error('SecondHand is already unlocked.');
+      const envelope = parseEnvelope(await this.readEncrypted());
+      const slot = envelope.slots?.touchId;
+      if (!slot) throw touchIdError('TOUCH_ID_MISSING', 'This information has no Touch ID key.');
+      let wrappingKey, key;
+      try {
+        wrappingKey = deriveTouchIdKey(touchIdKey, slot.salt);
+        key = unwrapKey(slot, wrappingKey, 'touchId');
+        const data = decryptContents(envelope, key);
+        Object.assign(this, { key, salt: null, slots: envelope.slots, version: 2, data });
+      } catch {
+        key?.fill(0); this.data = null;
+        throw touchIdError('TOUCH_ID_KEY', 'This Mac’s Touch ID key doesn’t open this information.');
+      } finally { wrappingKey?.fill(0); }
+    });
+  }
+  // Checks the password against the unlocked file's password slot, for a setting that asks for it.
+  checkPassword(passphrase) {
+    return this.enqueue(async () => {
+      this.getData();
+      const passwordKey = await deriveKey(passphrase, this.version === 1 ? this.salt : this.slots.password.salt);
+      let key;
+      try {
+        key = this.version === 1 ? passwordKey : unwrapKey(this.slots.password, passwordKey, 'password');
+        if (!crypto.timingSafeEqual(key, this.key)) throw new Error('mismatch');
+      } catch { throw new Error('That password isn’t right. Check it and try again.'); }
+      finally { passwordKey.fill(0); if (key && key !== passwordKey) key.fill(0); }
     });
   }
   deviceSlot(key, deviceSecret) {
@@ -298,6 +342,16 @@ class Vault {
   setDeviceSecret(deviceSecret) {
     return this.enqueue(() => this.changeSlots((slots, key) => {
       if (deviceSecret) slots.device = this.deviceSlot(key, deviceSecret); else delete slots.device;
+    }));
+  }
+  // Adds (or replaces) the Touch ID slot, or removes it with null. Other slots stay as they are.
+  setTouchIdKey(touchIdKey) {
+    return this.enqueue(() => this.changeSlots((slots, key) => {
+      if (!touchIdKey) { delete slots.touchId; return; }
+      const salt = crypto.randomBytes(32);
+      const wrappingKey = deriveTouchIdKey(touchIdKey, salt);
+      try { slots.touchId = wrapKey(key, wrappingKey, 'touchId', salt); }
+      finally { wrappingKey.fill(0); }
     }));
   }
   lock() {

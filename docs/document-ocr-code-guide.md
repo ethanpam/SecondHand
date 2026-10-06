@@ -53,11 +53,11 @@ This guide explains the additions in PR #78 by file and function. Related lines 
 
 The helpers in [document-parser.cjs](../shared/document-parser.cjs) are pure: they return analysis and never access the vault.
 
-- [`wordRows`](../shared/document-parser.cjs#L15-L39) validates positioned words and groups them into rows using their heights and vertical centers.
-- [`matches` and `afterLabel`](../shared/document-parser.cjs#L41-L70) locate printed labels and read only one bounded value row between known headers. A blank primary cell does not trigger a search farther down into a spouse or dependent's details.
-- [`recognizedType` and `money`](../shared/document-parser.cjs#L72-L83) identify supported 1040/1040-SR text and accept strict numeric amount syntax. They do not repair letters into digits or guess zeros.
-- [`parseTaxPage`](../shared/document-parser.cjs#L85-L209) uses unique label anchors and column positions to separate primary names/SSNs, spouse fields, domestic address cells, and historical tax lines. Its `add` helper validates eligible profile values with the existing schema. Spouse fields and amounts have no `profileKey`, making them review-only. Ambiguous foreign addresses/years produce warnings rather than guesses.
-- [`analyzeDocument`](../shared/document-parser.cjs#L212-L251) requires exactly one supported taxpayer header. Multiple returns or unknown layouts produce no structured suggestions. Amounts and SSNs survive only when both segmentation passes produce the same value. Other primary name/address suggestions still require user review. Confidence is recognition metadata, not a probability that an answer is correct.
+- [`wordRows`](../shared/document-parser.cjs#L14-L52) validates positioned words, drops tiny marks that OCR split off inside another word (such as the dot of an i), and groups the rest into rows using their heights and vertical centers.
+- [`matches` and `afterLabel`](../shared/document-parser.cjs#L54-L83) locate printed labels and read only one bounded value row between known headers. A blank primary cell does not trigger a search farther down into a spouse or dependent's details.
+- [`recognizedType` and `money`](../shared/document-parser.cjs#L85-L96) identify supported 1040/1040-SR text and accept strict numeric amount syntax. They do not repair letters into digits or guess zeros.
+- [`parseTaxPage`](../shared/document-parser.cjs#L98-L222) uses unique label anchors and column positions to separate primary names/SSNs, spouse fields, domestic address cells, and historical tax lines. Its `add` helper validates eligible profile values with the existing schema. Spouse fields and amounts have no `profileKey`, making them review-only. Ambiguous foreign addresses/years produce warnings rather than guesses.
+- [`analyzeDocument`](../shared/document-parser.cjs#L225-L264) requires exactly one supported taxpayer header. Multiple returns or unknown layouts produce no structured suggestions. Amounts and SSNs survive only when both segmentation passes produce the same value. Other primary name/address suggestions still require user review. Confidence is recognition metadata, not a probability that an answer is correct.
 
 ## Review UI and the save boundary
 

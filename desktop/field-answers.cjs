@@ -42,16 +42,17 @@ function createFieldAnswers({ laya, now = Date.now, today } = {}) {
     // choice-v2: every question is one pass, so one group, in page order.
     'choice-v2': questions => [questions]
   };
-  // Questions in page order: { id, label, type, options }, and the milliseconds the click has left.
+  // Questions in page order: { id, label, type, options }, the milliseconds the click has left, and the
+  // day ages are worked out on (the caller's, or this answerer's).
   // Returns { answers: { [id]: optionText }, sensitive: [id], sensitiveFields: [field] }: `sensitive`
   // lists the answers that needed a sensitive fact, and `sensitiveFields` the saved fields behind
   // the sensitive facts the model was given.
-  async function answer({ questions, profile, budgetMs }) {
+  async function answer({ questions, profile, budgetMs, today: day = today }) {
     const more = budget(budgetMs, now);
     const { format, bars } = await barsFor(laya);
     const pass = passes[format];
     if (!pass) throw new Error(`Field answers can’t ask a Laya model in the ${format} format.`);
-    const facts = buildFacts(profile, { today });
+    const facts = buildFacts(profile, { today: day });
     const everyday = factsText(facts.filter(fact => !fact.sensitive));
     const everything = factsText(facts);
     // An option that reads like the abstain candidate can't be told apart from it, so that question is the applicant's.

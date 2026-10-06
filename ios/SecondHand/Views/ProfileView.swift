@@ -77,7 +77,6 @@ struct ProfileView: View {
                             Text(profile.notes).font(.subheadline).textSelection(.enabled)
                         }
                     }
-                    LocalStorageNote()
                 }
                 .padding(20)
                 .frame(maxWidth: 700)
@@ -95,11 +94,21 @@ struct ProfileEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft = PersonalProfile()
     @State private var confirmedCurrent = false
+    @State private var importingDocument = false
+    @State private var loadedDraft = false
     @State private var error: String?
 
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Button { importingDocument = true } label: {
+                        Label("Upload or scan a document", systemImage: "doc.viewfinder")
+                    }
+                    .accessibilityIdentifier("profile.importDocument")
+                } footer: {
+                    Text("Use a tax or benefit document to fill in your details, or enter them below.")
+                }
                 Section {
                     TextField("First name", text: $draft.firstName).textContentType(.givenName)
                         .accessibilityIdentifier("profile.firstName")
@@ -195,7 +204,15 @@ struct ProfileEditor: View {
                     Button("Done") { UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) }
                 }
             }
-            .onAppear { draft = store.data.profile }
+            .onAppear {
+                if !loadedDraft { draft = store.data.profile; loadedDraft = true }
+            }
+            .sheet(isPresented: $importingDocument) {
+                ProfileDocumentImportView(currentProfile: draft) { updated in
+                    draft = updated
+                    confirmedCurrent = false
+                }
+            }
             .alert("Couldn’t save your profile", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
                 Button("OK", role: .cancel) { error = nil }
             } message: { Text(error ?? "Please try again.") }

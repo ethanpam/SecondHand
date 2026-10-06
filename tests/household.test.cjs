@@ -117,3 +117,77 @@ test('released values: saved fields as saved, derived answers worked out, band k
   assert.equal(fieldLabel('firstName'), 'First name');
   assert.throws(() => fieldLabel('somethingElse'), /Unknown field/);
 });
+
+// #135: one "today" for checking birth dates and working out ages, on this computer's own calendar.
+// Each test pins the clock and the timezone it runs in, and puts both back afterwards.
+function inZone(t, zone) {
+  const before = process.env.TZ;
+  process.env.TZ = zone;
+  t.after(() => { if (before === undefined) delete process.env.TZ; else process.env.TZ = before; });
+}
+function atInstant(t, iso) { t.mock.timers.enable({ apis: ['Date'], now: Date.parse(iso) }); }
+// 8:30 pm on October 5 in Iowa (Central daylight time) is already October 6 in UTC.
+const IOWA_EVENING = '2026-10-06T01:30:00Z';
+
+test('today is the date on this computer’s calendar, in its own timezone, never the UTC date', t => {
+  inZone(t, 'America/Chicago');
+  assert.equal(household.localDate(new Date(IOWA_EVENING)), '2026-10-05', 'evening in Iowa is still October 5');
+  assert.equal(household.localDate(new Date('2026-10-06T04:59:59Z')), '2026-10-05', 'one second before midnight in Iowa');
+  assert.equal(household.localDate(new Date('2026-10-06T05:00:00Z')), '2026-10-06', 'midnight in Iowa');
+  atInstant(t, IOWA_EVENING);
+  assert.equal(household.localDate(), '2026-10-05', 'the clock, read with no date given');
+  assert.equal(household.localDate('2026-02-28'), '2026-02-28', 'a date a caller names is used as it is');
+  assert.throws(() => household.localDate('2026-02-30'), /real date/);
+});
+
+test('around midnight UTC, today follows the computer’s timezone on both sides of the date line', t => {
+  inZone(t, 'UTC');
+  assert.equal(household.localDate(new Date('2026-10-05T23:59:59Z')), '2026-10-05');
+  assert.equal(household.localDate(new Date('2026-10-06T00:00:00Z')), '2026-10-06');
+  process.env.TZ = 'Pacific/Kiritimati';
+  assert.equal(household.localDate(new Date('2026-10-05T09:59:59Z')), '2026-10-05');
+  assert.equal(household.localDate(new Date('2026-10-05T10:00:00Z')), '2026-10-06', 'UTC+14 is a day ahead of UTC');
+  process.env.TZ = 'America/Chicago';
+  assert.equal(household.localDate(new Date('2026-10-06T00:00:00Z')), '2026-10-05', 'UTC midnight is 7 pm in Iowa');
+});
+
+test('a birth date can be used when it is today or earlier and no more than 130 years ago', () => {
+  const today = '2026-10-05';
+  assert.equal(household.birthDateProblem('', today), null, 'no birth date saved');
+  assert.equal(household.birthDateProblem('2026-10-05', today), null, 'born today');
+  assert.equal(household.birthDateProblem('2026-10-06', today), 'future', 'born tomorrow');
+  assert.equal(household.birthDateProblem('2999-01-01', today), 'future');
+  assert.equal(household.birthDateProblem('1896-10-05', today), null, 'exactly 130 years ago');
+  assert.equal(household.birthDateProblem('1896-10-04', today), 'tooOld', 'one day more than 130 years ago');
+  assert.equal(household.birthDateProblem('1825-06-01', today), 'tooOld');
+  // February 29: 130 years before 2028-02-29 is 1898-02-28 plus one day, so 1898-02-28 is too old and March 1 is not.
+  assert.equal(household.birthDateProblem('1898-02-28', '2028-02-29'), 'tooOld');
+  assert.equal(household.birthDateProblem('1898-03-01', '2028-02-29'), null);
+  assert.throws(() => household.birthDateProblem('04/12/1985', today), /real date/, 'a date in another format is a programming error, not a saved date');
+});
+
+test('a birth date in the future or more than 130 years ago has no age, and never throws', () => {
+  assert.equal(household.ageOn('2026-10-06', '2026-10-05'), null);
+  assert.equal(household.ageOn('1825-06-01', '2026-10-05'), null);
+  assert.equal(household.ageOn('1896-10-05', '2026-10-05'), 130);
+  assert.throws(() => household.ageOn('1985-13-01', '2026-10-05'), /real date/);
+});
+
+test('a member born “tomorrow” (saved on an Iowa evening) or long ago leaves the counts by age unknown; the size still counts everyone', t => {
+  inZone(t, 'America/Chicago');
+  atInstant(t, IOWA_EVENING);
+  // Saved while the clock was later, or before the oldest limit existed: stored as it is.
+  const stored = { firstName: 'Avery', birthDate: '1985-04-12', householdMembers: [
+    { id: SELF, firstName: 'Avery', birthDate: '1985-04-12', relationship: 'self' },
+    { id: id(1), firstName: 'Person1', birthDate: '2026-10-06', relationship: 'child' },
+    { id: id(2), firstName: 'Person2', birthDate: '1825-06-01', relationship: 'parent' }] };
+  assert.deepEqual(household.householdCounts(stored), { size: '3', adults: '', children: '', seniors: '' });
+  assert.equal(household.memberAges(stored), null);
+  assert.equal(household.bandCount(stored, 'householdCount:0-17'), '');
+  assert.equal(household.hasUnusableBirthDate(stored), true);
+  assert.equal(household.hasUnusableBirthDate(stored, { today: '2026-10-06' }), true, 'still the 1825 date');
+  const fine = { ...stored, householdMembers: stored.householdMembers.slice(0, 1) };
+  assert.equal(household.hasUnusableBirthDate(fine), false);
+  assert.equal(household.hasUnusableBirthDate({ birthDate: '2026-10-06', householdMembers: [] }), true, 'the applicant’s own date counts too');
+  assert.equal(household.hasUnusableBirthDate({ birthDate: '2026-10-06', householdMembers: [] }, { today: '2026-10-06' }), false, 'in UTC it is already October 6');
+});

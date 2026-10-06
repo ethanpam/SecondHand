@@ -128,6 +128,18 @@ Autofill works screen by screen and stays on for the tab until you click **Stop*
 
 The Select Address and Tell Us More steps and Laya are in this code but not yet in the public 0.4 downloads. SecondHand never changes an answer already on the page, and any answer Laya picks is marked as a guess for you to check. [Portal coverage](docs/iowa-portal.md) has the exact field list.
 
+## How a new form gets supported
+
+- **Iowa's portal pages are mapped by hand.** [`extension/iowa-adapter.js`](extension/iowa-adapter.js) knows a small set of Iowa's pages by their headings, form, and control ids. Each page came from a consented live walk-through of the portal ([the walk-through log](docs/iowa-live-journey.md)) and is kept as a sanitized copy in [`tests/fixtures`](tests/fixtures). Only these pages get Iowa-specific fills and an automatic **Continue** or **Save and Continue**. Adding another Iowa page means another live check, a fixture, code, and tests.
+- **A known Iowa page that looks different fills nothing.** If a mapped page changes so it no longer matches what was checked, SecondHand asks the app for nothing, fills nothing, and doesn't hand the page to the general rules. The page is left to you. [`tests/extension-navigation.test.cjs`](tests/extension-navigation.test.cjs) checks this ("strict rejected pages cannot use the general engine").
+- **Other forms need no code of their own.** Other Iowa pages, and food-assistance sites you turn on in the side panel, use the general rules in [`extension/generic-adapter.js`](extension/generic-adapter.js). They read each box's label, autocomplete hint, and accessible name, fill only the boxes they recognize, never change an answer already there, and never navigate or submit. [`scripts/smoke-all-websites.cjs`](scripts/smoke-all-websites.cjs) checks this on a made-up pantry form with no site code: the boxes the rules know get filled, nothing is submitted, and the page doesn't change.
+- **Laya answers some of what the rules miss, as a guess.** Laya runs on this computer. When the rules don't know a question, Laya may pick an answer from your saved facts. SecondHand marks each of Laya's answers as a guess for you to check, because Laya is sometimes wrong. On 15 real forms collected after training, which nobody wrote code for ([Final holdout](docs/laya-model.md#final-holdout)):
+  - Choosing answers: 5 of the 72 answers Laya filled were wrong. 57 matched the answer key, and 10 more were right by the saved facts.
+  - Matching text boxes, the way the app asks: 8 of the 67 boxes Laya matched were wrong, and 59 were right. Laya matched 59 of the 81 boxes it could have.
+- **With Laya off, the rules still work.** The rules always fill first, and Laya only gets what's left. Turn Laya off with its switch in the app's **Chrome extension** view, and SecondHand doesn't run it at all. See [Local AI with Laya](#local-ai-with-laya).
+
+On a form SecondHand has no map for, some questions stay with you. When the rules don't recognize a question and Laya isn't sure, SecondHand leaves it for you to answer.
+
 ## Privacy and safety
 
 - **Your details stay in the desktop app.** Chrome's extension storage and Chrome Sync never hold applicant information.
@@ -197,7 +209,7 @@ Tests only use the fictional profile in [`tests/fixtures/applicant-profile.json`
 
 ### Releases
 
-There is no hosted CI: pull requests and tags don't run checks or build installers. Run the commands above before sharing changes, and `npm audit` in the root and in `website/` for dependency audits. Installers are built locally with `npm run dist:win` on Windows or `npm run dist:mac` on a Mac, and uploaded by hand. The [download website](website/README.md) explains publishing, which uses a temporary upload token that never ships in the app.
+Every pull request and every push to `main` runs [CI](.github/workflows/ci.yml) on one Linux machine: `npm test` and `npm run check`, then `npm test`, `npm run typecheck`, `npm run lint` and `npm run build` in `website/`. CI installs no Electron, browsers or Laya model, so the Laya parity tests skip there. The Electron, browser, OCR, Laya and iOS smokes stay local: run the ones your change touches before merging (`test:ui`, `test:extension`, `test:translation`, `test:summary`, `test:laya`, `test:ocr`, `test:ocr:ui`, `test:native`, and the [iPhone app's tests](ios/README.md)). The [QA gate list](.claude/agents/qa.md) says which ones each area needs. Tags don't build installers, and nothing runs dependency audits: run `npm audit` in the root and in `website/`. Installers are built locally with `npm run dist:win` on Windows or `npm run dist:mac` on a Mac, and uploaded by hand. The [download website](website/README.md) explains publishing, which uses a temporary upload token that never ships in the app.
 
 ## Project layout
 

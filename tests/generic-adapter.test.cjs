@@ -330,6 +330,50 @@ test('applicant details never match boxes that name another person in English or
   for (const item of result.unmatched) assert.equal(generic.canSuggest('fullName', item), false, item.label);
 });
 
+// Boxes that ask for another person's details (#136, after #83): possessives with ’ and ', dependents, and
+// household members with or without a number.
+const OTHER_PERSON_LABELS = ['Child’s name', "Child's date of birth", 'Childs phone', 'Children’s Names, Schools and Grades', 'Grandchild’s birthdate',
+  'Partner’s phone', "Partner's first name", 'Spouse’s email', 'Husband’s name', 'Wife’s phone number', 'Landlord’s phone number', 'Proxy’s address',
+  "Representative's last name", 'Emergency contact’s phone', 'Household member’s name', "Family member's name", 'Dependent name', 'Dependent 1 date of birth',
+  'Dependent’s relationship to you', 'Household member name', 'Household member phone', 'Household member', 'Household member 2 name',
+  'Household member #3: First name', 'Other members of the household: Full name', 'Additional household member: Email', 'Nombre del miembro del hogar'];
+// The same details under another person's section heading, read as "<heading>: <label>".
+const OTHER_PERSON_SECTIONS = [['Child 1', 'First name', 'given-name'], ['Child 1', 'Date of birth', 'bday'], ['Dependent', 'Name', 'name'], ['Household member', 'Phone', 'tel'],
+  ['Partner’s information', 'Email', 'email'], ['Additional household members', 'Last name', 'family-name'], ['Other adults in the home', 'Full name', 'name']];
+
+test('another person’s boxes get none of the applicant’s details: possessives, dependents, household members and their sections (#136)', () => {
+  const doc = page(OTHER_PERSON_LABELS.map((label, index) => `<label for="o${index}">${label}</label><input id="o${index}" autocomplete="name">`).join('') +
+    OTHER_PERSON_SECTIONS.map(([heading, label, hint], index) => `<fieldset><legend>${heading}</legend><label for="s${index}">${label}</label><input id="s${index}" autocomplete="${hint}"></fieldset>`).join(''));
+  const result = generic.plan(doc);
+  assert.deepEqual(result.matched, [], 'not by the rules, nor by the box’s autocomplete hint');
+  assert.deepEqual(result.unmatched.map(field => field.label), [...OTHER_PERSON_LABELS, ...OTHER_PERSON_SECTIONS.map(([heading, label]) => `${heading}: ${label}`)]);
+  for (const field of result.unmatched) {
+    assert.equal(generic.blockedSuggestion(field.label), true, field.label);
+    assert.equal(generic.layaQuestion(field), '', `${field.label}: never sent to Laya`);
+    for (const key of generic.GENERIC_KEYS) assert.equal(generic.canSuggest(key, field), false, `${field.label}: ${key}`);
+  }
+  const guesses = result.unmatched.flatMap(({ id }) => ['fullName', 'firstName', 'lastName', 'phone', 'email', 'addressLine1'].map(key => ({ id, key, guessed: true })));
+  assert.deepEqual(generic.fillFields(doc, result.token, guesses, generic.deriveValues(profile)).filled, [], 'a guess, from Chrome’s AI or from Laya, is refused');
+});
+
+test('#83’s exceptions stay the applicant’s: the household representative, counts of children, dependents and members, the head of household and TEFAP’s household member (#136)', () => {
+  const kept = { rep: ['Household representative: First name', null], kids: ['Number of children', 'householdChildren'], under: ['How many children under 18?', 'householdChildren'],
+    deps: ['Number of dependents', null], members: ['How many household members?', 'householdSize'], adults: ['Number of household members ages 18 to 64', 'householdAdults'],
+    head: ['Name (Head of Household)', 'fullName'], full: ['Full name', 'fullName'],
+    // How USDA TEFAP forms ask for the applicant: the question bank keys it to the applicant's full name.
+    tefap: ['Name of household member', null] };
+  const doc = page(Object.entries(kept).map(([id, [label]]) => `<label for="${id}">${label}</label><input id="${id}">`).join('') +
+    '<fieldset><legend>Children</legend><label for="many">How many children under 18?</label><input id="many"></fieldset>');
+  const result = generic.plan(doc);
+  assert.deepEqual(byElement(doc, result), { ...Object.fromEntries(Object.entries(kept).filter(([, [, key]]) => key).map(([id, [, key]]) => [id, key])), many: 'householdChildren' });
+  for (const [label] of Object.values(kept)) {
+    assert.equal(generic.blockedSuggestion(label), false, label);
+    assert.equal(generic.layaQuestion({ label, type: 'text', options: [] }), 'text', label);
+  }
+  assert.equal(generic.canSuggest('firstName', { label: kept.rep[0] }), true);
+  assert.equal(generic.canSuggest('householdChildren', { label: kept.deps[0] }), true);
+});
+
 test('a field inside another person section is not matched from its short label', () => {
   const doc = page('<fieldset><legend>Emergency Contact</legend><label for="name">Name</label><input id="name" autocomplete="name"><label for="phone">Phone</label><input id="phone" autocomplete="tel"></fieldset>');
   const result = generic.plan(doc);
@@ -554,6 +598,78 @@ test('Laya takes text boxes and choice questions within the bridge’s limits, n
     'an SSN': field({ label: 'Social Security number', type: 'text', options: [] })
   };
   for (const [name, question] of Object.entries(refused)) assert.equal(generic.layaQuestion(question), '', name);
+});
+
+test('a question whose label or options carry a bidi control, an invisible character, or a line break is left to the applicant; the joiners Persian, Arabic, and Indic words need are kept', () => {
+  const choice = (extra = {}) => ({ label: 'Preferred pickup day', type: 'radio', options: ['Monday', 'Friday'], ...extra });
+  const box = label => ({ label, type: 'email', options: [] });
+  const unseen = { 'right-to-left override': '\u202E', 'left-to-right isolate': '\u2066', 'right-to-left mark': '\u200F', 'zero-width space': '\u200B', 'word joiner': '\u2060',
+    'byte order mark': '\uFEFF', 'soft hyphen': '\u00AD', 'variation selector': '\uFE0F', 'tag letter': '\u{E0041}', 'line separator': '\u2028', 'paragraph separator': '\u2029',
+    'next line (C1)': '\u0085', 'control sequence introducer (C1)': '\u009B' };
+  for (const [name, character] of Object.entries(unseen)) {
+    assert.equal(generic.layaQuestion(choice({ label: `Preferred pickup${character} day` })), '', `${name} in a label`);
+    assert.equal(generic.layaQuestion(choice({ options: ['Monday', `Fri${character}day`] })), '', `${name} in an option`);
+    assert.equal(generic.layaQuestion(box(`Where can we reach you?${character}`)), '', `${name} in a text box’s label`);
+  }
+  for (const text of ['می\u200Cخواهید', 'क्\u200Dष']) {
+    assert.equal(generic.layaQuestion(choice({ label: `${text}?` })), 'choice', text);
+    assert.equal(generic.layaQuestion(choice({ options: [text, 'Friday'] })), 'choice', text);
+    assert.equal(generic.layaQuestion(box(`${text}?`)), 'text', text);
+  }
+});
+
+// Boxes only the applicant answers (#134), each with an autocomplete hint that would otherwise give it a saved field.
+const APPLICANT_ONLY = [
+  ['Type your full name as your electronic signature', 'name'],
+  ['Full name (your electronic signature)', 'name'],
+  ['Applicant initials', 'name'],
+  ['Enter the code we texted you', 'tel'],
+  ['Enter the code we emailed you', 'email'],
+  ['Enter the 6-digit code sent to your phone', 'tel'],
+  ['Code from the text message', 'tel'],
+  ['In what city were you born?', 'address-level2'],
+  ['Security question: What is your mother’s maiden name?', 'family-name'],
+  ['What was the name of your first pet?', 'given-name'],
+  ['Answer to your security question', 'address-level2'],
+  ['Username', 'email'],
+  ['Create a user name', 'given-name'],
+  ['User ID', 'email']
+];
+
+test('a box only the applicant answers gets no saved field: not from the rules, a guess or Laya (#134)', () => {
+  const doc = page(APPLICANT_ONLY.map(([label, hint], index) => `<label for="u${index}">${label}</label><input id="u${index}" autocomplete="${hint}">`).join(''));
+  const result = generic.plan(doc);
+  assert.deepEqual(result.matched, [], 'not by the rules, nor by the box’s autocomplete hint');
+  assert.deepEqual(result.unmatched.map(field => field.label), APPLICANT_ONLY.map(([label]) => label));
+  for (const field of result.unmatched) {
+    assert.equal(generic.unsafeQuestion(field), true, field.label);
+    assert.equal(generic.layaQuestion(field), '', `${field.label}: never sent to Laya`);
+    for (const key of generic.GENERIC_KEYS) assert.equal(generic.canSuggest(key, field), false, `${field.label}: ${key}`);
+  }
+  const guesses = result.unmatched.flatMap(({ id }) => ['fullName', 'firstName', 'lastName', 'city', 'email', 'phone'].map(key => ({ id, key, guessed: true })));
+  const filled = generic.fillFields(doc, result.token, guesses, generic.deriveValues(profile));
+  assert.deepEqual(filled.filled, [], 'a guess, from Chrome’s AI or from Laya, is refused');
+  assert.deepEqual(APPLICANT_ONLY.map((_, index) => doc.getElementById(`u${index}`).value), APPLICANT_ONLY.map(() => ''));
+});
+
+test('ordinary boxes stay fillable by the rules and by a guess, and the SSN box only by its own rule (#134)', () => {
+  const doc = page('<label for="full">Full name</label><input id="full"><label for="city">City</label><input id="city"><label for="email">Email</label><input id="email" type="email">' +
+    '<label for="reach">Where can we reach you by email?</label><input id="reach" type="email"><label for="ssn">Social Security number</label><input id="ssn">');
+  const result = generic.plan(doc);
+  assert.deepEqual(byElement(doc, result), { full: 'fullName', city: 'city', email: 'email', ssn: 'ssn' });
+  for (const [label, key] of [['Full name', 'fullName'], ['City', 'city'], ['Email', 'email'], ['Where can we reach you by email?', 'email']]) {
+    assert.equal(generic.unsafeQuestion({ label, options: [] }), false, label);
+    assert.equal(generic.canSuggest(key, { label }), true, `${label}: ${key}`);
+    assert.equal(generic.layaQuestion({ label, type: 'text', options: [] }), 'text', label);
+  }
+  const reach = result.unmatched.find(field => field.label === 'Where can we reach you by email?');
+  const ssn = result.matched.find(item => item.key === 'ssn');
+  const assignments = [...result.matched.filter(item => item.key !== 'ssn').map(({ id, key }) => ({ id, key, guessed: false })), { id: reach.id, key: 'email', guessed: true },
+    { id: ssn.id, key: 'fullName', guessed: true }, { id: ssn.id, key: 'ssn', guessed: false }];
+  const filled = generic.fillFields(doc, result.token, assignments, { ...generic.deriveValues(profile), ssn: '123-45-6789' });
+  assert.deepEqual(filled.filled, [...result.matched.filter(item => item.key !== 'ssn').map(item => item.id), reach.id, ssn.id]);
+  assert.deepEqual(['full', 'city', 'email', 'reach', 'ssn'].map(id => doc.getElementById(id).value),
+    ['Avery Example', 'Demo City', 'avery.example@example.invalid', 'avery.example@example.invalid', '123-45-6789'], 'a guess never reaches the SSN box; its rule still does');
 });
 
 test('plans carry each matched question’s label, so the side panel can name a question that wasn’t saved', () => {

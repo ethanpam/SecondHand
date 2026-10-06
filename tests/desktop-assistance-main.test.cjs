@@ -6,7 +6,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { pathToFileURL } = require('node:url');
-const { PORTAL_URL, FIELD_LABELS } = require('../shared/schema.cjs');
+const schema = require('../shared/schema.cjs');
+const { PORTAL_URL, FIELD_LABELS } = schema;
 const realLaya = require('../desktop/laya.cjs');
 
 const extensionId = 'a'.repeat(32);
@@ -16,6 +17,10 @@ const source = fs.readFileSync(path.join(root, 'desktop/main.cjs'), 'utf8');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 // Values created inside the vm context have foreign prototypes.
 const plain = value => JSON.parse(JSON.stringify(value));
+// The day every test here runs on (#135): ages and birth-date checks never depend on when the tests run.
+// A test may name another day (`today`), or its own environment (`env`) to run on the clock.
+const TODAY = '2026-10-05';
+const IDLE_MS = 10 * 60 * 1000;
 
 async function desktop(options = {}) {
   let bridge;
@@ -32,8 +37,16 @@ async function desktop(options = {}) {
   const powerEvents = new Map();
   const opened = [];
   let registrations = 0;
+  // The main process's timers: kept, not run, until a test runs one (the idle lock).
+  const timers = new Map();
+  let timerIds = 0;
   class Vault {
-    constructor() { this.unlocked = true; this.data = { profile: { firstName: 'Synthetic', lastName: '' }, applications: [] }; }
+    // `options.profile`: information saved earlier, as the vault reads it back, without today's checks.
+    // `options.applications`: application records saved earlier.
+    constructor() {
+      this.unlocked = true;
+      this.data = { profile: options.profile ? structuredClone(options.profile) : { firstName: 'Synthetic', lastName: '' }, applications: structuredClone(options.applications ?? []) };
+    }
     async exists() { return true; }
     async inspect() { return { recoveryKey: true }; }
     async lock() { if (options.beforeLock) await options.beforeLock(); this.unlocked = false; }
@@ -50,12 +63,14 @@ async function desktop(options = {}) {
     show() { shows++; } focus() {} setMenuBarVisibility() {} once() {} on() {} loadFile() {}
     isDestroyed() { return false; }
   }
-  const app = { isPackaged: false, setName() {}, setPath() {}, getPath: () => '/synthetic-local-data',
+  const app = { isPackaged: options.packaged === true, setName() {}, setPath() {}, getPath: () => '/synthetic-local-data',
     requestSingleInstanceLock: () => true, whenReady: () => Promise.resolve(), on() {} };
   const electron = { app, BrowserWindow, ipcMain: { handle(_name, handler) { invoke = handler; } },
     dialog: { async showMessageBox(_parent, options) { prompts.push(options); return answer(); }, showErrorBox() { assert.fail('Desktop setup failed'); } },
     shell: { async openPath(folder) { opened.push(folder); return ''; } }, clipboard: {}, powerMonitor: { on(name, handler) { powerEvents.set(name, handler); } },
     session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, webRequest: { onBeforeRequest() {} } } } };
+  // A Mac without Touch ID; tests/desktop-touch-id-main.test.cjs covers Touch ID.
+  electron.systemPreferences = { canPromptTouchID: () => false };
   const overrides = {
     electron,
     // settings.json from `options.settings`; the guided setup's progress file from `options.setup` (none by default), as written since.
@@ -65,24 +80,41 @@ async function desktop(options = {}) {
         if (setupFile === null) throw Object.assign(new Error('No such file'), { code: 'ENOENT' });
         return setupFile;
       } },
-    './vault.cjs': { Vault, atomicWrite: async (file, bytes) => { writes.push({ file, json: JSON.parse(bytes.toString()) }); if (file.endsWith('setup-progress.json')) setupFile = bytes.toString(); }, MAX_VAULT_BYTES: 1000 },
+    // `options.beforeWrite(file)` runs before each write, for a test that acts while one is under way.
+    './vault.cjs': { Vault, atomicWrite: async (file, bytes) => {
+      await options.beforeWrite?.(file);
+      writes.push({ file, json: JSON.parse(bytes.toString()) });
+      if (file.endsWith('setup-progress.json')) setupFile = bytes.toString();
+    }, MAX_VAULT_BYTES: 1000 },
     './bridge.cjs': { ...require('../desktop/bridge.cjs'), startBridge: async (_directory, _getId, handler) => { bridge = handler; return { close: async () => {} }; } },
     './extension-setup.cjs': options.extensionCopy?.module ?? { getExtensionSetup: async () => ({ prepared: true }) },
     './registration.cjs': { registerHost: async () => { registrations++; return {}; } },
     './test-storage-path.cjs': { testStoragePath: () => null },
+    // The real schema. A record main.cjs builds here (recordProgress) has this vm context's Object prototype,
+    // which the schema's plain-object check refuses; in the app both share one realm, so it is copied across.
+    '../shared/schema.cjs': { ...schema, validateApplication: (input, existing) => schema.validateApplication(JSON.parse(JSON.stringify(input)), existing) },
     // The app's one Laya runtime (#38). Without an override it is the real one with the shipped model,
     // minus its background download and update checks (tests/desktop-laya-main.test.cjs covers those).
     './laya.cjs': { ...realLaya, createLaya: runtimeOptions => options.laya ?? { ...realLaya.createLaya(runtimeOptions), startUpdates() {}, update() {} } }
   };
   vm.runInNewContext(source, {
     require: name => Object.hasOwn(overrides, name) ? overrides[name] : require(name.startsWith('.') ? path.join(root, 'desktop', name) : name),
-    __dirname: path.join(root, 'desktop'), process: { platform: process.platform, env: {}, argv: ['synthetic-electron'] },
-    setTimeout: () => 1, clearTimeout() {}, Buffer
+    __dirname: path.join(root, 'desktop'), process: { platform: process.platform, env: options.env ?? { SECONDHAND_TEST_MODE: '1', SECONDHAND_TEST_TODAY: options.today ?? TODAY }, argv: ['synthetic-electron'] },
+    setTimeout: (callback, ms) => { timers.set(++timerIds, { callback, ms }); return timerIds; }, clearTimeout: id => { timers.delete(id); }, Buffer
   });
   await tick();
   assert.equal(typeof bridge, 'function');
   return {
     prompts, notifications, writes, removed,
+    // The idle lock's timers now armed, and running the one that is armed, as ten minutes without activity would.
+    idleTimers: () => [...timers.values()].filter(timer => timer.ms === IDLE_MS).map(timer => timer.ms),
+    async idle() {
+      const armed = [...timers].filter(([, timer]) => timer.ms === IDLE_MS);
+      assert.equal(armed.length, 1, 'one idle lock is armed');
+      timers.delete(armed[0][0]);
+      armed[0][1].callback();
+      for (let i = 0; i < 5; i++) await tick();
+    },
     get shows() { return shows; },
     get dataReads() { return dataReads; },
     get registrations() { return registrations; },
@@ -106,6 +138,27 @@ test('renderer lock status and notifications identify each completed lock monoto
   await app.sleep();
   assert.equal((await app.invoke('status')).lockRevision, 2);
   assert.deepEqual(JSON.parse(JSON.stringify(app.notifications[1][1])), { lockRevision: 2 });
+});
+
+test('ten minutes without activity lock SecondHand: the access receipt moves on, the window hears of it, and saved answers are refused', async () => {
+  const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true } });
+  assert.deepEqual(app.idleTimers(), [], 'nothing is armed before any activity');
+  await app.request({ type: 'getFields', fields: ['firstName'] });
+  await app.invoke('getData');
+  assert.deepEqual(app.idleTimers(), [IDLE_MS], 'activity starts the ten minutes again: one idle lock is armed');
+  const before = (await app.request({ type: 'status' })).accessRevision;
+  const notified = app.notifications.length;
+
+  await app.idle();
+  const status = await app.invoke('status');
+  assert.equal(status.unlocked, false);
+  assert.equal(status.lockRevision, 1);
+  assert.deepEqual(app.notifications.slice(notified).map(plain), [['secondhand:locked', { lockRevision: 1 }]]);
+  assert.ok((await app.request({ type: 'status' })).accessRevision > before, 'access receipts from before the lock are outdated');
+  await assert.rejects(app.request({ type: 'getFields', fields: ['firstName'] }), /Unlock SecondHand first/);
+  assert.deepEqual(app.idleTimers(), [], 'nothing is armed while locked');
+  await app.invoke('unlock', 'synthetic password');
+  assert.deepEqual(app.idleTimers(), [IDLE_MS], 'an unlock starts the ten minutes');
 });
 
 test('trusted autofill returns saved values with no dialog; lock still blocks it', async () => {
@@ -237,6 +290,110 @@ test('a late approval after lock and unlock is rejected', async () => {
   resolve({ response: 2 });
   await assert.rejects(pending, /changed/);
   assert.equal((await app.invoke('status')).autofillWithoutAsking, false);
+});
+
+// The next prompt waits until the test answers it; any prompt after it is cancelled at once.
+function holdPrompt(app) {
+  let respond;
+  app.answer(() => respond ? Promise.resolve({ response: 0 }) : new Promise(resolve => { respond = response => resolve({ response }); }));
+  return {
+    async shown() { await until(() => Boolean(respond)); },
+    answer: response => respond(response)
+  };
+}
+const WIC = 'https://wic.example.gov';
+// Changes to SecondHand's access while a prompt is open, and the refusal each one gives the approval.
+const ACCESS_CHANGES = {
+  lock: [app => app.invoke('lock'), /Unlock SecondHand first/],
+  'lock and unlock': [async app => { await app.invoke('lock'); await app.invoke('unlock', 'synthetic password'); }, /SecondHand access changed/],
+  'another site turned off': [app => app.request({ type: 'untrustSite', url: `${WIC}/apply` }), /SecondHand access changed/],
+  'all websites turned off': [app => app.request({ type: 'untrustAllSites' }), /SecondHand access changed/]
+};
+
+test('a lock or a site turned off while “Trust this site?” is open trusts nothing', async t => {
+  for (const [change, [apply, refusal]] of Object.entries(ACCESS_CHANGES)) await t.test(change, async () => {
+    const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: [WIC], allSites: true } });
+    const prompt = holdPrompt(app);
+    const pending = app.request({ type: 'trustSite', url: PANTRY });
+    await prompt.shown();
+    await apply(app);
+    prompt.answer(1);
+    await assert.rejects(pending, refusal);
+    if (change === 'lock') await app.invoke('unlock', 'synthetic password');
+    assert.equal((await app.invoke('status')).trustedSites.includes('https://pantry.example.org'), false);
+    assert.equal(app.writes.some(write => write.json.trustedSites?.includes('https://pantry.example.org')), false, 'nothing about the site is saved');
+  });
+});
+
+test('a lock or a site turned off while “Trust all websites?” is open turns nothing on', async t => {
+  for (const change of ['lock', 'lock and unlock', 'another site turned off']) await t.test(change, async () => {
+    const [apply, refusal] = ACCESS_CHANGES[change];
+    const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: [WIC] } });
+    const prompt = holdPrompt(app);
+    const pending = app.request({ type: 'trustAllSites' });
+    await prompt.shown();
+    await apply(app);
+    prompt.answer(1);
+    await assert.rejects(pending, refusal);
+    assert.equal((await app.request({ type: 'status' })).allSites, false);
+    assert.equal(app.writes.some(write => write.json.allSites), false, 'nothing is saved');
+  });
+});
+
+test('a lock while an approved trust is being saved refuses the reply', async t => {
+  for (const type of ['trustSite', 'trustAllSites']) for (const change of ['lock', 'lock and unlock']) await t.test(`${type}, ${change}`, async () => {
+    const [apply, refusal] = ACCESS_CHANGES[change];
+    let app;
+    let saving = false;
+    app = await desktop({ settings: { extensionId, autofillWithoutAsking: true }, beforeWrite: async file => { if (saving && file.endsWith('settings.json')) { saving = false; await apply(app); } } });
+    saving = true;
+    await assert.rejects(app.request({ type, url: PANTRY }), refusal);
+  });
+});
+
+test('a lock or the site turned off while “Save to My information?” is open saves nothing', async t => {
+  for (const [change, [apply, refusal]] of Object.entries(ACCESS_CHANGES)) await t.test(change, async () => {
+    const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: [WIC], allSites: true } });
+    const prompt = holdPrompt(app);
+    const pending = app.request({ type: 'saveFields', url: `${WIC}/apply`, fields: { county: 'Story' } });
+    await prompt.shown();
+    await apply(app);
+    prompt.answer(1);
+    await assert.rejects(pending, refusal);
+    if (change === 'lock') await app.invoke('unlock', 'synthetic password');
+    assert.equal(plain(await app.invoke('getData')).profile.county, undefined);
+    assert.equal(app.notifications.some(([channel]) => channel === 'secondhand:profile-changed'), false);
+  });
+});
+
+test('one trust prompt at a time: a second trust request waits for the first one’s answer', async () => {
+  const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true } });
+  const prompt = holdPrompt(app);
+  const first = app.request({ type: 'trustAllSites' });
+  await prompt.shown();
+  await assert.rejects(app.request({ type: 'trustAllSites' }), /Another request is waiting for your approval/);
+  await assert.rejects(app.request({ type: 'trustSite', url: PANTRY }), /Another request is waiting for your approval/);
+  assert.equal(app.prompts.length, 1, 'one prompt');
+  prompt.answer(1);
+  assert.deepEqual(plain(await first), { allSites: true });
+  app.answer(async () => ({ response: 1 }));
+  assert.deepEqual(plain(await app.request({ type: 'trustSite', url: PANTRY })), { trusted: true, origin: 'https://pantry.example.org' }, 'the next one asks once the first is answered');
+});
+
+test('SecondHand trusts at most 50 sites one by one: the 51st is refused until one is removed', async () => {
+  const fifty = Array.from({ length: 50 }, (_, n) => `https://site-${n}.example.org`);
+  const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: fifty } });
+  app.answer(async () => ({ response: 1 }));
+  const writes = app.writes.length;
+  await assert.rejects(app.request({ type: 'trustSite', url: PANTRY }), /Remove a trusted site before adding another/);
+  assert.equal(app.writes.length, writes, 'nothing is saved');
+  assert.deepEqual(plain((await app.invoke('status')).trustedSites), fifty);
+  assert.deepEqual(plain(await app.request({ type: 'trustSite', url: `${fifty[7]}/form` })), { trusted: true, origin: fifty[7] }, 'a site already trusted stays trusted');
+  await app.invoke('removeTrustedSite', fifty[0]);
+  assert.deepEqual(plain(await app.request({ type: 'trustSite', url: PANTRY })), { trusted: true, origin: 'https://pantry.example.org' });
+  assert.equal(app.writes.at(-1).json.trustedSites.length, 50);
+  const tooMany = await desktop({ settings: { extensionId, trustedSites: [...fifty, 'https://one-more.example.org', fifty[0]] } });
+  assert.deepEqual(plain((await tooMany.invoke('status')).trustedSites), fifty, 'a saved list longer than 50 keeps the first 50');
 });
 
 test('the trust switch round-trips through the renderer and resets for a new extension ID', async () => {
@@ -404,7 +561,9 @@ test('removing a trusted site stops field release; a locked vault cannot trust s
   await assert.rejects(app.request({ type: 'getFields', url: PANTRY, fields: ['firstName'] }), /isn’t trusted/);
   await app.invoke('lock');
   await assert.rejects(app.request({ type: 'trustSite', url: PANTRY }), /Unlock/);
-  const stored = await desktop({ settings: { extensionId, trustedSites: ['https://ok.example.org', 'http://bad.example.org', 'javascript:1', 42] } });
+  // A host name longer than DNS allows (254 characters) is never a trusted site either.
+  const tooLong = `https://${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(62)}`;
+  const stored = await desktop({ settings: { extensionId, trustedSites: ['https://ok.example.org', 'http://bad.example.org', 'javascript:1', 42, tooLong] } });
   assert.deepEqual(plain((await stored.invoke('status')).trustedSites), ['https://ok.example.org']);
 });
 
@@ -530,6 +689,47 @@ test('suggestFields and answerFields take an untrusted https site only while all
   for (const request of anywhere) await assert.rejects(on.request(request), /isn’t trusted/, request.type);
 });
 
+// #137: an embedded form's requests carry the form's own address, so trust and every prompt follow that site.
+const EMBEDDED_FORM = 'https://forms.example.net/embed';
+test('an embedded form’s requests are trusted and prompted for the form’s own site, never the page around it', async () => {
+  const sixtyThere = answerRequest([sixty], { url: EMBEDDED_FORM });
+  // Only the host page is trusted: its trust doesn't cover a form from another site.
+  const hostOnly = await answering({ extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'] });
+  for (const request of [{ type: 'getFields', url: EMBEDDED_FORM, fields: ['firstName'] }, suggest([box], { url: EMBEDDED_FORM }), sixtyThere]) {
+    await assert.rejects(hostOnly.request(request), /isn’t trusted/, request.type);
+  }
+  await assert.rejects(hostOnly.request({ type: 'saveFields', url: EMBEDDED_FORM, fields: { email: 'synthetic@example.org' } }), /isn’t trusted/, 'saveFields');
+  assert.equal(hostOnly.prompts.length, 0);
+  hostOnly.answer(async () => ({ response: 1 }));
+  await hostOnly.request({ type: 'trustSite', url: EMBEDDED_FORM });
+  assert.deepEqual(plain((await hostOnly.request({ type: 'getFields', url: EMBEDDED_FORM, fields: ['county'] })).values), { county: 'Polk' },
+    'trusting the form’s own site lets it ask');
+
+  // With all websites on, the sensitive prompts name the form's site, the one that gets the answers.
+  const everywhere = await answering({ extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'], allSites: true });
+  await everywhere.invoke('saveProfile', { ...household, firstName: 'Synthetic', assetsOnHand: '250' });
+  everywhere.answer(async () => ({ response: 1 }));
+  assert.deepEqual(plain((await everywhere.request({ type: 'getFields', url: EMBEDDED_FORM, fields: ['firstName', 'assetsOnHand'] })).values), { firstName: 'Synthetic', assetsOnHand: '250' });
+  assert.deepEqual(plain((await everywhere.request(sixtyThere)).answers), { [sixty.id]: 'No' });
+  const [fields, answers] = everywhere.prompts;
+  assert.equal(fields.title, 'Share sensitive details?');
+  assert.equal(fields.message, 'Fill sensitive details on https://forms.example.net?');
+  assert.match(fields.detail, /give these details to https:\/\/forms\.example\.net\./);
+  assert.equal(answers.message, 'Fill this answer on https://forms.example.net? It uses sensitive details.');
+  assert.match(answers.detail, /meant to give these answers to https:\/\/forms\.example\.net:/);
+  // Saving an answer the form's page holds names that site too.
+  assert.deepEqual(plain(await everywhere.request({ type: 'saveFields', url: EMBEDDED_FORM, fields: { email: 'synthetic@example.org' } })), { saved: ['email'] });
+  assert.equal(everywhere.prompts.at(-1).message, 'Save this answer from https://forms.example.net to My information?');
+  for (const prompt of everywhere.prompts) assert.doesNotMatch(`${prompt.message} ${prompt.detail}`, /pantry\.example\.org/);
+
+  // Without Always allow, the everyday prompt names it too.
+  const ordinary = await desktop({ settings: { extensionId, allSites: true } });
+  ordinary.answer(async () => ({ response: 1 }));
+  await ordinary.request({ type: 'getFields', url: EMBEDDED_FORM, fields: ['firstName'] });
+  assert.equal(ordinary.prompts[0].message, 'Fill these saved answers into https://forms.example.net?');
+  assert.match(ordinary.prompts[0].detail, /^Website: https:\/\/forms\.example\.net\n/);
+});
+
 test('before a new install has downloaded the shipped model, both Laya requests answer "not ready" and status says so', async () => {
   const app = await desktop({ settings: trusted });
   assert.deepEqual(plain((await app.request({ type: 'status' })).laya), { state: 'not-downloaded' });
@@ -612,7 +812,7 @@ test('Always allow on the answers prompt works like getFields’: it saves the s
   assert.equal(other.prompts.length, 1, 'Always allow belongs to the stored extension ID: another one is asked, then refused');
 });
 
-test('with Always allow on, everyday answers need no prompt; answers that needed sensitive facts get one "Share sensitive details?" prompt, and Cancel returns none', async () => {
+test('with Always allow on, everyday answers need no prompt; answers that needed sensitive facts get one "Share sensitive details?" prompt, and Cancel drops only those', async () => {
   const app = await answering(trusted);
   const everyday = await app.request(answerRequest([veteran]));
   assert.deepEqual(plain(everyday.answers), { 'f0:sh-1-4': 'No' });
@@ -635,7 +835,11 @@ test('with Always allow on, everyday answers need no prompt; answers that needed
 
   app.answer(async () => ({ response: 0 }));
   const cancelled = await app.request(answerRequest([sixty, veteran]));
-  assert.deepEqual(plain(cancelled.answers), {}, 'Cancel returns no answers');
+  assert.deepEqual(plain(cancelled.answers), { 'f0:sh-1-4': 'No' }, 'Cancel drops only the answer that needed sensitive details; the everyday one still fills');
+  assert.equal(app.prompts.length, 2, 'Always allow covers the everyday answer: no other prompt');
+  assert.equal(cancelled.accessRevision, (await app.request({ type: 'status' })).accessRevision);
+  assert.deepEqual(plain((await app.request(answerRequest([sixty]))).answers), {}, 'with only sensitive answers, Cancel returns none');
+  assert.equal(app.prompts.length, 3);
 });
 
 test('the sensitive prompt says how many of the answers needed sensitive details, in plain grammar, and that Laya read them', async () => {
@@ -669,8 +873,39 @@ test('without Always allow, answers that needed sensitive facts fold into the sa
   assert.deepEqual(plain(app.prompts[0].buttons), ['Cancel', 'Allow once']);
   assert.match(app.prompts[0].detail, /Date of birth/);
   assert.equal((await app.invoke('status')).autofillWithoutAsking, false);
+
+  // Cancel drops the answer that needed sensitive details. The everyday one follows its own rule: without
+  // Always allow, it asks "Let Chrome fill this form?", listing only that answer.
+  const responses = [0, 1];
+  app.answer(async () => ({ response: responses.shift() }));
+  assert.deepEqual(plain((await app.request(answerRequest([sixty, veteran]))).answers), { 'f0:sh-1-4': 'No' });
+  assert.deepEqual(app.prompts.slice(1).map(prompt => prompt.title), ['Share sensitive details?', 'Let Chrome fill this form?']);
+  const everyday = app.prompts.at(-1);
+  assert.deepEqual(plain(everyday.buttons), ['Cancel', 'Allow once', 'Always allow on this computer']);
+  assert.equal(everyday.message, 'Fill this answer into https://pantry.example.org?');
+  assert.match(everyday.detail, /“Is anyone in your household a veteran\?”: No/);
+  assert.doesNotMatch(everyday.detail, /60 or older/, 'the dropped answer isn’t offered again');
+  assert.equal((await app.invoke('status')).autofillWithoutAsking, false);
+
   app.answer(async () => ({ response: 0 }));
-  assert.deepEqual(plain((await app.request(answerRequest([sixty, veteran]))).answers), {});
+  assert.deepEqual(plain((await app.request(answerRequest([sixty, veteran]))).answers), {}, 'Cancel on both returns none');
+  assert.equal(app.prompts.length, 5);
+});
+
+test('a lock while the "Share sensitive details?" prompt is open releases nothing when it is cancelled', async () => {
+  for (const settings of [trusted, asking]) for (const change of ['lock', 'lock and unlock']) {
+    const app = await answering(settings);
+    // The sensitive prompt waits for Cancel; any later prompt would be allowed at once.
+    let cancel;
+    app.answer(() => cancel ? Promise.resolve({ response: 1 }) : new Promise(done => { cancel = () => done({ response: 0 }); }));
+    const pending = app.request(answerRequest([sixty, veteran]));
+    await until(() => Boolean(cancel));
+    await app.invoke('lock');
+    if (change === 'lock and unlock') await app.invoke('unlock', 'synthetic password');
+    cancel();
+    await assert.rejects(pending, change === 'lock' ? /Unlock SecondHand first/ : /SecondHand access changed/, `${settings.autofillWithoutAsking ? 'Always allow' : 'asking'}, ${change}`);
+    assert.equal(app.prompts.length, 1, 'no prompt for the everyday answer');
+  }
 });
 
 test('on Iowa’s portal, answers follow getFields’ Iowa rule: a prompt only without Always allow, and never a sensitive one', async () => {
@@ -710,6 +945,25 @@ test('one approval at a time: answers and saved fields wait for each other’s p
   await assert.rejects(other.request(answerRequest([veteran])), /waiting for your approval/, 'a getFields prompt holds answers back too');
   release({ response: 1 });
   await fields;
+});
+
+test('a lock or the site turned off while Laya is choosing answers releases none of them', async t => {
+  for (const [change, [apply, refusal]] of Object.entries(ACCESS_CHANGES)) await t.test(change, async () => {
+    const laya = stubLaya(sixtyFromAge);
+    const decideBatch = laya.decideBatch;
+    let scoring = false;
+    let finish;
+    const held = new Promise(resolve => { finish = resolve; });
+    laya.decideBatch = async items => { scoring = true; await held; return decideBatch(items); };
+    const app = await desktop({ laya, settings: { extensionId, autofillWithoutAsking: true, trustedSites: [WIC], allSites: true } });
+    await app.invoke('saveProfile', household);
+    const pending = app.request(answerRequest([veteran], { url: `${WIC}/apply` }));
+    await until(() => scoring);
+    await apply(app);
+    finish();
+    await assert.rejects(pending, refusal);
+    assert.equal(app.prompts.length, 0, 'nothing is offered');
+  });
 });
 
 test('the desktop stops Laya at the time the click has left, and a decision that comes after it is not returned', async () => {
@@ -760,7 +1014,9 @@ function extensionCopy({ exists = true, prepared = true, refresh = async () => {
   return copy;
 }
 const shipped = async app => plain(await app.request({ type: 'status' })).extension;
-const until = async condition => { for (let i = 0; i < 100 && !condition(); i++) await tick(); assert.ok(condition(), 'timed out'); };
+// Waits up to 5 seconds, a turn of the event loop at a time. Status reads the real Laya model
+// folder first, and on a busy machine that disk read can take hundreds of turns.
+const until = async condition => { const end = performance.now() + 5000; while (!condition() && performance.now() < end) await tick(); assert.ok(condition(), 'timed out'); };
 
 test('status reports the extension build the app ships and that the copy it prepared for Chrome has it', async () => {
   const copy = extensionCopy();
@@ -997,4 +1253,145 @@ test('the guided setup remembers how many of its six steps are done until it is 
   await assert.rejects(finished.invoke('saveSetupProgress', 2), /isn’t under way/);
   const broken = await desktop({ settings: trusted, setup: '{"version":1,"step":"three"}' });
   await assert.rejects(broken.invoke('setupProgress'), /setup progress/, 'an unreadable progress file fails loudly');
+});
+
+// recordProgress: after Autofill fills Iowa's form, the application record says it is in progress. A
+// submission is never inferred: only the applicant marks an application submitted, with its receipt number.
+const record = (n, status, changes = {}) => ({ id: `00000000-0000-4000-a000-${String(n).padStart(12, '0')}`, program: 'Iowa SNAP', status,
+  createdAt: '2020-09-01T12:00:00.000Z', updatedAt: '2020-09-02T12:00:00.000Z', confirmationNumber: status === 'submitted' ? `SYNTHETIC-RECEIPT-${n}` : '',
+  notes: `Synthetic note ${n}`, nextAction: 'Upload pay stubs', dueDate: '2026-10-20', ...changes });
+const PROGRESS = { type: 'recordProgress', filledCount: 100 };
+
+test('recordProgress starts an in-progress Iowa SNAP record when there is none, and fills after it update the same one', async () => {
+  const app = await desktop();
+  assert.deepEqual(plain(await app.request(PROGRESS)), { recorded: true });
+  const [started] = plain(await app.invoke('getData')).applications;
+  assert.equal(started.program, 'Iowa SNAP');
+  assert.equal(started.status, 'in_progress');
+  assert.equal(started.confirmationNumber, '');
+  assert.match(started.id, /^[0-9a-f-]{36}$/);
+  assert.deepEqual(app.idleTimers(), [IDLE_MS], 'a fill is activity');
+  await app.request(PROGRESS);
+  const after = plain(await app.invoke('getData')).applications;
+  assert.equal(after.length, 1);
+  assert.equal(after[0].id, started.id);
+  assert.equal(after[0].status, 'in_progress');
+});
+
+test('recordProgress moves only the newest draft or in-progress record to in progress, keeping its details, and never marks it submitted', async () => {
+  const records = [record(1, 'draft'), record(2, 'draft'), record(3, 'submitted'), record(4, 'approved')];
+  const app = await desktop({ applications: records });
+  for (let fill = 0; fill < 3; fill++) await app.request(PROGRESS);
+  const after = plain(await app.invoke('getData')).applications;
+  assert.equal(after.length, 4, 'no record is added');
+  assert.deepEqual(after[0], records[0], 'an older draft stays as it was');
+  const { updatedAt, ...moved } = after[1];
+  assert.deepEqual(moved, (({ updatedAt: _, ...rest }) => ({ ...rest, status: 'in_progress' }))(records[1]), 'the newest draft keeps its id, dates, receipt number, notes, next step and due date');
+  assert.ok(updatedAt > records[1].updatedAt);
+  assert.deepEqual(after.slice(2), records.slice(2), 'submitted and decided records stay as they were');
+});
+
+test('with only submitted, decided or needs-action records, recordProgress adds a new in-progress record and changes none of them', async () => {
+  const records = [record(1, 'submitted'), record(2, 'approved'), record(3, 'denied'), record(4, 'needs_action')];
+  const app = await desktop({ applications: records });
+  await app.request(PROGRESS);
+  const after = plain(await app.invoke('getData')).applications;
+  assert.deepEqual(after.slice(0, 4), records);
+  assert.equal(after.length, 5);
+  assert.equal(after[4].status, 'in_progress');
+  assert.equal(after.filter(item => item.status === 'submitted').length, 1, 'no submission is inferred');
+});
+
+test('recordProgress needs SecondHand unlocked', async () => {
+  const app = await desktop({ applications: [record(1, 'draft')] });
+  await app.invoke('lock');
+  await assert.rejects(app.request(PROGRESS), /Unlock SecondHand first/);
+  await app.invoke('unlock', 'synthetic password');
+  assert.deepEqual(plain(await app.invoke('getData')).applications, [record(1, 'draft')]);
+});
+
+// #135: one "today", on this computer's calendar, for checking birth dates when they are saved and for
+// working out ages. A birth date saved earlier that today's checks would refuse never fails a request.
+test('ages follow the day the app runs on: on 2027-02-14 the child born 2021-02-14 turns 6 and leaves the 0 to 5 band', async () => {
+  const birthday = await desktop({ settings: trusted, today: '2027-02-14' });
+  await birthday.invoke('saveProfile', listedHousehold());
+  assert.deepEqual(plain((await birthday.request({ type: 'getFields', fields: ['householdCount:0-5', 'householdCount:6-17', 'householdChildren'] })).values),
+    { 'householdCount:0-5': '0', 'householdCount:6-17': '2', householdChildren: '2' });
+  const before = await desktop({ settings: trusted, today: '2027-02-13' });
+  await before.invoke('saveProfile', listedHousehold());
+  assert.deepEqual(plain((await before.request({ type: 'getFields', fields: ['householdCount:0-5'] })).values), { 'householdCount:0-5': '1' }, 'the day before, still 5');
+});
+
+test('a pinned day is for tests only: it needs test mode and an unpackaged app, and must be a real date', async () => {
+  await assert.rejects(desktop({ env: { SECONDHAND_TEST_TODAY: TODAY } }), /SECONDHAND_TEST_TODAY needs SECONDHAND_TEST_MODE=1/);
+  await assert.rejects(desktop({ packaged: true, env: { SECONDHAND_TEST_MODE: '1', SECONDHAND_TEST_TODAY: TODAY } }), /packaged SecondHand refuses SECONDHAND_TEST_TODAY/);
+  await assert.rejects(desktop({ env: { SECONDHAND_TEST_MODE: '1', SECONDHAND_TEST_TODAY: '2026-02-30' } }), /real date/);
+});
+
+test('on an Iowa evening, with no day pinned, My information refuses a child born tomorrow', async t => {
+  const before = process.env.TZ;
+  process.env.TZ = 'America/Chicago';
+  t.after(() => { if (before === undefined) delete process.env.TZ; else process.env.TZ = before; });
+  // 8:30 pm on October 5 in Iowa: already October 6 in UTC.
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-10-06T01:30:00Z') });
+  const app = await desktop({ settings: trusted, env: {} });
+  await assert.rejects(app.invoke('saveProfile', listedHousehold({ 2: { birthDate: '2026-10-06' } })), /Person 3’s date of birth can’t be after today \(2026-10-05 on this computer\)\./);
+  const saved = await app.invoke('saveProfile', listedHousehold({ 2: { birthDate: '2026-10-05' } }));
+  assert.equal(saved.householdMembers[2].birthDate, '2026-10-05', 'born today');
+});
+
+test('My information and Save to My information refuse a birth date after today or more than 130 years ago, and say which', async () => {
+  const app = await desktop({ settings: trusted });
+  await assert.rejects(app.invoke('saveProfile', { birthDate: '2026-10-06' }), /Your date of birth can’t be after today \(2026-10-05 on this computer\)\./);
+  await assert.rejects(app.invoke('saveProfile', listedHousehold({ 3: { birthDate: '1825-06-01' } })), /Person 4’s date of birth can’t be more than 130 years ago\./);
+  app.answer(async () => ({ response: 1 }));
+  await assert.rejects(app.request({ type: 'saveFields', url: PANTRY, fields: { birthDate: '2026-10-06' } }), error => /can’t be after today/.test(error.publicMessage));
+  assert.equal(app.prompts.length, 0, 'a refused date is never offered for confirmation');
+});
+
+// Saved while the clock was later (a child born 2026-10-08), or before the 130-year limit existed (a parent born 1825).
+// As the vault keeps it, the applicant's own row carries their name and birth date.
+const unusableDates = listedHousehold({ 0: { firstName: 'Synthetic', lastName: 'Applicant', birthDate: '1985-04-12' }, 2: { birthDate: '2026-10-08' }, 3: { birthDate: '1825-06-01' } });
+
+test('a saved birth date the app can’t use never fails a field request: answers from ages stay with the applicant, and the reply says why', async () => {
+  const app = await desktop({ settings: trusted, profile: unusableDates });
+  app.answer(async () => ({ response: 1 }));
+  const reply = plain(await app.request({ type: 'getFields', url: PANTRY, fields: [...BANDS, 'householdChildren', 'householdSize', 'studentNameGrade', 'firstName'] }));
+  assert.deepEqual(reply.values, { householdSize: '4', studentNameGrade: 'Riley Example, 5th', firstName: 'Synthetic' });
+  assert.equal(reply.reason, 'birthDate');
+  const unrelated = plain(await app.request({ type: 'getFields', url: PANTRY, fields: ['firstName', 'householdSize'] }));
+  assert.equal(unrelated.reason, undefined, 'nothing was left out because of a birth date');
+  // The applicant's own date: never filled into a page.
+  const own = await desktop({ settings: trusted, profile: { firstName: 'Synthetic', birthDate: '2026-10-08' } });
+  const ownReply = plain(await own.request({ type: 'getFields', fields: ['birthDate', 'firstName'] }));
+  assert.deepEqual(ownReply.values, { firstName: 'Synthetic' });
+  assert.equal(ownReply.reason, 'birthDate');
+});
+
+test('a saved birth date the app can’t use never fails Laya: it answers from the other facts and the reply says why', async () => {
+  const ownDate = listedHousehold({ 0: { firstName: 'Synthetic', lastName: 'Applicant', birthDate: '2026-10-08' } });
+  const app = await desktop({ laya: stubLaya(sixtyFromAge), settings: trusted, profile: { ...ownDate, birthDate: '2026-10-08', householdVeteran: 'no' } });
+  app.answer(async () => ({ response: 1 }));
+  const reply = plain(await app.request(answerRequest([sixty, veteran])));
+  assert.deepEqual(reply.answers, { [veteran.id]: 'No' }, 'no age, so 60 or older stays with the applicant');
+  assert.equal(reply.reason, 'birthDate');
+  const fine = await desktop({ laya: stubLaya(sixtyFromAge), settings: trusted, profile: { ...household } });
+  const answered = plain(await fine.request(answerRequest([sixty, veteran])));
+  assert.equal(answered.reason, undefined);
+});
+
+test('Save to My information is refused while a saved birth date can’t be used, naming whose date to fix in My information', async () => {
+  const app = await desktop({ settings: trusted, profile: unusableDates });
+  app.answer(async () => ({ response: 1 }));
+  await assert.rejects(app.request({ type: 'saveFields', url: PANTRY, fields: { county: 'Story' } }), error => error.publicMessage ===
+    'Person 3’s date of birth can’t be after today (2026-10-05 on this computer). Fix the date in My information, then save this answer again.');
+  const own = await desktop({ settings: trusted, profile: { firstName: 'Synthetic', birthDate: '1825-06-01' } });
+  await assert.rejects(own.request({ type: 'saveFields', url: PANTRY, fields: { county: 'Story' } }), error => error.publicMessage ===
+    'Your date of birth can’t be more than 130 years ago. Fix the date in My information, then save this answer again.');
+  assert.equal(app.prompts.length + own.prompts.length, 0, 'nothing is offered for confirmation');
+  assert.equal(plain(await app.invoke('getData')).profile.county, undefined);
+  // A date of birth saved from the page is that answer’s own problem, not My information’s.
+  const fresh = await desktop({ settings: trusted, profile: { firstName: 'Synthetic' } });
+  await assert.rejects(fresh.request({ type: 'saveFields', url: PANTRY, fields: { birthDate: '2026-10-06' } }), error => error.publicMessage ===
+    'Your date of birth can’t be after today (2026-10-05 on this computer).');
 });

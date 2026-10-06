@@ -11,18 +11,31 @@ const centerX = word => (word.bbox.x0 + word.bbox.x1) / 2;
 const phrase = text => text.split(/\s+/).map(normalize);
 const meanConfidence = words => Math.round(words.reduce((sum, word) => sum + word.confidence, 0) / (words.length || 1));
 const content = words => words.slice().sort((a, b) => a.bbox.x0 - b.bbox.x0).map(word => word.text).join(' ').trim();
+const wordHeight = word => word.bbox.y1 - word.bbox.y0;
+const medianHeight = words => words.map(wordHeight).sort((a, b) => a - b)[Math.floor(words.length / 2)];
+const inside = (mark, word) => word.bbox.x0 <= mark.bbox.x0 && mark.bbox.x1 <= word.bbox.x1 && word.bbox.y0 <= mark.bbox.y0 && mark.bbox.y1 <= word.bbox.y1;
+
+// OCR can report a mark it split off a word, such as the dot of an i, as its
+// own tiny word inside that word's box. It is part of the word already read,
+// not separate text. Ordered by position, it would break a printed label or
+// join a value. Only marks far shorter than this page's text are dropped.
+function withoutSplitMarks(words) {
+  const typical = medianHeight(words) || 0;
+  const tiny = word => wordHeight(word) * 3 <= typical;
+  const text = words.filter(word => !tiny(word));
+  return words.filter(mark => !tiny(mark) || !text.some(word => inside(mark, word)));
+}
 
 function wordRows(page) {
   const width = Number(page.width), height = Number(page.height);
   if (!(width > 0 && height > 0) || !Array.isArray(page.words)) return [];
-  const words = page.words.slice(0, 12000).filter(word => typeof word?.text === 'string' && word.text.trim() && word.text.length <= 250 &&
+  const words = withoutSplitMarks(page.words.slice(0, 12000).filter(word => typeof word?.text === 'string' && word.text.trim() && word.text.length <= 250 &&
     Number.isFinite(word.confidence) && word.confidence >= 0 && word.confidence <= 100 && word.bbox &&
     ['x0', 'y0', 'x1', 'y1'].every(key => Number.isFinite(word.bbox[key])) &&
     word.bbox.x0 >= 0 && word.bbox.y0 >= 0 && word.bbox.x1 <= width && word.bbox.y1 <= height &&
     word.bbox.x1 > word.bbox.x0 && word.bbox.y1 > word.bbox.y0)
-    .map(word => ({ ...word, text: word.text.trim() }));
-  const heights = words.map(word => word.bbox.y1 - word.bbox.y0).sort((a, b) => a - b);
-  const tolerance = Math.max(2, (heights[Math.floor(heights.length / 2)] || 10) * 0.5);
+    .map(word => ({ ...word, text: word.text.trim() })));
+  const tolerance = Math.max(2, (medianHeight(words) || 10) * 0.5);
   const rows = [];
   for (const word of words.sort((a, b) => centerY(a) - centerY(b))) {
     const recent = rows[rows.length - 1];
@@ -71,6 +84,9 @@ function afterLabel(rows, anchor, next, x0, x1) {
 
 function recognizedType(page) {
   const text = typeof page?.text === 'string' ? page.text.slice(0, 10000) : '';
+  if (/\bSSA[-– ]?1099\b/i.test(text) && /SOCIAL SECURITY BENEFIT STATEMENT/i.test(text)) return 'ssa-1099';
+  if (/\b1099[-– ]?NEC\b/i.test(text) && /Nonemployee\s+Compensation/i.test(text)) return '1099-nec';
+  if (/\bW[-– ]?2\b/i.test(text) && /Wage and Tax Statement/i.test(text)) return 'w2';
   if (/\b1\s*040\s*[-–]?\s*SR\b/i.test(text) && /Income Tax Return\s+\w+\s+Seniors/i.test(text)) return '1040-sr';
   if (/\b1040\b/.test(text) && /U\.?\s*S\.?\s*(?:Individual )?Income Tax Return/i.test(text)) return '1040';
   return null;
@@ -209,15 +225,113 @@ function parseTaxPage(page, type) {
   return { type, title: type === '1040-sr' ? 'Form 1040-SR tax return' : 'Form 1040 tax return', taxYear, fields, warnings };
 }
 
+// Name/address candidates only. Statement amounts never become current monthly income.
+function parseStatementPage(page, type) {
+  const rows = wordRows(page), fields = [];
+  const unique = list => list.length === 1 ? list[0] : null;
+  const one = label => unique(matches(rows, label));
+  const sameRow = (anchor, label) => anchor && unique(matches(rows, label).filter(item =>
+    Math.abs((item.y0 + item.y1 - anchor.y0 - anchor.y1) / 2) < Math.max(item.y1 - item.y0, anchor.y1 - anchor.y0) * 0.8));
+  const below = (label, anchor) => anchor && unique(matches(rows, label).filter(item => item.y0 > anchor.y1));
+  const cellRows = (start, end, left, right) => {
+    if (!start || !end || end.y0 <= start.y1 || !(right > left)) return [];
+    return rows.map(row => row.words.filter(word => centerY(word) > start.y1 && centerY(word) < end.y0 && centerX(word) >= left && centerX(word) < right)).filter(words => words.length);
+  };
+  const add = (key, label, value, words) => {
+    if (!value || !words.length || !PROFILE_KEYS.has(key)) return;
+    try { value = validateProfile({ [key]: value })[key]; } catch { return; }
+    fields.push({ id: key, label, value, profileKey: key, page: page.pageNumber || 1, confidence: meanConfidence(words) });
+  };
+  const fullName = words => {
+    const name = content(words);
+    // Combined-name fields have no reliable boundary for compound surnames. Leave ambiguous names manual.
+    if (!/^[\p{L}][\p{L} .'-]{1,99}$/u.test(name)) return;
+    const parts = name.split(/\s+/);
+    if (!(parts.length === 2 || (parts.length === 3 && /^[\p{L}]\.?$/u.test(parts[1])))) return;
+    add('firstName', 'First name', parts[0], words);
+    if (parts.length === 3) add('middleName', 'Middle initial', parts[1].replace('.', ''), words);
+    add('lastName', 'Last name', parts.at(-1), words);
+  };
+  const street = words => {
+    const raw = content(words);
+    if (!/^\d+[\p{L}\d .,'#/-]+$/u.test(raw)) return;
+    const match = raw.match(/^(.*?)(?:,?\s+(?:APT\.?|UNIT|SUITE|STE\.?|#)\s*([\w-]+))$/i);
+    add('addressLine1', 'Address on statement', (match ? match[1] : raw).replace(/,$/, '').trim(), words);
+    if (match) add('addressLine2', 'Apartment or unit', match[2], words);
+  };
+  const cityStateZip = words => {
+    const match = content(words).match(/^([\p{L} .'-]+),?\s+([A-Z]{2})\s+(\d{5}(?:-\d{4})?)$/u);
+    if (!match) return;
+    add('city', 'City', match[1].trim(), words);
+    add('state', 'State', match[2], words);
+    add('zip', 'ZIP code', match[3], words);
+  };
+  if (type === '1099-nec') {
+    const name = one("RECIPIENT'S name");
+    const address = below('Street address', name), city = below('City or town', address);
+    const state = below('State or province', city), end = below('Account number', state);
+    const apt = sameRow(address, 'Apt no'), country = sameRow(state, 'Country');
+    const zip = sameRow(state, 'ZIP or foreign postal code');
+    if (name && address && city && state && end && apt && country && zip) {
+      const right = Math.max(address.row.words.find(word => normalize(word.text) === '2')?.bbox.x0 || 0, apt.x1);
+      // Recipient cells are below the recipient name; never search the similar payer cells above it.
+      const nameRows = cellRows(name, address, name.x0, right);
+      const streetRows = cellRows(address, city, address.x0, apt.x0);
+      const cityRows = cellRows(city, state, city.x0, right);
+      const stateRows = cellRows(state, end, state.x0, country.x0);
+      const zipRows = cellRows(zip, end, zip.x0, right);
+      const countryRows = cellRows(country, end, country.x0, zip.x0);
+      const domestic = countryRows.length === 1 && /^(US|USA|UNITED STATES)$/i.test(content(countryRows[0]));
+      if (nameRows.length === 1) fullName(nameRows[0]);
+      if (domestic) {
+        if (streetRows.length === 1) street(streetRows[0]);
+        const aptRows = cellRows(apt, city, apt.x0, right);
+        if (aptRows.length === 1 && /^(?:APT\s*)?[A-Z0-9-]+$/i.test(content(aptRows[0]))) add('addressLine2', 'Apartment or unit', content(aptRows[0]).replace(/^APT\s*/i, ''), aptRows[0]);
+        if (cityRows.length === 1 && /^[\p{L} .'-]+$/u.test(content(cityRows[0]))) add('city', 'City', content(cityRows[0]), cityRows[0]);
+        if (stateRows.length === 1) add('state', 'State', content(stateRows[0]), stateRows[0]);
+        if (zipRows.length === 1) add('zip', 'ZIP code', content(zipRows[0]), zipRows[0]);
+      }
+    }
+  } else if (type === 'w2') {
+    const name = one("Employee's first name and initial"), end = one("Employee's address and ZIP code");
+    const suffix = sameRow(name, 'Suff');
+    if (name && end && suffix) {
+      const values = cellRows(name, end, name.x0, suffix.x1);
+      if (values.length === 3) {
+        fullName(values[0]); street(values[1]); cityStateZip(values[2]);
+      }
+    }
+  } else if (type === 'ssa-1099') {
+    const name = one('Box 1 Name'), social = one('Box 2'), benefits = one('Box 3 Benefits Paid');
+    const address = one('Box 7 Address'), end = one('Box 8 Claim Number');
+    if (name && social && benefits && name.y0 < benefits.y0) {
+      const values = cellRows(name, benefits, name.x0, social.x0);
+      const inline = name.row.words.filter(word => word.bbox.x0 >= name.x1 && centerX(word) < social.x0);
+      if (inline.length && values.length === 0) fullName(inline);
+      else if (!inline.length && values.length === 1) fullName(values[0]);
+    }
+    if (address && end) {
+      const values = cellRows(address, end, address.x0, page.width);
+      if (values.length === 2) { street(values[0]); cityStateZip(values[1]); }
+    }
+  }
+  return { type, title: ({ w2: 'Form W-2 wage statement', '1099-nec': 'Form 1099-NEC compensation statement', 'ssa-1099': 'Form SSA-1099 benefit statement' })[type],
+    taxYear: '', fields, warnings: ['Check every selected value against the original, including the recipient’s name and current address.',
+      'Statement amounts are historical. They are not copied into current monthly income.',
+      ...(!fields.length ? ['The recipient details could not be read reliably; enter them manually.'] : [])] };
+}
+
 function analyzeDocument(document) {
   const pages = Array.isArray(document?.pages) ? document.pages.slice(0, 12) : [];
   const found = pages.flatMap(page => {
     const type = recognizedType(page);
-    const headers = type ? matches(wordRows(page), 'Your first name and middle initial') : [];
+    const label = ({'1099-nec': "RECIPIENT'S name", 'ssa-1099': 'Box 1 Name', w2: "Employee's first name and initial"})[type] || 'Your first name and middle initial';
+    const headers = type ? matches(wordRows(page), label) : [];
     return headers.map(() => ({ page, type }));
   });
   if (found.length === 1) {
     const { page, type } = found[0];
+    if (['1099-nec', 'ssa-1099', 'w2'].includes(type)) return parseStatementPage(page, type);
     const result = parseTaxPage(page, type);
     const alternate = page.alternative && Array.isArray(page.alternative.words)
       ? parseTaxPage({ ...page, ...page.alternative, alternative: undefined }, type) : null;

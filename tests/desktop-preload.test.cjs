@@ -98,3 +98,31 @@ test('preload tells My information which fields a save from Chrome changed, neve
   assert.deepEqual(calls, [['secondhand:invoke', 'setupProgress'], ['secondhand:invoke', 'startSetup'], ['secondhand:invoke', 'saveSetupProgress', 2]]);
   assert.equal(Object.keys(api).some(name => /saveFields/i.test(name)), false, 'saving from a page is the extension’s request, never the renderer’s');
 });
+
+test('preload offers Touch ID as named calls, and an unlock notice with only a valid lock revision', () => {
+  let api;
+  const calls = [];
+  const listeners = {};
+  let removed;
+  vm.runInNewContext(fs.readFileSync(require.resolve('../desktop/preload.cjs'), 'utf8'), {
+    require: () => ({
+      contextBridge: { exposeInMainWorld(_name, value) { api = value; } },
+      ipcRenderer: { invoke: (...args) => { calls.push(args); return Promise.resolve(); },
+        on(channel, callback) { listeners[channel] = callback; }, removeListener(channel, callback) { removed = { channel, callback }; } }
+    })
+  });
+  api.setTouchIdUnlock({ enabled: true, password: 'synthetic password' });
+  api.unlockWithTouchId();
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [['secondhand:invoke', 'setTouchIdUnlock', { enabled: true, password: 'synthetic password' }], ['secondhand:invoke', 'unlockWithTouchId']]);
+  const received = [];
+  const unsubscribe = api.onUnlocked(payload => received.push(payload));
+  listeners['secondhand:unlocked']({ sender: 'private-electron-event' }, { lockRevision: 0, ignored: 'private-extra-payload' });
+  assert.deepEqual(JSON.parse(JSON.stringify(received.pop())), { lockRevision: 0 });
+  for (const payload of [undefined, null, {}, { lockRevision: -1 }, { lockRevision: 2.5 }, { lockRevision: '3' }]) {
+    listeners['secondhand:unlocked']({ sender: 'private-electron-event' }, payload);
+    assert.equal(received.pop(), undefined);
+  }
+  unsubscribe();
+  assert.equal(removed.channel, 'secondhand:unlocked');
+  assert.throws(() => api.onUnlocked('not a function'), /callback is required/);
+});
