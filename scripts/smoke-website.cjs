@@ -160,12 +160,15 @@ async function inspectWhatItDoes(page) {
   await expect(page.locator('.scope-note p')).toHaveCount(3);
   await expect(page.locator('.scope-note p').first()).toContainText(/review that address before you submit\.$/);
   await page.getByText('Updating from an earlier version', { exact: true }).click();
+  // The extension reloads itself only when the new app ships a newer extension build.
+  await expect(page.locator('#setup details[open] .details-body')).toContainText('If it comes with a newer extension');
   await expect(page.locator('#setup details[open] .details-body')).toContainText('reloads itself');
   await expect(page.locator('#setup details[open] .details-body')).toContainText('0.4.0 or earlier');
   await page.goto(`${site}/chrome-extension`, { waitUntil: 'networkidle' });
   await inspectLayout(page);
   await expect(page.locator('main')).not.toContainText(/Details link|\bDetails\b to open/);
   await expect(page.locator('img.guide-card')).not.toHaveAttribute('alt', /Details/);
+  await expect(page.locator('section[aria-labelledby="after-update"]')).toContainText('If it comes with a newer extension');
   await expect(page.locator('section[aria-labelledby="after-update"]')).toContainText('reloads itself');
   await expect(page.locator('section[aria-labelledby="after-update"]')).toContainText('0.4.0 or earlier');
   await page.goto(site, { waitUntil: 'networkidle' });
