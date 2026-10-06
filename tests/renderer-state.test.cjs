@@ -25,6 +25,7 @@ async function renderer(t, { initialSetup = null, ...overrides } = {}) {
   const window = dom.window;
   let onLocked;
   let onProfileChanged;
+  let onOpenHousehold;
   let status = { exists: true, unlocked: true, extensionId: '', bridgeRunning: true };
   const database = { profile: { firstName: 'Initial', lastName: 'Test' }, applications: [] };
   // The guided setup's progress as the desktop keeps it: null when none is under way.
@@ -48,6 +49,9 @@ async function renderer(t, { initialSetup = null, ...overrides } = {}) {
       return structuredClone(setup.progress);
     },
     onProfileChanged: callback => { onProfileChanged = callback; return () => {}; },
+    // Add your household in Chrome's side panel (#180), and Overview's note about it.
+    onOpenHousehold: callback => { onOpenHousehold = callback; return () => {}; },
+    dismissHouseholdNote: async () => { status = { ...status, householdNoteDismissed: true }; return status; },
     ...overrides
   };
   loadRenderer(window);
@@ -62,6 +66,8 @@ async function renderer(t, { initialSetup = null, ...overrides } = {}) {
     window, get, database, control, radios, setup,
     // Save to My information in Chrome changed these saved fields.
     profileChanged: fields => onProfileChanged({ fields }),
+    // The side panel's Add your household (#180).
+    openHousehold: () => onOpenHousehold(),
     value: name => boxes(name) ? boxes(name).filter(box => box.checked).map(box => box.value).join(',') : control(name).value,
     choices: name => radios(name)?.map(radio => radio.value) ?? Array.from(control(name).options, option => option.value),
     edit(id, value) {
@@ -2095,4 +2101,71 @@ test('a row saved before the student status existed keeps its answer until the s
   assert.deepEqual([saved[0].householdMembers[0].student, saved[0].householdMembers[0].grade], ['yes', 'College'], 'saving again keeps it');
   view.edit('studentLevel', 'undergraduate');
   assert.deepEqual([inRow(self, 'student').value, inRow(self, 'grade').value], ['yes', 'College']);
+});
+
+// #180: Overview says to add the household list until one is saved; the side panel's Add your household opens it too.
+const atHousehold = view => view.get('view-profile').hidden === false && view.window.document.activeElement === view.get('household-heading');
+test('Overview offers Add your household until a household list is saved, and the button opens My information at Your household (#180)', async t => {
+  const view = await renderer(t);
+  assert.equal(view.get('view-overview').hidden, false);
+  assert.equal(view.get('household-note').hidden, false);
+  assert.equal(view.get('household-note-text').textContent, 'Add your household: SecondHand can then answer questions like “# of children 0–5”.');
+  assert.equal(view.get('household-note-open').textContent.trim(), 'Add your household');
+  view.get('household-note-open').click();
+  assert.ok(atHousehold(view), 'My information opens at Your household, its heading read first');
+  view.get('add-household-member').click();
+  editRow(view, memberRows(view)[1], 'firstName', 'Riley');
+  view.submit('profile-form');
+  await tick(); await tick();
+  view.window.document.querySelector('.nav-item[data-view="overview"]').click();
+  assert.equal(view.get('household-note').hidden, true, 'a saved list ends it');
+  const listed = await renderer(t, { getData: async () => ({ profile: { firstName: 'Avery', householdMembers: [{ id: '0f2c8d4e-1a3b-4c5d-8e6f-7a8b9c0d1e2f', relationship: 'self' }] }, applications: [] }) });
+  assert.equal(listed.get('household-note').hidden, true, 'never shown with a list saved');
+});
+
+test('Dismiss keeps the household note away, after a lock too; a dismissal the app can’t keep says so and leaves it (#180)', async t => {
+  let dismissed = 0;
+  const view = await renderer(t);
+  const dismiss = view.window.secondHand.dismissHouseholdNote;
+  view.window.secondHand.dismissHouseholdNote = () => { dismissed++; return dismiss(); };
+  view.get('household-note-dismiss').click();
+  await tick(); await tick();
+  assert.equal(dismissed, 1);
+  assert.equal(view.get('household-note').hidden, true);
+  view.lock(1);
+  view.edit('passphrase', 'synthetic');
+  view.submit('auth-form');
+  await tick(); await tick();
+  assert.equal(view.get('workspace').hidden, false);
+  assert.equal(view.get('household-note').hidden, true, 'still dismissed after unlocking');
+  const refused = await renderer(t, { dismissHouseholdNote: async () => { throw new Error('Unlock SecondHand first.'); } });
+  refused.get('household-note-dismiss').click();
+  await tick(); await tick();
+  assert.equal(refused.get('household-note').hidden, false);
+  assert.equal(refused.get('toast').textContent, 'Unlock SecondHand first.');
+  assert.equal(refused.get('toast').classList.contains('error'), true);
+});
+
+test('Add your household in Chrome opens My information at Your household, leaving the guided setup, and after unlocking when locked (#180)', async t => {
+  const view = await renderer(t, { initialSetup: { step: 3, steps: 6 } });
+  view.get('setup-resume-button').click();
+  assert.equal(view.get('setup-step-title').textContent, 'Income and money on hand');
+  view.openHousehold();
+  assert.ok(atHousehold(view));
+  assert.equal(view.get('setup-bar').hidden, true, 'My information shows whole, its household part included');
+  assert.equal(view.get('household-heading').closest('[hidden]'), null);
+  view.window.document.querySelector('.nav-item[data-view="overview"]').click();
+  view.lock(1);
+  view.openHousehold();
+  assert.equal(view.get('workspace').hidden, true, 'nothing opens while locked');
+  view.edit('passphrase', 'synthetic');
+  view.submit('auth-form');
+  await tick(); await tick();
+  assert.ok(atHousehold(view), 'once unlocked, it opens there');
+  view.window.document.querySelector('.nav-item[data-view="overview"]').click();
+  view.lock(2);
+  view.edit('passphrase', 'synthetic');
+  view.submit('auth-form');
+  await tick(); await tick();
+  assert.equal(view.get('view-overview').hidden, false, 'only once');
 });
