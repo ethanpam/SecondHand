@@ -2,6 +2,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const schema = require('../shared/schema.cjs');
 const { PORTAL_URL, FIELD_LABELS } = schema;
 const realLaya = require('../desktop/laya.cjs');
@@ -13,6 +16,10 @@ const context = { extensionId };
 // A test may name another day (`today`), or its own environment (`env`) to run on the clock.
 const TODAY = '2026-10-05';
 const IDLE_MS = 10 * 60 * 1000;
+// Each desktop's data folder: its own empty one inside this temporary folder. Settings, setup progress and
+// the vault are stand-ins; the real Laya runtime and Touch ID look in the folder and find nothing.
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'secondhand-assistance-main-'));
+test.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
 
 test('expanded SNAP answers are Iowa-only even when another site is trusted; record lists never leave the vault', async () => {
   const app = await desktop({ profile: { iowaResident: 'yes', ssnCardFirstName: 'Synthetic', jobs: [{ employer: 'Private' }] },
@@ -32,6 +39,7 @@ test('expanded SNAP answers are Iowa-only even when another site is trusted; rec
 // The real main process with Electron simulated (tests/helpers/harness.cjs). The vault, its files and the
 // bridge are stand-ins; Laya is the real runtime unless a test gives `laya`.
 async function desktop(options = {}) {
+  const userData = fs.mkdtempSync(path.join(scratch, 'app-'));
   let dataReads = 0;
   const writes = [];
   const removed = [];
@@ -55,7 +63,7 @@ async function desktop(options = {}) {
     async update(change) { change(this.data); }
   }
   const main = await startMain({
-    userData: '/synthetic-local-data', packaged: options.packaged === true,
+    userData, packaged: options.packaged === true,
     env: options.env ?? { SECONDHAND_TEST_MODE: '1', SECONDHAND_TEST_TODAY: options.today ?? TODAY },
     dialog: { async showMessageBox(_parent, options) { prompts.push(options); return answer(); } },
     electron: { shell: { async openPath(folder) { opened.push(folder); return ''; } } },
@@ -86,7 +94,7 @@ async function desktop(options = {}) {
   // The idle lock's timers now armed: set, and not cleared or run.
   const armed = () => main.timers.filter(timer => timer.ms === IDLE_MS && !timer.cleared);
   return {
-    prompts, notifications: main.sent, writes, removed,
+    userData, prompts, notifications: main.sent, writes, removed,
     idleTimers: () => armed().map(timer => timer.ms),
     // Runs the armed idle lock, as ten minutes without activity would.
     async idle() {
@@ -1228,11 +1236,11 @@ test('the guided setup remembers how many of its six steps are done until it is 
   const fresh = await desktop({ settings: trusted });
   assert.equal(await fresh.invoke('setupProgress'), null, 'no setup under way');
   assert.deepEqual(plain(await fresh.invoke('startSetup')), { step: 0, steps: 6 });
-  assert.deepEqual(fresh.writes.at(-1), { file: '/synthetic-local-data/setup-progress.json', json: { version: 1, step: 0 } });
+  assert.deepEqual(fresh.writes.at(-1), { file: path.join(fresh.userData, 'setup-progress.json'), json: { version: 1, step: 0 } });
   assert.deepEqual(plain(await fresh.invoke('saveSetupProgress', 3)), { step: 3, steps: 6 });
   assert.deepEqual(plain(await fresh.invoke('saveSetupProgress', 2)), { step: 3, steps: 6 }, 'going back keeps the steps already done');
   assert.equal(await fresh.invoke('saveSetupProgress', 6), null, 'all six done: setup is finished');
-  assert.deepEqual(fresh.removed, ['/synthetic-local-data/setup-progress.json']);
+  assert.deepEqual(fresh.removed, [path.join(fresh.userData, 'setup-progress.json')]);
   for (const step of [-1, 7, 2.5, '3', null]) await assert.rejects(fresh.invoke('saveSetupProgress', step), /Request denied|step/, JSON.stringify(step));
 
   const resumed = await desktop({ settings: trusted, setup: { version: 1, step: 3 } });
