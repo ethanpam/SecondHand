@@ -512,8 +512,8 @@
 
   // Needs a human Spanish review before release (see the #34 notes).
   const es = Object.freeze({
-    "panel.fillAndContinue": "Rellenar y continuar",
-    "panel.fillAndContinueHint": "Usa solo respuestas guardadas. Pulsa Siguiente cuando la página está completa; esto puede enviar y guardar respuestas. Se detiene ante datos faltantes, errores, consentimiento, firmas, pagos y envío final.",
+    "panel.fillAndContinue": "Llenar y continuar",
+    "panel.fillAndContinueHint": "SecondHand usa solo sus respuestas guardadas y hace clic en el botón para seguir (como “Next”) cuando la página está completa; esto puede enviar y guardar respuestas. Se detiene ante datos que faltan, errores, consentimiento, firmas, pagos y el envío final.",
     "worker.siteContinuing": "Página rellenada y Siguiente pulsado. Revisando la siguiente página…",
     "worker.siteOriginChanged": "Se detuvo porque la solicitud pasó a otro sitio web. Inicie de nuevo allí si desea continuar.",
     "worker.siteFillBusy": "Espere a que termine el autocompletado actual.",
@@ -882,7 +882,7 @@
     'result.movesOn': 'SecondHand avanzará cuando no falte nada.',
     'result.needYouNotSaved': 'Por contestar: {count}. No están en su perfil guardado.',
     'result.nothingNew': 'No hay nada nuevo que llenar.',
-    'result.nothingMatches': 'Ninguna pregunta de aquí coincide con sus respuestas en “My information”.',
+    'result.nothingMatches': 'Ninguna pregunta de esta página coincide con sus respuestas en “My information”.',
     'result.noSavedAnswers': 'No hay respuesta guardada para lo que falta.',
     'result.thenTodo': '{summary} {todo}',
     'result.withReason': '{summary} {reason}',
@@ -890,7 +890,7 @@
     'result.siteFilledGuessed': { one: 'Se llenó {count} respuesta · Laya adivinó {guessed}. Revísela antes de enviar.', other: 'Se llenaron {count} respuestas · Laya adivinó {guessed}. Revíselas antes de enviar.' },
     'result.siteFilledNeedYou': { one: 'Se llenó {count} respuesta · {needYou} sin contestar. Revísela antes de enviar.', other: 'Se llenaron {count} respuestas · {needYou} sin contestar. Revíselas antes de enviar.' },
     'result.siteFilledGuessedNeedYou': { one: 'Se llenó {count} respuesta · Laya adivinó {guessed} · {needYou} sin contestar. Revísela antes de enviar.', other: 'Se llenaron {count} respuestas · Laya adivinó {guessed} · {needYou} sin contestar. Revíselas antes de enviar.' },
-    'result.nothingMatchesNeedYou': 'Ninguna pregunta de aquí coincide con sus respuestas en “My information”. {count} sin contestar.',
+    'result.nothingMatchesNeedYou': 'Ninguna pregunta de esta página coincide con sus respuestas en “My information”. {count} sin contestar.',
     'result.siteNeedYou': 'Por contestar: {count}.',
     'result.withHeld': { one: '{summary} {count} dato sensible espera hasta que usted haga clic en “Llenar datos sensibles” en el panel lateral.', other: '{summary} {count} datos sensibles esperan hasta que usted haga clic en “Llenar datos sensibles” en el panel lateral.' },
     'result.withHeldBelow': { one: '{summary} {count} dato sensible espera hasta que usted haga clic en “Llenar datos sensibles”, más abajo.', other: '{summary} {count} datos sensibles esperan hasta que usted haga clic en “Llenar datos sensibles”, más abajo.' },
