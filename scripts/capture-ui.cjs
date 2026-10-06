@@ -279,11 +279,19 @@ async function iowaCard() {
     await expect((await card()).locator('#autofill')).toBeVisible();
     await cardShot(session, 'card-ready-again');
 
+    // As on a first run: the count of starts is set back, so this click is the first.
     await open(screen('household'));
+    await (await card()).evaluate(() => localStorage.removeItem('secondhand.autofillStarted'));
     await (await card()).locator('#autofill').click();
     // The fill revealed the security check: the card settles on what the applicant must do.
     await expect((await card()).locator('#widget-text')).toHaveText(/^Type the characters shown/, { timeout: 20000 });
     await cardShot(session, 'card-message');
+
+    // Started again from this Chrome: the card says the short form of what Autofill waits for.
+    await open(applicant, { profile: { ...smoke.syntheticProfile, firstName: '' } });
+    await (await card()).locator('#autofill').click();
+    await expect((await card()).locator('#need-you')).toBeVisible({ timeout: 20000 });
+    await cardShot(session, 'card-need-you-again');
 
     await open(applicant, { locked: true });
     await (await card()).locator('#autofill').click();
@@ -332,6 +340,9 @@ async function iowaPanel() {
     await open(applicant, missingName);
     await recheck(panel);
     await panelShot(session, panel, 'panel-iowa-again', listed);
+    // Started again: the status says the short form of what Autofill waits for.
+    await panel.click('#panel-autofill');
+    await panelShot(session, panel, 'panel-iowa-filled-again', filled);
 
     await open(applicant, { locked: true });
     await recheck(panel);
@@ -565,8 +576,8 @@ async function recording() {
 }
 
 const sessions = [
-  [iowaCard, ['card-ready', 'card-focus', 'card-hidden', 'card-hidden-focus', 'card-working', 'card-need-you', 'card-hidden-waiting', 'card-ready-again', 'card-message', 'card-locked', 'card-closed', 'card-pill']],
-  [iowaPanel, ['panel-iowa', 'panel-header', 'panel-focus', 'panel-working', 'panel-iowa-filled', 'panel-checklist', 'panel-iowa-again', 'panel-locked', 'panel-closed', 'panel-info', 'panel-elsewhere', 'panel-elsewhere-es', 'panel-arabic', 'panel-questions']],
+  [iowaCard, ['card-ready', 'card-focus', 'card-hidden', 'card-hidden-focus', 'card-working', 'card-need-you', 'card-hidden-waiting', 'card-ready-again', 'card-message', 'card-need-you-again', 'card-locked', 'card-closed', 'card-pill']],
+  [iowaPanel, ['panel-iowa', 'panel-header', 'panel-focus', 'panel-working', 'panel-iowa-filled', 'panel-checklist', 'panel-iowa-again', 'panel-iowa-filled-again', 'panel-locked', 'panel-closed', 'panel-info', 'panel-elsewhere', 'panel-elsewhere-es', 'panel-arabic', 'panel-questions']],
   [sites, ['panel-site-off', 'panel-site-filled', 'panel-site-filled-open', 'panel-laya-off', 'panel-save', 'panel-site-held', 'panel-site-guessed', 'panel-site-guessed-es', 'panel-all-sites-off', 'card-site', 'card-offer', 'card-offer-filled']],
   [outdated, ['card-outdated', 'panel-outdated', 'card-reload']],
   [shortcutsPage, ['chrome-shortcuts']],

@@ -98,12 +98,16 @@
       relabel();
     });
   }
-  // Whether Autofill has ever been started on Iowa's form from this Chrome profile, in the extension pages'
-  // own storage like the language choice. Before that, both surfaces say all of what Autofill does; after
-  // it, the short version. Nothing about the applicant is kept here.
+  // How many times Autofill has been started on Iowa's form from this Chrome profile, counted up to 2, in the
+  // extension pages' own storage like the language choice. Before the first start, the card says all of what
+  // Autofill does; after it, only where it matters. Through the first run, the lines on its pages say all of what
+  // Autofill waits for; once the reader has started it again, the short form (see BRIEF). Nothing about the
+  // applicant is kept here.
   const STARTED_KEY = 'secondhand.autofillStarted';
-  const startedBefore = () => { try { return localStorage.getItem(STARTED_KEY) === '1'; } catch { return false; } };
-  const noteStarted = () => { try { localStorage.setItem(STARTED_KEY, '1'); } catch { /* storage is a convenience here */ } };
+  const starts = () => { try { return Number(localStorage.getItem(STARTED_KEY)) || 0; } catch { return 0; } };
+  const startedBefore = () => starts() > 0;
+  const usedBefore = () => starts() > 1;
+  const noteStarted = () => { try { localStorage.setItem(STARTED_KEY, String(Math.min(starts() + 1, 2))); } catch { /* storage is a convenience here */ } };
   const followStarted = rerender => { window.addEventListener('storage', event => { if (event.key === STARTED_KEY) rerender(); }); };
   // The keyboard shortcuts Chrome gives SecondHand (chrome://extensions/shortcuts), by command: a button's tooltip
   // names the one set for it. Read once; `rerender` runs when they are known.
@@ -120,6 +124,13 @@
   }
   // What Iowa's applicant page asks while answers are left: SecondHand clicks Save and Continue once nothing is.
   const CHECK_FIRST = 'iowa.missingAnswers';
+  // A line's short form, for a reader who has seen it through a whole run (see usedBefore).
+  const BRIEF = Object.freeze({ [CHECK_FIRST]: 'result.movesOn' });
+  function briefly(message) {
+    if (!message?.key || !usedBefore()) return message;
+    if (Object.hasOwn(BRIEF, message.key)) return { key: BRIEF[message.key], params: {} };
+    return { key: message.key, params: Object.fromEntries(Object.entries(message.params || {}).map(([name, value]) => [name, value?.key ? briefly(value) : value])) };
+  }
   const withShortcut = (title, name) => [title, shortcuts[name] ? t('shortcut.keys', { keys: shortcuts[name] }) : ''].filter(Boolean).join(' ');
 
   applyStatic();
@@ -186,10 +197,12 @@
       // What the worker reported, in the side panel's words, without the count of what is left: the link beside
       // it carries that. While Autofill is on, what Stop would do goes after it: on a page that waits for answers,
       // where SecondHand clicks Save and Continue once nothing is left, that Stop lets the reader check and
-      // continue themselves. Why Chrome's AI guessed nothing stays in the tooltip.
-      const text = words(withLeft(fromResult(result), 0), 240);
+      // continue themselves. A reader who has seen a whole run gets the short form, without Stop's note. Why
+      // Chrome's AI guessed nothing stays in the tooltip.
+      const text = words(briefly(withLeft(fromResult(result), 0)), 240);
+      if (!autopilot || usedBefore()) return text;
       const stop = t(result.todoKey === CHECK_FIRST ? 'widget.stopToCheck' : 'widget.stopNote');
-      return autopilot ? `${/[.!?…。]$/.test(text) ? text : `${text}.`} ${stop}` : text;
+      return `${/[.!?…。]$/.test(text) ? text : `${text}.`} ${stop}`;
     }
     function render() {
       // There is a card for this page, unless the reader hid it. An outdated card keeps its steps on screen.
@@ -592,8 +605,8 @@
       // Where the questions left are listed by name, each row goes to its own.
       $('panel-left').hidden = !target || !left.length || named.length > 0;
       // While Autofill is on, what its button does now: on a page that waits for answers, that it lets the reader
-      // check and continue themselves.
-      $('stop-note').hidden = !target || !autopilot;
+      // check and continue themselves. A reader who has seen a whole run knows.
+      $('stop-note').hidden = !target || !autopilot || usedBefore();
       $('stop-note').textContent = t(checkFirst ? 'panel.stopToCheck' : 'panel.stopNote');
       $('panel-left').disabled = working;
       $('open-iowa').hidden = Boolean(target) || !away || halted;
@@ -821,7 +834,7 @@
       const loading = target?.status === 'loading';
       if (site?.enabled && !site.ready) show({ key: loading ? 'panel.waitingLoad' : 'panel.reloadToRead' });
       // What Autofill reported, with its count of what is left kept current as the reader answers.
-      else if (reported(result)) show(withLeft(fromResult(result), ran ? (named.length ? named.filter(item => !item.done).length : left.length) : fieldKeys(result.needYou).length), result.state === 'error');
+      else if (reported(result)) show(briefly(withLeft(fromResult(result), ran ? (named.length ? named.filter(item => !item.done).length : left.length) : fieldKeys(result.needYou).length)), result.state === 'error');
       else if (site && !site.enabled) show({ key: 'panel.siteOff', params: { host: hostOf(site.origin) } });
       // An information-only page of Iowa's says there is nothing to fill before Autofill is clicked.
       else if (site || (fillable && page.kind !== 'info')) show(null);
@@ -1193,7 +1206,7 @@
       if (!stopping && !site) noteStarted();
       const result = await act(stopping ? { type: 'ui:stop', confirmed: true } : { type: 'ui:autofill', confirmed: true }, { key: stopping ? 'panel.stopping' : 'panel.filling' });
       if (result) autopilot = !stopping && continuing(result);
-      if (reported(result)) show(fromResult(result), result.state === 'error');
+      if (reported(result)) show(briefly(fromResult(result)), result.state === 'error');
       controls();
       if (!stopping) await desktopStatus();
       await refresh();

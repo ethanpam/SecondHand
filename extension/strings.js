@@ -266,6 +266,7 @@
 
     'result.filled': { one: 'Filled {count} answer.', other: 'Filled {count} answers.' },
     'result.filledNeedYou': { one: 'Filled {count} answer · {needYou} left for you.', other: 'Filled {count} answers · {needYou} left for you.' },
+    'result.movesOn': 'SecondHand moves on once nothing is left.',
     'result.needYouNotSaved': '{count} left for you, with no saved answer.',
     'result.nothingNew': 'Nothing new to fill.',
     'result.nothingMatches': 'Nothing here matches your saved profile.',
@@ -642,6 +643,7 @@
 
     'result.filled': { one: 'Se llenó {count} respuesta.', other: 'Se llenaron {count} respuestas.' },
     'result.filledNeedYou': { one: 'Se llenó {count} respuesta · {needYou} sin contestar.', other: 'Se llenaron {count} respuestas · {needYou} sin contestar.' },
+    'result.movesOn': 'SecondHand avanzará cuando no falte nada.',
     'result.needYouNotSaved': 'Por contestar: {count}. No están en su perfil guardado.',
     'result.nothingNew': 'No hay nada nuevo que llenar.',
     'result.nothingMatches': 'Nada aquí coincide con su perfil guardado.',
@@ -1016,6 +1018,7 @@
 
     'result.filled': { one: 'Đã điền {count} câu trả lời.', other: 'Đã điền {count} câu trả lời.' },
     'result.filledNeedYou': { one: 'Đã điền {count} câu trả lời · {needYou} mục cần bạn.', other: 'Đã điền {count} câu trả lời · {needYou} mục cần bạn.' },
+    'result.movesOn': 'SecondHand sẽ đi tiếp khi không còn gì.',
     'result.needYouNotSaved': '{count} mục cần bạn. Chúng không có trong hồ sơ đã lưu của bạn.',
     'result.nothingNew': 'Không có gì mới để điền.',
     'result.nothingMatches': 'Không có mục nào ở đây khớp với hồ sơ đã lưu của bạn.',
@@ -1391,6 +1394,7 @@
 
     'result.filled': { one: '已填写 {count} 个答案。', other: '已填写 {count} 个答案。' },
     'result.filledNeedYou': { one: '已填写 {count} 个答案 · {needYou} 项需要您处理。', other: '已填写 {count} 个答案 · {needYou} 项需要您处理。' },
+    'result.movesOn': '全部填完后，SecondHand 会继续。',
     'result.needYouNotSaved': '{count} 项需要您处理。它们不在您保存的资料中。',
     'result.nothingNew': '没有新的内容需要填写。',
     'result.nothingMatches': '这里没有与您保存的资料相符的内容。',
@@ -1766,6 +1770,7 @@
 
     'result.filled': { one: '{count} réponse remplie.', other: '{count} réponses remplies.' },
     'result.filledNeedYou': { one: '{count} réponse remplie · {needYou} pour vous.', other: '{count} réponses remplies · {needYou} pour vous.' },
+    'result.movesOn': 'SecondHand avance quand plus rien ne manque.',
     'result.needYouNotSaved': '{count} question(s) pour vous. Elles ne sont pas dans votre profil enregistré.',
     'result.nothingNew': 'Rien de nouveau à remplir.',
     'result.nothingMatches': 'Rien ici ne correspond à votre profil enregistré.',
@@ -2141,6 +2146,7 @@
 
     'result.filled': { one: 'الإجابات المعبأة: {count}.', other: 'الإجابات المعبأة: {count}.' },
     'result.filledNeedYou': { one: 'الإجابات المعبأة: {count} · بحاجة إليك: {needYou}.', other: 'الإجابات المعبأة: {count} · بحاجة إليك: {needYou}.' },
+    'result.movesOn': 'يتابع SecondHand عندما لا يتبقى شيء.',
     'result.needYouNotSaved': 'بحاجة إليك: {count}. هذه الأسئلة ليست في ملفك المحفوظ.',
     'result.nothingNew': 'لا يوجد شيء جديد للتعبئة.',
     'result.nothingMatches': 'لا شيء هنا يطابق ملفك المحفوظ.',

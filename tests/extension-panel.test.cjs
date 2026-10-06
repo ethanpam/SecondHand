@@ -1073,11 +1073,14 @@ test('a widget that loads mid-run picks up the running autofill', async t => {
   assert.equal(view.get('widget-text').textContent, 'Type the characters shown in Iowa’s security check, then click Continue. Stop erases nothing.');
 });
 
+// Autofill on Iowa's applicant page, waiting for one answer: once nothing is left, it clicks Save and Continue.
+const missingResult = { state: 'done', filled: 3, needYou: ['firstName'], pageKey: 'iowa-personal-information',
+  message: 'Filled 3 answers · 1 left for you. Check what was filled before you answer what is left: once nothing is left, SecondHand clicks Save and Continue.',
+  messageKey: 'result.thenTodo', messageParams: { summary: { key: 'result.filledNeedYou', params: { count: 3, needYou: 1 } }, todo: { key: 'iowa.missingAnswers', params: {} } },
+  todo: 'Check what was filled before you answer what is left: once nothing is left, SecondHand clicks Save and Continue.', todoKey: 'iowa.missingAnswers', todoParams: {} };
+
 test('while Autofill waits for answers it would save and continue after, both surfaces say Stop lets the reader check first', async t => {
-  const missing = { state: 'done', filled: 3, needYou: ['firstName'], pageKey: 'iowa-personal-information',
-    message: 'Filled 3 answers · 1 left for you. Check what was filled before you answer what is left: once nothing is left, SecondHand clicks Save and Continue.',
-    messageKey: 'result.thenTodo', messageParams: { summary: { key: 'result.filledNeedYou', params: { count: 3, needYou: 1 } }, todo: { key: 'iowa.missingAnswers', params: {} } },
-    todo: 'Check what was filled before you answer what is left: once nothing is left, SecondHand clicks Save and Continue.', todoKey: 'iowa.missingAnswers', todoParams: {} };
+  const missing = missingResult;
   const side = await panel(t, { autopilot: true, result: missing });
   assert.ok(side.get('status').textContent.endsWith(missing.todo));
   assert.equal(side.get('stop-note').textContent, 'To check and continue yourself, click Stop Autofill. It erases nothing.');
@@ -1086,6 +1089,22 @@ test('while Autofill waits for answers it would save and continue after, both su
   // Anywhere else, Stop only ends Autofill.
   const waiting = await panel(t, { autopilot: true, result: waitingResult });
   assert.equal(waiting.get('stop-note').textContent, 'Stop ends Autofill and erases nothing.');
+});
+
+test('once Autofill has been started again from this Chrome, both surfaces say the short form of what it waits for, without Stop’s note', async t => {
+  const storage = new Map([['secondhand.autofillStarted', '2']]);
+  const card = await panel(t, { launcher: true, storage, autopilot: true, result: missingResult });
+  assert.equal(card.get('widget-text').textContent, 'Filled 3 answers. SecondHand moves on once nothing is left.');
+  assert.equal(card.get('widget-text').title, missingResult.message, 'all of it stays in the tooltip');
+  const side = await panel(t, { storage, autopilot: true, result: missingResult });
+  assert.match(side.get('status').textContent, /^Filled 3 answers · \d left for you\. SecondHand moves on once nothing is left\.$/);
+  assert.equal(side.get('stop-note').hidden, true);
+  // Anywhere else the line is as it was, without Stop's note.
+  const message = await panel(t, { launcher: true, storage, kind: 'blocked', autopilot: true, result: waitingResult });
+  assert.equal(message.get('widget-text').textContent, 'Type the characters shown in Iowa’s security check, then click Continue.');
+  // Through the first run, all of it.
+  const first = await panel(t, { launcher: true, storage: new Map([['secondhand.autofillStarted', '1']]), autopilot: true, result: missingResult });
+  assert.match(first.get('widget-text').textContent, /once nothing is left, SecondHand clicks Save and Continue\. To check and continue yourself, click Stop\. It erases nothing\.$/);
 });
 
 test('side panel turns its button into Stop while autofill is on', async t => {
@@ -1495,6 +1514,10 @@ test('Iowa widget and sidebar say what Autofill will do before it is clicked, in
   const laterWidget = await panel(t, { launcher: true, storage });
   await laterWidget.userClick('autofill');
   assert.deepEqual([...storage.keys()].sort(), ['secondhand.autofillStarted', 'secondhand.build'], 'the widget notes a start too; the side panel had noted its build');
+  assert.equal(storage.get('secondhand.autofillStarted'), '2', 'counted up to two: started again');
+  const third = await panel(t, { launcher: true, storage });
+  await third.userClick('autofill');
+  assert.equal(storage.get('secondhand.autofillStarted'), '2');
   // Another site's Autofill fills once and notes nothing.
   const siteStorage = new Map();
   const siteWidget = await panel(t, { launcher: true, storage: siteStorage, tab: SITE, site: { origin: ORIGIN, enabled: true } });
