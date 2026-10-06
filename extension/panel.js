@@ -849,6 +849,8 @@
       const label = document.createElement('span'); label.className = 'checklist-label'; label.textContent = fixedText(own || item.label, 400);
       const original = document.createElement('span'); original.className = 'checklist-detail'; original.textContent = own && own !== item.label ? fixedText(item.label, 400) : '';
       original.hidden = !original.textContent;
+      // SecondHand's own label stands for English words of the form; a page's words are in the page's language.
+      if (item.labelKey) original.lang = 'en';
       copy.append(label, original);
       row.append(copy);
       return row;

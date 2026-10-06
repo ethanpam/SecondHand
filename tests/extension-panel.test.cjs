@@ -1550,6 +1550,8 @@ test('the side panel lists every question in Spanish; a row click finds it throu
     ['BUTTON', spanish('iowa.firstName'), 'First name'],
     ['BUTTON', '[es] Preferred pickup day', 'Preferred pickup day']]);
   assert.equal(rows[1].querySelector('.checklist-detail').hidden, false);
+  assert.equal(rows[1].querySelector('.checklist-detail').getAttribute('lang'), 'en', 'the English under SecondHand’s own label is marked as English');
+  assert.equal(rows[2].querySelector('.checklist-detail').getAttribute('lang'), null, 'a page’s own words are in the page’s language');
   assert.equal(view.get('questions').hidden, false);
   assert.equal(view.get('questions-summary').textContent, strings.text('es', 'questions.count', { count: 2 }));
   assert.equal(view.get('questions-note').textContent, spanish('translate.done'));
