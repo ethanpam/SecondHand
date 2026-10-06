@@ -94,6 +94,11 @@ if (nativeOrigin) {
   // always, and the profile's own age counts while the household list sets them.
   const AGE_COUNT_FIELDS = Object.freeze(['householdAdults', 'householdChildren', 'householdSeniors']);
   const MAX_TRUSTED_SITES = 50;
+  // A trusted site's host name is at most 253 characters, the longest DNS allows, so its origin is at most 261.
+  const MAX_HOST_LENGTH = 253;
+  const hostTooLong = origin => new URL(origin).hostname.length > MAX_HOST_LENGTH;
+  // settings.json at its largest: 50 origins of 261 characters (13.2 KB) and the other settings. 16 KB holds it.
+  const MAX_SETTINGS_BYTES = 16 * 1024;
   // The guided first-run setup's progress: how many of its six steps are done. Not sensitive, and kept
   // beside the settings only while the setup is under way.
   const SETUP_STEPS = 6;
@@ -197,7 +202,7 @@ if (nativeOrigin) {
   async function loadSettings() {
     let text = null;
     try {
-      if ((await fs.stat(configPath)).size <= 4096) text = await fs.readFile(configPath, 'utf8');
+      if ((await fs.stat(configPath)).size <= MAX_SETTINGS_BYTES) text = await fs.readFile(configPath, 'utf8');
     } catch (error) { if (error.code === 'ENOENT') return; }
     let config;
     try { config = JSON.parse(text); } catch { config = null; }
@@ -208,7 +213,7 @@ if (nativeOrigin) {
       return;
     }
     if (EXTENSION_ID.test(config.extensionId || '')) { extensionId = config.extensionId; autofillWithoutAsking = config.autofillWithoutAsking === true; }
-    if (Array.isArray(config.trustedSites)) trustedSites = [...new Set(config.trustedSites.filter(origin => typeof origin === 'string' && siteOrigin(origin) === origin))].slice(0, MAX_TRUSTED_SITES);
+    if (Array.isArray(config.trustedSites)) trustedSites = [...new Set(config.trustedSites.filter(origin => typeof origin === 'string' && siteOrigin(origin) === origin && !hostTooLong(origin)))].slice(0, MAX_TRUSTED_SITES);
     if (typeof config.layaEnabled === 'boolean') layaEnabled = config.layaEnabled;
     allSites = config.allSites === true;
   }
@@ -395,6 +400,7 @@ if (nativeOrigin) {
     requireUnlocked();
     if (request.type === 'trustSite') {
       const origin = siteOrigin(request.url);
+      if (origin && hostTooLong(origin)) throw publicError('This site’s address is too long for SecondHand to trust.');
       if (fieldRequestPending) throw publicError('Another request is waiting for your approval.');
       fieldRequestPending = true;
       const generation = accessRevision;
