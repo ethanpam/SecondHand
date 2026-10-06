@@ -194,8 +194,8 @@
       // another site's name before Autofill is no news.
       const message = outdated || Boolean(note) || working || (result ? !locked && !closed : known && !site);
       $('widget-text').classList.toggle('visually-hidden', !message);
-      // The translated view is offered until Autofill has something to report.
-      $('translate-offer').hidden = outdated || Boolean(note) || working || Boolean(result) || !known || !pageLanguage || pageLanguage === language;
+      // The translated view is offered whenever the page is in another language, before and after Autofill.
+      $('translate-offer').hidden = outdated || Boolean(note) || working || !known || !pageLanguage || pageLanguage === language;
       // When the frame can't hold the whole notice, the short form says what to do. Letters overhang
       // their line by a pixel or so; a line cut off is 14px more.
       if (outdated && $('widget-text').scrollHeight - $('widget-text').clientHeight > 7) $('widget-text').textContent = t((OUTDATED_LINES[outdatedKey] || OUTDATED_LINES['panel.outdated'])[1]);

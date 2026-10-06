@@ -1645,10 +1645,11 @@ test('the widget offers the Spanish view when the page is in English, and the of
   const elsewhere = await panel(t, { launcher: true, language: 'es-ES', tab: SITE, site: { origin: ORIGIN, enabled: true }, Translator: translatorStub().Translator, LanguageDetector: detectorStub({ failure: new Error('Synthetic detector failure') }).LanguageDetector, questions: pageQuestions });
   await settle();
   assert.equal(elsewhere.get('widget-text').textContent, spanish('widget.languageCheckFailed'));
-  // Once Autofill has something to report, the offer makes room for it.
+  // The offer stays once Autofill has something to report: the reader still needs the questions in their language.
   await view.userClick('autofill');
-  assert.equal(view.get('translate-offer').hidden, true);
+  assert.equal(view.get('translate-offer').hidden, false);
   assert.equal(view.get('widget-text').classList.contains('visually-hidden'), false);
+  assert.equal(view.get('need-you').hidden, false);
 });
 
 test('when the widget’s offer opened the side panel, the panel shows the list by itself and asks for a click only to download', async t => {
