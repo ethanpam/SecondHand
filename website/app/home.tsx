@@ -117,8 +117,8 @@ export function Home() {
                 person’s saved job, private pension, Social Security, rent,
                 utilities or cash. It does this only when it knows every
                 question on the page and every required answer is filled in. If
-                an answer is missing, or Iowa shows an error or pop-up, it stays
-                on that page. Anywhere else, you move on yourself. You handle
+                a required answer is missing, or Iowa shows an error or pop-up,
+                it stays on that page. Anywhere else, you move on yourself. You handle
                 consent, signatures and submission.
               </p>
               <p>
