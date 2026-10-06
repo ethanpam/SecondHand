@@ -153,7 +153,7 @@ function createTouchIdUnlock({ vault, platform, filePath, revision }) {
     } finally { record?.key.fill(0); }
   }
 
-  // A restored backup or a new password: the information is a different one, so the key goes.
+  // A new password: the information is a different one, so the key goes.
   async function forget() {
     try { await removeSealed(); }
     catch (error) { notice = `Touch ID’s key on this Mac couldn’t be removed (${error.message}). Turn Touch ID off in Privacy & backups.`; }
