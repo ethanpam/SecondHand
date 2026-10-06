@@ -52,7 +52,8 @@ function createFieldAnswers({ laya, now = Date.now, today } = {}) {
   // `answers` are the sure ones; `sensitive` lists those that needed a sensitive fact, and `sensitiveFields` the saved
   // fields behind the sensitive facts the model was given. With `guess`, `guesses` are Laya's best guesses on the
   // guessable questions it has no sure answer for, from the everyday facts alone: its top option where that beats
-  // "the facts don't say" (bestGuess). They come from the passes asked for the answers, never another.
+  // "the facts don't say" (bestGuess). They come from the passes asked for the answers, never another. Autofill doesn't
+  // ask for them (#189); ML_model/eval/app_accuracy.cjs does, to measure how many a model gets right.
   async function answer({ questions, profile, budgetMs, today: day = today, guess = false }) {
     const more = budget(budgetMs, now);
     const { format, bars } = await barsFor(laya);

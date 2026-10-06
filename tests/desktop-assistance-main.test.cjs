@@ -1405,7 +1405,8 @@ test('the desktop stops Laya at the time the click has left, and a decision that
   assert.deepEqual(plain((await slow.request(answerRequest([veteran], { budgetMs: 3000 }))).answers), { 'f0:sh-1-4': 'No' });
 });
 
-// #185: a question Laya has no sure answer for, where its best guess beats "the facts don't say".
+// #185: a question Laya has no sure answer for, where its best guess beats "the facts don't say". Its guesses were
+// mostly wrong on the final holdout (#189: ML_model/eval/reports/*-final-app-fills.json), so Autofill asks for none.
 const sizeQuestion = { id: 'f0:sh-1-5', label: 'How many people live in your household?', type: 'radio', options: ['1', '2', '3 or more'] };
 const guessesSize = state => state.question === sizeQuestion.label ? (state.candidate.startsWith('None') ? 0.3 : { 1: 0.6, 2: 0.1, '3 or more': 0.05 }[state.candidate]) : sixtyFromAge(state);
 async function guessing(settings) {
@@ -1413,64 +1414,21 @@ async function guessing(settings) {
   await app.invoke('saveProfile', household);
   return app;
 }
-const GUESS_NOTE = 'Laya isn’t sure of the answers marked “a guess”. SecondHand marks them on the page for you to check.';
 
-test('#185: off Iowa’s portal, Laya’s best guesses come back beside its sure answers, through the same approval, each marked as a guess in the prompt', async () => {
-  const app = await guessing(asking);
-  app.answer(async () => ({ response: 1 }));
-  const once = plain(await app.request(answerRequest([veteran, sizeQuestion])));
-  assert.deepEqual(once.answers, { [veteran.id]: 'No' });
-  assert.deepEqual(once.guesses, { [sizeQuestion.id]: '1' });
-  assert.equal(app.prompts.length, 1, 'one prompt for the answers and the guesses');
-  const [prompt] = app.prompts;
-  assert.equal(prompt.title, 'Let Chrome fill this form?');
-  assert.equal(prompt.message, 'Fill these answers into https://pantry.example.org?');
-  assert.match(prompt.detail, /“Is anyone in your household a veteran\?”: No\n“How many people live in your household\?”: 1 \(a guess\)\n\nLaya isn’t sure/);
-  assert.ok(prompt.detail.includes(GUESS_NOTE));
-
-  app.answer(async () => ({ response: 0 }));
-  assert.deepEqual(plain(await app.request(answerRequest([sizeQuestion]))), { answers: {}, guesses: {}, accessRevision: once.accessRevision }, 'Cancel releases no guess');
-  assert.equal(app.prompts.at(-1).message, 'Fill this answer into https://pantry.example.org?');
-  assert.match(app.prompts.at(-1).detail, /“How many people live in your household\?”: 1 \(a guess\)/);
-
-  const allowed = await guessing(trusted);
-  assert.deepEqual(plain((await allowed.request(answerRequest([sizeQuestion]))).guesses), { [sizeQuestion.id]: '1' });
-  assert.equal(allowed.prompts.length, 0, 'Always allow covers guesses as it covers sure answers');
-  const sure = await answering(asking);
-  sure.answer(async () => ({ response: 1 }));
-  await sure.request(answerRequest([veteran]));
-  assert.equal(sure.prompts[0].detail.includes(GUESS_NOTE), false, 'without a guess, the prompt says nothing about guesses');
-});
-
-test('#185: on Iowa’s portal Laya never guesses; a question it isn’t sure of stays with the applicant', async () => {
-  const iowa = answerRequest([veteran, sizeQuestion], { url: `${PORTAL_URL}/applyForBenefits/financialInfo` });
-  const app = await guessing({ extensionId, autofillWithoutAsking: true });
-  assert.deepEqual(plain(await app.request(iowa)), { answers: { [veteran.id]: 'No' }, guesses: {}, accessRevision: (await app.request({ type: 'status' })).accessRevision });
-  const asked = await guessing({ extensionId });
-  asked.answer(async () => ({ response: 1 }));
-  await asked.request(iowa);
-  assert.doesNotMatch(asked.prompts[0].detail, /How many people|a guess/);
-});
-
-test('#185: the "Share sensitive details?" prompt lists the guesses too, and its Cancel leaves them to the everyday prompt', async () => {
-  const app = await guessing(asking);
-  app.answer(async () => ({ response: 1 }));
-  const allowed = plain(await app.request(answerRequest([sixty, sizeQuestion])));
-  assert.deepEqual([allowed.answers, allowed.guesses], [{ [sixty.id]: 'No' }, { [sizeQuestion.id]: '1' }]);
-  const [sensitive] = app.prompts;
-  assert.equal(sensitive.title, 'Share sensitive details?');
-  assert.equal(sensitive.message, 'Fill these 2 answers on https://pantry.example.org? 1 of them uses sensitive details.');
-  assert.match(sensitive.detail, /“Is anyone in your household 60 or older\?”: No\n“How many people live in your household\?”: 1 \(a guess\)/);
-  assert.ok(sensitive.detail.includes(GUESS_NOTE));
-
-  const responses = [0, 1];
-  app.answer(async () => ({ response: responses.shift() }));
-  const kept = plain(await app.request(answerRequest([sixty, sizeQuestion])));
-  assert.deepEqual([kept.answers, kept.guesses], [{}, { [sizeQuestion.id]: '1' }], 'Cancel drops only the answer that needed sensitive details');
-  const everyday = app.prompts.at(-1);
-  assert.equal(everyday.title, 'Let Chrome fill this form?');
-  assert.match(everyday.detail, /“How many people live in your household\?”: 1 \(a guess\)/);
-  assert.doesNotMatch(everyday.detail, /60 or older/);
+test('#189: Autofill asks Laya for no best guesses on any site: Laya fills only sure answers, and a question it isn’t sure of stays with the applicant', async () => {
+  for (const url of [PANTRY, `${PORTAL_URL}/applyForBenefits/financialInfo`]) {
+    const allowed = await guessing(trusted);
+    const reply = plain(await allowed.request(answerRequest([veteran, sizeQuestion], { url })));
+    assert.deepEqual(reply, { answers: { [veteran.id]: 'No' }, accessRevision: (await allowed.request({ type: 'status' })).accessRevision }, url);
+    const asked = await guessing(asking);
+    asked.answer(async () => ({ response: 1 }));
+    assert.deepEqual(plain((await asked.request(answerRequest([veteran, sizeQuestion], { url }))).answers), { [veteran.id]: 'No' }, url);
+    assert.equal(asked.prompts.length, 1, url);
+    assert.doesNotMatch(asked.prompts[0].detail, /How many people|a guess/, url);
+    // A question with only a best guess is never offered for approval.
+    assert.deepEqual(plain(await asked.request(answerRequest([sizeQuestion], { url }))), { answers: {}, accessRevision: (await asked.request({ type: 'status' })).accessRevision }, url);
+    assert.equal(asked.prompts.length, 1, url);
+  }
 });
 
 test('warmLaya loads Laya’s model before a click’s questions are asked and answers with Laya’s state; it reads no saved answers and needs no unlock', async () => {

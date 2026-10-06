@@ -65,7 +65,7 @@ test('every question is decided however slow the model is: no request carries th
   assert.equal(result.answering.filled, 4);
 });
 
-test('#189: Laya’s best guesses, asked for as Autofill asks off Iowa’s portal, are counted apart from its sure answers', async () => {
+test('#189: Laya’s best guesses are asked for and counted apart from its sure answers, though Autofill doesn’t ask for them', async () => {
   const result = await appAccuracy({ laya: leansFirst(), bank, households, today: TODAY });
   // Never sure, so no sure answer: each yes/no question asked gets its first option as a guess, for each household.
   assert.deepEqual(result.answering, { decisions: 6, filled: 0, right: 0, wrong: [] });

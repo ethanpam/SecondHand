@@ -5,8 +5,8 @@
 // boxes. Every fill is checked against the answer key (dataset/build.cjs): a wrong fill is an answer the key
 // doesn't give, including any fill where the key says the facts don't say. The click's clock is held still and its
 // time limit left off each request, so every question is decided however long the model takes on a busy
-// computer; tests/laya-parity.test.cjs checks speed. Laya's best guesses (#185), asked for as Autofill asks off
-// Iowa's portal, are checked against the same key apart from its sure answers: a report, never a budget (#189).
+// computer; tests/laya-parity.test.cjs checks speed. Laya's best guesses (#185) are asked for too, though Autofill
+// doesn't ask for them, and checked against the same key apart from its sure answers: a report, never a budget (#189).
 //
 //   node ML_model/eval/app_accuracy.cjs --model <export folder> --format <format> [--per-question 8] [--out <report.json>]
 // tests/laya-parity.test.cjs runs it with SECONDHAND_LAYA_ACCURACY=1 and checks WRONG_FILL_BUDGETS.
