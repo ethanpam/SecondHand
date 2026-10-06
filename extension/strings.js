@@ -37,6 +37,7 @@
     'widget.filledGuessed': 'Filled {count} · {guessed} guessed',
     'widget.suggestedByLaya': 'suggested by Laya',
     'widget.held': { one: '{count} sensitive detail waits in the side panel', other: '{count} sensitive details wait in the side panel' },
+    'widget.layaGuessed': { one: '{count} guessed by Laya, check it', other: '{count} guessed by Laya, check them' },
     'widget.nothingMatches': 'Nothing here matches your saved profile.',
     'widget.needYou': { one: '{count} need you', other: '{count} need you' },
     'widget.findInForm': 'Find it in the form.',
@@ -125,6 +126,9 @@
     'held.hint': 'SecondHand fills these only after you allow it in the SecondHand app.',
     'held.fill': 'Fill sensitive details',
     'held.filling': 'Allow or cancel in the SecondHand app.',
+    'guesses.title': 'Guessed by Laya, check them',
+    'guesses.hint': 'Laya wasn’t sure of these answers, so each has a dotted outline on the page. Click one to find it and check it.',
+    'guesses.rowLabel': 'Find Laya’s guess for “{label}” on the page',
     'checklist.summary': '{done} of {total} done',
     'checklist.rowLabel': '{label}: {status}. Find it in Iowa’s form.',
 
@@ -256,6 +260,7 @@
     'result.nothingToFillNext': 'Nothing to fill here. Click Next, then Autofill again.',
     'result.nothingToFill': 'Nothing to fill here.',
     'result.suggestedByLaya': '{summary} Guesses were suggested by Laya on this computer.',
+    'result.layaGuessed': { one: '{summary} {count} guessed by Laya, check it.', other: '{summary} {count} guessed by Laya, check them.' },
 
     // The Iowa adapter's labels, instructions, and reasons, word for word.
     'iowa.firstName': 'First name',
@@ -390,6 +395,7 @@
     'widget.filledGuessed': 'Completadas: {count} · por IA: {guessed}',
     'widget.suggestedByLaya': 'sugeridas por Laya',
     'widget.held': { one: '{count} dato sensible espera en el panel lateral', other: '{count} datos sensibles esperan en el panel lateral' },
+    'widget.layaGuessed': { one: '{count} respuesta adivinada por Laya, revísela', other: '{count} respuestas adivinadas por Laya, revíselas' },
     'widget.nothingMatches': 'Nada aquí coincide con su perfil guardado.',
     'widget.needYou': { one: 'Falta {count}', other: 'Faltan {count}' },
     'widget.findInForm': 'Búsquelo en el formulario.',
@@ -478,6 +484,9 @@
     'held.hint': 'SecondHand los llena solo después de que usted lo permita en la aplicación SecondHand.',
     'held.fill': 'Llenar datos sensibles',
     'held.filling': 'Permita o cancele en la aplicación SecondHand.',
+    'guesses.title': 'Respuestas adivinadas por Laya, revíselas',
+    'guesses.hint': 'Estas respuestas son suposiciones de Laya, así que cada una tiene un contorno punteado en la página. Haga clic en una para encontrarla y revisarla.',
+    'guesses.rowLabel': 'Buscar en la página la respuesta que Laya adivinó para “{label}”',
     'checklist.summary': '{done} de {total} listas',
     'checklist.rowLabel': '{label}: {status}. Búsquelo en el formulario de Iowa.',
 
@@ -608,6 +617,7 @@
     'result.nothingToFillNext': 'No hay nada que llenar aquí. Haga clic en “Next” y luego en “Autocompletar” otra vez.',
     'result.nothingToFill': 'No hay nada que llenar aquí.',
     'result.suggestedByLaya': '{summary} Laya sugirió las suposiciones en esta computadora.',
+    'result.layaGuessed': { one: '{summary} {count} respuesta adivinada por Laya, revísela.', other: '{summary} {count} respuestas adivinadas por Laya, revíselas.' },
 
     'iowa.firstName': 'Nombre',
     'iowa.middleName': 'Segundo nombre',
@@ -740,6 +750,7 @@
     'widget.filledGuessed': 'Đã điền {count} · {guessed} là đoán',
     'widget.suggestedByLaya': 'do Laya gợi ý',
     'widget.held': { one: '{count} thông tin nhạy cảm đang chờ trong bảng bên', other: '{count} thông tin nhạy cảm đang chờ trong bảng bên' },
+    'widget.layaGuessed': { one: '{count} câu do Laya đoán, hãy kiểm tra', other: '{count} câu do Laya đoán, hãy kiểm tra' },
     'widget.nothingMatches': 'Không có mục nào ở đây khớp với hồ sơ đã lưu của bạn.',
     'widget.needYou': { one: '{count} mục cần bạn', other: '{count} mục cần bạn' },
     'widget.findInForm': 'Hãy tìm nó trong biểu mẫu.',
@@ -828,6 +839,9 @@
     'held.hint': 'SecondHand chỉ điền các mục này sau khi bạn cho phép trong ứng dụng SecondHand.',
     'held.fill': 'Điền thông tin nhạy cảm',
     'held.filling': 'Hãy cho phép hoặc hủy trong ứng dụng SecondHand.',
+    'guesses.title': 'Câu do Laya đoán, hãy kiểm tra',
+    'guesses.hint': 'Laya không chắc các câu trả lời này, nên mỗi câu có viền chấm trên trang. Bấm vào một câu để tìm và kiểm tra.',
+    'guesses.rowLabel': 'Tìm câu Laya đoán cho “{label}” trên trang',
     'checklist.summary': 'Xong {done} trên {total}',
     'checklist.rowLabel': '{label}: {status}. Hãy tìm nó trong biểu mẫu của Iowa.',
 
@@ -958,6 +972,7 @@
     'result.nothingToFillNext': 'Ở đây không có gì để điền. Hãy bấm “Next”, rồi bấm Tự điền lại.',
     'result.nothingToFill': 'Ở đây không có gì để điền.',
     'result.suggestedByLaya': '{summary} Các câu đoán do Laya gợi ý trên máy này.',
+    'result.layaGuessed': { one: '{summary} {count} câu do Laya đoán, hãy kiểm tra.', other: '{summary} {count} câu do Laya đoán, hãy kiểm tra.' },
 
     'iowa.firstName': 'Tên',
     'iowa.middleName': 'Tên đệm',
@@ -1091,6 +1106,7 @@
     'widget.filledGuessed': '已填写 {count} 项 · {guessed} 项为推测',
     'widget.suggestedByLaya': '由 Laya 建议',
     'widget.held': { one: '{count} 项敏感信息在侧边栏中等待', other: '{count} 项敏感信息在侧边栏中等待' },
+    'widget.layaGuessed': { one: 'Laya 推测了 {count} 项，请检查', other: 'Laya 推测了 {count} 项，请检查' },
     'widget.nothingMatches': '这里没有与您保存的资料相符的内容。',
     'widget.needYou': { one: '{count} 项需要您处理', other: '{count} 项需要您处理' },
     'widget.findInForm': '请在表格中找到它。',
@@ -1179,6 +1195,9 @@
     'held.hint': '只有在您于 SecondHand 应用中允许后，SecondHand 才会填写这些内容。',
     'held.fill': '填写敏感信息',
     'held.filling': '请在 SecondHand 应用中允许或取消。',
+    'guesses.title': 'Laya 推测的答案，请检查',
+    'guesses.hint': 'Laya 对这些答案没有把握，因此每一项在页面上都有点状轮廓。点击一项即可找到并检查。',
+    'guesses.rowLabel': '在页面上查找 Laya 对“{label}”的推测',
     'checklist.summary': '已完成 {done}/{total}',
     'checklist.rowLabel': '{label}：{status}。请在爱荷华州的表格中找到它。',
 
@@ -1309,6 +1328,7 @@
     'result.nothingToFillNext': '这里没有可填写的内容。请点击 “Next”，然后再次点击自动填写。',
     'result.nothingToFill': '这里没有可填写的内容。',
     'result.suggestedByLaya': '{summary}推测内容由本机上的 Laya 建议。',
+    'result.layaGuessed': { one: '{summary}Laya 推测了 {count} 项，请检查。', other: '{summary}Laya 推测了 {count} 项，请检查。' },
 
     'iowa.firstName': '名字',
     'iowa.middleName': '中间名',
@@ -1442,6 +1462,7 @@
     'widget.filledGuessed': '{count} rempli(s) · {guessed} deviné(s)',
     'widget.suggestedByLaya': 'suggéré par Laya',
     'widget.held': { one: '{count} information sensible attend dans le panneau latéral', other: '{count} informations sensibles attendent dans le panneau latéral' },
+    'widget.layaGuessed': { one: '{count} réponse devinée par Laya, vérifiez-la', other: '{count} réponses devinées par Laya, vérifiez-les' },
     'widget.nothingMatches': 'Rien ici ne correspond à votre profil enregistré.',
     'widget.needYou': { one: '{count} question pour vous', other: '{count} questions pour vous' },
     'widget.findInForm': 'Trouvez-la dans le formulaire.',
@@ -1530,6 +1551,9 @@
     'held.hint': 'SecondHand ne les remplit qu’après votre accord dans l’application SecondHand.',
     'held.fill': 'Remplir les informations sensibles',
     'held.filling': 'Autorisez ou annulez dans l’application SecondHand.',
+    'guesses.title': 'Réponses devinées par Laya, à vérifier',
+    'guesses.hint': 'Laya a deviné ces réponses sans certitude : chacune a un contour en pointillés sur la page. Cliquez sur l’une d’elles pour la trouver et la vérifier.',
+    'guesses.rowLabel': 'Trouver sur la page la réponse devinée par Laya pour « {label} »',
     'checklist.summary': '{done} sur {total} faits',
     'checklist.rowLabel': '{label} : {status}. Trouvez-le dans le formulaire de l’Iowa.',
 
@@ -1660,6 +1684,7 @@
     'result.nothingToFillNext': 'Rien à remplir ici. Cliquez sur « Next », puis de nouveau sur Remplir.',
     'result.nothingToFill': 'Rien à remplir ici.',
     'result.suggestedByLaya': '{summary} Les réponses devinées ont été suggérées par Laya sur cet ordinateur.',
+    'result.layaGuessed': { one: '{summary} {count} réponse devinée par Laya, vérifiez-la.', other: '{summary} {count} réponses devinées par Laya, vérifiez-les.' },
 
     'iowa.firstName': 'Prénom',
     'iowa.middleName': 'Deuxième prénom',
@@ -1793,6 +1818,7 @@
     'widget.filledGuessed': 'تمت التعبئة: {count} · تخمين: {guessed}',
     'widget.suggestedByLaya': 'اقترحها Laya',
     'widget.held': { one: 'بيانات حساسة تنتظر في اللوحة الجانبية: {count}', other: 'بيانات حساسة تنتظر في اللوحة الجانبية: {count}' },
+    'widget.layaGuessed': { one: 'إجابات خمّنها Laya، تحقق منها: {count}', other: 'إجابات خمّنها Laya، تحقق منها: {count}' },
     'widget.nothingMatches': 'لا شيء هنا يطابق ملفك المحفوظ.',
     'widget.needYou': { one: 'بحاجة إليك: {count}', other: 'بحاجة إليك: {count}' },
     'widget.findInForm': 'ابحث عنه في النموذج.',
@@ -1881,6 +1907,9 @@
     'held.hint': 'لا يعبئ SecondHand هذه البيانات إلا بعد أن تسمح بذلك في تطبيق SecondHand.',
     'held.fill': 'تعبئة البيانات الحساسة',
     'held.filling': 'اسمح أو ألغِ في تطبيق SecondHand.',
+    'guesses.title': 'إجابات خمّنها Laya، تحقق منها',
+    'guesses.hint': 'لم يكن Laya متأكدًا من هذه الإجابات، لذلك لكل منها إطار منقّط في الصفحة. انقر على إجابة للعثور عليها والتحقق منها.',
+    'guesses.rowLabel': 'ابحث في الصفحة عن تخمين Laya لـ “{label}”',
     'checklist.summary': 'تم: {done} من {total}',
     'checklist.rowLabel': '{label}: {status}. ابحث عنه في نموذج أيوا.',
 
@@ -2011,6 +2040,7 @@
     'result.nothingToFillNext': 'لا يوجد ما يُعبّأ هنا. انقر على “Next”، ثم على تعبئة تلقائية مرة أخرى.',
     'result.nothingToFill': 'لا يوجد ما يُعبّأ هنا.',
     'result.suggestedByLaya': '{summary} اقترح Laya التخمينات على هذا الكمبيوتر.',
+    'result.layaGuessed': { one: '{summary} إجابات خمّنها Laya، تحقق منها: {count}.', other: '{summary} إجابات خمّنها Laya، تحقق منها: {count}.' },
 
     'iowa.firstName': 'الاسم الأول',
     'iowa.middleName': 'الاسم الأوسط',

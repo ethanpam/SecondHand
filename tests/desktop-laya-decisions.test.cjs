@@ -35,6 +35,18 @@ test('the best candidate is used only when it clears the bar, beats "the facts d
   assert.equal(pick([0.99], ANSWER_THRESHOLD), -1, 'abstain alone is never an answer');
 });
 
+test('#185: Laya’s best guess is its top-scoring option when that one alone beats "the facts don’t say", with no bar and no lead', () => {
+  const { bestGuess } = decisions;
+  assert.equal(bestGuess([0.4, 0.1, 0.3]), 0, 'well under the bar, but ahead of abstaining');
+  assert.equal(bestGuess([0.2, 0.31, 0.3]), 1, 'any lead over abstaining is enough');
+  assert.equal(bestGuess([0.4, 0.39, 0.1]), 0, 'a close runner-up doesn’t stop a guess');
+  assert.equal(bestGuess([0.4, 0.1, 0.4]), -1, 'a tie with abstain is not a win');
+  assert.equal(bestGuess([0.2, 0.1, 0.6]), -1, 'abstain scores higher');
+  assert.equal(bestGuess([0.4, 0.4, 0.1]), -1, 'a tie for the top is never broken by page order');
+  assert.equal(bestGuess([0.97, 0.01, 0.02]), 0, 'a sure answer is a guess too; the caller uses it as an answer first');
+  assert.equal(bestGuess([0.99]), -1, 'abstain alone is never a guess');
+});
+
 test('scores come from one batch per decision with the trained question, and anything unreadable fails loudly', async () => {
   const calls = [];
   const formats = [];

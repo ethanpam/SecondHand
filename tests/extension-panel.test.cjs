@@ -2005,3 +2005,59 @@ test('the widget counts held questions under need-you, says they wait in the sid
   await spanish.userClick('autofill');
   assert.equal(spanish.get('widget-text').textContent, 'Completadas: 1 · 2 datos sensibles esperan en el panel lateral');
 });
+
+// #185: Laya's best guesses, listed for the applicant to find and check.
+const GUESSES = [{ id: 'f0:sh-1-1', label: 'How many people live in your household?' }, { id: 'f4:sh-1-3', label: 'Preferred pickup day' }];
+const GUESSED = 'Filled 4 · 1 guessed. Check your answers before you submit. Guesses were suggested by Laya on this computer. 2 guessed by Laya, check them.';
+const guessedDone = { state: 'done', filled: 4, guessed: 1, laya: 1, layaGuessed: 2, layaGuesses: GUESSES, needYou: [], pageKey: 'general', message: GUESSED, messageKey: 'result.layaGuessed',
+  messageParams: { summary: { key: 'result.suggestedByLaya', params: { summary: { key: 'result.siteFilledGuessed', params: { count: 4, guessed: 1 } } } }, count: 2 } };
+
+test('#185: the side panel lists Laya’s guesses by their own words, and a trusted row click finds each one on the page', async t => {
+  const view = await panel(t, { tab: pantryTab, site: PANTRY_SITE, result: guessedDone });
+  assert.equal(view.get('guesses-section').hidden, false);
+  assert.equal(view.get('guesses-title').textContent, 'Guessed by Laya, check them');
+  assert.equal(view.get('guesses-section').querySelector('.save-hint').textContent,
+    'Laya wasn’t sure of these answers, so each has a dotted outline on the page. Click one to find it and check it.');
+  const rows = [...view.window.document.querySelectorAll('[data-guess-id]')];
+  assert.deepEqual(rows.map(row => [row.tagName, row.dataset.guessId, row.textContent, row.getAttribute('aria-label')]), [
+    ['BUTTON', 'f0:sh-1-1', 'How many people live in your household?', 'Find Laya’s guess for “How many people live in your household?” on the page'],
+    ['BUTTON', 'f4:sh-1-3', 'Preferred pickup day', 'Find Laya’s guess for “Preferred pickup day” on the page']]);
+  assert.equal(view.get('status').textContent, GUESSED);
+  rows[1].click(); await tick();
+  assert.equal(view.types().includes('ui:focusField'), false, 'only a trusted click');
+  await view.userClick(rows[1]);
+  assert.deepEqual(plainRequests(view.requests.filter(request => request.type === 'ui:focusField')), [{ type: 'ui:focusField', key: 'f4:sh-1-3', tabId: 7 }]);
+  assert.equal(view.get('status').textContent, GUESSED, 'found: nothing more to say');
+});
+
+test('#185: the guess list shows only well-formed questions, in the applicant’s language, and is gone with no guesses', async t => {
+  const odd = { ...guessedDone, layaGuesses: [...GUESSES, { id: 'not an id!', label: 'Bad id' }, { id: 'f0:sh-1-5', label: 7 }, null] };
+  const view = await panel(t, { tab: pantryTab, site: PANTRY_SITE, result: odd, language: 'es' });
+  assert.deepEqual([...view.window.document.querySelectorAll('[data-guess-id]')].map(row => row.dataset.guessId), ['f0:sh-1-1', 'f4:sh-1-3']);
+  assert.equal(view.get('guesses-title').textContent, 'Respuestas adivinadas por Laya, revíselas');
+  assert.equal(view.window.document.querySelector('[data-guess-id]').getAttribute('aria-label'), strings.text('es', 'guesses.rowLabel', { label: GUESSES[0].label }));
+  view.get('language').value = 'fr';
+  view.get('language').dispatchEvent(new view.window.Event('change'));
+  assert.equal(view.get('guesses-title').textContent, 'Réponses devinées par Laya, à vérifier');
+  assert.equal(view.window.document.querySelector('[data-guess-id]').getAttribute('aria-label'), strings.text('fr', 'guesses.rowLabel', { label: GUESSES[0].label }));
+  for (const result of [siteDone, null]) {
+    const none = await panel(t, { tab: pantryTab, site: PANTRY_SITE, result });
+    assert.equal(none.get('guesses-section').hidden, true);
+  }
+});
+
+test('#185: the widget says how many Laya guessed, apart from its sure answers, in the applicant’s language', async t => {
+  const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true }, autofill: guessedDone });
+  await view.userClick('autofill');
+  assert.equal(view.get('widget-text').textContent, 'Filled 4 · 1 guessed · suggested by Laya · 2 guessed by Laya, check them');
+  assert.equal(view.get('widget-text').title, GUESSED);
+  const one = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true },
+    autofill: { ...guessedDone, filled: 1, guessed: 0, laya: undefined, layaGuessed: 1, layaGuesses: GUESSES.slice(0, 1) } });
+  await one.userClick('autofill');
+  assert.equal(one.get('widget-text').textContent, 'Filled 1 · 1 guessed by Laya, check it');
+  const spanishView = await panel(t, { launcher: true, language: 'es', tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true }, autofill: guessedDone });
+  await spanishView.userClick('autofill');
+  assert.equal(spanishView.get('widget-text').textContent,
+    `${strings.text('es', 'widget.filledGuessed', { count: 4, guessed: 1 })} · ${spanish('widget.suggestedByLaya')} · ${strings.text('es', 'widget.layaGuessed', { count: 2 })}`);
+  assert.deepEqual(shownText(spanishView).filter(text => englishOnly.has(text)), []);
+});

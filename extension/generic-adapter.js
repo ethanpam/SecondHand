@@ -803,11 +803,13 @@
     }
     return false;
   }
+  // A rule's answer has a solid green outline, a guess a dashed amber one, and Laya's best guess (#185) a dotted plum one.
   function ensureStyle(doc) {
     if (doc.getElementById('secondhand-filled-style')) return;
     const style = doc.createElement('style');
     style.id = 'secondhand-filled-style';
     style.textContent = '[data-secondhand-filled="rule"]{outline:2px solid #5f9b62!important;outline-offset:1px!important}[data-secondhand-filled="guess"]{outline:2px dashed #d99a2b!important;outline-offset:1px!important}' +
+      '[data-secondhand-filled="laya-guess"]{outline:3px dotted #9b3d8f!important;outline-offset:2px!important}' +
       '[data-secondhand-attention]{outline:3px solid #d99a2b!important;outline-offset:3px!important;box-shadow:0 0 0 7px #d99a2b40!important}';
     (doc.head || doc.documentElement).append(style);
   }
@@ -816,9 +818,19 @@
     return entry.elements.some(element => element.getAttribute('aria-invalid') === 'true') || container?.classList.contains('form-line-error') ||
       Boolean(container && Array.from(container.querySelectorAll('[role="alert"]')).some(rendered));
   }
-  function mark(doc, entry, guess) {
+  // Laya's best guess (#185) goes only to a single-choice question, never a checkbox group, and never on Iowa's portal.
+  const LAYA_GUESS_KINDS = Object.freeze(['radio', 'ariaRadio', 'select']);
+  const layaGuessable = (doc, entry) => LAYA_GUESS_KINDS.includes(entry.kind) && doc.location.origin !== 'https://hhsservices.iowa.gov';
+  // Laya's best guesses on this page, by the id each was filled under: answered questions leave the next plan, but the
+  // side panel lists each one for the applicant to find and check.
+  let layaGuessed = null;
+  // `kind` is 'rule', 'guess', or 'laya-guess'.
+  function mark(doc, entry, kind, id) {
     ensureStyle(doc);
-    entry.elements.forEach(element => element.setAttribute('data-secondhand-filled', guess ? 'guess' : 'rule'));
+    entry.elements.forEach(element => element.setAttribute('data-secondhand-filled', kind));
+    if (kind !== 'laya-guess') return;
+    if (layaGuessed?.doc !== doc) layaGuessed = { doc, map: new Map() };
+    layaGuessed.map.set(id, entry);
   }
   function fillFields(doc, token, assignments, values) {
     const ids = (Array.isArray(assignments) ? assignments : []).map(item => item?.id);
@@ -835,21 +847,22 @@
       // An option Laya picked from the saved profile is always a guess, and never for a question only the applicant answers.
       const option = assignment?.option;
       const answering = typeof option === 'string' && key === undefined;
+      const layaGuess = answering && assignment.layaGuess === true;
       // A key the rules did not choose for this question is a guess: never for a question only the applicant
       // answers, by any of its labels, and only a key a guess may offer.
       const allowed = entry && (match(entry).key === key || (!householdRulesOnly(doc) && !applicantOnly(entry) && canSuggest(key, { label: entry.labels[0] || '' })));
       const placed = !usable ? false
-        : answering ? !householdRulesOnly(doc) && !applicantOnly(entry) && !entry.labels.some(iowaRule) && fillOption(entry, option)
+        : answering ? !householdRulesOnly(doc) && !applicantOnly(entry) && !entry.labels.some(iowaRule) && (!layaGuess || layaGuessable(doc, entry)) && fillOption(entry, option)
         : option === undefined && (GENERIC_KEYS.includes(key) || COMPOSITE_KEYS.includes(key) || ruleOnlyKey(key)) && allowed && typeof value === 'string' && value && compatible(key, entry) && fillEntry(entry, key, value);
       if (!placed) { skipped.push(assignment?.id); continue; }
-      const guess = answering || assignment.guessed || GUESS_KEYS.includes(key);
-      if (placed.pending) { current.pending.set(assignment.id, { option: placed.pending, entry, guess }); pending.push(assignment.id); continue; }
+      const kind = layaGuess ? 'laya-guess' : answering || assignment.guessed || GUESS_KEYS.includes(key) ? 'guess' : 'rule';
+      if (placed.pending) { current.pending.set(assignment.id, { option: placed.pending, entry, kind }); pending.push(assignment.id); continue; }
       entry.elements[0].dispatchEvent(new entry.elements[0].ownerDocument.defaultView.Event('blur'));
       if (rejectedByPage(entry)) {
         if (entry.kind === 'input' || entry.kind === 'textarea' || entry.kind === 'select') setValue(entry.elements[0], '');
         rejected.push(assignment.id); continue;
       }
-      mark(doc, entry, guess);
+      mark(doc, entry, kind, assignment.id);
       filled.push(assignment.id);
     }
     return { ok: true, filled, skipped, rejected, pending };
@@ -873,7 +886,7 @@
       const item = live.get(id);
       if (!checked(id)) settled.skipped.push(id);
       else if (rejectedByPage(item.entry)) settled.rejected.push(id);
-      else { mark(doc, item.entry, item.guess); settled.filled.push(id); }
+      else { mark(doc, item.entry, item.kind, id); settled.filled.push(id); }
       live.delete(id);
     }
     return settled;
@@ -890,7 +903,7 @@
   // Scrolls a question into view and highlights it. Keyboard focus is never moved: focusing
   // and then leaving an empty field makes sites such as Google Forms flag it as required.
   function focusField(doc, id) {
-    const entry = (current?.doc === doc ? current.map.get(id) : null) || (listed?.doc === doc ? listed.map.get(id) : null);
+    const entry = (current?.doc === doc ? current.map.get(id) : null) || (listed?.doc === doc ? listed.map.get(id) : null) || (layaGuessed?.doc === doc ? layaGuessed.map.get(id) : null);
     const element = entry?.elements[0];
     if (!element || !element.isConnected || !rendered(element)) return false;
     clearAttention();

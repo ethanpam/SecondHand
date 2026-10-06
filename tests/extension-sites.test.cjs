@@ -43,6 +43,8 @@ const pantryPlan = () => ({
 // unanswered fields on screen under fresh ids, and answering a field can reveal others.
 function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = {}) {
   let sequence = 0, current = null, listings = 0, listed = null;
+  // Laya's best guesses (#185), by the id each was filled under: the engine finds them after the next plan.
+  const layaGuessed = new Set();
   const onScreen = field => !field.hidden && (!field.revealedBy || fields.some(other => other.name === field.revealedBy && other.answered));
   const shown = field => !field.answered && onScreen(field);
   return {
@@ -65,14 +67,15 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
     fill({ token, assignments, values }) {
       if (token !== current?.token) return { ok: false, filled: [], skipped: [] };
       const filled = [], rejected = [];
-      for (const { id, key, option, guessed } of assignments) {
+      for (const { id, key, option, guessed, layaGuess } of assignments) {
         const field = current.ids.get(id);
         // Laya's answer (#42) is one of the question's own options; everything else is a saved value.
         const answer = option !== undefined ? (field?.options || []).includes(option) && option : values[key];
         if (!field || field.answered || field.refuses || !answer) continue;
         // The page flags the answer: the engine clears a text box, but a chosen option stays chosen.
         if (field.rejects) { rejected.push(id); if (field.choice) field.answered = answer; continue; }
-        field.answered = answer; field.mark = guessed ? 'guess' : 'rule';
+        field.answered = answer; field.mark = layaGuess ? 'laya-guess' : guessed ? 'guess' : 'rule';
+        if (layaGuess) layaGuessed.add(id);
         filled.push(id);
       }
       return { ok: true, filled, skipped: assignments.map(item => item.id).filter(id => !filled.includes(id) && !rejected.includes(id)), rejected };
@@ -83,7 +86,7 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
       listed = new Map(fields.filter(onScreen).map((field, index) => [`sq-${listings}-${index}`, field]));
       return { lang, questions: [...listed].map(([id, field]) => ({ id, label: field.label || field.name })) };
     },
-    focus: id => Boolean(current?.ids.has(id) || listed?.has(id)),
+    focus: id => Boolean(current?.ids.has(id) || listed?.has(id) || layaGuessed.has(id)),
     // Save to My information: the applicant types an answer the profile didn't have. The engine reports only
     // which listed boxes hold one, and reads one box after the click, for the key the rules matched to it.
     type: (name, value) => { fields.find(field => field.name === name).typed = value; },
@@ -526,10 +529,13 @@ test('the page count takes each on-screen question SecondHand filled once and sp
     <input name="email" data-secondhand-filled="guess"><input name="untouched"></form>
     <section style="display:none"><input name="earlier" data-secondhand-filled="rule"><button type="button">Next</button></section>
     <div hidden><input name="tucked" data-secondhand-filled="guess"></div>
-    <button type="submit">Submit</button>`), { rule: 2, guess: 1, next: false });
+    <button type="submit">Submit</button>`), { rule: 2, guess: 1, layaGuess: 0, next: false });
   // Google Forms' div choices: every option is marked, but the question counts once.
   assert.deepEqual(run(`<div role="radiogroup">${['One', 'Two', 'Three'].map(label => `<div role="radio" aria-label="${label}" data-secondhand-filled="rule"></div>`).join('')}</div>
-    <div role="radiogroup"><div role="radio" data-secondhand-filled="guess"></div><div role="radio" data-secondhand-filled="guess"></div></div>`), { rule: 1, guess: 1, next: false });
+    <div role="radiogroup"><div role="radio" data-secondhand-filled="guess"></div><div role="radio" data-secondhand-filled="guess"></div></div>`), { rule: 1, guess: 1, layaGuess: 0, next: false });
+  // Laya's best guesses (#185) count apart from the other guesses, a group once.
+  assert.deepEqual(run(`<label><input type="radio" name="size" data-secondhand-filled="laya-guess">1</label><label><input type="radio" name="size" data-secondhand-filled="laya-guess">2</label>
+    <select name="county" data-secondhand-filled="laya-guess"></select><input name="email" data-secondhand-filled="guess">`), { rule: 0, guess: 1, layaGuess: 2, next: false });
   assert.equal(run('<button type="button">Next</button>').next, true);
   assert.equal(run('<input type="submit" value="Next page">').next, true);
   assert.equal(run('<div role="button"><span>Next</span></div>').next, true);
@@ -1657,6 +1663,87 @@ test('answers made before getFields’ approval: an Always allow there outdates 
 });
 
 // "What this page says" on a site that is on: the page's own words and those of each embedded form that is on.
+// #185: Laya's best guess on a single-choice question it isn't sure of: filled with its own mark, counted in the summary,
+// and listed for the side panel.
+const SIZE = { name: 'size', label: 'How many people live in your household?', type: 'radio', options: ['1', '2', '3 or more'] };
+const guessingDesktop = (guesses = request => ({ [request.questions.find(question => question.label === SIZE.label).id]: '1' })) => layaDesktop({
+  answerFields: (request, vault) => ({ answers: { [request.questions.find(question => question.label === SIXTY.label).id]: 'No' }, guesses: guesses(request), accessRevision: vault.accessRevision }) });
+
+test('#185: Laya’s guess fills a single-choice question with its own mark; the summary says how many Laya guessed, and the side panel gets each one to find', async () => {
+  const w = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...SIZE }, { ...SIXTY }, { ...PET }], desktop: guessingDesktop() });
+  const result = plain((await autofill(w)).data);
+  const size = 'f0:sh-1-1';
+  assert.deepEqual(w.content.find(call => call.type === 'secondhand:generic:fill').assignments, [{ id: 'sh-1-0', key: 'fullName', guessed: false },
+    { id: 'sh-1-2', option: 'No', guessed: true }, { id: 'sh-1-1', option: '1', guessed: true, layaGuess: true }]);
+  assert.deepEqual(w.page.fields.map(field => field.mark), ['rule', 'laya-guess', 'guess', undefined]);
+  assert.deepEqual([result.filled, result.guessed, result.laya, result.layaGuessed], [3, 1, 1, 1], 'the guess is filled, apart from the sure answer');
+  assert.deepEqual(result.layaGuesses, [{ id: size, label: SIZE.label }]);
+  assert.deepEqual(result.needYou, [idOf(w, 'pet')]);
+  assert.equal(result.message, 'Filled 3 · 1 guessed · 1 need you. Check your answers before you submit. Guesses were suggested by Laya on this computer. 1 guessed by Laya, check it.');
+  assert.equal(result.messageKey, 'result.layaGuessed');
+  assert.deepEqual(plain((await w.panel({ type: 'ui:pageState' })).data).result.layaGuesses, [{ id: size, label: SIZE.label }]);
+  assert.deepEqual(plain((await w.panel({ type: 'ui:focusField', key: size })).data), { focused: true }, 'the side panel finds it after the fill planned the page again');
+  assert.equal(strings.english('result.layaGuessed', { summary: { key: 'result.siteFilled', params: { count: 2 } }, count: 2 }),
+    'Filled 2. Check your answers before you submit. 2 guessed by Laya, check them.');
+});
+
+test('#185: guesses alone fill under their own access receipt; a desktop from before guesses sends none', async () => {
+  const only = layaDesktop({ answerFields: (request, vault) => ({ answers: {}, guesses: { [request.questions[0].id]: '1' }, accessRevision: vault.accessRevision }) });
+  const w = siteWorker({ enabled: true, fields: [{ ...SIZE }], desktop: only });
+  const result = plain((await autofill(w)).data);
+  assert.deepEqual([result.filled, result.guessed, result.laya, result.layaGuessed], [1, 0, undefined, 1]);
+  assert.equal(result.message, 'Filled 1. Check your answers before you submit. 1 guessed by Laya, check it.');
+  const stale = siteWorker({ enabled: true, fields: [{ ...SIZE }], desktop: layaDesktop({ answerFields: request => ({ answers: {}, guesses: { [request.questions[0].id]: '1' }, accessRevision: 99 }) }) });
+  const refused = plain((await autofill(stale)).data);
+  assert.equal(refused.state, 'error');
+  assert.match(refused.message, /access changed/);
+  assert.deepEqual(stale.page.answered(), []);
+  const older = siteWorker({ enabled: true, fields: [{ ...SIZE }, { ...SIXTY }], desktop: layaDesktop({ answerFields: (request, vault) => ({ answers: { [request.questions[1].id]: 'No' }, accessRevision: vault.accessRevision }) }) });
+  const before = plain((await autofill(older)).data);
+  assert.deepEqual([before.filled, before.layaGuessed, before.layaGuesses], [1, undefined, undefined]);
+});
+
+test('#185: a guess for a checkbox group, a question outside the request, one Laya also answered, or an option the question lacks fills nothing', async () => {
+  const NEEDS = { name: 'needs', label: 'Which of these does your household need?', type: 'checkbox', options: ['Produce', 'Diapers'] };
+  const id = (request, label) => request.questions.find(question => question.label === label).id;
+  const replies = [
+    request => ({ [id(request, NEEDS.label)]: 'Produce' }),
+    () => ({ 'f0:sh-9-9': '1' }),
+    request => ({ [id(request, SIXTY.label)]: 'Yes' }),
+    request => ({ [id(request, SIZE.label)]: '4' }),
+    request => ({ [id(request, SIZE.label)]: 1 }),
+    () => [],
+    () => null
+  ];
+  for (const guesses of replies) {
+    const w = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...SIZE }, { ...SIXTY }, { ...NEEDS }], desktop: guessingDesktop(guesses) });
+    const result = plain((await autofill(w)).data);
+    assert.deepEqual([result.state, result.messageKey], ['error', 'worker.layaUnusable'], guesses.toString());
+    assert.equal(w.contentTypes().includes('secondhand:generic:fill'), false, guesses.toString());
+    assert.deepEqual(w.page.answered(), []);
+  }
+});
+
+test('#185: a Spanish question’s guess fills the page’s own option, found by position', async () => {
+  const { ai } = workerAI();
+  const w = siteWorker({ enabled: true, lang: 'es', ai, fields: [{ ...SIXTY_ES }], desktop: layaDesktop({
+    answerFields: (request, vault) => ({ answers: {}, guesses: { [request.questions[0].id]: 'Yes' }, accessRevision: vault.accessRevision }) }) });
+  const result = plain((await autofill(w)).data);
+  assert.deepEqual(w.content.find(call => call.type === 'secondhand:generic:fill').assignments, [{ id: 'sh-1-0', option: 'Sí', guessed: true, layaGuess: true }]);
+  assert.deepEqual(result.layaGuesses, [{ id: 'f0:sh-1-0', label: SIXTY_ES.label }], 'the side panel lists it in the page’s own words');
+});
+
+test('#185: the guess list holds the reload, as the need-you list does', async () => {
+  const w = updating({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...SIZE }], desktop: { ...layaDesktop({
+    answerFields: (request, vault) => ({ answers: {}, guesses: { [request.questions[0].id]: '1' }, accessRevision: vault.accessRevision }) }), extension: UPDATE } });
+  assert.equal(plain((await autofill(w)).data).layaGuessed, 1);
+  await statusRow(w);
+  assert.equal(w.reloads(), 0, 'Laya’s guess is still to check');
+  w.events.updated(7, { status: 'loading' });
+  await statusRow(w);
+  assert.equal(w.reloads(), 1);
+});
+
 const sitePoints = { language: 'en', points: ['Bring a photo ID.'], english: false };
 
 test('a site’s page text is its own words, then each embedded form’s that is on; a form that is off is never read', async () => {

@@ -367,6 +367,14 @@ test('with Laya ready, its answer joins the general fill on an unknown Iowa page
   assert.doesNotMatch(JSON.stringify(answer), /Synthetic private/);
 });
 
+test('#185: Laya never guesses on Iowa’s portal: a reply with a guess for an unknown Iowa page fills nothing', async () => {
+  const w = worker({ kind: 'manual', engine: generalEngine, general: financialPlan(), desktop: { values: financialValues, layaState: 'ready',
+    laya: { answerFields: request => ({ answers: {}, guesses: { [request.questions[0].id]: 'No' }, accessRevision: 0 }) } } });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.messageKey, 'worker.layaUnusable');
+  assert.equal(w.calls.content.some(message => message.type === 'secondhand:generic:fill'), false);
+});
+
 test('with Laya ready, an unknown Iowa page the rules can’t fill gets Laya’s answers, then waits for the applicant', async () => {
   const general = { ...nothingPlanned(), unmatched: [blind] };
   const w = worker({ kind: 'manual', engine: generalEngine, general, desktop: layaAnswers(() => ({ [blind.id]: 'No' })) });
