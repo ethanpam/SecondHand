@@ -861,6 +861,9 @@ async function enabledSiteFrames(tabId, origin) {
 const siteResult = (state, message, extra = {}) => ({ state, filled: 0, guessed: 0, needYou: [], ...message, pageKey: 'general', ...extra });
 // A result's count of Laya's best guesses on screen, and each one's id and label for the side panel to list (#185). Nothing when there are none.
 const layaGuessResult = (count, list) => count || list.length ? { layaGuessed: count, layaGuesses: list } : {};
+// A result's household questions the household list left open (#180), each by id and label, with what the list lacks as the first
+// one's site said it (one profile answers every site). Null when there are none.
+const householdResult = list => list.length ? { ...list[0].lacking, questions: list.map(({ id, label }) => ({ id, label })) } : null;
 const filledSummary = (filled, needYou) => needYou.length ? { key: 'result.filledNeedYou', params: { count: filled, needYou: needYou.length } } : { key: 'result.filled', params: { count: filled } };
 
 // Runs in the page, so Chrome serializes it and it must stand alone. Counts the questions
@@ -1111,7 +1114,7 @@ function answerSites(frames) {
     // An embedded frame without the address Chrome gave for it is never filled under another's.
     if (typeof url !== 'string') throw fault(FRAME_ERROR);
     const origin = new URL(url).origin;
-    if (!sites.has(origin)) sites.set(origin, { url, frameIds: new Set(), keys: [], values: null, reason: null, held: [] });
+    if (!sites.has(origin)) sites.set(origin, { url, frameIds: new Set(), keys: [], values: null, reason: null, held: [], household: null });
     sites.get(origin).frameIds.add(frameId);
   }
   return [...sites.values()];
@@ -1124,6 +1127,28 @@ function heldBack(response, site) {
   if (SecondHandIowa.isSupportedUrl(site.url) || !Array.isArray(held) || !held.length || new Set(held).size !== held.length ||
     held.some(field => !site.keys.includes(field) || Object.hasOwn(response.values, field))) throw fault('worker.desktopUnexpected');
   return held;
+}
+
+// Household questions (#180): the counts the household list answers, its counts by age among them, and the student's name and grade.
+const HOUSEHOLD_KEYS = Object.freeze(['householdSize', 'householdAdults', 'householdChildren', 'householdSeniors', 'studentNameGrade']);
+const AGE_KEYS = Object.freeze(['householdAdults', 'householdChildren', 'householdSeniors']);
+// Whether a question with this key is one the household list leaves open for what it lacks: any household question while no list
+// is saved, and only a count by age while a birth date on it is missing.
+const householdQuestion = (key, need) => SecondHandGeneric.isBandKey(key) || (need === 'birthDate' ? AGE_KEYS : HOUSEHOLD_KEYS).includes(key);
+// What the household list lacks for the household questions a site's reply left open (#180): { need: 'list' } when no list is
+// saved, or { need: 'birthDate', person } naming the first member without a birth date as My information does ('you', or their
+// row, 1 to 20). Null when the reply says nothing. Anything else, any on Iowa's portal, or one for a request that left no such
+// question open, is refused.
+function householdNeed(response, site) {
+  if (response.household === undefined) return null;
+  const { household } = response;
+  const keys = household && typeof household === 'object' && !Array.isArray(household) ? Object.keys(household).sort().join() : '';
+  const known = keys === 'need' ? household.need === 'list' : keys === 'need,person' && household.need === 'birthDate' &&
+    (household.person === 'you' || (Number.isInteger(household.person) && household.person >= 1 && household.person <= 20));
+  if (!known || SecondHandIowa.isSupportedUrl(site.url) || !site.keys.some(key => householdQuestion(key, household.need) && !Object.hasOwn(response.values, key))) {
+    throw fault('worker.desktopUnexpected');
+  }
+  return household.need === 'list' ? { need: 'list' } : { need: 'birthDate', person: household.person };
 }
 
 // One fill message to the plan a frame holds, and its reply checked: every id it filled, rejected or skipped is one it was
@@ -1298,6 +1323,7 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       receipt(receiptRevision(response));
       site.reason = desktopReason(response);
       site.held = heldBack(response, site);
+      site.household = householdNeed(response, site);
       site.values = SecondHandGeneric.deriveValues(response.values);
     }
     // The answers came before getFields: an Always allow in its prompt outdates their receipt.
@@ -1311,11 +1337,12 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
     let filled = custom.filled, placedByLaya = 0;
     // The questions Laya's best guesses went to, each with its own words, for the side panel to list (#185).
     // `rememberable`: the open questions the side panel may offer to remember (#186).
-    const needYou = [], savable = [], held = [], layaGuesses = [], rememberable = [];
+    // `household`: the household questions the household list left open (#180), each with what its site's reply said the list lacks.
+    const needYou = [], savable = [], held = [], layaGuesses = [], rememberable = [], household = [];
     for (const frame of initial) {
       const { frameId, documentId } = frame;
       // A frame gets only its own site's saved values.
-      const { url: siteUrl, keys, values, held: heldFields } = siteOf(frameId);
+      const { url: siteUrl, keys, values, held: heldFields, household: lacking } = siteOf(frameId);
       let { plan, planned } = frame;
       const refused = new Map(); // Refused answers stay local to this frame.
       if (revision !== null) for (let pass = 1; ; pass++) {
@@ -1363,6 +1390,12 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
         if (waiting.has(field.id) || !SecondHandGeneric.SAVE_KEYS.includes(field.key) || !keys.includes(field.key) || (typeof values?.[field.key] === 'string' && values[field.key])) continue;
         savable.push(kept(field));
       }
+      // Household questions with no answer because of what the household list lacks (#180): the side panel lists them with Add your household.
+      for (const field of lacking ? plan.matched : []) {
+        if (field.partial || !householdQuestion(field.key, lacking.need) || !keys.includes(field.key) || (typeof values?.[field.key] === 'string' && values[field.key])) continue;
+        const { id, label } = kept(field);
+        household.push({ id, label, lacking });
+      }
       // Open questions whose custom answer the app held back (#186): they wait for Fill sensitive details, each with its question.
       // The others a custom answer may fill: the side panel offers to remember the applicant's own answer.
       for (const field of prefix ? plan.unmatched : []) {
@@ -1372,7 +1405,7 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       }
     }
     // Why the desktop left answers out, from every site's replies, each reason said once.
-    return { filled, needYou, savable, held, rememberable, custom: custom.filled, laya: placedByLaya, layaGuesses, reason: reasons(prepared.reason, ...answers.map(reply => reply.reason), ...sites.map(site => site.reason)) };
+    return { filled, needYou, savable, held, rememberable, custom: custom.filled, laya: placedByLaya, layaGuesses, household: householdResult(household), reason: reasons(prepared.reason, ...answers.map(reply => reply.reason), ...sites.map(site => site.reason)) };
   } finally {
     for (const site of sites) site.values = null;
     questionTranslation.forget();
@@ -1409,7 +1442,7 @@ async function fillSiteOnce(tabId, url, guesses, { guard = () => {}, automatic =
       const hosts = pending.map(frame => new URL(frame.origin).hostname).join(', ');
       return siteResult('waiting', say('worker.formInsideFrames', { hosts }));
     }
-    const { needYou, savable, held, rememberable, custom, laya: suggested, layaGuesses, reason } = await fillPlan(tabId, url, frames, { prefix: true, laya: automatic ? false : laya, guard });
+    const { needYou, savable, held, rememberable, custom, laya: suggested, layaGuesses, household, reason } = await fillPlan(tabId, url, frames, { prefix: true, laya: automatic ? false : laya, guard });
     guard();
     keepSavable(tabId, url, siteOrigin(url), savable);
     keepHeld(tabId, url, siteOrigin(url), held, reason);
@@ -1418,7 +1451,7 @@ async function fillSiteOnce(tabId, url, guesses, { guard = () => {}, automatic =
     const filled = tally.rule + tally.guess + tally.layaGuess;
     return siteResult('done', siteSummary(filled, tally.guess, needYou, tally.next, suggested, reason, held.length, tally.layaGuess, custom),
       { filled, guessed: tally.guess, needYou, ...(suggested ? { laya: suggested } : {}), ...(held.length ? { held: held.length } : {}), ...(custom ? { custom } : {}),
-        ...layaGuessResult(tally.layaGuess, layaGuesses) });
+        ...layaGuessResult(tally.layaGuess, layaGuesses), ...(household ? { household } : {}) });
   } catch (error) {
     const { state, ...message } = failed(error);
     return siteResult(state, message);
@@ -1799,7 +1832,8 @@ function heldChanged(tabId, kept, placed, inPart, reason, placedCustom) {
   const custom = (result.custom || 0) + placedCustom;
   const { layaGuessed = 0, layaGuesses = [] } = result;
   remember(tabId, siteResult('done', siteSummary(filled, result.guessed, needYou, false, result.laya, reasons(kept.reason, reason), held, layaGuessed, custom),
-    { filled, guessed: result.guessed, needYou, ...(result.laya ? { laya: result.laya } : {}), ...(held ? { held } : {}), ...(custom ? { custom } : {}), ...layaGuessResult(layaGuessed, layaGuesses) }));
+    { filled, guessed: result.guessed, needYou, ...(result.laya ? { laya: result.laya } : {}), ...(held ? { held } : {}), ...(custom ? { custom } : {}), ...layaGuessResult(layaGuessed, layaGuesses),
+      ...(result.household ? { household: result.household } : {}) }));
 }
 async function currentPageState(tabId, route) {
   const tab = await chrome.tabs.get(tabId);
@@ -2004,6 +2038,13 @@ async function openApp() {
   return { opened: reply.opened };
 }
 
+// Add your household (#180): the desktop app opens My information at Your household. Nothing goes with the request.
+async function openHousehold() {
+  const reply = await nativeRequest('openHousehold');
+  if (reply?.shown !== true || Object.keys(reply).length !== 1) throw fault('worker.desktopUnexpected');
+  return { shown: true };
+}
+
 // An error reply carries the same English, key, and parameters as a result.
 function errorReply(error) {
   const text = typeof error?.message === 'string' ? error.message : '';
@@ -2049,6 +2090,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   let run;
   if (message.type === 'ui:showApp' && message.confirmed === true) run = () => nativeRequest('showApp');
   else if (message.type === 'ui:openApp' && message.confirmed === true) run = openApp;
+  else if (panel && message.type === 'ui:openHousehold' && message.confirmed === true) run = openHousehold;
   else if (panel && message.type === 'ui:desktopStatus') {
     run = async () => {
       const desktop = await desktopStatus().then(data => ({ connected: true, unlocked: Boolean(data?.unlocked), laya: layaState(data),
