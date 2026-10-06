@@ -293,9 +293,12 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
     if (url !== 'chrome-extension://testextension/background.js' || !disk) throw new TypeError('Failed to fetch');
     return { ok: true, text: async () => code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${disk}';`) };
   };
-  vm.runInNewContext(build ? code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${build}';`) : code,
+  // Starts the worker as Chrome does: at once, and again after Chrome stopped it (#142), when the new worker's listeners
+  // replace the old one's and its memory starts empty. Chrome's records (registrations, access, tabs) stay as they were.
+  const start = () => vm.runInNewContext(build ? code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${build}';`) : code,
     { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, SecondHandTranslation: translation, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console, fetch,
       ...ai, ...(clock ? { Date: { now: () => clock.now } } : {}) });
+  start();
   const send = (message, sender) => new Promise(resolve => { if (!listener(message, sender, resolve)) resolve(undefined); });
   // Whether Chrome lets SecondHand read this address.
   function covered(address) {
@@ -307,6 +310,9 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
     reloads: () => reloads,
     // The person removes SecondHand's access in Chrome's settings (#142).
     revoke: origins => takeBack(origins),
+    restart: () => { listener = undefined; for (const key of Object.keys(events)) delete events[key]; start(); },
+    // The events the worker listens to, its own messages included.
+    listening: () => [...Object.keys(events), ...(listener ? ['message'] : [])].sort(),
     nativeTypes: () => native.map(call => call.type),
     contentTypes: () => content.map(call => call.type),
     panel: message => send({ tabId: 7, ...message }, { id: 'testextension', url: PANEL_URL }),
@@ -1095,6 +1101,52 @@ test('the Save offers and page words kept for a site Chrome took back are forgot
   assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).savable, undefined);
   assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).summary, undefined);
   assert.equal(w.content.filter(call => call.type === 'secondhand:generic:answered').length, 1, 'the forgotten offer is never asked about again');
+});
+
+// A worker restart (#142): Chrome stops an idle service worker and starts it again for the next event. Chrome's
+// records (registrations, access) are as they were; everything the worker held in memory is gone.
+test('a restarted worker listens for every event before its first one, and the sites turned on stay on, from Chrome’s records', async () => {
+  const w = siteWorker({ enabled: true, frames: [secondFrame({ enabled: true })] });
+  w.restart();
+  assert.deepEqual(w.listening(), ['activated', 'installed', 'message', 'permissionsRemoved', 'removed', 'updated'],
+    'registered while the worker starts, so the event that woke it is heard');
+  assert.deepEqual(plain((await w.panel({ type: 'ui:pageState' })).data.site), { origin: ORIGIN, enabled: true, ready: true, frames: [{ origin: FRAME_ORIGIN, enabled: true }] });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.state, 'done', result.message);
+  assert.ok(result.filled > 0);
+  const all = siteWorker({ url: OTHER_URL, allSites: true });
+  all.restart();
+  assert.equal(plain((await all.panel({ type: 'ui:desktopStatus' })).data).allSites, true);
+  assert.equal(plain((await all.panel({ type: 'ui:pageState' })).data).site.enabled, true);
+});
+
+test('a restarted worker hears Chrome take a site back, and finds one taken back while no worker listened at its next status', async () => {
+  const w = siteWorker({ enabled: true });
+  w.restart();
+  w.revoke([`${ORIGIN}/*`]);
+  await settle();
+  assert.equal(w.registered.size, 0);
+  assert.deepEqual(untrusted(w), [ORIGIN]);
+  // Chrome's record says so all the same.
+  const missed = siteWorker({ enabled: true });
+  missed.permissions.delete(`${ORIGIN}/*`);
+  missed.restart();
+  assert.equal((await missed.panel({ type: 'ui:desktopStatus' })).ok, true);
+  assert.equal(missed.registered.size, 0);
+  assert.deepEqual(untrusted(missed), [ORIGIN]);
+});
+
+test('the last result and Save offers live in the worker’s memory only: gone after a restart, back with the next Autofill', async () => {
+  const w = siteWorker({ enabled: true });
+  await autofill(w);
+  w.restart();
+  let state = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.deepEqual({ result: state.result, savable: state.savable }, { result: null, savable: undefined });
+  assert.equal(state.site.enabled, true);
+  await autofill(w);
+  state = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.deepEqual(state.result.needYou, [`f0:${w.page.idOf('pickup')}`, `f0:${w.page.idOf('size')}`]);
+  assert.deepEqual(state.savable.map(item => item.label), ['size']);
 });
 
 test('visible iframe discovery is https only, deduplicated, and excludes the page origin', t => {
