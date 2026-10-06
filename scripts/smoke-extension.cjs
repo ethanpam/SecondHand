@@ -691,7 +691,8 @@ async function main() {
     widget = await launcherFrame();
     await expect(widget.locator('#pill')).toBeVisible({ timeout: 15000 });
     await expect(widget.locator('#widget')).toBeHidden();
-    await expect.poll(async () => { const box = await host.boundingBox(); return `${box.width} by ${box.height}`; }, { timeout: 10000 }).toBe('46 by 46');
+    await expect.poll(async () => { const box = await host.boundingBox(); return box.height === 46 && box.width > 46 && box.width < 140; }, { timeout: 10000 }).toBe(true);
+    await expect(widget.locator('#pill-label')).toHaveText('Show');
     await expect(widget.locator('#pill')).toHaveAttribute('aria-label', 'Show SecondHand’s card');
     await widget.locator('#pill').click();
     await expect(widget.locator('#autofill')).toBeVisible();
