@@ -272,7 +272,9 @@ test('on Enter Personal Information, when SecondHand will not save and continue,
 
 test('no Iowa English says "verified", "controls", "context", or "facts"', () => {
   const jargon = /verified|controls|context|facts/i;
-  const found = Object.entries(en).filter(([key, value]) => key.startsWith('iowa.') && jargon.test(typeof value === 'string' ? value : `${value.one} ${value.other}`))
+  // The side panel's line about Autofill on Iowa and the Autofill button's tooltip there too (#167).
+  const iowaLines = ['panel.iowaPolicy', 'widget.autofillIowaTitle'];
+  const found = Object.entries(en).filter(([key, value]) => (key.startsWith('iowa.') || iowaLines.includes(key)) && jargon.test(typeof value === 'string' ? value : `${value.one} ${value.other}`))
     .map(([key]) => key);
   assert.deepEqual(found, []);
 });
@@ -281,10 +283,20 @@ test('in every language, the lines on the Iowa pages SecondHand fills no longer 
   // French "Vérifiez" means "check" and stays.
   const verified = { es: /verific/i, vi: /xác minh/i, zh: /核实/, fr: /vérifié/i, ar: /التحقق/ };
   for (const [code, pattern] of Object.entries(verified)) {
-    for (const key of ['iowa.manualReview', 'iowa.addressManualReason', 'iowa.selfDetailsReason', 'iowa.startDetailsReason', 'iowa.canSaveContinue']) {
+    for (const key of ['iowa.manualReview', 'iowa.addressManualReason', 'iowa.selfDetailsReason', 'iowa.startDetailsReason', 'iowa.canSaveContinue',
+      'panel.iowaPolicy', 'widget.autofillIowaTitle']) {
       assert.doesNotMatch(strings.catalogs[code][key], pattern, `${code} ${key}`);
     }
   }
+});
+
+test('the side panel’s English line about Autofill on Iowa says what it fills, where it continues, and what Laya and you check (#167)', () => {
+  const policy = en['panel.iowaPolicy'];
+  for (const words of ['first suggested home address', 'Laya', 'Social Security number', 'to check', 'Continue']) assert.ok(policy.includes(words), words);
+  assert.doesNotMatch(policy, /verified|Tell Us More/);
+  // Laya's best guesses never run on Iowa (#188), and Iowa never holds sensitive details back (#187).
+  assert.doesNotMatch(policy, /guess|Fill sensitive details/);
+  assert.ok(policy.split(/\s+/).length <= 90, `${policy.split(/\s+/).length} words`);
 });
 
 test('the worker says nothing in English of its own: every message it builds comes from a catalog key', () => {
