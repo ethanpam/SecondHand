@@ -27,11 +27,15 @@ const SETS = [
 ];
 const NO_MODEL = { version: 1, model: null };
 const TOLERANCE = 1e-3;
-// How fast a model must decide on this computer. A click gives Laya BUDGET_MS (3 s) for a whole page, and the
-// slowest page measured (round 2, docs/laya-model.md) asks 15 question passes in 2.7 s: one decision gets a
-// fraction of that. The first decision after idle also starts the model process, checks the model's
-// checksum and loads it, which warming does ahead of a click.
-const LATENCY = Object.freeze({ firstMs: 10 * 1000, p95Ms: BUDGET_MS / 10, batchOf20Ms: BUDGET_MS });
+// How fast each model must decide: a little over the slowest of four runs on 2026-10-06, on an Apple M4 Max
+// (14 cores) with the 1-minute load at 6 to 33. noul-v1 took 659–731 ms for the first decision (process start,
+// checksum, load), 132–137 ms one decision at a time at p95, and 1,753–2,064 ms for a batch of 20; choice-v2
+// 623–916 ms, 146–158 ms and 2,073–2,653 ms. A click gives Laya BUDGET_MS (3 s) for a whole page, so a batch of
+// 20 never gets more than that.
+const LATENCY = Object.freeze({
+  'noul-v1': Object.freeze({ firstMs: 1000, p95Ms: 200, batchOf20Ms: 2500 }),
+  'choice-v2': Object.freeze({ firstMs: 1200, p95Ms: 200, batchOf20Ms: BUDGET_MS })
+});
 // Probabilities in option order: a choice answer is keyed by label, and JavaScript lists number-like keys first.
 const values = (answer, definition) => answer.type === 'noul' ? [1 - answer.noul, answer.noul] : definition.criteria.map(label => answer.probabilities[label]);
 const only = decision => Object.values(decision.questions)[0];
@@ -43,6 +47,7 @@ const load = fixture => JSON.parse(fs.readFileSync(path.join(__dirname, 'fixture
 test('every model format the app runs has its own reference outputs, made from a model of that format', () => {
   assert.deepEqual(SETS.map(set => set.format), [...MODEL_FORMATS]);
   assert.deepEqual(Object.keys(WRONG_FILL_BUDGETS), [...MODEL_FORMATS], 'and its own wrong-fill budget');
+  assert.deepEqual(Object.keys(LATENCY), [...MODEL_FORMATS], 'and its own latency budget');
   for (const { format, fixture } of SETS) assert.equal(load(fixture).format, format, fixture);
   assert.equal(new Set(SETS.map(set => set.env)).size, SETS.length, 'each export has its own variable');
 });
@@ -121,9 +126,10 @@ for (const { format, fixture, env } of SETS) {
     times.sort((a, b) => a - b);
     t.diagnostic(`First decision (process start, model load, inference): ${Math.round(firstMs)} ms. One decision at a time: p50 ${Math.round(percentile(times, 0.5))} ms, p95 ${Math.round(percentile(times, 0.95))} ms (mean ${Math.round(rows.reduce((sum, row) => sum + row.length, 0) / rows.length)} tokens). decideBatch of the same 20: ${Math.round(batchMs)} ms.`);
     t.diagnostic(`Model process RSS: ${megabytes(loaded)} loaded, ${megabytes(busy)} after the decisions. Desktop process RSS: ${megabytes(desktopBefore)} before, ${megabytes(desktopAfter)} after.`);
-    assert.ok(firstMs <= LATENCY.firstMs, `the first decision took ${Math.round(firstMs)} ms; its budget is ${LATENCY.firstMs} ms`);
-    assert.ok(percentile(times, 0.95) <= LATENCY.p95Ms, `one decision took ${Math.round(percentile(times, 0.95))} ms at p95; its budget is ${LATENCY.p95Ms} ms`);
-    assert.ok(batchMs <= LATENCY.batchOf20Ms, `decideBatch of 20 took ${Math.round(batchMs)} ms; its budget is ${LATENCY.batchOf20Ms} ms`);
+    const budget = LATENCY[format];
+    assert.ok(firstMs <= budget.firstMs, `the first decision took ${Math.round(firstMs)} ms; its budget is ${budget.firstMs} ms`);
+    assert.ok(percentile(times, 0.95) <= budget.p95Ms, `one decision took ${Math.round(percentile(times, 0.95))} ms at p95; its budget is ${budget.p95Ms} ms`);
+    assert.ok(batchMs <= budget.batchOf20Ms, `decideBatch of 20 took ${Math.round(batchMs)} ms; its budget is ${budget.batchOf20Ms} ms`);
     await children[0].exited;
     t.diagnostic('The model process ended after the idle timeout, returning all of its memory.');
     const again = await laya.decide(rows[0].state, rows[0].questions);
