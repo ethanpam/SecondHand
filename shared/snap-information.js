@@ -20,13 +20,15 @@
     { id: 'background', label: 'Your background', description: 'Answer for yourself. Home state does not establish birthplace, citizenship, or residency.', fields: [
       ...yn([['iowaResident', 'You are an Iowa resident'], ['bornInUs', 'You were born in the United States'], ['naturalizedCitizen', 'You are a naturalized U.S. citizen']]),
       field('birthState', 'U.S. state of birth', 'state'), field('preferredLanguage', 'Preferred language'),
-      field('needsInterpreter', 'You need an interpreter', 'yesno'), field('ethnicity', 'Your ethnicity (your own description)'), field('race', 'Your race or races (your own description)'),
-      ...yn([['eatsWithHousehold', 'You purchase and prepare meals with this household'], ['pregnant', 'You are pregnant'], ['migrantSeasonalFarmworker', 'You are a migrant or seasonal farmworker']]),
-      field('immigrationStatus', 'Your immigration or lawful-presence status (as documented)'), field('pregnancyDueDate', 'Expected due date', 'date')
+      field('needsInterpreter', 'You need an interpreter', 'yesno'), field('wantsFreeLanguageHelp', 'You would like free help in your first language when visiting the office', 'yesno'), field('ethnicity', 'Your ethnicity (your own description)'), field('race', 'Your race or races (your own description)'),
+      ...yn([['eatsWithHousehold', 'You purchase and prepare meals with this household'], ['eatsMealsWithHousehold', 'You eat with this household'], ['pregnant', 'You are pregnant'], ['migrantSeasonalFarmworker', 'You are a migrant or seasonal farmworker']]),
+      field('immigrationStatus', 'Your immigration or lawful-presence status (as documented)'), field('pregnancyDueDate', 'Expected due date', 'date'),
+      field('pregnancyExpectedBabies', 'Number of expected babies', 'text', { maxLength: 2 })
     ] },
     { id: 'emergency', label: 'Emergency SNAP screening', description: 'Save your answers to the household questions. No answer is calculated from saved money or employment details.', fields: yn([
       ['emergencyIncomeUnder150', 'Household income is less than $150 this month'], ['emergencyCashUnder100', 'Household cash, checking, and savings total less than $100'],
-      ['emergencyMigrantSeasonal', 'Household includes a migrant or seasonal farmworker'], ['emergencyHousingExceedsIncome', 'Housing and utility expenses exceed expected income and available money (check the portal question)']
+      ['emergencyMigrantSeasonal', 'Household includes a migrant or seasonal farmworker'], ['emergencyHousingExceedsIncome', 'Housing and utility expenses exceed expected income and available money (check the portal question)'],
+      ['emergencyHousingExceedsExpectedIncome', 'Monthly mortgage or rent and utility payments exceed expected monthly income']
     ]) },
     { id: 'work-screening', label: 'Household job and school questions', fields: yn([
       ['householdInSchool', 'Anyone in the household attends school or college'], ['householdOnStrike', 'Anyone in the household is on strike'],
@@ -42,7 +44,8 @@
     { id: 'expense-screening', label: 'Household expense questions', fields: yn([
       ['paysDependentCare', 'Household pays dependent-care expenses'], ['paysHousing', 'Household pays housing expenses'], ['lowRentHousing', 'Household lives in low-rent or subsidized housing'],
       ['paysChildSupport', 'Household pays child support'], ['paysUtilities', 'Household pays utilities'], ['receivedEnergyAssistance', 'Household received energy assistance in the past year'],
-      ['paysMedical', 'Household pays medical expenses'], ['paysMedicare', 'Household pays Medicare expenses']
+      ['receivedEnergyAssistanceCurrentAddress', 'You received energy assistance in the past year at your current address'],
+      ['paysMedical', 'Household pays medical expenses'], ['paysUncoveredAgedDisabledMedical', 'Household pays medical treatment, prescriptions, in-home support or health care expenses for aged or disabled people that insurance does not cover'], ['paysMedicare', 'Household pays Medicare expenses']
     ]) },
     { id: 'utilities', label: 'Utility types paid by the household', description: 'Each type is an explicit answer. A monthly total does not establish which utilities you pay.', fields: yn([
       ['utilityGas', 'Gas'], ['utilityElectricity', 'Electricity or lights'], ['utilityWaterSewage', 'Water or sewage'], ['utilityTelephone', 'Telephone'],
@@ -50,6 +53,9 @@
     ]) },
     { id: 'property-screening', label: 'Household property questions', fields: yn([
       ['hasLiquidAssets', 'Household has cash, checking, savings, or other liquid assets'], ['hasRealProperty', 'Household owns real property'], ['hasTrust', 'Household has a trust'],
+      ['ownsOrBuyingProperty', 'Do you or anyone in the household own property? Is anyone buying property even if you don’t live at that property?'],
+      ['hasConservatorshipOrTrust', 'Does anyone in the household have a conservatorship or trust?'],
+      ['ownsOrRegisteredVehicle', 'Does anyone own or have their name on the registration of any motor vehicle, even if not running? (car, truck, boat, camper, motorcycle, or other vehicle)'],
       ['transferredProperty90Days', 'Household sold or transferred property in the last 90 days'], ['hasPersonalProperty', 'Household has other personal property'], ['hasVehicle', 'Household owns a vehicle'],
       ['sharesResourcesOutsideHousehold', 'Household shares resources with someone outside the household']
     ]) },
@@ -81,9 +87,22 @@
   const frequency = () => field('frequency', 'How often', 'select', { options: frequencies });
   const dates = () => [field('startDate', 'Start date', 'date'), field('endDate', 'End date', 'date')];
   const records = [
-    { key: 'jobs', label: 'Jobs and self-employment', fields: [person(), field('employer', 'Employer or business name'), field('jobTitle', 'Job or work description'), field('selfEmployed', 'Self-employed', 'yesno'), field('employerPhone', 'Employer phone', 'tel'), field('employerAddress', 'Employer address'), amount(), frequency(), field('hoursPerWeek', 'Hours per week'), ...dates(), field('lastPayDate', 'Last pay date', 'date'), field('lastPayAmount', 'Last pay amount', 'money'), field('reasonEnded', 'Reason work ended')] },
+    { key: 'jobs', label: 'Jobs and self-employment', description: 'One explicitly named person and job per record. Gross pay, tips, monthly hours, and self-employment net income are separate answers; none is calculated from tax documents or weekly hours.', fields: [person(),
+      field('workOrTraining', 'Work or training', 'select', { options: [['', 'Unanswered'], ['Work', 'Work'], ['Training', 'Training']] }),
+      field('employer', 'Employer or business name'), field('jobTitle', 'Job or work description'), field('selfEmployed', 'Self-employed', 'yesno'),
+      field('employerPhone', 'Employer phone', 'tel'), field('employerAddress', 'Employer address'), field('amount', 'Gross income per pay period', 'money'), frequency(),
+      field('hoursPerWeek', 'Hours per week'), field('monthlyHours', 'Hours per month', 'text', { maxLength: 6, hint: 'Enter the monthly hours explicitly. Weekly hours are not converted.' }),
+      field('tipsOrCommissions', 'Tips or commissions', 'money'), field('incomeExpectedSame', 'Income expected to stay the same', 'yesno'),
+      ...yn([['changedJobs30Days', 'Changed jobs in the last 30 days'], ['stoppedWorking30Days', 'Stopped working in the last 30 days'], ['fewerHours30Days', 'Worked fewer hours in the last 30 days']]),
+      field('selfEmploymentMonthlyNet', 'Self-employment monthly net income', 'money', { hint: 'Enter the current monthly net amount. This is not inferred from gross pay or annual tax amounts.' }),
+      field('hasBusinessExpenses', 'Business expenses related to self-employment', 'yesno'),
+      ...dates(), field('lastPayDate', 'Last pay date', 'date'), field('lastPayAmount', 'Last pay amount', 'money'), field('reasonEnded', 'Reason work ended')] },
     { key: 'otherIncomeSources', label: 'Other income sources', fields: [person(), field('type', 'Income type'), field('source', 'Payer or source'), amount(), frequency(), ...dates(), field('expectedChange', 'Expected change (your own description)')] },
     { key: 'housingExpenses', label: 'Housing expenses', fields: [person(), field('type', 'Housing expense type'), field('paidTo', 'Paid to'), amount(), frequency(), ...dates()] },
+    { key: 'utilityExpenses', label: 'Utilities paid by a person', description: 'One explicitly named person per record. Household utility answers are not copied into anyone’s personal expenses.', fields: [person(), ...yn([
+      ['gas', 'Gas'], ['electricity', 'Electricity or lights'], ['waterSewage', 'Water or sewage'], ['telephone', 'Telephone'],
+      ['petFees', 'Pet fees'], ['garageRent', 'Garage rent'], ['landlordExtra', 'Extra charges from landlord'], ['garbage', 'Garbage'], ['heatingCooling', 'Heating or cooling']
+    ])] },
     { key: 'dependentCareExpenses', label: 'Dependent-care expenses', fields: [person(), field('dependent', 'Person receiving care'), field('provider', 'Care provider'), field('providerPhone', 'Provider phone', 'tel'), field('reason', 'Reason for care'), amount(), frequency(), ...dates()] },
     { key: 'childSupportExpenses', label: 'Child-support expenses', fields: [person(), field('recipient', 'Person receiving payment'), field('child', 'Child this supports'), field('courtOrdered', 'Court ordered', 'yesno'), amount(), frequency(), ...dates()] },
     { key: 'medicalExpenses', label: 'Medical and Medicare expenses', fields: [person(), field('type', 'Expense type'), field('provider', 'Provider or insurer'), amount(), frequency(), field('expenseDate', 'Expense date', 'date'), field('reimbursedAmount', 'Amount reimbursed', 'money')] },

@@ -749,7 +749,8 @@ test('the trust setting says plainly that it fills sensitive details without ask
   assert.equal(view.get('autofill-trust').getAttribute('aria-describedby'), 'autofill-trust-hint', 'a screen reader reads it with the checkbox');
   assert.equal(text(hint), 'When SecondHand is unlocked, Chrome can fill your saved answers without another pop-up, on every site SecondHand is on. ' +
     'That includes your Social Security number, birth date, income, and citizenship and disability answers. ' +
-    'It also continues through verified Iowa applicant and home-address screens. Review the first suggested home address before submitting. Lock SecondHand to stop.');
+    'It also continues through supported Iowa applicant, home-address, complete Tell Us More, screening, and financial record pages. ' +
+    'It shares one person’s saved record at a time; you choose if several match. Review every answer and the first suggested home address before submitting. Lock SecondHand to stop.');
 });
 
 test('a failed trust change restores the checkbox and shows the error', async t => {
@@ -771,6 +772,8 @@ test('Privacy & backups names everything autofill fills or clicks today and keep
     'When another site’s pop-up asks about those details, Always allow on this site skips it there alone. Only the saved answers a page needs leave SecondHand.');
   assert.doesNotMatch(card, /every time/);
   for (const phrase of ['first applicant page', 'Household Application Information', 'Tell Us More', 'date of birth', 'Iowa’s questions about you',
+    'all visible questions are answered', 'submitted SSN matches', 'birth-date-only layout still needs manual Continue',
+    'supported and complete', 'person’s saved job', 'Cash/Uncashed Check asset', 'Other Information/legal/representative questions',
     'first suggested home address', 'Information-only screens', 'Laya', 'guesses', 'Other sites you trust', 'Chrome’s built-in AI', 'on this computer',
     'never guesses on Iowa’s form', 'Iowa pages SecondHand doesn’t know', 'A complete live submission has not been validated.']) assert.ok(card.includes(phrase), phrase);
   // Chrome's AI is named with where it runs, that its answers are marked, and that it stays off Iowa's form.
@@ -796,10 +799,11 @@ test('Privacy & backups names everything autofill fills or clicks today and keep
   const address = Array.from(view.window.document.querySelectorAll('#view-privacy .autofill-card p'), text).filter(paragraph => paragraph.includes('first suggested home address'));
   assert.equal(address.length, 1);
   assert.match(address[0], /^On the verified home-address page, .*\. Check that this address is yours before you submit\.$/);
-  // Tell Us More may fill the saved Social Security number, which Iowa may not keep, so it ends on checking that number (#192).
+  // Tell Us More may fill and continue; submitted mirrors are checked locally,
+  // but only the applicant can review whether Iowa retained the right number.
   const ssn = paragraphs.filter(paragraph => paragraph.includes('Social Security number') && paragraph.includes('Tell Us More'));
   assert.equal(ssn.length, 1);
-  assert.match(ssn[0], /^On the Tell Us More page, Autofill may fill .*About you.*More SNAP information.*check that number in Iowa’s form before you continue\.$/);
+  assert.match(ssn[0], /^On the Tell Us More page, Autofill may fill .*About you.*More SNAP information.*check that number in Iowa’s form before submitting\.$/);
   assert.ok(ssn[0].split(/\s+/).length <= 65, `${ssn[0].split(/\s+/).length} words: ${ssn[0]}`);
   // The four household screening pages Autofill answers from More SNAP information (#192).
   const screening = paragraphs.filter(paragraph => ['Job Information', 'Income Information', 'Expenses Information', 'Property Information', 'More SNAP information']

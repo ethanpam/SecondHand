@@ -119,7 +119,7 @@ Coming from a version without automatic updates, such as the public 0.4 download
 
 ## What it covers today
 
-Autofill works screen by screen and stays on for the tab until you click **Stop**, lock SecondHand, leave Iowa's site, or reach a screen it doesn't know. It also stops after 15 automatic steps so you can check where you are.
+Autofill works screen by screen and stays on for the tab until you click **Stop**, lock SecondHand, leave Iowa's site, or reach a screen it doesn't know. It also stops after 64 automatic steps so you can check where you are.
 
 | Iowa screen | What SecondHand does |
 | --- | --- |
@@ -128,15 +128,17 @@ Autofill works screen by screen and stays on for the tab until you click **Stop*
 | Let's get started, About you | Waits for you to accept Iowa's consent or click Continue. |
 | **Enter Personal Information** | Fills your saved names, phones, home and mailing addresses, and program choices. Waits for missing required answers, then clicks Save and Continue. |
 | Select Address (verified home-only layout) | Picks Iowa's first suggested home address and continues. Check it before you submit. |
-| Tell Us More | Fills your saved date of birth and the answers you saved under About you in My information. Anything not saved stays with you. |
-| Other Iowa pages | May fill matching saved answers after you approve, and Laya's sure answers to other questions, marked as guesses. You continue. |
+| Tell Us More | Fills matching saved answers. The fully captured layout can continue only when all visible questions are recognized and answered, any submitted SSN matches, and no errors or dialogs remain. The partial birth-date layout stays manual. |
+| Captured screening pages | Emergency, Background Information, Job Information, Income Information, Expenses Information, and Property Information use explicit saved answers and may continue only when every visible question is supported and complete. |
+| Captured financial records | One explicitly owned job, Private Pension/Social Security income, rent responsibility, personal utility record, or Cash/Uncashed Check asset. You choose among matching saved records; required fields and page guards must be complete before Continue. No annual-to-current income conversion. |
+| Other Iowa pages | May fill matching saved answers after you approve, and Laya's answers to other questions, marked as guesses. You continue. Captured screening and financial record forms have the separate scope below; unmatched variants still need you. |
 | CAPTCHA, consent, signatures, final Submit | Never touched. |
 
 The Select Address and Tell Us More steps and Laya are in this code but not yet in the public 0.4 downloads. SecondHand never changes an answer already on the page, and any answer Laya picks is marked as a guess for you to check. [Portal coverage](docs/iowa-portal.md) has the exact field list.
 
 ## How a new form gets supported
 
-- **Iowa's portal pages are mapped by hand.** [`extension/iowa-adapter.js`](extension/iowa-adapter.js) knows a small set of Iowa's pages by their headings, form, and control ids. Each page came from a consented live walk-through of the portal ([the walk-through log](docs/iowa-live-journey.md)) and is kept as a sanitized copy in [`tests/fixtures`](tests/fixtures). Only these pages get Iowa-specific fills and an automatic **Continue** or **Save and Continue**. Adding another Iowa page means another live check, a fixture, code, and tests.
+- **Iowa's portal pages are mapped by hand.** [`extension/iowa-adapter.js`](extension/iowa-adapter.js) knows a small set of Iowa's pages by their headings, form, and control ids. Each page came from a consented live walk-through of the portal ([the walk-through log](docs/iowa-live-journey.md)) and is kept as a sanitized copy in [`tests/fixtures`](tests/fixtures). The later scalar and record adapters add their own captured page guards. Only recognized variants get automatic **Continue** or **Save and Continue**; summaries, Add Another, household relationships, Other Information/legal/representative questions, and final review remain manual. Adding another Iowa page means another live check, a fixture, code, and tests.
 - **A known Iowa page that looks different fills nothing.** If a mapped page changes so it no longer matches what was checked, SecondHand asks the app for nothing, fills nothing, and doesn't hand the page to the general rules. The page is left to you. [`tests/extension-navigation.test.cjs`](tests/extension-navigation.test.cjs) checks this ("strict rejected pages cannot use the general engine").
 - **Other forms need no code of their own.** Other Iowa pages, and food-assistance sites you turn on in the side panel, use the general rules in [`extension/generic-adapter.js`](extension/generic-adapter.js). They read each box's label, autocomplete hint, and accessible name, fill only the boxes they recognize, never change an answer already there, and never navigate or submit. [`scripts/smoke-all-websites.cjs`](scripts/smoke-all-websites.cjs) checks this on a made-up pantry form with no site code: the boxes the rules know get filled, nothing is submitted, and the page doesn't change.
 - **Laya answers some of what the rules miss, as a guess.** Laya runs on this computer. When the rules don't know a question, Laya may pick an answer from your saved facts. SecondHand marks each of Laya's answers as a guess for you to check, because Laya is sometimes wrong. On 15 real forms collected after training, which nobody wrote code for ([Final holdout](docs/laya-model.md#final-holdout)):

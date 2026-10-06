@@ -51,6 +51,7 @@ function content(t, url = `${adapter.PORTAL}/applicant`, { engine = true, matche
   if (engine) window.SecondHandGeneric = generalEngine(window, calls, { matched, settled });
   window.SecondHandIowa = {
     isSupportedUrl: adapter.isSupportedUrl,
+    NAVIGATION_PAGE_KEYS: adapter.NAVIGATION_PAGE_KEYS,
     scan: () => {
       const element = window.document.getElementById('firstName');
       const fields = element.value ? [] : [{ key: 'firstName', label: 'First name' }];
@@ -163,7 +164,7 @@ test('widget host is a full bar on fillable pages and a small pill elsewhere', t
 });
 
 test('the Iowa content script loads the general engine and the page reader before content.js', () => {
-  assert.deepEqual(JSON.parse(source('manifest.json')).content_scripts[0].js, ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js']);
+  assert.deepEqual(JSON.parse(source('manifest.json')).content_scripts[0].js, ['address-policy.js', 'iowa-later-adapter.js', 'iowa-record-adapter.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js']);
 });
 
 test('on Iowa pages the adapter has not verified, the general engine plans, fills, and focuses with metadata only', async t => {
@@ -1061,10 +1062,17 @@ for (const loading of [false, true]) {
 test('Iowa widget and sidebar disclose first-address selection before Autofill; other sites do not', async t => {
   const widget = await panel(t, { launcher: true });
   assert.match(widget.get('widget-text').textContent, /first home address suggestion/);
-  assert.match(widget.get('autofill').title, /and continues/);
+  assert.match(widget.get('autofill').title, /continues where SecondHand can/);
+  assert.match(widget.get('autofill').title, /Check every answer, your Social Security number, and the home address/);
   const sidebar = await panel(t);
   assert.equal(sidebar.get('iowa-policy').hidden, false);
-  assert.match(sidebar.get('iowa-policy').textContent, /Review that address before submitting/);
+  const policy = sidebar.get('iowa-policy').textContent;
+  assert.match(policy, /Social Security number; check it in Iowa’s form/);
+  assert.match(policy, /first suggested home address/);
+  assert.match(policy, /Review all answers and that address before submitting/);
+  assert.match(policy, /one person’s record at a time/);
+  assert.match(policy, /saves supported pages when complete/);
+  assert.match(policy, /You handle summaries, unmatched questions, consent, signatures, submission/);
   const other = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true } });
   assert.equal(other.get('iowa-policy').hidden, true);
 });

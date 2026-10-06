@@ -44,6 +44,8 @@
       ],
       "js": [
         "address-policy.js",
+        "iowa-later-adapter.js",
+        "iowa-record-adapter.js",
         "iowa-adapter.js",
         "generic-adapter.js",
         "page-text.js",

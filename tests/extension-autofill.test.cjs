@@ -171,7 +171,7 @@ test('one click makes one status and one getFields request, fills revealed field
   assert.match(result.message, /Filled 3 · 1 need you/);
   assert.doesNotMatch(JSON.stringify(response), /Synthetic private/);
   assert.equal(w.calls.content.some(message => message.type.startsWith('secondhand:generic:')), false, 'verified pages never use the general engine');
-  assert.deepEqual(w.calls.injected[0], { target: { tabId: 7, frameIds: [0] }, files: ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js'] });
+  assert.deepEqual(w.calls.injected[0], { target: { tabId: 7, frameIds: [0] }, files: ['address-policy.js', 'iowa-later-adapter.js', 'iowa-record-adapter.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js'] });
 });
 
 test('locked and unreachable desktops map to widget states without filling', async () => {
@@ -705,15 +705,16 @@ test('a locked vault stops autofill at the first page that needs values', async 
   assert.equal(w.getFields().length, 0);
 });
 
-test('autofill stops after 15 automatic steps', async () => {
-  const screens = Array.from({ length: 20 }, (_, i) => info(`info${i}`, `/applyForBenefits/step${i}`, 'iowa-information'));
+test('autofill stops after 64 automatic steps', async () => {
+  const screens = Array.from({ length: 70 }, (_, i) => info(`info${i}`, `/applyForBenefits/step${i}`, `iowa-information-${i}`));
   const w = journey({ screens });
   await w.send({ type: 'ui:autofill', confirmed: true });
   await settle(); await settle();
-  assert.equal(w.continues(), 15);
+  await settle();
+  assert.equal(w.continues(), 64);
   const state = await lastResult(w);
   assert.equal(state.autopilot, false);
-  assert.match(state.result.message, /15 steps/);
+  assert.match(state.result.message, /64 steps/);
 });
 
 test('the widget can stop its own tab only, and pages cannot start autofill', async () => {
@@ -839,7 +840,7 @@ test('the side panel reads an Iowa information screen’s own words, keeps its k
   assert.equal(typeof id, 'string');
   assert.deepEqual(plain(reply.data), { pages: [{ id, pageKey: 'iowa-information', lang: 'en-US', current: true, text: IMPORTANT, unread: false, summary: null }] });
   assert.deepEqual(w.calls.content.map(message => message.type), ['secondhand:pageText']);
-  assert.deepEqual(w.calls.injected.at(-1).files, ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js']);
+  assert.deepEqual(w.calls.injected.at(-1).files, ['address-policy.js', 'iowa-later-adapter.js', 'iowa-record-adapter.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js']);
   assert.deepEqual(w.calls.native, [], 'reading a page never reaches the desktop');
   assert.equal(plain((await w.launcher({ type: 'ui:pageState' })).data).summary, undefined, 'no line before the side panel wrote the points');
 
@@ -1079,4 +1080,19 @@ test('observed household screening routes fill only rule matches, never ready or
     assert.equal(w.calls.content.some(call => ['secondhand:next', 'secondhand:continue'].includes(call.type)), false);
     assert.match(response.data.todo, /Check your answers/);
   }
+});
+
+
+test('distinct household screening steps on one route are each processed once without automatic Continue', async () => {
+  const w = journey({ engine: generalEngine, desktop: { values: financialValues }, screens: [
+    { name: 'job-screening', path: '/applyForBenefits/dynamicQuestions', general: financialPlan(), page: { kind: 'manual', pageKey: 'iowa-household-screening-rules', stepKey: 'iowa-screening-0', checklist: [] } },
+    { name: 'income-screening', path: '/applyForBenefits/dynamicQuestions', general: financialPlan(), page: { kind: 'manual', pageKey: 'iowa-household-screening-rules', stepKey: 'iowa-screening-1', checklist: [] } }
+  ] });
+  await w.send({ type: 'ui:autofill', confirmed: true });
+  assert.equal(w.calls.content.filter(type => type === 'secondhand:generic:fill').length, 1);
+  w.userContinues(); await settle();
+  assert.equal(w.calls.content.filter(type => type === 'secondhand:generic:fill').length, 2);
+  await lastResult(w); await settle();
+  assert.equal(w.calls.content.filter(type => type === 'secondhand:generic:fill').length, 2);
+  assert.equal(w.continues(), 0);
 });
