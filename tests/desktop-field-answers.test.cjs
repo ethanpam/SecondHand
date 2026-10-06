@@ -66,7 +66,7 @@ test('consent, signature, agreement, and SSN questions are never scored, whateve
   const laya = stubLaya(() => 0.99);
   const answers = await answerer(laya).answer({ questions: [question('a', 'I agree to the pantry rules'), question('b', 'Do you give consent to share your information?'),
     question('c', 'Please confirm', ['I certify this is true', 'No']), question('d', 'Do you have a Social Security number?')], profile, budgetMs });
-  assert.deepEqual(answers, { answers: {}, sensitive: [], sensitiveFields: [] });
+  assert.deepEqual(answers, { answers: {}, guesses: {}, sensitive: [], sensitiveFields: [] });
   assert.deepEqual(laya.batches, []);
 });
 
@@ -285,4 +285,93 @@ test('choice-v2: a timeout keeps the requests already decided; a request past th
 
   const unknown = { ...choiceLaya(vet), format: async () => 'choice-v9' };
   await assert.rejects(answerer(unknown).answer({ questions, profile, budgetMs }), /choice-v9/);
+});
+
+// #185: Laya's best guess on an everyday single-choice question it has no sure answer for.
+const vet = question('vet', 'Is anyone in your household a veteran?');
+const size = question('size', 'How many people live in your household?', ['1', '2', '3 or more'], 'select');
+const polk = question('polk', 'Do you live in Polk County?');
+// A household with everyday facts only: its size, county and veterans.
+const everydayHousehold = { householdSize: '1', householdVeteran: 'no', county: 'Polk' };
+// Plays a model that isn't sure: `scores[question][candidate]`, the abstain candidate under ABSTAIN.
+const unsure = scores => state => scores[state.question]?.[state.candidate] ?? 0.01;
+
+test('#185: asked for guesses, a radio or dropdown question with no sure answer gets Laya’s top option when it beats "the facts don’t say"; answers stay sure only', async () => {
+  const pet = question('pet', 'Do you have a pet?');
+  const sure = question('sure', 'Does your household have one person?');
+  const scores = unsure({
+    [vet.label]: { Yes: 0.1, No: 0.6, [ABSTAIN]: 0.3 },
+    [size.label]: { 1: 0.5, 2: 0.2, '3 or more': 0.1, [ABSTAIN]: 0.4 },
+    [polk.label]: { Yes: 0.4, No: 0.05, [ABSTAIN]: 0.5 },
+    [pet.label]: { Yes: 0.6, [ABSTAIN]: 0.3 },
+    [sure.label]: { Yes: 0.97 }
+  });
+  const result = await answerer(stubLaya(scores)).answer({ questions: [vet, size, polk, pet, sure], profile: everydayHousehold, budgetMs, guess: true });
+  assert.deepEqual(result.answers, { sure: 'Yes' }, 'a sure answer is still an answer');
+  assert.deepEqual(result.guesses, { vet: 'No', size: '1' }, 'in page order; "the facts don’t say" wins for the county, and the pet question is never asked');
+  assert.deepEqual(result.sensitive, []);
+
+  const plain = await answerer(stubLaya(scores)).answer({ questions: [vet, size], profile: everydayHousehold, budgetMs });
+  assert.deepEqual(plain, { answers: {}, guesses: {}, sensitive: [], sensitiveFields: [] }, 'no guesses unless the caller asks for them (never on Iowa’s portal)');
+  const tied = await answerer(stubLaya(unsure({ [vet.label]: { Yes: 0.4, No: 0.4, [ABSTAIN]: 0.1 } }))).answer({ questions: [vet], profile: everydayHousehold, budgetMs, guess: true });
+  assert.deepEqual(tied.guesses, {}, 'two options tied for the top: no guess');
+});
+
+test('#185: checkbox groups stay sure only, and a question about a sensitive detail never gets a guess, by its words or by the facts behind it', async () => {
+  const needs = question('needs', 'Which of these describe your household?', ['A veteran lives here', 'Nobody served'], 'checkbox');
+  const citizen = question('citizen', 'Is everyone in your household a U.S. citizen?');
+  const income = question('income', 'Is your household income under $2,000 a month?');
+  const sixty = question('sixty', 'Is anyone in your household 60 or older?');
+  const laya = stubLaya(state => {
+    if (state.question === sixty.label) return state.facts.includes('41 years old') ? { Yes: 0.1, No: 0.6, [ABSTAIN]: 0.3 }[state.candidate] : { Yes: 0.1, No: 0.1, [ABSTAIN]: 0.8 }[state.candidate];
+    return { 'A veteran lives here': 0.1, 'Nobody served': 0.6, Yes: 0.6, No: 0.1, [ABSTAIN]: 0.3 }[state.candidate] ?? 0.01;
+  });
+  const result = await answerer(laya).answer({ questions: [needs, citizen, income, sixty, vet], profile, budgetMs, guess: true });
+  assert.deepEqual(result.answers, {});
+  assert.deepEqual(result.guesses, { vet: 'Yes' },
+    'the checkbox group, the citizenship and income questions, and the age question that only all the facts could guess get none');
+  assert.deepEqual(result.sensitive, []);
+  assert.deepEqual(result.sensitiveFields, [], 'a guess never needs a sensitive fact');
+});
+
+test('#185: a guess that a sensitive fact makes sure is a sure answer, and asking for guesses costs the click no more model time', async () => {
+  const sixty = question('sixty', 'Is anyone in your household 60 or older?');
+  const scores = state => state.question === sixty.label
+    ? (state.facts.includes('41 years old') ? { Yes: 0.01, No: 0.97, [ABSTAIN]: 0.02 } : { Yes: 0.1, No: 0.6, [ABSTAIN]: 0.3 })[state.candidate]
+    : { Yes: 0.1, No: 0.6, [ABSTAIN]: 0.3 }[state.candidate];
+  const guessing = stubLaya(scores);
+  const result = await answerer(guessing).answer({ questions: [sixty, vet], profile, budgetMs, guess: true });
+  assert.deepEqual(result.answers, { sixty: 'No' });
+  assert.deepEqual(result.sensitive, ['sixty']);
+  assert.deepEqual(result.guesses, { vet: 'No' }, 'only the question still without a sure answer');
+  const without = stubLaya(scores);
+  await answerer(without).answer({ questions: [sixty, vet], profile, budgetMs });
+  assert.deepEqual(guessing.batches, without.batches, 'the guesses come from the passes the click asks anyway');
+
+  // The click's budget: Laya finishes one decision every 1.1 seconds, in the order asked; one after 3 seconds is dropped, guess included.
+  let clock = 0;
+  let previous = Promise.resolve();
+  const slow = stubLaya(state => ({ Yes: 0.1, No: 0.6, [ABSTAIN]: 0.3 })[state.candidate]);
+  const decide = slow.decideBatch;
+  slow.decideBatch = items => {
+    previous = previous.then(() => new Promise(resolve => setImmediate(resolve))).then(() => { clock += 1100; return decide(items); });
+    return previous;
+  };
+  const questions = Array.from({ length: 4 }, (_, index) => question(`q${index}`, `Is anyone in your household a veteran ${index}?`));
+  const timed = await createFieldAnswers({ laya: slow, today: TODAY, now: () => clock }).answer({ questions, profile: everydayHousehold, budgetMs, guess: true });
+  assert.deepEqual(timed.guesses, { q0: 'No', q1: 'No' }, 'the third decision came at 3.3 seconds');
+});
+
+test('#185 choice-v2: a radio or dropdown question gets its best guess from the everyday facts; a checkbox group or a sensitive question gets none', async () => {
+  const needs = question('needs', 'Which of these describe your household?', ['A veteran lives here', 'Nobody served'], 'checkbox');
+  const disabled = question('disabled', 'Does anyone in your household have a disability?');
+  const laya = choiceLaya((state, choices) => state.facts.includes('years old')
+    ? choices.map(label => label === ABSTAIN ? 0.9 : 0.1 / (choices.length - 1))
+    : choices.map((label, index) => label === ABSTAIN ? 0.3 : index === 0 ? 0.5 : 0.2 / (choices.length - 2)));
+  const result = await answerer(laya).answer({ questions: [vet, size, needs, disabled, polk], profile, budgetMs, guess: true });
+  assert.deepEqual(result.answers, {});
+  assert.deepEqual(result.guesses, { vet: 'Yes', size: '1', polk: 'Yes' });
+  assert.deepEqual(result.sensitive, []);
+  const plain = await answerer(choiceLaya()).answer({ questions: [vet], profile, budgetMs });
+  assert.deepEqual(plain.guesses, {});
 });
