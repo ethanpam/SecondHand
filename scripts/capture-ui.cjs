@@ -256,8 +256,8 @@ async function iowaCard() {
 
     await open(screen('household'));
     await (await card()).locator('#autofill').click();
-    // "Filled 1 · Type the characters shown in Iowa’s security check, then click Continue.", once the fill has settled.
-    await expect((await card()).locator('#widget-text')).toContainText('·', { timeout: 20000 });
+    // The fill revealed the security check: the card settles on what the applicant must do.
+    await expect((await card()).locator('#widget-text')).toHaveText(/^Type the characters shown/, { timeout: 20000 });
     await cardShot(session, 'card-message');
 
     await open(applicant, { locked: true });

@@ -17,6 +17,22 @@
   const words = (message, length) => message?.key ? t(message.key, message.params || {}) : fixedText(message?.text, length);
   const fromResult = result => ({ key: result?.messageKey, params: result?.messageParams, text: result?.message });
   const hasMessage = result => Boolean(result?.message || result?.messageKey);
+  // A result's message with its count of what is left for the reader set to `left`, or without it when that is
+  // 0: the side panel keeps the count current as the page changes, and the card's own link carries it. A
+  // message from an older worker, words only, is left as it came.
+  const LEFT_KEYS = { 'result.filledNeedYou': 'result.filled', 'result.siteFilledNeedYou': 'result.siteFilled', 'result.siteFilledGuessedNeedYou': 'result.siteFilledGuessed' };
+  const ONLY_LEFT = { 'result.needYouNotSaved': 'result.noSavedAnswers', 'result.nothingMatchesNeedYou': 'result.nothingMatches' };
+  function withLeft(message, left) {
+    if (!message?.key) return message;
+    const params = Object.fromEntries(Object.entries(message.params || {}).map(([name, value]) => [name, value?.key ? withLeft(value, left) : value]));
+    if (Object.hasOwn(LEFT_KEYS, message.key)) {
+      if (left > 0) return { key: message.key, params: { ...params, needYou: left } };
+      const { needYou, ...rest } = params;
+      return { key: LEFT_KEYS[message.key], params: rest };
+    }
+    if (Object.hasOwn(ONLY_LEFT, message.key)) return left > 0 ? { key: message.key, params: { ...params, count: left } } : { key: ONLY_LEFT[message.key], params: {} };
+    return { key: message.key, params };
+  }
   // An error as the applicant reads it: its catalog key, or its own words passed on as a detail.
   const problem = (error, fallback = 'panel.assistantUnavailable') => error?.messageKey ? { key: error.messageKey, params: error.messageParams }
     : fixedText(error?.message) ? { key: 'detail', params: { detail: fixedText(error.message) } } : { key: fallback };
@@ -127,22 +143,11 @@
       if (working) return t('widget.working');
       if (note) return words(note, 120);
       if (!result) return !site ? t(startedBefore() ? 'widget.iowaReadyAgain' : 'widget.iowaReady') : languageTrouble ? t('widget.languageCheckFailed') : t('widget.siteReady', { host: hostOf(site.origin) });
-      // Other sites: the need-you link carries the count, so it isn't repeated here.
-      if (result.state === 'done' && result.pageKey === 'general') {
-        const filled = Number(result.filled) || 0;
-        const guessed = Number(result.guessed) || 0;
-        const summary = filled > 0 ? (guessed > 0 ? t('widget.filledGuessed', { count: filled, guessed }) : t('widget.filled', { count: filled }))
-          : fieldKeys(result.needYou).length ? t('widget.nothingMatches') : words(fromResult(result), 120);
-        const notes = [ai.note ? words(ai.note) : '', Number(result.laya) > 0 ? t('widget.suggestedByLaya') : ''].filter(Boolean);
-        return notes.length ? [summary.replace(/\.$/, ''), ...notes].join(' · ') : summary;
-      }
-      // While Autofill is on, what Stop would do goes after what is happening.
-      const said = text => autopilot ? `${/[.!?…。]$/.test(text) ? text : `${text}.`} ${t('widget.stopNote')}` : text;
-      if (result.state === 'done') {
-        const todo = words({ key: result.todoKey, params: result.todoParams, text: result.todo }, 90);
-        return said([t('widget.filled', { count: Number(result.filled) || 0 }), todo].filter(Boolean).join(' · '));
-      }
-      return said(words(fromResult(result), 120));
+      // What the worker reported, in the side panel's words, without the count of what is left: the link beside
+      // it carries that. While Autofill is on, what Stop would do goes after it. Why Chrome's AI guessed
+      // nothing stays in the tooltip.
+      const text = words(withLeft(fromResult(result), 0), 240);
+      return autopilot ? `${/[.!?…。]$/.test(text) ? text : `${text}.`} ${t('widget.stopNote')}` : text;
     }
     function render() {
       // There is a card for this page, unless the reader hid it. An outdated card keeps its steps on screen.
@@ -539,9 +544,9 @@
         button.addEventListener('click', trusted(() => { if (!button.disabled) focusField(item.key); }));
         $('page-checklist').append(button);
       }
-      // How many questions, then how many are left for the reader: the same count as the status line's and the widget's.
+      // Once Autofill has run, how many are left for the reader: the same count as the status line's and the widget's.
       const left = entries.filter(item => (item.required && item.status === 'missing') || item.status === 'manual').length;
-      $('checklist-summary').textContent = !ran ? t('questions.count', { count: entries.length }) : left ? t('checklist.left', { count: left }) : t('checklist.noneLeft');
+      $('checklist-summary').textContent = !ran ? '' : left ? t('checklist.left', { count: left }) : t('checklist.noneLeft');
       $('checklist-note').hidden = !(ran && entries.some(item => item.status !== 'complete' && notSaved.includes(item.key)));
       $('checklist-section').hidden = !entries.length;
     }
@@ -628,7 +633,8 @@
       renderLeft();
       const loading = target?.status === 'loading';
       if (site?.enabled && !site.ready) show({ key: loading ? 'panel.waitingLoad' : 'panel.reloadToRead' });
-      else if (reported(result)) show(fromResult(result), result.state === 'error');
+      // What Autofill reported, with its count of what is left kept current as the reader answers.
+      else if (reported(result)) show(withLeft(fromResult(result), ran ? (named.length ? named.filter(item => !item.done).length : left.length) : fieldKeys(result.needYou).length), result.state === 'error');
       else if (site && !site.enabled) show({ key: 'panel.siteOff', params: { host: hostOf(site.origin) } });
       // An information-only page of Iowa's says there is nothing to fill before Autofill is clicked.
       else if (site || (fillable && page.kind !== 'info')) show(null);

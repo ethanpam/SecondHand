@@ -290,7 +290,7 @@ async function main() {
     // Iowa's portal still works, with no Chrome restart.
     await page.goto(`${applicant}?next=stay`, { waitUntil: 'domcontentloaded' });
     await launcherFrame();
-    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofillIowa'));
     await panel.click('#panel-autofill');
     await expect(page.locator('#firstName')).toHaveValue(syntheticProfile.firstName, { timeout: 20000 });
     await expect(page.locator('#lastName')).toHaveValue(syntheticProfile.lastName);

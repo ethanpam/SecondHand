@@ -445,7 +445,8 @@ async function main() {
     widget = await launcherFrame();
     await widget.locator('#autofill').click();
     await expect(page.locator('#householdApplyProgYes')).toBeChecked({ timeout: 20000 });
-    await expect(widget.locator('#widget-text')).toHaveText('Filled 1 · Type the characters shown in Iowa’s security check, then click Continue. Stop erases nothing.', { timeout: 20000 });
+    // The fill revealed the security check, so the step after it leaves the applicant's next move on the card.
+    await expect(widget.locator('#widget-text')).toHaveText('Type the characters shown in Iowa’s security check, then click Continue. Stop erases nothing.', { timeout: 20000 });
     assert.deepEqual((await calls('getFields'))[0].fields, ['programSnap', 'programFip', 'programMedicaid']);
     assert.equal(await page.evaluate(() => window.__continues), 0);
     console.log('Autopilot: the household question is answered from saved programs and the CAPTCHA is left to the applicant.');

@@ -133,7 +133,7 @@ async function main() {
     // #39: a text box the rules miss is matched by Laya and filled from the vault as a guess.
     let widget = await open(CONTACT, 'ready');
     await widget.locator('#autofill').click();
-    await expect(widget.locator('#widget-text')).toHaveText(`${en('widget.filledGuessed', { count: 2, guessed: 1 })} · ${en('widget.suggestedByLaya')}`, { timeout: 20000 });
+    await expect(widget.locator('#widget-text')).toHaveText(en('result.suggestedByLaya', { summary: { key: 'result.siteFilledGuessed', params: { count: 2, guessed: 1 } } }), { timeout: 20000 });
     await expect(page.locator('#name')).toHaveValue(`${syntheticProfile.firstName} ${syntheticProfile.lastName}`);
     await expect(page.locator('#reach')).toHaveValue(syntheticProfile.email);
     assert.equal(await mark('#name'), 'rule');
@@ -149,7 +149,7 @@ async function main() {
     // #42: "Is anyone in your household 60 or older?" gets "No" for a household with no seniors; the pet question needs the applicant.
     widget = await open(HOUSEHOLD, 'ready');
     await widget.locator('#autofill').click();
-    await expect(widget.locator('#widget-text')).toHaveText(`${en('widget.filledGuessed', { count: 2, guessed: 1 })} · ${en('widget.suggestedByLaya')}`, { timeout: 20000 });
+    await expect(widget.locator('#widget-text')).toHaveText(en('result.suggestedByLaya', { summary: { key: 'result.siteFilledGuessed', params: { count: 2, guessed: 1 } } }), { timeout: 20000 });
     await expect(page.locator('input[name="sixty"][value="no"]')).toBeChecked();
     await expect(page.locator('input[name="sixty"][value="yes"]')).not.toBeChecked();
     assert.equal(await mark('input[name="sixty"][value="no"]'), 'guess');
@@ -199,16 +199,19 @@ async function main() {
       console.log(`#84: Chrome can't translate Spanish here (${chromeAI.translator}), so the question stays under need you and the result says why: "${line}"`);
     }
 
-    // Laya not ready: exactly today's click. Rules only (Chrome's AI isn't available in headless Chromium), and Laya is asked nothing.
+    // Laya not ready: exactly today's click. Rules only (Chrome's AI isn't available in headless Chromium, which the
+    // tooltip says), and Laya is asked nothing.
     widget = await open(CONTACT, 'off');
     await widget.locator('#autofill').click();
-    await expect(widget.locator('#widget-text')).toHaveText(`${en('widget.filled', { count: 1 })} · ${en('widget.aiUnavailable')}`, { timeout: 20000 });
+    await expect(widget.locator('#widget-text')).toHaveText(en('result.siteFilled', { count: 1 }), { timeout: 20000 });
+    await expect(widget.locator('#widget-text')).toHaveAttribute('title', new RegExp(en('widget.aiUnavailable').replace(/[.’]/g, '\\$&')));
     await expect(page.locator('#reach')).toHaveValue('');
     await expect(widget.locator('#need-you')).toHaveText(en('widget.needYou', { count: 1 }));
     assert.deepEqual((await calls()).map(call => call.type), ['warmLaya', 'status', 'getFields', 'status'], 'one readiness check, then the same requests as before Laya');
     widget = await open(HOUSEHOLD, 'off');
     await widget.locator('#autofill').click();
-    await expect(widget.locator('#widget-text')).toHaveText(`${en('widget.filled', { count: 1 })} · ${en('widget.aiUnavailable')}`, { timeout: 20000 });
+    await expect(widget.locator('#widget-text')).toHaveText(en('result.siteFilled', { count: 1 }), { timeout: 20000 });
+    await expect(widget.locator('#widget-text')).toHaveAttribute('title', new RegExp(en('widget.aiUnavailable').replace(/[.’]/g, '\\$&')));
     assert.equal(await page.locator('input[type="radio"]:checked').count(), 0);
     await expect(widget.locator('#need-you')).toHaveText(en('widget.needYou', { count: 2 }));
     assert.deepEqual(await layaRequests(), []);
