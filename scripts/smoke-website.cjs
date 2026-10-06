@@ -271,6 +271,18 @@ async function inspectWhatItDoes(page) {
   // The address the applicant must review ends the first paragraph, where a skimming reader sees it.
   await expect(page.locator('.scope-note p')).toHaveCount(3);
   await expect(page.locator('.scope-note p').first()).toContainText(/review that address before you submit\.$/);
+  // Autofill also chooses Save and Continue on Tell Us More, Iowa's screening pages and one person's record pages (#205).
+  for (const phrase of ['Tell Us More', 'Save and Continue', 'one person']) {
+    assert.ok(scope.includes(phrase), `What it does today must mention "${phrase}"`);
+  }
+  assert.doesNotMatch(scope, /every other page|stay manual|other Next buttons/i, 'What it does today must not say every other page waits for you');
+  const ready = await page.locator('.ready-strip').innerText();
+  for (const phrase of ['Save and Continue', 'submit']) {
+    assert.ok(ready.includes(phrase), `Ready to apply must mention "${phrase}"`);
+  }
+  assert.doesNotMatch(ready, /stay manual|other Next buttons/i, 'Ready to apply must not say other Next buttons stay manual');
+  // SecondHand never submits, signs or consents for the applicant.
+  for (const text of [scope, ready]) assert.doesNotMatch(text, /(it|SecondHand) (submits|signs|consents)/i);
   await page.getByText('Updating from an earlier version', { exact: true }).click();
   // The extension reloads itself only when the new app ships a newer extension build.
   await expect(page.locator('#setup details[open] .details-body')).toContainText('If it comes with a newer extension');
@@ -280,6 +292,9 @@ async function inspectWhatItDoes(page) {
   await inspectLayout(page);
   await expect(page.locator('main')).not.toContainText(/Details link|\bDetails\b to open/);
   await expect(page.locator('img.guide-card')).not.toHaveAttribute('alt', /Details/);
+  // Chrome lists the extension as SecondHand now (#201); the picture still shows the old name, so the alt names neither.
+  await expect(page.locator('img[src*="loaded"]')).toHaveAttribute('alt', /.+/);
+  await expect(page.locator('img[src*="loaded"]')).not.toHaveAttribute('alt', /companion/);
   // The card picture is a 2x capture of the real card (scripts/capture-guide-card.cjs), shown at the card's real size.
   // It loads lazily, so bring it into view and wait until it has loaded or failed.
   const card = page.locator('img.guide-card');
