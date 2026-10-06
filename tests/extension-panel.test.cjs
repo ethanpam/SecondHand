@@ -2562,7 +2562,7 @@ test('the list shows only well-formed questions, in the applicant’s language, 
   const odd = [...SAVABLE, { id: 'not an id!', label: 'Bad id', answered: true }, { id: 'f0:sh-2-3', label: 42, answered: true }, { id: 'f0:sh-2-4', label: 'No flag' }];
   const view = await panel(t, { tab: pantryTab, site: PANTRY_SITE, savable: odd, language: 'es' });
   assert.deepEqual([...view.window.document.querySelectorAll('[data-save-id]')].map(row => row.dataset.saveId), ['f0:sh-2-1', 'f0:sh-2-2']);
-  assert.equal(view.get('save-title').textContent, 'No está guardado en SecondHand');
+  assert.equal(view.get('save-title').textContent, 'Respuestas sin guardar en SecondHand');
   assert.equal(view.window.document.querySelector('[data-save-id="f0:sh-2-2"] button').textContent, 'Guardar en “My information”');
   const none = await panel(t, { tab: pantryTab, site: PANTRY_SITE });
   assert.equal(none.get('save-section').hidden, true);
