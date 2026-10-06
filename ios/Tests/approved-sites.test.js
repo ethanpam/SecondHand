@@ -188,3 +188,13 @@ test('re-approving a site invalidates old review tokens and remembered matches',
   assert.equal(view.scan.fields.find(f=>f.label==='Preferred contact').remembered,undefined);
   assert.equal(view.scan.fields.find(f=>f.label==='Preferred contact').suggestedKey,null);
 });
+
+
+test('optional radio choices do not block Next, while required groups accept any selected option', () => {
+  const dom=page('<form><label>Option A<input type="radio" name="optional" value="a"></label><label>Option B<input type="radio" name="optional" value="b"></label><button>Next</button></form>');
+  assert.equal(inspect(dom).actions[0].ready,true);
+  dom.window.document.querySelector('input').required=true;
+  assert.equal(inspect(dom).actions[0].ready,false);
+  dom.window.document.querySelectorAll('input')[1].checked=true;
+  assert.equal(inspect(dom).actions[0].ready,true);
+});

@@ -277,7 +277,7 @@
       if (["radio", "checkbox"].includes(control.type)) {
         const legendRequired = /\*/.test(control.closest("fieldset")?.querySelector("legend")?.textContent || "");
         if (control.type === "radio" || marked || legendRequired) {
-          if (!control.name) { if (!control.checked) return false; }
+          if (!control.name) { if ((marked || legendRequired || isPortalURL(doc.defaultView.location.href)) && !control.checked) return false; }
           else {
             const group = groups.get(control.name) || [];
             group.push(control); groups.set(control.name, group);
@@ -285,7 +285,13 @@
         }
       } else if (marked && !String(control.value || "").trim()) return false;
     }
-    if (Array.from(groups.values()).some(group => !group.some(control => control.checked))) return false;
+    if (Array.from(groups.values()).some(group => {
+      const required = isPortalURL(doc.defaultView.location.href) || group.some(control => control.required
+        || control.getAttribute("aria-required") === "true"
+        || Array.from(control.labels || []).some(label => /\*/.test(label.textContent))
+        || /\*/.test(control.closest("fieldset")?.querySelector("legend")?.textContent || ""));
+      return required && !group.some(control => control.checked);
+    })) return false;
     return !Array.from(form.querySelectorAll('[role="alert"], .error, .errors, .errorMessage'))
       .some(element => rendered(element, doc) && element.textContent.trim());
   }
