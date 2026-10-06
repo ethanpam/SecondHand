@@ -2660,12 +2660,16 @@ test('the buttons that the keyboard shortcuts work name them in their tooltips, 
   await settle();
   assert.equal(side.get('panel-autofill').title, 'Keyboard shortcut: ⌥⇧F.');
   assert.equal(side.get('panel-left').title, 'Keyboard shortcut: ⌥⇧N.');
+  // In words too, under the side panel's last line: a tooltip shows only to a pointer.
+  assert.equal(side.get('shortcuts-line').hidden, false);
+  assert.equal(side.get('shortcuts-line').textContent, 'Keyboard: ⌥⇧F starts Autofill, or stops it. ⌥⇧N goes to the next question left.');
   const spanish = await panel(t, { language: 'es', shortcuts });
   await settle();
   assert.equal(spanish.get('panel-autofill').title, 'Atajo de teclado: ⌥⇧F.');
   // Without the commands API (an older Chrome, or none set), no tooltip names one.
   const none = await panel(t, {});
   await settle();
+  assert.equal(none.get('shortcuts-line').hidden, true);
   assert.equal(none.get('panel-autofill').title, '');
 });
 

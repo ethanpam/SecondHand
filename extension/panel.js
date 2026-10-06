@@ -601,6 +601,11 @@
       $('iowa-policy').textContent = t('panel.iowaPolicy');
       $('panel-autofill').title = withShortcut('', COMMANDS.autofill);
       $('panel-left').title = withShortcut('', COMMANDS.nextQuestion);
+      // The keyboard shortcuts in words too: a tooltip shows only to a pointer, and at its own size.
+      const keys = [[COMMANDS.autofill, 'shortcut.autofillLine'], [COMMANDS.nextQuestion, 'shortcut.nextLine']]
+        .filter(([name]) => shortcuts[name]).map(([name, key]) => ({ key, params: { keys: shortcuts[name] } }));
+      $('shortcuts-line').hidden = !keys.length;
+      $('shortcuts-line').textContent = keys.length > 1 ? words({ key: 'joined', params: { first: keys[0], second: keys[1] } }) : keys.length ? words(keys[0]) : '';
       const pending = site?.enabled && site.ready ? site.frames.filter(frame => !frame.enabled) : [];
       $('frames-enable').hidden = !target || !pending.length;
       $('frames-enable').disabled = working;

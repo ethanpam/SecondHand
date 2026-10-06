@@ -73,7 +73,7 @@ button.checklist-item::after{content:"";flex:none;width:7px;height:7px;margin-in
 @media(max-width:260px){.checklist-item{gap:8px;padding:10px}button.checklist-item::after{display:none}}
 .checklist-section>.note{margin:0 0 8px}
 /* What stays with the reader, in the panel's own dark print. */
-footer{border-top:1px solid var(--border);margin-top:12px;padding:12px 0 16px}
+footer{border-top:1px solid var(--border);margin-top:12px;padding:12px 0 16px}footer>.note{margin:8px 0 0}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 /* The page's questions in the applicant's language. */
 .questions-pending{margin:0 0 8px}
