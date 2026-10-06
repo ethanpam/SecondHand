@@ -432,6 +432,12 @@ async function sites() {
       await expect.poll(() => shown('save-section'), { timeout: 20000 }).toBe(true);
       await page.locator('#apt').fill('Unit 5');
       await panelShot(running, panel, 'panel-save', () => Boolean(document.querySelector('[data-save-id] button')));
+      // All websites on, then off: the notice says how to remove the access Chrome keeps.
+      await panel.click('#all-sites-enable');
+      await expect.poll(() => shown('all-sites-disable'), { timeout: 20000 }).toBe(true);
+      await panel.click('#all-sites-disable');
+      await panelShot(running, panel, 'panel-all-sites-off', () => !document.getElementById('all-sites-enable').hidden && !document.getElementById('all-sites-enable').disabled);
+      assert.equal(await worker.evaluate(() => allSitesOn()), false);
       // Without Always allow, the app holds the date of birth back for Fill sensitive details (#176).
       await open(DETAILS, { holds: ['birthDate'], laya: 'ready', guess: true });
       await recheck(panel);
@@ -444,12 +450,6 @@ async function sites() {
       await expect.poll(() => panel.evaluate(() => !document.getElementById('panel-autofill').disabled), { timeout: 20000 }).toBe(true);
       await panel.click('#panel-autofill');
       await panelShot(running, panel, 'panel-site-guessed', () => !document.getElementById('guesses-section').hidden);
-      // All websites on, then off: the notice says how to remove the access Chrome keeps.
-      await panel.click('#all-sites-enable');
-      await expect.poll(() => shown('all-sites-disable'), { timeout: 20000 }).toBe(true);
-      await panel.click('#all-sites-disable');
-      await panelShot(running, panel, 'panel-all-sites-off', () => !document.getElementById('all-sites-enable').hidden && !document.getElementById('all-sites-enable').disabled);
-      assert.equal(await worker.evaluate(() => allSitesOn()), false);
       await panel.close();
     });
     // The card on other sites, with the side panel closed.
