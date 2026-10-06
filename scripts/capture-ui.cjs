@@ -67,6 +67,8 @@ async function installDesktop(worker) {
       if (type === 'suggestFields' || type === 'answerFields') throw Object.assign(new Error('Laya isn’t ready on this computer.'), { code: 'LAYA_NOT_READY' });
       if (type === 'getFields') {
         if (desktop.locked) throw new Error('Unlock your local vault first.');
+        // The app is asking the person: the request waits until the capture lets it go.
+        if (desktop.hold) await new Promise(resolve => { globalThis.__release = resolve; });
         return { accessRevision: 0, values: Object.fromEntries(payload.fields.filter(name => desktop.profile[name]).map(name => [name, desktop.profile[name]])) };
       }
       if (type === 'recordProgress') return { recorded: true };
@@ -219,7 +221,7 @@ async function withCopy(edit, work) {
 // The card on Iowa's application, with the side panel closed: an open panel covers the page's corner.
 async function iowaCard() {
   await withSession(smoke.extensionDirectory, {}, async session => {
-    const { page, open, card } = session;
+    const { page, worker, open, card } = session;
     await open(applicant);
     await expect((await card()).locator('#autofill')).toBeVisible();
     await cardShot(session, 'card-ready');
@@ -239,10 +241,18 @@ async function iowaCard() {
     await expect((await card()).locator('#pill:focus-visible')).toBeVisible();
     await cardShot(session, 'card-hidden-focus');
 
-    await open(applicant, { profile: { ...smoke.syntheticProfile, firstName: '' } });
+    // While the app asks the person for permission.
+    await open(applicant, { profile: { ...smoke.syntheticProfile, firstName: '' }, hold: true });
     await (await card()).locator('#autofill').click();
+    await expect((await card()).locator('#autofill')).toBeDisabled();
+    await cardShot(session, 'card-working');
+    await worker.evaluate(() => { globalThis.__desktop.hold = false; globalThis.__release?.(); });
     await expect((await card()).locator('#need-you')).toBeVisible({ timeout: 20000 });
     await cardShot(session, 'card-need-you');
+    // Autofill has been started once from this Chrome: the next form page gets the short line.
+    await open(applicant);
+    await expect((await card()).locator('#autofill')).toBeVisible();
+    await cardShot(session, 'card-ready-again');
 
     await open(screen('household'));
     await (await card()).locator('#autofill').click();
@@ -285,10 +295,18 @@ async function iowaPanel() {
     await panelShot(session, panel, 'panel-focus', () => document.activeElement?.id === 'panel-autofill');
     await panel.evaluate(() => document.activeElement.blur());
 
+    // While the app asks the person for permission, then the result.
+    await worker.evaluate(() => { globalThis.__desktop.hold = true; });
     await panel.click('#panel-autofill');
+    await panelShot(session, panel, 'panel-working', () => document.getElementById('panel-autofill').disabled);
+    await worker.evaluate(() => { globalThis.__desktop.hold = false; globalThis.__release?.(); });
     const filled = () => document.querySelector('[data-key="lastName"]')?.classList.contains('complete') === true;
     await panelShot(session, panel, 'panel-iowa-filled', filled);
     await panelShot(session, panel, 'panel-checklist', filled, { scroll: 100000 });
+    // Autofill has been started once from this Chrome: the next form page gets the short note.
+    await open(applicant, missingName);
+    await recheck(panel);
+    await panelShot(session, panel, 'panel-iowa-again', listed);
 
     await open(applicant, { locked: true });
     await recheck(panel);
@@ -483,8 +501,8 @@ async function recording() {
 }
 
 const sessions = [
-  [iowaCard, ['card-ready', 'card-focus', 'card-hidden', 'card-hidden-focus', 'card-need-you', 'card-message', 'card-locked', 'card-closed', 'card-pill']],
-  [iowaPanel, ['panel-iowa', 'panel-header', 'panel-focus', 'panel-iowa-filled', 'panel-checklist', 'panel-locked', 'panel-closed', 'panel-info', 'panel-elsewhere', 'panel-arabic', 'panel-questions']],
+  [iowaCard, ['card-ready', 'card-focus', 'card-hidden', 'card-hidden-focus', 'card-working', 'card-need-you', 'card-ready-again', 'card-message', 'card-locked', 'card-closed', 'card-pill']],
+  [iowaPanel, ['panel-iowa', 'panel-header', 'panel-focus', 'panel-working', 'panel-iowa-filled', 'panel-checklist', 'panel-iowa-again', 'panel-locked', 'panel-closed', 'panel-info', 'panel-elsewhere', 'panel-arabic', 'panel-questions']],
   [sites, ['panel-site-off', 'panel-site-filled', 'panel-laya-off', 'panel-save', 'panel-all-sites-off', 'card-site', 'card-offer']],
   [outdated, ['card-outdated', 'panel-outdated', 'card-reload']],
   [recording, ['card-autofill']]

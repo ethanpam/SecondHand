@@ -905,10 +905,10 @@ test('a widget that loads mid-run picks up the running autofill', async t => {
 
 test('side panel turns its button into Stop while autofill is on', async t => {
   const view = await panel(t, { autopilot: true, result: waitingResult });
-  assert.equal(view.get('panel-autofill').textContent, 'Stop autofill');
+  assert.equal(view.get('panel-autofill').textContent, 'Stop Autofill');
   await view.userClick('panel-autofill');
   assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:stop')), { type: 'ui:stop', confirmed: true, tabId: 7 });
-  assert.equal(view.get('panel-autofill').textContent, 'Autofill this page');
+  assert.equal(view.get('panel-autofill').textContent, 'Start Autofill');
 });
 
 test('a worker that never answers gets a plain notice and a Restart button in the widget and the side panel', async t => {
@@ -1220,24 +1220,42 @@ for (const loading of [false, true]) {
 }
 
 
-test('Iowa widget and sidebar disclose first-address selection before Autofill; other sites do not', async t => {
-  const widget = await panel(t, { launcher: true });
-  assert.match(widget.get('widget-text').textContent, /goes to the next by itself\. Picks Iowa’s first suggested home address/);
+test('Iowa widget and sidebar say what Autofill will do before it is clicked, in full the first time; other sites do not', async t => {
+  const storage = new Map();
+  const widget = await panel(t, { launcher: true, storage });
+  const FIRST = 'The SecondHand app asks you first. Then it fills each page and goes to the next by itself, picking Iowa’s first suggested home address. It never signs or submits.';
+  assert.equal(widget.get('widget-text').textContent, FIRST);
   assert.equal(widget.get('widget-text').classList.contains('visually-hidden'), false, 'the widget shows it, not only its tooltip');
-  assert.match(widget.get('autofill').title, /goes to the next one by itself\. On the address step it picks Iowa’s first suggested home address\. Check that address before you submit/);
-  const sidebar = await panel(t);
+  assert.match(widget.get('autofill').title, /^SecondHand fills each page and goes to the next by itself, and picks Iowa’s first suggested home address\. It never signs or submits\.$/);
+  const sidebar = await panel(t, { storage });
   assert.equal(sidebar.get('iowa-policy').hidden, false);
-  assert.match(sidebar.get('iowa-policy').textContent, /^Autofill fills each page and goes to the next one by itself\. On the address step it picks Iowa’s first suggested home address\. Check that address before you submit\.$/);
+  assert.equal(sidebar.get('iowa-policy').textContent, 'The SecondHand app asks you before anything is filled. Then Autofill fills each page and goes to the next one by itself. On the address step it picks Iowa’s first suggested home address: check it before you submit. It never does the security check, signs, or submits for you.');
   assert.equal(sidebar.get('iowa-policy').classList.contains('note'), false, 'it is not small print');
+  assert.equal(sidebar.get('panel-autofill').textContent, 'Start Autofill', 'on Iowa the button starts something that goes on by itself');
   // Once Autofill has run, the status line says what it did and the note is not repeated under it.
   await sidebar.userClick('panel-autofill');
   assert.equal(sidebar.get('iowa-policy').hidden, true);
   assert.match(sidebar.get('status').textContent, /^Filled 3/);
+  // Started once from this Chrome, the next page and the next tab get the short version, on both surfaces.
+  assert.equal(storage.get('secondhand.autofillStarted'), '1');
+  widget.window.dispatchEvent(Object.assign(new widget.window.Event('storage'), { key: 'secondhand.autofillStarted' }));
+  await settle();
+  assert.equal(widget.get('widget-text').textContent, 'SecondHand fills each page and goes to the next by itself. It never signs or submits.');
+  const later = await panel(t, { storage });
+  assert.equal(later.get('iowa-policy').textContent, 'Autofill fills each page and goes to the next one by itself, and picks Iowa’s first suggested home address. It never signs or submits.');
+  const laterWidget = await panel(t, { launcher: true, storage });
+  await laterWidget.userClick('autofill');
+  assert.deepEqual([...storage.keys()].sort(), ['secondhand.autofillStarted', 'secondhand.build'], 'the widget notes a start too; the side panel had noted its build');
+  // Another site's Autofill fills once and notes nothing.
+  const siteStorage = new Map();
+  const siteWidget = await panel(t, { launcher: true, storage: siteStorage, tab: SITE, site: { origin: ORIGIN, enabled: true } });
+  await siteWidget.userClick('autofill');
+  assert.equal(siteStorage.size, 0);
   const running = await panel(t, { autopilot: true, result: waitingResult });
   assert.equal(running.get('iowa-policy').hidden, true);
   // An information-only page says there is nothing to fill before Autofill is clicked, above the note.
-  const info = await panel(t, { pageState: state => ({ ...structuredClone(state), page: { kind: 'info', pageKey: 'iowa-instructions', reason: 'Nothing to fill on this page.', reasonKey: 'iowa.infoOnly', reasonParams: {}, checklist: [] } }) });
-  assert.equal(info.get('status').textContent, 'Nothing to fill on this page.');
+  const info = await panel(t, { pageState: state => ({ ...structuredClone(state), page: { kind: 'info', pageKey: 'iowa-instructions', reason: 'Nothing to fill on this page. Click Continue in Iowa’s form, or let Autofill go on for you.', reasonKey: 'iowa.infoOnly', reasonParams: {}, checklist: [] } }) });
+  assert.equal(info.get('status').textContent, 'Nothing to fill on this page. Click Continue in Iowa’s form, or let Autofill go on for you.');
   assert.equal(info.get('iowa-policy').hidden, false);
   assert.equal(info.get('panel-autofill').disabled, false);
   const other = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true } });
@@ -1350,7 +1368,7 @@ test('with Spanish as the browser language, the side panel shows none of SecondH
   const view = await panel(t, { language: 'es-ES', pageState: keyedChecklist });
   assert.equal(view.window.document.documentElement.lang, 'es');
   assert.equal(view.window.document.title, spanish('app.title'));
-  assert.equal(view.get('panel-autofill').textContent, spanish('panel.autofill'));
+  assert.equal(view.get('panel-autofill').textContent, spanish('panel.autofillIowa'));
   // Ready to fill, with the app unlocked: there is nothing more to say.
   assert.equal(view.get('status').textContent, '');
   assert.equal(view.get('desktop-status').parentElement.hidden, true);
@@ -1416,19 +1434,19 @@ test('the language picker saves the choice in the extension’s storage, changes
   const storage = new Map();
   const view = await panel(t, { storage, pageState: keyedChecklist });
   assert.equal(view.get('language').value, 'en');
-  assert.equal(view.get('panel-autofill').textContent, 'Autofill this page');
+  assert.equal(view.get('panel-autofill').textContent, 'Start Autofill');
   view.get('language').value = 'es';
   view.get('language').dispatchEvent(new view.window.Event('change'));
   await settle();
   assert.equal(storage.get('secondhand.language'), 'es');
-  assert.equal(view.get('panel-autofill').textContent, spanish('panel.autofill'));
+  assert.equal(view.get('panel-autofill').textContent, spanish('panel.autofillIowa'));
   assert.equal(view.get('checklist-summary').textContent, strings.text('es', 'questions.count', { count: 3 }));
   assert.equal(view.get('iowa-policy').textContent, spanish('panel.iowaPolicy'));
   assert.deepEqual(shownText(view).filter(text => englishOnly.has(text)), []);
 
   const reloaded = await panel(t, { storage });
   assert.equal(reloaded.get('language').value, 'es', 'the saved choice wins over the English browser');
-  assert.equal(reloaded.get('panel-autofill').textContent, spanish('panel.autofill'));
+  assert.equal(reloaded.get('panel-autofill').textContent, spanish('panel.autofillIowa'));
   const widget = await panel(t, { launcher: true, storage });
   assert.equal(widget.get('autofill').textContent, spanish('widget.autofill'));
   // A choice made while the widget is open reaches it through the storage event.

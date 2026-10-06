@@ -900,7 +900,7 @@
     if (info) {
       const ready = Boolean(continueButton(doc, info.onclick));
       return { ...result, kind: ready ? 'info' : 'manual', pageKey: info.pageKey, heading: info.heading,
-        reason: ready ? 'Nothing to fill on this page.' : 'Read this page, then click Continue in Iowa’s form.',
+        reason: ready ? 'Nothing to fill on this page. Click Continue in Iowa’s form, or let Autofill go on for you.' : 'Read this page, then click Continue in Iowa’s form.',
         ...(ready ? {} : { todo: 'Read this page, then click Continue in Iowa’s form.' }) };
     }
     const known = [

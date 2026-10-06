@@ -78,6 +78,13 @@
       relabel();
     });
   }
+  // Whether Autofill has ever been started on Iowa's form from this Chrome profile, in the extension pages'
+  // own storage like the language choice. Before that, both surfaces say all of what Autofill does; after
+  // it, the short version. Nothing about the applicant is kept here.
+  const STARTED_KEY = 'secondhand.autofillStarted';
+  const startedBefore = () => { try { return localStorage.getItem(STARTED_KEY) === '1'; } catch { return false; } };
+  const noteStarted = () => { try { localStorage.setItem(STARTED_KEY, '1'); } catch { /* storage is a convenience here */ } };
+  const followStarted = rerender => { window.addEventListener('storage', event => { if (event.key === STARTED_KEY) rerender(); }); };
 
   applyStatic();
   if (location.search === '?surface=launcher' && !location.hash) { widget(); return; }
@@ -119,7 +126,7 @@
       if (outdated) return t(outdatedKey === 'panel.reloadPage' ? 'panel.reloadPage' : 'widget.outdated');
       if (working) return t('widget.working');
       if (note) return words(note, 120);
-      if (!result) return !site ? t('widget.iowaReady') : languageTrouble ? t('widget.languageCheckFailed') : t('widget.siteReady', { host: hostOf(site.origin) });
+      if (!result) return !site ? t(startedBefore() ? 'widget.iowaReadyAgain' : 'widget.iowaReady') : languageTrouble ? t('widget.languageCheckFailed') : t('widget.siteReady', { host: hostOf(site.origin) });
       // Other sites: the need-you link carries the count, so it isn't repeated here.
       if (result.state === 'done' && result.pageKey === 'general') {
         const filled = Number(result.filled) || 0;
@@ -235,6 +242,7 @@
 
     $('autofill').addEventListener('click', trusted(async () => {
       if (working || outdated) return;
+      if (!site) noteStarted();
       working = true; note = null; ai = { note: null, reason: '' }; render();
       try {
         const request = { type: 'ui:autofill', confirmed: true };
@@ -307,6 +315,7 @@
       send({ type: 'ui:openPanel', confirmed: true, questions: true }).catch(error => { note = trouble(error); render(); });
     }));
     followLanguage(() => { applyStatic(); render(); });
+    followStarted(render);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
     window.addEventListener('pagehide', () => clearTimeout(pollTimer), { once: true });
     render();
@@ -435,8 +444,10 @@
     }
     function controls() {
       const off = Boolean(target && site && !site.enabled);
-      // What Autofill will do on Iowa's form, said before it is clicked. Once it has run, the status line says what it did.
+      // What Autofill will do on Iowa's form, said before it is clicked, in full until it has been started once
+      // from this Chrome. Once it has run on this page, the status line says what it did.
       $('iowa-policy').hidden = !target || Boolean(site) || autopilot || told;
+      $('iowa-policy').textContent = t(startedBefore() ? 'panel.iowaPolicyAgain' : 'panel.iowaPolicy');
       const pending = site?.enabled && site.ready ? site.frames.filter(frame => !frame.enabled) : [];
       $('frames-enable').hidden = !target || !pending.length;
       $('frames-enable').disabled = working;
@@ -457,7 +468,8 @@
       const laya = layaLine && site?.enabled ? words(layaLine) : '';
       $('laya-status').hidden = !laya;
       $('laya-status').textContent = laya;
-      $('panel-autofill').textContent = t(autopilot ? 'panel.stopAutofill' : 'panel.autofill');
+      // On Iowa's form the button starts something that goes on by itself; elsewhere it fills this page once.
+      $('panel-autofill').textContent = t(autopilot ? 'panel.stopAutofill' : site ? 'panel.autofill' : 'panel.autofillIowa');
       // While the app needs opening or unlocking, that button is the one to press: Autofill steps back to an outline.
       $('panel-autofill').classList.toggle('primary', !desktopAction);
       $('panel-autofill').classList.toggle('secondary', Boolean(desktopAction));
@@ -962,6 +974,7 @@
     $('panel-autofill').addEventListener('click', trusted(async () => {
       if ($('panel-autofill').disabled) return;
       const stopping = autopilot;
+      if (!stopping && !site) noteStarted();
       const result = await act(stopping ? { type: 'ui:stop', confirmed: true } : { type: 'ui:autofill', confirmed: true }, { key: stopping ? 'panel.stopping' : 'panel.filling' });
       if (result) autopilot = !stopping && continuing(result);
       if (reported(result)) show(fromResult(result), result.state === 'error');
@@ -1067,6 +1080,7 @@
       relabel();
     });
     followLanguage(relabel);
+    followStarted(controls);
     function halt(error) {
       if (halted) return;
       show(null);

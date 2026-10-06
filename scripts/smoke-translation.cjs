@@ -129,8 +129,8 @@ async function main() {
     console.log('Side panel: a row scrolls to its question; the form stays empty.');
 
     // The side panel shows none of SecondHand's English.
-    await expect.poll(() => panel.text('#panel-autofill')).toBe(es('panel.autofill'));
-    await expect.poll(() => panel.text('#iowa-policy')).toBe(es('panel.iowaPolicy'));
+    await expect.poll(() => panel.text('#panel-autofill')).toBe(es('panel.autofillIowa'));
+    await expect.poll(() => panel.text('#iowa-policy')).toBe(es('panel.iowaPolicyAgain'));
     assert.equal(await panel.text('#status'), '', 'ready to fill, there is nothing more to say');
     assert.equal(await panel.evaluate(() => document.documentElement.lang), 'es');
     assert.equal(await panel.evaluate(() => document.getElementById('language').value), 'es');
@@ -160,25 +160,25 @@ async function main() {
     // The picker: English wins over the Spanish browser, survives reloading the panel and the page, and the widget follows.
     const choose = value => panel.evaluate(value => { const select = document.getElementById('language'); select.value = value; select.dispatchEvent(new Event('change')); }, value);
     await choose('en');
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await expect(widget.locator('#autofill')).toHaveText('Autofill', { timeout: 10000 });
     await panel.evaluate(() => { window.__beforeReload = true; setTimeout(() => location.reload(), 0); });
     // While the panel reloads, its old page is gone: that read fails and the poll tries again.
     await expect.poll(() => panel.evaluate(() => !window.__beforeReload && document.readyState === 'complete').catch(() => false), { timeout: 15000 }).toBe(true);
-    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe('Start Autofill');
     assert.equal(await panel.evaluate(() => document.getElementById('language').value), 'en');
     await page.reload({ waitUntil: 'domcontentloaded' });
     widget = await launcherFrame();
     await expect(widget.locator('#autofill')).toHaveText('Autofill', { timeout: 20000 });
     await choose('es');
-    await expect.poll(() => panel.text('#panel-autofill')).toBe(es('panel.autofill'));
+    await expect.poll(() => panel.text('#panel-autofill')).toBe(es('panel.autofillIowa'));
     await expect(widget.locator('#autofill')).toHaveText(es('widget.autofill'), { timeout: 10000 });
     console.log('Picker: English persists over the Spanish browser across reloads of the panel and the page; both surfaces follow.');
 
     // Arabic turns the panel right to left; Vietnamese turns it back. The widget follows each choice.
     for (const [code, dir] of [['ar', 'rtl'], ['vi', 'ltr']]) {
       await choose(code);
-      await expect.poll(() => panel.text('#panel-autofill')).toBe(strings.text(code, 'panel.autofill'));
+      await expect.poll(() => panel.text('#panel-autofill')).toBe(strings.text(code, 'panel.autofillIowa'));
       await expect(widget.locator('#autofill')).toHaveText(strings.text(code, 'widget.autofill'), { timeout: 10000 });
       assert.deepEqual(await panel.evaluate(() => [document.documentElement.lang, document.documentElement.dir]), [code, dir]);
       assert.equal(await widget.evaluate(() => document.documentElement.dir), dir);

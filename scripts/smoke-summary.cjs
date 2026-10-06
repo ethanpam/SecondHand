@@ -79,7 +79,7 @@ async function main() {
     await expect(widget.locator('#details')).toBeVisible({ timeout: 20000 });
     await widget.locator('#details').click();
     panel = await smoke.attachNativePanel(context, page, extensionId);
-    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofillIowa'));
     const chrome = await panel.evaluate(async options => typeof Summarizer === 'undefined' ? 'missing' : Summarizer.availability(options), OPTIONS);
     // A Chrome that can't summarize is not the applicant's concern: nothing is said. One that can download its model offers to.
     const note = { missing: '', unavailable: '', downloadable: en('summary.needsDownload'), downloading: en('summary.needsDownload') }[chrome];

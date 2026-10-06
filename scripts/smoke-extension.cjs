@@ -471,7 +471,8 @@ async function main() {
         assert.equal(await widget.evaluate(() => document.documentElement.dir), code === 'ar' ? 'rtl' : 'ltr');
         // Before Autofill: that it goes on by itself and picks the first suggested address, with the offer of
         // the page's questions in the applicant's language under it where there is one.
-        await expect(widget.locator('#widget-text')).toHaveText(strings.text(code, 'widget.iowaReady'));
+        // Autofill has been started from this profile above, so this is the short line.
+        await expect(widget.locator('#widget-text')).toHaveText(strings.text(code, 'widget.iowaReadyAgain'));
         await expect(widget.locator('#widget-text')).toBeVisible();
         await expect.poll(() => widget.evaluate(whole), { timeout: 10000 }).toBe(true);
         const ready = await host.boundingBox();
@@ -560,7 +561,7 @@ async function main() {
     // button say so, not a red repeat under Autofill. Opening it waits for the app, then offers Unlock.
     await resetTo(`${applicant}?next=stay`);
     await worker.evaluate(() => { globalThis.__nativeSmoke.closed = true; });
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await panel.click('#panel-autofill');
     await expect.poll(() => panel.text('#desktop-status'), { timeout: 15000 }).toBe('The SecondHand app on this computer is closed.');
     await expect.poll(() => panel.text('#desktop-action')).toBe('Open SecondHand');
@@ -585,7 +586,7 @@ async function main() {
     await page.locator('#sameAddress2').check();
     await page.locator('#mailingAddressLine1').fill('Preserved fictional mailing');
     await page.locator('#sameAddress2').evaluate(element => { element.checked = false; });
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await panel.click('#panel-autofill');
     await expect(page.locator('#lastName')).toHaveValue(syntheticProfile.lastName, { timeout: 20000 });
     await expect(page.locator('#firstName')).toHaveValue('Preserved fictional name');
@@ -601,7 +602,7 @@ async function main() {
       verifiedApplicantClicks = 0; verifiedAddressLoads = 0; documentManualLoads = 0; verifiedAddressNext.length = 0;
       await resetTo(`${applicant}?next=verified-address-${variant}`, { profile: { mailingSameAsHome: 'yes' } });
       await worker.evaluate(() => { globalThis.__nativeSmoke.holdAddressNavigation = true; });
-      await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+      await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
       await panel.click('#panel-autofill');
       await expect.poll(() => page.url(), { timeout: 20000 }).toBe(addressUrl);
       await expect.poll(() => worker.evaluate(() => globalThis.__nativeSmoke.addressAuthorizationWaiting), { timeout: 20000 }).toBe(true);
@@ -633,7 +634,7 @@ async function main() {
     for (const variant of ['error', 'modal', 'mailing']) {
       currentAddressVariant = variant; verifiedAddressNext.length = 0;
       await resetTo(addressUrl);
-      await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+      await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
       await panel.click('#panel-autofill');
       const before = await page.evaluate(() => JSON.stringify(document.__addressQa));
       const requests = (await calls('getFields')).length;
@@ -653,7 +654,7 @@ async function main() {
     await expect(page.locator('#homeAddressIndex1')).toBeChecked();
     await expect(enteredCounty).toBeVisible();
     await expect.poll(() => panel.text('[data-key="addressReview"]')).toContain('Not filled yet');
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await panel.click('#panel-autofill');
     await expect.poll(() => page.url(), { timeout: 20000 }).toBe(documentManualUrl);
     await expect.poll(() => verifiedAddressNext.length).toBe(1);
@@ -667,7 +668,7 @@ async function main() {
     await resetTo(addressUrl);
     await expect(enteredCounty).toBeVisible();
     const countyBefore = await enteredCounty.inputValue();
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await panel.click('#panel-autofill');
     await expect.poll(() => page.evaluate(() => document.__addressQa.selectionClicks.length), { timeout: 20000 }).toBe(1);
     await expect.poll(() => panel.text('[data-key="addressReview"]')).toContain('Do it yourself');
@@ -680,7 +681,7 @@ async function main() {
     console.log('Address county stays visible: stays manual; Save and Continue not pressed and the county untouched.');
 
     await resetTo(`${applicant}?next=address-review`, { profile: { mailingSameAsHome: 'yes' } });
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await panel.click('#panel-autofill');
     await expect(page.locator('[data-qa-only]')).toBeVisible({ timeout: 20000 });
     await expect.poll(() => panel.text('[data-key="addressReview"]')).toContain('address');
@@ -695,7 +696,7 @@ async function main() {
     currentAddressVariant = 'original'; verifiedAddressNext.length = 0;
     await resetTo(addressUrl);
     await worker.evaluate(() => { globalThis.__nativeSmoke.lockAfterFields = true; });
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await panel.click('#panel-autofill');
     await expect.poll(() => panel.text('#status')).toMatch(/lock|unlock|changed/i);
     await expect(page.locator('#homeAddressIndex1')).toBeChecked();
@@ -709,7 +710,7 @@ async function main() {
     await resetTo(selfDetailsUrl);
     const untouched = await selfControls();
     await expect.poll(() => panel.text('[data-key="birthDate"]')).toContain('Date of birth');
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await panel.click('#panel-autofill');
     await expect(page.locator(`[id="${selfFixture.DOB_ID}"]`)).toHaveValue('04/12/1985', { timeout: 20000 });
     await expect.poll(() => panel.text('[data-key="birthDate"]')).toContain('Done');
@@ -729,7 +730,7 @@ async function main() {
     for (const variant of ['people', 'form', 'heading']) {
       currentSelfVariant = variant;
       await resetTo(selfDetailsUrl);
-      await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+      await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
       await panel.click('#panel-autofill');
       await page.waitForTimeout(1800);
       await expect(page.locator(`[id="${selfFixture.DOB_ID}"]`)).toHaveValue('');
@@ -752,7 +753,7 @@ async function main() {
     const answered = [['gender', 2], ['hasSsn', 1], ['ssnCardName', 1], ['usCitizen', 1], ['militaryOrVeteran', 2], ['hasDisability', 2], ['blind', 2], ['healthLimits', 2], ['hasMedicare', 2]]
       .map(([key, option]) => tellUsMore.radioId(tellUsMore.ANSWERS[key], option));
     await expect.poll(() => panel.text('[data-key="gender"]')).toContain('Are you male or female?');
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await panel.click('#panel-autofill');
     await expect(page.locator(`[id="${tellUsMore.DOB_ID}"]`)).toHaveValue('04/12/1985', { timeout: 20000 });
     await expect.poll(startChecked, { timeout: 20000 }).toEqual(answered);
@@ -777,7 +778,7 @@ async function main() {
     // With nothing saved, nothing is filled; each row says to type the answer in Iowa's form, and one note above
     // the list says where to save answers for next time.
     await resetTo(startDetailsUrl, { profile: Object.fromEntries(startFields.map(field => [field, ''])) });
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await panel.click('#panel-autofill');
     for (const key of startRows.filter(key => key !== 'ssnCardName')) {
       await expect.poll(() => panel.text(`[data-key="${key}"]`), { timeout: 20000 }).toContain('No saved answer: type it in Iowa’s form');
