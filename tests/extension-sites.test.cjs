@@ -1603,7 +1603,7 @@ test('only a confirmed side-panel request turns on all websites, and only with C
   assert.equal(noAccess.registered.size, 0);
 });
 
-const CHROME_STILL = 'Chrome still lists SecondHand’s access to all websites, but nothing uses it. To remove it, open chrome://extensions, then SecondHand, then Details, then Site access.';
+const CHROME_STILL = 'Chrome’s own settings may still list SecondHand’s access to all websites; SecondHand no longer uses it.';
 test('when the app declines all websites or can’t be reached, nothing is registered or trusted, Chrome’s grant is left alone, and the panel says the app didn’t approve', async () => {
   const w = siteWorker({ url: OTHER_URL, allGranted: true, desktop: { trustAllError: 'You cancelled trusting all websites.' } });
   const declined = await allSitesOn(w);
