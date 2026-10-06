@@ -191,3 +191,46 @@ test('a saved birth date in the future or more than 130 years ago never stops th
   for (const id of ['household.adults', 'household.children', 'household.seniors', 'household.ages', 'household.childAges']) assert.equal(listedFacts[id], undefined, id);
   assert.equal(listedFacts['household.students'], 'One household member is a student in 5th grade.');
 });
+
+// #184: the student status, where the income comes from, the benefits the household gets now, and the help wanted.
+test('the student status, income sources, current benefits and the help wanted become facts; income sources and benefits are sensitive', () => {
+  const facts = profile => Object.fromEntries(buildFacts(profile, { today: TODAY }).map(fact => [fact.id, fact]));
+  const student = studentLevel => facts({ studentLevel })['applicant.student']?.text;
+  assert.deepEqual(['not-student', 'high-school', 'undergraduate', 'graduate', 'other', ''].map(student), ['The applicant is not a student.',
+    'The applicant is a high school student.', 'The applicant is an undergraduate college student.', 'The applicant is a graduate student.',
+    'The applicant is a student, not in high school, college or graduate school.', undefined]);
+  const income = incomeSources => facts({ incomeSources })['income.sources']?.text;
+  assert.equal(income('job'), 'The household’s income comes from a job.');
+  assert.equal(income('financial-aid,family-support'), 'The household’s income comes from financial aid or student loans and family support.');
+  assert.equal(income('job,self-employment,unemployment,social-security,child-support,pension,other'), 'The household’s income comes from a job, self-employment, ' +
+    'unemployment benefits, Social Security (including SSI and SSDI), child support, a pension and another source.');
+  assert.equal(income('none'), 'The household has no source of income.');
+  assert.equal(income(''), undefined);
+  // The facts name the benefits the household gets. Those it doesn't are left out to keep the sheet within the model's
+  // reach; the rules answer a yes or no about one from the saved list itself.
+  const benefits = currentBenefits => facts({ currentBenefits })['benefits.current']?.text;
+  assert.equal(benefits('snap,school-meals'), 'The household gets SNAP and free or reduced school meals now.');
+  assert.equal(benefits('cash-assistance'), 'The household gets cash assistance (TANF, FIP or HRA) now.');
+  assert.equal(benefits('snap,wic,cash-assistance,medicaid,ssi,housing,school-meals'), 'The household gets SNAP, WIC, cash assistance (TANF, FIP or HRA), Medicaid, SSI, ' +
+    'housing assistance and free or reduced school meals now.');
+  assert.equal(benefits('none'), 'The household gets none of these benefits now: SNAP, WIC, cash assistance (TANF, FIP or HRA), Medicaid, SSI, housing assistance and free or reduced school meals.');
+  assert.equal(benefits(''), undefined);
+  const help = helpWanted => facts({ helpWanted })['help.wanted']?.text;
+  assert.equal(help('food-pantry,fresh-produce'), 'The applicant is looking for a food pantry and fresh produce.');
+  assert.equal(help('food-vouchers,gift-cards,snap-help,social-services,other'), 'The applicant is looking for meals or food vouchers, grocery gift cards, help applying for SNAP, social services and other help.');
+  // Where the money comes from and which benefits the household gets are sensitive, as income is.
+  const all = facts({ studentLevel: 'graduate', incomeSources: 'job', currentBenefits: 'snap', helpWanted: 'food-pantry' });
+  assert.deepEqual(Object.fromEntries(Object.values(all).map(fact => [fact.id, [fact.sources, fact.sensitive]])), {
+    'applicant.student': [['studentLevel'], false], 'income.sources': [['incomeSources'], true],
+    'benefits.current': [['currentBenefits'], true], 'help.wanted': [['helpWanted'], false]
+  });
+  assert.ok(SENSITIVE_SOURCES.includes('incomeSources') && SENSITIVE_SOURCES.includes('currentBenefits'));
+  assert.throws(() => buildFacts({ incomeSources: 'lottery' }, { today: TODAY }), /incomeSources/);
+  assert.throws(() => buildFacts({ studentLevel: 'college' }, { today: TODAY }), /studentLevel/);
+});
+
+test('the fictional profile’s income answers agree with each other: no income, and no source of income (#184)', () => {
+  const facts = byId(buildFacts({ ...fixture, county: 'Story' }, { today: TODAY }));
+  assert.deepEqual([facts['income.other'], facts['income.total'], facts['income.sources']],
+    ['The household has no other income.', 'The household has no income.', 'The household has no source of income.']);
+});

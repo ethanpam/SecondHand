@@ -40,6 +40,15 @@ const DETAILS = 'https://pantry.example.org/details';
 const HOUSEHOLD = 'https://pantry.example.org/household';
 const HOUSEHOLD_QUESTIONS = { young: '# of people in your household 0 - 17 yrs old', middle: '# of people in your household 18 - 59 yrs old', older: '# of people in your household 60 + yrs',
   student: 'Student name and grade. Order will be assigned to(first and Last)', guardian: 'Guardian first and last name', apt: 'Apartment number' };
+// #184: the four questions a student pantry's intake (Jotform) left open in live QA, drawn as Jotform draws them.
+const STUDENT_PANTRY = 'https://pantry.example.org/student';
+const STUDENT_QUESTIONS = [['radio', 3, 'Student Status', ['Undergraduate', 'Graduate', 'Feirstein Graduate']],
+  ['checkbox', 4, 'Assistance/Information Needed', ['Fresh Food', 'Vouchers', 'Food Pantry', 'Grocery Gift Cards', 'Social Services']],
+  ['checkbox', 5, 'Current Source of Income/Resources', ['Financial Aid', 'Family Support', 'On-Campus Job', 'Off-Campus Job', 'Other Support']],
+  ['radio', 6, 'Do you or anyone in your family receive Cash Assistance through NYC HRA?', ['Yes', 'No']]];
+const jotformQuestion = ([type, q, label, options]) => `<li class="form-line jf-required"><label class="form-label" id="label_${q}">${label}<span class="form-required">*</span></label>` +
+  `<div role="${type === 'radio' ? 'radiogroup' : 'group'}" aria-labelledby="label_${q}">${options.map((value, n) => `<span class="form-${type}-item"><input type="${type}" id="input_${q}_${n}" name="q${q}[]" value="${value}" required>` +
+  `<label for="input_${q}_${n}">${value}</label></span>`).join('')}</div></li>`;
 // What the desktop works out from the fictional household list, as the app does: band counts and the one student's name and grade.
 const listed = validateProfile(syntheticProfile);
 const desktopProfile = { ...syntheticProfile, customFields: customAnswers, ...Object.fromEntries(['householdCount:18-59', 'householdCount:60+', 'studentNameGrade'].map(key => [key, releasedValue(listed, key)])) };
@@ -106,7 +115,8 @@ const pages = {
     '<label for="day">Preferred pickup day</label><select id="day" name="day"><option value="">Choose a day</option><option>Monday</option><option>Friday</option></select>' +
     '<button type="submit">Submit</button></form>'),
   [HOUSEHOLD]: formPage('Pantry order: household', `<form>${Object.entries(HOUSEHOLD_QUESTIONS).map(([id, label]) => `<label for="${id}">${label}</label><input id="${id}" name="${id}">`).join('')}` +
-    '<button type="submit">Submit</button></form>')
+    '<button type="submit">Submit</button></form>'),
+  [STUDENT_PANTRY]: formPage('Student pantry intake', `<form><ul>${STUDENT_QUESTIONS.map(jotformQuestion).join('')}</ul><button type="submit">Submit</button></form>`)
 };
 
 // The desktop app as the worker sees it over native messaging, with Always allow on. It keeps its own
@@ -571,6 +581,62 @@ async function main() {
     await page.screenshot({ path: path.join(root, 'artifacts/remember/visit-filled.png') });
     await worker.evaluate(() => { const desktop = globalThis.__desktop; desktop.customFieldsAvailable = false; desktop.profile.customFields = desktop.profile.customFields.filter(row => !row.site); });
     console.log('#186: two open questions the applicant answered were remembered after the side-panel click and the app’s confirmation (the pickup day stayed unchecked); after a reload, Autofill filled them from custom answers and said so.');
+
+    // #184: the student pantry's four questions, from the fictional profile. Without Always allow, the help wanted fills at once;
+    // where the income comes from and whether the family gets cash assistance are sensitive, so they wait for Fill sensitive details.
+    // The fictional applicant isn't a student and has no income, and the form offers neither answer: those two stay under need-you.
+    await worker.evaluate(() => { Object.assign(globalThis.__desktop, { holds: ['incomeSources', 'currentBenefits'], answers: ['allow'] }); globalThis.__desktop.prompts.length = 0; });
+    const since184 = (await calls('getFields')).length;
+    const ticked = name => page.locator(`input[name="${name}"]:checked`).evaluateAll(boxes => boxes.map(box => box.value));
+    await page.goto(STUDENT_PANTRY, { waitUntil: 'domcontentloaded' });
+    let studentWidget = await launcherFrame();
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+    await panel.click('#panel-autofill');
+    await expect(page.locator('#input_4_0')).toBeChecked({ timeout: 20000 });
+    await settled();
+    assert.deepEqual([syntheticProfile.studentLevel, syntheticProfile.helpWanted, syntheticProfile.incomeSources, syntheticProfile.currentBenefits],
+      ['not-student', 'food-pantry,fresh-produce', 'none', 'school-meals'], 'the fictional profile’s answers');
+    assert.deepEqual(await ticked('q3[]'), [], 'the fictional applicant isn’t a student');
+    assert.deepEqual(await ticked('q4[]'), ['Fresh Food', 'Food Pantry']);
+    assert.deepEqual([await ticked('q5[]'), await ticked('q6[]')], [[], []], 'income sources and benefits wait');
+    assert.deepEqual(await heldCalls(since184), [{ url: STUDENT_PANTRY, fields: ['studentLevel', 'helpWanted', 'incomeSources', 'currentBenefits'], sensitive: false }]);
+    await expect.poll(() => panel.visible('#held-section'), { timeout: 15000 }).toBe(true);
+    const heldList = await panel.text('#held-list');
+    assert.ok(heldList.includes('Current Source of Income/Resources') && heldList.includes('Cash Assistance through NYC HRA'), heldList);
+    await panel.click('#held-fill');
+    await expect(page.locator('#input_6_1')).toBeChecked({ timeout: 20000 });
+    await expect.poll(() => panel.visible('#held-section'), { timeout: 15000 }).toBe(false);
+    assert.deepEqual(await ticked('q6[]'), ['No'], 'free school meals are the household’s only benefit: no cash assistance');
+    assert.deepEqual(await ticked('q5[]'), [], 'no source of income, and the form has no None');
+    assert.deepEqual((await heldCalls(since184)).at(-1), { url: STUDENT_PANTRY, fields: ['incomeSources', 'currentBenefits'], sensitive: true });
+    assert.deepEqual(await worker.evaluate(() => globalThis.__desktop.prompts), ['Fill sensitive details on https://pantry.example.org?']);
+    await expect(studentWidget.locator('#need-you')).toHaveText(en('widget.needYou', { count: 2 }), { timeout: 15000 });
+    await settled();
+    assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
+    await page.screenshot({ path: path.join(root, 'artifacts/student-pantry/student-pantry-fictional.png'), fullPage: true });
+    console.log('#184: the student pantry’s form from the fictional profile: Fresh Food and Food Pantry at once, No to cash assistance after Fill sensitive details; the student status and the income, which the form has no answer for, stayed under need-you.');
+
+    // The same form for a copy of the fictional applicant who is an undergraduate with a job, financial aid and family support,
+    // with Always allow: Undergraduate, Financial Aid and Family Support are checked. On-Campus Job and Off-Campus Job are both
+    // a job, so neither is checked, and the question stays under need-you.
+    await worker.evaluate(() => {
+      Object.assign(globalThis.__desktop, { holds: [], answers: [], profile: { ...globalThis.__desktop.profile, studentLevel: 'undergraduate', incomeSources: 'job,financial-aid,family-support' } });
+      globalThis.__desktop.prompts.length = 0;
+    });
+    await page.goto(STUDENT_PANTRY, { waitUntil: 'domcontentloaded' });
+    studentWidget = await launcherFrame();
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+    await panel.click('#panel-autofill');
+    await expect(page.locator('#input_5_1')).toBeChecked({ timeout: 20000 });
+    await settled();
+    assert.deepEqual([await ticked('q3[]'), await ticked('q4[]'), await ticked('q5[]'), await ticked('q6[]')],
+      [['Undergraduate'], ['Fresh Food', 'Food Pantry'], ['Financial Aid', 'Family Support'], ['No']]);
+    await expect(studentWidget.locator('#need-you')).toHaveText(en('widget.needYou', { count: 1 }), { timeout: 15000 });
+    assert.equal(await panel.visible('#held-section'), false);
+    assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
+    await page.screenshot({ path: path.join(root, 'artifacts/student-pantry/student-pantry-student.png'), fullPage: true });
+    await worker.evaluate(profile => { globalThis.__desktop.profile = profile; }, desktopProfile);
+    console.log('#184: for a student with a job, financial aid and family support: Undergraduate, Financial Aid and Family Support checked; On-Campus Job and Off-Campus Job left unchecked, with the question under need-you.');
 
     // A page whose only input is a search box gets no card.
     since = await probe();

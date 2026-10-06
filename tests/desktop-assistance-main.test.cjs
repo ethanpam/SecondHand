@@ -264,7 +264,7 @@ test('untrusted autofill asks once per click with Allow once, Always allow, and 
   assert.equal((await app.request({ type: 'getFields', fields: ['firstName'] })).values.firstName, 'Synthetic');
   assert.deepEqual(plain(app.prompts[0].buttons), ['Cancel', 'Allow once', 'Always allow on this computer']);
   // Always allow covers sensitive details too (#175), and the prompt that turns it on says so.
-  assert.match(app.prompts[0].detail, /Choose “Always allow” to let the SecondHand extension fill without asking whenever this app is unlocked, on every site SecondHand is on\. That includes your Social Security number, birth date, income, and citizenship and disability answers\. You can turn it off on the Chrome extension page\./);
+  assert.match(app.prompts[0].detail, /Choose “Always allow” to let the SecondHand extension fill without asking whenever this app is unlocked, on every site SecondHand is on\. That includes your Social Security number, birth date, income, benefits, and citizenship and disability answers\. You can turn it off on the Chrome extension page\./);
   assert.match(app.prompts[0].detail, /initial applicant page/);
   assert.match(app.prompts[0].detail, /first possible home-address suggestion and choose Save and Continue/);
   assert.match(app.prompts[0].detail, /home-address suggestions only/);
@@ -606,7 +606,7 @@ test('a saved No to having a Social Security number answers Iowa without a numbe
 });
 
 // What "Trust this site?" and "Trust all websites?" say about Always allow (#175).
-const ALWAYS_ALLOW_INCLUDES = 'It asks before filling unless you chose Always allow. Always allow on this computer includes your Social Security number, date of birth, income, money on hand, medical expenses, and your answers about citizenship, disability, blindness, health, Medicare, and having a Social Security number';
+const ALWAYS_ALLOW_INCLUDES = 'It asks before filling unless you chose Always allow. Always allow on this computer includes your Social Security number, date of birth, income and where it comes from, the benefits your household gets, money on hand, medical expenses, and your answers about citizenship, disability, blindness, health, Medicare, and having a Social Security number';
 const escaped = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 test('your citizenship, disability, blindness, health, Medicare and Social Security answers are held back on other sites without Always allow, and fill from the sensitive prompt', async () => {
@@ -660,6 +660,27 @@ test('money on hand and medical expenses are held back on other sites without Al
   await allowed.invoke('saveProfile', { assetsOnHand: '250', monthlyMedicalExpenses: '40', householdPregnant: 'no' });
   assert.deepEqual(plain((await allowed.request({ type: 'getFields', url: PANTRY, fields: ['householdPregnant', 'assetsOnHand', 'monthlyMedicalExpenses'] })).values),
     { householdPregnant: 'no', assetsOnHand: '250', monthlyMedicalExpenses: '40' });
+  assert.equal(allowed.prompts.length, 0, 'Always allow covers them on other sites too');
+});
+
+test('income sources and current benefits are held back on other sites without Always allow; student status and the help wanted are everyday answers (#184)', async () => {
+  const answers = { studentLevel: 'undergraduate', incomeSources: 'financial-aid,family-support', currentBenefits: 'snap,school-meals', helpWanted: 'food-pantry,fresh-produce' };
+  const app = await desktop({ settings: { extensionId, trustedSites: ['https://pantry.example.org'] } });
+  await app.invoke('saveProfile', answers);
+  app.answer(async () => ({ response: 1 }));
+  const autofill = plain(await app.request({ type: 'getFields', url: PANTRY, fields: Object.keys(answers) }));
+  assert.deepEqual([autofill.values, autofill.held], [{ studentLevel: 'undergraduate', helpWanted: 'food-pantry,fresh-produce' }, ['incomeSources', 'currentBenefits']]);
+  assert.equal(app.prompts.at(-1).title, 'Let Chrome fill this form?');
+  assert.deepEqual(plain((await app.request({ type: 'getFields', url: PANTRY, fields: ['incomeSources', 'currentBenefits'], sensitive: true })).values),
+    { incomeSources: 'financial-aid,family-support', currentBenefits: 'snap,school-meals' });
+  assert.equal(app.prompts.at(-1).title, 'Share sensitive details?');
+  assert.match(app.prompts.at(-1).detail, /^Where your household’s income comes from, Benefits your household gets now\n/);
+  assert.deepEqual(plain((await app.request({ type: 'getFields', fields: Object.keys(answers) })).values), answers);
+  assert.equal(app.prompts.at(-1).title, 'Let Chrome fill this form?', 'Iowa keeps its own trust rules: never a sensitive prompt');
+
+  const allowed = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'] } });
+  await allowed.invoke('saveProfile', answers);
+  assert.deepEqual(plain((await allowed.request({ type: 'getFields', url: PANTRY, fields: Object.keys(answers) })).values), answers);
   assert.equal(allowed.prompts.length, 0, 'Always allow covers them on other sites too');
 });
 

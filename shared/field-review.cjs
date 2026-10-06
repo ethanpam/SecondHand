@@ -2,7 +2,7 @@
 
 // Advisory checks only: no I/O, model calls, corrections, or profile writes.
 // Messages and labels are fixed; source values never become review text.
-const { PROFILE_FIELDS, FIELD_LABELS, PROFILE_CHOICES, RELATIONSHIPS, MAX_MEMBERS, LIST_FIELDS, SNAP_INFORMATION, RECORD_FIELDS, MAX_RECORDS,
+const { PROFILE_FIELDS, FIELD_LABELS, PROFILE_CHOICES, SEVERAL_CHOICES, RELATIONSHIPS, MAX_MEMBERS, LIST_FIELDS, SNAP_INFORMATION, RECORD_FIELDS, MAX_RECORDS,
   validateInformationValue, validateRecords, validateProfile } = require('./schema.cjs');
 const household = require('./household.cjs');
 const SCALARS = PROFILE_FIELDS.filter(key => !LIST_FIELDS.includes(key));
@@ -15,7 +15,7 @@ const PHONES = new Set(['phone', 'homePhone', 'mobilePhone', ...SNAP_INFORMATION
 const AMOUNTS = new Set(['monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand', 'monthlyMedicalExpenses']);
 const COUNTS = ['householdAdults', 'householdChildren', 'householdSeniors'];
 const SOURCE = new Set(['firstName', 'middleName', 'lastName', 'maidenName', 'addressLine1', 'addressLine2', 'city', 'county',
-  'mailingAddressLine1', 'mailingAddressLine2', 'mailingCity', 'bestContactTime', ...Object.keys(PROFILE_CHOICES),
+  'mailingAddressLine1', 'mailingAddressLine2', 'mailingCity', 'bestContactTime', ...Object.keys(PROFILE_CHOICES), ...Object.keys(SEVERAL_CHOICES),
   ...SNAP_INFORMATION.scalarFields.filter(field => ['text', 'yesno', 'select'].includes(field.type)).map(field => field.key)]);
 const INVALID = Symbol('invalid input');
 const BAD_VALUE = 'This answer has an unsupported format. Check the original and enter it again.';
@@ -62,6 +62,7 @@ function invalidMessage(key) {
   if (COUNTS.includes(key)) return 'Use a whole number from 0 to 30, or leave it unanswered.';
   if (AMOUNTS.has(key)) return 'Use a nonnegative amount with at most eight whole-number digits and two decimal places. Check the time period.';
   if (Object.hasOwn(PROFILE_CHOICES, key)) return 'Choose one of the available answers, or leave the question unanswered.';
+  if (Object.hasOwn(SEVERAL_CHOICES, key)) return 'Choose only answers on the list, each once, or leave the question unanswered. None can’t be chosen with other answers.';
   if (key === 'bestContactTime') return 'Keep the best time to call to 30 characters or fewer.';
   return BAD_VALUE;
 }

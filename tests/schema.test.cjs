@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { validateProfile, validateStoredProfile, validateApplication, validateStoredApplication, isPortalUrl, YES_NO_FIELDS, PROFILE_FIELDS, PROFILE_CHOICES, REQUEST_FIELDS, DERIVED_FIELDS, FIELD_LABELS,
-  releasedValue, blockedByBirthDate, LIST_FIELDS, MEMBER_FIELDS } = require('../shared/schema.cjs');
+  releasedValue, blockedByBirthDate, LIST_FIELDS, MEMBER_FIELDS, SEVERAL_CHOICES } = require('../shared/schema.cjs');
 const fictionalProfile = require('./fixtures/applicant-profile.json');
 
 test('only the exact HTTPS Iowa application origin and path can receive fields', () => {
@@ -292,4 +292,76 @@ test('a page gets no answer worked out from a birth date that can’t be used, a
   assert.equal(releasedValue(own, 'householdChildren', { today }), '1', 'without a list, the manual count is the applicant’s own answer');
   assert.equal(blockedByBirthDate(own, 'householdChildren', { today }), false);
   assert.equal(blockedByBirthDate(validateStoredProfile({ birthDate: '' }), 'birthDate', { today }), false, 'nothing saved is not a reason');
+});
+
+// #184: a student pantry's intake asked for these, and nothing saved could answer them.
+test('student status, income sources, current benefits and the help wanted are saved answers from fixed lists, each with a label', () => {
+  assert.deepEqual(Object.fromEntries(['studentLevel', 'incomeSources', 'currentBenefits', 'helpWanted'].map(key => [key, FIELD_LABELS[key]])), {
+    studentLevel: 'Student status', incomeSources: 'Where your household’s income comes from', currentBenefits: 'Benefits your household gets now', helpWanted: 'Help you want'
+  });
+  for (const key of ['studentLevel', 'incomeSources', 'currentBenefits', 'helpWanted']) {
+    assert.ok(PROFILE_FIELDS.includes(key) && REQUEST_FIELDS.includes(key), key);
+    assert.equal(validateProfile({})[key], '', `${key} is unanswered until the applicant answers it`);
+  }
+  assert.deepEqual(PROFILE_CHOICES.studentLevel, ['', 'not-student', 'high-school', 'undergraduate', 'graduate', 'other']);
+  for (const value of PROFILE_CHOICES.studentLevel) assert.equal(validateProfile({ studentLevel: value }).studentLevel, value);
+  for (const value of ['Undergraduate', 'college', 'yes']) assert.throws(() => validateProfile({ studentLevel: value }), { message: 'Choose a supported student status, or leave it blank.' }, value);
+  assert.deepEqual(SEVERAL_CHOICES, {
+    incomeSources: ['job', 'self-employment', 'financial-aid', 'family-support', 'unemployment', 'social-security', 'child-support', 'pension', 'other', 'none'],
+    currentBenefits: ['snap', 'wic', 'cash-assistance', 'medicaid', 'ssi', 'housing', 'school-meals', 'none'],
+    helpWanted: ['food-pantry', 'fresh-produce', 'food-vouchers', 'gift-cards', 'snap-help', 'social-services', 'other']
+  });
+});
+
+test('a question with several answers is saved as its choices, comma-separated in the list’s order, and None stands alone', () => {
+  for (const [key, choices] of Object.entries(SEVERAL_CHOICES)) {
+    for (const choice of choices) assert.equal(validateProfile({ [key]: choice })[key], choice, `${key}: ${choice}`);
+    const real = choices.filter(choice => choice !== 'none');
+    assert.equal(validateProfile({ [key]: real.join(',') })[key], real.join(','), `${key}: all of them`);
+    assert.equal(validateProfile({ [key]: [...real].reverse().join(',') })[key], real.join(','), `${key}: saved in the list’s order`);
+  }
+  assert.equal(validateProfile({ incomeSources: 'pension,job' }).incomeSources, 'job,pension');
+  const refused = {
+    'an answer not on the list': [{ incomeSources: 'lottery' }, 'Choose only answers on the list for where your household’s income comes from, or leave it blank.'],
+    'an answer from another list': [{ helpWanted: 'snap' }, 'Choose only answers on the list for help you want, or leave it blank.'],
+    'a space after the comma': [{ currentBenefits: 'snap, wic' }, 'Choose only answers on the list for benefits your household gets now, or leave it blank.'],
+    'an empty answer between commas': [{ currentBenefits: 'snap,,wic' }, 'Choose only answers on the list for benefits your household gets now, or leave it blank.'],
+    'the same answer twice': [{ incomeSources: 'job,job' }, 'Choose each answer for where your household’s income comes from once.'],
+    'None with another answer': [{ currentBenefits: 'none,snap' }, 'None can’t be chosen with other answers for benefits your household gets now.'],
+    'None with another income source': [{ incomeSources: 'job,none' }, 'None can’t be chosen with other answers for where your household’s income comes from.']
+  };
+  for (const [name, [profile, message]] of Object.entries(refused)) assert.throws(() => validateProfile(profile), { message }, name);
+  for (const value of [['job'], { job: true }, 3]) assert.throws(() => validateProfile({ incomeSources: value }), /is invalid\./, JSON.stringify(value));
+  // Read back as saved.
+  assert.equal(validateStoredProfile({ incomeSources: 'job,pension' }).incomeSources, 'job,pension');
+});
+
+test('a page asking for these answers gets them as saved', () => {
+  const saved = validateProfile({ studentLevel: 'graduate', incomeSources: 'financial-aid,family-support', currentBenefits: 'none', helpWanted: 'food-pantry' });
+  assert.deepEqual(Object.fromEntries(['studentLevel', 'incomeSources', 'currentBenefits', 'helpWanted'].map(key => [key, releasedValue(saved, key)])),
+    { studentLevel: 'graduate', incomeSources: 'financial-aid,family-support', currentBenefits: 'none', helpWanted: 'food-pantry' });
+  assert.equal(releasedValue(validateProfile({}), 'currentBenefits'), '');
+});
+
+test('the applicant’s own row on the household list says whether they are a student as their student status does', () => {
+  const self = (extra = {}) => ({ ...withMembers([child({ student: 'no', grade: '' })]), householdMembers: [{ id: MEMBER_SELF, relationship: 'self', ...extra }, child({ student: 'no', grade: '' })] });
+  const own = (profile, validate = validateProfile) => validate(profile).householdMembers[0].student;
+  for (const level of ['high-school', 'undergraduate', 'graduate', 'other']) {
+    assert.equal(own({ ...self(), studentLevel: level }), 'yes', level);
+    assert.equal(own({ ...self({ student: 'no' }), studentLevel: level }), 'yes', `${level}: the row follows the student status`);
+  }
+  assert.equal(own({ ...self({ student: 'yes' }), studentLevel: 'not-student' }), 'no');
+  assert.equal(own({ ...self({ student: 'yes' }), studentLevel: 'undergraduate' }, validateStoredProfile), 'yes', 'read back the same way');
+  assert.equal(own({ ...self({ student: 'no' }), studentLevel: 'graduate' }, validateStoredProfile), 'yes');
+  // A grade on the applicant's row needs a student status that says they are a student.
+  assert.equal(validateProfile({ ...self({ grade: 'College' }), studentLevel: 'undergraduate' }).householdMembers[0].grade, 'College');
+  assert.throws(() => validateProfile({ ...self({ student: 'yes', grade: 'College' }), studentLevel: 'not-student' }), { message: 'Add a grade only for a household member who is a student.' });
+  // Without a student status, the row keeps any answer saved on it before the student status existed.
+  for (const answer of ['', 'yes', 'no']) {
+    assert.equal(own(self({ student: answer })), answer, `saved: ${answer || 'unanswered'}`);
+    assert.equal(own(self({ student: answer }), validateStoredProfile), answer, `read back: ${answer || 'unanswered'}`);
+  }
+  assert.equal(validateStoredProfile(self({ student: 'yes', grade: 'College' })).householdMembers[0].grade, 'College', 'a profile saved before #184 still opens');
+  // Nobody else's row follows the applicant's student status.
+  assert.equal(validateProfile({ ...self(), studentLevel: 'graduate' }).householdMembers[1].student, 'no');
 });

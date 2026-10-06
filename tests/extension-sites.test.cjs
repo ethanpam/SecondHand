@@ -46,7 +46,8 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
   // Laya's best guesses (#185), by the id each was filled under: the engine finds them after the next plan.
   const layaGuessed = new Set();
   const onScreen = field => !field.hidden && (!field.revealedBy || fields.some(other => other.name === field.revealedBy && other.answered));
-  const shown = field => !field.answered && onScreen(field);
+  // A field the engine answered only in part (#184) stays in the plan, marked, until the applicant finishes it.
+  const shown = field => (!field.answered || field.inPart) && onScreen(field);
   return {
     fields,
     // The page as HTML, with the engine's marks on the fields it filled.
@@ -58,7 +59,7 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
       fields.filter(shown).forEach((field, index) => {
         const id = `sh-${sequence}-${index}`;
         ids.set(id, field);
-        if (field.key) matched.push({ id, key: field.key, confidence: 'high', label: field.label || field.name });
+        if (field.key) matched.push({ id, key: field.key, confidence: 'high', label: field.label || field.name, ...(field.inPart ? { partial: true } : {}) });
         else unmatched.push({ id, label: field.label, type: field.type, options: field.options || [], required: field.required === true });
       });
       current = { token: `${tokenPrefix}-${sequence}`, ids };
@@ -66,7 +67,7 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
     },
     fill({ token, assignments, values }) {
       if (token !== current?.token) return { ok: false, filled: [], skipped: [] };
-      const filled = [], rejected = [];
+      const filled = [], rejected = [], partial = [];
       for (const { id, key, option, guessed, layaGuess, custom } of assignments) {
         const field = current.ids.get(id);
         // Laya's answer (#42) is one of the question's own options; everything else is a saved value.
@@ -77,8 +78,10 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
         field.answered = answer; field.mark = layaGuess ? 'laya-guess' : guessed ? 'guess' : 'rule';
         if (layaGuess) layaGuessed.add(id);
         filled.push(id);
+        // `partly`: a checkbox question one saved answer names several options of; the engine checks the rest and says so.
+        if (field.partly) { field.inPart = true; partial.push(id); }
       }
-      return { ok: true, filled, skipped: assignments.map(item => item.id).filter(id => !filled.includes(id) && !rejected.includes(id)), rejected };
+      return { ok: true, filled, skipped: assignments.map(item => item.id).filter(id => !filled.includes(id) && !rejected.includes(id)), rejected, partial };
     },
     // Every question on screen, answered or not, under its own ids: labels only.
     questions() {
@@ -805,7 +808,7 @@ function siteContent(t, { url = SITE_URL, engine = true, settled = null, offers 
       fillFields: (doc, token, assignments, values) => {
         calls.push({ token, assignments: plain(assignments), values: plain(values) });
         doc.getElementById('name').value = values.fullName;
-        return { ok: true, filled: ['sh-1'], skipped: [], rejected: ['sh-2'], pending: [], values };
+        return { ok: true, filled: ['sh-1'], skipped: [], rejected: ['sh-2'], pending: [], partial: [], values };
       },
       // Stands in for the engine confirming choices the page marks a moment after the click.
       settle: async (doc, token, result) => { calls.push(`settle:${token}`); return settled ? settled(result) : result; },
@@ -869,7 +872,7 @@ test('site plans and fills answer with field metadata only, never values or elem
   assert.deepEqual(plain(plan), { token: 'plan-1', lang: '', matched: [{ id: 'sh-1', key: 'fullName', confidence: 'high' }],
     unmatched: [{ id: 'sh-2', label: 'Pickup day', type: 'select-one', options: ['Monday'], required: true }] });
   const filled = await page.requestAsync({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [{ id: 'sh-1', key: 'fullName', guessed: false }], values: { fullName: 'Synthetic private name' } });
-  assert.deepEqual(plain(filled), { ok: true, filled: ['sh-1'], skipped: [], rejected: ['sh-2'] }, 'answers the page refused come back');
+  assert.deepEqual(plain(filled), { ok: true, filled: ['sh-1'], skipped: [], rejected: ['sh-2'], partial: [] }, 'answers the page refused come back');
   assert.deepEqual(page.calls[1], { token: 'plan-1', assignments: [{ id: 'sh-1', key: 'fullName', guessed: false }], values: { fullName: 'Synthetic private name' } });
   assert.equal(page.window.document.getElementById('name').value, 'Synthetic private name');
   assert.doesNotMatch(JSON.stringify([plan, filled]), /Synthetic private/);
@@ -884,7 +887,7 @@ test('a fill answers only after the engine settles choices the page confirms a m
   const page = siteContent(t, { settled: result => ({ ...result, filled: [...result.filled, 'sh-3'], pending: [] }) });
   page.request({ type: 'secondhand:generic:plan' });
   const filled = await page.requestAsync({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [{ id: 'sh-1', key: 'fullName', guessed: false }], values: { fullName: 'Synthetic' } });
-  assert.deepEqual(plain(filled), { ok: true, filled: ['sh-1', 'sh-3'], skipped: [], rejected: ['sh-2'] });
+  assert.deepEqual(plain(filled), { ok: true, filled: ['sh-1', 'sh-3'], skipped: [], rejected: ['sh-2'], partial: [] });
   assert.equal(page.calls.at(-1), 'settle:plan-1');
 });
 
@@ -892,7 +895,7 @@ test('a fill the page interrupted by changing answers that the page changed', as
   const page = siteContent(t, { settled: result => ({ ...result, ok: false, pageChanged: true, pending: [] }) });
   page.request({ type: 'secondhand:generic:plan' });
   const filled = await page.requestAsync({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [{ id: 'sh-1', key: 'fullName', guessed: false }], values: { fullName: 'Synthetic' } });
-  assert.deepEqual(plain(filled), { ok: false, pageChanged: true, filled: ['sh-1'], skipped: [], rejected: ['sh-2'] });
+  assert.deepEqual(plain(filled), { ok: false, pageChanged: true, filled: ['sh-1'], skipped: [], rejected: ['sh-2'], partial: [] });
 });
 
 test('other extensions, malformed fills, and Iowa messages reach nothing on approved sites', t => {
@@ -1222,9 +1225,9 @@ test('an https subframe answers plans without creating a widget', t => {
 });
 test('content fill reports rejected ids without values', async t => {
   const page = siteContent(t);
-  page.window.SecondHandGeneric.fillFields = () => ({ ok: true, filled: [], skipped: [], rejected: ['sh-1'], pending: [], values: { secret: 'private' } });
+  page.window.SecondHandGeneric.fillFields = () => ({ ok: true, filled: [], skipped: [], rejected: ['sh-1'], pending: [], partial: [], values: { secret: 'private' } });
   const result = await page.requestAsync({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [], values: {} });
-  assert.deepEqual(plain(result), { ok: true, filled: [], skipped: [], rejected: ['sh-1'] });
+  assert.deepEqual(plain(result), { ok: true, filled: [], skipped: [], rejected: ['sh-1'], partial: [] });
 });
 
 test('malformed engine fill arrays fail visibly instead of becoming an empty success', async t => {
@@ -2515,7 +2518,7 @@ test('the scripts run once when a site’s own registration and all websites bot
   const lastName = plan.matched.find(item => item.key === 'lastName');
   await new Promise(resolve => page.listeners[0]({ type: 'secondhand:generic:fill', token: plan.token, assignments: [{ id: lastName.id, key: 'lastName', guessed: false }], values: { lastName: 'Synthetic' } },
     { id: extensionId }, value => { filled = value; resolve(); }));
-  assert.deepEqual(plain(filled), { ok: true, filled: [lastName.id], skipped: [], rejected: [] }, 'a later load keeps the plan in use valid');
+  assert.deepEqual(plain(filled), { ok: true, filled: [lastName.id], skipped: [], rejected: [], partial: [] }, 'a later load keeps the plan in use valid');
 });
 
 test('an embedded form reports whether it has a form and never makes a card of its own', async t => {
@@ -3450,4 +3453,40 @@ test('an embedded form’s answer is remembered in that form’s own site’s na
   off.registered.clear(); off.permissions.clear();
   assert.equal((await rememberAnswers(off, [idOf(off, 'emplid')])).ok, false);
   for (const each of [moved, off]) assert.equal(each.contentTypes().includes('secondhand:generic:readOpen'), false);
+});
+
+// #184: a saved answer that names several options of a checkbox question (On-Campus Job and Off-Campus Job are both a job)
+// leaves those unchecked. The rest are checked, and the question stays under need-you until the applicant finishes it.
+const INCOME = { name: 'income', key: 'incomeSources', label: 'Current Source of Income/Resources', partly: true };
+
+test('a question the rules answered in part counts as filled, stays under need-you, and is never filled again (#184)', async () => {
+  const w = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...INCOME }],
+    desktop: { values: { firstName: 'Synthetic', lastName: 'Applicant', incomeSources: 'job,financial-aid,family-support' } } });
+  const result = plain((await autofill(w)).data);
+  const income = `f0:${w.page.idOf('income')}`;
+  assert.deepEqual([result.filled, result.needYou, result.message], [2, [income], 'Filled 2 · 1 need you. Check your answers before you submit.']);
+  const fills = w.content.filter(call => call.type === 'secondhand:generic:fill');
+  assert.deepEqual(fills.map(call => call.assignments.map(item => item.key)), [['fullName', 'incomeSources']], 'filled once, never again');
+  assert.equal((await w.panel({ type: 'ui:focusField', key: income, confirmed: true })).ok, true, 'the need-you list can show it');
+  // The next click leaves it as it is, still under need-you.
+  const again = plain((await autofill(w)).data);
+  assert.deepEqual(again.needYou, [`f0:${w.page.idOf('income')}`]);
+  assert.equal(w.content.filter(call => call.type === 'secondhand:generic:fill').length, 1);
+});
+
+test('held income sources answered in part by Fill sensitive details count as filled and stay under need-you; the next click holds nothing for them (#184)', async () => {
+  const w = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...INCOME }],
+    desktop: { values: { firstName: 'Synthetic', lastName: 'Applicant', incomeSources: 'job,financial-aid' }, holds: ['incomeSources'] } });
+  const first = plain((await autofill(w)).data);
+  const income = `f0:${w.page.idOf('income')}`;
+  assert.deepEqual([first.filled, first.needYou, first.held], [1, [income], 1]);
+  const response = await w.panel({ type: 'ui:fillHeld', confirmed: true });
+  assert.equal(response.ok, true, response.error);
+  const result = plain(response.data);
+  assert.deepEqual([result.filled, result.needYou, result.held, result.message], [2, [income], undefined, 'Filled 2 · 1 need you. Check your answers before you submit.']);
+  assert.equal(await heldList(w), undefined);
+  const asked = w.native.filter(call => call.type === 'getFields').length;
+  const again = plain((await autofill(w)).data);
+  assert.deepEqual([again.needYou, again.held], [[`f0:${w.page.idOf('income')}`], undefined], 'answered in part, it waits for the applicant, not for the sensitive prompt');
+  assert.equal(w.native.filter(call => call.type === 'getFields').length, asked, 'and nothing is asked of the app for it');
 });
