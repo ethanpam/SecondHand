@@ -264,10 +264,50 @@ struct ApplicationReceipt: Codable, Equatable, Identifiable {
 struct AutofillSession: Codable {
     var expiresAt: Date
     var fields: [String: String]
+    // Optional for decoding sessions written by earlier Iowa-only builds.
+    var approvedSitesEnabled: Bool? = false
+
+    func fields(for pageURL: String, approvals: [WebsiteApproval]) -> [String: String]? {
+        guard isValid() else { return nil }
+        if IowaApplicationBridge.allowsApplicationPage(pageURL) { return fields }
+        guard approvedSitesEnabled == true, WebsiteApproval.allowsPage(pageURL),
+              let origin = WebsiteApproval.origin(pageURL),
+              let site = approvals.first(where: { $0.origin == origin }) else { return nil }
+        return fields.filter { key, _ in
+            key != "hasHomeAddress" && IowaApplicationBridge.allowedFieldKeys.contains(key)
+                && (site.includeSensitive || !WebsiteApproval.sensitiveKeys.contains(key))
+        }
+    }
     func isValid(now: Date = Date()) -> Bool {
         guard expiresAt > now && expiresAt.timeIntervalSince(now) <= 601 else { return false }
         guard let hasHomeAddress = fields["hasHomeAddress"] else { return true }
         return hasHomeAddress == HomeAddressAnswer.yes.rawValue || hasHomeAddress == HomeAddressAnswer.no.rawValue
+    }
+}
+
+struct WebsiteApproval: Codable, Equatable, Identifiable {
+    var revision = UUID()
+    var origin: String
+    var includeSensitive = false
+    var id: String { origin }
+    static let sensitiveKeys: Set<String> = ["ssn", "annualIncome", "annualIncomeYear", "monthlyIncome", "monthlyHousingCost"]
+    static let iowaOrigin = "https://hhsservices.iowa.gov"
+
+    static func origin(_ raw: String) -> String? {
+        guard raw.count <= 2000, !raw.contains("\\"),
+              raw.rangeOfCharacter(from: .whitespacesAndNewlines.union(.controlCharacters)) == nil,
+              let url = URLComponents(string: raw), url.scheme == "https",
+              url.user == nil, url.password == nil, url.port == nil || url.port == 443,
+              let host = url.host?.lowercased(),
+              host.range(of: #"^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*[a-z0-9]$"#, options: .regularExpression) != nil else { return nil }
+        return "https://" + host
+    }
+
+    static func allowsPage(_ raw: String) -> Bool {
+        guard let origin = origin(raw), let url = URLComponents(string: raw) else { return false }
+        if origin == iowaOrigin { return IowaApplicationBridge.allowsApplicationPage(raw) }
+        let path = (url.path + " " + (url.fragment ?? "")).lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
+        return !["login", "logon", "signin", "signup", "register", "registration", "createaccount", "password", "recovery", "authentication", "checkout", "payment"].contains(where: path.contains)
     }
 }
 

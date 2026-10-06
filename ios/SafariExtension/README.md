@@ -6,18 +6,18 @@ The iOS extension now supports a user-started application session, explicit fiel
 
 1. In SecondHand, review the profile and allow application sharing for ten minutes.
 2. Open an Iowa application in Safari, handle login and initial consent/verification, then start assistance from the extension. Grant Iowa website access when asked.
-3. Known applicant fields fill automatically. Other eligible fields require a user-selected match to a saved answer; these mappings last only for the current page.
+3. Known applicant fields fill automatically. Other eligible fields require a user-selected match to a saved answer; reviewed matches can optionally be remembered for the same site and unchanged field.
 4. Review the page, complete missing answers, and explicitly Continue. Pause and Stop can interrupt filling. A paused session requires Resume.
 5. Complete the signature on Iowa's website. On a recognizable E-Signature page, check the extension's authorization box and choose **Approve and submit application**. Unknown signing or submission pages stay manual.
 6. Check Iowa's result. On a recognized confirmation page, enter the number and confirm that the website reports submission. Unlock the app to import the receipt. Otherwise record it manually in the app.
 
 ## Data and permissions
 
-`activeTab`, `scripting`, `nativeMessaging`, and `storage` support the workflow. Optional host access to `https://hhsservices.iowa.gov/*` is requested only when the user starts assistance. All runtime operations additionally require the exact HTTPS origin and a clean `/apspssp/ssp.portal/applyForBenefits/` route. Query strings, fragments, account routes, subframes, and external form targets are unsupported. There are no network fetches, cookie access, external message endpoints, backend, or cloud synchronization.
+`activeTab`, `scripting`, `nativeMessaging`, and `storage` support the workflow. Optional HTTPS host access is declared broadly but requested for one exact website from a popup click. Additional websites require encrypted native approval and an app sharing session explicitly enabling approved websites. Iowa still requires a clean `/apspssp/ssp.portal/applyForBenefits/` route; its account routes and query/fragment URLs remain unsupported. Additional sites allow query/fragment navigation but block account/payment routes. Subframes and external form targets remain unsupported. There are no network fetches, cookie access, external message endpoints, backend, or cloud synchronization.
 
 The native app shares only first/middle/last name, email, explicit home/mobile phone numbers, home address, the saved Yes/No home-address answer (when one is saved), monthly income, and monthly housing cost after explicit authorization. The extension requests only fields selected for the current operation. Generic phone, household members, documents, notes, birth dates, passwords, signatures, and consent are never supplied.
 
-The worker persists only tab ID, expiration, phase, page count, and filled count. Answers, page URLs, field labels, mappings, snapshots, and approval tokens are not written to extension storage or logs. The isolated page script keeps its private review snapshot in memory. JavaScript does not guarantee immediate memory zeroization.
+The worker persists tab ID, expiration, phase, page/filled counts and the session origin. Optional remembered matches contain the origin, SHA-256 hashes of field context and path (including the approval revision), and saved-field keys. Answers, full page URLs, raw field labels, snapshots and review tokens are not written to storage or logs. Matching hashes are not a claim of anonymity. The isolated page script keeps its private review snapshot in memory. JavaScript does not guarantee immediate memory zeroization.
 
 ## Native protocol
 
@@ -25,6 +25,7 @@ All messages are sent to `browser.runtime.sendNativeMessage("com.ethanpam.second
 
 - `{action: "applicationFields", pageURL, keys}` returns `{fields, expiresAt}` for requested allowlisted keys when the encrypted sharing session is valid.
 - `{action: "recordReceipt", pageURL, confirmationNumber, receiptID}` requires an active session, a UUID, and a 3–80 character alphanumeric/space/hyphen confirmation. It writes a separate encrypted pending receipt and returns `{recorded: true}`. This is a user report, not agency verification.
+- `siteStatus`, `approveSite` and `removeSite` manage exact-origin encrypted approvals. Approval requires a current session explicitly enabling approved websites. Removal revokes the session. SSN/income keys need both session inclusion and sensitive sharing for that site.
 - The older `contactFields` action remains restricted to the original applicant page and original contact subset.
 
 Errors are fixed identifiers and never contain saved values, local paths, or underlying native diagnostics. Pending receipts are imported idempotently; they do not race writes to the app's profile vault or downgrade more advanced progress.
@@ -52,3 +53,5 @@ The suites cover strict known-field matching, explicit mappings, multiple synthe
 
 
 SSN and annual-income sharing: Settings offers an unchecked SSN inclusion switch and a picker for one annual record (type, amount, year, source). These choices apply to a new ten-minute Iowa-only session; revoke an active session before changing them. Safari offers SSN only for an explicitly labeled applicant/self SSN field and annual amounts/years only for corresponding annual questions. The user selects each mapping and clicks Fill; these are not verified live-page automatic mappings. No annual totals or monthly conversions are calculated. Generic ambiguous SSN fields, other-person fields, and unsupported layouts remain manual. Values are not stored in extension browser storage or displayed in popup previews. Later live Iowa pages still require verification; local synthetic tests do not establish complete portal coverage.
+
+See [approved website setup and testing](../README.md#approved-websites). General pages require explicit Fill and Next clicks; payment, consent, signature and final submission stay on the website.

@@ -13,7 +13,7 @@ const PANEL_URL = 'chrome-extension://testextension/panel.html';
 const SITE_URL = 'https://pantry.example.org/intake?step=1';
 const ORIGIN = 'https://pantry.example.org';
 const SCRIPT_ID = 'site-pantry.example.org';
-const SITE_SCRIPT = { id: SCRIPT_ID, matches: [`${ORIGIN}/*`], js: ['generic-adapter.js', 'page-text.js', 'generic-content.js'], allFrames: true, runAt: 'document_idle', persistAcrossSessions: true };
+const SITE_SCRIPT = { id: SCRIPT_ID, matches: [`${ORIGIN}/*`], js: ['generic-adapter.js', 'generic-navigation.js', 'page-text.js', 'generic-content.js'], allFrames: true, runAt: 'document_idle', persistAcrossSessions: true };
 const ALL = 'https://*/*';
 const IOWA_ORIGIN = 'https://hhsservices.iowa.gov';
 const IOWA_HOST = `${IOWA_ORIGIN}/*`;
@@ -21,11 +21,11 @@ const IOWA_HOST = `${IOWA_ORIGIN}/*`;
 const ALL_SCRIPT = { id: 'site-all', matches: [ALL], excludeMatches: [IOWA_HOST], js: SITE_SCRIPT.js, allFrames: true, runAt: 'document_idle', persistAcrossSessions: true };
 
 // Stand-in for generic-adapter.js's pure helpers; the real engine has its own tests.
-const { GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey } = require('../extension/generic-adapter.js');
+const { GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey, canCustom } = require('../extension/generic-adapter.js');
 const SENSITIVE = ['ssn', 'birthDate', 'ageRange', 'totalMonthlyIncome', 'annualIncome', 'assetsOnHand', 'monthlyMedicalExpenses',
   'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare'];
 const generic = {
-  GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey,
+  GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey, canCustom,
   requestKeys: keys => [...new Set(keys.flatMap(key => key === 'fullName' ? ['firstName', 'lastName'] : key === 'ageRange' ? ['birthDate'] : [key]))],
   deriveValues: values => ({ ...values, ...(values.firstName && values.lastName ? { fullName: `${values.firstName} ${values.lastName}` } : {}),
     ...(values.birthDate ? { ageRange: '41' } : {}) })
@@ -67,10 +67,10 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
     fill({ token, assignments, values }) {
       if (token !== current?.token) return { ok: false, filled: [], skipped: [] };
       const filled = [], rejected = [];
-      for (const { id, key, option, guessed, layaGuess } of assignments) {
+      for (const { id, key, option, guessed, layaGuess, custom } of assignments) {
         const field = current.ids.get(id);
         // Laya's answer (#42) is one of the question's own options; everything else is a saved value.
-        const answer = option !== undefined ? (field?.options || []).includes(option) && option : values[key];
+        const answer = option !== undefined ? (field?.options || []).includes(option) && option : values[custom ? id : key];
         if (!field || field.answered || field.refuses || !answer) continue;
         // The page flags the answer: the engine clears a text box, but a chosen option stays chosen.
         if (field.rejects) { rejected.push(id); if (field.choice) field.answered = answer; continue; }
@@ -239,7 +239,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
         if (request.type === 'status') {
           duringStatus?.(vault, ++statusChecks);
           return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: vault.accessRevision, allSites: vault.allSites, ...(vault.layaState ? { laya: { state: vault.layaState } } : {}),
-            ...(vault.extension ? { extension: structuredClone(vault.extension) } : {}) });
+            ...(vault.extension ? { extension: structuredClone(vault.extension) } : {}), ...(vault.customFieldsAvailable ? { customFieldsAvailable: true } : {}) });
         }
         if (request.type === 'trustAllSites') {
           if (vault.trustAllError) return fail(vault.trustAllError);
@@ -284,6 +284,10 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
             values: Object.fromEntries(request.fields.filter(key => vault.values[key] && (played || !held.includes(key))).map(key => [key, vault.values[key]])),
             ...((played ? held !== undefined : held.length) ? { held } : {}), ...(reason !== undefined ? { reason } : {}) });
         }
+        if (request.type === 'getCustomFields') {
+          const response = vault.custom?.(plain(request), vault, tab);
+          return reply(response || { values: {}, accessRevision: vault.accessRevision });
+        }
         fail('Unsupported bridge request.');
       } })
     }
@@ -319,7 +323,7 @@ test('the worker loads the site engine, its text, and its translator next to the
   const imported = [];
   const chrome = { runtime: { onMessage: { addListener: () => {} } }, tabs: {}, sidePanel: { setPanelBehavior: async () => {} } };
   assert.throws(() => runFile('extension/background.js', { chrome, SecondHandIowa: adapter, importScripts: (...files) => imported.push(...files), crypto: webcrypto, URL, Map, Set }), /generic-adapter\.js/);
-  assert.deepEqual(imported, ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'strings.js', 'translation.js']);
+  assert.deepEqual(imported, ['address-policy.js', 'iowa-later-adapter.js', 'iowa-record-adapter.js', 'iowa-adapter.js', 'generic-adapter.js', 'strings.js', 'translation.js']);
   assert.throws(() => runFile('extension/background.js', { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }), /strings\.js/);
   assert.throws(() => runFile('extension/background.js', { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }),
     /translation\.js/, 'a worker that can’t translate questions for Laya doesn’t start');
@@ -580,8 +584,8 @@ test('AI guesses join the one desktop request and are filled with the guessed ma
   const [, reach, call] = unmatched.map(field => field.id);
   const response = await w.launcher({ type: 'ui:autofill', confirmed: true, guesses: { [reach]: 'email', [call]: 'phone' } });
   assert.equal(response.ok, true, response.error);
-  assert.deepEqual(w.nativeTypes(), ['warmLaya', 'status', 'getFields', 'status'], 'the plan readies Laya, then the fill’s one vault request');
-  assert.deepEqual(w.native[2].fields, ['firstName', 'lastName', 'email', 'phone']);
+  assert.deepEqual(w.nativeTypes(), ['warmLaya', 'status', 'status', 'getFields', 'status'], 'the plan readies Laya, then checks custom-answer availability before its one field release');
+  assert.deepEqual(w.native.find(call => call.type === 'getFields').fields, ['firstName', 'lastName', 'email', 'phone']);
   // The fill uses the plan the AI saw, then plans again for anything revealed.
   assert.deepEqual(w.contentTypes(), ['secondhand:generic:frames', 'secondhand:generic:plan', 'secondhand:generic:frames', 'secondhand:generic:fill', 'secondhand:generic:plan']);
   assert.deepEqual(w.content.find(call => call.type === 'secondhand:generic:fill').assignments, [{ id: 'sh-1-0', key: 'fullName', guessed: false }, { id: reach.split(':')[1], key: 'email', guessed: true }, { id: call.split(':')[1], key: 'phone', guessed: true }]);
@@ -1481,7 +1485,7 @@ test('a question whose label hides a zero-width space stays with the applicant, 
 test('answers alone fill under their own access receipt, which is checked before the page is touched', async () => {
   const w = siteWorker({ enabled: true, fields: [{ ...SIXTY }], desktop: layaDesktop({ answerFields: (request, vault) => ({ answers: { [request.questions[0].id]: 'No' }, accessRevision: vault.accessRevision }) }) });
   const result = plain((await autofill(w)).data);
-  assert.deepEqual(w.nativeTypes(), ['warmLaya', 'answerFields', 'status']);
+  assert.deepEqual(w.nativeTypes(), ['status', 'warmLaya', 'answerFields', 'status']);
   assert.equal(result.filled, 1);
   assert.equal(result.guessed, 1);
   const stale = siteWorker({ enabled: true, fields: [{ ...SIXTY }], desktop: layaDesktop({ answerFields: request => ({ answers: { [request.questions[0].id]: 'No' }, accessRevision: 99 }) }) });
@@ -1540,7 +1544,7 @@ test('Laya not ready: the widget’s plan says so after one readiness check, and
   assert.deepEqual(today.nativeTypes(), ['warmLaya']);
   const reach = idOf(today, 'reach');
   const guessed = plain((await today.launcher({ type: 'ui:autofill', confirmed: true, guesses: { [reach]: 'email' } })).data);
-  assert.deepEqual(today.nativeTypes(), ['warmLaya', 'status', 'getFields', 'status'], 'Laya is not asked again in the same click');
+  assert.deepEqual(today.nativeTypes(), ['warmLaya', 'status', 'status', 'getFields', 'status'], 'custom availability is checked; Laya is not asked again in the same click');
   assert.equal(guessed.guessed, 1);
   assert.equal(guessed.laya, undefined);
   assert.equal(guessed.message, 'Filled 2 answers · 1 guessed · 2 left for you. Check them before you submit.');
@@ -1548,17 +1552,17 @@ test('Laya not ready: the widget’s plan says so after one readiness check, and
   const unguessed = siteWorker({ enabled: true, fields: openQuestions(), desktop: { values: SAVED } });
   await plan(unguessed);
   const plain_ = plain((await unguessed.launcher({ type: 'ui:autofill', confirmed: true })).data);
-  assert.deepEqual(unguessed.nativeTypes(), ['warmLaya', 'status', 'getFields', 'status'], 'a fresh plan in the same click does not ask Laya again');
+  assert.deepEqual(unguessed.nativeTypes(), ['warmLaya', 'status', 'status', 'getFields', 'status'], 'a fresh plan in the same click does not ask Laya again');
   assert.equal(plain_.message, 'Filled 1 answer · 3 left for you. Check it before you submit.');
 
   const side = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...REACH }, { ...SIXTY }], desktop: { values: SAVED } });
   const fromPanel = plain((await autofill(side)).data);
-  assert.deepEqual(side.nativeTypes(), ['warmLaya', 'status', 'getFields', 'status'], 'one "not ready" answer and Laya is left alone for the click');
+  assert.deepEqual(side.nativeTypes(), ['status', 'warmLaya', 'status', 'getFields', 'status'], 'one "not ready" answer and Laya is left alone for the click');
   assert.equal(fromPanel.message, 'Filled 1 answer · 2 left for you. Check it before you submit.');
-  // A closed desktop app reads as today: nothing to fill without the rules, "open the app" with them.
+  // Custom answers can match an otherwise unknown question, so a closed app must be opened to check either path.
   const alone = plain((await autofill(siteWorker({ enabled: true, fields: [{ ...REACH }], desktop: { reachable: false } }))).data);
-  assert.equal(alone.state, 'done');
-  assert.equal(alone.message, 'Nothing here matches your saved profile. 1 left for you.');
+  assert.equal(alone.state, 'offline');
+  assert.equal(alone.message, 'Open the SecondHand app, then click Autofill again.');
   assert.equal((await autofill(siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...REACH }], desktop: { reachable: false } }))).data.state, 'offline');
 });
 
@@ -1641,7 +1645,7 @@ test('Laya gets one three-second budget per click: each request carries what is 
   const quick = await timedClick({ suggestMs: 1200, approvalMs: 20000, loadMs: 6000 });
   assert.deepEqual(quick.budgets, [['suggestFields', 3000], ['answerFields', 1800]],
     'loading the model first (6 seconds) and a 20-second approval are not Laya’s time; the matches took 1.2 seconds');
-  assert.deepEqual(quick.w.nativeTypes().slice(0, 3), ['warmLaya', 'suggestFields', 'answerFields'], 'Laya is warmed before the click’s budget starts');
+  assert.deepEqual(quick.w.nativeTypes().slice(0, 4), ['status', 'warmLaya', 'suggestFields', 'answerFields'], 'Laya is warmed before the click’s budget starts');
   assert.deepEqual(quick.w.page.answered(), ['name', 'reach', 'sixty']);
 
   // A new click starts a new budget.
@@ -2383,6 +2387,161 @@ test('a form that appears after the page loads brings the card, and the card goe
   assert.equal(page.cards(), 0);
 });
 
+test('text-only question label changes update form detection without replacing the label or control', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const page = livePage(t, '<label for="detail">Signature</label><input id="detail">');
+  await tick();
+  const label = page.window.document.querySelector('label'), input = page.window.document.querySelector('input');
+  assert.equal(page.cards(), 0);
+  label.firstChild.data = 'First name';
+  await checkAfterChange(t);
+  assert.equal(page.cards(), 1);
+  assert.equal(page.window.document.querySelector('label'), label);
+  assert.equal(page.window.document.querySelector('input'), input);
+  label.firstChild.data = 'Signature';
+  await checkAfterChange(t);
+  assert.equal(page.cards(), 0, 'the card also leaves when the only question becomes one the applicant must answer');
+});
+
+const historyEvent = (page, name, persisted = true) => page.window.dispatchEvent(new page.window.PageTransitionEvent(name, { persisted }));
+test('back-forward-cache restoration restarts late-form detection, including a check canceled before the page hid', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const page = livePage(t, '<main id="app">Loading</main>');
+  await tick();
+  const app = page.window.document.getElementById('app');
+  app.append(page.window.document.createElement('p'));
+  await tick(); // A check is pending when the page enters the back-forward cache.
+  historyEvent(page, 'pagehide');
+  historyEvent(page, 'pageshow');
+  assert.equal(page.cards(), 0);
+  app.innerHTML = '<label for="name">First name</label><input id="name">';
+  await checkAfterChange(t);
+  assert.equal(page.cards(), 1);
+  historyEvent(page, 'pagehide');
+  app.innerHTML = '<p>Completed</p>';
+  await tick();
+  historyEvent(page, 'pageshow');
+  assert.equal(page.cards(), 0, 'restoration checks the current DOM immediately');
+  app.innerHTML = '<label for="zip">ZIP code</label><input id="zip">';
+  await checkAfterChange(t);
+  assert.equal(page.cards(), 1, 'a second cache cycle also rearms its observer');
+});
+
+test('restored embedded frames report fresh form state once and never create a second widget', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const frame = livePage(t, '<main><label for="name">First name</label><input id="name"></main>', { top: false, url: `${FRAME_ORIGIN}/form` });
+  await tick();
+  historyEvent(frame, 'pagehide');
+  historyEvent(frame, 'pagehide');
+  historyEvent(frame, 'pageshow');
+  historyEvent(frame, 'pageshow');
+  await tick();
+  assert.deepEqual(frame.reports.map(item => item.helps), [true, false, true]);
+  assert.equal(frame.cards(), 0);
+  historyEvent(frame, 'pagehide');
+  frame.window.document.querySelector('main').textContent = 'No form remains';
+  historyEvent(frame, 'pageshow');
+  await tick();
+  assert.deepEqual(frame.reports.map(item => item.helps), [true, false, true, false, false], 'even a restored empty frame corrects any missed departure report');
+  let reply;
+  frame.listeners[0]({ type: 'secondhand:generic:helps' }, { id: extensionId }, value => { reply = plain(value); });
+  assert.deepEqual(reply, { helps: false });
+});
+
+test('restoring a page refreshes embedded-form state and ignoring duplicate pageshow creates no duplicate repair timer', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const page = livePage(t, '<main>No local form</main>', { framesReply: { frames: true } });
+  await tick(); assert.equal(page.cards(), 1);
+  let started = 0, cleared = 0;
+  const set = page.window.setInterval.bind(page.window), clear = page.window.clearInterval.bind(page.window);
+  page.window.setInterval = (...args) => { started++; return set(...args); };
+  page.window.clearInterval = id => { if (id !== null) cleared++; return clear(id); };
+  page.window.chrome.runtime.sendMessage = async message => { page.reports.push(plain(message)); return { frames: false }; };
+  historyEvent(page, 'pagehide');
+  historyEvent(page, 'pageshow');
+  historyEvent(page, 'pageshow');
+  await tick();
+  assert.equal(page.cards(), 0, 'old embedded-frame visibility is not reused after restoration');
+  assert.equal(page.reports.length, 2, 'one top-level frame query per activation');
+  assert.equal(started, 1); assert.equal(cleared, 1);
+  historyEvent(page, 'pagehide'); historyEvent(page, 'pageshow'); await tick();
+  assert.equal(started, 2); assert.equal(cleared, 2);
+});
+
+test('turning a suspended page off cannot be undone by restoration, late reports, or DOM changes', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const page = livePage(t, '<main>No local form</main>'); await tick();
+  let answer;
+  page.window.chrome.runtime.sendMessage = message => { page.reports.push(plain(message)); return new Promise(resolve => { answer = resolve; }); };
+  historyEvent(page, 'pagehide'); historyEvent(page, 'pageshow');
+  historyEvent(page, 'pagehide');
+  page.tell({ type: 'secondhand:generic:off' });
+  historyEvent(page, 'pageshow');
+  answer?.({ frames: true });
+  page.window.document.querySelector('main').innerHTML = '<label for="zip">ZIP code</label><input id="zip">';
+  await checkAfterChange(t);
+  assert.equal(page.cards(), 0);
+  let replied = false;
+  page.listeners[0]({ type: 'secondhand:generic:plan' }, { id: extensionId }, () => { replied = true; });
+  assert.equal(replied, false);
+  assert.equal(page.reports.length, 2);
+});
+
+test('a cached page waits for current site approval and stays off if access was revoked while it was frozen', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const top of [true, false]) {
+    const page = livePage(t, '<label for="name">First name</label><input id="name">', { top });
+    await tick();
+    historyEvent(page, 'pagehide');
+    let answer;
+    page.window.chrome.runtime.sendMessage = message => { page.reports.push(plain(message)); return new Promise(resolve => { answer = resolve; }); };
+    historyEvent(page, 'pageshow');
+    assert.equal(page.cards(), 0, 'no card until the restored site is confirmed');
+    let replied = false;
+    page.listeners[0]({ type: 'secondhand:generic:plan' }, { id: extensionId }, () => { replied = true; });
+    assert.equal(replied, false, 'no plans or fills while current access is being checked');
+    if (!top) {
+      let status;
+      page.listeners[0]({ type: 'secondhand:generic:helps' }, { id: extensionId }, value => { status = plain(value); });
+      assert.deepEqual(status, { helps: true }, 'the worker can still count this frame without a form answer');
+    }
+    answer(undefined); // The worker returns nothing for a site no longer approved.
+    await tick();
+    historyEvent(page, 'pagehide'); historyEvent(page, 'pageshow');
+    page.window.document.querySelector('label').firstChild.data = 'Last name';
+    await checkAfterChange(t);
+    assert.equal(page.cards(), 0);
+    page.listeners[0]({ type: 'secondhand:generic:plan' }, { id: extensionId }, () => { replied = true; });
+    assert.equal(replied, false, 'returning again cannot revive a revoked script');
+  }
+});
+
+test('an approval report from an earlier cached activation cannot overwrite fresh restored frame state', async t => {
+  const page = livePage(t, '<main>No local form</main>'); await tick();
+  const replies = [];
+  page.window.chrome.runtime.sendMessage = message => { page.reports.push(plain(message)); return new Promise(resolve => replies.push(resolve)); };
+  historyEvent(page, 'pagehide'); historyEvent(page, 'pageshow');
+  historyEvent(page, 'pagehide'); historyEvent(page, 'pageshow');
+  assert.equal(replies.length, 2);
+  replies[1]({ frames: false }); await tick();
+  replies[0]({ frames: true }); await tick();
+  assert.equal(page.cards(), 0, 'the later approved activation wins even when old replies arrive last');
+});
+
+test('newer embedded-form reports received during restoration survive the older approval reply', async t => {
+  const page = livePage(t, '<main>No local form</main>'); await tick();
+  historyEvent(page, 'pagehide');
+  let answer;
+  page.window.chrome.runtime.sendMessage = () => new Promise(resolve => { answer = resolve; });
+  historyEvent(page, 'pageshow');
+  page.tell({ type: 'secondhand:generic:formFrames', helps: true });
+  assert.equal(page.cards(), 0, 'frame metadata alone cannot approve restoration');
+  answer({ frames: false }); await tick();
+  assert.equal(page.cards(), 1, 'the newer frame message wins after the worker approves the site');
+  page.tell({ type: 'secondhand:generic:formFrames', helps: false });
+  assert.equal(page.cards(), 0);
+});
+
 test('the scripts run once when a site’s own registration and all websites both match the page', async t => {
   const page = livePage(t, forms.plainPantry, { loads: 2 });
   assert.equal(page.cards(), 1);
@@ -2515,7 +2674,7 @@ test('Laya gets a Spanish form’s question in English, and its answer fills the
   // Only the page's question words went to Chrome's translator, before any saved value was read.
   assert.deepEqual(calls.availability, [{ sourceLanguage: 'es', targetLanguage: 'en' }]);
   assert.deepEqual(calls.translate.sort(), ['¿Hay alguien en su hogar de 60 años o más?', 'Sí', 'No'].sort());
-  assert.deepEqual(w.nativeTypes(), ['warmLaya', 'answerFields', 'status', 'getFields', 'status']);
+  assert.deepEqual(w.nativeTypes(), ['status', 'warmLaya', 'answerFields', 'status', 'getFields', 'status']);
 });
 
 test('a Spanish question Chrome can’t translate yet stays under need you, Laya is asked nothing, and the result says why', async () => {
@@ -3124,4 +3283,70 @@ test('the held list holds the reload, as the need-you list does (#176)', async (
   assert.equal(plain((await fillHeld(w)).data).filled, 3);
   await statusRow(w);
   assert.equal(w.reloads(), 0, 'the pickup day still needs the applicant');
+});
+
+const customQuestion = { name: 'membership', label: 'Membership number', type: 'text' };
+test('saved custom answers use exact question IDs, precede model guesses, and request no catalog', async () => {
+  const w = siteWorker({ enabled: true, fields: [{ ...customQuestion }, { name: 'name', key: 'firstName' }], desktop: {
+    customFieldsAvailable: true,
+    custom: request => ({ values: { [request.fields[0].id]: 'MEM-2042' }, accessRevision: 0 })
+  } });
+  const reply = await w.panel({ type: 'ui:autofill', confirmed: true });
+  assert.equal(reply.ok, true); assert.equal(reply.data.state, 'done');
+  assert.equal(w.page.fields[0].answered, 'MEM-2042');
+  assert.equal(w.page.fields[1].answered, 'Synthetic private first');
+  const requests = w.native.filter(item => item.type === 'getCustomFields');
+  assert.equal(requests.length, 1);
+  assert.deepEqual(requests[0].fields, [{ id: 'sh-1-0', label: 'Membership number', type: 'text', options: [] }]);
+  assert.doesNotMatch(JSON.stringify(reply), /MEM-2042|Synthetic private first/);
+});
+test('a desktop with no custom-answer capability receives no custom request', async () => {
+  const w = siteWorker({ enabled: true, fields: [{ ...customQuestion }] });
+  await w.panel({ type: 'ui:autofill', confirmed: true });
+  assert.equal(w.native.some(item => item.type === 'getCustomFields'), false);
+  assert.equal(w.page.fields[0].answered, undefined);
+});
+test('canceled, unrelated, malformed or stale custom replies never fill an answer', async () => {
+  for (const custom of [() => ({ values: {}, accessRevision: 0 }),
+    () => ({ values: { invented: 'secret' }, accessRevision: 0 }),
+    request => ({ values: { [request.fields[0].id]: 'x'.repeat(1001) }, accessRevision: 0 }),
+    request => ({ values: { [request.fields[0].id]: 'secret' }, accessRevision: 1 }),
+    (request, vault, tab) => { tab.url = `${ORIGIN}/changed`; return { values: { [request.fields[0].id]: 'secret' }, accessRevision: 0 }; }]) {
+    const w = siteWorker({ enabled: true, fields: [{ ...customQuestion }], desktop: { customFieldsAvailable: true, custom } });
+    await w.panel({ type: 'ui:autofill', confirmed: true });
+    assert.equal(w.page.fields[0].answered, undefined);
+  }
+});
+test('custom questions in an embedded form are released only under its own approved origin', async () => {
+  const embedded = { frameId: 4, origin: 'https://forms.example.net', enabled: true, fields: [{ ...customQuestion }] };
+  const w = siteWorker({ enabled: true, fields: [], frames: [embedded], desktop: { customFieldsAvailable: true,
+    custom: request => ({ values: { [request.fields[0].id]: 'FRAME-ONLY' }, accessRevision: 0 }) } });
+  await w.panel({ type: 'ui:autofill', confirmed: true });
+  assert.equal(embedded.page.fields[0].answered, 'FRAME-ONLY');
+  assert.deepEqual(w.native.filter(item => item.type === 'getCustomFields').map(item => item.url), ['https://forms.example.net/form']);
+  assert.equal(w.page.fields.length, 0);
+});
+
+
+test('custom question batches stay below native byte and count limits and continue after successful fills', async () => {
+  const fields = Array.from({ length: 45 }, (_, i) => ({ name: `member${i}`, label: `Preferred option ${i}`, type: 'select', options: Array.from({ length: 30 }, (_, n) => '界'.repeat(90) + n) }));
+  const w = siteWorker({ enabled: true, fields, desktop: { customFieldsAvailable: true,
+    custom: request => ({ values: Object.fromEntries(request.fields.map(field => [field.id, field.options[0]])), accessRevision: 0 }) } });
+  const result = await autofill(w);
+  assert.equal(result.data.state, 'done');
+  const requests = w.native.filter(call => call.type === 'getCustomFields');
+  assert.ok(requests.length > 1 && requests.length <= 4);
+  assert.ok(requests.every(call => call.fields.length <= 40 && Buffer.byteLength(JSON.stringify(call)) <= 48 * 1024));
+  assert.equal(w.page.fields.filter(field => field.answered).length, requests.reduce((n, request) => n + request.fields.length, 0));
+});
+
+test('partial custom rejection replans successful answers and never repeats the rejected assignment in that pass', async () => {
+  const w = siteWorker({ enabled: true, fields: [{ ...customQuestion }, { name: 'badge', label: 'Badge code', type: 'text', rejects: true }], desktop: {
+    customFieldsAvailable: true, custom: request => ({ values: Object.fromEntries(request.fields.map(field => [field.id, 'SAVED-42'])), accessRevision: 0 })
+  } });
+  const reply = await autofill(w);
+  assert.equal(reply.data.state, 'done'); assert.equal(reply.data.filled, 1);
+  assert.equal(w.page.fields[0].answered, 'SAVED-42'); assert.equal(w.page.fields[1].answered, undefined);
+  assert.equal(w.native.filter(call => call.type === 'getCustomFields').length, 1);
+  assert.equal(reply.data.needYou.length, 1);
 });

@@ -144,7 +144,7 @@ test('automatic detection is confined to Iowa portal top frames and applicant st
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../extension/manifest.json'), 'utf8'));
   assert.deepEqual(manifest.permissions.sort(), ['activeTab', 'nativeMessaging', 'scripting', 'sidePanel']);
   assert.deepEqual(manifest.host_permissions, ['https://hhsservices.iowa.gov/*']);
-  assert.deepEqual(manifest.content_scripts, [{ matches: [adapter.PORTAL, `${adapter.PORTAL}/*`], js: ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js'], run_at: 'document_idle', all_frames: false }]);
+  assert.deepEqual(manifest.content_scripts, [{ matches: [adapter.PORTAL, `${adapter.PORTAL}/*`], js: ['address-policy.js', 'iowa-later-adapter.js', 'iowa-record-adapter.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js'], run_at: 'document_idle', all_frames: false }]);
   assert.equal(manifest.externally_connectable, undefined);
   assert.match(manifest.content_security_policy.extension_pages, /connect-src 'none'/);
 });

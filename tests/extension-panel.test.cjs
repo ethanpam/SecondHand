@@ -55,6 +55,7 @@ function content(t, url = `${adapter.PORTAL}/applicant`, { engine = true, matche
   if (engine) window.SecondHandGeneric = generalEngine(window, calls, { matched, settled });
   window.SecondHandIowa = {
     isSupportedUrl: adapter.isSupportedUrl,
+    NAVIGATION_PAGE_KEYS: adapter.NAVIGATION_PAGE_KEYS,
     scan: () => {
       const element = window.document.getElementById('firstName');
       const fields = element.value ? [] : [{ key: 'firstName', label: 'First name' }];
@@ -167,7 +168,7 @@ test('widget host is a full bar on fillable pages and a small pill elsewhere', t
 });
 
 test('the Iowa content script loads the general engine and the page reader before content.js', () => {
-  assert.deepEqual(JSON.parse(source('manifest.json')).content_scripts[0].js, ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js']);
+  assert.deepEqual(JSON.parse(source('manifest.json')).content_scripts[0].js, ['address-policy.js', 'iowa-later-adapter.js', 'iowa-record-adapter.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js']);
 });
 
 test('on Iowa pages the adapter has not verified, the general engine plans, fills, and focuses with metadata only', async t => {
@@ -302,7 +303,7 @@ async function panel(t, initial = {}) {
   const requests = [];
   const listeners = {};
   const tabs = { current: initial.tab || { id: 7, url: `${adapter.PORTAL}/applicant` } };
-  // A site other than Iowa: metadata only, never a checklist or autopilot.
+  // General sites expose metadata and may run explicitly requested Fill and continue.
   const state = initial.site ? { page: { kind: 'general', pageKey: 'general' }, result: initial.result || null, autopilot: false, site: { ...initial.site },
     ...(initial.savable ? { savable: structuredClone(initial.savable) } : {}), ...(initial.held ? { held: structuredClone(initial.held) } : {}) } : {
     page: { kind: initial.kind || 'fillable', pageKey: 'iowa-personal-information', reason: 'Complete this step in Iowa’s form.', checklist: [
@@ -343,6 +344,7 @@ async function panel(t, initial = {}) {
     else if (payload.type === 'ui:widgetSize') data = { sized: true };
     // `autofillHeld`: a promise the app's answer waits for, as while its window asks for permission.
     else if (payload.type === 'ui:autofill') { await initial.autofillHeld; state.result = initial.autofill || doneResult; state.autopilot = Boolean(initial.autopilotAfterAutofill); data = structuredClone(state.result); }
+    else if (payload.type === 'ui:fillAndContinue') { state.result = initial.fillAndContinue || { state: 'continuing', pageKey: 'general', autoContinue: true, filled: 2, messageKey: 'worker.siteContinuing' }; state.autopilot = state.result.autoContinue === true; data = structuredClone(state.result); }
     else if (payload.type === 'ui:stop') { state.autopilot = false; state.result = { state: 'stopped', filled: 0, needYou: [], message: 'Autofill stopped. Nothing was erased.', pageKey: 'iowa-personal-information' }; data = structuredClone(state.result); }
     else if (payload.type === 'ui:desktopStatus') data = { ...desktop };
     else if (payload.type === 'ui:focusField') data = { focused: true };
@@ -1519,10 +1521,19 @@ test('Iowa widget and sidebar say what Autofill will do before it is clicked, in
   assert.equal(widget.get('widget-text').textContent, FIRST);
   assert.equal(widget.get('widget-text').classList.contains('visually-hidden'), false, 'the widget shows it, not only its tooltip');
   assert.equal(widget.get('autofill').title, EN['widget.autofillIowaTitle']);
+  assert.match(widget.get('autofill').title, /continues where SecondHand can/);
+  assert.match(widget.get('autofill').title, /Check every answer, your Social Security number, and the home address/);
   const sidebar = await panel(t, { storage });
   assert.equal(sidebar.get('iowa-policy').hidden, false);
   // The side panel's line says what Autofill does on Iowa (#167), on every page until Autofill has run there.
   assert.equal(sidebar.get('iowa-policy').textContent, EN['panel.iowaPolicy']);
+  const policy = sidebar.get('iowa-policy').textContent;
+  assert.match(policy, /Social Security number; check it in Iowa’s form/);
+  assert.match(policy, /first suggested home address/);
+  assert.match(policy, /Review all answers and that address before submitting/);
+  assert.match(policy, /one person’s record at a time/);
+  assert.match(policy, /saves supported pages when complete/);
+  assert.match(policy, /You handle summaries, unmatched questions, consent, signatures, submission/);
   assert.equal(sidebar.get('iowa-policy').classList.contains('note'), false, 'it is not small print');
   assert.equal(sidebar.get('panel-autofill').textContent, 'Start Autofill', 'on Iowa the button starts something that goes on by itself');
   // Once Autofill has run, the status line says what it did and the note is not repeated under it.
@@ -2708,4 +2719,39 @@ test('#185: the widget says how many Laya guessed, apart from its sure answers, 
   await spanishView.userClick('autofill');
   assert.equal(spanishView.get('widget-text').textContent, strings.text('es', guessedDone.messageKey, guessedDone.messageParams));
   assert.deepEqual(shownText(spanishView).filter(text => englishOnly.has(text)), []);
+});
+
+
+test('Fill and continue is a trusted, explicit side-panel action with an ordinary-Next disclosure and Stop', async t => {
+  const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true, ready: true } });
+  assert.equal(view.get('site-continue').hidden, false);
+  assert.equal(view.get('site-continue').disabled, false);
+  assert.match(view.get('site-continue-hint').textContent, /saved/i);
+  assert.match(view.get('site-continue-hint').textContent, /send|save/i);
+  assert.match(view.get('site-continue-hint').textContent, /consent|signature|submit/i);
+  view.get('site-continue').click(); await tick();
+  assert.equal(view.types().includes('ui:fillAndContinue'), false);
+  await view.userClick('site-continue');
+  assert.deepEqual(plainRequests(view.requests.filter(r => r.type === 'ui:fillAndContinue')), [{ type: 'ui:fillAndContinue', confirmed: true, tabId: 7 }]);
+  assert.equal(view.types().includes('ui:plan'), false, 'this mode never asks Chrome AI for guesses');
+  assert.equal(view.get('site-continue').hidden, true);
+  assert.equal(view.get('panel-autofill').textContent, 'Stop Autofill');
+  await view.userClick('panel-autofill');
+  assert.equal(view.types().includes('ui:stop'), true);
+  assert.equal(view.get('site-continue').hidden, false);
+});
+
+test('Fill and continue is unavailable off enabled ready general sites and recovers after a pause', async t => {
+  for (const site of [null, { origin: ORIGIN, enabled: false }, { origin: ORIGIN, enabled: true, ready: false }]) {
+    const view = await panel(t, site ? { tab: SITE, site } : {});
+    assert.equal(view.get('site-continue').hidden, true);
+    await view.userClick('site-continue');
+    assert.equal(view.types().includes('ui:fillAndContinue'), false);
+  }
+  const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true, ready: true }, fillAndContinue: {
+    state: 'waiting', pageKey: 'general', autoContinue: false, messageKey: 'worker.siteNext.missing' } });
+  await view.userClick('site-continue');
+  assert.equal(view.get('site-continue').hidden, false);
+  assert.equal(view.get('panel-autofill').textContent, 'Autofill this page');
+  assert.match(view.get('status').textContent, /required/i);
 });

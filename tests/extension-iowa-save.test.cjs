@@ -30,7 +30,7 @@ function iowaTab(t, html = expenses, url = EXPENSES, { engine = true } = {}) {
   layout(document);
   let listener;
   window.chrome = { runtime: { id: extensionId, getURL: file => `chrome-extension://${extensionId}/${file}`, onMessage: { addListener: callback => { listener = callback; } } } };
-  for (const file of ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js']) evalFile(window, `extension/${file}`);
+  for (const file of ['address-policy.js', 'iowa-later-adapter.js', 'iowa-record-adapter.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js']) evalFile(window, `extension/${file}`);
   const engineCalls = [];
   const real = window.SecondHandGeneric;
   window.SecondHandGeneric = engine ? { ...real,

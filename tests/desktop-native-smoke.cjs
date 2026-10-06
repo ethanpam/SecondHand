@@ -139,6 +139,9 @@ async function startedApps(record, unrecorded) {
     { request: { id: 'native-smoke', type: 'status' }, data: { unlocked: false, applicationCount: 0 } },
     { request: { id: 'show-app', type: 'showApp' }, data: { shown: true } },
     { request: { id: 'fields', type: 'getFields', url: PORTAL_URL, fields: ['firstName'] }, data: { values: { firstName: 'Synthetic' } } },
+    { request: { id: 'one-record', type: 'getRecordFields', url: `${PORTAL_URL}/applyForBenefits/dynamicQuestions`, pageKey: 'iowa-job-history',
+      recordType: 'jobs', fields: ['person', 'employer'], personName: 'Synthetic Owner' },
+    data: { recordId: '11111111-2222-4333-8444-555555555555', values: { person: 'Synthetic Owner', employer: 'Synthetic Employer' }, accessRevision: 37 } },
     windowsRelay ? { request: { id: 'open-app', type: 'openApp' }, data: { opened: 'shown' } }
       : { request: { id: 'open-app', type: 'openApp' }, received: { id: 'open-app', type: 'showApp' }, data: { shown: true }, answer: { opened: 'shown' } }
   ];
@@ -163,7 +166,7 @@ async function startedApps(record, unrecorded) {
     delete env.ELECTRON_RUN_AS_NODE;
     const messages = await runHost(executable, packaged ? [] : [root], env, fixtures.map(item => item.request));
     assert.deepEqual(messages, fixtures.map(item => ({ id: item.request.id, ok: true, data: item.answer || item.data })));
-    process.stdout.write(`Native messaging subprocess smoke passed (${packaged ? `packaged ${process.platform} native host` : 'development Electron'}): status, showApp, getFields, and openApp with the app running.\n`);
+    process.stdout.write(`Native messaging subprocess smoke passed (${packaged ? `packaged ${process.platform} native host` : 'development Electron'}): status, showApp, getFields, getRecordFields, and openApp with the app running.\n`);
 
     // With the app closed, openApp starts it. A packaged Mac host would start the real packaged app, so on a
     // Mac this runs with development Electron; the Windows relay starts a stand-in beside a copy of itself.

@@ -15,6 +15,8 @@ const preApplicant = require('../tests/fixtures/iowa-pre-applicant.cjs');
 const addressFixture = require('../tests/fixtures/iowa-select-address.cjs');
 const selfFixture = require('../tests/fixtures/iowa-self-details.cjs');
 const tellUsMore = require('../tests/fixtures/iowa-tell-us-more.cjs');
+const laterFixture = require('../tests/fixtures/iowa-later-pages.cjs');
+const jobFixture = require('../tests/fixtures/iowa-job-history.cjs');
 const strings = require('../extension/strings.js');
 const root = path.join(__dirname, '..');
 const portal = 'https://hhsservices.iowa.gov/apspssp/ssp.portal';
@@ -28,6 +30,7 @@ const documentNextMarker = 'SECONDHAND_SYNTHETIC_FULL_DOCUMENT_NEXT';
 const addressUrl = addressFixture.URL;
 const selfDetailsUrl = selfFixture.URL;
 const startDetailsUrl = tellUsMore.URL;
+const backgroundUrl = laterFixture.url('background');
 const verifiedApplicantMarker = 'SECONDHAND_VERIFIED_ADDRESS_APPLICANT_NEXT';
 const verifiedAddressMarker = 'SECONDHAND_VERIFIED_ADDRESS_NEXT:';
 const addressVariants = {
@@ -85,12 +88,30 @@ function selfDetailsFixture(variant = 'verified') {
 // hideShowQuestions: each rule is "answer:shown ids:hidden ids", and ids follow the prefix.
 function startDetailsFixture(variant = 'verified') {
   const html = variant === 'people' ? tellUsMore.html.replace('People | Unvisited', 'People | Active') : tellUsMore.html;
-  if (!['verified', 'people'].includes(variant)) throw new Error('Unknown Tell Us More QA variant.');
+  if (!['verified', 'people', 'synchronized', 'mirror-mismatch', 'meal', 'unknown', 'error', 'modal'].includes(variant)) throw new Error('Unknown Tell Us More QA variant.');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Tell Us More · isolated QA</title>
     <style>body{font:16px system-ui;background:#f7f8f2;color:#294035;margin:0;padding:30px}main{max-width:900px}li{display:inline-block;margin-right:12px}label{margin:0 12px 0 4px}input[type=text],select{padding:8px}button{padding:12px;margin:10px}.questionAnswer{margin:16px 0}</style></head>
     <body><main><p>ISOLATED QA · FICTIONAL APPLICANT. Trimmed from a sanitized capture; the script below is a QA stand-in for Iowa's.</p>${html}</main>
     <script>
       window.__startQa = { nextClicks: 0, shown: [] };
+      // Explicitly synthetic stand-in, not evidence of Iowa's external masking script.
+      // The ordinary fixture intentionally has no mirror synchronization.
+      if (${JSON.stringify(['synchronized', 'mirror-mismatch'].includes(variant))}) {
+        document.getElementById(${JSON.stringify(tellUsMore.SSN_BOX_ID)}).addEventListener('input', event => {
+          const digits = event.target.value.replace(/[^0-9]/g, '');
+          event.target.parentElement.querySelector('[name="ssndiv"] input').value =
+            ${JSON.stringify(variant === 'mirror-mismatch')} ? '123456780' : digits;
+        });
+      }
+      if (${JSON.stringify(variant === 'meal')}) {
+        const question = document.getElementById('question02422');
+        question.classList.remove('disabledQuestion', 'hidden'); question.style.display = '';
+      }
+      if (${JSON.stringify(variant === 'unknown')}) document.getElementById('answerSet').insertAdjacentHTML('beforeend', '<div class="questionAnswer"><label>Unmapped synthetic follow-up<input value="Answered only for QA"></label></div>');
+      if (${JSON.stringify(variant === 'error')}) document.getElementById('answerSet').insertAdjacentHTML('beforeend', '<div role="alert">Synthetic validation error</div>');
+      if (${JSON.stringify(variant === 'modal')}) {
+        const modal = document.getElementById('customModalBox'); modal.style.display = 'block'; modal.setAttribute('role', 'dialog');
+      }
       function hideShowQuestions(prefix, input, rules) {
         const rule = rules.split('|').map(part => part.split(':')).find(([answer]) => answer === input.value);
         if (!rule) return;
@@ -103,6 +124,20 @@ function startDetailsFixture(variant = 'verified') {
       }
       document.getElementById('dqButtonId309').onclick = () => { window.__startQa.nextClicks++; };
     </script></body></html>`;
+}
+
+function backgroundBrowserFixture() {
+  // This positive path has no language/naturalization/race follow-ups. Handler
+  // stubs are synthetic; browser QA does not claim Iowa's scripts were executed.
+  return laterFixture.makeHtml('background') + `<script>
+    window.__backgroundQa = { nextClicks: 0 };
+    function hideShowQuestions() {}
+    document.getElementById('dqButtonId311').onclick = () => { window.__backgroundQa.nextClicks++; };
+  </script>`;
+}
+
+function jobBrowserFixture() {
+  return jobFixture.html.replace('</body>', `<script>(${jobFixture.attachHandlers.toString()})(document);</script></body>`);
 }
 
 function fixture(nextStep) {
@@ -189,6 +224,7 @@ async function installNativeStub(worker) {
     nativeRequest = async (type, payload = {}) => {
       const state = globalThis.__nativeSmoke;
       state.calls.push({ type, fields: payload.fields || [], url: payload.url || '' });
+      if (type === 'getRecordFields') Object.assign(state.calls.at(-1), { pageKey: payload.pageKey, recordType: payload.recordType, personName: payload.personName || '' });
       // A closed app can't be reached, as the worker reports a host that can't reach it; openApp starts it, locked.
       if (type === 'openApp') {
         if (!state.closed) return { opened: 'shown' };
@@ -199,6 +235,10 @@ async function installNativeStub(worker) {
       if (type === 'status') return { unlocked: !state.locked, applicationCount: 0, accessRevision: state.accessRevision };
       if (type === 'showApp') return { shown: true };
       if (type === 'getFields') {
+        if (payload.fields.length === 0 && state.holdNavigation) {
+          state.navigationAuthorizationWaiting = true;
+          await new Promise(resolve => { state.releaseNavigation = resolve; });
+        }
         if (payload.url === addressUrl && state.holdAddressNavigation) {
           state.addressAuthorizationWaiting = true;
           await new Promise(resolve => { state.releaseAddressNavigation = resolve; });
@@ -208,6 +248,19 @@ async function installNativeStub(worker) {
         const values = Object.fromEntries(payload.fields.filter(field => state.profile[field]).map(field => [field, state.profile[field]]));
         if (state.lockAfterFields) { state.locked = true; state.accessRevision++; }
         return { values, accessRevision: receipt };
+      }
+      if (type === 'getRecordFields') {
+        if (state.holdRecord) {
+          state.recordAuthorizationWaiting = true;
+          await new Promise(resolve => { state.releaseRecord = resolve; });
+        }
+        if (state.locked) throw new Error('Unlock your local vault first.');
+        const record = state.record;
+        if (!record) return { values: {}, reason: 'recordMissing', accessRevision: state.accessRevision };
+        const receipt = state.accessRevision;
+        const values = Object.fromEntries(payload.fields.filter(field => record[field]).map(field => [field, record[field]]));
+        if (state.lockAfterRecord) { state.locked = true; state.accessRevision++; }
+        return { recordId: record.id, values, accessRevision: receipt };
       }
       if (type === 'recordProgress') return { recorded: true };
       // This build ships no Laya model, so Laya is unavailable and both Laya requests answer "not ready".
@@ -297,7 +350,7 @@ async function main() {
   const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-chromium-smoke-'));
   let context, panel, page, worker;
   const errors = [];
-  let currentAddressVariant = 'original', currentSelfVariant = 'verified', currentStartVariant = 'verified';
+  let currentAddressVariant = 'original', currentSelfVariant = 'verified', currentStartVariant = 'verified', currentSharedPage = 'self';
   let verifiedApplicantClicks = 0, verifiedAddressLoads = 0, documentManualLoads = 0;
   const verifiedAddressNext = [];
   try {
@@ -314,7 +367,8 @@ async function main() {
         verifiedAddressLoads++;
         return route.fulfill({ status: 200, contentType: 'text/html', body: verifiedAddressFixture(currentAddressVariant) });
       }
-      if (request.isNavigationRequest() && request.url() === selfDetailsUrl) return route.fulfill({ status: 200, contentType: 'text/html', body: selfDetailsFixture(currentSelfVariant) });
+      if (request.isNavigationRequest() && request.url() === selfDetailsUrl) return route.fulfill({ status: 200, contentType: 'text/html', body: currentSharedPage === 'job' ? jobBrowserFixture() : selfDetailsFixture(currentSelfVariant) });
+      if (request.isNavigationRequest() && request.url() === backgroundUrl) return route.fulfill({ status: 200, contentType: 'text/html', body: backgroundBrowserFixture() });
       if (request.isNavigationRequest() && request.url() === startDetailsUrl) return route.fulfill({ status: 200, contentType: 'text/html', body: startDetailsFixture(currentStartVariant) });
       if (request.isNavigationRequest() && request.url() === documentManualUrl) {
         documentManualLoads++;
@@ -532,7 +586,7 @@ async function main() {
     };
     const stopNote = code => strings.text(code, 'widget.stopNote');
     const wholeSteps = [
-      { name: 'Job Information', url: selfDetailsUrl, pageKey: 'iowa-self-details-unverified', line: code => `${strings.text(code, 'iowa.selfUnverifiedTodo')} ${stopNote(code)}` },
+      { name: 'Job Information', url: selfDetailsUrl, pageKey: 'iowa-job-screening-unverified', line: code => `${strings.text(code, 'iowa.laterManualTodo')} ${stopNote(code)}` },
       { name: 'unexpected Enter Personal Information', url: `${applicant}?next=unexpected`, pageKey: 'iowa-personal-unverified', line: code => `${strings.text(code, 'iowa.personalUnverifiedTodo')} ${stopNote(code)}` },
       // Save and Continue disabled: SecondHand fills the page and does not continue.
       { name: 'Enter Personal Information, Save and Continue disabled', url: `${applicant}?next=stay`, pageKey: 'iowa-personal-information', disabled: true,
@@ -936,8 +990,8 @@ async function main() {
     // picks the marital status and clicks each saved answer, then answers the Social Security card
     // question Iowa's script shows after Yes. The number box stays empty and Save and Continue is never
     // clicked. (The native stub answers hasSsn itself, as the desktop works it out from saved answers.)
-    const startFields = ['sex', 'birthDate', 'hasSsn', 'ssn', 'ssnCardNameMatches', 'ssnCardFirstName', 'ssnCardMiddleName', 'ssnCardLastName', 'usCitizen', 'householdAllCitizens', 'maritalStatus',
-      'militaryOrVeteran', 'disabled', 'householdDisability', 'blind', 'healthLimitation', 'medicare', 'householdMedicare'];
+    const startFields = ['sex', 'birthDate', 'hasSsn', 'ssn', 'ssnCardNameMatches', 'ssnCardFirstName', 'ssnCardMiddleName', 'ssnCardLastName', 'usCitizen', 'householdAllCitizens', 'bornInUs', 'maritalStatus',
+      'militaryOrVeteran', 'eatsMealsWithHousehold', 'disabled', 'householdDisability', 'blind', 'healthLimitation', 'medicare', 'householdMedicare', 'pregnant', 'pregnancyDueDate', 'pregnancyExpectedBabies'];
     const startRows = ['gender', 'birthDate', 'hasSsn', 'ssnCardName', 'usCitizen', 'maritalStatus', 'militaryOrVeteran', 'hasDisability', 'blind', 'healthLimits', 'hasMedicare'];
     const startChecked = () => page.evaluate(() => Array.from(document.querySelectorAll('#answerSet input[type="radio"]')).filter(element => element.checked).map(element => element.id));
     const startBoxes = () => page.evaluate(ids => ids.map(id => document.getElementById(id).value),
@@ -1022,6 +1076,92 @@ async function main() {
     currentStartVariant = 'verified';
     console.log('Tell Us More conditional controls: another-person phase releases no profile fields and fills nothing.');
 
+    // The complete captured layout has a bounded ordinary Next; unsupported follow-ups
+    // remain negative cases above. All answers and any mirror behavior here are synthetic.
+    const completeStartProfile = { sex: 'Male', hasSsn: 'no', ssn: '', usCitizen: 'no', bornInUs: '',
+      militaryOrVeteran: 'no', disabled: 'no', blind: 'no', healthLimitation: 'no', medicare: 'no' };
+    const startNextClicks = () => page.evaluate(() => window.__startQa.nextClicks);
+    async function startCompleteCase(variant = 'verified', profile = {}) {
+      currentStartVariant = variant;
+      await resetTo(startDetailsUrl, { profile: { ...completeStartProfile, ...profile } });
+      await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
+      const since = await workerState();
+      await panel.click('#panel-autofill');
+      await settled(since);
+    }
+    await startCompleteCase();
+    await expect.poll(startNextClicks, { timeout: 20000 }).toBe(1);
+    await settled();
+    assert.equal(await startNextClicks(), 1);
+    assert.deepEqual((await calls('getFields')).map(call => call.fields), [startFields]);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.locator('[data-secondhand-assistant]')).toBeAttached();
+    await settled();
+    assert.equal(await startNextClicks(), 0, 'same-step reload cannot repeat a potentially accepted Continue');
+    assert.equal((await calls('getFields')).length, 1, 'same-step reload does not request the profile again');
+    console.log('Tell Us More: complete no-SSN page continues once; reload cannot duplicate the same step.');
+
+    await startCompleteCase('synchronized', { hasSsn: 'yes', ssn: '123456789', ssnCardNameMatches: 'no',
+      ssnCardFirstName: 'Alex', ssnCardMiddleName: '', ssnCardLastName: 'Sample' });
+    await expect.poll(startNextClicks, { timeout: 20000 }).toBe(1);
+    await expect(ssnMirror()).toHaveValue('123456789');
+    await expect(page.locator(`[id="${cardIds[1]}"]`)).toHaveValue('');
+    const completedMetadata = await panel.evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      return JSON.stringify(await chrome.runtime.sendMessage({ type: 'ui:pageState', tabId: tab.id }));
+    });
+    for (const value of ['123456789', '123-45-6789', 'Alex', 'Sample', '1985-04-12', '04/12/1985', 'pageInstance', 'nextToken', 'accessRevision']) {
+      assert.equal(completedMetadata.includes(value), false, value);
+    }
+    await panel.screenshot(path.join(root, 'artifacts/extension-tell-us-more-complete-sidebar.png'));
+    console.log('Tell Us More: matching synthetic SSN mirror permits one Next; optional card middle name stays blank; metadata contains no answers or private tokens.');
+
+    await startCompleteCase('meal', { usCitizen: 'yes', bornInUs: 'yes', eatsMealsWithHousehold: 'no', eatsWithHousehold: 'yes' });
+    await expect.poll(startNextClicks, { timeout: 20000 }).toBe(1);
+    await expect(page.locator(`[id="${tellUsMore.radioId(21, 1)}"]`)).toBeChecked();
+    await expect(page.locator(`[id="${tellUsMore.radioId(25, 2)}"]`)).toBeChecked();
+    console.log('Tell Us More: captured birthplace and eating follow-ups use their own explicit answers.');
+
+    for (const variant of ['unknown', 'error', 'modal', 'mirror-mismatch']) {
+      await startCompleteCase(variant, variant === 'mirror-mismatch' ? { hasSsn: 'yes', ssn: '123456789', ssnCardNameMatches: 'yes' } : {});
+      if (variant !== 'modal') await expect(page.locator(`[id="${tellUsMore.DOB_ID}"]`)).toHaveValue('04/12/1985', { timeout: 20000 });
+      await settled();
+      assert.equal(await startNextClicks(), 0, variant);
+      if (variant === 'modal') assert.deepEqual(await calls('getFields'), []);
+      if (variant === 'mirror-mismatch') await expect.poll(() => panel.text('[data-key="ssn"]')).toContain('Do it yourself');
+      console.log(`Tell Us More ${variant}: automatic Continue stays paused.`);
+    }
+
+    await startCompleteCase('verified', { blind: '' });
+    await expect(page.locator(`[id="${tellUsMore.DOB_ID}"]`)).toHaveValue('04/12/1985', { timeout: 20000 });
+    await settled();
+    assert.equal(await startNextClicks(), 0);
+    await page.locator(`[id="${tellUsMore.radioId(27, 2)}"]`).check();
+    await expect.poll(startNextClicks, { timeout: 20000 }).toBe(1);
+    assert.deepEqual((await calls('getFields')).map(call => call.fields), [startFields, []]);
+    console.log('Tell Us More: a missing answer pauses, then manual completion obtains no-data authorization before one Next.');
+
+    for (const interruption of ['lock', 'edited-during-approval']) {
+      await startCompleteCase('verified', { blind: '' });
+      await expect(page.locator(`[id="${tellUsMore.DOB_ID}"]`)).toHaveValue('04/12/1985', { timeout: 20000 });
+      await settled();
+      await worker.evaluate(interruption => {
+        if (interruption === 'lock') globalThis.__nativeSmoke.lockAfterFields = true;
+        else globalThis.__nativeSmoke.holdNavigation = true;
+      }, interruption);
+      await page.locator(`[id="${tellUsMore.radioId(27, 2)}"]`).check();
+      await expect.poll(() => calls('getFields').then(items => items.length), { timeout: 20000 }).toBe(2);
+      if (interruption === 'edited-during-approval') {
+        await expect.poll(() => worker.evaluate(() => globalThis.__nativeSmoke.navigationAuthorizationWaiting)).toBe(true);
+        await page.locator(`[id="${tellUsMore.MARITAL_ID}"]`).selectOption('Widowed');
+        await worker.evaluate(() => { const state = globalThis.__nativeSmoke; state.holdNavigation = false; state.releaseNavigation(); });
+      }
+      await settled();
+      assert.equal(await startNextClicks(), 0, interruption);
+      console.log(`Tell Us More ${interruption}: authorization cannot continue the changed or locked page.`);
+    }
+    currentStartVariant = 'verified';
+
     // With nothing saved, nothing is filled; each row says to type the answer in Iowa's form, and one note above
     // the list says where to save answers for next time.
     await resetTo(startDetailsUrl, { profile: Object.fromEntries(startFields.map(field => [field, ''])) });
@@ -1040,6 +1180,66 @@ async function main() {
     assert.deepEqual(await page.evaluate(() => window.__startQa), { nextClicks: 0, shown: [] });
     assert.deepEqual((await calls('getFields')).map(call => call.fields), [startFields]);
     console.log('Tell Us More (dynamicQuestionsStart), nothing saved: nothing filled; every row says to type the answer in Iowa’s form, and a note points to My information.');
+
+    // Captured later scalar form through the actual extension. The origin,
+    // document injection, UI gesture and one-use Next are real; Iowa handlers
+    // and desktop answers remain the explicit isolated QA stubs above.
+    await resetTo(backgroundUrl, { profile: { iowaResident: 'yes', migrantSeasonalFarmworker: 'no', preferredLanguage: 'English',
+      naturalizedCitizen: 'no', birthState: 'IA', race: '' } });
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
+    await panel.click('#panel-autofill');
+    await expect(page.locator('[id="answerSets0.answers187.answerValue"]')).toHaveValue('Iowa', { timeout: 20000 });
+    await expect.poll(() => page.evaluate(() => window.__backgroundQa.nextClicks), { timeout: 20000 }).toBe(1);
+    await settled();
+    assert.equal(await page.evaluate(() => window.__backgroundQa.nextClicks), 1);
+    assert.deepEqual((await calls('getFields')).map(call => call.url), [backgroundUrl]);
+    assert.deepEqual(await calls('getRecordFields'), []);
+    assert.doesNotMatch(await panel.evaluate(() => document.body.innerText), /Synthetic Example|qa-person|qa-token/);
+    console.log('Background Information: exact scalar fields fill and ordinary Next occurs once; no record list is requested.');
+
+    currentSharedPage = 'job';
+    const fictionalJob = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-000000000071', person: 'Jordan Sample', workOrTraining: 'Work', startDate: '2026-02-03', selfEmployed: 'no',
+      employer: 'Fictional Job QA Company', jobTitle: 'Synthetic Clerk', monthlyHours: '120', amount: '850.50', frequency: 'Every Other Week', tipsOrCommissions: '0',
+      incomeExpectedSame: 'yes', changedJobs30Days: 'no', stoppedWorking30Days: 'no', fewerHours30Days: 'no' };
+    async function resetJob({ record = fictionalJob, lockAfterRecord = false, holdRecord = false } = {}) {
+      await resetTo(jobFixture.URL);
+      await worker.evaluate(options => Object.assign(globalThis.__nativeSmoke, options), { record, lockAfterRecord, holdRecord });
+      await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
+    }
+    await resetJob();
+    await panel.click('#panel-autofill');
+    await expect(page.locator('[id="answerSets0.personSelection"]')).toHaveValue('1', { timeout: 20000 });
+    await expect(page.locator('[id="answerSets0.answers8.answerValue"]')).toHaveValue('850.50', { timeout: 20000 });
+    await expect.poll(() => page.evaluate(() => document.__jobQa.nextClicks), { timeout: 20000 }).toBe(1);
+    await settled();
+    assert.equal(await page.evaluate(() => document.__jobQa.nextClicks), 1);
+    const requests = await calls('getRecordFields'); assert.equal(requests.length, 1);
+    assert.equal(requests[0].pageKey, 'iowa-job-history'); assert.equal(requests[0].recordType, 'jobs'); assert.ok(requests[0].fields.includes('person'));
+    assert.equal(requests[0].personName, '');
+    assert.deepEqual(await calls('getFields'), [], 'record pages never request the scalar profile or whole list');
+    const sidebar = await panel.evaluate(() => document.body.innerText);
+    assert.doesNotMatch(sidebar, /Jordan Sample|Fictional Job QA Company|Synthetic Clerk|850\.50|aaaaaaaa-bbbb/);
+    await panel.screenshot(path.join(root, 'artifacts/extension-job-record-sidebar.png'));
+    console.log('Job record: second person selected by exact name, one scoped release, explicit No proofs, private values, and one Next.');
+
+    for (const variant of ['missing', 'owner-conflict', 'locked-receipt', 'edit-during-approval']) {
+      await resetJob({ record: variant === 'missing' ? null : fictionalJob, lockAfterRecord: variant === 'locked-receipt', holdRecord: variant === 'edit-during-approval' });
+      if (variant === 'owner-conflict') await page.locator('[id="answerSets0.personSelection"]').selectOption('0');
+      await panel.click('#panel-autofill');
+      await expect.poll(async () => (await calls('getRecordFields')).length, { timeout: 20000 }).toBe(1);
+      if (variant === 'edit-during-approval') {
+        await expect.poll(() => worker.evaluate(() => globalThis.__nativeSmoke.recordAuthorizationWaiting)).toBe(true);
+        await page.locator('[id="answerSets0.personSelection"]').selectOption('0');
+        await worker.evaluate(() => { const state = globalThis.__nativeSmoke; state.holdRecord = false; state.releaseRecord(); });
+      }
+      await settled();
+      assert.equal(await page.evaluate(() => document.__jobQa.nextClicks), 0);
+      await expect(page.locator('[id="answerSets0.answers8.answerValue"]')).toHaveValue('');
+      await expect(page.locator('[id="answerSets0.answers4.answerValue"]')).toHaveValue('');
+      assert.deepEqual(await calls('getFields'), []);
+      console.log(`Job record ${variant}: no financial fill and no Next.`);
+    }
+    currentSharedPage = 'self';
 
     assert.deepEqual(errors, []);
     console.log('Widget: intro pages show a small pill. All browser fixtures/data were synthetic; native desktop responses were DevTools stubs.');

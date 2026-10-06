@@ -11,6 +11,19 @@ const { FrameReader, frame, extensionFromOrigin, validateRequest, startBridge, r
 const { PORTAL_URL, PROFILE_FIELDS, REQUEST_FIELDS } = require('../shared/schema.cjs');
 const EXTENSION = 'a'.repeat(32);
 
+test('custom answers have bounded question-only metadata and never permit Iowa, arbitrary fields or source values', () => {
+  const request = { id: 'custom', type: 'getCustomFields', url: 'https://pantry.example.org/form', fields: [{ id: 'field1', label: 'Pickup location', type: 'text' }] };
+  assert.deepEqual(validateRequest(request), request);
+  for (const change of [{ url: PORTAL_URL }, { url: 'http://pantry.example.org' }, { url: 'https://person@pantry.example.org' }, { fields: ['customFields'] }, { values: {} }, { fields: [{ ...request.fields[0], value: 'private' }] }, { fields: [] }]) assert.throws(() => validateRequest({ ...request, ...change }));
+  assert.throws(() => validateRequest({ id: 'old', type: 'getFields', url: request.url, fields: ['customFields'] }));
+});
+
+test('general navigation authorization carries only a non-Iowa HTTPS URL, never fields or click selectors', () => {
+  const request = { id: 'next', type: 'authorizeSiteNavigation', url: 'https://pantry.example.org/form' };
+  assert.deepEqual(validateRequest(request), request);
+  for (const change of [{ url: PORTAL_URL }, { url: `${PORTAL_URL}/applyForBenefits/dynamicQuestions` }, { url: 'http://pantry.example.org' }, { selector: 'button' }, { fields: [] }, { sensitive: true }]) assert.throws(() => validateRequest({ ...request, ...change }));
+});
+
 test('native frames handle split headers, split UTF-8, and multiple messages', () => {
   const reader = new FrameReader();
   const values = [];
@@ -68,8 +81,8 @@ test('showApp carries no data; assisted-session requests and tokens are no longe
   for (const extra of [{ tabId: 1 }, { profile: {} }]) assert.throws(() => validateRequest({ id: 'x', type: 'getFields', url: PORTAL_URL, fields: ['firstName'], ...extra }), /Unexpected/);
 });
 
-test('empty field authorization is limited to the two exact verified Iowa navigation endpoints', () => {
-  for (const page of ['enterPersonalInfo', 'addressValidation']) {
+test('empty field authorization is limited to exact Iowa endpoints with separately verified navigation adapters', () => {
+  for (const page of ['enterPersonalInfo', 'addressValidation', 'dynamicQuestions', 'dynamicQuestionsStart', 'ssaVerificationRender']) {
     const url = `${PORTAL_URL}/applyForBenefits/${page}`;
     const request = { id: 'navigation', type: 'getFields', url, fields: [] };
     assert.deepEqual(validateRequest(request), request);
@@ -77,7 +90,9 @@ test('empty field authorization is limited to the two exact verified Iowa naviga
       assert.throws(() => validateRequest({ ...request, url: altered }), /profile fields/);
     }
   }
-  for (const url of [PORTAL_URL, `${PORTAL_URL}/applyForBenefits/dynamicQuestions`,
+  for (const url of [PORTAL_URL, `${PORTAL_URL}/applyForBenefits/dynamicQuestionsResume`,
+    `${PORTAL_URL}/applyForBenefits/eSignature`,
+    `${PORTAL_URL}/applyForBenefits/enterPersonalInfoSummary`, `${PORTAL_URL}/applyForBenefits/iaReminderAboutYourRights`,
     `${PORTAL_URL}/applyForBenefits/addressValidationDQfuncPage`, 'https://pantry.example.org/intake',
     'https://hhsservices.iowa.gov/other/applyForBenefits/addressValidation']) {
     assert.throws(() => validateRequest({ id: 'navigation', type: 'getFields', url, fields: [] }), /profile fields/);
@@ -512,4 +527,59 @@ test('a request too large to reach the desktop beside the session token is refus
   const responses = await hostSession(directory, [over, largest]);
   assert.deepEqual(responses, [{ id: 'over', ok: false, error: 'Request exceeds the local bridge limit.' }, { id: 'largest', ok: true, data: { trusted: true } }]);
   assert.deepEqual(seen, ['largest']);
+});
+
+test('record requests require the exact captured job page, explicit owner field, and narrow projection', () => {
+  const request = { id: 'job', type: 'getRecordFields', url: `${PORTAL_URL}/applyForBenefits/dynamicQuestions`,
+    pageKey: 'iowa-job-history', recordType: 'jobs', fields: ['person', 'employer', 'monthlyHours'], personName: ' Avery  Example ' };
+  assert.deepEqual(validateRequest(request), request);
+  assert.doesNotThrow(() => validateRequest({ ...request, personName: '' }));
+  for (const change of [
+    { url: PORTAL_URL }, { url: `${request.url}/` }, { url: `${request.url}?step=1` }, { url: `${request.url}#job` },
+    { url: request.url.replace('dynamicQuestions', 'dynamicQuestionsStart') }, { url: 'https://pantry.example.org/intake' },
+    { pageKey: 'iowa-income' }, { pageKey: '__proto__' }, { recordType: 'taxStatements' }, { recordType: 'assets' },
+    { fields: [] }, { fields: ['employer'] }, { fields: ['person', 'person'] }, { fields: ['person', 'ssn'] },
+    { fields: ['person', 'hoursPerWeek'] }, { fields: ['person', 'annualIncome'] }, { fields: ['person', 'householdMembers'] },
+    { personName: null }, { personName: 2 }, { personName: 'x'.repeat(201) }, { personName: 'Other\u202Eperson' }, { personName: 'Avery\nExample' },
+    { recordId: 'chosen-by-browser' }, { records: [] }, { profile: {} }
+  ]) assert.throws(() => validateRequest({ ...request, ...change }), JSON.stringify(change));
+  for (const field of ['jobs', 'jobs.person', 'taxStatements']) {
+    assert.throws(() => validateRequest({ id: 'ordinary', type: 'getFields', url: request.url, fields: [field] }), /profile fields/);
+  }
+});
+
+test('retirement requests permit only the observed owner/type/amount/frequency projection', () => {
+  const request = { id: 'pension', type: 'getRecordFields', url: `${PORTAL_URL}/applyForBenefits/dynamicQuestions`,
+    pageKey: 'iowa-retirement-income', recordType: 'otherIncomeSources', fields: ['person', 'type', 'amount', 'frequency'] };
+  assert.deepEqual(validateRequest(request), request);
+  for (const change of [{ pageKey: 'iowa-job-history' }, { recordType: 'jobs' }, { recordType: 'taxStatements' },
+    { fields: ['person', 'source'] }, { fields: ['person', 'startDate'] }, { fields: ['person', 'annualIncome'] },
+    { fields: ['type', 'amount'] }, { url: `${request.url}?type=pension` }]) assert.throws(() => validateRequest({ ...request, ...change }));
+});
+
+test('housing requests permit only captured responsibility fields, not a landlord or household total', () => {
+  const request = { id: 'rent', type: 'getRecordFields', url: `${PORTAL_URL}/applyForBenefits/dynamicQuestions`,
+    pageKey: 'iowa-housing-expenses', recordType: 'housingExpenses', fields: ['person', 'type', 'amount', 'frequency'] };
+  assert.deepEqual(validateRequest(request), request);
+  for (const fields of [['person', 'paidTo'], ['person', 'startDate'], ['person', 'monthlyRent'], ['person', 'currentValue']]) {
+    assert.throws(() => validateRequest({ ...request, fields }));
+  }
+});
+
+test('utility records allow only the captured person and nine explicit utility answers', () => {
+  const request = { id: 'record-utilities', type: 'getRecordFields', url: `${PORTAL_URL}/applyForBenefits/dynamicQuestions`, pageKey: 'iowa-utility-expenses', recordType: 'utilityExpenses',
+    fields: ['person', 'gas', 'electricity', 'waterSewage', 'telephone', 'petFees', 'garageRent', 'landlordExtra', 'garbage', 'heatingCooling'] };
+  assert.doesNotThrow(() => validateRequest(request));
+  for (const fields of [['gas'], ['person', 'utilityGas'], ['person', 'amount'], ['person', 'monthlyUtilities']]) assert.throws(() => validateRequest({ ...request, fields }));
+});
+
+test('liquid asset projection is exact-route, explicit-owner, and excludes description, shared ownership and inferred cash', () => {
+  const request = { id: 'record-asset', type: 'getRecordFields', url: `${PORTAL_URL}/applyForBenefits/dynamicQuestions`, pageKey: 'iowa-liquid-assets', recordType: 'assets',
+    fields: ['person', 'type', 'currentValue', 'amountOwed', 'accountOrPolicy', 'institution', 'acquiredDate'] };
+  assert.doesNotThrow(() => validateRequest(request));
+  for (const fields of [['currentValue'], ['person', 'description'], ['person', 'sharedWith'], ['person', 'ownershipShare'], ['person', 'cashOnHand'], ['person', 'ssn'], ['person', 'person']]) {
+    assert.throws(() => validateRequest({ ...request, fields }));
+  }
+  for (const suffix of ['?page=2', '#review', '/']) assert.throws(() => validateRequest({ ...request, url: request.url + suffix }));
+  for (const extra of [{ recordId: 'arbitrary' }, { recordType: 'taxStatements' }, { pageKey: 'iowa-other-assets' }, { personName: 'Avery\nExample' }]) assert.throws(() => validateRequest({ ...request, ...extra }));
 });

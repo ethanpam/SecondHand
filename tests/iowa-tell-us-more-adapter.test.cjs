@@ -37,7 +37,7 @@ function reveal(doc, ids) {
 // The Social Security number box and the boxes for the name on the card.
 const SSN_BOXES = [fixture.SSN_BOX_ID, 'answerSets0.answers12.answerValue', 'answerSets0.answers15.answerValue', 'answerSets0.answers16.answerValue'];
 
-test('Tell Us More at dynamicQuestionsStart offers every question, and never Save and Continue', () => {
+test('Tell Us More at dynamicQuestionsStart offers every known question, and pauses incomplete Save and Continue', () => {
   const doc = page(), scan = adapter.scan(doc, fixture.URL), probe = adapter.probePage(doc, fixture.URL);
   assert.equal(scan.recognizedPage, true);
   assert.deepEqual(scan.fields, [
@@ -52,9 +52,9 @@ test('Tell Us More at dynamicQuestionsStart offers every question, and never Sav
   assert.deepEqual(probe.fields, scan.fields);
   assert.deepEqual(probe.checklist.map(item => [item.key, item.status]), [...FILLS.map(key => [key, 'missing']), ['startDetailsReview', 'manual']]);
   assert.deepEqual(probe.checklist.filter(item => item.fillable).map(item => item.key), FILLS);
-  assert.equal(probe.requiredRemaining, 10); assert.equal(probe.manualRemaining, 1);
-  assert.equal(probe.todo, 'Answer the remaining questions, then click Save and Continue in Iowa’s form yourself.');
-  assert.equal(probe.reason, 'SecondHand can fill the answers you saved in My information on this page. Answer the other questions yourself, then click Save and Continue in Iowa’s form.');
+  assert.equal(probe.requiredRemaining, 10); assert.equal(probe.manualRemaining, 0);
+  assert.equal(probe.todo, 'Check what was filled before you answer what is left: once nothing is left, SecondHand clicks Save and Continue.');
+  assert.equal(probe.reason, 'SecondHand continues only when the supported questions are complete and this page has no errors or unsupported questions.');
   assert.doesNotMatch(JSON.stringify(probe), /Avery|Example|answerSets|question0/);
   assert.equal(adapter.captureNavigation(doc, fixture.URL), null);
   let clicked = 0; byId(doc, 'dqButtonId309').addEventListener('click', () => clicked++);
@@ -64,8 +64,8 @@ test('Tell Us More at dynamicQuestionsStart offers every question, and never Sav
 });
 
 test('each question maps to its own explicit profile field without substituting ordinary names', () => {
-  assert.deepEqual(adapter.profileRequest(PAGE_KEY), ['sex', 'birthDate', 'hasSsn', 'ssn', 'ssnCardNameMatches', 'ssnCardFirstName', 'ssnCardMiddleName', 'ssnCardLastName', 'usCitizen', 'householdAllCitizens', 'maritalStatus',
-    'militaryOrVeteran', 'disabled', 'householdDisability', 'blind', 'healthLimitation', 'medicare', 'householdMedicare']);
+  assert.deepEqual(adapter.profileRequest(PAGE_KEY), ['sex', 'birthDate', 'hasSsn', 'ssn', 'ssnCardNameMatches', 'ssnCardFirstName', 'ssnCardMiddleName', 'ssnCardLastName', 'usCitizen', 'householdAllCitizens', 'bornInUs', 'maritalStatus',
+    'militaryOrVeteran', 'eatsMealsWithHousehold', 'disabled', 'householdDisability', 'blind', 'healthLimitation', 'medicare', 'householdMedicare', 'pregnant', 'pregnancyDueDate', 'pregnancyExpectedBabies']);
   assert.deepEqual(values({ ...saved, ssn: '999-99-9999', hasSsnAnswer: 'yes', householdVeteran: 'no', firstName: 'Avery' }),
     { gender: 'Female', birthDate: '1985-04-12', hasSsn: 'yes', ssn: '999-99-9999', ssnCardName: 'yes', usCitizen: 'yes', maritalStatus: 'Never Married',
       militaryOrVeteran: 'no', hasDisability: 'no', blind: 'no', healthLimits: 'no', hasMedicare: 'no' });
@@ -168,15 +168,15 @@ test('conditional Social Security fields require a fresh scan and never invent m
     const answers = values({ ...saved, ssnCardNameMatches: answer });
     assert.deepEqual(fillAll(doc, undefined, answers), { filled: FILLS, skipped: [] });
     // The next pass finds the question Iowa just showed, and nothing else.
-    assert.deepEqual(adapter.scan(doc, fixture.URL).fields, [{ key: 'ssn', label: 'Social Security number: review in Iowa’s form' }, { key: 'ssnCardName', label: 'Is your first and last name the same as on your Social Security card?' }]);
+    assert.deepEqual(adapter.scan(doc, fixture.URL).fields, [{ key: 'ssn', label: 'Social Security number: review in Iowa’s form' }, { key: 'ssnCardName', label: 'Is your first and last name the same as on your Social Security card?' }, { key: 'bornInUs', label: 'Were you born in the U.S.?' }]);
     const probe = adapter.probePage(doc, fixture.URL);
     assert.deepEqual(probe.checklist.slice(2, 5).map(item => [item.key, item.status]), [['hasSsn', 'complete'], ['ssn', 'missing'], ['ssnCardName', 'missing']]);
     assert.equal(probe.pageKey, PAGE_KEY);
-    assert.deepEqual(fillAll(doc, undefined, answers), { filled: ['ssnCardName'], skipped: ['ssn'] });
+    assert.deepEqual(fillAll(doc, undefined, answers), { filled: ['ssnCardName'], skipped: ['ssn', 'bornInUs'] });
     assert.ok(radio(doc, 'ssnCardName', option).checked, answer);
     for (const id of SSN_BOXES) assert.equal(byId(doc, id).value, '', id);
     assert.equal(byId(doc, 'answerSets0.answers21.answerValue1').checked || byId(doc, 'answerSets0.answers21.answerValue2').checked, false);
-    assert.deepEqual(fieldKeys(doc), answer === 'no' ? ['ssn', 'ssnCardFirstName', 'ssnCardMiddleName', 'ssnCardLastName'] : ['ssn']);
+    assert.deepEqual(fieldKeys(doc), answer === 'no' ? ['ssn', 'ssnCardFirstName', 'ssnCardMiddleName', 'ssnCardLastName', 'bornInUs'] : ['ssn', 'bornInUs']);
     assert.equal(adapter.probePage(doc, fixture.URL).checklist.find(item => item.key === 'ssnCardName').status, 'complete');
   }
   // Not saved: the question stays open for the applicant.

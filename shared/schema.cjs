@@ -1,6 +1,7 @@
 'use strict';
 const { randomUUID } = require('node:crypto');
 const household = require('./household.cjs');
+const { validateCustomFields } = require('./custom-fields.cjs');
 const SNAP_INFORMATION = require('./snap-information.js');
 const RECORD_FIELDS = Object.freeze(Object.fromEntries(SNAP_INFORMATION.records.map(record => [record.key, record.fields])));
 const MAX_RECORDS = SNAP_INFORMATION.maxRecords;
@@ -33,6 +34,7 @@ const FIELD_LABELS = Object.freeze({
   healthLimitation: 'A health condition limits your daily activities, or you live in a medical facility or nursing home', medicare: 'You have Medicare',
   // Each person in the household: name, birth date, relationship to the applicant, and whether they are a student.
   householdMembers: 'Household members',
+  customFields: 'Custom answers',
   hasSsn: 'Whether you have a Social Security number', studentNameGrade: 'Student name and grade',
   ...Object.fromEntries(SNAP_INFORMATION.scalarFields.map(field => [field.key, field.label])),
   ...Object.fromEntries(SNAP_INFORMATION.records.map(record => [record.key, record.label]))
@@ -46,7 +48,7 @@ const DERIVED_FIELDS = Object.freeze({
 });
 const PROFILE_FIELDS = Object.freeze(Object.keys(FIELD_LABELS).filter(key => !Object.hasOwn(DERIVED_FIELDS, key)));
 // The household list never leaves the app whole: a page gets only the answers worked out from it.
-const LIST_FIELDS = Object.freeze(['householdMembers', ...Object.keys(RECORD_FIELDS)]);
+const LIST_FIELDS = Object.freeze(['householdMembers', 'customFields', ...Object.keys(RECORD_FIELDS)]);
 // Every named field a page may ask the desktop for. Age-band counts ("householdCount:0-17") are asked for by key too.
 const REQUEST_FIELDS = Object.freeze([...PROFILE_FIELDS.filter(key => !LIST_FIELDS.includes(key)), ...Object.keys(DERIVED_FIELDS)]);
 // The fixed counts the household list works out when it has people; the manual counts answer otherwise.
@@ -54,7 +56,7 @@ const HOUSEHOLD_COUNT_FIELDS = Object.freeze({ householdSize: 'size', householdA
 const RELATIONSHIPS = Object.freeze(['self', 'spouse-partner', 'child', 'parent', 'sibling', 'grandchild', 'other-relative', 'other']);
 const MAX_MEMBERS = 20;
 const MEMBER_FIELDS = Object.freeze(['id', ...SNAP_INFORMATION.memberFields.map(field => field.key)]);
-const MAX_PROFILE_REVIEW_ROWS = PROFILE_FIELDS.length + MAX_MEMBERS * (MEMBER_FIELDS.length - 1) +
+const MAX_PROFILE_REVIEW_ROWS = PROFILE_FIELDS.filter(key => key !== 'customFields').length + MAX_MEMBERS * (MEMBER_FIELDS.length - 1) +
   MAX_RECORDS * Object.values(RECORD_FIELDS).reduce((count, fields) => count + fields.length, 0);
 // Answers the side panel may offer to save from a page: the general engine's saved profile fields
 // (extension/generic-adapter.js PROFILE_KEYS), except the Social Security number, which is never read from a page.
@@ -171,6 +173,7 @@ function checkProfile(input, { today, saving }) {
   }
   for (const definition of SNAP_INFORMATION.scalarFields) result[definition.key] = validateInformationValue(definition, input[definition.key]);
   result.householdMembers = validateMembers(input.householdMembers, result, { today, saving });
+  result.customFields = validateCustomFields(input.customFields);
   for (const key of Object.keys(RECORD_FIELDS)) result[key] = validateRecords(key, input[key]);
   return result;
 }
@@ -193,7 +196,9 @@ function validateInformationValue(definition, input) {
   if (type === 'state' && !STATE_CODES.has(value.toUpperCase())) throw new Error(`${label} must be a recognized two-letter state or postal-region abbreviation.`);
   if (key === 'ssn' && !/^\d{3}-?\d{2}-?\d{4}$/.test(value)) throw new Error('Enter a nine-digit Social Security number or leave it blank.');
   if (key === 'taxYear' && !/^(19|20)\d{2}$/.test(value)) throw new Error('Tax year must contain four digits from 1900 to 2099.');
+  if (key === 'monthlyHours' && (!/^\d{1,3}(\.\d{1,2})?$/.test(value) || Number(value) > 744)) throw new Error('Hours per month must be between 0 and 744.');
   if (key === 'hoursPerWeek' && (!/^\d{1,3}(\.\d{1,2})?$/.test(value) || Number(value) > 168)) throw new Error('Hours per week must be between 0 and 168.');
+  if (key === 'pregnancyExpectedBabies' && !/^(?:[1-9]|1\d|20)$/.test(value)) throw new Error('Number of expected babies must be a whole number from 1 to 20, or left blank.');
   return type === 'state' ? value.toUpperCase() : value;
 }
 

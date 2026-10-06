@@ -202,7 +202,8 @@ async function main() {
     await expect(widget.locator('#widget-text')).toHaveAttribute('title', new RegExp(en('widget.aiUnavailable').replace(/[.’]/g, '\\$&')));
     await expect(page.locator('#reach')).toHaveValue('');
     await expect(widget.locator('#need-you')).toHaveText(en('widget.needYou', { count: 1 }));
-    assert.deepEqual((await calls()).map(call => call.type), ['warmLaya', 'status', 'getFields', 'status'], 'one readiness check, then the same requests as before Laya');
+    // The second status is the check for saved custom answers to questions no rule knows (#209).
+    assert.deepEqual((await calls()).map(call => call.type), ['warmLaya', 'status', 'status', 'getFields', 'status'], 'one readiness check, then the same requests as before Laya');
     widget = await open(HOUSEHOLD, 'off');
     await widget.locator('#autofill').click();
     await expect(widget.locator('#widget-text')).toHaveText(en('result.siteFilled', { count: 1 }), { timeout: 20000 });

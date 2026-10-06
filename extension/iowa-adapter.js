@@ -2,6 +2,13 @@
 (function (root) {
   'use strict';
   const addressPolicy = typeof module === 'object' && module.exports ? require('./address-policy.js') : root.SecondHandAddressPolicy;
+  const later = typeof module === 'object' && module.exports ? require('./iowa-later-adapter.js') : root.SecondHandIowaLater;
+  const records = typeof module === 'object' && module.exports ? require('./iowa-record-adapter.js') : root.SecondHandIowaRecords;
+  const delegatedBindings = new WeakMap(), delegatedNavigation = new WeakMap();
+  const providers = [records, later].filter(Boolean);
+  const delegated = (doc, url) => providers.find(provider => provider.probePage(doc, url)) || null;
+  const providerForKey = key => providers.find(provider => provider.NAVIGATION_PAGE_KEYS.includes(key)) || null;
+  const NAVIGATION_PAGE_KEYS = Object.freeze(['iowa-personal-information', 'iowa-select-address', 'iowa-tell-us-more', ...providers.flatMap(provider => provider.NAVIGATION_PAGE_KEYS)]);
   const PORTAL = 'https://hhsservices.iowa.gov/apspssp/ssp.portal';
   const normal = value => String(value || '').replace(/\s+/g, ' ').trim().replace(/\s*\*\s*$/, '').replace(/:$/, '').trim().toLowerCase();
   const questions = Object.freeze({
@@ -89,11 +96,13 @@
     ssnCardLastName: { label: 'Last name on Social Security card', question: 'question04072', index: 16, wording: 'Last Name', text: true, cardName: true, profile: 'ssnCardLastName' },
     usCitizen: { label: 'Are you a U.S. citizen or national?', question: 'question06001', index: 18, wording: 'Are you a U.S. Citizen or National?',
       reveals: '::6181|Yes:6181:|No::6181', profile: 'usCitizen', household: { field: 'householdAllCitizens', settles: 'yes' } },
+    bornInUs: { label: 'Were you born in the U.S.?', question: 'question06181', index: 21, wording: 'Were you born in the U.S.?', reveals: '', profile: 'bornInUs' },
     maritalStatus: { label: 'Marital status', question: 'question04', index: 22, wording: 'Marital Status',
       choices: ['Select One', 'Divorced', 'Legally Separated', 'Married (includes common-law)', 'Never Married', 'Separated', 'Widowed'], profile: 'maritalStatus' },
     // A household answer about veterans doesn't settle "spouse of a veteran".
     militaryOrVeteran: { label: 'Are you in the military, a veteran, or a spouse of a veteran?', question: 'question01007331', index: 24,
       wording: 'Are you in the military, a veteran, or a spouse of a veteran?', reveals: '', profile: 'militaryOrVeteran' },
+    eatsMealsWithHousehold: { label: 'Do you eat with the household?', question: 'question02422', index: 25, wording: 'Do you eat with the household?', reveals: '', profile: 'eatsMealsWithHousehold' },
     hasDisability: { label: 'Are you disabled?', question: 'question07', index: 26, wording: 'Are you Disabled?', reveals: '',
       profile: 'disabled', household: { field: 'householdDisability', settles: 'no' } },
     blind: { label: 'Are you blind?', question: 'question0565', index: 27, wording: 'Are you Blind?', reveals: '', profile: 'blind' },
@@ -103,7 +112,22 @@
     hasMedicare: { label: 'Do you have Medicare?', question: 'question01000414', index: 29, wording: 'Do you have Medicare?', reveals: '',
       profile: 'medicare', household: { field: 'householdMedicare', settles: 'no' } }
   });
-  const startKeys = Object.freeze(Object.keys(startQuestions));
+  // Same full Start Application form, freshly observed at dynamicQuestions. Its alternate
+  // question templates have different indexes and reveal handlers; never mix the two sets.
+  const legacyGenderReveals = '::8003,8004,8005,1030,8006,1031,8007,8089,8090,8091,8092,8093,8094,8095,8096,8097,8098,8099,8100,8101,8102,8103,8104,8105,8106,443,7999|Male::8003,8004,8005,1030,8006,1031,8007,8089,8090,8091,8092,8093,8094,8095,8096,8097,8098,8099,8100,8101,8102,8103,8104,8105,8106,443,7999|Female:8003,8004,8005,1030,8006,1031,8007,8089,8090,8091,8092,8093,8094,8095,8096,8097,8098,8099,8100,8101,8102,8103,8104,8105,8106,443,7999:';
+  const legacyQuestions = Object.freeze({
+    ...Object.fromEntries(Object.entries(startQuestions).filter(([key]) => !['healthLimits', 'hasMedicare'].includes(key))),
+    gender: { ...startQuestions.gender, question: 'question01', index: 2, reveals: legacyGenderReveals },
+    birthDate: { ...startQuestions.birthDate, question: 'question02419', index: 3 },
+    usCitizen: { ...startQuestions.usCitizen, question: 'question06179', index: 19, reveals: '::6180|Yes:6180:|No::6180' },
+    bornInUs: { ...startQuestions.bornInUs, question: 'question06180', index: 20 },
+    pregnant: { label: 'Are you pregnant?', question: 'question0443', index: 32, wording: 'Are you Pregnant?', profile: 'pregnant',
+      reveals: '::8003,8004,8005,1030,8006,1031,8007,7999|Yes:8003,8004,8005,1030,8006,1031,8007,7999:|No::8003,8004,8005,1030,8006,1031,8007,7999' },
+    pregnancyDueDate: { label: 'Pregnancy due date', question: 'question01030', index: 33, wording: 'Pregnancy Due Date:', date: true, profile: 'pregnancyDueDate' },
+    pregnancyExpectedBabies: { label: 'Number of expected babies', question: 'question01031', index: 34, wording: 'Number of expected Babies:', text: true, profile: 'pregnancyExpectedBabies' }
+  });
+  const allQuestionFields = Object.freeze({ ...startQuestions, pregnant: legacyQuestions.pregnant, pregnancyDueDate: legacyQuestions.pregnancyDueDate, pregnancyExpectedBabies: legacyQuestions.pregnancyExpectedBabies });
+  const startKeys = Object.freeze(Object.keys(allQuestionFields));
   // The answers a question accepts: a marital status as Iowa lists it, Male or Female, or yes or no.
   const startAnswers = spec => spec.choices ? spec.choices.slice(1) : spec.options || ['yes', 'no'];
   // The applicant's own saved answer, else the household answer where it settles the question, else null.
@@ -257,10 +281,13 @@
   }
 
   function scan(doc, rawUrl) {
+    const provider = delegated(doc, rawUrl);
+    if (provider) { const result = provider.scan(doc, rawUrl); result.bindings.forEach(binding => delegatedBindings.set(binding, provider)); return result; }
     const result = { supported: isSupportedUrl(rawUrl), recognizedPage: false, fields: [], bindings: [], ambiguous: [], skipped: 0 };
     if (!result.supported) return result;
     if (addressContext(doc, rawUrl)) { result.recognizedPage = true; return result; }
-    const self = selfDetailsContext(doc, rawUrl);
+    const start = startDetailsContext(doc, rawUrl);
+    const self = start ? null : selfDetailsContext(doc, rawUrl);
     if (self) {
       result.recognizedPage = true;
       if (editable(self.birthDate, doc) && !self.birthDate.value.trim()) {
@@ -269,14 +296,13 @@
       } else result.skipped++;
       return result;
     }
-    const start = startDetailsContext(doc, rawUrl);
     if (start) {
       result.recognizedPage = true;
       const startDetails = startDetailsState(start);
       for (const key of startKeys) {
         const elements = start.controls[key];
         if (elements && startOpen(elements, doc)) {
-          result.fields.push({ key, label: startQuestions[key].label });
+          result.fields.push({ key, label: start.specs[key].label });
           result.bindings.push({ key, element: elements[0], elements, startDetails,
             ...(key === 'ssn' ? { ssnMirror: elements[0].parentElement.querySelector('[name="ssndiv"] input') } : {}) });
         } else result.skipped++;
@@ -316,10 +342,11 @@
       value = `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
     }
     if (key.startsWith('ssnCard') && value.length > 100) return null;
-    if (key === 'birthDate') {
+    if (key === 'pregnancyExpectedBabies' && !/^(?:[1-9]|1[0-9]|20)$/.test(value)) return null;
+    if (key === 'birthDate' || key === 'pregnancyDueDate') {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
       const date = new Date(`${value}T00:00:00.000Z`);
-      if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value || !usableBirthDate(value)) return null;
+      if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value || (key === 'birthDate' && !usableBirthDate(value))) return null;
       value = `${value.slice(5, 7)}/${value.slice(8, 10)}/${value.slice(0, 4)}`;
     }
     if (key === 'homePhone' || key === 'mobilePhone') {
@@ -346,6 +373,8 @@
   }
 
   function fill(doc, rawUrl, originalBindings, values) {
+    const provider = originalBindings.length && delegatedBindings.get(originalBindings[0]);
+    if (provider) return originalBindings.every(binding => delegatedBindings.get(binding) === provider) ? provider.fill(doc, rawUrl, originalBindings, values) : { filled: [], skipped: originalBindings.map(binding => binding.key), unsafe: true };
     if (originalBindings.some(binding => binding.startDetails)) return fillStartDetails(doc, rawUrl, originalBindings, values);
     if (originalBindings.some(binding => binding.key === 'birthDate')) return fillSelfDetails(doc, rawUrl, originalBindings, values);
     const filled = [], skipped = [];
@@ -416,7 +445,7 @@
   }
 
   // Iowa's recorded date-of-birth box: plain month/day/year text with no scripts of its own.
-  function birthDateBox(doc, form, question, index) {
+  function birthDateBox(doc, form, question, index, wording = 'Date of Birth (mm/dd/yyyy)') {
     const inputs = doc.querySelectorAll(`[id="answerSets0.answers${index}.answerValue"]`);
     const name = `answerSets[0].answers[${index}].answerValue`;
     if (inputs.length !== 1) return null;
@@ -427,7 +456,7 @@
         birthDate.title !== 'mm/dd/yyyy' || !birthDate.classList.contains('date-format-class') || !birthDate.classList.contains('hasDatepicker') ||
         birthDate.maxLength !== -1 || birthDate.required || birthDate.hasAttribute('pattern') ||
         Array.from(birthDate.attributes).some(attribute => attribute.name.startsWith('on')) ||
-        namesFor(birthDate, doc).join('|') !== 'date of birth (mm/dd/yyyy)') return null;
+        namesFor(birthDate, doc).join('|') !== normal(wording)) return null;
     return birthDate;
   }
 
@@ -489,7 +518,7 @@
   // A recorded question's controls, or null when any id, name, label, option or handler differs.
   function startControls(doc, form, question, spec, lookup) {
     if (spec.date) {
-      const birthDate = birthDateBox(doc, form, question, spec.index);
+      const birthDate = birthDateBox(doc, form, question, spec.index, spec.wording);
       return birthDate ? [birthDate] : null;
     }
     const named = lookup.named(`answerSets[0].answers[${spec.index}].answerValue`);
@@ -534,8 +563,10 @@
   // dynamicQuestionsStart puts the applicant's name above the question panel rather than inside it.
   // Each recorded question is checked on its own: one that differs is left for the applicant.
   function startDetailsContext(doc, rawUrl) {
-    const page = tellUsMorePage(doc, rawUrl, 'dynamicQuestionsStart');
+    const legacy = rawUrl === `${PORTAL}/applyForBenefits/dynamicQuestions`;
+    const page = tellUsMorePage(doc, rawUrl, legacy ? 'dynamicQuestions' : 'dynamicQuestionsStart');
     if (!page) return null;
+    const specs = legacy ? legacyQuestions : startQuestions;
     const { form } = page;
     const nameGroups = form.querySelectorAll('.peTaxInfoName'), panels = form.querySelectorAll('div.panel-group');
     if (nameGroups.length !== 1 || panels.length !== 1 || nameGroups[0].parentElement !== form || panels[0].parentElement !== form ||
@@ -548,7 +579,7 @@
     // As on the older page, one birth date on screen. Iowa's scripts may show follow-up questions,
     // but a second copy of a question (another template's) leaves that question to the applicant.
     const birthDates = shownBirthDates(doc, form);
-    if (birthDates.length !== 1) return null;
+    if (birthDates.length !== 1 || birthDates[0].id !== `answerSets0.answers${specs.birthDate.index}.answerValue`) return null;
     const shownWordings = Array.from(group.querySelectorAll('.questionAnswer')).filter(element => rendered(element, doc))
       .map(element => normal(element.querySelector(':scope > fieldset > legend, :scope > div.question > label')?.textContent));
     // One pass over ids and names: a recorded id must name exactly one element.
@@ -560,7 +591,7 @@
     }
     const lookup = { only: id => ids.get(id) || null, named: name => names.get(name) || [] };
     const questions = {}, controls = {};
-    for (const [key, spec] of Object.entries(startQuestions)) {
+    for (const [key, spec] of Object.entries(specs)) {
       const question = lookup.only(spec.question);
       if (!question || question.parentElement !== group || question.tagName !== 'DIV' || question.classList.length !== 1 ||
           !question.classList.contains('questionAnswer') || !rendered(question, doc)) continue;
@@ -573,20 +604,27 @@
     // still identify the applicant's number, and the distinct name on that person's card.
     const yesSsn = controls.hasSsn?.[0].checked && !controls.hasSsn?.[1].checked;
     const differentCardName = controls.ssnCardName?.[1].checked && !controls.ssnCardName?.[0].checked;
-    for (const [key, spec] of Object.entries(startQuestions)) if ((spec.sensitive && !yesSsn) || (spec.cardName && (!yesSsn || !differentCardName))) delete controls[key];
+    for (const [key, spec] of Object.entries(specs)) if ((spec.sensitive && !yesSsn) || (spec.cardName && (!yesSsn || !differentCardName))) delete controls[key];
+    if (!controls.usCitizen?.[0].checked || controls.usCitizen?.[1].checked) delete controls.bornInUs;
+    if (!controls.gender?.[1].checked || controls.gender?.[0].checked) delete controls.pregnant;
+    if (!controls.pregnant?.[0].checked || controls.pregnant?.[1].checked) { delete controls.pregnancyDueDate; delete controls.pregnancyExpectedBabies; }
     if (controls.birthDate && controls.birthDate[0] !== birthDates[0]) return null;
-    return { ...page, nameGroup: nameGroups[0], nameHeading: nameHeadings[0], panel: panels[0], group, questions, controls };
+    return { ...page, specs, legacy, nameGroup: nameGroups[0], nameHeading: nameHeadings[0], panel: panels[0], group, questions, controls };
   }
 
   function startDetailsState(context) {
-    return { form: context.form, nameGroup: context.nameGroup, nameHeading: context.nameHeading, nameText: context.nameHeading.textContent,
+    return { form: context.form, specs: context.specs, legacy: context.legacy, nameGroup: context.nameGroup, nameHeading: context.nameHeading, nameText: context.nameHeading.textContent,
       panel: context.panel, group: context.group, intro: context.intro, introText: context.intro.textContent, active: context.active, people: context.people };
   }
 
   const hasAnswer = elements => elements.some(element => element.type === 'radio' ? element.checked : Boolean(String(element.value || '').trim()));
   function startDependentAnswer(element, doc) {
     const questions = element.name === 'answerSets[0].answers[6].answerValue' ? ['question03', 'question04068', 'question04070', 'question04071', 'question04072']
-      : element.name === 'answerSets[0].answers[11].answerValue' ? ['question04070', 'question04071', 'question04072'] : [];
+      : element.name === 'answerSets[0].answers[11].answerValue' ? ['question04070', 'question04071', 'question04072']
+      : element.name === 'answerSets[0].answers[18].answerValue' ? ['question06181']
+      : element.name === 'answerSets[0].answers[19].answerValue' ? ['question06180']
+      : element.name === 'answerSets[0].answers[32].answerValue' ? ['question01030', 'question01031']
+      : element.name === 'answerSets[0].answers[2].answerValue' ? ['question0443', ...legacyGenderReveals.split('|')[0].slice(2).split(',').map(id => `question0${id}`)] : [];
     return questions.some(id => Array.from(doc.getElementById(id)?.querySelectorAll('input,select,textarea') || []).some(control =>
       control.type !== 'hidden' && (['radio', 'checkbox'].includes(control.type) ? control.checked : Boolean(String(control.value || '').trim()))));
   }
@@ -600,7 +638,7 @@
     const filled = [], skipped = [];
     for (const binding of [...bindings].sort((a, b) => startKeys.indexOf(a.key) - startKeys.indexOf(b.key))) {
       const { key } = binding;
-      const spec = startKeys.includes(key) ? startQuestions[key] : null;
+      const spec = startKeys.includes(key) ? binding.startDetails?.specs?.[key] : null;
       const current = () => {
         const context = startDetailsContext(doc, rawUrl);
         const elements = context?.controls[key];
@@ -802,10 +840,11 @@
   }
 
   function focusField(doc, rawUrl, key) {
+    const provider = delegated(doc, rawUrl); if (provider) return provider.focusField(doc, rawUrl, key);
     if (!isSupportedUrl(rawUrl) || doc.location.href !== rawUrl) return false;
     const start = startDetailsContext(doc, rawUrl);
     if (start) {
-      const element = Object.hasOwn(startQuestions, key) ? start.controls[key]?.find(item => editable(item, doc)) : null;
+      const element = Object.hasOwn(start.specs, key) ? start.controls[key]?.find(item => editable(item, doc)) : null;
       if (!element || !scrollToField(element, doc) || !startDetailsContext(doc, rawUrl)?.controls[key]?.includes(element)) return false;
       element.focus({ preventScroll: true });
       return doc.activeElement === element;
@@ -832,9 +871,82 @@
     return doc.activeElement === element;
   }
 
+  const TELL_NEXT = "dynamicQuestionsButton('WARNING!', '', 'Ok', 'Cancel', 'answerSet', 'simple?buttonId=309', 'true', 'dqButtonId309');";
+  function tellNavigation(doc, rawUrl) {
+    const context = startDetailsContext(doc, rawUrl);
+    if (!context) return null;
+    const { form } = context;
+    const buttons = Array.from(doc.querySelectorAll('#dqButtonId309'));
+    if (buttons.length !== 1) return null;
+    const button = buttons[0];
+    if (button.tagName !== 'BUTTON' || button.form !== form || button.type !== 'button' || button.className !== 'btn btn-primary saveButton' ||
+        button.title !== 'Save and Continue' || normal(button.textContent) !== 'save and continue' || button.getAttribute('onclick') !== TELL_NEXT ||
+        Array.from(button.attributes).some(attribute => attribute.name.startsWith('on') && attribute.name !== 'onclick') ||
+        !rendered(button, doc) || button.matches(':disabled') || button.getAttribute('aria-disabled') === 'true' ||
+        ['formaction', 'formtarget', 'formnovalidate', 'form'].some(name => button.hasAttribute(name))) return null;
+    return { form, button, tell: startDetailsState(context) };
+  }
+  function startComplete(spec, elements) {
+    if (!elements || elements.some(element => element.matches(':disabled') || element.getAttribute('aria-invalid') === 'true' ||
+        (element.willValidate && !element.validity.valid))) return false;
+    if (!spec.date && !spec.text && !spec.choices) return elements.filter(element => element.checked).length === 1;
+    const input = elements[0], value = input.value.trim();
+    if (!value) return spec.optional === true;
+    if (spec.choices) return startAnswers(spec).includes(value);
+    if (spec.date) {
+      const parts = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value);
+      return Boolean(parts && formatValue(spec.profile, `${parts[3]}-${parts[1]}-${parts[2]}`, input) === value);
+    }
+    if (spec.sensitive) {
+      const formatted = formatValue('ssn', value, input), mirror = input.parentElement.querySelector('[name="ssndiv"] input');
+      return Boolean(formatted && mirror && !mirror.matches(':disabled') && !mirror.readOnly &&
+        formatValue('ssn', mirror.value, input) === formatted);
+    }
+    return formatValue(spec.profile, value, input) !== null;
+  }
+  function startIssues(context, doc, fields) {
+    const checklist = [], covered = new Set();
+    let requiredRemaining = 0, manualRemaining = 0;
+    for (const [key, spec] of Object.entries(context.specs)) {
+      if (!context.questions[key]) continue;
+      const elements = context.controls[key];
+      elements?.forEach(element => covered.add(element));
+      const complete = startComplete(spec, elements);
+      const status = complete ? (spec.optional && !hasAnswer(elements) ? 'optional' : 'complete') : elements && !hasAnswer(elements) && startOpen(elements, doc) ? 'missing' : 'manual';
+      if (status === 'missing') requiredRemaining++;
+      if (status === 'manual') manualRemaining++;
+      // The captured optional card middle name may be blank. Other questions need an answer.
+      checklist.push({ key, label: spec.label, status, required: !spec.optional, fillable: fields.some(field => field.key === key) });
+    }
+    const knownQuestions = new Set(Object.values(context.questions));
+    let unknown = Array.from(context.group.querySelectorAll('.questionAnswer')).some(question => rendered(question, doc) && !knownQuestions.has(question));
+    unknown ||= currentControls(context.form, doc).some(element => !covered.has(element));
+    unknown ||= Array.from(context.form.querySelectorAll('[role="textbox"], [role="combobox"], [role="radio"], [role="checkbox"], [contenteditable]:not([contenteditable="false"])')).some(element => rendered(element, doc) && !covered.has(element));
+    // A parent may reveal additional questions. Their absence is not an answered branch.
+    const expected = ['gender', 'birthDate', 'hasSsn', 'usCitizen', 'maritalStatus', 'militaryOrVeteran', 'hasDisability', 'blind', ...(context.legacy ? ['eatsMealsWithHousehold'] : ['healthLimits', 'hasMedicare'])];
+    if (context.controls.hasSsn?.[0].checked) expected.push('ssn', 'ssnCardName');
+    if (context.controls.ssnCardName?.[1].checked) expected.push('ssnCardFirstName', 'ssnCardMiddleName', 'ssnCardLastName');
+    if (context.controls.usCitizen?.[0].checked) expected.push('bornInUs');
+    if (context.legacy && context.controls.gender?.[1].checked) expected.push('pregnant');
+    if (context.legacy && context.controls.pregnant?.[0].checked) expected.push('pregnancyDueDate', 'pregnancyExpectedBabies');
+    unknown ||= expected.some(key => !context.controls[key]);
+    // The other Start-route pregnancy templates have not been observed active.
+    unknown ||= !context.legacy && Boolean(context.controls.gender?.[1].checked);
+    const error = Array.from(doc.querySelectorAll('[role="alert"], .error, .errors, .errorMessage, .validation-summary-errors, [id*="error" i], [class*="error" i], [aria-busy="true"]'))
+      .some(element => rendered(element, doc) && (element.getAttribute('aria-busy') === 'true' || element.textContent.trim()));
+    const protectedQuestion = Array.from(context.form.querySelectorAll('label,legend')).some(element => rendered(element, doc) &&
+      /\b(consent|certify|certification|attest|signature|i agree|penalty of perjury)\b/.test(normal(element.textContent)));
+    if (unknown || error || protectedQuestion) manualRemaining++;
+    checklist.push({ key: 'startDetailsReview', label: 'Answer all visible questions before SecondHand continues',
+      status: requiredRemaining || manualRemaining ? 'manual' : 'complete', required: false, fillable: false });
+    return { checklist, requiredRemaining, manualRemaining };
+  }
+
   function navigationButton(doc, rawUrl) {
     const address = addressContext(doc, rawUrl);
     if (address) return address;
+    const tell = tellNavigation(doc, rawUrl);
+    if (tell) return tell;
     if (!isSupportedUrl(rawUrl) || !identifyPage(doc)) return null;
     const forms = doc.querySelectorAll('form#personalInformation[action="enterPersonalInfo"]');
     if (forms.length !== 1) return null;
@@ -857,7 +969,7 @@
     if (shown('#captchaDiv, [name="captchaAnswer"], #simpleCaptcha')) return { pageKey: 'iowa-captcha', heading: 'Security check', todo: 'Type the characters shown in Iowa’s security check, then click Continue.' };
     if (shown('#termChkbox')) return { pageKey: 'iowa-consent', heading: 'Let’s get started', todo: 'Read and accept Iowa’s consent, then click Continue.' };
     if (shown('input[type="password"], #securityCode')) return { pageKey: 'iowa-verification', heading: 'Sign in or verify', todo: 'Sign in or verify in Iowa’s form, then continue.' };
-    if (shown('[aria-modal="true"], [role="dialog"]')) return { pageKey: 'iowa-popup', heading: 'Iowa pop-up', todo: 'Answer Iowa’s pop-up, then continue.' };
+    if (shown('[aria-modal="true"], [role="dialog"], [role="alertdialog"], .modal, .popupPage, dialog[open]')) return { pageKey: 'iowa-popup', heading: 'Iowa pop-up', todo: 'Answer Iowa’s pop-up, then continue.' };
     if (headings.some(heading => /\b(signature|certification|attestation|review and submit|submit application|confirmation|terms and conditions)\b/.test(heading))) {
       return { pageKey: 'iowa-protected-step', heading: 'Finish this step yourself', todo: 'Sign or submit in Iowa’s form yourself.' };
     }
@@ -885,6 +997,7 @@
     const headings = Array.from(doc.querySelectorAll('h1,h2,h3')).filter(element => rendered(element, doc)).map(element => normal(element.textContent));
     const blocked = protectedStep(doc, headings);
     if (blocked) return { ...result, ...blocked, kind: 'blocked', reason: blocked.todo };
+    const provider = delegated(doc, rawUrl); if (provider) return provider.probePage(doc, rawUrl);
     if (headings.includes('select address') || rawUrl === `${PORTAL}/applyForBenefits/addressValidation`) {
       const address = addressContext(doc, rawUrl);
       return { ...result, kind: address ? 'fillable' : 'manual', pageKey: 'iowa-select-address', heading: 'Select Address',
@@ -893,7 +1006,8 @@
         checklist: [{ key: 'addressReview', label: 'First suggested home address', status: address ? (address.first.checked ? 'complete' : 'missing') : 'manual', required: true, fillable: false }],
         reason: address ? 'Next selects Iowa’s first suggested home address and saves this step. Review the selected address before final submission.' : 'Check this address step in Iowa’s form yourself. This page doesn’t look the way SecondHand expects, so SecondHand leaves the address to you.' };
     }
-    const self = selfDetailsContext(doc, rawUrl);
+    const start = startDetailsContext(doc, rawUrl);
+    const self = start ? null : selfDetailsContext(doc, rawUrl);
     if (self) {
       const fields = scan(doc, rawUrl).fields;
       const checklist = [{ key: 'birthDate', label: 'Date of birth', status: self.birthDate.value.trim() ? 'complete' : editable(self.birthDate, doc) ? 'optional' : 'manual', required: false, fillable: fields.length === 1 }];
@@ -907,24 +1021,14 @@
         todo: 'Review the other questions, then click Save and Continue in Iowa’s form yourself.',
         reason: 'SecondHand can fill your saved date of birth on this page. Answer the other questions yourself, then click Save and Continue in Iowa’s form.' };
     }
-    const start = startDetailsContext(doc, rawUrl);
     if (start) {
       const fields = scan(doc, rawUrl).fields;
-      const checklist = [];
-      for (const [key, spec] of Object.entries(startQuestions)) {
-        if (!start.questions[key]) continue;
-        const elements = start.controls[key];
-        // The captured SSN control submits through a separate masked mirror. We don't write it or
-        // claim submission readiness from the visible box; the applicant reviews it in Iowa.
-        const status = spec.sensitive && elements && hasAnswer(elements) ? 'manual' : elements && hasAnswer(elements) ? 'complete'
-          : elements && startOpen(elements, doc) ? (spec.optional ? 'optional' : 'missing') : 'manual';
-        checklist.push({ key, label: spec.label, status, required: !spec.optional, fillable: fields.some(field => field.key === key) });
-      }
-      checklist.push({ key: 'startDetailsReview', label: 'Answer the remaining questions, then click Save and Continue in Iowa’s form', status: 'manual', required: false, fillable: false });
-      return { ...result, kind: 'fillable', pageKey: 'iowa-tell-us-more', heading: 'Tell Us More', fields, checklist, canAdvance: false,
-        requiredRemaining: checklist.filter(item => item.status === 'missing').length, manualRemaining: checklist.filter(item => item.status === 'manual').length,
-        todo: 'Answer the remaining questions, then click Save and Continue in Iowa’s form yourself.',
-        reason: 'SecondHand can fill the answers you saved in My information on this page. Answer the other questions yourself, then click Save and Continue in Iowa’s form.' };
+      const issues = startIssues(start, doc, fields);
+      const canAdvance = issues.requiredRemaining === 0 && issues.manualRemaining === 0 && Boolean(tellNavigation(doc, rawUrl));
+      return { ...result, ...issues, kind: 'fillable', pageKey: 'iowa-tell-us-more', heading: 'Tell Us More', fields, canAdvance,
+        todo: canAdvance ? 'SecondHand can save this page and continue. Review every answer before final submission.'
+          : 'Check what was filled before you answer what is left: once nothing is left, SecondHand clicks Save and Continue.',
+        reason: 'SecondHand continues only when the supported questions are complete and this page has no errors or unsupported questions.' };
     }
     // dynamicQuestions is reused later. Only these independently observed household-screening
     // headings open the rules-only parser; this is never a navigation or personal-template match.
@@ -937,7 +1041,7 @@
       !Array.from(doc.querySelectorAll('select,input')).some(element => rendered(element, doc) && /personSelection|householdMember|employer|helper|representative|signature/i.test(`${element.name} ${element.id}`)) &&
       !headings.some(heading => /\b(employer|helper|assisting|representative|another person|other person)\b/.test(heading)) &&
       !Array.from(doc.querySelectorAll('label,legend')).some(element => rendered(element, doc) && /\b(consent|certify|certification|attest|signature|i agree)\b/.test(normal(element.textContent)));
-    if (screening) return { ...result, pageKey: 'iowa-household-screening-rules', heading: mainHeadings[0].textContent.trim() };
+    if (screening) return { ...result, pageKey: 'iowa-household-screening-rules', stepKey: `iowa-screening-${screeningHeadings.indexOf(normal(mainHeadings[0].textContent))}`, heading: mainHeadings[0].textContent.trim() };
     if (headings.includes('tell us more') || new URL(rawUrl).pathname.replace(/\/$/, '') === '/apspssp/ssp.portal/applyForBenefits/dynamicQuestions') return { ...result, pageKey: 'iowa-self-details-unverified', heading: 'Applicant questions', todo: 'Answer any questions on this page yourself, then go to the next page in Iowa’s form.', reason: 'SecondHand doesn’t fill this page. Answer any questions yourself, then go to the next page in Iowa’s form.' };
     const pageId = identifyPage(doc);
     if (pageId === 'household') {
@@ -1022,25 +1126,29 @@
 
   // Saved profile fields a page needs, and how they become that page's answers.
   function profileRequest(pageKey) {
+    const provider = providerForKey(pageKey); if (provider) return provider.profileRequest?.(pageKey) || [];
     if (pageKey === 'iowa-self-details') return ['birthDate'];
-    if (pageKey === 'iowa-tell-us-more') return Object.values(startQuestions).flatMap(spec => spec.household ? [spec.profile, spec.household.field] : [spec.profile]);
+    if (pageKey === 'iowa-tell-us-more') return Object.values(allQuestionFields).flatMap(spec => spec.household ? [spec.profile, spec.household.field] : [spec.profile]);
     if (pageKey === 'iowa-personal-information') return Object.keys(definitions);
     if (pageKey === 'iowa-program-intent') return [...programKeys];
     return [];
   }
   function pageValues(pageKey, values) {
+    const provider = providerForKey(pageKey); if (provider) return provider.pageValues?.(pageKey, values) || {};
     if (pageKey === 'iowa-self-details') return typeof values?.birthDate === 'string' ? { birthDate: values.birthDate } : {};
     if (pageKey === 'iowa-tell-us-more') {
-      return Object.fromEntries(startKeys.map(key => [key, startAnswer(startQuestions[key], values)]).filter(([, value]) => value !== null));
+      return Object.fromEntries(startKeys.map(key => [key, startAnswer(allQuestionFields[key], values)]).filter(([, value]) => value !== null));
     }
     if (pageKey === 'iowa-program-intent') return programKeys.some(key => values?.[key] === 'yes') ? { householdApplyProg: 'yes' } : {};
     return pageKey === 'iowa-personal-information' ? values : {};
   }
 
   function controlState(form) {
-    return Array.from(form.querySelectorAll('input, select, textarea')).filter(element => element.type !== 'hidden').map(element => ({ element,
+    return Array.from(form.querySelectorAll('input, select, textarea')).map(element => ({ element,
       value: element.value, checked: element.checked, disabled: element.disabled, readOnly: element.readOnly, required: element.required,
       id: element.id, name: element.name, type: element.type, ariaInvalid: element.getAttribute('aria-invalid'), ariaRequired: element.getAttribute('aria-required'),
+      handlers: Array.from(element.attributes).filter(attribute => attribute.name.startsWith('on')).map(attribute => `${attribute.name}=${attribute.value}`).join('|'),
+      options: element.tagName === 'SELECT' ? Array.from(element.options).map(option => `${option.value}|${option.textContent}|${option.disabled}`).join('~') : '',
       rendered: rendered(element, form.ownerDocument), labels: namesFor(element, form.ownerDocument).join('|') }));
   }
 
@@ -1050,6 +1158,8 @@
   }
 
   function captureNavigation(doc, rawUrl) {
+    const provider = delegated(doc, rawUrl);
+    if (provider) { const inner = provider.captureNavigation(doc, rawUrl); if (!inner) return null; const token = Object.freeze({}); delegatedNavigation.set(token, { provider, inner }); return token; }
     if (doc.location.href !== rawUrl || !probePage(doc, rawUrl).canAdvance) return null;
     const next = navigationButton(doc, rawUrl);
     if (!next) return null;
@@ -1057,18 +1167,24 @@
     // in this isolated world's memory and are never included in a page probe.
     const token = Object.freeze({});
     navigationSnapshots.set(token, { doc, url: rawUrl, ...next, controls: controlState(next.form), expires: Date.now() + 120000,
-      buttonType: next.button.type, onclick: next.button.getAttribute('onclick'), address: next.kind === 'address' ? addressState(next) : null });
+      buttonType: next.button.type, onclick: next.button.getAttribute('onclick'), tell: next.tell || null, address: next.kind === 'address' ? addressState(next) : null });
     return token;
   }
 
+  function sameTellState(before, next) {
+    return !before || Boolean(next?.tell && Object.keys(before).every(key => before[key] === next.tell[key]));
+  }
+
   function advance(doc, rawUrl, token) {
+    const delegation = token && delegatedNavigation.get(token);
+    if (delegation) { delegatedNavigation.delete(token); return delegation.provider.advance(doc, rawUrl, delegation.inner); }
     const original = token && navigationSnapshots.get(token);
     if (token) navigationSnapshots.delete(token);
     const fail = reason => ({ advanced: false, reason });
     if (!original || original.doc !== doc || original.url !== rawUrl || doc.location.href !== rawUrl || original.expires < Date.now()) return fail('The page changed or the Next preview expired. Check this page again.');
     const page = probePage(doc, rawUrl), next = navigationButton(doc, rawUrl);
     if (!page.canAdvance || !next || next.form !== original.form || next.button !== original.button ||
-        next.button.type !== original.buttonType || next.button.getAttribute('onclick') !== original.onclick || !sameControlState(original.controls, next.form) ||
+        next.button.type !== original.buttonType || next.button.getAttribute('onclick') !== original.onclick || !sameControlState(original.controls, next.form) || !sameTellState(original.tell, next) ||
         (original.address && (!next.first || !sameAddressState(original.address, next)))) return fail('The page or an answer changed. Review it and check again before Next.');
     if (original.address) {
       const unchanged = expected => {
@@ -1090,7 +1206,7 @@
       catch { return fail('Iowa’s Next control could not be activated. Check the page before trying again.'); }
       return { advanced: true, reason: 'The first suggested home address was selected and Next was clicked once. Review the address before final submission.' };
     }
-    if (!scrollToField(next.button, doc) || doc.location.href !== rawUrl || !probePage(doc, rawUrl).canAdvance || !sameControlState(original.controls, next.form)) return fail('The Next button is not safely accessible. Continue in Iowa’s form.');
+    if (!scrollToField(next.button, doc) || doc.location.href !== rawUrl || !probePage(doc, rawUrl).canAdvance || !sameControlState(original.controls, next.form) || !sameTellState(original.tell, navigationButton(doc, rawUrl))) return fail('The Next button is not safely accessible. Continue in Iowa’s form.');
     try { next.button.click(); }
     catch { return fail('Iowa’s Next control could not be activated. Check the page before trying again.'); }
     return { advanced: true, reason: 'Next was clicked once. Check the following page for required questions or errors.' };
@@ -1099,7 +1215,9 @@
   // The worker uses only this union's keys for its explicit desktop grant. Each
   // page still uses its own exact selectors and recipient checks internally.
   const supportedDefinitions = Object.freeze({ ...definitions, birthDate: Object.freeze({ label: 'Date of birth' }) });
-  const api = Object.freeze({ PORTAL, definitions: supportedDefinitions, isSupportedUrl, rendered, visible, scan, fill, formatValue, focusField, probePage, INFO_PAGE_KEYS, informationScreen, instructions, continuePage, profileRequest, pageValues, captureNavigation, advance });
+  const recordRequest = key => records?.recordRequest(key) || null;
+  const recordContext = (doc, url, bindings) => records?.recordContext(doc, url, bindings) ?? null;
+  const api = Object.freeze({ PORTAL, NAVIGATION_PAGE_KEYS, recordRequest, recordContext, definitions: supportedDefinitions, isSupportedUrl, rendered, visible, scan, fill, formatValue, focusField, probePage, INFO_PAGE_KEYS, informationScreen, instructions, continuePage, profileRequest, pageValues, captureNavigation, advance });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandIowa = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

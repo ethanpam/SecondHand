@@ -106,15 +106,15 @@ test('Google Forms choice questions are planned, counted as need-you, and filled
   const doc = page(forms.googleChoices);
   const clicks = googleClicks(doc);
   const result = generic.plan(doc);
-  assert.deepEqual(result.matched.map(item => item.key), ['householdSize', 'householdVeteran']);
+  assert.deepEqual(result.matched.map(item => item.key), ['householdSize', 'householdVeteran', 'county']);
   assert.deepEqual(result.unmatched.map(({ label, type, options, required }) => ({ label, type, options, required })), [
     { label: 'Which pantry location?', type: 'radio', options: ['North', 'South'], required: true },
-    { label: 'Which items do you need?', type: 'checkbox', options: ['Produce', 'Dairy'], required: true },
-    { label: 'County', type: 'listbox', options: ['Polk', 'Story'], required: true }
+    { label: 'Which items do you need?', type: 'checkbox', options: ['Produce', 'Dairy'], required: true }
   ], 'an answered question is not planned; the rest wait for the applicant');
   const filled = generic.fillFields(doc, result.token, [...result.matched.map(({ id, key }) => ({ id, key, guessed: false })),
     ...result.unmatched.map(({ id }) => ({ id, key: 'county', guessed: true }))], generic.deriveValues({ ...profile, county: 'Polk' }));
-  assert.deepEqual(filled.filled, result.matched.map(item => item.id));
+  assert.deepEqual(filled.filled, result.matched.filter(item => item.key !== 'county').map(item => item.id));
+  assert.deepEqual(filled.pending, result.matched.filter(item => item.key === 'county').map(item => item.id), 'a dropdown click only counts after the page confirms selection');
   assert.deepEqual(clicks, ['Three', 'No'], 'only the matching options are clicked; the answered question is never touched');
   const checkedIn = heading => [...doc.getElementById(heading).parentElement.querySelectorAll('[aria-checked="true"]')].map(option => option.getAttribute('data-value'));
   assert.deepEqual(checkedIn('c1'), ['Three']);

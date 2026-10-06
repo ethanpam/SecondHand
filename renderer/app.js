@@ -165,6 +165,8 @@
     data = { profile: {}, applications: [] };
     $('profile-form').reset();
     snapEditor.render({});
+    renderCustomAnswers([]);
+    $('custom-answers').open = false;
     manualCounts = null;
     renderMembers([]);
     renderSetupResume();
@@ -199,7 +201,8 @@
     $('auth-view').hidden = false;
     const exists = Boolean(vaultStatus.exists);
     $('auth-title').textContent = exists ? 'Welcome back' : 'Create a password';
-    $('auth-description').textContent = exists ? 'Enter your password to pick up where you left off. Your information is right here on this computer.' : 'Your password protects the information you save in SecondHand. It is encrypted and stays on this computer.';
+    $('auth-description').textContent = exists ? '' : 'Your password protects the information you save in SecondHand. It is encrypted and stays on this computer.';
+    $('auth-description').hidden = exists;
     $('confirm-passphrase-field').hidden = exists;
     $('confirm-passphrase').required = !exists;
     $('passphrase').minLength = exists ? 1 : 12;
@@ -271,6 +274,7 @@
     if (!active) return;
     $('reset-form').hidden = true;
     $('auth-title').textContent = 'Start over';
+    $('auth-description').hidden = false;
     $('auth-description').textContent = 'If you can’t reset your password, you can erase your saved information and create a new password.';
     $('start-over-confirm').focus();
   }
@@ -288,6 +292,7 @@
     $('reset-submit').hidden = !available;
     if (!active) return;
     $('auth-title').textContent = 'Reset your password';
+    $('auth-description').hidden = false;
     $('reset-method').hidden = !(vaultStatus.recoveryKey && vaultStatus.deviceReset);
     if (!available) { $('auth-description').textContent = 'Without your password or a recovery key, SecondHand can’t open your saved information.'; return; }
     renderResetMethod();
@@ -350,8 +355,98 @@
     manualCounts = null;
     for (const key of profileFields) profileControl(key).value = typeof data.profile[key] === 'string' ? data.profile[key] : '';
     snapEditor.render(data.profile);
+    renderCustomAnswers(data.profile.customFields);
     renderMembers(Array.isArray(data.profile.householdMembers) ? data.profile.householdMembers : []);
     setProfileDirty(false);
+  }
+
+  // Custom answers share the profile's draft, save revision, and encrypted storage.
+  // They never enter the general field-review/model request.
+  const MAX_CUSTOM_ANSWERS = 50;
+  const customAnswerRows = () => Array.from($('custom-answer-list').children);
+  function refreshCustomAnswers() {
+    const rows = customAnswerRows();
+    rows.forEach((row, index) => {
+      row.querySelector('legend').textContent = `Custom answer ${index + 1}`;
+      row.querySelector('button').setAttribute('aria-label', `Remove custom answer ${index + 1}`);
+    });
+    $('custom-answers-count').textContent = `${rows.length} of ${MAX_CUSTOM_ANSWERS}`;
+    $('custom-answers-empty').hidden = rows.length > 0;
+    $('add-custom-answer').disabled = rows.length >= MAX_CUSTOM_ANSWERS;
+    $('custom-answers-limit').hidden = rows.length < MAX_CUSTOM_ANSWERS;
+  }
+  function customAnswerRow(answer) {
+    const row = element('fieldset', 'custom-answer');
+    row.dataset.customId = answer.id;
+    row.append(element('legend'));
+    const controls = {};
+    const field = (key, title, multiline, limit) => {
+      const wrapper = element('div', 'field');
+      const label = element('label', '', title);
+      const input = element(multiline ? 'textarea' : 'input');
+      input.id = `custom-${answer.id}-${key}`;
+      input.dataset.customField = key;
+      input.maxLength = limit;
+      input.autocomplete = 'off';
+      input.spellcheck = false;
+      if (multiline) input.rows = key === 'value' ? 3 : 2;
+      else input.type = 'text';
+      label.htmlFor = input.id;
+      input.value = key === 'aliases' ? (Array.isArray(answer.aliases) ? answer.aliases.join('\n') : '') : (answer[key] || '');
+      if (key !== 'aliases') input.setAttribute('aria-required', 'true');
+      wrapper.append(label, input);
+      controls[key] = input;
+      return wrapper;
+    };
+    row.append(field('label', 'Question label', false, 120), field('value', 'Your answer', true, 1000));
+    const aliases = element('details', 'custom-answer-aliases');
+    aliases.append(element('summary', '', 'Other wording for this question (optional)'));
+    const aliasField = field('aliases', 'Aliases — one per line', true, 604);
+    const hint = element('p', 'field-hint', 'Up to 5 aliases, each 120 characters or fewer. Enter only questions that should receive this same answer.');
+    hint.id = `custom-${answer.id}-alias-hint`;
+    controls.aliases.setAttribute('aria-describedby', hint.id);
+    aliasField.append(hint);
+    aliases.append(aliasField);
+    if (answer.aliases?.length) aliases.open = true;
+    const remove = element('button', 'text-button danger', 'Remove answer');
+    remove.type = 'button';
+    remove.addEventListener('click', () => {
+      row.remove();
+      clearError('custom-answers-error');
+      refreshCustomAnswers();
+      clearFieldReviews(); profileRevision++; setProfileDirty(true);
+      $('add-custom-answer').focus();
+    });
+    row.append(aliases, remove);
+    return row;
+  }
+  function renderCustomAnswers(answers) {
+    $('custom-answer-list').replaceChildren(...(Array.isArray(answers) ? answers : []).map(customAnswerRow));
+    clearError('custom-answers-error');
+    refreshCustomAnswers();
+  }
+  function collectCustomAnswers() {
+    return customAnswerRows().map(row => ({
+      id: row.dataset.customId,
+      label: row.querySelector('[data-custom-field="label"]').value.trim(),
+      value: row.querySelector('[data-custom-field="value"]').value.trim(),
+      aliases: row.querySelector('[data-custom-field="aliases"]').value.split(/\r?\n/).map(value => value.trim()).filter(Boolean)
+    }));
+  }
+  function customAnswersValid(answers) {
+    for (const [index, answer] of answers.entries()) {
+      const invalid = !answer.label || answer.label.length > 120 ? ['label', 'Enter a question label of 1–120 characters.']
+        : !answer.value || answer.value.length > 1000 ? ['value', 'Enter your answer (1–1,000 characters), or remove this custom answer.']
+          : answer.aliases.length > 5 || answer.aliases.some(alias => alias.length > 120) ? ['aliases', 'Use up to 5 aliases, each 120 characters or fewer.'] : null;
+      if (!invalid) continue;
+      $('custom-answers').open = true;
+      const row = customAnswerRows()[index];
+      if (invalid[0] === 'aliases') row.querySelector('details').open = true;
+      showError('custom-answers-error', `Custom answer ${index + 1}: ${invalid[1]}`);
+      row.querySelector(`[data-custom-field="${invalid[0]}"]`).focus();
+      return false;
+    }
+    return true;
   }
 
   // Why a birth date can't be used on this computer's calendar today: 'future', 'tooOld' (more than 130
@@ -1421,17 +1516,20 @@
   $('privacy-lock').addEventListener('click', lockVault);
   $('profile-form').addEventListener('input', (event) => {
     clearFieldReviews();
+    if (event.target.closest('#custom-answers')) clearError('custom-answers-error');
     profileRevision++; setProfileDirty(true);
     if (['firstName', 'lastName', 'birthDate'].includes(event.target.name)) syncSelf();
   });
   $('profile-form').addEventListener('change', () => clearFieldReviews());
   $('profile-form').addEventListener('submit', (event) => {
-    event.preventDefault(); clearError('profile-error');
+    event.preventDefault(); clearError('profile-error'); clearError('custom-answers-error');
     const generation = vaultGeneration;
     const revision = profileRevision;
     // In the guided setup, saving a step moves on to the next.
     const step = setupStep;
-    const profile = reviewProfileDraft();
+    const customFields = collectCustomAnswers();
+    if (!customAnswersValid(customFields)) return;
+    const profile = { ...reviewProfileDraft(), customFields };
     for (const field of profileFields) profile[field] = profile[field].trim();
     pending(step === null ? $('save-profile') : $('setup-next'), async () => {
       try {
@@ -1445,6 +1543,16 @@
         if (step !== null) await setupStepSaved(step, generation);
       } catch (error) { if (generation === vaultGeneration) showError('profile-error', error); }
     });
+  });
+
+  $('add-custom-answer').addEventListener('click', () => {
+    if (customAnswerRows().length >= MAX_CUSTOM_ANSWERS) return;
+    const row = customAnswerRow({ id: window.crypto.randomUUID(), label: '', value: '', aliases: [] });
+    $('custom-answer-list').append(row);
+    $('custom-answers').open = true;
+    refreshCustomAnswers(); clearError('custom-answers-error');
+    clearFieldReviews(); profileRevision++; setProfileDirty(true);
+    row.querySelector('[data-custom-field="label"]').focus();
   });
 
   $('new-application').addEventListener('click', () => openApplication());

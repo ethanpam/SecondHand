@@ -30,6 +30,7 @@ input[readonly]{background:#f6f7f2}
 
 /* Optional SNAP preparation and local records. */
 .snap-information>summary{font-size:18px;font-weight:600;cursor:pointer}
+.custom-answers>summary{font-size:18px;font-weight:600;cursor:pointer;display:list-item}.custom-answers-count{font-size:11px;font-weight:400;color:var(--muted);margin-left:10px;white-space:nowrap}.custom-answers>.field-hint{margin:14px 0;max-width:650px}.custom-answers-empty{padding:20px 0;color:var(--muted);font-size:13px}.custom-answer-list{display:flex;flex-direction:column;gap:18px;margin:20px 0}.custom-answer{min-width:0;margin:0;padding:18px;border:1px solid var(--line);border-radius:10px}.custom-answer>legend{padding:0 7px;font-size:12px;font-weight:600}.custom-answer>.field+.field{margin-top:14px}.custom-answer-aliases{margin-top:14px}.custom-answer-aliases>summary{cursor:pointer;font-size:12px;color:var(--body)}.custom-answer-aliases[open]>summary{margin-bottom:12px}.custom-answer .field-hint{margin-top:6px}.custom-answer>.text-button{margin-top:16px}.custom-answers summary:focus-visible{outline:3px solid #9cb693;outline-offset:3px}
 .snap-information>p{margin:16px 0;color:var(--body)}
 .snap-section{border-top:1px solid var(--line);padding:16px 0}
 .snap-section>summary,.snap-member-details>summary{font-weight:600;cursor:pointer;line-height:1.6}
