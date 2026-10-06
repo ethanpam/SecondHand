@@ -1105,7 +1105,7 @@ test('while Autofill waits for answers it would save and continue after, both su
 });
 
 test('while Autofill waits for the app, both surfaces say where its window is on this computer', async t => {
-  for (const [os, where] of [['mac', 'Can’t see that window? Click SecondHand in the Dock.'], ['win', 'Can’t see that window? Click SecondHand in the taskbar.'],
+  for (const [os, where] of [['mac', 'Can’t see that window? Click the SecondHand bear in the Dock.'], ['win', 'Can’t see that window? Click the SecondHand bear at the bottom of your screen.'],
     ['linux', 'Can’t see that window? It may be behind Chrome.']]) {
     const waiting = `Waiting for the SecondHand app. If its window asks for your OK, nothing is filled until you allow it. ${where}`;
     let release;
