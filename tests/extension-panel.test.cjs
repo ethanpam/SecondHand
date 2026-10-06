@@ -854,7 +854,8 @@ test('widget on a fillable page offers one-click Autofill and cycles through wha
   assert.equal(view.get('need-you').hidden, true);
   assert.equal(view.get('summary-line'), null, 'the key-points line is gone');
   assert.equal(view.get('details').textContent.trim(), '', 'the logo is the details button and has no words');
-  assert.equal(view.get('details').getAttribute('aria-label'), EN['widget.detailsTitle']);
+  assert.equal(view.get('details').title, EN['widget.detailsTitle']);
+  assert.equal(view.get('details').getAttribute('aria-label'), null, 'its tooltip is its name, said once');
   assert.equal(view.get('widget-text').textContent, EN['widget.iowaReady']);
   assert.equal(view.get('widget-text').classList.contains('visually-hidden'), false, 'what Autofill will do is shown before it is clicked');
   view.get('autofill').click(); await tick();
@@ -955,8 +956,8 @@ test('the widget can be hidden to its logo and shown again from it, by the reade
   await view.userClick('hide');
   assert.equal(view.get('widget').hidden, true);
   assert.equal(view.get('pill').hidden, false);
-  assert.equal(view.get('pill').title, EN['widget.showTitle']);
   assert.equal(view.get('pill').getAttribute('aria-label'), EN['widget.showTitle']);
+  assert.equal(view.get('pill').hasAttribute('title'), false, 'no tooltip repeats its name');
   assert.equal(view.get('pill-label').hidden, false);
   assert.equal(view.get('pill-label').textContent, 'Show', 'the logo says the word that shows the card again');
   assert.equal(view.get('pill').classList.contains('labeled'), true);
@@ -983,7 +984,6 @@ test('the widget can be hidden to its logo and shown again from it, by the reade
   assert.equal(next.get('widget').hidden, true, 'the next page keeps the card hidden');
   assert.equal(next.get('pill').hidden, false);
   assert.equal(next.get('pill').classList.contains('waiting'), true, 'two questions are left for the reader');
-  assert.equal(next.get('pill').title, 'Show SecondHand’s card: it needs you');
   assert.equal(next.get('pill').getAttribute('aria-label'), 'Show SecondHand’s card: it needs you');
   // A screen reader still hears what the hidden card says, from the status region outside the card.
   const status = next.get('widget-status');
@@ -995,17 +995,17 @@ test('the widget can be hidden to its logo and shown again from it, by the reade
   assert.equal(next.get('widget-text').getAttribute('role'), null, 'one region speaks, not two');
   const quiet = await panel(t, { launcher: true, storage, session });
   assert.equal(quiet.get('pill').classList.contains('waiting'), false);
-  assert.equal(quiet.get('pill').title, 'Show SecondHand’s card');
+  assert.equal(quiet.get('pill').getAttribute('aria-label'), 'Show SecondHand’s card');
   await quiet.userClick('pill');
   assert.equal(session.has('secondhand.cardHidden'), false);
   // The link to what is left says what it does.
   assert.equal(next.get('need-you').title, 'Go to the next question left, in the form.');
-  assert.equal(next.get('details').getAttribute('aria-label'), 'Open SecondHand’s side panel');
+  assert.equal(next.get('details').title, 'Open SecondHand’s side panel');
   assert.equal(next.get('hide').textContent, 'Hide');
   // Another site's widget hides the same way.
   const site = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true } });
   await site.userClick('hide');
-  assert.equal(site.get('pill').title, EN['widget.showTitle']);
+  assert.equal(site.get('pill').getAttribute('aria-label'), EN['widget.showTitle']);
   assert.deepEqual(plainRequests(site.requests.at(-1)), { type: 'ui:widgetSize', line: false, pill: true });
 });
 
@@ -1222,7 +1222,7 @@ test('an outdated card the page can size directly is drawn whole, can be hidden,
   await widget.userClick('hide');
   assert.equal(widget.get('widget').hidden, true);
   assert.equal(widget.get('pill').hidden, false);
-  assert.equal(widget.get('pill').title, EN['widget.showWaitingTitle'], 'the hidden notice still needs the reader');
+  assert.equal(widget.get('pill').getAttribute('aria-label'), EN['widget.showWaitingTitle'], 'the hidden notice still needs the reader');
   assert.deepEqual(plain(posted.map(([data]) => data)).at(-1), { type: 'secondhand:cardSize', line: true, pill: true });
   assert.equal(widget.requests.filter(request => request.type === 'ui:widgetSize').length, sizes, 'the outdated worker is not asked');
   await widget.userClick('pill');

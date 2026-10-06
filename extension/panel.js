@@ -232,8 +232,15 @@
       const needYou = ['done', 'waiting'].includes(result?.state) ? fieldKeys(result.needYou) : [];
       const waiting = pill && (needYou.length > 0 || ['waiting', 'error', 'locked', 'offline'].includes(result?.state) || Boolean(note));
       $('pill').classList.toggle('waiting', waiting);
-      $('pill').title = t(waiting ? 'widget.showWaitingTitle' : pill ? 'widget.showTitle' : 'widget.pillTitle');
-      $('pill').setAttribute('aria-label', t(waiting ? 'widget.showWaitingTitle' : pill ? 'widget.showTitle' : 'widget.pillTitle'));
+      // One name each, said once: the round logo's from its tooltip; a hidden card's from a label that starts with the
+      // word it shows, and no tooltip to repeat it.
+      if (pill) {
+        $('pill').removeAttribute('title');
+        $('pill').setAttribute('aria-label', t(waiting ? 'widget.showWaitingTitle' : 'widget.showTitle'));
+      } else {
+        $('pill').title = t('widget.pillTitle');
+        $('pill').removeAttribute('aria-label');
+      }
       // A locked app offers Unlock, and a closed one Open SecondHand, in Autofill's place.
       const locked = result?.state === 'locked';
       const closed = result?.state === 'offline';
