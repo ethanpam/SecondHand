@@ -478,7 +478,7 @@ async function main() {
       { name: 'unexpected Enter Personal Information', url: `${applicant}?next=unexpected`, pageKey: 'iowa-personal-unverified', line: code => strings.text(code, 'iowa.personalUnverifiedTodo') },
       // Save and Continue disabled: SecondHand fills the page and does not continue.
       { name: 'Enter Personal Information, Save and Continue disabled', url: `${applicant}?next=stay`, pageKey: 'iowa-personal-information', disabled: true,
-        line: (code, filled) => `${strings.text(code, 'widget.filled', { count: filled })} · ${strings.text(code, 'iowa.canSaveContinue')}` }
+        line: (code, filled) => `${strings.text(code, 'widget.filled', { count: filled })} · ${strings.text(code, 'iowa.reviewSaveContinue')}` }
     ];
     // Before Autofill there is no line, so the frame is 46px tall. On these English pages the
     // widget may offer the page in the applicant's language instead, and that offer gets the row.
