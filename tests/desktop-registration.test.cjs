@@ -4,12 +4,12 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const vm = require('node:vm');
 const test = require('node:test');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { HOST_NAME } = require('../desktop/bridge.cjs');
-const runFile = promisify(execFile);
+const { runFile } = require('./helpers/harness.cjs');
+const execute = promisify(execFile);
 const root = path.resolve(__dirname, '..');
 const extensionId = 'jogldddafjfbmfjnjlbjloakjbecnjpl';
 
@@ -20,9 +20,8 @@ async function registrationFixture(t, platform = 'darwin') {
   const userData = path.join(directory, "vault's $(printf changed) $name");
   const appPath = path.join(directory, "probe's $(printf changed) $name.cjs");
   await fs.writeFile(appPath, "process.stdout.write(JSON.stringify({ userData: process.env.SECONDHAND_USER_DATA, testMode: process.env.SECONDHAND_TEST_MODE, testUserData: process.env.SECONDHAND_TEST_USER_DATA, args: process.argv.slice(2) }));\n");
-  const source = await fs.readFile(path.join(root, 'desktop/registration.cjs'), 'utf8');
   const module = { exports: {} };
-  vm.runInNewContext(source, {
+  runFile('desktop/registration.cjs', {
     module, Buffer,
     process: { platform, execPath: process.execPath },
     require: name => name === 'node:os' ? { homedir: () => fakeHome } :
@@ -58,7 +57,7 @@ test('development registration binds its launcher to the exact desktop data path
       environment.SECONDHAND_TEST_MODE = '1';
       environment.SECONDHAND_TEST_USER_DATA = path.join(userData, 'another-test-vault');
     }
-    const output = await runFile('/bin/sh', [manifest.path, ...args], { env: environment });
+    const output = await execute('/bin/sh', [manifest.path, ...args], { env: environment });
     assert.equal(output.stderr, '');
     assert.deepEqual(JSON.parse(output.stdout), { userData, args });
   }

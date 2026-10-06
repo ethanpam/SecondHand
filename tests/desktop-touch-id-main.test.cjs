@@ -3,28 +3,16 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
-const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const vm = require('node:vm');
-const { pathToFileURL } = require('node:url');
 const realLaya = require('../desktop/laya.cjs');
 const { touchIdPlatform, createTouchIdUnlock } = require('../desktop/touch-id.cjs');
+const { plain, until, startMain, safeStorage } = require('./helpers/harness.cjs');
 
-const root = path.resolve(__dirname, '..');
-const source = fs.readFileSync(path.join(root, 'desktop/main.cjs'), 'utf8');
 const PASSWORD = 'synthetic touch password';
 const DAY = 24 * 60 * 60 * 1000;
 const START = Date.UTC(2026, 9, 3, 12);
-// Values created inside the vm context have foreign prototypes.
-const plain = value => JSON.parse(JSON.stringify(value));
-// Waits up to 5 seconds, a turn of the event loop at a time: reaching the prompt reads the disk, which a busy machine slows.
-async function waitFor(condition, what) {
-  const end = performance.now() + 5000;
-  while (!condition() && performance.now() < end) await new Promise(resolve => setImmediate(resolve));
-  assert.ok(condition(), what);
-}
 
 async function folder(t) {
   const userData = await fsp.mkdtemp(path.join(os.tmpdir(), 'secondhand-touch-id-main-'));
@@ -37,71 +25,32 @@ async function folder(t) {
 // prompt is shown and no Keychain item is touched.
 async function desktop(t, { userData, platform = 'darwin', canPrompt = true, encryptionAvailable = true, clock = { now: START }, dialog = {}, isPackaged = false, env = {} } = {}) {
   userData ||= await folder(t);
-  let invoke;
-  let bridge;
-  let window;
   const prompts = [];
-  const sent = [];
-  const timers = [];
   let answer = async () => {};
   let onUnseal = () => {};
   let onRemove = async () => {};
-  const safeStorage = {
-    isEncryptionAvailable: () => encryptionAvailable,
-    encryptString: text => Buffer.from(`sealed:${Buffer.from(text).toString('hex')}`),
-    decryptString: bytes => {
-      onUnseal();
-      const text = bytes.toString();
-      if (!text.startsWith('sealed:')) throw new Error('Not sealed by this computer.');
-      return Buffer.from(text.slice(7), 'hex').toString();
-    }
-  };
+  const keychain = safeStorage({ available: encryptionAvailable, unsealing: () => onUnseal() });
   const systemPreferences = {
     canPromptTouchID: () => { if (platform !== 'darwin') assert.fail('Touch ID is asked about on macOS only'); return canPrompt; },
     promptTouchID: reason => { prompts.push(reason); return answer(); }
   };
-  class BrowserWindow {
-    constructor() {
-      window = this;
-      this.webContents = { mainFrame: { url: pathToFileURL(path.join(root, 'renderer/index.html')).href },
-        setWindowOpenHandler() {}, on() {}, send(...args) { sent.push(plain(args)); } };
-    }
-    show() {} focus() {} setMenuBarVisibility() {} once() {} on() {} loadFile() {}
-    isDestroyed() { return false; }
-  }
-  const app = { isPackaged, setName() {}, setPath() {}, getPath: () => userData,
-    requestSingleInstanceLock: () => true, whenReady: () => Promise.resolve(), on() {} };
-  const electron = { app, BrowserWindow, safeStorage, systemPreferences, ipcMain: { handle(_name, handler) { invoke = handler; } },
-    dialog: { showErrorBox() { assert.fail('Desktop setup failed'); }, ...dialog },
-    shell: {}, clipboard: {}, powerMonitor: { on() {} },
-    session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, webRequest: { onBeforeRequest() {} } } } };
-  const overrides = {
-    electron,
+  class SyntheticDate extends Date { static now() { return clock.now; } }
+  const main = await startMain({ userData, platform, env, packaged: isPackaged, dialog, electron: { safeStorage: keychain, systemPreferences }, modules: {
     // main.cjs's own file removals wait for `removing`, so a test can act while one is under way.
     'node:fs/promises': { ...fsp, rm: async (file, options) => { await onRemove(file); return fsp.rm(file, options); } },
-    './bridge.cjs': { ...require('../desktop/bridge.cjs'), startBridge: async (_directory, _getId, handler) => { bridge = handler; return { close: async () => {} }; } },
-    './extension-setup.cjs': { getExtensionSetup: async () => ({ prepared: true }) },
-    './registration.cjs': { registerHost: async () => ({}) },
-    './test-storage-path.cjs': { testStoragePath: () => null },
     './laya.cjs': { ...realLaya, createLaya: options => ({ ...realLaya.createLaya(options), startUpdates() {}, update() {} }) }
-  };
-  class SyntheticDate extends Date { static now() { return clock.now; } }
-  vm.runInNewContext(source, {
-    require: name => Object.hasOwn(overrides, name) ? overrides[name] : require(name.startsWith('.') ? path.join(root, 'desktop', name) : name),
-    __dirname: path.join(root, 'desktop'), process: { platform, env, argv: ['synthetic-electron'] },
-    setTimeout: (_callback, ms) => { timers.push(ms); return timers.length; }, clearTimeout() {}, Buffer, Date: SyntheticDate
-  });
-  for (let attempt = 0; !(window && bridge) && attempt < 200; attempt++) await new Promise(resolve => setTimeout(resolve, 5));
-  assert.ok(window && bridge, 'The desktop window and bridge were not started');
+  }, globals: { Date: SyntheticDate } });
   const sealedPath = path.join(userData, 'touch-unlock.bin');
   return {
-    userData, sealedPath, prompts, sent, timers, clock,
+    userData, sealedPath, prompts, sent: main.sent, clock,
+    // The milliseconds of every timer main.cjs set, in order.
+    get timers() { return main.timers.map(timer => timer.ms); },
     answer: callback => { answer = callback; },
     unsealing: callback => { onUnseal = callback; },
     removing: callback => { onRemove = callback; },
-    invoke: (method, argument) => invoke({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, method, ...(argument === undefined ? [] : [argument])),
-    request: type => bridge({ id: 'synthetic', type }, { extensionId: 'a'.repeat(32) }),
-    sealed: async () => JSON.parse(safeStorage.decryptString(await fsp.readFile(sealedPath))),
+    invoke: main.invoke,
+    request: type => main.bridge({ id: 'synthetic', type }, { extensionId: 'a'.repeat(32) }),
+    sealed: async () => JSON.parse(keychain.decryptString(await fsp.readFile(sealedPath))),
     slots: async () => JSON.parse(await fsp.readFile(path.join(userData, 'vault.secondhand'), 'utf8')).slots
   };
 }
@@ -123,7 +72,7 @@ test('turning Touch ID on asks for the password, adds a Touch ID slot, and seals
   for (const request of [undefined, {}, { enabled: 'yes' }]) await assert.rejects(app.invoke('setTouchIdUnlock', request), /Invalid setting/);
   await assert.rejects(app.invoke('setTouchIdUnlock', { enabled: true, password: 'a wrong but long password' }), /That password isn’t right/);
   await assert.rejects(app.invoke('setTouchIdUnlock', { enabled: true }), /at least 12/);
-  await assert.rejects(fsp.access(app.sealedPath), 'nothing is sealed without the password');
+  await assert.rejects(fsp.access(app.sealedPath), { code: 'ENOENT' }, 'nothing is sealed without the password');
   assert.deepEqual(Object.keys(await app.slots()).sort(), ['device', 'password', 'recovery']);
   assert.deepEqual(app.prompts, [], 'turning it on shows no Touch ID prompt');
 
@@ -253,7 +202,7 @@ test('a cancelled prompt shared by the app and Chrome refuses both, asks once, a
   app.answer(() => cancel ? Promise.reject(new Error('Canceled by user.')) : new Promise((_resolve, reject) => { cancel = () => reject(new Error('Canceled by user.')); }));
   const fromApp = app.invoke('unlockWithTouchId').then(() => assert.fail('unlocked'), error => error.message);
   const fromChrome = app.request('unlockWithTouchId');
-  await waitFor(() => Boolean(cancel), 'the prompt is up');
+  await until(() => Boolean(cancel), 'the prompt to be up');
   cancel();
   assert.equal(await fromApp, 'Touch ID didn’t unlock SecondHand (Canceled by user.). Enter your password.');
   assert.deepEqual(plain(await fromChrome), { unlocked: false, reason: 'cancelled' });
@@ -270,7 +219,7 @@ test('a password unlock while the Touch ID prompt is up wins: Touch ID answers u
   let approve;
   app.answer(() => new Promise(resolve => { approve = resolve; }));
   const attempt = app.invoke('unlockWithTouchId');
-  await waitFor(() => Boolean(approve), 'the prompt is up');
+  await until(() => Boolean(approve), 'the prompt to be up');
   assert.equal((await app.invoke('unlock', PASSWORD)).unlocked, true);
   let reads = 0;
   app.unsealing(() => { reads++; });
@@ -315,7 +264,7 @@ test('turning Touch ID off removes its slot and the sealed key; the other slots 
   const slots = await app.slots();
   const off = await app.invoke('setTouchIdUnlock', { enabled: false });
   assert.equal(off.touchId, 'off');
-  await assert.rejects(fsp.access(app.sealedPath));
+  await assert.rejects(fsp.access(app.sealedPath), { code: 'ENOENT' });
   const after = await app.slots();
   assert.deepEqual(Object.keys(after).sort(), ['device', 'password', 'recovery']);
   for (const name of ['password', 'recovery', 'device']) assert.deepEqual(after[name], slots[name]);
@@ -343,7 +292,7 @@ test('a damaged key file or Touch ID slot turns Touch ID off with the reason, as
     const error = await app.invoke('unlockWithTouchId').then(() => assert.fail(`${name}: unlocked`), failure => failure);
     assert.match(error.message, /^Touch ID was turned off because .+\. Enter your password\.$/, name);
     assert.match(error.message, reason, name);
-    await assert.rejects(fsp.access(app.sealedPath), `${name}: the sealed key is removed`);
+    await assert.rejects(fsp.access(app.sealedPath), { code: 'ENOENT' }, `${name}: the sealed key is removed`);
     const status = await app.invoke('status');
     assert.equal(status.unlocked, false, name);
     assert.equal(status.touchId, 'off', name);
@@ -402,7 +351,7 @@ test('a damaged sealed key found by a password unlock turns Touch ID off and say
   assert.equal(unlocked.unlocked, true);
   assert.equal(unlocked.touchId, 'off');
   assert.match(unlocked.touchIdNotice, /^Touch ID was turned off because its key file on this Mac is damaged\.$/);
-  await assert.rejects(fsp.access(app.sealedPath));
+  await assert.rejects(fsp.access(app.sealedPath), { code: 'ENOENT' });
   assert.deepEqual(Object.keys(await app.slots()).sort(), ['device', 'password', 'recovery']);
   // Turning it on again clears the notice.
   const on = await app.invoke('setTouchIdUnlock', { enabled: true, password: PASSWORD });
@@ -419,7 +368,7 @@ test('a sealed key left without a Touch ID slot turns Touch ID off at the next p
   const unlocked = await app.invoke('unlock', PASSWORD);
   assert.equal(unlocked.touchId, 'off');
   assert.match(unlocked.touchIdNotice, /because your saved information has no Touch ID key/);
-  await assert.rejects(fsp.access(app.sealedPath));
+  await assert.rejects(fsp.access(app.sealedPath), { code: 'ENOENT' });
 });
 
 test('a password reset with the recovery key or this computer keeps Touch ID: the slot and key stay, and it unlocks', async t => {
@@ -453,7 +402,7 @@ test('starting over erases the Touch ID key with the saved information', async t
   await app.invoke('lock');
   const erased = await app.invoke('startOver', { confirmation: 'start over' });
   assert.equal(erased.touchId, 'off');
-  await assert.rejects(fsp.access(app.sealedPath));
+  await assert.rejects(fsp.access(app.sealedPath), { code: 'ENOENT' });
   const created = await app.invoke('createVault', { password: 'synthetic new password', allowDeviceReset: false });
   assert.equal(created.status.touchId, 'off');
 });
@@ -466,7 +415,7 @@ test('restoring a backup removes the Touch ID key: the backup opens with its own
   await app.invoke('exportBackup');
   await app.invoke('lock');
   assert.deepEqual(plain(await app.invoke('importBackup')), { cancelled: false });
-  await assert.rejects(fsp.access(app.sealedPath));
+  await assert.rejects(fsp.access(app.sealedPath), { code: 'ENOENT' });
   assert.equal((await app.invoke('status')).touchId, 'off');
   await assert.rejects(app.invoke('unlockWithTouchId'), /Touch ID is off/);
   // The restored file still carries the slot it was saved with; the password unlock removes it.
@@ -500,7 +449,7 @@ test('a backup restored while the Touch ID prompt is up isn’t opened by it: To
   let approve;
   app.answer(() => new Promise(resolve => { approve = resolve; }));
   const asking = app.request('unlockWithTouchId');
-  await waitFor(() => Boolean(approve), 'the prompt is up');
+  await until(() => Boolean(approve), 'the prompt to be up');
   let answered;
   duringRestore(app, async () => { approve(); answered = plain(await asking); });
   assert.deepEqual(plain(await app.invoke('importBackup')), { cancelled: false });
@@ -546,7 +495,7 @@ test('a new password removes a Touch ID key left from earlier information', asyn
   await fsp.writeFile(path.join(userData, 'touch-unlock.bin'), 'left from earlier information');
   const app = await desktop(t, { userData });
   await app.invoke('createVault', { password: PASSWORD, allowDeviceReset: false });
-  await assert.rejects(fsp.access(app.sealedPath));
+  await assert.rejects(fsp.access(app.sealedPath), { code: 'ENOENT' });
 });
 
 test('without Touch ID, on another system, or without the Keychain, Touch ID stays off and can’t be turned on', async t => {
@@ -569,7 +518,7 @@ test('without Touch ID, on another system, or without the Keychain, Touch ID sta
   const noKeychain = await desktop(t, { encryptionAvailable: false });
   await noKeychain.invoke('createVault', { password: PASSWORD, allowDeviceReset: false });
   await assert.rejects(noKeychain.invoke('setTouchIdUnlock', { enabled: true, password: PASSWORD }), /This Mac’s Keychain isn’t available, so Touch ID can’t be turned on/);
-  await assert.rejects(fsp.access(noKeychain.sealedPath));
+  await assert.rejects(fsp.access(noKeychain.sealedPath), { code: 'ENOENT' });
   assert.deepEqual(Object.keys(await noKeychain.slots()).sort(), ['password', 'recovery']);
 });
 
@@ -614,7 +563,7 @@ test('a turn-on whose key can’t be saved removes the slot it added, and says s
   platform.seal = () => { throw new Error('synthetic Keychain failure'); };
   await assert.rejects(touchId.turnOn(PASSWORD), error => error.publicMessage === 'Touch ID couldn’t be turned on (synthetic Keychain failure). Your password still works.');
   assert.equal(slots.length, 4, 'a key that can’t be sealed adds no slot');
-  await assert.rejects(fsp.access(filePath));
+  await assert.rejects(fsp.access(filePath), { code: 'ENOTDIR' }, 'no key file can be there: its folder is a file');
 });
 
 test('the Touch ID test hook works only in an unpackaged build in test mode, and never asks macOS or the Keychain', () => {

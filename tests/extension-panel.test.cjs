@@ -7,6 +7,7 @@ const test = require('node:test');
 const { JSDOM } = require('jsdom');
 const adapter = require('../extension/iowa-adapter.js');
 const strings = require('../extension/strings.js');
+const { plain, evalFile, layout } = require('./helpers/harness.cjs');
 const extensionId = 'a'.repeat(32);
 const extensionURL = file => `chrome-extension://${extensionId}/${file}`;
 const source = file => fs.readFileSync(path.join(__dirname, '../extension', file), 'utf8');
@@ -14,7 +15,6 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 const BUILD = source('panel.js').match(/const BUILD = '([^']+)'/)[1];
 const OUTDATED = 'SecondHand was updated. Open chrome://extensions and click the reload arrow on SecondHand, then reload this page.';
 
-const plain = value => JSON.parse(JSON.stringify(value));
 
 // Stand-in for generic-adapter.js; the real engine has its own tests. Plans carry
 // elements and values so the tests can prove only metadata leaves the page.
@@ -63,8 +63,8 @@ function content(t, url = `${adapter.PORTAL}/applicant`, { engine = true, matche
     focusField: (_document, _url, key) => { if (key !== 'firstName') return false; window.document.getElementById('firstName').focus(); return true; },
     fill: (_document, _url, bindings, values) => { for (const binding of bindings) binding.element.value = values[binding.key]; return { filled: bindings.map(binding => binding.key), skipped: [] }; }
   };
-  window.eval(source('page-text.js'));
-  window.eval(source('content.js'));
+  evalFile(window, 'extension/page-text.js');
+  evalFile(window, 'extension/content.js');
   return { window, frames, calls, setKind: (value, instruction) => { kind = value; todo = instruction; }, get continued() { return continued; }, get advanced() { return advanced; },
     host: () => window.document.querySelector('[data-secondhand-assistant]'),
     request(message, sender = { id: extensionId }) { let response; listener?.(message, sender, value => { response = value; }); return response; },
@@ -84,7 +84,7 @@ test('on-page assistant is isolated in a fixed extension iframe only on the exac
   assert.equal(page.frames[0].referrerPolicy, 'no-referrer');
   assert.equal(page.frames[0].getAttribute('sandbox'), 'allow-scripts allow-same-origin');
   assert.equal(page.frames[0].getAttribute('allow'), 'language-detector', 'the widget may use Chrome’s on-device language detector');
-  page.window.eval(source('content.js'));
+  evalFile(page.window, 'extension/content.js');
   assert.equal(page.frames.length, 1);
 
   const wrong = content(t, 'https://hhsservices.iowa.gov.evil.example/apspssp/ssp.portal');
@@ -95,7 +95,7 @@ test('on-page assistant is isolated in a fixed extension iframe only on the exac
   page.window.document.body.append(child);
   child.contentWindow.SecondHandIowa = page.window.SecondHandIowa;
   child.contentWindow.chrome = page.window.chrome;
-  child.contentWindow.eval(source('content.js'));
+  evalFile(child.contentWindow, 'extension/content.js');
   assert.equal(child.contentWindow.secondHandContentInstalled, undefined);
 });
 
@@ -382,7 +382,7 @@ async function panel(t, initial = {}) {
   }
   // Run the page's own scripts, in the order panel.html lists them.
   for (const [, file] of source('panel.html').matchAll(/<script src="([^"]+)"/g)) {
-    window.eval(source(file));
+    evalFile(window, `extension/${file}`);
     // A shorter wait before a download that never starts is reported (the service's own tests cover the timing).
     if (file === 'translation.js' && initial.stallMs) {
       const service = window.SecondHandTranslation;
@@ -1090,8 +1090,7 @@ test('the Iowa page-text request answers only an information-only screen’s wor
   const doc = page.window.document;
   doc.documentElement.lang = 'en';
   doc.body.insertAdjacentHTML('afterbegin', '<main><h1>Important Information when applying and what to expect.</h1><p>What you need to do.</p><input value="Synthetic private value"></main>');
-  const box = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 };
-  for (const node of doc.querySelectorAll('*')) { node.getBoundingClientRect = () => box; node.getClientRects = () => [box]; }
+  layout(doc);
   page.window.SecondHandIowa.informationScreen = () => 'iowa-information';
   assert.deepEqual(plain(page.request({ type: 'secondhand:pageText' })), { lang: 'en', pageKey: 'iowa-information', text: 'Important Information when applying and what to expect.\nWhat you need to do.' });
   page.window.SecondHandIowa.informationScreen = () => '';
@@ -1322,11 +1321,16 @@ test('a translator Chrome must download starts from the applicant’s click, sho
   assert.equal(view.get('questions-note').textContent, spanish('translate.done'));
   assert.equal(view.get('questions-list').children[2].querySelector('.checklist-label').textContent, '[es] Preferred pickup day');
 
+  // A download that never starts is reported after its stall time, on a clock the test runs.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const stuck = translatorStub({ availability: 'downloadable', create: () => new Promise(() => {}) });
   const stalled = await panel(t, { language: 'es-ES', Translator: stuck.Translator, questions: pageQuestions, stallMs: 15 });
   await stalled.userClick('questions-show'); await settle();
-  await new Promise(resolve => setTimeout(resolve, 40));
-  assert.equal(stalled.get('questions-note').textContent, strings.text('es', 'translate.stalled', { language: 'español', source: 'inglés' }));
+  const note = strings.text('es', 'translate.stalled', { language: 'español', source: 'inglés' });
+  t.mock.timers.tick(14); await settle();
+  assert.notEqual(stalled.get('questions-note').textContent, note, 'not before its stall time');
+  t.mock.timers.tick(1); await settle();
+  assert.equal(stalled.get('questions-note').textContent, note);
   assert.equal(stalled.get('questions-list').children.length, 3, 'the questions stay listed in their own words');
 });
 
@@ -1516,11 +1520,15 @@ test('a model Chrome must download starts from the applicant’s click, shows it
   assert.deepEqual(points(view), KEY_POINTS);
   assert.equal(view.get('summary-note').hidden, true);
 
+  // A download that never starts is reported after its stall time, on a clock the test runs.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const stuck = summarizerStub({ availability: 'downloadable', create: () => new Promise(() => {}) });
   const stalled = await panel(t, { Summarizer: stuck.Summarizer, pageText: { pages: [summaryPage] }, stallMs: 15 });
   await settle();
   await stalled.userClick('summary-get'); await settle();
-  await new Promise(resolve => setTimeout(resolve, 40));
+  t.mock.timers.tick(14); await settle();
+  assert.notEqual(stalled.get('summary-note').textContent, EN['summary.stalled'], 'not before its stall time');
+  t.mock.timers.tick(1); await settle();
   assert.equal(stalled.get('summary-note').textContent, EN['summary.stalled']);
   assert.equal(stalled.get('summary-note').classList.contains('error'), true);
 });
@@ -1739,13 +1747,17 @@ test('when all websites is on, its off button shows, the per-site buttons step a
 });
 
 test('the off message, with how to remove Chrome’s kept grant, stays on screen until the tab changes', async t => {
+  // The side panel checks the page every 1.5 seconds; the test runs that clock itself.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const taken = 'SecondHand is off on other websites. Sites you turned on one at a time stay on. Chrome still lists SecondHand’s access to all websites, but nothing uses it. To remove it, open chrome://extensions, then SecondHand, then Details, then Site access.';
   const params = { first: { key: 'worker.allSitesOff', params: {} }, second: { key: 'worker.chromeStillAllows', params: {} } };
   const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, desktop: { allSites: true },
     allSitesOff: { message: taken, messageKey: 'joined', messageParams: params } });
   await view.userClick('all-sites-disable'); for (let i = 0; i < 6; i++) await tick();
   assert.equal(view.get('status').textContent, taken);
-  await view.window.eval('new Promise(resolve => setTimeout(resolve, 1700))');
+  const checks = view.types().filter(type => type === 'ui:pageState').length;
+  t.mock.timers.tick(1500); for (let i = 0; i < 6; i++) await tick();
+  assert.equal(view.types().filter(type => type === 'ui:pageState').length, checks + 1, 'the regular page check ran');
   assert.equal(view.get('status').textContent, taken, 'the regular page check doesn’t replace it');
   view.tabs.current = { id: 8, url: OTHER_SITE.url };
   view.listeners.activated({ tabId: 8 }); for (let i = 0; i < 4; i++) await tick();

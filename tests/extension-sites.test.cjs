@@ -1,19 +1,14 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const vm = require('node:vm');
 const { webcrypto } = require('node:crypto');
 const { JSDOM } = require('jsdom');
 const adapter = require('../extension/iowa-adapter.js');
 const strings = require('../extension/strings.js');
 const forms = require('./fixtures/pantry-forms.cjs');
-const translation = require('../extension/translation.js');
+const { plain, tick, runFile, evalFile, layout, layoutElements, serviceWorker, nativeHost } = require('./helpers/harness.cjs');
 
-// Values created inside the worker's vm context have foreign prototypes.
-const plain = value => JSON.parse(JSON.stringify(value));
-const source = file => fs.readFileSync(path.join(__dirname, '../extension', file), 'utf8');
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
 const SITE_URL = 'https://pantry.example.org/intake?step=1';
 const ORIGIN = 'https://pantry.example.org';
@@ -145,9 +140,8 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
     values: { firstName: 'Synthetic private first', lastName: 'Synthetic private last', zip: '50309' }, ...desktop };
   // With `trusted`, the app trusts only those origins, as its trusted-site list does.
   const untrusted = url => Array.isArray(vault.trusted) && !vault.trusted.includes(new URL(url).origin);
-  const events = {};
-  const event = key => ({ addListener: value => { events[key] = value; } });
-  let listener;
+  const w = serviceWorker();
+  const { events, event, send } = w;
   const chrome = {
     tabs: {
       get: async () => ({ ...tab }),
@@ -228,83 +222,61 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
     sidePanel: { setPanelBehavior: async () => {}, open: async options => { opened.push(plain(options)); } },
     runtime: {
       id: 'testextension', getURL: file => `chrome-extension://testextension/${file}`,
-      onMessage: { addListener: callback => { listener = callback; } },
+      onMessage: w.onMessage,
       onInstalled: event('installed'),
       reload: () => { reloads++; },
-      connectNative: () => {
-        let onMessage, onDisconnect;
-        return {
-          onMessage: { addListener: callback => { onMessage = callback; } },
-          onDisconnect: { addListener: callback => { onDisconnect = callback; } },
-          disconnect: () => {},
-          postMessage: request => {
-            native.push(plain(request)); log.push(`native:${request.type}`);
-            queueMicrotask(async () => {
-              // A reply the test holds back, as the app does while its approval prompt is open.
-              await vault.delay?.[request.type];
-              if (!vault.reachable) return onDisconnect();
-              const reply = data => onMessage({ id: request.id, ok: true, data });
-              const fail = error => onMessage({ id: request.id, ok: false, error });
-              if (request.type === 'status') {
-                duringStatus?.(vault, ++statusChecks);
-                return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: vault.accessRevision, allSites: vault.allSites, ...(vault.layaState ? { laya: { state: vault.layaState } } : {}),
-                  ...(vault.extension ? { extension: structuredClone(vault.extension) } : {}) });
-              }
-              if (request.type === 'trustAllSites') {
-                if (vault.trustAllError) return fail(vault.trustAllError);
-                if (vault.trustAllReply) return reply(vault.trustAllReply);
-                vault.allSites = true; return reply({ allSites: true });
-              }
-              if (request.type === 'untrustAllSites') { if (vault.untrustError) return fail(vault.untrustError); vault.allSites = false; return reply({ allSites: false }); }
-              // Laya (#39, #42): readied before a click's questions; "not ready" unless a test plays it.
-              if (request.type === 'warmLaya') { vault.warming?.(); return reply({ state: vault.layaState || 'unavailable' }); }
-              if (request.type === 'suggestFields' || request.type === 'answerFields') {
-                if (untrusted(request.url) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
-                const play = vault.laya?.[request.type];
-                if (!play) return onMessage({ id: request.id, ok: false, error: 'Laya isn’t ready on this computer.', code: 'LAYA_NOT_READY' });
-                const answer = play(plain(request), vault);
-                return typeof answer === 'string' ? fail(answer) : reply(answer);
-              }
-              if (request.type === 'showApp') return reply({ shown: true });
-              if (request.type === 'trustSite') return (vault.trustError || request.url === vault.declineOrigin) ? fail(vault.trustError || 'Declined') : reply({ trusted: true, origin: new URL(request.url).origin });
-              if (request.type === 'untrustSite') return vault.untrustSiteError ? fail(vault.untrustSiteError) : reply({ trusted: false, origin: new URL(request.url).origin });
-              if (request.type === 'saveFields') {
-                if (untrusted(request.url) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
-                if (vault.saveError) return fail(vault.saveError);
-                return reply({ saved: Object.keys(request.fields) });
-              }
-              if (request.type === 'getFields') {
-                duringGetFields?.(tab, plain(request));
-                // The app's rule: a site it doesn't trust gets nothing unless all websites is on.
-                if ((vault.refuseUntrusted || untrusted(request.url)) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
-                if (vault.cancelOrigin === new URL(request.url).origin) return fail('You cancelled this field request.');
-                if (vault.getFieldsError) return fail(vault.getFieldsError);
-                // `fieldsReason`: why the app left saved answers out (#135), or a function of the request that says it for one site.
-                const reason = typeof vault.fieldsReason === 'function' ? vault.fieldsReason(plain(request)) : vault.fieldsReason;
-                return reply({ accessRevision: vault.accessRevision, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])),
-                  ...(reason !== undefined ? { reason } : {}) });
-              }
-              fail('Unsupported bridge request.');
-            });
-          }
-        };
-      }
+      connectNative: nativeHost({ posted: request => { native.push(plain(request)); log.push(`native:${request.type}`); }, answer: async (request, { reply, fail, disconnect }) => {
+        // A reply the test holds back, as the app does while its approval prompt is open.
+        await vault.delay?.[request.type];
+        if (!vault.reachable) return disconnect();
+        if (request.type === 'status') {
+          duringStatus?.(vault, ++statusChecks);
+          return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: vault.accessRevision, allSites: vault.allSites, ...(vault.layaState ? { laya: { state: vault.layaState } } : {}),
+            ...(vault.extension ? { extension: structuredClone(vault.extension) } : {}) });
+        }
+        if (request.type === 'trustAllSites') {
+          if (vault.trustAllError) return fail(vault.trustAllError);
+          if (vault.trustAllReply) return reply(vault.trustAllReply);
+          vault.allSites = true; return reply({ allSites: true });
+        }
+        if (request.type === 'untrustAllSites') { if (vault.untrustError) return fail(vault.untrustError); vault.allSites = false; return reply({ allSites: false }); }
+        // Laya (#39, #42): readied before a click's questions; "not ready" unless a test plays it.
+        if (request.type === 'warmLaya') { vault.warming?.(); return reply({ state: vault.layaState || 'unavailable' }); }
+        if (request.type === 'suggestFields' || request.type === 'answerFields') {
+          if (untrusted(request.url) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
+          const play = vault.laya?.[request.type];
+          if (!play) return fail('Laya isn’t ready on this computer.', { code: 'LAYA_NOT_READY' });
+          const answer = play(plain(request), vault);
+          return typeof answer === 'string' ? fail(answer) : reply(answer);
+        }
+        if (request.type === 'showApp') return reply({ shown: true });
+        if (request.type === 'trustSite') return (vault.trustError || request.url === vault.declineOrigin) ? fail(vault.trustError || 'Declined') : reply({ trusted: true, origin: new URL(request.url).origin });
+        if (request.type === 'untrustSite') return vault.untrustSiteError ? fail(vault.untrustSiteError) : reply({ trusted: false, origin: new URL(request.url).origin });
+        if (request.type === 'saveFields') {
+          if (untrusted(request.url) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
+          if (vault.saveError) return fail(vault.saveError);
+          return reply({ saved: Object.keys(request.fields) });
+        }
+        if (request.type === 'getFields') {
+          duringGetFields?.(tab, plain(request));
+          // The app's rule: a site it doesn't trust gets nothing unless all websites is on.
+          if ((vault.refuseUntrusted || untrusted(request.url)) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
+          if (vault.cancelOrigin === new URL(request.url).origin) return fail('You cancelled this field request.');
+          if (vault.getFieldsError) return fail(vault.getFieldsError);
+          // `fieldsReason`: why the app left saved answers out (#135), or a function of the request that says it for one site.
+          const reason = typeof vault.fieldsReason === 'function' ? vault.fieldsReason(plain(request)) : vault.fieldsReason;
+          return reply({ accessRevision: vault.accessRevision, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])),
+            ...(reason !== undefined ? { reason } : {}) });
+        }
+        fail('Unsupported bridge request.');
+      } })
     }
   };
   // A test may run the worker's clock itself: `clock.now` is what Date.now() returns. `ai` holds the
   // stand-ins for Chrome's Translator and LanguageDetector a test gives the worker; by default it has neither.
-  const code = source('background.js');
-  const fetch = async url => {
-    if (url !== 'chrome-extension://testextension/background.js' || !disk) throw new TypeError('Failed to fetch');
-    return { ok: true, text: async () => code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${disk}';`) };
-  };
-  // Starts the worker as Chrome does: at once, and again after Chrome stopped it (#142), when the new worker's listeners
-  // replace the old one's and its memory starts empty. Chrome's records (registrations, access, tabs) stay as they were.
-  const start = () => vm.runInNewContext(build ? code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${build}';`) : code,
-    { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, SecondHandTranslation: translation, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console, fetch,
-      ...ai, ...(clock ? { Date: { now: () => clock.now } } : {}) });
-  start();
-  const send = (message, sender) => new Promise(resolve => { if (!listener(message, sender, resolve)) resolve(undefined); });
+  // The worker starts as Chrome starts it: at once, and again after Chrome stopped it (#142), when the new worker's
+  // listeners replace the old one's and its memory starts empty. Chrome's records (registrations, access, tabs) stay as they were.
+  w.start({ chrome, globals: { SecondHandGeneric: generic, ...ai, ...(clock ? { Date: { now: () => clock.now } } : {}) }, build, disk });
   // Whether Chrome lets SecondHand read this address.
   function covered(address) {
     try { const origin = new URL(address).origin; return permissions.has(`${origin}/*`) || (origin === IOWA_ORIGIN ? iowa.held : permissions.has(ALL) && address.startsWith('https://')); }
@@ -315,9 +287,9 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
     reloads: () => reloads,
     // The person removes SecondHand's access in Chrome's settings (#142).
     revoke: origins => takeBack(origins),
-    restart: () => { listener = undefined; for (const key of Object.keys(events)) delete events[key]; start(); },
+    restart: w.restart,
     // The events the worker listens to, its own messages included.
-    listening: () => [...Object.keys(events), ...(listener ? ['message'] : [])].sort(),
+    listening: w.listening,
     nativeTypes: () => native.map(call => call.type),
     contentTypes: () => content.map(call => call.type),
     panel: message => send({ tabId: 7, ...message }, { id: 'testextension', url: PANEL_URL }),
@@ -330,13 +302,13 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(reso
 test('the worker loads the site engine, its text, and its translator next to the Iowa adapter and refuses to start without any of them', () => {
   const imported = [];
   const chrome = { runtime: { onMessage: { addListener: () => {} } }, tabs: {}, sidePanel: { setPanelBehavior: async () => {} } };
-  assert.throws(() => vm.runInNewContext(source('background.js'), { chrome, SecondHandIowa: adapter, importScripts: (...files) => imported.push(...files), crypto: webcrypto, URL, Map, Set }), /generic-adapter\.js/);
+  assert.throws(() => runFile('extension/background.js', { chrome, SecondHandIowa: adapter, importScripts: (...files) => imported.push(...files), crypto: webcrypto, URL, Map, Set }), /generic-adapter\.js/);
   assert.deepEqual(imported, ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'strings.js', 'translation.js']);
-  assert.throws(() => vm.runInNewContext(source('background.js'), { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }), /strings\.js/);
-  assert.throws(() => vm.runInNewContext(source('background.js'), { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }),
+  assert.throws(() => runFile('extension/background.js', { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }), /strings\.js/);
+  assert.throws(() => runFile('extension/background.js', { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }),
     /translation\.js/, 'a worker that can’t translate questions for Laya doesn’t start');
   const { layaQuestion: _, ...older } = generic;
-  assert.throws(() => vm.runInNewContext(source('background.js'), { chrome, SecondHandIowa: adapter, SecondHandGeneric: older, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }),
+  assert.throws(() => runFile('extension/background.js', { chrome, SecondHandIowa: adapter, SecondHandGeneric: older, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }),
     /generic-adapter\.js/, 'an engine without Laya’s question rule is refused');
 });
 
@@ -811,8 +783,8 @@ function siteContent(t, { url = SITE_URL, engine = true, settled = null, offers 
       }
     };
   }
-  window.eval(source('page-text.js'));
-  window.eval(source('generic-content.js'));
+  evalFile(window, 'extension/page-text.js');
+  evalFile(window, 'extension/generic-content.js');
   return { window, frames, calls, reports,
     host: () => window.document.querySelector('[data-secondhand-assistant]'),
     request(message, sender = { id: extensionId }) { let response; listener?.(message, sender, value => { response = value; }); return response; },
@@ -836,14 +808,14 @@ test('on approved sites the widget is a closed, full-size extension iframe in th
   assert.equal(host.getAttribute('data-secondhand-size'), 'full');
   assert.equal(host.style.height, '46px');
   assert.equal(host.style.position, 'fixed');
-  page.window.eval(source('generic-content.js'));
+  evalFile(page.window, 'extension/generic-content.js');
   assert.equal(page.frames.length, 1, 'injecting again keeps one widget');
 
   const child = page.window.document.createElement('iframe');
   page.window.document.body.append(child);
   child.contentWindow.SecondHandGeneric = page.window.SecondHandGeneric;
   child.contentWindow.chrome = page.window.chrome;
-  child.contentWindow.eval(source('generic-content.js'));
+  evalFile(child.contentWindow, 'extension/generic-content.js');
   assert.equal(child.contentWindow.document.querySelector('[data-secondhand-assistant]'), null);
   assert.equal(siteContent(t, { engine: false }).host(), null);
   assert.equal(siteContent(t, { url: 'http://pantry.example.org/intake' }).host(), null);
@@ -1198,7 +1170,7 @@ test('an https subframe answers plans without creating a widget', t => {
   const reports = [];
   dom.window.chrome = { runtime: { id: extensionId, onMessage: { addListener: callback => { listener = callback; } }, sendMessage: async message => { reports.push(plain(message)); } } };
   dom.window.SecondHandGeneric = { plan: () => pantryPlan(), offers: () => true };
-  dom.window.eval(source('generic-content.js'));
+  evalFile(dom.window, 'extension/generic-content.js');
   assert.equal(typeof listener, 'function');
   assert.deepEqual(reports, [{ type: 'secondhand:generic:form', helps: true }]);
   let result;
@@ -1761,8 +1733,7 @@ test('a site frame answers the page-text request with its declared language and 
   doc.documentElement.lang = 'en';
   doc.body.insertAdjacentHTML('afterbegin', '<p>Bring a photo ID to pickup.</p>');
   doc.getElementById('name').value = 'Synthetic private name';
-  const box = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 };
-  for (const node of doc.querySelectorAll('*')) { node.getBoundingClientRect = () => box; node.getClientRects = () => [box]; }
+  layout(doc);
   assert.deepEqual(plain(page.request({ type: 'secondhand:generic:pageText' })), { lang: 'en', text: 'Bring a photo ID to pickup.\nYour name\nPickup day' });
   assert.equal(page.request({ type: 'secondhand:generic:pageText' }, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
   delete page.window.SecondHandPageText;
@@ -2163,26 +2134,25 @@ test('answers go only to the document Chrome placed: an embedded form that moves
 });
 
 // The real site engine and content script on a page, as Chrome loads them for each registration that matches.
-const CHECK_WAIT = 800; // longer than the content script waits after a page change before it checks again
+// How long the content script waits after a page change before it checks again. A test that changes a page
+// mocks setTimeout: the change arms the check, and the test's clock runs it.
+const CHECK_MS = 500;
+const checkAfterChange = async t => { await tick(); t.mock.timers.tick(CHECK_MS); await tick(); };
 function livePage(t, html, { url = OTHER_URL, framesReply = { frames: false }, loads = 1, top = true } = {}) {
   const dom = new JSDOM(`<!doctype html><body>${html}</body>`, { url, runScripts: 'outside-only', pretendToBeVisual: true });
   t.after(() => dom.window.close());
   if (!top) dom.reconfigure({ windowTop: {} });
   const { window } = dom;
-  // jsdom has no layout: every element gets a visible box.
-  const box = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 };
-  window.Element.prototype.getBoundingClientRect = () => box;
-  window.Element.prototype.getClientRects = () => [box];
+  layoutElements(window);
   const listeners = [], reports = [];
   window.chrome = { runtime: { id: extensionId, getURL: extensionURL, onMessage: { addListener: callback => { listeners.push(callback); } },
     sendMessage: async message => { reports.push(plain(message)); return structuredClone(framesReply); } } };
-  const load = () => { for (const file of SITE_SCRIPT.js) window.eval(source(file)); };
+  const load = () => { for (const file of SITE_SCRIPT.js) evalFile(window, `extension/${file}`); };
   for (let i = 0; i < loads; i++) load();
   return { window, listeners, reports, load,
     cards: () => window.document.querySelectorAll('[data-secondhand-assistant]').length,
     tell(message) { for (const listener of listeners) listener(message, { id: extensionId }, () => {}); } };
 }
-const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 test('with all websites on, the card shows on a form page and stays hidden on a search-only page, a sign-in page, and a page without inputs', async t => {
   assert.equal(livePage(t, forms.plainPantry).cards(), 1);
@@ -2200,18 +2170,22 @@ test('with all websites on, the card shows on a form page and stays hidden on a 
 });
 
 test('a form that appears after the page loads brings the card, and the card goes when the form does', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const page = livePage(t, '<main id="app"><p>Loading…</p></main>');
-  assert.equal(page.cards(), 0);
+  await tick();
+  assert.equal(page.cards(), 0, 'the page has loaded without a form');
   page.window.document.getElementById('app').innerHTML = '<form><label for="fname">First name</label><input id="fname"><label for="zip">ZIP code</label><input id="zip"></form>';
-  await wait(CHECK_WAIT);
+  await tick();
+  assert.equal(page.cards(), 0, 'the check waits for the page to settle');
+  t.mock.timers.tick(CHECK_MS); await tick();
   assert.equal(page.cards(), 1);
   page.window.document.getElementById('fname').value = 'Typed by the applicant';
   page.window.document.getElementById('zip').value = '50309';
   page.window.document.getElementById('app').append(page.window.document.createElement('p'));
-  await wait(CHECK_WAIT);
+  await checkAfterChange(t);
   assert.equal(page.cards(), 1, 'a filled form keeps its card');
   page.window.document.getElementById('app').innerHTML = '<p>Thank you. We received your sign-up.</p>';
-  await wait(CHECK_WAIT);
+  await checkAfterChange(t);
   assert.equal(page.cards(), 0);
 });
 
@@ -2234,17 +2208,20 @@ test('the scripts run once when a site’s own registration and all websites bot
 });
 
 test('an embedded form reports whether it has a form and never makes a card of its own', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const frame = livePage(t, '<form><label for="fname">First name</label><input id="fname"></form>', { url: `${FRAME_ORIGIN}/form`, top: false });
   assert.equal(frame.cards(), 0);
-  assert.deepEqual(frame.reports, [{ type: 'secondhand:generic:form', helps: true }]);
+  await tick();
+  assert.deepEqual(frame.reports, [{ type: 'secondhand:generic:form', helps: true }], 'the frame has loaded with its form');
   frame.window.document.querySelector('form').remove();
-  await wait(CHECK_WAIT);
+  await checkAfterChange(t);
   assert.deepEqual(frame.reports.at(-1), { type: 'secondhand:generic:form', helps: false });
   const empty = livePage(t, '<p>Advertisement</p>', { url: 'https://ads.example.com/frame', top: false });
   assert.deepEqual(empty.reports, [], 'a frame without a form says nothing');
 });
 
 test('an embedded frame tells the worker whether its page has a form when the worker asks, with a yes or no only (#157)', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const ask = (page, sender = { id: extensionId }) => {
     let reply;
     for (const listener of page.listeners) listener({ type: 'secondhand:generic:helps' }, sender, value => { reply = value; });
@@ -2253,8 +2230,10 @@ test('an embedded frame tells the worker whether its page has a form when the wo
   const frame = livePage(t, '<form><label for="fname">First name</label><input id="fname" value="Synthetic typed answer"></form>', { url: `${FRAME_ORIGIN}/form`, top: false });
   assert.deepEqual(ask(frame), { helps: true });
   assert.equal(ask(frame, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
+  await tick();
+  assert.deepEqual(ask(frame), { helps: true }, 'the frame has loaded with its form');
   frame.window.document.querySelector('form').remove();
-  await wait(CHECK_WAIT);
+  await checkAfterChange(t);
   assert.deepEqual(ask(frame), { helps: false });
   assert.deepEqual(ask(livePage(t, '<p>Advertisement</p>', { url: 'https://ads.example.com/frame', top: false })), { helps: false });
   assert.equal(ask(livePage(t, forms.plainPantry)), undefined, 'the top page places its own card');
@@ -2266,7 +2245,7 @@ test('an embedded frame tells the worker whether its page has a form when the wo
 test('the top page shows the card for an embedded form the worker tells it about', async t => {
   const page = siteContent(t, { offers: () => false, framesReply: { frames: true } });
   assert.equal(page.host(), null);
-  await wait(0);
+  await tick();
   assert.ok(page.host(), 'a form embedded before the page loaded');
   page.request({ type: 'secondhand:generic:formFrames', helps: false });
   assert.equal(page.host(), null);
@@ -2278,6 +2257,7 @@ test('the top page shows the card for an embedded form the worker tells it about
 });
 
 test('when SecondHand is turned off for the page, its card goes and the page answers nothing more', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const page = siteContent(t);
   assert.ok(page.host());
   page.request({ type: 'secondhand:generic:off' }, { id: 'b'.repeat(32) });
@@ -2287,7 +2267,7 @@ test('when SecondHand is turned off for the page, its card goes and the page ans
   assert.equal(page.request({ type: 'secondhand:generic:plan' }), undefined);
   page.request({ type: 'secondhand:generic:formFrames', helps: true });
   page.window.document.body.append(page.window.document.createElement('p'));
-  await wait(CHECK_WAIT);
+  await checkAfterChange(t);
   assert.equal(page.host(), null, 'nothing brings it back');
   assert.deepEqual(page.calls, []);
 });

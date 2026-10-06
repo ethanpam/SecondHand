@@ -137,6 +137,24 @@ async function main() {
     await installDesktop(worker, desktopProfile);
     assert.equal(await worker.evaluate(() => allSitesOn()), false, 'all websites starts off');
     const calls = type => worker.evaluate(type => globalThis.__desktop.calls.filter(call => call.type === type), type);
+    // The worker's own record, so a check that nothing came waits on events and state, not on the clock (#143): the
+    // tab loads Chrome reported complete (a page's content scripts have run by then), the pages whose content script
+    // reported whether they have a form, and whether the worker is busy (a click, a site fill, an autopilot step).
+    await worker.evaluate(() => {
+      globalThis.__smokeProbe = { complete: 0, reports: [] };
+      chrome.tabs.onUpdated.addListener((_tabId, change) => { if (change.status === 'complete') globalThis.__smokeProbe.complete++; });
+      chrome.runtime.onMessage.addListener((message, sender) => { if (message?.type === 'secondhand:generic:form') globalThis.__smokeProbe.reports.push(sender.url); });
+    });
+    const probe = () => worker.evaluate(() => ({ complete: globalThis.__smokeProbe.complete, reports: [...globalThis.__smokeProbe.reports],
+      busy: Boolean(clicksUnderway || siteRuns.size || [...autopilots.values()].some(pilot => pilot.running)) }));
+    // Waits until the worker is busy with nothing and, given its record from before a navigation, Chrome has finished
+    // loading the page and, for a page SecondHand is on (`reportFrom`), its content script has reported.
+    async function settled(since, { reportFrom } = {}) {
+      await expect.poll(async () => {
+        const now = await probe();
+        return !now.busy && (!since || now.complete > since.complete) && (!reportFrom || now.reports.slice(since.reports.length).includes(reportFrom));
+      }, { timeout: 20000 }).toBe(true);
+    }
     page = context.pages()[0] || await context.newPage();
     page.on('pageerror', error => errors.push(error.message));
     const extensionId = new URL(worker.url()).hostname;
@@ -148,8 +166,9 @@ async function main() {
     const cards = () => page.locator('[data-secondhand-assistant]').count();
 
     // A site that was never turned on gets nothing yet.
+    let since = await probe();
     await page.goto(PANTRY, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(1500);
+    await settled(since);
     assert.equal(await cards(), 0, 'no card on a site that is off');
 
     // Another site turned on by itself, the existing way (the desktop's trust is the stub).
@@ -195,7 +214,7 @@ async function main() {
     await expect(page.locator('#zip')).toHaveValue(syntheticProfile.zip);
     await expect(page.locator('#email')).toHaveValue(syntheticProfile.email);
     await expect(page.locator('#hh')).toHaveValue(syntheticProfile.householdSize);
-    await page.waitForTimeout(1500);
+    await settled();
     assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
     assert.equal(page.url(), PANTRY, 'nothing navigates');
     assert.deepEqual((await calls('getFields')).map(call => ({ url: call.url, fields: call.fields })),
@@ -232,13 +251,14 @@ async function main() {
     await expect.poll(() => panel.text('#status'), { timeout: 15000 }).toBe(en('save.saved'));
     assert.deepEqual(await worker.evaluate(() => globalThis.__desktop.saves), [{ url: HOUSEHOLD, fields: { addressLine2: 'Unit 5' } }]);
     await expect.poll(() => panel.visible('#save-section'), { timeout: 15000 }).toBe(false);
-    await page.waitForTimeout(1000);
+    await settled();
     assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
     console.log('#98: a pantry form’s household questions filled from the fictional household list (0-17, 18-59, 60+, and the student’s name and grade); the guardian stayed blank; the typed apartment was saved to My information after the Save click.');
 
     // A page whose only input is a search box gets no card.
+    since = await probe();
     await page.goto(SEARCH, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(1500);
+    await settled(since, { reportFrom: SEARCH });
     assert.equal(await cards(), 0, 'no card on a search-only page');
     console.log('All websites: no card on a search-only page.');
 
@@ -305,17 +325,20 @@ async function main() {
     assert.equal((await calls('untrustAllSites')).length, 1);
     const shown = await panel.text('#status');
     assert.equal(shown, en('joined', { first: { key: 'worker.allSitesOff' }, second: { key: 'worker.chromeStillAllows' } }));
+    since = await probe();
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(1500);
+    await settled(since);
     assert.equal(await cards(), 0, 'the card stays gone after a reload');
     await panel.screenshot(path.join(root, 'artifacts/all-websites/all-websites-off-panel.png'));
     console.log(`All websites: off. The card left the open page; Chrome’s grant and Iowa’s access are kept. The side panel says: "${shown}"`);
 
     // With the grant kept and all websites off, a site that was never trusted gets nothing.
+    since = await probe();
     await page.goto(NEVER, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(1500);
+    await settled(since);
     assert.equal(await cards(), 0, 'no card on a site that was never trusted');
     assert.equal(await worker.evaluate(origin => siteEnabled(origin), new URL(NEVER).origin), false);
+    await expect.poll(() => panel.visible('#site-enable'), { timeout: 15000 }).toBe(true);
     assert.equal(await panel.visible('#panel-autofill'), false, 'the panel offers to turn the site on, not Autofill');
     assert.equal((await calls('getFields')).some(call => call.url.startsWith(new URL(NEVER).origin)), false);
     console.log('Off: a site that was never trusted gets no card and no fill, though Chrome’s grant is kept.');
@@ -338,8 +361,9 @@ async function main() {
     assert.deepEqual((await calls('untrustSite')).map(call => call.url), [new URL(WIC).origin]);
     assert.deepEqual(await worker.evaluate(() => chrome.scripting.getRegisteredContentScripts()), []);
     assert.equal(await allowed(['https://*/*']), true);
+    since = await probe();
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(1500);
+    await settled(since);
     assert.equal(await cards(), 0);
     console.log('Per-site: wic.example.org turned off under the kept grant; the app dropped it and its card is gone.');
 

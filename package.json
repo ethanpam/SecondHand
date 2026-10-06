@@ -13,6 +13,7 @@
     "dev": "node scripts/dev.cjs",
     "test": "node --test tests/*.test.cjs",
     "check": "node scripts/check.cjs",
+    "test:coverage": "node scripts/coverage.cjs",
     "test:ui": "node scripts/smoke-ui.cjs",
     "test:extension": "node scripts/smoke-extension.cjs && node scripts/smoke-all-websites.cjs && node scripts/smoke-self-update.cjs",
     "test:translation": "node scripts/smoke-translation.cjs",

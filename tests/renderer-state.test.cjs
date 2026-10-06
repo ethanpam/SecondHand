@@ -5,11 +5,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { JSDOM } = require('jsdom');
+const { loadRenderer } = require('./helpers/harness.cjs');
 const { PROFILE_FIELDS, PROFILE_CHOICES, YES_NO_FIELDS, LIST_FIELDS, MEMBER_FIELDS, validateProfile } = require('../shared/schema.cjs');
 const fictionalProfile = require('./fixtures/applicant-profile.json');
 
 const html = fs.readFileSync(path.join(__dirname, '../renderer/index.html'), 'utf8');
-const script = ['../shared/snap-information.js', '../renderer/snap-information.js', '../renderer/app.js'].map(file => fs.readFileSync(path.join(__dirname, file), 'utf8')).join('\n');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 function deferred() {
@@ -50,7 +50,7 @@ async function renderer(t, { initialSetup = null, ...overrides } = {}) {
     onProfileChanged: callback => { onProfileChanged = callback; return () => {}; },
     ...overrides
   };
-  window.eval(script);
+  loadRenderer(window);
   await tick();
   const get = id => window.document.getElementById(id);
   // A profile field's control: its input or select, or its group of radio buttons.
@@ -1445,6 +1445,10 @@ test('a refused restore says why on the unlock screen, and declining the warning
 });
 
 const LAYA_BYTES = 428699034;
+// How often renderer/app.js asks for Laya's status while a download or update runs. A test that sees polls
+// mocks setTimeout and moves the clock this far for each one.
+const LAYA_POLL_MS = 500;
+const nextPoll = async t => { t.mock.timers.tick(LAYA_POLL_MS); await tick(); await tick(); };
 const layaView = view => ({
   checked: view.get('laya-toggle').checked, disabled: view.get('laya-toggle').disabled, text: view.get('laya-status').textContent,
   progress: view.get('laya-progress').hidden ? null : Number(view.get('laya-progress').value),
@@ -1452,6 +1456,7 @@ const layaView = view => ({
 });
 
 test('the Laya toggle shows the model size, and turning it on downloads with visible progress until ready', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const calls = [];
   let polled = 0;
   const view = await renderer(t, {
@@ -1466,11 +1471,12 @@ test('the Laya toggle shows the model size, and turning it on downloads with vis
   await tick(); await tick();
   assert.deepEqual(calls, [true]);
   assert.deepEqual(layaView(view), { checked: true, disabled: false, text: 'Downloading 25% of 429 MB…', progress: 25, buttons: ['Pause download'] });
-  await new Promise(resolve => setTimeout(resolve, 600));
+  assert.equal(polled, 0, 'the first poll waits its turn');
+  await nextPoll(t);
   assert.equal(layaView(view).text, 'Downloading 50% of 429 MB…');
-  await new Promise(resolve => setTimeout(resolve, 600));
+  await nextPoll(t);
   assert.deepEqual(layaView(view), { checked: true, disabled: false, text: 'Ready. The model (429 MB) is on this computer.', progress: null, buttons: ['Remove model'] });
-  await new Promise(resolve => setTimeout(resolve, 600));
+  await nextPoll(t);
   assert.equal(polled, 2, 'polling stops once the download is finished');
 });
 
@@ -1527,17 +1533,19 @@ test('a Laya error shows its message with a way to try again, and a failed toggl
 });
 
 test('a new install shows Laya on and downloading in the background, with its progress', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const view = await renderer(t, {
     status: async () => ({ exists: true, unlocked: true, extensionId: '', bridgeRunning: true, laya: { state: 'downloading', enabled: true, progress: 0, sizeBytes: LAYA_BYTES } }),
     layaStatus: async () => ({ state: 'downloading', enabled: true, progress: 0.1, sizeBytes: LAYA_BYTES })
   });
   assert.match(view.get('view-extension').textContent, /While it’s on, SecondHand downloads it in the background, checks for a newer version once a day, and runs it on this computer\./);
   assert.deepEqual(layaView(view), { checked: true, disabled: false, text: 'Downloading 0% of 429 MB…', progress: 0, buttons: ['Pause download'] });
-  await new Promise(resolve => setTimeout(resolve, 600));
+  await nextPoll(t);
   assert.equal(layaView(view).text, 'Downloading 10% of 429 MB…');
 });
 
 test('an update note shows beside the model’s status: a failed check, a model that needs a newer SecondHand, or an update downloading until it is installed', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const failed = await renderer(t, {
     status: async () => ({ exists: true, unlocked: true, extensionId: '', bridgeRunning: true,
       laya: { state: 'ready', enabled: true, sizeBytes: LAYA_BYTES, update: { state: 'error', message: 'Update check failed: the server answered 404.' } } })
@@ -1557,11 +1565,11 @@ test('an update note shows beside the model’s status: a failed check, a model 
       { state: 'ready', enabled: true, sizeBytes: 431e6 }
   });
   assert.deepEqual(layaView(updating), { checked: true, disabled: false, text: 'Ready. The model (429 MB) is on this computer. Downloading an update: 30% of 431 MB…', progress: null, buttons: ['Remove model'] });
-  await new Promise(resolve => setTimeout(resolve, 600));
+  await nextPoll(t);
   assert.equal(layaView(updating).text, 'Ready. The model (429 MB) is on this computer. Downloading an update: 90% of 431 MB…');
-  await new Promise(resolve => setTimeout(resolve, 600));
+  await nextPoll(t);
   assert.equal(layaView(updating).text, 'Ready. The model (431 MB) is on this computer.');
-  await new Promise(resolve => setTimeout(resolve, 600));
+  await nextPoll(t);
   assert.equal(polled, 2, 'polling stops once the update is installed');
 });
 

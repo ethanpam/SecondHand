@@ -305,14 +305,31 @@ test('the model is released after 5 idle minutes and loads again on the next dec
 
 test('warming loads the model ahead of a request, so a first decision after idle isn’t spent loading it', async t => {
   // Loading the real model takes seconds (process start, checksum, load): longer than a request's timeout.
+  // Here a load takes 120 ms of a clock the test runs, and a request has 60.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const slowLoad = () => stubRunner({ load: () => new Promise(resolve => setTimeout(resolve, 120)) });
-  const cold = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: { version: 1, model: null }, runner: slowLoad(), enabled: true, timeoutMs: 60 });
-  assert.equal((await cold.decide(rowState('3'), { correct: DECISION }).catch(error => error)).code, LAYA_TIMEOUT, 'without warming, the load eats the request’s time');
+  // What a promise came to: one that never settles fails the test instead of stopping it.
+  const ended = async (promise, what) => {
+    let outcome;
+    promise.then(value => { outcome = { value }; }, error => { outcome = { value: error }; });
+    await settles(() => outcome, what);
+    return outcome.value;
+  };
+  const coldRunner = slowLoad();
+  const cold = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: { version: 1, model: null }, runner: coldRunner, enabled: true, timeoutMs: 60 });
+  const coldDecision = cold.decide(rowState('3'), { correct: DECISION });
+  await settles(() => coldRunner.loads.length === 1, 'the model loading for the request');
+  t.mock.timers.tick(60);
+  assert.equal((await ended(coldDecision, 'the request to end')).code, LAYA_TIMEOUT, 'without warming, the load eats the request’s time');
+  t.mock.timers.tick(60);
   const runner = slowLoad();
   const laya = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: { version: 1, model: null }, runner, enabled: true, timeoutMs: 60 });
-  await Promise.all([laya.warm(), laya.warm()]);
+  const warming = Promise.all([laya.warm(), laya.warm()]);
+  await settles(() => runner.loads.length === 1, 'the model loading for the warms');
+  t.mock.timers.tick(120);
+  await ended(warming, 'the warms to finish');
   assert.equal(runner.loads.length, 1, 'warms share one load');
-  assert.equal((await laya.decide(rowState('3'), { correct: DECISION })).answers.correct.type, 'noul');
+  assert.equal((await ended(laya.decide(rowState('3'), { correct: DECISION }), 'a decision from the warm model')).answers.correct.type, 'noul', 'it needs none of the clock');
   await laya.warm();
   assert.equal(runner.loads.length, 1, 'a warm model is not loaded again');
   const off = createLaya({ modelDir: modelDirectory(t), modelFormat: 'noul-v1', manifest: { version: 1, model: null }, runner: stubRunner(), enabled: false });

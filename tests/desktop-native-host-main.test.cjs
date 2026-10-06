@@ -2,13 +2,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
+const { runMain } = require('./helpers/harness.cjs');
 
-const root = path.resolve(__dirname, '..');
-const source = fs.readFileSync(path.join(root, 'desktop/main.cjs'), 'utf8');
 const extensionId = 'a'.repeat(32);
 
 // main.cjs as Chrome starts it on macOS and Linux: with the extension's origin, it runs the native host.
@@ -19,7 +15,7 @@ function nativeHost({ packaged = false, env = {} } = {}) {
   const app = { isPackaged: packaged, setName() {}, setPath() {}, getPath: () => '/synthetic-data', getAppPath: () => '/synthetic/secondHand',
     whenReady: () => new Promise(() => {}), exit: code => assert.fail(`The native host exited (${code})`),
     requestSingleInstanceLock: () => assert.fail('The native host must not take the desktop’s single-instance lock') };
-  const overrides = {
+  runMain({
     electron: { app },
     './test-storage-path.cjs': { testStoragePath: () => null },
     './bridge.cjs': { ...require('../desktop/bridge.cjs'), nativeStreams: () => ({ input: 'synthetic-input', output: 'synthetic-output' }),
@@ -30,13 +26,9 @@ function nativeHost({ packaged = false, env = {} } = {}) {
       process.nextTick(() => child.emit('spawn'));
       return child;
     } }
-  };
-  vm.runInNewContext(source, {
-    require: name => Object.hasOwn(overrides, name) ? overrides[name] : require(name.startsWith('.') ? path.join(root, 'desktop', name) : name),
-    __dirname: path.join(root, 'desktop'), Buffer, setTimeout, clearTimeout,
+  }, { setTimeout, clearTimeout,
     process: { platform: 'darwin', execPath: '/synthetic/electron', env: { ...env },
-      argv: ['/synthetic/electron', '/synthetic/secondHand', `chrome-extension://${extensionId}/`, '--parent-window=0'] }
-  });
+      argv: ['/synthetic/electron', '/synthetic/secondHand', `chrome-extension://${extensionId}/`, '--parent-window=0'] } });
   assert.ok(host, 'main ran the native host');
   return { host, spawns };
 }

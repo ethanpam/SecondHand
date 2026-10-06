@@ -1,20 +1,14 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { JSDOM } = require('jsdom');
 const reader = require('../extension/page-text.js');
 const adapter = require('../extension/iowa-adapter.js');
 const preApplicant = require('./fixtures/iowa-pre-applicant.cjs');
 const pantry = require('./fixtures/pantry-forms.cjs');
+const { layout, laidOut } = require('./helpers/harness.cjs');
 
 // jsdom lays nothing out, so every element gets a box; a test shrinks one to show it collapsed.
-function page(html, url = 'https://pantry.example.org/sign-up') {
-  const dom = new JSDOM(`<!doctype html><html lang="en"><body>${html}</body></html>`, { url, pretendToBeVisual: true });
-  const { document } = dom.window;
-  const box = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 };
-  for (const node of document.querySelectorAll('*')) { node.getBoundingClientRect = () => box; node.getClientRects = () => [box]; }
-  return document;
-}
+const page = (html, url = 'https://pantry.example.org/sign-up') => laidOut(`<!doctype html><html lang="en"><body>${html}</body></html>`, url);
 const iowaScreen = name => page(preApplicant.screens[name].html, `${adapter.PORTAL}${preApplicant.screens[name].path}`);
 const INSTRUCTIONS = ['Food pantry sign-up', 'Before you visit',
   'Bring a photo ID for the adult picking up food. On your first visit, also bring a utility bill or lease that shows your address.',
@@ -44,7 +38,7 @@ test('typed and chosen answers, choices, SecondHand’s widget, scripts, styles,
   doc.querySelector('main').insertAdjacentHTML('beforeend', '<div data-secondhand-assistant="">SecondHand widget words</div>' +
     '<div role="radiogroup"><label><div role="radio" aria-checked="true"></div><span>Synthetic chosen option</span></label></div>' +
     '<div role="listbox"><div role="option" aria-selected="true">Synthetic listbox answer</div></div><div contenteditable="true">Synthetic typed words</div>');
-  for (const node of doc.querySelectorAll('*')) { const box = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 }; node.getBoundingClientRect = () => box; node.getClientRects = () => [box]; }
+  layout(doc);
   const text = reader.read(doc);
   assert.equal(text, [...INSTRUCTIONS, ...QUESTIONS].join('\n'));
   for (const left of ['Synthetic', '50309', 'Choose one', 'Sign up', 'SecondHand widget', 'pantryReady', 'color: green', 'Home', 'Donate', 'Privacy', 'Riverbend', 'hidden text', 'Hidden promotion']) {

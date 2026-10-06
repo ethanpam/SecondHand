@@ -224,12 +224,18 @@ async function inspectDemoMotion(page) {
   async function assertSuspended() {
     await expect(text).toHaveAttribute('data-running', 'false');
     await expect(demo).toHaveAttribute('data-running', 'false');
-    const previousText = await content.innerText();
-    const previousPhase = await demo.getAttribute('data-phase');
     assert.equal(await page.locator('.text-type__cursor').evaluate(element => getComputedStyle(element).animationPlayState), 'paused');
-    await page.waitForTimeout(500);
-    assert.equal(await content.innerText(), previousText);
-    assert.equal(await demo.getAttribute('data-phase'), previousPhase);
+    // data-running="false" means their timers are cleared. A change in the next 30 rendered frames would show one
+    // still running (#143: rendered frames, not a fixed wait).
+    const changes = await page.evaluate(() => new Promise(resolve => {
+      const seen = [];
+      const observer = new MutationObserver(records => seen.push(...records.map(record => record.type)));
+      for (const selector of ['.text-type__content', '.autofill-demo']) observer.observe(document.querySelector(selector), { subtree: true, childList: true, characterData: true, attributes: true });
+      let frames = 30;
+      const frame = () => { if (--frames) requestAnimationFrame(frame); else { observer.disconnect(); resolve(seen); } };
+      requestAnimationFrame(frame);
+    }));
+    assert.deepEqual(changes, [], 'Nothing moves while suspended');
   }
 
   await page.evaluate(() => {
@@ -301,8 +307,11 @@ async function main() {
     await page.screenshot({ path: path.join(artifacts, 'desktop.png'), fullPage: true });
 
     await page.emulateMedia({ reducedMotion: 'reduce' });
+    const shaderSpeed = () => page.locator('.gradient-canvas[data-paper-shader]').evaluate(element => element.paperShaderMount.currentSpeed);
+    await expect.poll(shaderSpeed).toBe(0);
     const reducedFrame = await shaderFrame();
-    await page.waitForTimeout(200);
+    // A shader that still ran would draw a new frame within the next rendered frames (#143: frames, not a fixed wait).
+    await page.evaluate(() => new Promise(resolve => { let frames = 10; const frame = () => (--frames ? requestAnimationFrame(frame) : resolve()); requestAnimationFrame(frame); }));
     assert.equal(await shaderFrame(), reducedFrame, 'Reduced motion must stop animation');
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await expect.poll(shaderFrame).toBeGreaterThan(reducedFrame);

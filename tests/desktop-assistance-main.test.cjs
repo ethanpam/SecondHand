@@ -3,24 +3,23 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
-const vm = require('node:vm');
-const { pathToFileURL } = require('node:url');
 const schema = require('../shared/schema.cjs');
 const { PORTAL_URL, FIELD_LABELS } = schema;
 const realLaya = require('../desktop/laya.cjs');
+const { plain, tick, startMain } = require('./helpers/harness.cjs');
 
 const extensionId = 'a'.repeat(32);
 const context = { extensionId };
-const root = path.resolve(__dirname, '..');
-const source = fs.readFileSync(path.join(root, 'desktop/main.cjs'), 'utf8');
-const tick = () => new Promise(resolve => setImmediate(resolve));
-// Values created inside the vm context have foreign prototypes.
-const plain = value => JSON.parse(JSON.stringify(value));
 // The day every test here runs on (#135): ages and birth-date checks never depend on when the tests run.
 // A test may name another day (`today`), or its own environment (`env`) to run on the clock.
 const TODAY = '2026-10-05';
 const IDLE_MS = 10 * 60 * 1000;
+// Each desktop's data folder: its own empty one inside this temporary folder. Settings, setup progress and
+// the vault are stand-ins; the real Laya runtime and Touch ID look in the folder and find nothing.
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'secondhand-assistance-main-'));
+test.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
 
 test('expanded SNAP answers are Iowa-only even when another site is trusted; record lists never leave the vault', async () => {
   const app = await desktop({ profile: { iowaResident: 'yes', ssnCardFirstName: 'Synthetic', jobs: [{ employer: 'Private' }] },
@@ -37,24 +36,18 @@ test('expanded SNAP answers are Iowa-only even when another site is trusted; rec
   assert.deepEqual(plain(response.values), { iowaResident: 'yes', ssnCardFirstName: 'Synthetic' });
 });
 
+// The real main process with Electron simulated (tests/helpers/harness.cjs). The vault, its files and the
+// bridge are stand-ins; Laya is the real runtime unless a test gives `laya`.
 async function desktop(options = {}) {
-  let bridge;
-  let shows = 0;
+  const userData = fs.mkdtempSync(path.join(scratch, 'app-'));
   let dataReads = 0;
   const writes = [];
   const removed = [];
   let setupFile = options.setup === undefined ? null : typeof options.setup === 'string' ? options.setup : JSON.stringify(options.setup);
-  let invoke;
-  let window;
   let answer = async () => ({ response: 1 });
   const prompts = [];
-  const notifications = [];
-  const powerEvents = new Map();
   const opened = [];
   let registrations = 0;
-  // The main process's timers: kept, not run, until a test runs one (the idle lock).
-  const timers = new Map();
-  let timerIds = 0;
   class Vault {
     // `options.profile`: information saved earlier, as the vault reads it back, without today's checks.
     // `options.applications`: application records saved earlier.
@@ -69,75 +62,56 @@ async function desktop(options = {}) {
     getData() { dataReads++; return this.data; }
     async update(change) { change(this.data); }
   }
-  class BrowserWindow {
-    constructor() {
-      window = this;
-      this.webContents = { mainFrame: { url: pathToFileURL(path.join(root, 'renderer/index.html')).href },
-        setWindowOpenHandler() {}, on() {}, send(...args) { notifications.push(args); } };
+  const main = await startMain({
+    userData, packaged: options.packaged === true,
+    env: options.env ?? { SECONDHAND_TEST_MODE: '1', SECONDHAND_TEST_TODAY: options.today ?? TODAY },
+    dialog: { async showMessageBox(_parent, options) { prompts.push(options); return answer(); } },
+    electron: { shell: { async openPath(folder) { opened.push(folder); return ''; } } },
+    modules: {
+      // settings.json from `options.settings`; the guided setup's progress file from `options.setup` (none by default), as written since.
+      'node:fs/promises': { mkdir: async () => {}, stat: async () => ({ size: 10 }), rm: async file => { removed.push(file); if (file.endsWith('setup-progress.json')) setupFile = null; },
+        readFile: async file => {
+          if (!String(file).endsWith('setup-progress.json')) return JSON.stringify(options.settings ?? { extensionId });
+          if (setupFile === null) throw Object.assign(new Error('No such file'), { code: 'ENOENT' });
+          return setupFile;
+        } },
+      // `options.beforeWrite(file)` runs before each write, for a test that acts while one is under way.
+      './vault.cjs': { Vault, atomicWrite: async (file, bytes) => {
+        await options.beforeWrite?.(file);
+        writes.push({ file, json: JSON.parse(bytes.toString()) });
+        if (file.endsWith('setup-progress.json')) setupFile = bytes.toString();
+      }, MAX_VAULT_BYTES: 1000 },
+      './extension-setup.cjs': options.extensionCopy?.module ?? { getExtensionSetup: async () => ({ prepared: true }) },
+      './registration.cjs': { registerHost: async () => { registrations++; return {}; } },
+      // The real schema. A record main.cjs builds here (recordProgress) has this vm context's Object prototype,
+      // which the schema's plain-object check refuses; in the app both share one realm, so it is copied across.
+      '../shared/schema.cjs': { ...schema, validateApplication: (input, existing) => schema.validateApplication(JSON.parse(JSON.stringify(input)), existing) },
+      // The app's one Laya runtime (#38). Without an override it is the real one with the shipped model,
+      // minus its background download and update checks (tests/desktop-laya-main.test.cjs covers those).
+      './laya.cjs': { ...realLaya, createLaya: runtimeOptions => options.laya ?? { ...realLaya.createLaya(runtimeOptions), startUpdates() {}, update() {} } }
     }
-    show() { shows++; } focus() {} setMenuBarVisibility() {} once() {} on() {} loadFile() {}
-    isDestroyed() { return false; }
-  }
-  const app = { isPackaged: options.packaged === true, setName() {}, setPath() {}, getPath: () => '/synthetic-local-data',
-    requestSingleInstanceLock: () => true, whenReady: () => Promise.resolve(), on() {} };
-  const electron = { app, BrowserWindow, ipcMain: { handle(_name, handler) { invoke = handler; } },
-    dialog: { async showMessageBox(_parent, options) { prompts.push(options); return answer(); }, showErrorBox() { assert.fail('Desktop setup failed'); } },
-    shell: { async openPath(folder) { opened.push(folder); return ''; } }, clipboard: {}, powerMonitor: { on(name, handler) { powerEvents.set(name, handler); } },
-    session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, webRequest: { onBeforeRequest() {} } } } };
-  // A Mac without Touch ID; tests/desktop-touch-id-main.test.cjs covers Touch ID.
-  electron.systemPreferences = { canPromptTouchID: () => false };
-  const overrides = {
-    electron,
-    // settings.json from `options.settings`; the guided setup's progress file from `options.setup` (none by default), as written since.
-    'node:fs/promises': { mkdir: async () => {}, stat: async () => ({ size: 10 }), rm: async file => { removed.push(file); if (file.endsWith('setup-progress.json')) setupFile = null; },
-      readFile: async file => {
-        if (!String(file).endsWith('setup-progress.json')) return JSON.stringify(options.settings ?? { extensionId });
-        if (setupFile === null) throw Object.assign(new Error('No such file'), { code: 'ENOENT' });
-        return setupFile;
-      } },
-    // `options.beforeWrite(file)` runs before each write, for a test that acts while one is under way.
-    './vault.cjs': { Vault, atomicWrite: async (file, bytes) => {
-      await options.beforeWrite?.(file);
-      writes.push({ file, json: JSON.parse(bytes.toString()) });
-      if (file.endsWith('setup-progress.json')) setupFile = bytes.toString();
-    }, MAX_VAULT_BYTES: 1000 },
-    './bridge.cjs': { ...require('../desktop/bridge.cjs'), startBridge: async (_directory, _getId, handler) => { bridge = handler; return { close: async () => {} }; } },
-    './extension-setup.cjs': options.extensionCopy?.module ?? { getExtensionSetup: async () => ({ prepared: true }) },
-    './registration.cjs': { registerHost: async () => { registrations++; return {}; } },
-    './test-storage-path.cjs': { testStoragePath: () => null },
-    // The real schema. A record main.cjs builds here (recordProgress) has this vm context's Object prototype,
-    // which the schema's plain-object check refuses; in the app both share one realm, so it is copied across.
-    '../shared/schema.cjs': { ...schema, validateApplication: (input, existing) => schema.validateApplication(JSON.parse(JSON.stringify(input)), existing) },
-    // The app's one Laya runtime (#38). Without an override it is the real one with the shipped model,
-    // minus its background download and update checks (tests/desktop-laya-main.test.cjs covers those).
-    './laya.cjs': { ...realLaya, createLaya: runtimeOptions => options.laya ?? { ...realLaya.createLaya(runtimeOptions), startUpdates() {}, update() {} } }
-  };
-  vm.runInNewContext(source, {
-    require: name => Object.hasOwn(overrides, name) ? overrides[name] : require(name.startsWith('.') ? path.join(root, 'desktop', name) : name),
-    __dirname: path.join(root, 'desktop'), process: { platform: process.platform, env: options.env ?? { SECONDHAND_TEST_MODE: '1', SECONDHAND_TEST_TODAY: options.today ?? TODAY }, argv: ['synthetic-electron'] },
-    setTimeout: (callback, ms) => { timers.set(++timerIds, { callback, ms }); return timerIds; }, clearTimeout: id => { timers.delete(id); }, Buffer
   });
-  await tick();
-  assert.equal(typeof bridge, 'function');
+  // The idle lock's timers now armed: set, and not cleared or run.
+  const armed = () => main.timers.filter(timer => timer.ms === IDLE_MS && !timer.cleared);
   return {
-    prompts, notifications, writes, removed,
-    // The idle lock's timers now armed, and running the one that is armed, as ten minutes without activity would.
-    idleTimers: () => [...timers.values()].filter(timer => timer.ms === IDLE_MS).map(timer => timer.ms),
+    userData, prompts, notifications: main.sent, writes, removed,
+    idleTimers: () => armed().map(timer => timer.ms),
+    // Runs the armed idle lock, as ten minutes without activity would.
     async idle() {
-      const armed = [...timers].filter(([, timer]) => timer.ms === IDLE_MS);
-      assert.equal(armed.length, 1, 'one idle lock is armed');
-      timers.delete(armed[0][0]);
-      armed[0][1].callback();
+      const timers = armed();
+      assert.equal(timers.length, 1, 'one idle lock is armed');
+      timers[0].cleared = true;
+      timers[0].callback();
       for (let i = 0; i < 5; i++) await tick();
     },
-    get shows() { return shows; },
+    get shows() { return main.shows; },
     get dataReads() { return dataReads; },
     get registrations() { return registrations; },
     opened,
     answer: callback => { answer = callback; },
-    request: request => bridge({ id: 'synthetic', url: PORTAL_URL, ...request }, context),
-    invoke: (method, argument) => invoke({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, method, ...(argument === undefined ? [] : [argument])),
-    async sleep() { powerEvents.get('suspend')(); await tick(); }
+    request: request => main.bridge({ id: 'synthetic', url: PORTAL_URL, ...request }, context),
+    invoke: main.invoke,
+    async sleep() { main.powerEvents.get('suspend')(); await tick(); }
   };
 }
 
@@ -1262,11 +1236,11 @@ test('the guided setup remembers how many of its six steps are done until it is 
   const fresh = await desktop({ settings: trusted });
   assert.equal(await fresh.invoke('setupProgress'), null, 'no setup under way');
   assert.deepEqual(plain(await fresh.invoke('startSetup')), { step: 0, steps: 6 });
-  assert.deepEqual(fresh.writes.at(-1), { file: '/synthetic-local-data/setup-progress.json', json: { version: 1, step: 0 } });
+  assert.deepEqual(fresh.writes.at(-1), { file: path.join(fresh.userData, 'setup-progress.json'), json: { version: 1, step: 0 } });
   assert.deepEqual(plain(await fresh.invoke('saveSetupProgress', 3)), { step: 3, steps: 6 });
   assert.deepEqual(plain(await fresh.invoke('saveSetupProgress', 2)), { step: 3, steps: 6 }, 'going back keeps the steps already done');
   assert.equal(await fresh.invoke('saveSetupProgress', 6), null, 'all six done: setup is finished');
-  assert.deepEqual(fresh.removed, ['/synthetic-local-data/setup-progress.json']);
+  assert.deepEqual(fresh.removed, [path.join(fresh.userData, 'setup-progress.json')]);
   for (const step of [-1, 7, 2.5, '3', null]) await assert.rejects(fresh.invoke('saveSetupProgress', step), /Request denied|step/, JSON.stringify(step));
 
   const resumed = await desktop({ settings: trusted, setup: { version: 1, step: 3 } });
