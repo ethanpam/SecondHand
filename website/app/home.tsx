@@ -111,14 +111,14 @@ export function Home() {
                 saved in My information. If you turn on Laya, SecondHand’s AI on
                 this computer, it fills more questions and marks them as guesses
                 to check. It moves past information-only screens for you. It
-                also selects Save and Continue on Tell Us More, Iowa’s
-                emergency SNAP questions, Background Information, the Job,
-                Income, Expenses and Property Information pages, and the pages
-                for one person’s saved job, pension, Social Security, rent,
+                also selects Save and Continue on Tell Us More, Background
+                Information, and Iowa’s questions about emergency SNAP, jobs,
+                income, expenses and property. It does the same on pages for one
+                person’s saved job, private pension, Social Security, rent,
                 utilities or cash. It does this only when it knows every
-                question on the page, every required answer is filled in, and
-                Iowa shows no error or pop-up. On any page not named here, or if
-                any of that is not true, you move on yourself. You handle
+                question on the page and every required answer is filled in. If
+                an answer is missing, or Iowa shows an error or pop-up, it stays
+                on that page. Anywhere else, you move on yourself. You handle
                 consent, signatures and submission.
               </p>
               <p>
