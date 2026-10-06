@@ -81,6 +81,20 @@ test('preload lets the app turn all websites off, never on: Chrome’s prompt ca
   assert.deepEqual(Object.keys(api).filter(name => /allSites/i.test(name)), ['turnOffAllSites']);
 });
 
+test('preload lets the app remove Always allow on a site, never add it: only the sensitive prompt does (#175)', () => {
+  let api;
+  const calls = [];
+  runFile('desktop/preload.cjs', {
+    require: () => ({
+      contextBridge: { exposeInMainWorld(_name, value) { api = value; } },
+      ipcRenderer: { invoke: (...args) => { calls.push(args); return Promise.resolve(); }, on() {}, removeListener() {} }
+    })
+  });
+  api.removeAlwaysAllowedSite('https://pantry.example.org');
+  assert.deepEqual(calls, [['secondhand:invoke', 'removeAlwaysAllowedSite', 'https://pantry.example.org']]);
+  assert.deepEqual(Object.keys(api).filter(name => /alwaysAllow/i.test(name)), ['removeAlwaysAllowedSite']);
+});
+
 test('preload tells My information which fields a save from Chrome changed, never their values, and exposes the setup’s progress calls', () => {
   let api;
   let listener;

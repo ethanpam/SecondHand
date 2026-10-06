@@ -743,6 +743,15 @@ test('Chrome extension view toggles autofill trust through the desktop API', asy
   assert.doesNotMatch(view.get('view-extension').textContent, /guided/i);
 });
 
+test('the trust setting says plainly that it fills sensitive details without asking too, on every site SecondHand is on (#175)', async t => {
+  const view = await renderer(t);
+  const hint = view.get('autofill-trust-hint');
+  assert.equal(view.get('autofill-trust').getAttribute('aria-describedby'), 'autofill-trust-hint', 'a screen reader reads it with the checkbox');
+  assert.equal(text(hint), 'When SecondHand is unlocked, Chrome can fill your saved answers without another pop-up, on every site SecondHand is on. ' +
+    'That includes your Social Security number, birth date, income, and citizenship and disability answers. ' +
+    'It also continues through verified Iowa applicant and home-address screens. Review the first suggested home address before submitting. Lock SecondHand to stop.');
+});
+
 test('a failed trust change restores the checkbox and shows the error', async t => {
   const view = await renderer(t, { setAutofillTrust: async () => { throw new Error('Unlock SecondHand first.'); } });
   view.get('autofill-trust').checked = true;
@@ -756,6 +765,11 @@ test('Privacy & backups names everything autofill fills or clicks today and keep
   const view = await renderer(t);
   view.window.document.querySelector('.nav-item[data-view="privacy"]').click();
   const card = text(view.window.document.querySelector('#view-privacy .autofill-card'));
+  // Always allow covers sensitive details too, on every site SecondHand is on (#175).
+  assert.equal(text(view.window.document.querySelector('#view-privacy .autofill-card p')), 'Autofill asks the first time. Choose Always allow to skip the pop-up while SecondHand is unlocked, ' +
+    'on every site SecondHand is on. That includes your Social Security number, birth date, income, and citizenship and disability answers. ' +
+    'When another site’s pop-up asks about those details, Always allow on this site skips it there alone. Only the saved answers a page needs leave SecondHand.');
+  assert.doesNotMatch(card, /every time/);
   for (const phrase of ['first applicant page', 'Household Application Information', 'Tell Us More', 'date of birth', 'Iowa’s questions about you',
     'first suggested home address', 'Information-only screens', 'Laya', 'guesses', 'Other sites you trust', 'Chrome’s built-in AI', 'on this computer',
     'never guesses on Iowa’s form', 'Iowa pages SecondHand doesn’t know', 'A complete live submission has not been validated.']) assert.ok(card.includes(phrase), phrase);
@@ -857,14 +871,57 @@ test('trusted sites are listed with a Remove button that calls the desktop', asy
   assert.equal(view.get('trusted-sites-empty').hidden, false);
 });
 
-test('the Chrome extension view says whether all websites is on and turns it off through the desktop; sites trusted one by one stay', async t => {
-  const calls = [];
-  let status = { exists: true, unlocked: true, extensionId: '', bridgeRunning: true, trustedSites: ['https://pantry.example.org'], allSites: true };
+test('sites with Always allow on this site are listed under their own heading, each with a Remove button that calls the desktop (#175)', async t => {
+  const removed = [];
+  const [pantry, wic] = ['https://pantry.example.org', 'https://wic.example.gov'];
+  let status = { exists: true, unlocked: true, extensionId: '', bridgeRunning: true, trustedSites: [pantry, wic], alwaysAllowedSites: [pantry, wic] };
+  const without = (list, origin) => list.filter(site => site !== origin);
   const view = await renderer(t, {
     status: async () => status,
-    turnOffAllSites: async () => { calls.push('off'); status = { ...status, allSites: false }; return status; }
+    removeAlwaysAllowedSite: async origin => { removed.push(['Always allow', origin]); status = { ...status, alwaysAllowedSites: without(status.alwaysAllowedSites, origin) }; return status; },
+    // As the desktop does, removing a trusted site takes its Always allow too.
+    removeTrustedSite: async origin => {
+      removed.push(['trusted', origin]);
+      status = { ...status, trustedSites: without(status.trustedSites, origin), alwaysAllowedSites: without(status.alwaysAllowedSites, origin) };
+      return status;
+    }
   });
-  assert.equal(view.get('all-sites-status').textContent, 'All websites: on. SecondHand can fill forms on any website after you click Autofill there. Sensitive details still ask on each site.');
+  const sites = id => Array.from(view.get(id).querySelectorAll('code'), code => code.textContent);
+  assert.equal(text(view.get('always-allowed-heading')), 'Sites that fill sensitive details without asking');
+  assert.equal(view.get('always-allowed-sites').getAttribute('aria-labelledby'), 'always-allowed-heading');
+  assert.deepEqual(sites('always-allowed-sites'), [pantry, wic]);
+  assert.equal(view.get('always-allowed-sites-empty').hidden, true);
+  view.get('always-allowed-sites').querySelector('button').click();
+  await tick(); await tick();
+  assert.deepEqual(removed, [['Always allow', pantry]]);
+  assert.deepEqual(sites('always-allowed-sites'), [wic]);
+  assert.deepEqual(sites('trusted-sites'), [pantry, wic], 'the site stays trusted');
+  assert.equal(view.get('toast').textContent, 'Always allow on this site is off for https://pantry.example.org.');
+  view.get('trusted-sites').querySelectorAll('button')[1].click();
+  await tick(); await tick();
+  assert.deepEqual(removed.at(-1), ['trusted', wic]);
+  assert.deepEqual(sites('trusted-sites'), [pantry]);
+  assert.deepEqual(sites('always-allowed-sites'), [], 'turning a site off takes its Always allow too');
+  assert.equal(view.get('always-allowed-sites-empty').hidden, false);
+  assert.equal(text(view.get('always-allowed-sites-empty')), 'None yet. When SecondHand asks before filling sensitive details on a site, choose Always allow on this site to add it here.');
+
+  const failing = await renderer(t, { status: async () => ({ ...status, alwaysAllowedSites: [pantry] }), removeAlwaysAllowedSite: async () => { throw new Error('Unlock SecondHand first.'); } });
+  failing.get('always-allowed-sites').querySelector('button').click();
+  await tick(); await tick();
+  assert.match(failing.get('autofill-trust-error').textContent, /Unlock SecondHand first\./);
+  assert.deepEqual(Array.from(failing.get('always-allowed-sites').querySelectorAll('code'), code => code.textContent), [pantry]);
+});
+
+test('the Chrome extension view says whether all websites is on and turns it off through the desktop; sites trusted one by one stay', async t => {
+  const calls = [];
+  let status = { exists: true, unlocked: true, extensionId: '', bridgeRunning: true, trustedSites: ['https://pantry.example.org'], allSites: true,
+    alwaysAllowedSites: ['https://pantry.example.org', 'https://never.example.net'] };
+  const view = await renderer(t, {
+    status: async () => status,
+    // As the desktop does, Always allow stays only on sites trusted on their own.
+    turnOffAllSites: async () => { calls.push('off'); status = { ...status, allSites: false, alwaysAllowedSites: ['https://pantry.example.org'] }; return status; }
+  });
+  assert.equal(view.get('all-sites-status').textContent, 'All websites: on. SecondHand can fill forms on any website after you click Autofill there. It asks first unless you chose Always allow.');
   assert.equal(view.get('all-sites-off').hidden, false);
   assert.equal(view.get('all-sites-off').textContent, 'Turn off');
   view.get('all-sites-off').click();
@@ -874,6 +931,8 @@ test('the Chrome extension view says whether all websites is on and turns it off
   assert.equal(view.get('all-sites-off').hidden, true);
   assert.match(view.get('toast').textContent, /no longer fill forms on every website/);
   assert.deepEqual(Array.from(view.get('trusted-sites').querySelectorAll('code'), code => code.textContent), ['https://pantry.example.org']);
+  assert.deepEqual(Array.from(view.get('always-allowed-sites').querySelectorAll('code'), code => code.textContent), ['https://pantry.example.org'],
+    'Always allow goes with the sites all websites let in');
 
   const failing = await renderer(t, { status: async () => ({ ...status, allSites: true }), turnOffAllSites: async () => { throw new Error('Unlock SecondHand first.'); } });
   failing.get('all-sites-off').click();

@@ -176,7 +176,7 @@ const RESET = 'SecondHand couldn’t read its settings file, so it reset the Chr
 const KEPT_OFF = `${RESET} Laya stays off.`;
 const BACK_ON = `${RESET} Laya is on again. If you had turned it off, turn it off again on that page.`;
 const site = 'https://pantry.example.org';
-const written = JSON.stringify({ extensionId, autofillWithoutAsking: true, trustedSites: [site], layaEnabled: false, allSites: true });
+const written = JSON.stringify({ extensionId, autofillWithoutAsking: true, trustedSites: [site], layaEnabled: false, allSites: true, alwaysAllowedSites: [site] });
 
 test('a settings file that can’t be read is reset and the app says what was reset; Laya’s off choice is kept when it can still be read', async t => {
   const cases = [
@@ -185,7 +185,8 @@ test('a settings file that can’t be read is reset and the app says what was re
     ['damaged where Laya’s choice was', `${written.slice(0, written.indexOf('"layaEnabled"'))}"layaEnab\u0000`, BACK_ON],
     ['not settings', '[false]', BACK_ON],
     ['empty', '', BACK_ON],
-    ['too large', JSON.stringify({ extensionId, layaEnabled: false, padding: 'x'.repeat(16 * 1024) }), BACK_ON]
+    // Past the 32 KB that two full lists of the longest sites, and the other settings, fit in (#175).
+    ['too large', JSON.stringify({ extensionId, layaEnabled: false, padding: 'x'.repeat(32 * 1024) }), BACK_ON]
   ];
   for (const [name, settingsText, notice] of cases) {
     const server = await modelServer(t);
@@ -195,6 +196,7 @@ test('a settings file that can’t be read is reset and the app says what was re
     assert.equal(status.extensionId, null, `${name}: Chrome is disconnected`);
     assert.equal(status.autofillWithoutAsking, false, name);
     assert.deepEqual(plain(status.trustedSites), [], name);
+    assert.deepEqual(plain(status.alwaysAllowedSites), [], name);
     assert.equal(status.allSites, false, name);
     if (notice === KEPT_OFF) {
       assert.equal(status.laya.state, 'off', name);
@@ -229,6 +231,7 @@ test('a missing or readable settings file has no notice', async t => {
   assert.equal(status.extensionId, extensionId);
   assert.equal(status.autofillWithoutAsking, true);
   assert.deepEqual(plain(status.trustedSites), [site]);
+  assert.deepEqual(plain(status.alwaysAllowedSites), [site]);
   assert.equal(status.allSites, true);
   assert.equal(status.laya.state, 'off');
 });

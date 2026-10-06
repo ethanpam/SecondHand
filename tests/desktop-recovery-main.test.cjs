@@ -282,27 +282,30 @@ test('a new recovery key needs SecondHand unlocked, stops the old key working, a
   assert.equal((await app.invoke('resetPassword', { recoveryKey: second, password: 'synthetic second password' })).unlocked, true);
 });
 
-// settings.json (#139): 50 trusted sites with the longest host name DNS allows (253 characters), with every
-// other setting on, are saved and read back after a restart.
+// settings.json (#139): 50 trusted sites with the longest host name DNS allows (253 characters), each with Always
+// allow on this site (#175), and every other setting on, are saved and read back after a restart.
 const longestHost = n => `${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${`site${String(n).padStart(2, '0')}`.padEnd(61, 'x')}`;
-const trusting = { showMessageBox: async () => ({ response: 1 }) };
+// Trust this site, Trust all websites and Allow once are the second button; Always allow on this site is the third.
+const trusting = { showMessageBox: async options => ({ response: options.title === 'Share sensitive details?' ? 2 : 1 }) };
 
-test('50 trusted sites with the longest host names, and every other setting, survive a restart', async t => {
+test('50 trusted sites with the longest host names, Always allow on each, and every other setting, survive a restart', async t => {
   const app = await desktop(t, { dialog: trusting });
   await app.invoke('createVault', { password: PASSWORD, allowDeviceReset: false });
   await app.invoke('connectExtension', EXTENSION);
-  await app.invoke('setAutofillTrust', true);
   await app.invoke('setLayaEnabled', false);
   assert.equal(longestHost(0).length, 253);
   const sites = Array.from({ length: 50 }, (_, n) => `https://${longestHost(n)}`);
   for (const site of sites) assert.deepEqual(plain(await app.request({ type: 'trustSite', url: `${site}/apply` })), { trusted: true, origin: site });
+  for (const site of sites) await app.request({ type: 'getFields', url: `${site}/apply`, fields: ['ssn'] });
+  await app.invoke('setAutofillTrust', true);
   assert.deepEqual(plain(await app.request({ type: 'trustAllSites' })), { allSites: true });
-  assert.ok((await fsp.stat(path.join(app.userData, 'settings.json'))).size > 13000, 'the largest settings.json SecondHand can write');
+  assert.ok((await fsp.stat(path.join(app.userData, 'settings.json'))).size > 26000, 'the largest settings.json SecondHand can write');
 
   const restarted = await desktop(t, { userData: app.userData });
   const status = await restarted.invoke('status');
   assert.equal(status.settingsNotice, null);
   assert.deepEqual(plain(status.trustedSites), sites);
+  assert.deepEqual(plain(status.alwaysAllowedSites), sites);
   assert.equal(status.extensionId, EXTENSION);
   assert.equal(status.autofillWithoutAsking, true);
   assert.equal(status.allSites, true);
