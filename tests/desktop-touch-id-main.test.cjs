@@ -72,7 +72,7 @@ test('turning Touch ID on asks for the password, adds a Touch ID slot, and seals
   for (const request of [undefined, {}, { enabled: 'yes' }]) await assert.rejects(app.invoke('setTouchIdUnlock', request), /Invalid setting/);
   await assert.rejects(app.invoke('setTouchIdUnlock', { enabled: true, password: 'a wrong but long password' }), /That password isn’t right/);
   await assert.rejects(app.invoke('setTouchIdUnlock', { enabled: true }), /at least 12/);
-  await assert.rejects(fsp.access(app.sealedPath), 'nothing is sealed without the password');
+  await assert.rejects(fsp.access(app.sealedPath), { code: 'ENOENT' }, 'nothing is sealed without the password');
   assert.deepEqual(Object.keys(await app.slots()).sort(), ['device', 'password', 'recovery']);
   assert.deepEqual(app.prompts, [], 'turning it on shows no Touch ID prompt');
 
@@ -264,7 +264,7 @@ test('turning Touch ID off removes its slot and the sealed key; the other slots 
   const slots = await app.slots();
   const off = await app.invoke('setTouchIdUnlock', { enabled: false });
   assert.equal(off.touchId, 'off');
-  await assert.rejects(fsp.access(app.sealedPath));
+  await assert.rejects(fsp.access(app.sealedPath), { code: 'ENOENT' });
   const after = await app.slots();
   assert.deepEqual(Object.keys(after).sort(), ['device', 'password', 'recovery']);
   for (const name of ['password', 'recovery', 'device']) assert.deepEqual(after[name], slots[name]);
@@ -292,7 +292,7 @@ test('a damaged key file or Touch ID slot turns Touch ID off with the reason, as
     const error = await app.invoke('unlockWithTouchId').then(() => assert.fail(`${name}: unlocked`), failure => failure);
     assert.match(error.message, /^Touch ID was turned off because .+\. Enter your password\.$/, name);
     assert.match(error.message, reason, name);
-    await assert.rejects(fsp.access(app.sealedPath), `${name}: the sealed key is removed`);
+    await assert.rejects(fsp.access(app.sealedPath), { code: 'ENOENT' }, `${name}: the sealed key is removed`);
     const status = await app.invoke('status');
     assert.equal(status.unlocked, false, name);
     assert.equal(status.touchId, 'off', name);
@@ -351,7 +351,7 @@ test('a damaged sealed key found by a password unlock turns Touch ID off and say
   assert.equal(unlocked.unlocked, true);
   assert.equal(unlocked.touchId, 'off');
   assert.match(unlocked.touchIdNotice, /^Touch ID was turned off because its key file on this Mac is damaged\.$/);
-  await assert.rejects(fsp.access(app.sealedPath));
+  await assert.rejects(fsp.access(app.sealedPath), { code: 'ENOENT' });
   assert.deepEqual(Object.keys(await app.slots()).sort(), ['device', 'password', 'recovery']);
   // Turning it on again clears the notice.
   const on = await app.invoke('setTouchIdUnlock', { enabled: true, password: PASSWORD });
@@ -368,7 +368,7 @@ test('a sealed key left without a Touch ID slot turns Touch ID off at the next p
   const unlocked = await app.invoke('unlock', PASSWORD);
   assert.equal(unlocked.touchId, 'off');
   assert.match(unlocked.touchIdNotice, /because your saved information has no Touch ID key/);
-  await assert.rejects(fsp.access(app.sealedPath));
+  await assert.rejects(fsp.access(app.sealedPath), { code: 'ENOENT' });
 });
 
 test('a password reset with the recovery key or this computer keeps Touch ID: the slot and key stay, and it unlocks', async t => {
@@ -402,7 +402,7 @@ test('starting over erases the Touch ID key with the saved information', async t
   await app.invoke('lock');
   const erased = await app.invoke('startOver', { confirmation: 'start over' });
   assert.equal(erased.touchId, 'off');
-  await assert.rejects(fsp.access(app.sealedPath));
+  await assert.rejects(fsp.access(app.sealedPath), { code: 'ENOENT' });
   const created = await app.invoke('createVault', { password: 'synthetic new password', allowDeviceReset: false });
   assert.equal(created.status.touchId, 'off');
 });
@@ -415,7 +415,7 @@ test('restoring a backup removes the Touch ID key: the backup opens with its own
   await app.invoke('exportBackup');
   await app.invoke('lock');
   assert.deepEqual(plain(await app.invoke('importBackup')), { cancelled: false });
-  await assert.rejects(fsp.access(app.sealedPath));
+  await assert.rejects(fsp.access(app.sealedPath), { code: 'ENOENT' });
   assert.equal((await app.invoke('status')).touchId, 'off');
   await assert.rejects(app.invoke('unlockWithTouchId'), /Touch ID is off/);
   // The restored file still carries the slot it was saved with; the password unlock removes it.
@@ -495,7 +495,7 @@ test('a new password removes a Touch ID key left from earlier information', asyn
   await fsp.writeFile(path.join(userData, 'touch-unlock.bin'), 'left from earlier information');
   const app = await desktop(t, { userData });
   await app.invoke('createVault', { password: PASSWORD, allowDeviceReset: false });
-  await assert.rejects(fsp.access(app.sealedPath));
+  await assert.rejects(fsp.access(app.sealedPath), { code: 'ENOENT' });
 });
 
 test('without Touch ID, on another system, or without the Keychain, Touch ID stays off and can’t be turned on', async t => {
@@ -518,7 +518,7 @@ test('without Touch ID, on another system, or without the Keychain, Touch ID sta
   const noKeychain = await desktop(t, { encryptionAvailable: false });
   await noKeychain.invoke('createVault', { password: PASSWORD, allowDeviceReset: false });
   await assert.rejects(noKeychain.invoke('setTouchIdUnlock', { enabled: true, password: PASSWORD }), /This Mac’s Keychain isn’t available, so Touch ID can’t be turned on/);
-  await assert.rejects(fsp.access(noKeychain.sealedPath));
+  await assert.rejects(fsp.access(noKeychain.sealedPath), { code: 'ENOENT' });
   assert.deepEqual(Object.keys(await noKeychain.slots()).sort(), ['password', 'recovery']);
 });
 
@@ -563,7 +563,7 @@ test('a turn-on whose key can’t be saved removes the slot it added, and says s
   platform.seal = () => { throw new Error('synthetic Keychain failure'); };
   await assert.rejects(touchId.turnOn(PASSWORD), error => error.publicMessage === 'Touch ID couldn’t be turned on (synthetic Keychain failure). Your password still works.');
   assert.equal(slots.length, 4, 'a key that can’t be sealed adds no slot');
-  await assert.rejects(fsp.access(filePath));
+  await assert.rejects(fsp.access(filePath), { code: 'ENOTDIR' }, 'no key file can be there: its folder is a file');
 });
 
 test('the Touch ID test hook works only in an unpackaged build in test mode, and never asks macOS or the Keychain', () => {

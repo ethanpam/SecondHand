@@ -87,7 +87,7 @@ test('a refresh writes background.js last, so its build marker means every other
   await fs.rm(path.join(copy, 'panel.css'));
   await fs.mkdir(path.join(copy, 'panel.css'));
   await fs.writeFile(path.join(copy, 'panel.css', 'blocker'), 'synthetic');
-  await assert.rejects(prepareBundledExtension(app));
+  await assert.rejects(prepareBundledExtension(app), { message: /panel\.css/ }, 'the refresh stops at the file it can’t replace');
   assert.equal(markerOf(await fs.readFile(path.join(copy, 'background.js'), 'utf8')), OLD_BUILD, 'background.js keeps the old build while any file is old');
   assert.equal((await getExtensionSetup(app)).prepared, false);
   await fs.rm(path.join(copy, 'panel.css'), { recursive: true });
@@ -110,8 +110,8 @@ test('a bundle without a build marker is refused before anything is copied', asy
 test('bundled public key pins the same Chrome ID on every platform and copy location', async () => {
   const manifest = JSON.parse(await fs.readFile(path.join(root, 'extension/manifest.json'), 'utf8'));
   assert.equal(extensionIdFromKey(manifest.key), 'jogldddafjfbmfjnjlbjloakjbecnjpl');
-  assert.throws(() => extensionIdFromKey('not a public key'));
-  assert.throws(() => extensionIdFromKey(Buffer.from('not DER').toString('base64')));
+  assert.throws(() => extensionIdFromKey('not a public key'), { message: 'The bundled extension key is invalid.' });
+  assert.throws(() => extensionIdFromKey(Buffer.from('not DER').toString('base64')), { code: /^ERR_OSSL_/ }, 'base64 that isn’t a public key is refused by the key parser');
   assert.equal(bundledDirectory({ isPackaged: false, getAppPath: () => root }), path.join(root, 'extension'));
   assert.equal(bundledDirectory({ isPackaged: true }, '/packaged/resources'), path.join('/packaged/resources', 'extension'));
 });
@@ -162,7 +162,7 @@ test('a broken package fails before replacing an existing extension', async t =>
   const resources = path.join(directory, 'resources');
   await fs.mkdir(path.join(resources, 'extension'), { recursive: true });
   await fs.copyFile(path.join(root, 'extension/manifest.json'), path.join(resources, 'extension/manifest.json'));
-  await assert.rejects(prepareBundledExtension({ ...app, isPackaged: true }, resources));
+  await assert.rejects(prepareBundledExtension({ ...app, isPackaged: true }, resources), { code: 'ENOENT', message: /background\.js/ }, 'a bundle missing its files is refused');
   assert.deepEqual(await fs.readFile(path.join(initial.directory, 'manifest.json')), before);
 });
 
@@ -176,7 +176,7 @@ test('refresh removes leftover top-level files only after the new extension is w
   const resources = path.join(userData, '..', 'resources');
   await fs.mkdir(path.join(resources, 'extension'), { recursive: true });
   await fs.copyFile(path.join(root, 'extension/manifest.json'), path.join(resources, 'extension/manifest.json'));
-  await assert.rejects(prepareBundledExtension({ ...app, isPackaged: true }, resources));
+  await assert.rejects(prepareBundledExtension({ ...app, isPackaged: true }, resources), { code: 'ENOENT', message: /background\.js/ }, 'a bundle missing its files is refused');
   assert.equal(await fs.readFile(stale, 'utf8'), 'old removed file');
   const refreshed = await prepareBundledExtension(app);
   assert.equal(refreshed.directory, initial.directory);

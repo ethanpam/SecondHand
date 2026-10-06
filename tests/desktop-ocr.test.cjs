@@ -40,16 +40,17 @@ test('OCR result validation bounds pages, text, word boxes, and strips extra pay
   assert.deepEqual(validatePages(alternate), alternate);
   alternate.pages[0].alternative.words[0].bbox.x1 = 1001;
   assert.throws(() => validatePages(alternate), { code: 'OUTPUT_LIMIT' });
+  // Each change, and the error code the reader reports for it.
   const cases = [
-    value => { value.pageCount = 2; },
-    value => { value.pages[0].text = 'x'.repeat(LIMITS.textPerPage + 1); },
-    value => { value.pages[0].width = 1000000; },
-    value => { value.pages[0].confidence = NaN; },
-    value => { value.pages[0].words[0].bbox.x1 = 1000; },
-    value => { value.pages[0].words[0].bbox.x0 = 99; },
-    value => { value.pages[0].words[0].confidence = Infinity; }
+    [value => { value.pageCount = 2; }, 'READ_FAILED'],
+    [value => { value.pages[0].text = 'x'.repeat(LIMITS.textPerPage + 1); }, 'OUTPUT_LIMIT'],
+    [value => { value.pages[0].width = 1000000; }, 'OUTPUT_LIMIT'],
+    [value => { value.pages[0].confidence = NaN; }, 'OUTPUT_LIMIT'],
+    [value => { value.pages[0].words[0].bbox.x1 = 1000; }, 'OUTPUT_LIMIT'],
+    [value => { value.pages[0].words[0].bbox.x0 = 99; }, 'OUTPUT_LIMIT'],
+    [value => { value.pages[0].words[0].confidence = Infinity; }, 'OUTPUT_LIMIT']
   ];
-  for (const change of cases) { const value = page(); change(value); assert.throws(() => validatePages(value)); }
+  for (const [change, code] of cases) { const value = page(); change(value); assert.throws(() => validatePages(value), { code }, change.toString()); }
   assert.equal(progress({ phase: 'recognizing', page: 13, total: 13 }), null);
   assert.equal(progress({ phase: 'Synthetic applicant text', page: 1, total: 1 }), null);
 });

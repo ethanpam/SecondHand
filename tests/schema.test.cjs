@@ -16,14 +16,18 @@ test('blank facts stay unknown; explicit zero remains zero', () => {
   assert.equal(profile.state, '');
 });
 test('profile rejects unknown fields, invalid dates and invalid money', () => {
-  for (const profile of [{ unknown: 'value' }, { firstName: {} }, { birthDate: '2020-02-30' }, { monthlyRent: '-1' }, { monthlyRent: 'unknown' }, { householdSize: '0' }, JSON.parse('{"__proto__":"bad"}')]) assert.throws(() => validateProfile(profile));
+  for (const [profile, reason] of [[{ unknown: 'value' }, /^Unknown profile field\.$/], [{ firstName: {} }, /^First name is invalid\.$/], [{ birthDate: '2020-02-30' }, /^Enter a valid date of birth\.$/],
+    [{ monthlyRent: '-1' }, /^Monthly rent or mortgage must be a nonnegative dollar amount/], [{ monthlyRent: 'unknown' }, /^Monthly rent or mortgage must be a nonnegative dollar amount/],
+    [{ householdSize: '0' }, /^Household size must be a whole number from 1 to 99\.$/], [JSON.parse('{"__proto__":"bad"}'), /^Unknown profile field\.$/]]) {
+    assert.throws(() => validateProfile(profile), { message: reason }, JSON.stringify(profile));
+  }
 });
 test('typed phone numbers stay distinct; legacy phone never implies home or mobile', () => {
   const profile = validateProfile({ phone: '515-555-0100', homePhone: '(515)555-0101', mobilePhone: '5155550102' });
   assert.equal(profile.homePhone, '(515)555-0101');
   assert.equal(profile.mobilePhone, '5155550102');
   assert.equal(validateProfile({ phone: '515-555-0100' }).homePhone, '');
-  assert.throws(() => validateProfile({ mobilePhone: 'call me' }));
+  assert.throws(() => validateProfile({ mobilePhone: 'call me' }), /^Error: Enter a valid mobile phone number\.$/);
 });
 test('first-page yes/no choices preserve unknown separately and never infer programs or address answers', () => {
   const oldProfile = validateProfile({ firstName: 'Legacy', addressLine1: '123 Test Way', city: 'Demo City', state: 'IA', zip: '50309' });
@@ -33,7 +37,8 @@ test('first-page yes/no choices preserve unknown separately and never infer prog
   for (const field of YES_NO_FIELDS) {
     assert.equal(validateProfile({ [field]: 'yes' })[field], 'yes');
     assert.equal(validateProfile({ [field]: 'no' })[field], 'no');
-    for (const value of [true, false, 0, 1, 'Y', 'N', 'unknown', 'false']) assert.throws(() => validateProfile({ [field]: value }), field);
+    for (const value of [true, false, 0, 1]) assert.throws(() => validateProfile({ [field]: value }), / is invalid\.$/, `${field}: ${value}`);
+    for (const value of ['Y', 'N', 'unknown', 'false']) assert.throws(() => validateProfile({ [field]: value }), / must be Yes, No, or left unanswered\.$/, `${field}: ${value}`);
   }
   const explicit = validateProfile({ programSnap: 'yes', programFip: 'no', hasHomeAddress: 'no', mailingSameAsHome: 'no' });
   assert.equal(explicit.programFip, 'no');
@@ -47,26 +52,26 @@ test('mailing contact fields stay separate, use validated formats, and the full 
   assert.equal(complete.mailingAddressLine1, 'PO Box 123');
   assert.equal(complete.addressLine1, fictionalProfile.addressLine1);
   assert.equal(validateProfile({ mailingState: 'ia' }).mailingState, 'IA');
-  assert.throws(() => validateProfile({ mailingState: 'Iowa' }));
-  assert.throws(() => validateProfile({ mailingZip: '123' }));
-  assert.throws(() => validateProfile({ bestContactTime: 'x'.repeat(31) }));
+  assert.throws(() => validateProfile({ mailingState: 'Iowa' }), /^Error: Mailing state must use a two-letter state abbreviation\.$/);
+  assert.throws(() => validateProfile({ mailingZip: '123' }), /^Error: Mailing ZIP code must be a five- or nine-digit ZIP code\.$/);
+  assert.throws(() => validateProfile({ bestContactTime: 'x'.repeat(31) }), /^Error: Best time to call must be 30 characters or fewer\.$/);
   assert.equal(validateProfile({ bestContactTime: 'x'.repeat(30) }).bestContactTime.length, 30);
   for (const suffix of ['', 'I', 'III', 'X', 'Jr.', 'Sr.']) assert.equal(validateProfile({ suffix }).suffix, suffix);
-  for (const suffix of ['Jr', 'Doctor', 'XI']) assert.throws(() => validateProfile({ suffix }));
+  for (const suffix of ['Jr', 'Doctor', 'XI']) assert.throws(() => validateProfile({ suffix }), /^Error: Choose a supported name suffix, or leave it blank\.$/, suffix);
 });
 test('submission is never inferred and requires a receipt', () => {
   assert.equal(validateApplication({}).status, 'draft');
-  assert.throws(() => validateApplication({ status: 'submitted' }));
+  assert.throws(() => validateApplication({ status: 'submitted' }), /^Error: Add the portal confirmation number before marking an application submitted\.$/);
   const app = validateApplication({ status: 'submitted', confirmationNumber: 'TEST-RECEIPT' });
   assert.equal(app.confirmationNumber, 'TEST-RECEIPT');
   assert.equal(validateApplication({ ...app, status: 'needs_action' }, app).id, app.id);
-  assert.throws(() => validateApplication({ dueDate: '2026-02-30' }));
+  assert.throws(() => validateApplication({ dueDate: '2026-02-30' }), /^Error: Enter a valid due date\.$/);
 });
 test('stored application timestamps survive validation without being rewritten', () => {
   const original = { ...validateApplication({}), createdAt: '2026-01-01T12:00:00.000Z', updatedAt: '2026-02-01T12:00:00.000Z' };
   assert.deepEqual(validateStoredApplication(original), original);
-  assert.throws(() => validateStoredApplication({ ...original, createdAt: 'yesterday' }));
-  assert.throws(() => validateStoredApplication({ ...original, id: '' }));
+  assert.throws(() => validateStoredApplication({ ...original, createdAt: 'yesterday' }), /^Error: Invalid application timestamp\.$/);
+  assert.throws(() => validateStoredApplication({ ...original, id: '' }), /^Error: Incomplete stored application\.$/);
 });
 
 test('household counts accept whole numbers from 0 to 30 and household flags accept only yes or no', () => {
@@ -167,23 +172,24 @@ test('each household member is checked like the rest of the profile: trimmed, le
   assert.deepEqual(saved.householdMembers[1], completeMember({ id: MEMBER_CHILD, firstName: 'Riley', lastName: 'Example', birthDate: '2015-09-03', relationship: 'child', student: 'yes', grade: '5th' }));
   assert.deepEqual(validateProfile(withMembers([child({ birthDate: undefined, student: undefined, grade: undefined, lastName: undefined })])).householdMembers[1],
     completeMember({ id: MEMBER_CHILD, firstName: 'Riley', lastName: '', birthDate: '', relationship: 'child', student: '', grade: '' }), 'blank is unknown');
+  // Each refused member, and the reason the applicant is given.
   const refused = {
-    'an unknown member field': child({ password: 'not-supported' }),
-    'a future birth date': child({ birthDate: '2999-01-01' }),
-    'an impossible birth date': child({ birthDate: '2015-02-30' }),
-    'a birth date in another format': child({ birthDate: '09/03/2015' }),
-    'a control character': child({ firstName: 'Ri\u0007ley' }),
-    'a name over 100 characters': child({ lastName: 'x'.repeat(101) }),
-    'a relationship that isn’t listed': child({ relationship: 'cousin' }),
-    'a student answer that isn’t yes or no': child({ student: 'true' }),
-    'a grade over 20 characters': child({ grade: 'x'.repeat(21) }),
-    'a grade for someone who isn’t a student': child({ student: 'no' }),
-    'a person with no first name': child({ firstName: '  ' }),
-    'an id that isn’t one': child({ id: 'child-1' }),
-    'a member that isn’t an object': 'Riley Example',
-    'a member with an inherited shape': Object.create({ id: MEMBER_CHILD })
+    'an unknown member field': [child({ password: 'not-supported' }), /^Unknown household member field\.$/],
+    'a future birth date': [child({ birthDate: '2999-01-01' }), /^Person 2’s date of birth can’t be after today /],
+    'an impossible birth date': [child({ birthDate: '2015-02-30' }), /^Enter a valid date of birth for each person in your household\.$/],
+    'a birth date in another format': [child({ birthDate: '09/03/2015' }), /^Enter a valid date of birth for each person in your household\.$/],
+    'a control character': [child({ firstName: 'Ri\u0007ley' }), /^A household member’s first name is invalid\.$/],
+    'a name over 100 characters': [child({ lastName: 'x'.repeat(101) }), /^A household member’s last name is invalid\.$/],
+    'a relationship that isn’t listed': [child({ relationship: 'cousin' }), /^Choose how each household member is related to you\.$/],
+    'a student answer that isn’t yes or no': [child({ student: 'true' }), /^Whether a household member is a student is invalid\.$/],
+    'a grade over 20 characters': [child({ grade: 'x'.repeat(21) }), /^A household member’s grade is invalid\.$/],
+    'a grade for someone who isn’t a student': [child({ student: 'no' }), /^Add a grade only for a household member who is a student\.$/],
+    'a person with no first name': [child({ firstName: '  ' }), /^Enter a first name for each person in your household\.$/],
+    'an id that isn’t one': [child({ id: 'child-1' }), /^A household member is invalid\.$/],
+    'a member that isn’t an object': ['Riley Example', /^A household member is invalid\.$/],
+    'a member with an inherited shape': [Object.create({ id: MEMBER_CHILD }), /^A household member is invalid\.$/]
   };
-  for (const [name, member] of Object.entries(refused)) assert.throws(() => validateProfile(withMembers([member])), name);
+  for (const [name, [member, reason]] of Object.entries(refused)) assert.throws(() => validateProfile(withMembers([member])), { message: reason }, name);
   assert.throws(() => validateProfile(withMembers([child(), child()])), /once/, 'two members can’t share an id');
   assert.throws(() => validateProfile({ householdMembers: 'Riley' }), /household/i);
   assert.throws(() => validateProfile({ householdMembers: { 0: child() } }), /household/i);
@@ -260,8 +266,10 @@ test('a profile read back from the vault keeps a birth date the clock now puts i
   assert.equal(read.birthDate, '2030-05-05');
   assert.deepEqual(read.householdMembers.map(member => member.birthDate), ['2030-05-05', '2031-01-01', '1825-06-01']);
   // Everything else is still checked as it is when saved.
-  for (const profile of [{ birthDate: '2020-02-30' }, { birthDate: '04/12/1985' }, withMembers([child({ birthDate: '2015-02-30' })]), { zip: 'ABCDE' }, { unknown: 'value' }]) {
-    assert.throws(() => validateStoredProfile(profile), JSON.stringify(profile));
+  for (const [profile, reason] of [[{ birthDate: '2020-02-30' }, /^Enter a valid date of birth\.$/], [{ birthDate: '04/12/1985' }, /^Enter a valid date of birth\.$/],
+    [withMembers([child({ birthDate: '2015-02-30' })]), /^Enter a valid date of birth for each person in your household\.$/], [{ zip: 'ABCDE' }, /^ZIP code must be a five- or nine-digit ZIP code\.$/],
+    [{ unknown: 'value' }, /^Unknown profile field\.$/]]) {
+    assert.throws(() => validateStoredProfile(profile), { message: reason }, JSON.stringify(profile));
   }
 });
 

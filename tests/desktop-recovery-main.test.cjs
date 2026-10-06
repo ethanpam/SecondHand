@@ -67,7 +67,7 @@ test('a password created with reset on this computer can be reset there, and tur
 
   const off = await app.invoke('setDeviceReset', false);
   assert.equal(off.deviceReset, false);
-  await assert.rejects(fsp.access(app.secretPath));
+  await assert.rejects(fsp.access(app.secretPath), { code: 'ENOENT' });
   await app.invoke('lock');
   await assert.rejects(app.invoke('resetPassword', { method: 'device', password: 'synthetic third password' }), /isn’t set up/);
 
@@ -85,7 +85,7 @@ test('without protected storage, a new password still gets a recovery key and re
   assert.equal(created.status.deviceReset, false);
   assert.equal(created.status.recoveryKey, true);
   assert.match(created.recoveryKey, /^[0-9A-Z]{4}(?:-[0-9A-Z]{4}){7}$/);
-  await assert.rejects(fsp.access(app.secretPath));
+  await assert.rejects(fsp.access(app.secretPath), { code: 'ENOENT' });
   await assert.rejects(app.invoke('setDeviceReset', true), /couldn’t save a reset option/);
 });
 
@@ -120,9 +120,9 @@ test('starting over erases the locked information and reset secret, keeps settin
   assert.equal(erased.exists, false);
   assert.equal(erased.unlocked, false);
   assert.equal(erased.deviceReset, false);
-  await assert.rejects(fsp.access(path.join(userData, 'vault.secondhand')));
-  await assert.rejects(fsp.access(path.join(userData, 'vault.secondhand.before-import-1-abcd1234')));
-  await assert.rejects(fsp.access(app.secretPath));
+  await assert.rejects(fsp.access(path.join(userData, 'vault.secondhand')), { code: 'ENOENT' });
+  await assert.rejects(fsp.access(path.join(userData, 'vault.secondhand.before-import-1-abcd1234')), { code: 'ENOENT' });
+  await assert.rejects(fsp.access(app.secretPath), { code: 'ENOENT' });
   await fsp.access(settings);
 
   const created = await app.invoke('createVault', { password: 'synthetic new password', allowDeviceReset: false });
@@ -191,7 +191,7 @@ test('every refused or cancelled restore leaves the saved information as it was'
   const copies = (await fsp.readdir(app.userData)).filter(name => name.startsWith('vault.secondhand.before-import-'));
   assert.equal(copies.length, 1);
   assert.deepEqual(await fsp.readFile(path.join(app.userData, copies[0])), before.vault);
-  await assert.rejects(fsp.access(path.join(app.userData, 'setup-progress.json')));
+  await assert.rejects(fsp.access(path.join(app.userData, 'setup-progress.json')), { code: 'ENOENT' });
   await app.invoke('unlock', PASSWORD);
   assert.equal((await app.invoke('getData')).profile.firstName, 'Backed up');
 });
@@ -206,7 +206,7 @@ test('export: refused before a password exists, nothing written when cancelled, 
   assert.deepEqual(app.dialogs, [], 'no file is asked for');
   await app.invoke('createVault', { password: PASSWORD, allowDeviceReset: false });
   assert.deepEqual(plain(await app.invoke('exportBackup')), { cancelled: true });
-  await assert.rejects(fsp.access(target));
+  await assert.rejects(fsp.access(target), { code: 'ENOENT' });
   cancel = false;
   await app.invoke('lock');
   assert.deepEqual(plain(await app.invoke('exportBackup')), { cancelled: false }, 'a locked app can save its locked copy');
@@ -247,7 +247,7 @@ test('Save writes the recovery key and how to use it to the file the person pick
   await assert.rejects(app.invoke('saveRecoveryKey', 'not a recovery key'), /Enter the recovery key exactly as it was shown/);
   assert.deepEqual(app.dialogs, [], 'a key that isn’t one is never offered for saving');
   assert.deepEqual(plain(await app.invoke('saveRecoveryKey', recoveryKey)), { cancelled: true });
-  await assert.rejects(fsp.access(target));
+  await assert.rejects(fsp.access(target), { code: 'ENOENT' });
   assert.equal(app.dialogs[0].options.defaultPath, 'SecondHand recovery key.txt');
   cancel = false;
   assert.deepEqual(plain(await app.invoke('saveRecoveryKey', recoveryKey.toLowerCase())), { cancelled: false });
