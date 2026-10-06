@@ -156,7 +156,7 @@ test('rendered offscreen fields are scrolled into view and rechecked before fill
   target.getBoundingClientRect = () => ({ left: 20, top: 1400, right: 220, bottom: 1430, width: 200, height: 30 });
   target.scrollIntoView = () => {
     scrolled++;
-    target.getBoundingClientRect = () => ({ left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 });
+    target.getBoundingClientRect = () => BOX;
   };
   const result = adapter.fill(doc, URL, adapter.scan(doc, URL).bindings, { firstName: 'Example' });
   assert.deepEqual(result.filled, ['firstName']);
@@ -165,7 +165,7 @@ test('rendered offscreen fields are scrolled into view and rechecked before fill
   const control = blocked.querySelector('#firstName');
   control.getBoundingClientRect = () => ({ left: 20, top: 1400, right: 220, bottom: 1430, width: 200, height: 30 });
   control.scrollIntoView = () => {
-    control.getBoundingClientRect = () => ({ left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 });
+    control.getBoundingClientRect = () => BOX;
     control.hidden = true;
   };
   assert.deepEqual(adapter.fill(blocked, URL, adapter.scan(blocked, URL).bindings, { firstName: 'Example' }).filled, []);
@@ -366,7 +366,7 @@ test('checklist focus only scrolls and focuses a verified control on the exact p
   assert.equal(adapter.focusField(doc, URL, 'firstName'), false);
   const offscreen = doc.querySelector('#lastName');
   offscreen.getBoundingClientRect = () => ({ left: 20, top: 2000, right: 220, bottom: 2030, width: 200, height: 30 });
-  offscreen.scrollIntoView = () => { offscreen.getBoundingClientRect = () => ({ left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 }); };
+  offscreen.scrollIntoView = () => { offscreen.getBoundingClientRect = () => BOX; };
   assert.equal(adapter.focusField(doc, URL, 'lastName'), true);
   assert.equal(doc.activeElement.id, 'lastName');
 });

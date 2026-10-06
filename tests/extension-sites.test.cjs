@@ -7,7 +7,7 @@ const { JSDOM } = require('jsdom');
 const adapter = require('../extension/iowa-adapter.js');
 const strings = require('../extension/strings.js');
 const forms = require('./fixtures/pantry-forms.cjs');
-const { plain, tick, runFile, evalFile, layout, serviceWorker, nativeHost } = require('./helpers/harness.cjs');
+const { plain, tick, runFile, evalFile, layout, layoutElements, serviceWorker, nativeHost } = require('./helpers/harness.cjs');
 
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
 const SITE_URL = 'https://pantry.example.org/intake?step=1';
@@ -2143,10 +2143,7 @@ function livePage(t, html, { url = OTHER_URL, framesReply = { frames: false }, l
   t.after(() => dom.window.close());
   if (!top) dom.reconfigure({ windowTop: {} });
   const { window } = dom;
-  // jsdom has no layout: every element gets a visible box.
-  const box = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 };
-  window.Element.prototype.getBoundingClientRect = () => box;
-  window.Element.prototype.getClientRects = () => [box];
+  layoutElements(window);
   const listeners = [], reports = [];
   window.chrome = { runtime: { id: extensionId, getURL: extensionURL, onMessage: { addListener: callback => { listeners.push(callback); } },
     sendMessage: async message => { reports.push(plain(message)); return structuredClone(framesReply); } } };
