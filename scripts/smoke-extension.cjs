@@ -466,10 +466,9 @@ async function main() {
       return { text: text.textContent, shown: !text.classList.contains('visually-hidden') && box.width > 0 && box.height > 0,
         clipped: text.scrollHeight > text.clientHeight, inFrame: inside(box) && inside(card), dir: document.documentElement.dir };
     });
-    // On a narrow page a line may still end in "…" (clamped), but never past its frame.
-    const lineProblems = async (frame, expected, code, { clamped = false } = {}) => {
+    const lineProblems = async (frame, expected, code) => {
       const line = await widgetLine(frame), box = await frameBox();
-      return [line.text !== expected && `text "${line.text}"`, !line.shown && 'line hidden', !clamped && line.clipped && 'line clipped',
+      return [line.text !== expected && `text "${line.text}"`, !line.shown && 'line hidden', line.clipped && 'line clipped',
         !line.inFrame && 'line past the frame', box.width > 272 && `frame ${box.width}px wide`, box.height > 110 && `frame ${box.height}px tall`,
         line.dir !== strings.direction(code) && `dir ${line.dir}`].filter(Boolean);
     };
@@ -520,12 +519,11 @@ async function main() {
     console.log('Widget: after Autofill, the whole next step shows inside the frame in all six languages, and Arabic reads right to left.');
 
     // A narrow page (an old laptop at high zoom with the side panel open leaves about 260px): the
-    // widget keeps its buttons' width and its line takes more rows, and nothing is drawn past the frame.
+    // widget keeps its buttons' width and its line takes more rows, all of it inside the frame.
     const settledLine = async (code, expected) => {
       await expect.poll(async () => (await widget.evaluate(() => chrome.runtime.sendMessage({ type: 'ui:pageState' })))?.data?.result?.state, { timeout: 20000 }).toMatch(/^(waiting|done)$/);
       const { result } = (await widget.evaluate(() => chrome.runtime.sendMessage({ type: 'ui:pageState' }))).data;
-      await expect.poll(() => lineProblems(widget, expected(result.filled), code, { clamped: true }), { timeout: 10000, message: `${code} at ${page.viewportSize().width}px` }).toEqual([]);
-      return widget.evaluate(() => { const text = document.getElementById('widget-text'); return text.scrollHeight > text.clientHeight; });
+      await expect.poll(() => lineProblems(widget, expected(result.filled), code), { timeout: 10000, message: `${code} at ${page.viewportSize().width}px` }).toEqual([]);
     };
     const narrow = [];
     await page.setViewportSize({ width: 260, height: 900 });
@@ -536,19 +534,20 @@ async function main() {
       await expect.poll(() => beforeProblems(widget, code), { timeout: 10000, message: `${code} at 260px before Autofill` }).toEqual([]);
       const before = await frameBox();
       await widget.locator('#autofill').click();
-      const clamped = await settledLine(code, () => wholeSteps[0].line(code));
+      await settledLine(code, () => wholeSteps[0].line(code));
       const after = await frameBox();
       assert.ok(after.width <= before.width, `${code} at 260px: the line makes the widget no wider`);
-      narrow.push(`${code} Job Information at 260px: ${before.width}x${before.height} before, ${after.width}x${after.height} after${clamped ? ', line ends in …' : ''}`);
+      narrow.push(`${code} Job Information at 260px: ${before.width}x${before.height} before, ${after.width}x${after.height} after`);
     }
     currentSelfVariant = 'verified';
 
     // Save and Continue stays as clear of the widget as main left it, on Enter Personal Information
-    // scrolled to the bottom. At 390px the buttons alone reach its right edge, as on main.
+    // scrolled to the bottom. At 390px main's widget already covers its right edge. Under 640px the
+    // widget's width doesn't depend on the page's, so 390px also shows each language's line fits.
     const clearOf = { 390: ['left', 'center'], 427: ['left', 'center', 'right'], 455: ['left', 'center', 'right'], 512: ['left', 'center', 'right'], 640: ['left', 'center', 'right'] };
-    for (const code of ['en', 'es']) {
+    for (const code of strings.LANGUAGES) {
       await (await launcherFrame()).evaluate(code => globalThis.SecondHandStrings.setLanguage(code), code);
-      for (const [width, points] of Object.entries(clearOf)) {
+      for (const [width, points] of Object.entries(clearOf).filter(([width]) => ['en', 'es'].includes(code) || width === '390')) {
         await page.setViewportSize({ width: Number(width), height: 700 });
         await resetTo(`${applicant}?next=stay`);
         widget = await launcherFrame();
@@ -557,7 +556,7 @@ async function main() {
         await expect.poll(() => beforeProblems(widget, code), { timeout: 10000, message: `${code} at ${width}px before Autofill` }).toEqual([]);
         const before = await frameBox();
         await widget.locator('#autofill').click();
-        const clamped = await settledLine(code, filled => wholeSteps[2].line(code, filled));
+        await settledLine(code, filled => wholeSteps[2].line(code, filled));
         const after = await frameBox();
         if (Number(width) < 640) assert.ok(after.width <= before.width, `${code} at ${width}px: the line makes the widget no wider`);
         await page.evaluate(() => window.scrollTo(0, document.scrollingElement.scrollHeight));
@@ -567,7 +566,7 @@ async function main() {
             .filter(([, x]) => button.contains(document.elementFromPoint(x, y))).map(([point]) => point);
         });
         for (const point of points) assert.ok(clear.includes(point), `${code} at ${width}px: Save and Continue's ${point} is clear of the widget (clear: ${clear.join(', ') || 'none'})`);
-        narrow.push(`${code} Save and Continue disabled at ${width}px: ${before.width}x${before.height} before, ${after.width}x${after.height} after${clamped ? ', line ends in …' : ''}; button clear at ${clear.join(', ') || 'no point'}`);
+        narrow.push(`${code} Save and Continue disabled at ${width}px: ${before.width}x${before.height} before, ${after.width}x${after.height} after; button clear at ${clear.join(', ') || 'no point'}`);
       }
     }
     await page.setViewportSize({ width: 1200, height: 900 });
