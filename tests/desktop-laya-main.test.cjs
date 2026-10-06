@@ -75,7 +75,11 @@ async function desktop(t, { settings = { extensionId }, settingsText, manifest, 
     './vault.cjs': { ...require('../desktop/vault.cjs'), Vault, atomicWrite: async (file, bytes) => { writes.push({ file, json: JSON.parse(bytes.toString()) }); } },
     './laya.cjs': { ...realLaya, createLaya: options => {
       const laya = realLaya.createLaya({ ...options, ...(manifest ? { manifest } : {}), updateUrl, runner, checkEveryMs: 60 * 60 * 1000 });
-      created.push({ options, laya });
+      // The update runs main.cjs starts, so a test can wait until they are over.
+      const runs = [];
+      const startUpdates = laya.startUpdates;
+      laya.startUpdates = () => { const run = startUpdates(); runs.push(run); return run; };
+      created.push({ options, laya, runs });
       t.after(() => laya.close());
       return laya;
     } }
@@ -112,7 +116,8 @@ test('an applicant who turned Laya off stays off: startup checks, downloads, and
   assert.equal(status.laya.state, 'off');
   assert.equal(status.laya.enabled, false);
   assert.deepEqual(plain(await app.invoke('layaStatus')), plain(status.laya));
-  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(app.created[0].runs.length, 1, 'startup ran its update check');
+  await Promise.all(app.created[0].runs);
   assert.equal(app.runner.loads, 0);
   assert.deepEqual(server.requests, []);
   assert.equal(fs.existsSync(path.join(app.userData, 'models')), false);
@@ -187,7 +192,8 @@ test('a settings file that can’t be read is reset and the app says what was re
     assert.equal(status.allSites, false, name);
     if (notice === KEPT_OFF) {
       assert.equal(status.laya.state, 'off', name);
-      await new Promise(resolve => setTimeout(resolve, 50));
+      assert.equal(app.created[0].runs.length, 1, `${name}: startup ran its update check`);
+      await Promise.all(app.created[0].runs);
       assert.deepEqual(server.requests, [], `${name}: nothing is checked or downloaded`);
     } else {
       assert.equal(status.laya.enabled, true, name);

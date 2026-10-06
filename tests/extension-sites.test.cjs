@@ -7,7 +7,7 @@ const { JSDOM } = require('jsdom');
 const adapter = require('../extension/iowa-adapter.js');
 const strings = require('../extension/strings.js');
 const forms = require('./fixtures/pantry-forms.cjs');
-const { plain, runFile, evalFile, layout, serviceWorker, nativeHost } = require('./helpers/harness.cjs');
+const { plain, tick, runFile, evalFile, layout, serviceWorker, nativeHost } = require('./helpers/harness.cjs');
 
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
 const SITE_URL = 'https://pantry.example.org/intake?step=1';
@@ -2134,7 +2134,10 @@ test('answers go only to the document Chrome placed: an embedded form that moves
 });
 
 // The real site engine and content script on a page, as Chrome loads them for each registration that matches.
-const CHECK_WAIT = 800; // longer than the content script waits after a page change before it checks again
+// How long the content script waits after a page change before it checks again. A test that changes a page
+// mocks setTimeout: the change arms the check, and the test's clock runs it.
+const CHECK_MS = 500;
+const checkAfterChange = async t => { await tick(); t.mock.timers.tick(CHECK_MS); await tick(); };
 function livePage(t, html, { url = OTHER_URL, framesReply = { frames: false }, loads = 1, top = true } = {}) {
   const dom = new JSDOM(`<!doctype html><body>${html}</body>`, { url, runScripts: 'outside-only', pretendToBeVisual: true });
   t.after(() => dom.window.close());
@@ -2153,7 +2156,6 @@ function livePage(t, html, { url = OTHER_URL, framesReply = { frames: false }, l
     cards: () => window.document.querySelectorAll('[data-secondhand-assistant]').length,
     tell(message) { for (const listener of listeners) listener(message, { id: extensionId }, () => {}); } };
 }
-const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 test('with all websites on, the card shows on a form page and stays hidden on a search-only page, a sign-in page, and a page without inputs', async t => {
   assert.equal(livePage(t, forms.plainPantry).cards(), 1);
@@ -2171,18 +2173,22 @@ test('with all websites on, the card shows on a form page and stays hidden on a 
 });
 
 test('a form that appears after the page loads brings the card, and the card goes when the form does', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const page = livePage(t, '<main id="app"><p>Loading…</p></main>');
-  assert.equal(page.cards(), 0);
+  await tick();
+  assert.equal(page.cards(), 0, 'the page has loaded without a form');
   page.window.document.getElementById('app').innerHTML = '<form><label for="fname">First name</label><input id="fname"><label for="zip">ZIP code</label><input id="zip"></form>';
-  await wait(CHECK_WAIT);
+  await tick();
+  assert.equal(page.cards(), 0, 'the check waits for the page to settle');
+  t.mock.timers.tick(CHECK_MS); await tick();
   assert.equal(page.cards(), 1);
   page.window.document.getElementById('fname').value = 'Typed by the applicant';
   page.window.document.getElementById('zip').value = '50309';
   page.window.document.getElementById('app').append(page.window.document.createElement('p'));
-  await wait(CHECK_WAIT);
+  await checkAfterChange(t);
   assert.equal(page.cards(), 1, 'a filled form keeps its card');
   page.window.document.getElementById('app').innerHTML = '<p>Thank you. We received your sign-up.</p>';
-  await wait(CHECK_WAIT);
+  await checkAfterChange(t);
   assert.equal(page.cards(), 0);
 });
 
@@ -2205,17 +2211,20 @@ test('the scripts run once when a site’s own registration and all websites bot
 });
 
 test('an embedded form reports whether it has a form and never makes a card of its own', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const frame = livePage(t, '<form><label for="fname">First name</label><input id="fname"></form>', { url: `${FRAME_ORIGIN}/form`, top: false });
   assert.equal(frame.cards(), 0);
-  assert.deepEqual(frame.reports, [{ type: 'secondhand:generic:form', helps: true }]);
+  await tick();
+  assert.deepEqual(frame.reports, [{ type: 'secondhand:generic:form', helps: true }], 'the frame has loaded with its form');
   frame.window.document.querySelector('form').remove();
-  await wait(CHECK_WAIT);
+  await checkAfterChange(t);
   assert.deepEqual(frame.reports.at(-1), { type: 'secondhand:generic:form', helps: false });
   const empty = livePage(t, '<p>Advertisement</p>', { url: 'https://ads.example.com/frame', top: false });
   assert.deepEqual(empty.reports, [], 'a frame without a form says nothing');
 });
 
 test('an embedded frame tells the worker whether its page has a form when the worker asks, with a yes or no only (#157)', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const ask = (page, sender = { id: extensionId }) => {
     let reply;
     for (const listener of page.listeners) listener({ type: 'secondhand:generic:helps' }, sender, value => { reply = value; });
@@ -2224,8 +2233,10 @@ test('an embedded frame tells the worker whether its page has a form when the wo
   const frame = livePage(t, '<form><label for="fname">First name</label><input id="fname" value="Synthetic typed answer"></form>', { url: `${FRAME_ORIGIN}/form`, top: false });
   assert.deepEqual(ask(frame), { helps: true });
   assert.equal(ask(frame, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
+  await tick();
+  assert.deepEqual(ask(frame), { helps: true }, 'the frame has loaded with its form');
   frame.window.document.querySelector('form').remove();
-  await wait(CHECK_WAIT);
+  await checkAfterChange(t);
   assert.deepEqual(ask(frame), { helps: false });
   assert.deepEqual(ask(livePage(t, '<p>Advertisement</p>', { url: 'https://ads.example.com/frame', top: false })), { helps: false });
   assert.equal(ask(livePage(t, forms.plainPantry)), undefined, 'the top page places its own card');
@@ -2237,7 +2248,7 @@ test('an embedded frame tells the worker whether its page has a form when the wo
 test('the top page shows the card for an embedded form the worker tells it about', async t => {
   const page = siteContent(t, { offers: () => false, framesReply: { frames: true } });
   assert.equal(page.host(), null);
-  await wait(0);
+  await tick();
   assert.ok(page.host(), 'a form embedded before the page loaded');
   page.request({ type: 'secondhand:generic:formFrames', helps: false });
   assert.equal(page.host(), null);
@@ -2249,6 +2260,7 @@ test('the top page shows the card for an embedded form the worker tells it about
 });
 
 test('when SecondHand is turned off for the page, its card goes and the page answers nothing more', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const page = siteContent(t);
   assert.ok(page.host());
   page.request({ type: 'secondhand:generic:off' }, { id: 'b'.repeat(32) });
@@ -2258,7 +2270,7 @@ test('when SecondHand is turned off for the page, its card goes and the page ans
   assert.equal(page.request({ type: 'secondhand:generic:plan' }), undefined);
   page.request({ type: 'secondhand:generic:formFrames', helps: true });
   page.window.document.body.append(page.window.document.createElement('p'));
-  await wait(CHECK_WAIT);
+  await checkAfterChange(t);
   assert.equal(page.host(), null, 'nothing brings it back');
   assert.deepEqual(page.calls, []);
 });

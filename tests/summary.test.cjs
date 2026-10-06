@@ -89,7 +89,9 @@ test('each page’s text is summarized once per language of the points', async (
   assert.equal(ai.calls.summarize.length, 2);
 });
 
-test('a download reports its progress; one that never starts says so; one that fails is tried again on the next click', async () => {
+test('a download reports its progress; one that never starts says so; one that fails is tried again on the next click', async t => {
+  // The test runs the clock the stall timer counts on.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   let monitor, finish;
   const downloading = chromeSummarizer({ availability: 'downloadable', create: options => { options.monitor(monitor = new EventTarget()); return new Promise(resolve => { finish = resolve; }); } });
   const seen = [];
@@ -99,12 +101,14 @@ test('a download reports its progress; one that never starts says so; one that f
   monitor.dispatchEvent(progress(1));
   finish({ inputQuota: 4000 });
   await pending;
-  await new Promise(resolve => setTimeout(resolve, 60));
+  t.mock.timers.tick(60);
   assert.deepEqual(seen, [0, 0.5, 1], 'no stall once Chrome is downloading');
 
   const stalls = [];
   summary.create(chromeSummarizer({ availability: 'downloadable', create: () => new Promise(() => {}) }).scope, { stallMs: 20 }).summarizer('en', 'en', { onStall: () => stalls.push('stalled') });
-  await new Promise(resolve => setTimeout(resolve, 60));
+  t.mock.timers.tick(19);
+  assert.deepEqual(stalls, [], 'not before its stall time');
+  t.mock.timers.tick(1);
   assert.deepEqual(stalls, ['stalled']);
 
   let attempts = 0;

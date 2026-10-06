@@ -1321,11 +1321,16 @@ test('a translator Chrome must download starts from the applicant’s click, sho
   assert.equal(view.get('questions-note').textContent, spanish('translate.done'));
   assert.equal(view.get('questions-list').children[2].querySelector('.checklist-label').textContent, '[es] Preferred pickup day');
 
+  // A download that never starts is reported after its stall time, on a clock the test runs.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const stuck = translatorStub({ availability: 'downloadable', create: () => new Promise(() => {}) });
   const stalled = await panel(t, { language: 'es-ES', Translator: stuck.Translator, questions: pageQuestions, stallMs: 15 });
   await stalled.userClick('questions-show'); await settle();
-  await new Promise(resolve => setTimeout(resolve, 40));
-  assert.equal(stalled.get('questions-note').textContent, strings.text('es', 'translate.stalled', { language: 'español', source: 'inglés' }));
+  const note = strings.text('es', 'translate.stalled', { language: 'español', source: 'inglés' });
+  t.mock.timers.tick(14); await settle();
+  assert.notEqual(stalled.get('questions-note').textContent, note, 'not before its stall time');
+  t.mock.timers.tick(1); await settle();
+  assert.equal(stalled.get('questions-note').textContent, note);
   assert.equal(stalled.get('questions-list').children.length, 3, 'the questions stay listed in their own words');
 });
 
@@ -1515,11 +1520,15 @@ test('a model Chrome must download starts from the applicant’s click, shows it
   assert.deepEqual(points(view), KEY_POINTS);
   assert.equal(view.get('summary-note').hidden, true);
 
+  // A download that never starts is reported after its stall time, on a clock the test runs.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const stuck = summarizerStub({ availability: 'downloadable', create: () => new Promise(() => {}) });
   const stalled = await panel(t, { Summarizer: stuck.Summarizer, pageText: { pages: [summaryPage] }, stallMs: 15 });
   await settle();
   await stalled.userClick('summary-get'); await settle();
-  await new Promise(resolve => setTimeout(resolve, 40));
+  t.mock.timers.tick(14); await settle();
+  assert.notEqual(stalled.get('summary-note').textContent, EN['summary.stalled'], 'not before its stall time');
+  t.mock.timers.tick(1); await settle();
   assert.equal(stalled.get('summary-note').textContent, EN['summary.stalled']);
   assert.equal(stalled.get('summary-note').classList.contains('error'), true);
 });
@@ -1738,13 +1747,17 @@ test('when all websites is on, its off button shows, the per-site buttons step a
 });
 
 test('the off message, with how to remove Chrome’s kept grant, stays on screen until the tab changes', async t => {
+  // The side panel checks the page every 1.5 seconds; the test runs that clock itself.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const taken = 'SecondHand is off on other websites. Sites you turned on one at a time stay on. Chrome still lists SecondHand’s access to all websites, but nothing uses it. To remove it, open chrome://extensions, then SecondHand, then Details, then Site access.';
   const params = { first: { key: 'worker.allSitesOff', params: {} }, second: { key: 'worker.chromeStillAllows', params: {} } };
   const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, desktop: { allSites: true },
     allSitesOff: { message: taken, messageKey: 'joined', messageParams: params } });
   await view.userClick('all-sites-disable'); for (let i = 0; i < 6; i++) await tick();
   assert.equal(view.get('status').textContent, taken);
-  await view.window.eval('new Promise(resolve => setTimeout(resolve, 1700))');
+  const checks = view.types().filter(type => type === 'ui:pageState').length;
+  t.mock.timers.tick(1500); for (let i = 0; i < 6; i++) await tick();
+  assert.equal(view.types().filter(type => type === 'ui:pageState').length, checks + 1, 'the regular page check ran');
   assert.equal(view.get('status').textContent, taken, 'the regular page check doesn’t replace it');
   view.tabs.current = { id: 8, url: OTHER_SITE.url };
   view.listeners.activated({ tabId: 8 }); for (let i = 0; i < 4; i++) await tick();

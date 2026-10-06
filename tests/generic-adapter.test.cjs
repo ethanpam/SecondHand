@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const generic = require('../extension/generic-adapter.js');
 const forms = require('./fixtures/pantry-forms.cjs');
-const { laidOut } = require('./helpers/harness.cjs');
+const { tick, laidOut } = require('./helpers/harness.cjs');
 
 const page = (html, url = 'https://pantry.example.org/intake') => laidOut(html, url);
 // Radio groups are named by the group, other controls by their id.
@@ -141,7 +141,9 @@ test('number words and "or more" choices pick the right count; a click Google ig
   assert.deepEqual(filled.filled, [], 'without Google registering the click, nothing counts as filled');
 });
 
-test('a document that loses its window while choices settle stops waiting and reports that the page changed', async () => {
+test('a document that loses its window while choices settle stops waiting and reports that the page changed', async t => {
+  // The test runs the clock: settle looks at the page every 10 ms until its timeout.
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   // Google never confirms these clicks, so each choice waits to settle.
   const pendingFill = () => {
     const doc = page(forms.googleChoices);
@@ -156,11 +158,16 @@ test('a document that loses its window while choices settle stops waiting and re
 
   const during = pendingFill();
   const started = Date.now();
+  let outcome;
   const settling = generic.settle(during.doc, during.token, during.filled, { timeoutMs: 5000 });
-  await new Promise(resolve => setTimeout(resolve, 30));
+  settling.then(result => { outcome = result; }, error => { outcome = error; });
+  t.mock.timers.tick(10); await tick();
+  assert.equal(outcome, undefined, 'it waits while the page is there');
   detach(during.doc);
+  t.mock.timers.tick(10); await tick();
+  assert.ok(outcome, 'it stops waiting at its next look once the page is gone, not at its 5-second timeout');
   assert.deepEqual(await settling, { ok: false, pageChanged: true, filled: [], skipped: [during.id], rejected: [], pending: [] });
-  assert.ok(Date.now() - started < 1000, 'it stops waiting once the page is gone');
+  assert.equal(Date.now() - started, 20);
   assert.equal(during.doc.querySelector('[data-secondhand-filled]'), null, 'nothing on the old page is marked as filled');
 
   const before = pendingFill();
