@@ -1297,6 +1297,25 @@ test('Laya answers a choice question from the saved profile: the option is picke
   assert.doesNotMatch(JSON.stringify(layaCalls(w)), /Synthetic private|synthetic\.private|50309/, 'no saved value is ever sent to Laya');
 });
 
+test('a question whose label hides a zero-width space stays with the applicant, never sent; Laya still answers the others and the click succeeds', async () => {
+  const { validateRequest } = require('../desktop/bridge.cjs');
+  const DELIVERY = { name: 'delivery', label: `Do you need a home${String.fromCodePoint(0x200B)} delivery?`, type: 'radio', options: ['Yes', 'No'] };
+  let answerRequest;
+  const w = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...SIXTY }, { ...DELIVERY }, { ...PET }], desktop: layaDesktop({
+    answerFields: (request, vault) => {
+      // The desktop's own check: it refuses the whole request when any question breaks its rules.
+      try { validateRequest(request); } catch (error) { return error.message; }
+      answerRequest = request;
+      return { answers: { [request.questions[0].id]: 'No' }, accessRevision: vault.accessRevision };
+    } }) });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.state, 'done', result.message);
+  assert.deepEqual(answerRequest.questions.map(question => question.label), [SIXTY.label, PET.label], 'Laya gets every other question');
+  assert.deepEqual(w.page.answered(), ['name', 'sixty']);
+  assert.deepEqual(result.needYou, [idOf(w, 'delivery'), idOf(w, 'pet')], 'the hidden-character question is left to the applicant');
+  assert.equal(result.message, 'Filled 2 · 1 guessed · 2 need you. Check your answers before you submit. Guesses were suggested by Laya on this computer.');
+});
+
 test('answers alone fill under their own access receipt, which is checked before the page is touched', async () => {
   const w = siteWorker({ enabled: true, fields: [{ ...SIXTY }], desktop: layaDesktop({ answerFields: (request, vault) => ({ answers: { [request.questions[0].id]: 'No' }, accessRevision: vault.accessRevision }) }) });
   const result = plain((await autofill(w)).data);

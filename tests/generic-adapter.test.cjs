@@ -600,6 +600,24 @@ test('Laya takes text boxes and choice questions within the bridge’s limits, n
   for (const [name, question] of Object.entries(refused)) assert.equal(generic.layaQuestion(question), '', name);
 });
 
+test('a question whose label or options carry a bidi control, an invisible character, or a line break is left to the applicant; the joiners Persian, Arabic, and Indic words need are kept', () => {
+  const choice = (extra = {}) => ({ label: 'Preferred pickup day', type: 'radio', options: ['Monday', 'Friday'], ...extra });
+  const box = label => ({ label, type: 'email', options: [] });
+  const unseen = { 'right-to-left override': '\u202E', 'left-to-right isolate': '\u2066', 'right-to-left mark': '\u200F', 'zero-width space': '\u200B', 'word joiner': '\u2060',
+    'byte order mark': '\uFEFF', 'soft hyphen': '\u00AD', 'variation selector': '\uFE0F', 'tag letter': '\u{E0041}', 'line separator': '\u2028', 'paragraph separator': '\u2029',
+    'next line (C1)': '\u0085', 'control sequence introducer (C1)': '\u009B' };
+  for (const [name, character] of Object.entries(unseen)) {
+    assert.equal(generic.layaQuestion(choice({ label: `Preferred pickup${character} day` })), '', `${name} in a label`);
+    assert.equal(generic.layaQuestion(choice({ options: ['Monday', `Fri${character}day`] })), '', `${name} in an option`);
+    assert.equal(generic.layaQuestion(box(`Where can we reach you?${character}`)), '', `${name} in a text box’s label`);
+  }
+  for (const text of ['می\u200Cخواهید', 'क्\u200Dष']) {
+    assert.equal(generic.layaQuestion(choice({ label: `${text}?` })), 'choice', text);
+    assert.equal(generic.layaQuestion(choice({ options: [text, 'Friday'] })), 'choice', text);
+    assert.equal(generic.layaQuestion(box(`${text}?`)), 'text', text);
+  }
+});
+
 // Boxes only the applicant answers (#134), each with an autocomplete hint that would otherwise give it a saved field.
 const APPLICANT_ONLY = [
   ['Type your full name as your electronic signature', 'name'],
