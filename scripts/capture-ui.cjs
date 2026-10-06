@@ -24,7 +24,8 @@ const root = path.join(__dirname, '..');
 const output = path.join(root, 'docs/pr-media');
 const [label, ...only] = process.argv.slice(2);
 const VIEW = { width: 1200, height: 900 };
-const CARD = { x: VIEW.width - 330, y: VIEW.height - 140, width: 330, height: 140 };
+// Tall enough for the card at its largest, 166px, with its 16px margin.
+const CARD = { x: VIEW.width - 330, y: VIEW.height - 190, width: 330, height: 190 };
 const FILM = { width: 800, height: 600 };
 const applicant = `${smoke.applicant}?next=stay`;
 const screen = name => `${smoke.portal}${preApplicant.screens[name].path}`;

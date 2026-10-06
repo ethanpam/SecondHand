@@ -95,6 +95,6 @@ guesses, Spanish, Arabic, and an outdated build. Run it with `before` on main an
 branch to compare them in a pull request. Shot names after the label limit the run to those shots; a name
 that ends in a hyphen takes every shot that starts with it, as in `npm run capture:ui -- after card- panel-iowa`.
 
-The side panel is captured at Chrome's own 360 by 765 pixels and the card as a 330 by 140 corner of the
+The side panel is captured at Chrome's own 360 by 765 pixels and the card as a 330 by 190 corner of the
 page, both at twice that size. `card-autofill` is a short recording and needs `ffmpeg` on the PATH. Every
 run fails if the extension logged an error in any of its pages or its worker.
