@@ -999,7 +999,7 @@ test('the widget can be hidden to its logo and shown again from it, by the reade
   await quiet.userClick('pill');
   assert.equal(session.has('secondhand.cardHidden'), false);
   // The link to what is left says what it does.
-  assert.equal(next.get('need-you').title, 'Go to the next question left, in the form');
+  assert.equal(next.get('need-you').title, 'Go to the next question left, in the form.');
   assert.equal(next.get('details').getAttribute('aria-label'), 'Open SecondHand’s side panel');
   assert.equal(next.get('hide').textContent, 'Hide');
   // Another site's widget hides the same way.
@@ -2653,6 +2653,9 @@ test('the buttons that the keyboard shortcuts work name them in their tooltips, 
   assert.equal(widget.get('autofill').title, `${EN['widget.autofillIowaTitle']} Keyboard shortcut: ⌥⇧F.`);
   assert.equal(widget.get('stop').title, `${EN['widget.stopTitle']} Keyboard shortcut: ⌥⇧F.`);
   assert.equal(widget.get('need-you').title, EN['widget.needYouTitle'], 'no shortcut is set for the next question');
+  const both = await panel(t, { launcher: true, result: doneResult, shortcuts: [...shortcuts.slice(0, 1), { name: 'next-question', shortcut: '⌥⇧N' }] });
+  await settle();
+  assert.equal(both.get('need-you').title, 'Go to the next question left, in the form. Keyboard shortcut: ⌥⇧N.', 'a sentence, then the shortcut');
   const side = await panel(t, { shortcuts: [...shortcuts.slice(0, 1), { name: 'next-question', shortcut: '⌥⇧N' }] });
   await settle();
   assert.equal(side.get('panel-autofill').title, 'Keyboard shortcut: ⌥⇧F.');
