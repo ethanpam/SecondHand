@@ -118,6 +118,8 @@
       rerender();
     }).catch(() => {});
   }
+  // What Iowa's applicant page asks while answers are left: SecondHand clicks Save and Continue once nothing is.
+  const CHECK_FIRST = 'iowa.missingAnswers';
   const withShortcut = (title, name) => [title, shortcuts[name] ? t('shortcut.keys', { keys: shortcuts[name] }) : ''].filter(Boolean).join(' ');
 
   applyStatic();
@@ -182,10 +184,12 @@
       if (note) return words(note, 120);
       if (!result) return !site ? readyLine() : languageTrouble ? t('widget.languageCheckFailed') : t('widget.siteReady', { host: hostOf(site.origin) });
       // What the worker reported, in the side panel's words, without the count of what is left: the link beside
-      // it carries that. While Autofill is on, what Stop would do goes after it. Why Chrome's AI guessed
-      // nothing stays in the tooltip.
+      // it carries that. While Autofill is on, what Stop would do goes after it: on a page that waits for answers,
+      // where SecondHand clicks Save and Continue once nothing is left, that Stop lets the reader check and
+      // continue themselves. Why Chrome's AI guessed nothing stays in the tooltip.
       const text = words(withLeft(fromResult(result), 0), 240);
-      return autopilot ? `${/[.!?…。]$/.test(text) ? text : `${text}.`} ${t('widget.stopNote')}` : text;
+      const stop = t(result.todoKey === CHECK_FIRST ? 'widget.stopToCheck' : 'widget.stopNote');
+      return autopilot ? `${/[.!?…。]$/.test(text) ? text : `${text}.`} ${stop}` : text;
     }
     function render() {
       // There is a card for this page, unless the reader hid it. An outdated card keeps its steps on screen.
@@ -433,6 +437,8 @@
     let told = false;
     // Autofill has run on the page on screen: until then a required question is only not filled yet.
     let ran = false;
+    // That run waits for answers, and clicks Save and Continue once nothing is left (see CHECK_FIRST).
+    let checkFirst = false;
     // The questions Autofill left for the reader, and which of them the link under the status goes to next.
     let left = [];
     let leftCursor = 0;
@@ -585,8 +591,10 @@
       $('panel-autofill').classList.toggle('secondary', Boolean(desktopAction));
       // Where the questions left are listed by name, each row goes to its own.
       $('panel-left').hidden = !target || !left.length || named.length > 0;
-      // While Autofill is on, what its button does now.
+      // While Autofill is on, what its button does now: on a page that waits for answers, that it lets the reader
+      // check and continue themselves.
       $('stop-note').hidden = !target || !autopilot;
+      $('stop-note').textContent = t(checkFirst ? 'panel.stopToCheck' : 'panel.stopNote');
       $('panel-left').disabled = working;
       $('open-iowa').hidden = Boolean(target) || !away || halted;
       $('panel-left').textContent = t('panel.goToLeft', { count: left.length || 1 });
@@ -598,7 +606,7 @@
       renderSummary();
     }
     function clearPage() {
-      fillable = false; autopilot = false; told = false; ran = false; left = []; leftCursor = 0; named = []; filledNames = []; site = null; page = null; notSaved = []; checklistSignature = '';
+      fillable = false; autopilot = false; told = false; ran = false; checkFirst = false; left = []; leftCursor = 0; named = []; filledNames = []; site = null; page = null; notSaved = []; checklistSignature = '';
       savable = []; savableSignature = '';
       held = []; heldSignature = '';
       layaGuesses = []; guessesSignature = '';
@@ -783,6 +791,7 @@
       const result = state.result;
       told = reported(result);
       ran = Boolean(result) && result.pageKey === page.pageKey && ['done', 'waiting', 'continuing'].includes(result.state);
+      checkFirst = ran && result.todoKey === CHECK_FIRST;
       notSaved = fieldKeys(result?.notSaved);
       savable = (Array.isArray(state.savable) ? state.savable : []).filter(item => fieldKeys([item?.id]).length && typeof item.label === 'string' && typeof item.answered === 'boolean')
         .slice(0, 40).map(({ id, label, answered }) => ({ id, label, answered }));

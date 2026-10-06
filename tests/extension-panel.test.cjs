@@ -1073,6 +1073,21 @@ test('a widget that loads mid-run picks up the running autofill', async t => {
   assert.equal(view.get('widget-text').textContent, 'Type the characters shown in Iowa’s security check, then click Continue. Stop erases nothing.');
 });
 
+test('while Autofill waits for answers it would save and continue after, both surfaces say Stop lets the reader check first', async t => {
+  const missing = { state: 'done', filled: 3, needYou: ['firstName'], pageKey: 'iowa-personal-information',
+    message: 'Filled 3 answers · 1 left for you. Check what was filled before you answer what is left: once nothing is left, SecondHand clicks Save and Continue.',
+    messageKey: 'result.thenTodo', messageParams: { summary: { key: 'result.filledNeedYou', params: { count: 3, needYou: 1 } }, todo: { key: 'iowa.missingAnswers', params: {} } },
+    todo: 'Check what was filled before you answer what is left: once nothing is left, SecondHand clicks Save and Continue.', todoKey: 'iowa.missingAnswers', todoParams: {} };
+  const side = await panel(t, { autopilot: true, result: missing });
+  assert.ok(side.get('status').textContent.endsWith(missing.todo));
+  assert.equal(side.get('stop-note').textContent, 'To check and continue yourself, click Stop Autofill. It erases nothing.');
+  const card = await panel(t, { launcher: true, autopilot: true, result: missing });
+  assert.equal(card.get('widget-text').textContent, 'Filled 3 answers. Check what was filled before you answer what is left: once nothing is left, SecondHand clicks Save and Continue. To check and continue yourself, click Stop. It erases nothing.');
+  // Anywhere else, Stop only ends Autofill.
+  const waiting = await panel(t, { autopilot: true, result: waitingResult });
+  assert.equal(waiting.get('stop-note').textContent, 'Stop ends Autofill and erases nothing.');
+});
+
 test('side panel turns its button into Stop while autofill is on', async t => {
   const view = await panel(t, { autopilot: true, result: waitingResult });
   assert.equal(view.get('panel-autofill').textContent, 'Stop Autofill');
@@ -1625,12 +1640,12 @@ test('with Spanish as the browser language, the widget shows none of SecondHand�
 
 test('results the worker names by key show in Spanish in the widget and the side panel; a bare message shows as sent', async t => {
   const iowa = { state: 'done', filled: 3, needYou: ['firstName', 'lastName'], pageKey: 'iowa-personal-information',
-    message: 'Filled 3 answers · 2 left for you. Check what was filled and answer what is left in Iowa’s form. Once nothing is left, SecondHand clicks Save and Continue.',
+    message: 'Filled 3 answers · 2 left for you. Check what was filled before you answer what is left: once nothing is left, SecondHand clicks Save and Continue.',
     messageKey: 'result.thenTodo', messageParams: { summary: { key: 'result.filledNeedYou', params: { count: 3, needYou: 2 } }, todo: { key: 'iowa.missingAnswers', params: {} } },
-    todo: 'Check what was filled and answer what is left in Iowa’s form. Once nothing is left, SecondHand clicks Save and Continue.', todoKey: 'iowa.missingAnswers', todoParams: {} };
+    todo: 'Check what was filled before you answer what is left: once nothing is left, SecondHand clicks Save and Continue.', todoKey: 'iowa.missingAnswers', todoParams: {} };
   const widget = await panel(t, { launcher: true, language: 'es-ES', autofill: iowa });
   await widget.userClick('autofill');
-  assert.equal(widget.get('widget-text').textContent, `${strings.text('es', 'result.thenTodo', { summary: { key: 'result.filled', params: { count: 3 } }, todo: { key: 'iowa.missingAnswers', params: {} } })} ${spanish('widget.stopNote')}`);
+  assert.equal(widget.get('widget-text').textContent, `${strings.text('es', 'result.thenTodo', { summary: { key: 'result.filled', params: { count: 3 } }, todo: { key: 'iowa.missingAnswers', params: {} } })} ${spanish('widget.stopToCheck')}`, 'SecondHand clicks Save and Continue once nothing is left: Stop lets the reader check first');
   assert.equal(widget.get('need-you').textContent, 'Faltan 2');
   assert.equal(widget.get('widget-text').title, strings.text('es', iowa.messageKey, iowa.messageParams));
   const side = await panel(t, { language: 'es-ES', autofill: iowa });
