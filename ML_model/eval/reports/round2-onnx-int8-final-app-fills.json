@@ -1,0 +1,159 @@
+{
+  "model": "/Users/jacobdang/Projects/LayaStudio/workspace/exports/round2-lora-proper-1790530553-onnx-int8",
+  "format": "noul-v1",
+  "today": "2026-09-26",
+  "count": 400,
+  "seed": 11,
+  "perQuestion": 8,
+  "budget": {
+    "answering": 0.015,
+    "matching": 0.03
+  },
+  "overBudget": [],
+  "answering": {
+    "decisions": 1232,
+    "filled": 74,
+    "right": 57,
+    "wrong": [
+      {
+        "form": "https://form.jotform.com/201745233088050",
+        "question": "Have you or anyone in your household recently applied for SNAP benefits?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://form.jotform.com/201745233088050",
+        "question": "Have you or anyone in your household recently applied for SNAP benefits?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://form.jotform.com/201745233088050",
+        "question": "Does anyone in your household pay, on a monthly basis, at least one shelter/utility expense?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://form.jotform.com/201745233088050",
+        "question": "Anyone in your household elderly and/or disabled?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://form.jotform.com/201745233088050",
+        "question": "Anyone in your household elderly and/or disabled?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://docs.google.com/forms/d/e/1FAIpQLSfIErXME8JUm4GO_gdWufmC7dvASnnjNZbuFEF0rRxMoW3b9Q/viewform",
+        "question": "Are you interested in applying for SNAP, Medicaid, Medicare or LIHEAP?",
+        "filled": "SNAP: Supplemental Nutrition Assistance Program",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "U.S. citizen?",
+        "filled": "Yes",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "U.S. citizen?",
+        "filled": "Yes",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "U.S. citizen?",
+        "filled": "Yes",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "U.S. citizen?",
+        "filled": "Yes",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Does anyone pay over $35 a month in medical expenses?",
+        "filled": "Yes",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Does anyone pay over $35 a month in medical expenses?",
+        "filled": "Yes",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Does anyone pay over $35 a month in medical expenses?",
+        "filled": "Yes",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Does anyone pay over $35 a month in medical expenses?",
+        "filled": "Yes",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Does anyone have income?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Do you pay rent or room rent?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Do you pay for utilities?",
+        "filled": "No",
+        "key": null
+      }
+    ]
+  },
+  "matching": {
+    "decisions": 222,
+    "filled": 61,
+    "right": 56,
+    "wrong": [
+      {
+        "form": "https://form.jotform.com/200914653398057",
+        "question": "Street Address (If Different)",
+        "filled": "addressLine1",
+        "key": null
+      },
+      {
+        "form": "https://docs.google.com/forms/d/e/1FAIpQLSdB3TYDHjNOWiiPK9eH9erjOhSxi7u0Hp5fmzkUPzTB5MjB4g/viewform",
+        "question": "Number of adults in household (including yourself)",
+        "filled": "householdAdults",
+        "key": null
+      },
+      {
+        "form": "https://docs.google.com/forms/d/e/1FAIpQLSduKgIGVmC9IY0QUQLHqbW6u6NA1vC8gc0yMbDmeiybU_LYFQ/viewform",
+        "question": "Which county are you currently located in?",
+        "filled": "county",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Full name (first, middle initial, last)",
+        "filled": "fullName",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Phone number:",
+        "filled": "phone",
+        "key": null
+      }
+    ]
+  }
+}

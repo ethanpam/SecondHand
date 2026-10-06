@@ -1,0 +1,219 @@
+{
+  "model": "/Users/jacobdang/Projects/LayaStudio/workspace/exports/round4-lora-proper-1790727905-onnx-int8",
+  "format": "choice-v2",
+  "today": "2026-09-26",
+  "count": 400,
+  "seed": 11,
+  "perQuestion": 8,
+  "budget": {
+    "answering": 0.026,
+    "matching": 0.01
+  },
+  "overBudget": [],
+  "answering": {
+    "decisions": 1232,
+    "filled": 80,
+    "right": 49,
+    "wrong": [
+      {
+        "form": "https://accesshelps.org/wp-content/uploads/ACCESS-SIMC-Paper-Form-TEFAP-English-1.pdf",
+        "question": "Has anyone in your household, including yourself, served on active duty in the U.S. Armed Forces? Active duty includes serving in the U.S. Armed Forces as well as activation from the Reserves or National Guard.",
+        "filled": "No, never served in the U.S. Armed Forces",
+        "key": null
+      },
+      {
+        "form": "https://form.jotform.com/201745233088050",
+        "question": "Anyone in your household elderly and/or disabled?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://form.jotform.com/201745233088050",
+        "question": "Anyone in your household elderly and/or disabled?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://form.jotform.com/201745233088050",
+        "question": "Anyone in your household elderly and/or disabled?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://form.jotform.com/201745233088050",
+        "question": "Anyone in your household elderly and/or disabled?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://form.jotform.com/201745233088050",
+        "question": "Anyone in your household elderly and/or disabled?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://form.jotform.com/201745233088050",
+        "question": "Anyone in your household elderly and/or disabled?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://form.jotform.com/201745233088050",
+        "question": "Anyone in your household elderly and/or disabled?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://docs.google.com/forms/d/e/1FAIpQLSfIErXME8JUm4GO_gdWufmC7dvASnnjNZbuFEF0rRxMoW3b9Q/viewform",
+        "question": "Are you interested in applying for SNAP, Medicaid, Medicare or LIHEAP?",
+        "filled": "All of the above",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "U.S. citizen?",
+        "filled": "Yes",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "U.S. citizen?",
+        "filled": "Yes",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "U.S. citizen?",
+        "filled": "Yes",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "U.S. citizen?",
+        "filled": "Yes",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Disabled?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Disabled?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Disabled?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Disabled?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Disabled?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Disabled?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Disabled?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Due to disability?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Due to disability?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Due to disability?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Do you pay rent or room rent?",
+        "filled": "No",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Do you own your home?",
+        "filled": "Yes",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Do you own your home?",
+        "filled": "Yes",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Do you own your home?",
+        "filled": "Yes",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Do you own your home?",
+        "filled": "Yes",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Do you own your home?",
+        "filled": "Yes",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Do you own your home?",
+        "filled": "Yes",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Do you pay for utilities?",
+        "filled": "No",
+        "key": null
+      }
+    ]
+  },
+  "matching": {
+    "decisions": 222,
+    "filled": 15,
+    "right": 14,
+    "wrong": [
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Phone number:",
+        "filled": "phone",
+        "key": null
+      }
+    ]
+  }
+}

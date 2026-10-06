@@ -3,17 +3,19 @@
 // checked here with a stand-in model (tests only). tests/laya-parity.test.cjs runs it on a real export.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { appAccuracy, overBudget, WRONG_FILL_BUDGETS } = require('../ML_model/eval/app_accuracy.cjs');
+const { appAccuracy, overBudget, finalHoldout, WRONG_FILL_BUDGETS } = require('../ML_model/eval/app_accuracy.cjs');
+const { choiceDecisions } = require('../ML_model/dataset/build.cjs');
 const { MODEL_FORMATS } = require('../desktop/laya-model.cjs');
 
 const TODAY = '2026-09-26';
-// One final-holdout form: two yes/no questions the facts settle, one they never cover, and two text boxes.
+// One final-holdout form: two yes/no questions the facts settle, one they never cover, two text boxes, and a date box.
 const bank = [{ source: { url: 'https://final-pantry.example.org/intake', title: 'Synthetic final form', kind: 'web', retrieved: '2026-09-29', final: true }, questions: [
   { id: 'q1', label: 'Is anyone in your household 65 or older?', type: 'radio', options: ['Yes', 'No'], rule: { name: 'anySenior65' } },
   { id: 'q2', label: 'Are there children under 18 in your household?', type: 'radio', options: ['No', 'Yes'], rule: { name: 'anyChildren' } },
   { id: 'q3', label: 'Do you have a pet?', type: 'radio', options: ['Yes', 'No'], rule: { name: 'none' } },
   { id: 'q4', label: 'Email address', type: 'email', options: [], rule: { name: 'field', key: 'email' } },
-  { id: 'q5', label: 'Anything else we should know?', type: 'textarea', options: [], rule: { name: 'none' } }
+  { id: 'q5', label: 'Anything else we should know?', type: 'textarea', options: [], rule: { name: 'none' } },
+  { id: 'q6', label: 'Date of birth', type: 'date', options: [], rule: { name: 'none' } }
 ] }];
 // Two fictional households with no seniors and no children: "No" is right for both yes/no questions.
 const household = { birthDate: '1985-04-12', householdSize: '2', householdAdults: '2', householdChildren: '0', householdSeniors: '0', state: 'IA', county: 'Polk' };
@@ -39,9 +41,21 @@ test('each fill the app makes is checked against the answer key: a fill the key 
     { question: 'Is anyone in your household 65 or older?', filled: 'Yes', key: 'No' }, { question: 'Is anyone in your household 65 or older?', filled: 'Yes', key: 'No' }]);
   assert.equal(laya.asked.includes('Do you have a pet?'), false);
   // Each text box is asked once, and gets the first saved field on offer. The email box is offered email first, so
-  // it is right; a box that names no field is offered every one, and the key fills nothing there.
+  // it is right; a box that names no field is offered every one, and the key fills nothing there. A date box is
+  // never asked (date of birth is never offered), so it isn't a decision, as in the reports.
   assert.deepEqual(result.matching, { decisions: 2, filled: 2, right: 1, wrong: [
     { form: 'https://final-pantry.example.org/intake', question: 'Anything else we should know?', filled: 'firstName', key: null }] });
+});
+
+test('every question is decided however slow the model is: no request carries the click’s time limit', async () => {
+  const limits = [];
+  const laya = firstCandidate();
+  const decideBatch = laya.decideBatch;
+  laya.decideBatch = async (items, options = {}) => { limits.push(options.timeoutMs); return decideBatch(items, options); };
+  const result = await appAccuracy({ laya, bank, households, today: TODAY });
+  assert.ok(limits.length >= 6, 'every asked question and box reached the model');
+  assert.deepEqual([...new Set(limits)], [undefined], 'a slow machine never drops a question as timed out');
+  assert.equal(result.answering.filled, 4);
 });
 
 test('a model that fills nothing makes no wrong fills', async () => {
@@ -58,4 +72,10 @@ test('wrong fills over a task’s budget, a share of its decisions, fail with th
   for (const format of MODEL_FORMATS) {
     for (const task of ['answering', 'matching']) assert.ok(WRONG_FILL_BUDGETS[format][task] > 0 && WRONG_FILL_BUDGETS[format][task] < 0.1, `${format} ${task}`);
   }
+});
+
+test('the final holdout is built as its reports were (docs/laya-model.md): 1,232 choice decisions and 222 text boxes that aren’t dates', () => {
+  const { bank, households, today, perQuestion } = finalHoldout();
+  assert.equal(choiceDecisions(bank, households, { today, perQuestion }).length, 1232);
+  assert.equal(bank.flatMap(file => file.questions).filter(question => ['text', 'textarea', 'number', 'email', 'tel'].includes(question.type)).length, 222);
 });

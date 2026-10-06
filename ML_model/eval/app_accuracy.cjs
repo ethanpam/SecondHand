@@ -3,10 +3,11 @@
 // asked as one Autofill click asks it, through the desktop's own request code: desktop/field-answers.cjs for
 // its choice questions, one fictional household at a time, and desktop/field-suggestions.cjs for its text
 // boxes. Every fill is checked against the answer key (dataset/build.cjs): a wrong fill is an answer the key
-// doesn't give, including any fill where the key says the facts don't say. The clock is held still, so every
-// question is decided however long the model takes; tests/laya-parity.test.cjs checks speed.
+// doesn't give, including any fill where the key says the facts don't say. The click's clock is held still and its
+// time limit left off each request, so every question is decided however long the model takes on a busy
+// computer; tests/laya-parity.test.cjs checks speed.
 //
-//   node ML_model/eval/app_accuracy.cjs --model <export folder> --format <format> [--per-question 24] [--out <report.json>]
+//   node ML_model/eval/app_accuracy.cjs --model <export folder> --format <format> [--per-question 8] [--out <report.json>]
 // tests/laya-parity.test.cjs runs it with SECONDHAND_LAYA_ACCURACY=1 and checks WRONG_FILL_BUDGETS.
 const fs = require('node:fs');
 const { createLaya } = require('../../desktop/laya.cjs');
@@ -18,25 +19,27 @@ const { choiceDecisions, formKey, ABSTAIN } = require('../dataset/build.cjs');
 const { loadFinalBank } = require('../question-bank.cjs');
 const { generateHouseholds } = require('../profiles/generate.cjs');
 
-// The share of a task's decisions the app may fill wrong on the final holdout, per model format: just over
-// what each model filled wrong there at the app's bars (docs/laya-model.md; ML_model/eval/reports
-// round2-onnx-int8-final-app.json and round4-onnx-int8-final.json): noul-v1 15 of 1,232 answers (1.2%) and 9
-// of 222 boxes (4.1%), choice-v2 30 of 1,232 (2.4%) and 1 of 222 (0.5%).
+// The share of a task's decisions the app may fill wrong on the final holdout, per model format: a little over
+// what this job measured on 2026-10-06 (ML_model/eval/reports/*-final-app-fills.json): round 2's noul-v1 export
+// filled 17 of 1,232 answers wrong (1.38%) and 5 of 222 boxes (2.25%); round 4's choice-v2 export 31 of 1,232
+// (2.52%) and 1 of 222 (0.45%). The decisions are the same each run: one more wrong fill in a task passes, two fail.
 const WRONG_FILL_BUDGETS = Object.freeze({
-  'noul-v1': Object.freeze({ answering: 0.02, matching: 0.05 }),
-  'choice-v2': Object.freeze({ answering: 0.03, matching: 0.01 })
+  'noul-v1': Object.freeze({ answering: 0.015, matching: 0.03 }),
+  'choice-v2': Object.freeze({ answering: 0.026, matching: 0.01 })
 });
-// The final holdout as the reports scored it: build.cjs's households (2,000 from seed 7), up to 24 per
-// choice question, taken across its right answers.
-const FINAL = Object.freeze({ today: '2026-09-26', count: 2000, seed: 7, perQuestion: 24 });
+// The final holdout as its reports scored it (docs/laya-model.md: build.cjs --final --today 2026-09-26
+// --households 400 --seed 11 --per-question 8): 400 fictional households, up to 8 per choice question, taken
+// across its right answers.
+const FINAL = Object.freeze({ today: '2026-09-26', count: 400, seed: 11, perQuestion: 8 });
 
 const asAsked = ({ id, label, type, options }) => ({ id, label, type, options });
 
 // { answering, matching }: each task's decisions, fills, right fills and wrong fills ({ form, question, filled, key }).
 async function appAccuracy({ laya, bank, households, today, perQuestion = Infinity }) {
   const still = () => 0;
-  const answerer = createFieldAnswers({ laya, today, now: still });
-  const matcher = createFieldSuggestions({ laya, now: still });
+  const unhurried = { ...laya, decideBatch: (items, { timeoutMs, ...options } = {}) => laya.decideBatch(items, options) };
+  const answerer = createFieldAnswers({ laya: unhurried, today, now: still });
+  const matcher = createFieldSuggestions({ laya: unhurried, now: still });
   const answering = { decisions: 0, filled: 0, right: 0, wrong: [] };
   const forms = new Map(bank.flatMap(file => file.questions.map(question => [question, formKey(file)])));
   for (const { question, index, answer } of choiceDecisions(bank, households, { today, perQuestion })) {
@@ -49,7 +52,8 @@ async function appAccuracy({ laya, bank, households, today, perQuestion = Infini
   }
   const matching = { decisions: 0, filled: 0, right: 0, wrong: [] };
   for (const file of bank) {
-    const boxes = file.questions.filter(question => TEXT_TYPES.includes(question.type));
+    // A date box is never asked (date of birth is never offered), so, as in the reports, it isn't a decision.
+    const boxes = file.questions.filter(question => TEXT_TYPES.includes(question.type) && question.type !== 'date');
     matching.decisions += boxes.length;
     const suggestions = await matcher.suggest(boxes.map(asAsked), { budgetMs: BUDGET_MS });
     for (const box of boxes) {
@@ -85,7 +89,7 @@ function finalHoldout({ perQuestion = FINAL.perQuestion } = {}) {
 async function main() {
   const arg = (name, fallback) => { const index = process.argv.indexOf(`--${name}`); return index > 0 ? process.argv[index + 1] : fallback; };
   const modelDir = arg('model'), format = arg('format');
-  if (!modelDir || !Object.hasOwn(WRONG_FILL_BUDGETS, format)) throw new Error(`Usage: node ML_model/eval/app_accuracy.cjs --model <export folder> --format <${Object.keys(WRONG_FILL_BUDGETS).join(' | ')}> [--per-question 24] [--out <report.json>]`);
+  if (!modelDir || !Object.hasOwn(WRONG_FILL_BUDGETS, format)) throw new Error(`Usage: node ML_model/eval/app_accuracy.cjs --model <export folder> --format <${Object.keys(WRONG_FILL_BUDGETS).join(' | ')}> [--per-question 8] [--out <report.json>]`);
   const laya = createLaya({ modelDir, modelFormat: format, manifest: { version: 1, model: null }, enabled: true, timeoutMs: 5 * 60 * 1000 });
   try {
     const result = await appAccuracy({ laya, ...finalHoldout({ perQuestion: Number(arg('per-question', String(FINAL.perQuestion))) }) });
