@@ -525,7 +525,8 @@ async function main() {
     for (const id of Object.keys(NO_LIST_QUESTIONS)) assert.equal(await page.locator(`#${id}`).inputValue(), '', `${id} stays open`);
     assert.deepEqual((await calls('getFields')).filter(call => call.url === NO_LIST).map(call => call.fields), [['firstName', 'householdAdults', 'householdCount:0-5', 'householdCount:6-18']]);
     await expect(noListWidget.locator('#need-you')).toHaveText(en('widget.needYou', { count: 3 }), { timeout: 15000 });
-    await expect(noListWidget.locator('#widget-text')).toHaveText(`${en('widget.filled', { count: 1 })} · ${en('widget.household', { count: 3 })}`);
+    // The card says the side panel's sentence without the count its link carries, then where the household questions wait.
+    await expect(noListWidget.locator('#widget-text')).toHaveText(`${en('result.siteFilled', { count: 1 })} ${en('widget.household', { count: 3 })}`);
     await expect.poll(() => panel.visible('#household-section'), { timeout: 15000 }).toBe(true);
     assert.equal(await panel.text('#household-hint'), en('household.hintList'));
     assert.equal(await panel.text('#household-list'), Object.values(NO_LIST_QUESTIONS).join(''));
@@ -636,7 +637,7 @@ async function main() {
     assert.ok(asked186.slice(1).every(call => call.url === VISIT && !call.fields.includes('EMPLID')), 'a filled question isn’t asked about again');
     await expect.poll(() => panel.text('#status'), { timeout: 15000 })
       .toBe(en('result.fromCustom', { summary: { key: 'result.siteFilledNeedYou', params: { count: 3, needYou: 1 } }, count: 2 }));
-    await expect(visitWidget.locator('#widget-text')).toHaveText(`${en('widget.filled', { count: 3 })} · ${en('widget.fromCustom', { count: 2 })}`, { timeout: 15000 });
+    await expect(visitWidget.locator('#widget-text')).toHaveText(en('result.fromCustom', { summary: { key: 'result.siteFilled', params: { count: 3 } }, count: 2 }), { timeout: 15000 });
     assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
     await page.screenshot({ path: path.join(root, 'artifacts/remember/visit-filled.png') });
     await worker.evaluate(() => { const desktop = globalThis.__desktop; desktop.customFieldsAvailable = false; desktop.profile.customFields = desktop.profile.customFields.filter(row => !row.site); });
