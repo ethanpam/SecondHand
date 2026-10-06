@@ -10,6 +10,7 @@ const path = require('node:path');
 const applicantFixture = require('../tests/fixtures/applicant-profile.json');
 const { PROFILE_FIELDS, LIST_FIELDS, validateProfile } = require('../shared/schema.cjs');
 const { MODEL_FILES } = require('../desktop/laya-model.cjs');
+const { relayRequest } = require('../desktop/bridge.cjs');
 const root = path.join(__dirname, '..');
 const passphrase = 'synthetic-test-vault-passphrase';
 // Creating or unlocking the vault derives its key with scrypt (N=2^15, r=8) in the
@@ -195,6 +196,43 @@ async function guidedSetup(page, application, userData) {
   await expect(page.locator('#setup-resume')).toBeHidden();
   await assert.rejects(fs.access(progressFile), 'a finished setup keeps no progress file');
   console.log('Guided setup: offered after the recovery key, six steps saved as the applicant moved on, finished later from Overview; the household step listed four people and counted their ages.');
+}
+
+// #186: one answer remembered from https://pantry.example.org through the bridge, shown, changed and removed in My information.
+async function remembered(page, application, userData, pantry) {
+  await application.evaluate(({ dialog }) => {
+    globalThis.__smokeDialogs = [];
+    dialog.showMessageBox = async (_window, options) => { globalThis.__smokeDialogs.push({ title: options.title, message: options.message, detail: options.detail }); return { response: 1 }; };
+  });
+  const request = (type, payload) => relayRequest(userData, 'a'.repeat(32), { id: crypto.randomUUID(), type, url: `${pantry}/visit`, ...payload });
+  const question = { label: 'How did you hear about us?', type: 'radio', options: ['Friend', 'Church', 'Flyer'] };
+  const reply = await request('rememberAnswers', { answers: [{ ...question, answer: 'Church' }] });
+  assert.deepEqual([reply.ok, reply.data], [true, { remembered: 1 }], reply.error);
+  await expect(page.locator('#toast')).toHaveText('An answer you chose to remember in Chrome is now in My information, under Custom answers.');
+  await page.locator('.nav-item[data-view="profile"]').click();
+  await page.locator('#custom-answers > summary').click();
+  const row = page.locator('.custom-answer').filter({ has: page.locator('[data-custom-field="label"]') }).last();
+  await expect(row.locator('[data-custom-field="label"]')).toHaveValue(question.label);
+  await expect(row.locator('.custom-answer-site')).toHaveText('Saved from pantry.example.org with Remember for next time.');
+  await expect(row.locator('select[data-custom-field="value"]')).toHaveValue('Church');
+  assert.deepEqual(await row.locator('select[data-custom-field="value"] option').allTextContents(), question.options);
+  await captureDiagnostic(page, 'remember/desktop-custom-answers.png', { fullPage: true });
+  // Changed in My information, it is what the next Autofill on the same question gets.
+  await row.locator('select[data-custom-field="value"]').selectOption('Flyer');
+  await page.locator('#save-profile').click();
+  await expect(page.locator('#profile-save-state')).toBeHidden();
+  const saved = (await page.evaluate(() => window.secondHand.getData())).profile.customFields;
+  assert.deepEqual(saved.map(({ id, ...answer }) => answer), [{ label: question.label, value: 'Flyer', aliases: [], ...question, site: pantry }]);
+  const fill = await request('getCustomFields', { fields: [{ id: 'f0:sh-1-0', label: '2. How did you hear about us? *', type: 'radio', options: ['flyer', 'friend', 'church'] }] });
+  assert.deepEqual([fill.ok, fill.data?.values], [true, { 'f0:sh-1-0': 'flyer' }], fill.error);
+  assert.deepEqual(await application.evaluate(() => globalThis.__smokeDialogs.map(dialog => dialog.title)), ['Remember this answer?', 'Let Chrome fill this form?'],
+    'the app asked before it kept the answer, and again before it filled it');
+  assert.match(await application.evaluate(() => globalThis.__smokeDialogs[0].detail), /^“How did you hear about us\?”: "Church"\n\n/);
+  await row.getByRole('button', { name: /^Remove custom answer/ }).click();
+  await page.locator('#save-profile').click();
+  await expect(page.locator('#profile-save-state')).toBeHidden();
+  assert.deepEqual((await page.evaluate(() => window.secondHand.getData())).profile.customFields, []);
+  console.log('#186: an answer remembered through the bridge, after the app’s confirmation, showed in Custom answers with its site and choices; changed there, it filled the same question; removed, the profile was as before.');
 }
 
 async function main() {
@@ -409,6 +447,12 @@ async function main() {
     const restored = await page.evaluate(() => window.secondHand.getData());
     assert.deepEqual(withoutIds(restored.profile), withoutIds(applicantFixture));
     assert.equal(restored.applications[0].confirmationNumber, 'SYNTHETIC-RECEIPT-ONLY');
+
+    // Remember for next time (#186), through the app's real bridge: the extension asks the app to keep a pantry's question
+    // as a custom answer. The app's confirmation is answered Remember here (Electron's native dialog can't be clicked by a
+    // test); the dialogs it showed are kept to check. My information's Custom answers then lists it with the site it came
+    // from and its own choices; a changed answer is what the next Autofill gets; and removing it leaves the profile as it was.
+    await remembered(page, application, userData, pantry);
 
     // Unlock with Touch ID (#99): turned on with the password, used after an automatic lock, and ready
     // at once after a restart. It stays on until it's turned off.

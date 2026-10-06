@@ -312,7 +312,7 @@ test('#185: asked for guesses, a radio or dropdown question with no sure answer 
   assert.deepEqual(result.sensitive, []);
 
   const plain = await answerer(stubLaya(scores)).answer({ questions: [vet, size], profile: everydayHousehold, budgetMs });
-  assert.deepEqual(plain, { answers: {}, guesses: {}, sensitive: [], sensitiveFields: [] }, 'no guesses unless the caller asks for them (never on Iowa’s portal)');
+  assert.deepEqual(plain, { answers: {}, guesses: {}, sensitive: [], sensitiveFields: [] }, 'no guesses unless the caller asks for them (Autofill doesn’t: #189)');
   const tied = await answerer(stubLaya(unsure({ [vet.label]: { Yes: 0.4, No: 0.4, [ABSTAIN]: 0.1 } }))).answer({ questions: [vet], profile: everydayHousehold, budgetMs, guess: true });
   assert.deepEqual(tied.guesses, {}, 'two options tied for the top: no guess');
 });

@@ -38,4 +38,5 @@ footer{border-top:1px solid #e6ebde;padding:12px 0 14px}footer p{font-size:10px;
 .summary-group h3{margin:0 0 4px;font-size:11px;font-weight:600;color:#728763}.summary-group ul{margin:0;padding-inline-start:18px}
 .summary-group li{font-size:13px;line-height:1.5;color:#49663c;margin:3px 0}.summary-empty{font-size:12px;line-height:1.5;color:#a68a48}
 .save-hint{font-size:11px;line-height:1.45;color:#7e9470;margin:0 0 8px}.save-row{cursor:default}.save-row .button{flex-shrink:0;width:auto;padding:6px 10px;font-size:12px}
+.remember-check{display:flex;align-items:center;gap:6px;flex-shrink:0;font-size:11px;color:#59764b;cursor:pointer}.remember-check input{margin:0;accent-color:#628c51}#remember-save{margin-top:8px}
 .guess-mark{border:2px dotted #9b3d8f}

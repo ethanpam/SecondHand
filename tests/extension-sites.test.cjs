@@ -21,11 +21,11 @@ const IOWA_HOST = `${IOWA_ORIGIN}/*`;
 const ALL_SCRIPT = { id: 'site-all', matches: [ALL], excludeMatches: [IOWA_HOST], js: SITE_SCRIPT.js, allFrames: true, runAt: 'document_idle', persistAcrossSessions: true };
 
 // Stand-in for generic-adapter.js's pure helpers; the real engine has its own tests.
-const { GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey, canCustom } = require('../extension/generic-adapter.js');
+const { GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey, canCustom, canRemember, timeBound } = require('../extension/generic-adapter.js');
 const SENSITIVE = ['ssn', 'birthDate', 'ageRange', 'totalMonthlyIncome', 'annualIncome', 'assetsOnHand', 'monthlyMedicalExpenses',
   'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare'];
 const generic = {
-  GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey, canCustom,
+  GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey, canCustom, canRemember, timeBound,
   requestKeys: keys => [...new Set(keys.flatMap(key => key === 'fullName' ? ['firstName', 'lastName'] : key === 'ageRange' ? ['birthDate'] : [key]))],
   deriveValues: values => ({ ...values, ...(values.firstName && values.lastName ? { fullName: `${values.firstName} ${values.lastName}` } : {}),
     ...(values.birthDate ? { ageRange: '41' } : {}) })
@@ -98,6 +98,13 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
       const field = token === current?.token ? current.ids.get(id) : null;
       if (!field || field.key !== key) return null;
       // `repeated`: the page asks the question in more than one box, as in a member's section with no heading (#142).
+      if (field.repeated) return { repeated: true };
+      return field.typed === undefined ? { empty: true } : field.typed === null ? { unreadable: true } : { value: field.typed };
+    },
+    // Remember for next time (#186): one open question's answer, read after the click.
+    readOpen({ token, id }) {
+      const field = token === current?.token ? current.ids.get(id) : null;
+      if (!field || field.key) return null;
       if (field.repeated) return { repeated: true };
       return field.typed === undefined ? { empty: true } : field.typed === null ? { unreadable: true } : { value: field.typed };
     },
@@ -177,6 +184,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
         if (message.type === 'secondhand:generic:questions') return model.questions();
         if (message.type === 'secondhand:generic:answered') return { answered: model.answeredIds(message.token, message.ids) };
         if (message.type === 'secondhand:generic:read') return model.read(plain(message));
+        if (message.type === 'secondhand:generic:readOpen') return model.readOpen(plain(message));
         if (message.type === 'secondhand:generic:pageText') return structuredClone(frame ? frame.pageText || { lang: '', text: '' } : pageText);
         // An embedded frame says whether its page has a form SecondHand can help with (#157): `helps` on the frame.
         // `off`: SecondHand was turned off for the frame, which answers nothing. `answering`: a test holds the answer back.
@@ -285,6 +293,12 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
           return reply({ accessRevision: vault.accessRevision,
             values: Object.fromEntries(request.fields.filter(key => vault.values[key] && (played || !held.includes(key))).map(key => [key, vault.values[key]])),
             ...((played ? held !== undefined : held.length) ? { held } : {}), ...(reason !== undefined ? { reason } : {}) });
+        }
+        // Remember for next time (#186): the app's confirmation and save, as Remember, unless the test gives its refusal.
+        if (request.type === 'rememberAnswers') {
+          if (untrusted(request.url) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
+          if (vault.rememberError) return fail(vault.rememberError);
+          return reply({ remembered: request.answers.length });
         }
         if (request.type === 'getCustomFields') {
           const response = vault.custom?.(plain(request), vault, tab);
@@ -592,7 +606,7 @@ test('AI guesses join the one desktop request and are filled with the guessed ma
   const result = plain(response.data);
   assert.equal(result.filled, 3);
   assert.equal(result.guessed, 2);
-  assert.equal(result.message, 'Filled 3 · 2 guessed · 1 need you. Check your answers before you submit.');
+  assert.equal(result.message, 'Filled 3 · 2 suggested · 1 need you. Check your answers before you submit.');
   assert.doesNotMatch(JSON.stringify(result), /Synthetic private|5155550100/);
 });
 
@@ -805,6 +819,12 @@ function siteContent(t, { url = SITE_URL, engine = true, settled = null, offers 
         calls.push(`read:${token}:${id}:${key}`);
         if (token === 'plan-1' && id === 'sh-3') return { repeated: true, element: doc.getElementById('name') };
         return token === 'plan-1' && id === 'sh-1' && key === 'county' ? { value: 'Story', element: doc.getElementById('name') } : null;
+      },
+      // Remember for next time (#186): one open question's answer, after the click.
+      readOpen: (doc, token, id) => {
+        calls.push(`readOpen:${token}:${id}`);
+        if (token === 'plan-1' && id === 'sh-3') return { empty: true, element: doc.getElementById('day') };
+        return token === 'plan-1' && id === 'sh-2' ? { value: 'Monday', element: doc.getElementById('day') } : null;
       }
     };
   }
@@ -1433,7 +1453,7 @@ test('with Laya ready, the widget’s plan says so, and its match fills a text b
   assert.equal(result.filled, 2);
   assert.equal(result.guessed, 1);
   assert.equal(result.laya, 1);
-  assert.equal(result.message, 'Filled 2 · 1 guessed · 1 need you. Check your answers before you submit. Guesses were suggested by Laya on this computer.');
+  assert.equal(result.message, 'Filled 2 · 1 suggested · 1 need you. Check your answers before you submit. Suggestions came from Laya on this computer.');
   assert.equal(result.messageKey, 'result.suggestedByLaya');
   assert.doesNotMatch(JSON.stringify(layaCalls(w)), /Synthetic private|synthetic\.private|50309/, 'no saved value is ever sent to Laya');
 });
@@ -1453,7 +1473,7 @@ test('Laya answers a choice question from the saved profile: the option is picke
   assert.equal(w.page.fields[1].mark, 'guess');
   assert.deepEqual(result.needYou, [idOf(w, 'pet')], '"Do you have a pet?" stays under need you');
   assert.equal(result.guessed, 1);
-  assert.equal(result.message, 'Filled 2 · 1 guessed · 1 need you. Check your answers before you submit. Guesses were suggested by Laya on this computer.');
+  assert.equal(result.message, 'Filled 2 · 1 suggested · 1 need you. Check your answers before you submit. Suggestions came from Laya on this computer.');
   assert.deepEqual(w.nativeTypes().filter(type => type !== 'status'), ['warmLaya', 'answerFields', 'getFields'],
     'Laya is readied, answers the choice questions first, and the saved values follow');
   assert.doesNotMatch(JSON.stringify(layaCalls(w)), /Synthetic private|synthetic\.private|50309/, 'no saved value is ever sent to Laya');
@@ -1475,7 +1495,7 @@ test('a question whose label hides a zero-width space stays with the applicant, 
   assert.deepEqual(answerRequest.questions.map(question => question.label), [SIXTY.label, PET.label], 'Laya gets every other question');
   assert.deepEqual(w.page.answered(), ['name', 'sixty']);
   assert.deepEqual(result.needYou, [idOf(w, 'delivery'), idOf(w, 'pet')], 'the hidden-character question is left to the applicant');
-  assert.equal(result.message, 'Filled 2 · 1 guessed · 2 need you. Check your answers before you submit. Guesses were suggested by Laya on this computer.');
+  assert.equal(result.message, 'Filled 2 · 1 suggested · 2 need you. Check your answers before you submit. Suggestions came from Laya on this computer.');
 });
 
 test('answers alone fill under their own access receipt, which is checked before the page is touched', async () => {
@@ -1543,7 +1563,7 @@ test('Laya not ready: the widget’s plan says so after one readiness check, and
   assert.deepEqual(today.nativeTypes(), ['warmLaya', 'status', 'status', 'getFields', 'status'], 'custom availability is checked; Laya is not asked again in the same click');
   assert.equal(guessed.guessed, 1);
   assert.equal(guessed.laya, undefined);
-  assert.equal(guessed.message, 'Filled 2 · 1 guessed · 2 need you. Check your answers before you submit.');
+  assert.equal(guessed.message, 'Filled 2 · 1 suggested · 2 need you. Check your answers before you submit.');
 
   const unguessed = siteWorker({ enabled: true, fields: openQuestions(), desktop: { values: SAVED } });
   await plan(unguessed);
@@ -1686,7 +1706,7 @@ test('#185: Laya’s guess fills a single-choice question with its own mark; the
   assert.deepEqual([result.filled, result.guessed, result.laya, result.layaGuessed], [3, 1, 1, 1], 'the guess is filled, apart from the sure answer');
   assert.deepEqual(result.layaGuesses, [{ id: size, label: SIZE.label }]);
   assert.deepEqual(result.needYou, [idOf(w, 'pet')]);
-  assert.equal(result.message, 'Filled 3 · 1 guessed · 1 need you. Check your answers before you submit. Guesses were suggested by Laya on this computer. 1 guessed by Laya, check it.');
+  assert.equal(result.message, 'Filled 3 · 1 suggested · 1 need you. Check your answers before you submit. Suggestions came from Laya on this computer. 1 guessed by Laya, check it.');
   assert.equal(result.messageKey, 'result.layaGuessed');
   assert.deepEqual(plain((await w.panel({ type: 'ui:pageState' })).data).result.layaGuesses, [{ id: size, label: SIZE.label }]);
   assert.deepEqual(plain((await w.panel({ type: 'ui:focusField', key: size })).data), { focused: true }, 'the side panel finds it after the fill planned the page again');
@@ -2906,6 +2926,18 @@ test('a site frame says which listed boxes hold an answer, by id, and reads one 
   assert.deepEqual(page.calls.filter(call => typeof call === 'string' && call.startsWith('read:')), ['read:plan-1:sh-1:county', 'read:plan-1:sh-2:county', 'read:plan-1:sh-3:birthDate']);
 });
 
+test('a site frame reads one open question’s answer only when the worker asks for it, and sends the answer alone (#186)', t => {
+  const page = siteContent(t);
+  assert.deepEqual(plain(page.request({ type: 'secondhand:generic:readOpen', token: 'plan-1', id: 'sh-2' })), { value: 'Monday' }, 'the value only, nothing else of the box');
+  assert.deepEqual(plain(page.request({ type: 'secondhand:generic:readOpen', token: 'plan-1', id: 'sh-3' })), { empty: true });
+  assert.deepEqual(plain(page.request({ type: 'secondhand:generic:readOpen', token: 'plan-1', id: 'sh-1' })), { readable: false });
+  for (const message of [{ type: 'secondhand:generic:readOpen', token: 'plan-1' }, { type: 'secondhand:generic:readOpen', token: 7, id: 'sh-2' }, { type: 'secondhand:generic:readOpen', token: 'plan-1', id: ['sh-2'] }]) {
+    assert.deepEqual(plain(page.request(message)), { ok: false, error: 'This page could not be checked safely. Review it manually.' }, JSON.stringify(message));
+  }
+  assert.equal(page.request({ type: 'secondhand:generic:readOpen', token: 'plan-1', id: 'sh-2' }, { id: 'another-extension' }), undefined);
+  assert.deepEqual(page.calls.filter(call => typeof call === 'string' && call.startsWith('readOpen:')), ['readOpen:plan-1:sh-2', 'readOpen:plan-1:sh-3', 'readOpen:plan-1:sh-1']);
+});
+
 // #135: answers the app left out because a saved date of birth is after today or more than 130 years ago.
 const BIRTH_DATE_REASON = 'SecondHand left the answers that need a date of birth for you: a date of birth in My information is after today or more than 130 years ago. Check it in the SecondHand app.';
 test('when the app leaves answers out because of a saved date of birth, the click still fills the rest and says why', async () => {
@@ -2923,7 +2955,7 @@ test('when Laya answers without a saved date of birth it can’t use, the click 
   const w = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...SIXTY }, { ...PET }], desktop: layaDesktop(play) });
   const result = plain((await autofill(w)).data);
   assert.equal(result.filled, 2);
-  assert.equal(result.message, `Filled 2 · 1 guessed · 1 need you. Check your answers before you submit. Guesses were suggested by Laya on this computer. ${BIRTH_DATE_REASON}`);
+  assert.equal(result.message, `Filled 2 · 1 suggested · 1 need you. Check your answers before you submit. Suggestions came from Laya on this computer. ${BIRTH_DATE_REASON}`);
   const both = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...SIXTY }, { ...PET }], desktop: { ...layaDesktop(play), fieldsReason: 'birthDate' } });
   assert.equal(plain((await autofill(both)).data).message.split(BIRTH_DATE_REASON).length, 2, 'the same reason is said once');
 });
@@ -3287,6 +3319,140 @@ test('partial custom rejection replans successful answers and never repeats the 
   assert.equal(w.page.fields[0].answered, 'SAVED-42'); assert.equal(w.page.fields[1].answered, undefined);
   assert.equal(w.native.filter(call => call.type === 'getCustomFields').length, 1);
   assert.equal(reply.data.needYou.length, 1);
+});
+
+// #186: Remember for next time keeps the applicant's answers to open questions as custom answers, and a custom answer about
+// a sensitive subject waits for Fill sensitive details.
+const EMPLID_Q = { name: 'emplid', label: 'EMPLID', type: 'text' };
+const HEARD_Q = { name: 'heard', label: 'How did you hear about us?', type: 'radio', options: ['Friend', 'Church', 'Flyer'] };
+const DAY_Q = { name: 'day', label: 'Preferred pickup day', type: 'select', options: ['Monday', 'Friday'] };
+const INCOME_Q = { name: 'income', label: 'Monthly income', type: 'number' };
+const rememberAnswers = (w, ids) => w.panel({ type: 'ui:rememberAnswers', ids, confirmed: true });
+const rememberable = async w => plain((await w.panel({ type: 'ui:pageState' })).data).rememberable;
+const remembering = (fields = [{ ...EMPLID_Q }, { ...HEARD_Q }, { ...DAY_Q }, { name: 'name', key: 'fullName' }, { name: 'sign', label: 'Signature', type: 'text' }], options = {}) =>
+  siteWorker({ enabled: true, fields, ...options });
+
+test('the summary says how many answers came from custom answers (#186)', async () => {
+  const w = siteWorker({ enabled: true, fields: [{ ...EMPLID_Q }, { name: 'name', key: 'fullName' }], desktop: { customFieldsAvailable: true,
+    custom: request => ({ values: { [request.fields[0].id]: 'SYN-4471' }, accessRevision: 0 }) } });
+  const result = plain((await autofill(w)).data);
+  assert.deepEqual([result.filled, result.custom, result.messageKey], [2, 1, 'result.fromCustom']);
+  assert.equal(result.message, 'Filled 2. Check your answers before you submit. 1 from your custom answers.');
+  assert.equal(strings.text('es', result.messageKey, result.messageParams).includes('1'), true);
+  const none = plain((await autofill(siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }] }))).data);
+  assert.equal(none.custom, undefined);
+});
+
+test('a custom answer the app holds back for its sensitive subject waits for Fill sensitive details, and no AI guesses it (#186)', async () => {
+  const held = request => request.fields.filter(field => field.label === 'Monthly income').map(field => field.id);
+  const custom = request => request.sensitive ? { values: Object.fromEntries(request.fields.map(field => [field.id, '1200'])), accessRevision: 0 }
+    : { values: {}, held: held(request), accessRevision: 0 };
+  const suggested = [];
+  const w = siteWorker({ enabled: true, fields: [{ ...INCOME_Q }, { name: 'name', key: 'fullName' }], desktop: { ...layaDesktop({ suggestFields: request => { suggested.push(...request.fields.map(field => field.label)); return { suggestions: {} }; } }),
+    customFieldsAvailable: true, custom } });
+  const result = plain((await autofill(w)).data);
+  const income = idOf(w, 'income');
+  assert.deepEqual([result.filled, result.held, result.needYou], [1, 1, [income]]);
+  assert.equal(result.message, 'Filled 1 · 1 need you. Check your answers before you submit. 1 sensitive detail waits until you click Fill sensitive details in the side panel.');
+  assert.equal(w.page.fields[0].answered, undefined);
+  assert.deepEqual(suggested, [], 'Laya never guesses a question whose custom answer waits');
+  assert.deepEqual(plain((await w.panel({ type: 'ui:pageState' })).data).held, [{ id: income, label: 'Monthly income' }]);
+  assert.equal(await rememberable(w), undefined, 'its answer is saved: it is never offered to remember');
+
+  const asked = w.native.length;
+  const filled = plain((await w.panel({ type: 'ui:fillHeld', confirmed: true })).data);
+  const request = w.native.slice(asked).find(call => call.type === 'getCustomFields');
+  assert.deepEqual({ url: request.url, fields: request.fields, sensitive: request.sensitive }, { url: `${ORIGIN}/intake`, fields: [{ id: w.page.idOf('income'), label: 'Monthly income', type: 'number', options: [] }], sensitive: true });
+  assert.equal(w.page.fields[0].answered, '1200');
+  assert.deepEqual([filled.filled, filled.held, filled.needYou], [2, undefined, []]);
+  assert.equal(filled.message, 'Filled 2. Check your answers before you submit. 1 from your custom answers.');
+
+  // A held list naming a question the worker didn't ask about, or one it was given an answer for, fills nothing.
+  for (const odd of [request => ({ values: {}, held: ['sh-9-9'], accessRevision: 0 }), request => ({ values: { [request.fields[0].id]: '1200' }, held: [request.fields[0].id], accessRevision: 0 }),
+    () => ({ values: {}, held: [], accessRevision: 0 })]) {
+    const refused = siteWorker({ enabled: true, fields: [{ ...INCOME_Q }], desktop: { customFieldsAvailable: true, custom: odd } });
+    assert.equal(plain((await autofill(refused)).data).messageKey, 'worker.desktopUnexpected');
+    assert.equal(refused.page.fields[0].answered, undefined);
+  }
+});
+
+test('after Autofill, the side panel offers Remember for next time for the open questions a custom answer may fill, unchecked when they change over time (#186)', async () => {
+  const w = remembering();
+  await autofill(w);
+  const [emplid, heard, day] = ['emplid', 'heard', 'day'].map(name => idOf(w, name));
+  assert.deepEqual(await rememberable(w), [{ id: emplid, label: 'EMPLID', timeBound: false, answered: false }, { id: heard, label: 'How did you hear about us?', timeBound: false, answered: false },
+    { id: day, label: 'Preferred pickup day', timeBound: true, answered: false }], 'never the signature, nor a question the rules filled');
+  assert.equal(plain((await w.launcher({ type: 'ui:pageState' })).data).rememberable, undefined, 'the on-page widget never gets the list');
+  w.page.type('emplid', 'SYN-4471');
+  assert.deepEqual((await rememberable(w)).map(item => item.answered), [true, false, false]);
+  assert.equal(w.contentTypes().includes('secondhand:generic:readOpen'), false, 'no box is read before the click');
+  assert.equal(w.nativeTypes().includes('rememberAnswers'), false);
+});
+
+test('Remember reads only the boxes the applicant chose, after the side panel’s click, and the app keeps them after its confirmation (#186)', async () => {
+  const w = remembering();
+  await autofill(w);
+  const [emplid, heard, day] = ['emplid', 'heard', 'day'].map(name => idOf(w, name));
+  w.page.type('emplid', 'SYN-4471'); w.page.type('heard', 'Church'); w.page.type('day', 'Friday');
+  assert.equal(await w.panel({ type: 'ui:rememberAnswers', ids: [emplid] }), undefined, 'only a confirmed click');
+  assert.equal(await w.launcher({ type: 'ui:rememberAnswers', ids: [emplid], confirmed: true }), undefined, 'only the side panel');
+  const response = await rememberAnswers(w, [emplid, heard]);
+  assert.equal(response.ok, true, response.error);
+  assert.deepEqual(plain(response.data), { remembered: 2 });
+  assert.deepEqual(w.content.filter(call => call.type === 'secondhand:generic:readOpen').map(({ frameId, id }) => ({ frameId, id })),
+    [{ frameId: 0, id: w.page.idOf('emplid') }, { frameId: 0, id: w.page.idOf('heard') }], 'only the chosen boxes');
+  assert.deepEqual(w.native.filter(call => call.type === 'rememberAnswers').map(({ url, answers }) => ({ url, answers })), [{ url: `${ORIGIN}/intake`, answers: [
+    { label: 'EMPLID', type: 'text', options: [], answer: 'SYN-4471' }, { label: 'How did you hear about us?', type: 'radio', options: ['Friend', 'Church', 'Flyer'], answer: 'Church' }] }]);
+  assert.deepEqual((await rememberable(w)).map(item => item.id), [day], 'remembered answers leave the list');
+  assert.equal((await rememberAnswers(w, [emplid])).errorKey, 'worker.answerGone', 'and can’t be remembered twice');
+  for (const ids of [[], 'emplid', [emplid, emplid], [42], Array.from({ length: 21 }, () => day)]) {
+    const reply = await rememberAnswers(w, ids);
+    assert.ok(reply === undefined || reply.errorKey === 'worker.answerGone', JSON.stringify(ids));
+  }
+});
+
+test('an empty, unreadable or repeated answer, or the app’s refusal, remembers nothing and says why (#186)', async () => {
+  const w = remembering();
+  await autofill(w);
+  const emplid = idOf(w, 'emplid');
+  assert.equal((await rememberAnswers(w, [emplid])).errorKey, 'worker.rememberEmpty');
+  w.page.type('emplid', null);
+  assert.equal((await rememberAnswers(w, [emplid])).errorKey, 'worker.rememberUnreadable');
+  w.page.fields[0].repeated = true;
+  assert.equal((await rememberAnswers(w, [emplid])).errorKey, 'worker.rememberRepeated');
+  delete w.page.fields[0].repeated;
+  w.page.type('emplid', 'SYN-4471');
+  w.vault.rememberError = 'You cancelled. Nothing was remembered.';
+  const cancelled = await rememberAnswers(w, [emplid]);
+  assert.deepEqual([cancelled.ok, cancelled.errorKey], [false, 'worker.rememberCancelled']);
+  const full = 'You have 50 custom answers, the most SecondHand keeps. Remove one in My information, then remember this answer again.';
+  w.vault.rememberError = full;
+  assert.deepEqual(plain((await rememberAnswers(w, [emplid])).errorParams), { detail: full }, 'the app’s own words when its list is full');
+  assert.ok((await rememberable(w)).some(item => item.id === emplid), 'a refused answer stays on the list');
+  assert.equal(w.nativeTypes().filter(type => type === 'rememberAnswers').length, 2);
+});
+
+test('an embedded form’s answer is remembered in that form’s own site’s name, and the list goes with the page or the site (#186)', async () => {
+  const child = secondFrame({ enabled: true, url: EMBED_URL, fields: [{ ...EMPLID_Q }] });
+  const w = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }], frames: [child] });
+  await autofill(w);
+  const emplid = `f4:${child.page.idOf('emplid')}`;
+  child.page.type('emplid', 'SYN-4471');
+  assert.deepEqual(await rememberable(w), [{ id: emplid, label: 'EMPLID', timeBound: false, answered: true }]);
+  assert.equal((await rememberAnswers(w, [emplid])).ok, true);
+  assert.deepEqual(w.native.filter(call => call.type === 'rememberAnswers').map(call => call.url), [EMBED_URL]);
+
+  const moved = remembering();
+  await autofill(moved);
+  moved.page.type('emplid', 'SYN-4471');
+  moved.events.updated(7, { status: 'loading' });
+  assert.equal(await rememberable(moved), undefined);
+  assert.equal((await rememberAnswers(moved, [idOf(moved, 'emplid')])).errorKey, 'worker.answerGone');
+  const off = remembering();
+  await autofill(off);
+  off.registered.clear(); off.permissions.clear();
+  assert.equal((await rememberAnswers(off, [idOf(off, 'emplid')])).ok, false);
+  for (const each of [moved, off]) assert.equal(each.contentTypes().includes('secondhand:generic:readOpen'), false);
 });
 
 // #184: a saved answer that names several options of a checkbox question (On-Campus Job and Off-Campus Job are both a job)

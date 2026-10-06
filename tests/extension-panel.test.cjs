@@ -300,7 +300,8 @@ async function panel(t, initial = {}) {
   const tabs = { current: initial.tab || { id: 7, url: `${adapter.PORTAL}/applicant` } };
   // General sites expose metadata and may run explicitly requested Fill and continue.
   const state = initial.site ? { page: { kind: 'general', pageKey: 'general' }, result: initial.result || null, autopilot: false, site: { ...initial.site },
-    ...(initial.savable ? { savable: structuredClone(initial.savable) } : {}), ...(initial.held ? { held: structuredClone(initial.held) } : {}) } : {
+    ...(initial.savable ? { savable: structuredClone(initial.savable) } : {}), ...(initial.held ? { held: structuredClone(initial.held) } : {}),
+    ...(initial.rememberable ? { rememberable: structuredClone(initial.rememberable) } : {}) } : {
     page: { kind: initial.kind || 'fillable', pageKey: 'iowa-personal-information', reason: 'Complete this step in Iowa’s form.', checklist: [
       { key: 'firstName', label: 'First name', status: 'missing', required: true, fillable: true },
       { key: 'lastName', label: 'Last name', status: 'complete', required: true, fillable: true },
@@ -344,6 +345,13 @@ async function panel(t, initial = {}) {
       if (initial.saveError) return { ok: false, ...initial.saveError };
       state.savable = state.savable.filter(item => item.id !== payload.id);
       data = { saved: true };
+    }
+    else if (payload.type === 'ui:rememberAnswers') {
+      // Remember for next time (#186): the worker reads the chosen boxes and the app keeps them after its confirmation.
+      await initial.rememberAnswered;
+      if (initial.rememberError) return { ok: false, ...initial.rememberError };
+      state.rememberable = state.rememberable.filter(item => !payload.ids.includes(item.id));
+      data = { remembered: payload.ids.length };
     }
     else if (payload.type === 'ui:fillHeld') {
       // Fill sensitive details (#176): the app's sensitive prompt for the held questions, then the tab's new result.
@@ -928,7 +936,7 @@ test('on a site that is on, Autofill fills once without Stop, and Turn off asks 
 
 test('widget on a site asks the on-device AI about open questions and sends its guesses with Autofill', async t => {
   const ai = languageModel();
-  const guessed = { state: 'done', filled: 3, guessed: 1, needYou: ['sh-2-0'], message: 'Filled 3 · 1 guessed · 1 need you. Check your answers before you submit.', pageKey: 'general' };
+  const guessed = { state: 'done', filled: 3, guessed: 1, needYou: ['sh-2-0'], message: 'Filled 3 · 1 suggested · 1 need you. Check your answers before you submit.', pageKey: 'general' };
   const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: openPlan, LanguageModel: ai.LanguageModel, autofill: guessed });
   assert.equal(ai.calls.availability, 0, 'nothing is asked before a click');
   await view.userClick('autofill');
@@ -940,7 +948,7 @@ test('widget on a site asks the on-device AI about open questions and sends its 
   assert.match(system, /- email:/);
   assert.match(system, /- phone:/);
   assert.doesNotMatch(system, /ssn|birthDate|Income|firstName/, 'the AI only learns the keys the worker allows');
-  assert.equal(view.get('widget-text').textContent, 'Filled 3 · 1 guessed');
+  assert.equal(view.get('widget-text').textContent, 'Filled 3 · 1 suggested');
   assert.equal(view.get('need-you').textContent, '1 need you');
 });
 
@@ -1402,8 +1410,8 @@ test('when the widget’s offer opened the side panel, the panel shows the list 
 
 // Laya, the desktop's local AI (#39, #42): when it is ready, Chrome's on-device AI stays off.
 const layaDone = { state: 'done', filled: 2, guessed: 1, laya: 1, needYou: ['f0:sh-1-1'], pageKey: 'general',
-  message: 'Filled 2 · 1 guessed · 1 need you. Check your answers before you submit. Guesses were suggested by Laya on this computer.',
-  messageKey: 'result.suggestedByLaya', messageParams: { summary: { key: 'result.siteFilledGuessedNeedYou', params: { count: 2, guessed: 1, needYou: 1 } } } };
+  message: 'Filled 2 · 1 suggested · 1 need you. Check your answers before you submit. Suggestions came from Laya on this computer.',
+  messageKey: 'result.suggestedByLaya', messageParams: { summary: { key: 'result.siteFilledSuggestedNeedYou', params: { count: 2, suggested: 1, needYou: 1 } } } };
 
 test('with Laya ready, the widget leaves Chrome’s on-device AI off, fills the plan Laya answers for, and says who suggested the guesses', async t => {
   const ai = languageModel();
@@ -1411,13 +1419,13 @@ test('with Laya ready, the widget leaves Chrome’s on-device AI off, fills the 
   await view.userClick('autofill');
   assert.deepEqual(plainRequests(view.requests.slice(-2)), [{ type: 'ui:plan', confirmed: true }, { type: 'ui:autofill', confirmed: true, guesses: {} }]);
   assert.equal(ai.calls.availability, 0, 'Chrome’s on-device AI is never asked');
-  assert.equal(view.get('widget-text').textContent, 'Filled 2 · 1 guessed · suggested by Laya');
+  assert.equal(view.get('widget-text').textContent, 'Filled 2 · 1 suggested · suggested by Laya');
   assert.equal(view.get('widget-text').title, layaDone.message);
   assert.equal(view.get('need-you').textContent, '1 need you');
 
   const spanishView = await panel(t, { launcher: true, language: 'es-ES', tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true }, autofill: layaDone });
   await spanishView.userClick('autofill');
-  assert.equal(spanishView.get('widget-text').textContent, `${strings.text('es', 'widget.filledGuessed', { count: 2, guessed: 1 })} · ${spanish('widget.suggestedByLaya')}`);
+  assert.equal(spanishView.get('widget-text').textContent, `${strings.text('es', 'widget.filledSuggested', { count: 2, suggested: 1 })} · ${spanish('widget.suggestedByLaya')}`);
   assert.deepEqual(shownText(spanishView).filter(text => englishOnly.has(text)), []);
 });
 
@@ -2017,9 +2025,9 @@ test('the widget counts held questions under need-you, says they wait in the sid
 
 // #185: Laya's best guesses, listed for the applicant to find and check.
 const GUESSES = [{ id: 'f0:sh-1-1', label: 'How many people live in your household?' }, { id: 'f4:sh-1-3', label: 'Preferred pickup day' }];
-const GUESSED = 'Filled 4 · 1 guessed. Check your answers before you submit. Guesses were suggested by Laya on this computer. 2 guessed by Laya, check them.';
+const GUESSED = 'Filled 4 · 1 suggested. Check your answers before you submit. Suggestions came from Laya on this computer. 2 guessed by Laya, check them.';
 const guessedDone = { state: 'done', filled: 4, guessed: 1, laya: 1, layaGuessed: 2, layaGuesses: GUESSES, needYou: [], pageKey: 'general', message: GUESSED, messageKey: 'result.layaGuessed',
-  messageParams: { summary: { key: 'result.suggestedByLaya', params: { summary: { key: 'result.siteFilledGuessed', params: { count: 4, guessed: 1 } } } }, count: 2 } };
+  messageParams: { summary: { key: 'result.suggestedByLaya', params: { summary: { key: 'result.siteFilledSuggested', params: { count: 4, suggested: 1 } } } }, count: 2 } };
 
 test('#185: the side panel lists Laya’s guesses by their own words, and a trusted row click finds each one on the page', async t => {
   const view = await panel(t, { tab: pantryTab, site: PANTRY_SITE, result: guessedDone });
@@ -2058,7 +2066,7 @@ test('#185: the guess list shows only well-formed questions, in the applicant’
 test('#185: the widget says how many Laya guessed, apart from its sure answers, in the applicant’s language', async t => {
   const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true }, autofill: guessedDone });
   await view.userClick('autofill');
-  assert.equal(view.get('widget-text').textContent, 'Filled 4 · 1 guessed · suggested by Laya · 2 guessed by Laya, check them');
+  assert.equal(view.get('widget-text').textContent, 'Filled 4 · 1 suggested · suggested by Laya · 2 guessed by Laya, check them');
   assert.equal(view.get('widget-text').title, GUESSED);
   const one = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true },
     autofill: { ...guessedDone, filled: 1, guessed: 0, laya: undefined, layaGuessed: 1, layaGuesses: GUESSES.slice(0, 1) } });
@@ -2067,7 +2075,7 @@ test('#185: the widget says how many Laya guessed, apart from its sure answers, 
   const spanishView = await panel(t, { launcher: true, language: 'es', tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true }, autofill: guessedDone });
   await spanishView.userClick('autofill');
   assert.equal(spanishView.get('widget-text').textContent,
-    `${strings.text('es', 'widget.filledGuessed', { count: 4, guessed: 1 })} · ${spanish('widget.suggestedByLaya')} · ${strings.text('es', 'widget.layaGuessed', { count: 2 })}`);
+    `${strings.text('es', 'widget.filledSuggested', { count: 4, suggested: 1 })} · ${spanish('widget.suggestedByLaya')} · ${strings.text('es', 'widget.layaGuessed', { count: 2 })}`);
   assert.deepEqual(shownText(spanishView).filter(text => englishOnly.has(text)), []);
 });
 
@@ -2104,4 +2112,85 @@ test('Fill and continue is unavailable off enabled ready general sites and recov
   assert.equal(view.get('site-continue').hidden, false);
   assert.equal(view.get('panel-autofill').textContent, 'Autofill this page');
   assert.match(view.get('status').textContent, /required/i);
+});
+
+// Remember for next time (#186): the open questions the applicant answered on the page, each with a checkbox.
+const REMEMBERABLE = [{ id: 'f0:sh-2-1', label: 'EMPLID', timeBound: false, answered: true }, { id: 'f0:sh-2-2', label: 'Preferred pickup day', timeBound: true, answered: true },
+  { id: 'f0:sh-2-3', label: 'How did you hear about us?', timeBound: false, answered: false }];
+const rememberRow = (view, id) => view.window.document.querySelector(`[data-remember-id="${id}"]`);
+const rememberBox = (view, id) => rememberRow(view, id).querySelector('input[type="checkbox"]');
+const tick6 = async () => { for (let i = 0; i < 6; i++) await tick(); };
+
+test('the side panel offers Remember for next time beside each open question answered on the page, checked unless its answer changes over time (#186)', async t => {
+  const view = await panel(t, { tab: pantryTab, site: PANTRY_SITE, rememberable: REMEMBERABLE });
+  assert.equal(view.get('remember-section').hidden, false);
+  assert.equal(view.get('remember-title').textContent, 'Your answers on this page');
+  assert.deepEqual([...view.window.document.querySelectorAll('[data-remember-id]')].map(row => row.dataset.rememberId), ['f0:sh-2-1', 'f0:sh-2-2'], 'only questions the page holds an answer for');
+  assert.match(rememberRow(view, 'f0:sh-2-1').textContent, /^EMPLID.*Remember for next time$/);
+  assert.equal(rememberBox(view, 'f0:sh-2-1').getAttribute('aria-label'), 'Remember your answer to “EMPLID” for next time');
+  assert.equal(rememberBox(view, 'f0:sh-2-1').checked, true, 'checked by default');
+  assert.equal(rememberBox(view, 'f0:sh-2-2').checked, false, 'a time-bound answer starts unchecked');
+  assert.match(rememberRow(view, 'f0:sh-2-2').textContent, /This answer may change, so it starts unchecked\./);
+  assert.equal(view.get('remember-save').textContent, 'Remember checked answers');
+  view.get('remember-save').click(); await tick();
+  assert.equal(view.types().includes('ui:rememberAnswers'), false, 'only a trusted click');
+  view.clickNow('remember-save');
+  await tick();
+  assert.equal(view.get('remember-save').disabled, true, 'while the app asks');
+  await tick6();
+  assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:rememberAnswers')), { type: 'ui:rememberAnswers', ids: ['f0:sh-2-1'], confirmed: true, tabId: 7 });
+  assert.equal(view.get('status').textContent, 'Remembered 1 answer. SecondHand can fill it next time.');
+  assert.equal(rememberRow(view, 'f0:sh-2-1'), null, 'a remembered answer leaves the list');
+  // Checking the time-bound one remembers it too; with nothing checked, there is nothing to send.
+  rememberBox(view, 'f0:sh-2-2').checked = true; rememberBox(view, 'f0:sh-2-2').dispatchEvent(new view.window.Event('change'));
+  assert.equal(view.get('remember-save').disabled, false);
+  rememberBox(view, 'f0:sh-2-2').checked = false; rememberBox(view, 'f0:sh-2-2').dispatchEvent(new view.window.Event('change'));
+  assert.equal(view.get('remember-save').disabled, true, 'nothing checked, nothing to remember');
+  rememberBox(view, 'f0:sh-2-2').checked = true; rememberBox(view, 'f0:sh-2-2').dispatchEvent(new view.window.Event('change'));
+  await view.userClick('remember-save'); await tick6();
+  assert.deepEqual(plainRequests(view.requests.filter(request => request.type === 'ui:rememberAnswers').at(-1)).ids, ['f0:sh-2-2']);
+  assert.equal(view.get('remember-section').hidden, true, 'nothing left to remember');
+});
+
+test('a remember the worker or the app refuses says why, and keeps the rows and the applicant’s choices (#186)', async t => {
+  const view = await panel(t, { tab: pantryTab, site: PANTRY_SITE, rememberable: REMEMBERABLE,
+    rememberError: { error: strings.english('worker.rememberCancelled'), errorKey: 'worker.rememberCancelled', errorParams: {} } });
+  rememberBox(view, 'f0:sh-2-2').checked = true; rememberBox(view, 'f0:sh-2-2').dispatchEvent(new view.window.Event('change'));
+  await view.userClick('remember-save'); await tick6();
+  assert.equal(view.get('status').textContent, 'Cancelled. Nothing was remembered.');
+  assert.equal(view.get('status').classList.contains('error'), true);
+  assert.deepEqual([rememberBox(view, 'f0:sh-2-1').checked, rememberBox(view, 'f0:sh-2-2').checked], [true, true]);
+  // A poll keeps the choices made here.
+  view.window.document.dispatchEvent(new view.window.Event('visibilitychange')); await tick6();
+  assert.deepEqual([rememberBox(view, 'f0:sh-2-1').checked, rememberBox(view, 'f0:sh-2-2').checked], [true, true]);
+  assert.equal(view.get('remember-save').disabled, false);
+});
+
+test('the remember list shows only well-formed rows, in the applicant’s language, and is gone with nothing to remember (#186)', async t => {
+  const odd = [...REMEMBERABLE, { id: 'not an id!', label: 'Bad id', timeBound: false, answered: true }, { id: 'f0:sh-2-4', label: 42, timeBound: false, answered: true },
+    { id: 'f0:sh-2-5', label: 'No flag', answered: true }, null];
+  const view = await panel(t, { tab: pantryTab, site: PANTRY_SITE, rememberable: odd, language: 'es' });
+  assert.deepEqual([...view.window.document.querySelectorAll('[data-remember-id]')].map(row => row.dataset.rememberId), ['f0:sh-2-1', 'f0:sh-2-2']);
+  assert.equal(view.get('remember-title').textContent, 'Sus respuestas en esta página');
+  assert.equal(view.get('remember-save').textContent, 'Recordar las respuestas marcadas');
+  assert.match(rememberRow(view, 'f0:sh-2-1').textContent, /Recordar para la próxima vez/);
+  view.get('language').value = 'fr';
+  view.get('language').dispatchEvent(new view.window.Event('change'));
+  assert.equal(view.get('remember-save').textContent, 'Retenir les réponses cochées');
+  assert.match(rememberRow(view, 'f0:sh-2-1').textContent, /Retenir pour la prochaine fois/);
+  const none = await panel(t, { tab: pantryTab, site: PANTRY_SITE, rememberable: [REMEMBERABLE[2]] });
+  assert.equal(none.get('remember-section').hidden, true, 'nothing answered yet');
+  const empty = await panel(t, { tab: pantryTab, site: PANTRY_SITE });
+  assert.equal(empty.get('remember-section').hidden, true);
+});
+
+test('the widget says how many answers came from custom answers (#186)', async t => {
+  const fromCustom = { state: 'done', filled: 3, guessed: 0, needYou: [], custom: 2, pageKey: 'general', message: 'Filled 3. Check your answers before you submit. 2 from your custom answers.',
+    messageKey: 'result.fromCustom', messageParams: { summary: { key: 'result.siteFilled', params: { count: 3 } }, count: 2 } };
+  const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: fromCustom });
+  await view.userClick('autofill');
+  assert.equal(view.get('widget-text').textContent, 'Filled 3 · 2 from your custom answers');
+  const spanish = await panel(t, { launcher: true, language: 'es', tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: fromCustom });
+  await spanish.userClick('autofill');
+  assert.equal(spanish.get('widget-text').textContent, 'Completadas: 3 · 2 de sus respuestas personalizadas');
 });

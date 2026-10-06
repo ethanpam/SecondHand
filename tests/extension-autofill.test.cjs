@@ -10,10 +10,13 @@ const { GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey } = req
 // Verified Iowa pages never use the general engine; any call there is a bug.
 const noSiteEngine = { GENERIC_KEYS, SAVE_KEYS, requestKeys: () => { throw new Error('Iowa used the site engine.'); }, deriveValues: () => { throw new Error('Iowa used the site engine.'); },
   unsafeQuestion: () => { throw new Error('Iowa used the site engine.'); }, layaQuestion: () => { throw new Error('Iowa used the site engine.'); },
-  isBandKey: () => { throw new Error('Iowa used the site engine.'); } };
+  isBandKey: () => { throw new Error('Iowa used the site engine.'); }, canRemember: () => { throw new Error('Iowa used the site engine.'); },
+  timeBound: () => { throw new Error('Iowa used the site engine.'); } };
+// Iowa's portal is never offered Remember for next time (#186), on any page.
+const noRemembering = { canRemember: () => { throw new Error('Iowa offered Remember for next time.'); }, timeBound: () => { throw new Error('Iowa offered Remember for next time.'); } };
 // Stand-in for generic-adapter.js's pure helpers on pages the Iowa adapter hasn't verified.
 const generalEngine = {
-  GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey,
+  GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey, ...noRemembering,
   requestKeys: keys => [...new Set(keys.flatMap(key => key === 'totalMonthlyIncome' ? ['monthlyEarnedIncome', 'monthlyOtherIncome'] : [key]))],
   deriveValues: values => ({ ...values, ...(values.monthlyEarnedIncome && values.monthlyOtherIncome ? { totalMonthlyIncome: 'Synthetic private total' } : {}) })
 };
@@ -363,7 +366,7 @@ test('with Laya ready, its answer joins the general fill on an unknown Iowa page
   assert.deepEqual(plain(w.calls.content.find(message => message.type === 'secondhand:generic:fill').assignments).at(-1), { id: blind.id, option: 'No', guessed: true });
   assert.equal(result.filled, 3);
   assert.equal(result.laya, 1);
-  assert.equal(result.message, 'Filled 3 · 1 need you. Guesses were suggested by Laya on this computer. Check your answers, then click Continue.');
+  assert.equal(result.message, 'Filled 3 · 1 need you. Suggestions came from Laya on this computer. Check your answers, then click Continue.');
   assert.doesNotMatch(JSON.stringify(answer), /Synthetic private/);
 });
 

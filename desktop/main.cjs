@@ -11,7 +11,7 @@ const { pathToFileURL, URL } = require('node:url');
 const { Vault, atomicWrite, normalizeRecoveryKey, MAX_VAULT_BYTES } = require('./vault.cjs');
 const { startBridge, runNativeHost, nativeStreams, appLaunch, startApp, extensionFromOrigin, EXTENSION_ID, isIowaNavigationAuthorization } = require('./bridge.cjs');
 const recordFields = require('./record-fields.cjs');
-const { validateCustomQuestions, matchCustomFields } = require('../shared/custom-fields.cjs');
+const { validateCustomQuestions, matchCustomFields, sensitiveCustomQuestion, rememberedAnswer, rememberAnswers: rememberCustomAnswers } = require('../shared/custom-fields.cjs');
 const { registerHost } = require('./registration.cjs');
 const { getExtensionSetup, prepareBundledExtension } = require('./extension-setup.cjs');
 const { testStoragePath } = require('./test-storage-path.cjs');
@@ -373,24 +373,66 @@ if (nativeOrigin) {
     if (!siteAllowed(origin)) throw publicError('This site isn’t trusted. Turn on SecondHand for it first.');
     return origin;
   }
+  // Custom answers follow getFields' approval rules (#186): an everyday one asks with the ordinary prompt unless Always allow
+  // covers the site; one about a sensitive subject is held back, and the reply names its question, unless Always allow covers
+  // the site. Fill sensitive details (`sensitive: true`) asks for the held ones alone, with the sensitive prompt.
   async function releaseCustomFields(request, context) {
     const generation = accessRevision, origin = checkGeneralAccess(request, context, generation);
     try {
-      if (Object.keys(request).some(key => !['id', 'type', 'url', 'fields'].includes(key))) throw new Error();
+      if (Object.keys(request).some(key => !['id', 'type', 'url', 'fields', 'sensitive'].includes(key)) || (Object.hasOwn(request, 'sensitive') && request.sensitive !== true)) throw new Error();
       validateCustomQuestions(request.fields);
     } catch { throw publicError('This page asked for unsupported custom-answer questions.'); }
+    const asking = request.sensitive === true;
+    if (asking && !request.fields.every(sensitiveCustomQuestion)) throw publicError('Only sensitive details on a site other than Iowa’s application are asked for this way.');
     if (fieldRequestPending) throw publicError('Another field request is waiting for your approval.');
     let matched;
     try { matched = matchCustomFields(vault.getData().profile.customFields, request.fields); }
     catch { throw publicError('Check your saved custom answers in My information.'); }
-    if (!matched.matches.length) { touch(); return { values: {}, accessRevision }; }
-    const receipt = await approveRelease({ context, iowa: false, origin, generation, withReceipt: true,
-      sensitive: { message: `Fill these custom answers on ${origin}?`,
-        detail: 'Custom answers are treated as sensitive. Only allow this if these exact questions and answers belong on this site:\n\n' +
-          matched.matches.map(row => `${row.label}: ${JSON.stringify(row.value)}`).join('\n') } });
+    const held = asking || releasedWithoutAsking({ context, iowa: false, origin }) ? [] : matched.matches.filter(row => row.sensitive);
+    const released = matched.matches.filter(row => !held.includes(row));
+    const waiting = held.length ? { held: held.map(row => row.id) } : {};
+    if (!released.length) { touch(); return { values: {}, accessRevision, ...waiting }; }
+    const shown = `Your custom answers:\n${released.map(row => `${row.label}: ${JSON.stringify(row.value)}`).join('\n')}`;
+    const receipt = await approveRelease({ context, iowa: false, origin, generation, withReceipt: true, items: shown,
+      message: `Fill ${released.length === 1 ? 'this custom answer' : 'these custom answers'} into ${origin}?`,
+      sensitive: asking ? { message: `Fill sensitive details on ${origin}?`, detail: `${shown}\n\nOnly allow this if you meant to give these details to ${origin}.` } : null });
+    if (!receipt && asking) throw publicError('You cancelled this field request.');
     checkGeneralAccess(request, context, receipt ? receipt.accessRevision : generation);
     touch();
-    return { values: receipt ? matched.values : {}, accessRevision };
+    return { values: receipt ? Object.fromEntries(released.map(row => [row.id, row.value])) : {}, accessRevision, ...waiting };
+  }
+  // rememberAnswers (Remember for next time, #186): answers the applicant gave on a page, kept as custom answers after one
+  // confirmation that names each question and answer. Only the custom answers change.
+  async function rememberAnswers(request, context) {
+    const generation = accessRevision, origin = checkGeneralAccess(request, context, generation);
+    const entries = request.answers.map(answer => validated(rememberedAnswer, answer));
+    validated(rememberCustomAnswers, vault.getData().profile.customFields, entries, origin);
+    if (fieldRequestPending) throw publicError('Another request is waiting for your approval.');
+    fieldRequestPending = true;
+    try {
+      mainWindow.show(); mainWindow.focus();
+      const sensitive = entries.filter(sensitiveCustomQuestion);
+      const one = entries.length === 1;
+      const answer = await dialog.showMessageBox(mainWindow, {
+        type: sensitive.length ? 'warning' : 'question', title: sensitive.length ? 'Remember sensitive details?' : one ? 'Remember this answer?' : 'Remember these answers?',
+        message: `Remember ${one ? 'this answer' : 'these answers'} from ${origin} for next time?`,
+        detail: `${entries.map(entry => `“${entry.label}”: ${JSON.stringify(entry.value)}`).join('\n')}\n\n` +
+          (sensitive.length ? `Your ${sensitive.length === 1 ? 'answer' : 'answers'} to ${listing(sensitive.map(entry => `“${entry.label}”`))} ${sensitive.length === 1 ? 'is' : 'are'} sensitive: ` +
+            `SecondHand fills ${sensitive.length === 1 ? 'it' : 'them'} only after you allow it on each site. ` : '') +
+          `SecondHand keeps ${one ? 'it' : 'them'} in My information under Custom answers and fills ${one ? 'it' : 'them'} when a form asks the same question with the same choices. ` +
+          `You can change or remove ${one ? 'it' : 'them'} there.`,
+        buttons: ['Cancel', 'Remember'], defaultId: sensitive.length ? 0 : 1, cancelId: 0, noLink: true
+      });
+      if (answer.response !== 1) throw publicError('You cancelled. Nothing was remembered.');
+      requireUnlocked();
+      if (generation !== accessRevision || extensionId !== context.extensionId || !siteAllowed(origin)) throw publicError('SecondHand access changed. Try again.');
+      accessRevision++;
+      await vault.update(data => { data.profile.customFields = rememberCustomAnswers(data.profile.customFields, entries, origin); });
+      accessRevision++;
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('secondhand:profile-changed', { fields: ['customFields'] });
+      touch();
+      return { remembered: entries.length };
+    } finally { fieldRequestPending = false; }
   }
   async function authorizeSiteNavigation(request, context) {
     const generation = accessRevision, origin = checkGeneralAccess(request, context, generation);
@@ -429,46 +471,41 @@ if (nativeOrigin) {
       const generation = accessRevision;
       const now = today();
       const profile = vault.getData().profile;
-      // Laya guesses only off Iowa's portal (#185).
-      const { answers, guesses, sensitive, sensitiveFields } = await fieldAnswers.answer({ questions: request.questions, profile, budgetMs: request.budgetMs, today: now, guess: !iowa });
+      // Sure answers only: Laya's best guesses (#185) were mostly wrong on the final holdout, so it isn't asked for them (#189).
+      const { answers, sensitive, sensitiveFields } = await fieldAnswers.answer({ questions: request.questions, profile, budgetMs: request.budgetMs, today: now });
       requireUnlocked();
       if (generation !== accessRevision) throw publicError('SecondHand access changed. Click Autofill again.');
-      // Laya's sure answers and its best guesses, in page order.
-      const guessed = question => Object.hasOwn(guesses, question.id);
-      const chosen = request.questions.filter(question => Object.hasOwn(answers, question.id) || guessed(question));
+      const chosen = request.questions.filter(question => Object.hasOwn(answers, question.id));
       // Laya had no age from a saved birth date it can't use; the questions it left say why (#135).
       const reason = chosen.length < request.questions.length && household.hasUnusableBirthDate(profile, { today: now }) ? { reason: 'birthDate' } : {};
-      const release = list => ({ answers: Object.fromEntries(list.filter(question => !guessed(question)).map(question => [question.id, answers[question.id]])),
-        guesses: Object.fromEntries(list.filter(guessed).map(question => [question.id, guesses[question.id]])) });
-      if (!chosen.length) return { ...release([]), accessRevision, ...reason };
+      if (!chosen.length) return { answers: {}, accessRevision, ...reason };
       // Answers are profile information: they follow getFields' approval, each question listed
-      // with the option that would be filled, a guess marked as one. Iowa's portal keeps its rule of no sensitive prompt.
-      const lines = list => list.map(question => guessed(question) ? `“${question.label}”: ${guesses[question.id]} (a guess)` : `“${question.label}”: ${answers[question.id]}`).join('\n');
-      const guessNote = list => list.some(guessed) ? '\n\nLaya isn’t sure of the answers marked “a guess”. SecondHand marks them on the page for you to check.' : '';
+      // with the option that would be filled. Iowa's portal keeps its rule of no sensitive prompt.
+      const lines = list => list.map(question => `“${question.label}”: ${answers[question.id]}`).join('\n');
       const these = list => list.length === 1 ? 'this answer' : 'these answers';
       const approve = (list, sensitivePrompt = null) => approveRelease({ context, iowa, origin, generation,
         message: `Fill ${these(list)} into ${iowa ? 'Iowa’s application' : origin}?`,
-        items: `Laya, SecondHand’s AI on this computer, picked ${these(list)} from your saved information:\n${lines(list)}${guessNote(list)}`, sensitive: sensitivePrompt });
+        items: `Laya, SecondHand’s AI on this computer, picked ${these(list)} from your saved information:\n${lines(list)}`, sensitive: sensitivePrompt });
       const count = chosen.length;
       // Laya reads every sensitive fact at once, so the prompt names them all and says how many
-      // answers needed them; which fact decided an answer is not known. A guess never needs one.
+      // answers needed them; which fact decided an answer is not known.
       const needed = sensitive.length;
       const which = needed === count ? these(chosen) : `${needed} of these answers`;
       const uses = needed === count ? (count === 1 ? 'It uses' : 'They use') : `${needed} of them ${needed === 1 ? 'uses' : 'use'}`;
       const asksSensitive = !iowa && needed > 0;
       const approved = await approve(chosen, asksSensitive ? { message: `Fill ${count === 1 ? 'this answer' : `these ${count} answers`} on ${origin}? ${uses} sensitive details.`,
-        detail: `${sensitiveFields.map(fieldLabel).join(', ')}\n\nLaya, SecondHand’s AI on this computer, read these saved details to pick ${which}. The details stay on this computer. Only allow this if you meant to give these answers to ${origin}:\n${lines(chosen)}${guessNote(chosen)}` } : null);
+        detail: `${sensitiveFields.map(fieldLabel).join(', ')}\n\nLaya, SecondHand’s AI on this computer, read these saved details to pick ${which}. The details stay on this computer. Only allow this if you meant to give these answers to ${origin}:\n${lines(chosen)}` } : null);
       touch();
-      if (approved) return { ...release(chosen), accessRevision, ...reason };
+      if (approved) return { answers, accessRevision, ...reason };
       // Cancel on "Share sensitive details?" drops only the answers that needed sensitive details (#42).
       // That prompt shows only without Always allow, so the others then ask "Let Chrome fill this form?".
       const everyday = asksSensitive ? chosen.filter(question => !sensitive.includes(question.id)) : [];
-      if (!everyday.length) return { ...release([]), accessRevision, ...reason };
+      if (!everyday.length) return { answers: {}, accessRevision, ...reason };
       requireUnlocked();
       if (generation !== accessRevision) throw publicError('SecondHand access changed. Click Autofill again.');
       const kept = await approve(everyday);
       touch();
-      return { ...release(kept ? everyday : []), accessRevision, ...reason };
+      return { answers: kept ? Object.fromEntries(everyday.map(question => [question.id, answers[question.id]])) : {}, accessRevision, ...reason };
     } catch (error) {
       if (error.publicMessage) throw error;
       if (error.code === 'LAYA_NOT_READY') throw layaNotReady();
@@ -585,6 +622,7 @@ if (nativeOrigin) {
     }
     if (request.type === 'getRecordFields') return releaseRecord(request, context);
     if (request.type === 'getCustomFields') return releaseCustomFields(request, context);
+    if (request.type === 'rememberAnswers') return rememberAnswers(request, context);
     if (request.type === 'authorizeSiteNavigation') return authorizeSiteNavigation(request, context);
     if (request.type === 'getFields') {
       const iowa = isPortalUrl(request.url);

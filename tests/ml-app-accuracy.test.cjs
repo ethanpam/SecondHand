@@ -31,6 +31,13 @@ function firstCandidate() {
 }
 // One that is sure the facts don't say, so it fills nothing.
 const abstains = () => ({ format: async () => 'noul-v1', decideBatch: async items => items.map((_, index) => ({ answers: { correct: { type: 'noul', noul: index === items.length - 1 ? 0.99 : 0.001, confidence: 0.99 } } })) });
+// noul-v1 and choice-v2 stand-ins that lean to the first candidate, under every bar, over "the facts don't say":
+// never sure, so each question asked gets that candidate as Laya's best guess (#185).
+const leansFirst = () => ({ format: async () => 'noul-v1', decideBatch: async items => items.map((_, index) => ({ answers: { correct: { type: 'noul', noul: index === 0 ? 0.6 : index === items.length - 1 ? 0.2 : 0.1, confidence: 0.6 } } })) });
+const choiceLeansFirst = () => ({ format: async () => 'choice-v2', decideBatch: async items => items.map(({ questions }) => {
+  const choices = questions.choice.criteria;
+  return { answers: { choice: { type: 'choice', choice: choices[0], probabilities: Object.fromEntries(choices.map((label, index) => [label, index === 0 ? 0.6 : 0.4 / (choices.length - 1)])), confidence: 0.6 } } };
+}) });
 
 test('each fill the app makes is checked against the answer key: a fill the key doesn’t give is a wrong fill', async () => {
   const laya = firstCandidate();
@@ -56,6 +63,27 @@ test('every question is decided however slow the model is: no request carries th
   assert.ok(limits.length >= 6, 'every asked question and box reached the model');
   assert.deepEqual([...new Set(limits)], [undefined], 'a slow machine never drops a question as timed out');
   assert.equal(result.answering.filled, 4);
+});
+
+test('#189: Laya’s best guesses are asked for and counted apart from its sure answers, though Autofill doesn’t ask for them', async () => {
+  const result = await appAccuracy({ laya: leansFirst(), bank, households, today: TODAY });
+  // Never sure, so no sure answer: each yes/no question asked gets its first option as a guess, for each household.
+  assert.deepEqual(result.answering, { decisions: 6, filled: 0, right: 0, wrong: [] });
+  assert.deepEqual({ ...result.guessing, wrong: result.guessing.wrong.length }, { filled: 4, right: 2, wrongRate: 0.5, wrong: 2 });
+  assert.deepEqual(result.guessing.wrong, [1, 2].map(() => ({ form: 'https://final-pantry.example.org/intake', question: 'Is anyone in your household 65 or older?', filled: 'Yes', key: 'No' })));
+  // choice-v2 asks the pet question too: a guess where the key says the facts don't say is wrong.
+  const choice = await appAccuracy({ laya: choiceLeansFirst(), bank, households, today: TODAY });
+  assert.deepEqual({ ...choice.guessing, wrong: choice.guessing.wrong.map(({ question, filled, key }) => [question, filled, key]) }, { filled: 6, right: 2, wrongRate: 4 / 6, wrong: [
+    ['Is anyone in your household 65 or older?', 'Yes', 'No'], ['Is anyone in your household 65 or older?', 'Yes', 'No'], ['Do you have a pet?', 'Yes', null], ['Do you have a pet?', 'Yes', null]] });
+  // A sure answer is never also a guess, and a model that guesses nothing has no wrong rate.
+  const sure = await appAccuracy({ laya: firstCandidate(), bank, households, today: TODAY });
+  assert.deepEqual(sure.guessing, { filled: 0, right: 0, wrongRate: null, wrong: [] });
+});
+
+test('#189: wrong guesses are reported, never counted against the wrong-fill budgets', async () => {
+  const result = await appAccuracy({ laya: leansFirst(), bank, households, today: TODAY });
+  assert.equal(result.guessing.wrong.length, 2);
+  assert.deepEqual(overBudget(result, { answering: 0, matching: 0 }), []);
 });
 
 test('a model that fills nothing makes no wrong fills', async () => {

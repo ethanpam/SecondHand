@@ -203,6 +203,49 @@
       }
     ]
   },
+  "guessing": {
+    "filled": 8,
+    "right": 2,
+    "wrongRate": 0.75,
+    "wrong": [
+      {
+        "form": "https://accesshelps.org/wp-content/uploads/ACCESS-SIMC-Paper-Form-TEFAP-English-1.pdf",
+        "question": "Has anyone in your household, including yourself, served on active duty in the U.S. Armed Forces? Active duty includes serving in the U.S. Armed Forces as well as activation from the Reserves or National Guard.",
+        "filled": "No, never served in the U.S. Armed Forces",
+        "key": null
+      },
+      {
+        "form": "https://accesshelps.org/wp-content/uploads/ACCESS-SIMC-Paper-Form-TEFAP-English-1.pdf",
+        "question": "Has anyone in your household, including yourself, served on active duty in the U.S. Armed Forces? Active duty includes serving in the U.S. Armed Forces as well as activation from the Reserves or National Guard.",
+        "filled": "No, never served in the U.S. Armed Forces",
+        "key": null
+      },
+      {
+        "form": "https://accesshelps.org/wp-content/uploads/ACCESS-SIMC-Paper-Form-TEFAP-English-1.pdf",
+        "question": "Has anyone in your household, including yourself, served on active duty in the U.S. Armed Forces? Active duty includes serving in the U.S. Armed Forces as well as activation from the Reserves or National Guard.",
+        "filled": "No, never served in the U.S. Armed Forces",
+        "key": null
+      },
+      {
+        "form": "https://accesshelps.org/wp-content/uploads/ACCESS-SIMC-Paper-Form-TEFAP-English-1.pdf",
+        "question": "Has anyone in your household, including yourself, served on active duty in the U.S. Armed Forces? Active duty includes serving in the U.S. Armed Forces as well as activation from the Reserves or National Guard.",
+        "filled": "No, never served in the U.S. Armed Forces",
+        "key": null
+      },
+      {
+        "form": "https://accesshelps.org/wp-content/uploads/ACCESS-SIMC-Paper-Form-TEFAP-English-1.pdf",
+        "question": "Has anyone in your household, including yourself, served on active duty in the U.S. Armed Forces? Active duty includes serving in the U.S. Armed Forces as well as activation from the Reserves or National Guard.",
+        "filled": "No, never served in the U.S. Armed Forces",
+        "key": null
+      },
+      {
+        "form": "https://accesshelps.org/wp-content/uploads/ACCESS-SIMC-Paper-Form-TEFAP-English-1.pdf",
+        "question": "Has anyone in your household, including yourself, served on active duty in the U.S. Armed Forces? Active duty includes serving in the U.S. Armed Forces as well as activation from the Reserves or National Guard.",
+        "filled": "No, never served in the U.S. Armed Forces",
+        "key": null
+      }
+    ]
+  },
   "matching": {
     "decisions": 222,
     "filled": 15,

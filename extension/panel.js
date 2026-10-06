@@ -7,7 +7,7 @@
   const summary = globalThis.SecondHandSummary;
   // Must match BUILD in background.js: change both together. Chrome loads these pages
   // from disk right away but keeps running the old worker until SecondHand is reloaded.
-  const BUILD = '2026-10-06.13';
+  const BUILD = '2026-10-06.15';
   // The applicant's language: the choice saved in this extension's storage, else the browser's.
   let language = strings.language();
   const t = (key, params = {}) => strings.text(language, key, params);
@@ -117,12 +117,15 @@
         const guessed = Number(result.guessed) || 0;
         // Questions held back for Fill sensitive details (#176) matched saved answers: it says where they wait instead.
         const held = Number.isInteger(result.held) && result.held > 0 ? result.held : 0;
-        const summary = filled > 0 ? (guessed > 0 ? t('widget.filledGuessed', { count: filled, guessed }) : t('widget.filled', { count: filled }))
+        // The dashed marks of an AI's suggestions are "suggested", so they can't be taken for Laya's best guesses (#189).
+        const summary = filled > 0 ? (guessed > 0 ? t('widget.filledSuggested', { count: filled, suggested: guessed }) : t('widget.filled', { count: filled }))
           : held ? '' : fieldKeys(result.needYou).length ? t('widget.nothingMatches') : words(fromResult(result), 120);
         // Laya's best guesses (#185), apart from its sure answers.
         const layaGuessed = Number.isInteger(result.layaGuessed) && result.layaGuessed > 0 ? result.layaGuessed : 0;
-        const notes = [ai.note ? words(ai.note) : '', Number(result.laya) > 0 ? t('widget.suggestedByLaya') : '', layaGuessed ? t('widget.layaGuessed', { count: layaGuessed }) : '',
-          held ? t('widget.held', { count: held }) : ''].filter(Boolean);
+        // Answers from the applicant's custom answers (#186).
+        const custom = Number.isInteger(result.custom) && result.custom > 0 ? result.custom : 0;
+        const notes = [ai.note ? words(ai.note) : '', custom ? t('widget.fromCustom', { count: custom }) : '', Number(result.laya) > 0 ? t('widget.suggestedByLaya') : '',
+          layaGuessed ? t('widget.layaGuessed', { count: layaGuessed }) : '', held ? t('widget.held', { count: held }) : ''].filter(Boolean);
         return notes.length ? [summary.replace(/\.$/, ''), ...notes].filter(Boolean).join(' · ') : summary;
       }
       if (result.state === 'done') {
@@ -338,6 +341,12 @@
     // Laya's best guesses (#185): the questions the last Autofill filled with one, by id and their own words, to find and check.
     let layaGuesses = [];
     let guessesSignature = '';
+    // Remember for next time (#186): the open questions the last Autofill left that a custom answer may fill, by id and their own
+    // words, whether their answer changes over time, and whether the page holds an answer now. Never the answer itself: the
+    // worker reads it after the Remember click. `rememberChoices` keeps each row's checkbox as the applicant left it.
+    let rememberable = [];
+    let rememberSignature = '';
+    const rememberChoices = new Map();
     let contextRevision = 0;
     let checklistSignature = '';
     let working = false;
@@ -453,6 +462,8 @@
       document.querySelectorAll('.checklist-item').forEach(button => { button.disabled = working || !target; });
       document.querySelectorAll('.save-row button').forEach(button => { button.disabled = working || !target; });
       $('held-fill').disabled = working || !target;
+      document.querySelectorAll('#remember-list input').forEach(box => { box.disabled = working || !target; });
+      $('remember-save').disabled = working || !target || !rememberChecked().length;
       renderQuestionControls();
       renderSummary();
     }
@@ -461,6 +472,9 @@
       savable = []; savableSignature = '';
       held = []; heldSignature = '';
       layaGuesses = []; guessesSignature = '';
+      rememberable = []; rememberSignature = ''; rememberChoices.clear();
+      $('remember-list').replaceChildren();
+      $('remember-section').hidden = true;
       $('page-checklist').replaceChildren();
       $('checklist-section').hidden = true;
       $('save-list').replaceChildren();
@@ -552,6 +566,46 @@
       }));
       $('held-section').hidden = !held.length;
     }
+    // One row per open question the page holds an answer for, in its own words, with a Remember for next time checkbox: checked
+    // unless its answer changes over time, until the applicant changes it. The section's one button remembers the checked ones.
+    function rememberChecked() { return rememberable.filter(item => rememberChoices.get(item.id) ?? !item.timeBound).map(item => item.id); }
+    function renderRemember() {
+      const signature = JSON.stringify([language, rememberable]);
+      if (signature === rememberSignature) return;
+      rememberSignature = signature;
+      $('remember-list').replaceChildren(...rememberable.map(item => {
+        const row = document.createElement('div');
+        row.className = 'checklist-item save-row'; row.dataset.rememberId = item.id;
+        const copy = document.createElement('span'); copy.className = 'checklist-copy';
+        const label = document.createElement('span'); label.className = 'checklist-label'; label.dir = 'auto'; label.textContent = fixedText(item.label, 200);
+        copy.append(label);
+        if (item.timeBound) {
+          const detail = document.createElement('span'); detail.className = 'checklist-detail'; detail.textContent = t('remember.changes');
+          copy.append(detail);
+        }
+        const check = document.createElement('label'); check.className = 'remember-check';
+        const box = document.createElement('input'); box.type = 'checkbox';
+        box.checked = rememberChoices.get(item.id) ?? !item.timeBound;
+        box.disabled = working || !target;
+        box.setAttribute('aria-label', t('remember.checkLabel', { label: fixedText(item.label, 200) }));
+        box.addEventListener('change', () => { rememberChoices.set(item.id, box.checked); controls(); });
+        check.append(box, document.createTextNode(t('remember.check')));
+        row.append(copy, check);
+        return row;
+      }));
+      $('remember-section').hidden = !rememberable.length;
+    }
+    async function rememberAnswers() {
+      const ids = rememberChecked();
+      if (!ids.length) return;
+      const result = await act({ type: 'ui:rememberAnswers', ids, confirmed: true }, { key: 'remember.saving' });
+      // Kept on screen like a saved answer: until the tab changes or another action starts.
+      if (Number.isInteger(result?.remembered) && result.remembered > 0) {
+        notice = { message: { key: 'remember.saved', params: { count: result.remembered } }, error: false };
+        renderStatus();
+        await refresh();
+      }
+    }
     // One row per question Laya guessed, in its own words, with the dotted outline it has on the page. A row finds it there.
     function renderGuesses() {
       const signature = JSON.stringify([language, layaGuesses]);
@@ -586,10 +640,13 @@
         .slice(0, 40).map(({ id, label }) => ({ id, label }));
       layaGuesses = (Array.isArray(result?.layaGuesses) ? result.layaGuesses : []).filter(item => fieldKeys([item?.id]).length && typeof item.label === 'string')
         .slice(0, 40).map(({ id, label }) => ({ id, label }));
+      rememberable = (Array.isArray(state.rememberable) ? state.rememberable : []).filter(item => fieldKeys([item?.id]).length && typeof item.label === 'string' &&
+        typeof item.timeBound === 'boolean' && item.answered === true).slice(0, 40).map(({ id, label, timeBound }) => ({ id, label, timeBound }));
       renderChecklist();
       renderSaves();
       renderHeld();
       renderGuesses();
+      renderRemember();
       const loading = target?.status === 'loading';
       if (site?.enabled && !site.ready) show({ key: loading ? 'panel.waitingLoad' : 'panel.reloadToRead' });
       else if (reported(result)) show(fromResult(result), result.state === 'error');
@@ -1032,6 +1089,7 @@
     }));
     // Fill sensitive details (#176): the app shows its sensitive prompt for the held questions. What it fills is the tab's
     // new result; a Cancel is said, and the questions stay listed.
+    $('remember-save').addEventListener('click', trusted(() => { if (!$('remember-save').disabled) rememberAnswers(); }));
     $('held-fill').addEventListener('click', trusted(async () => {
       if ($('held-fill').disabled) return;
       const result = await act({ type: 'ui:fillHeld', confirmed: true }, { key: 'held.filling' });
@@ -1058,7 +1116,7 @@
     function relabel() {
       applyStatic();
       $('language').value = language;
-      if (page) { renderChecklist(); renderSaves(); renderGuesses(); }
+      if (page) { renderChecklist(); renderSaves(); renderGuesses(); renderRemember(); }
       renderStatus();
       renderDesktop();
       resetQuestions();
