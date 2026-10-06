@@ -3,28 +3,16 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
-const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const vm = require('node:vm');
-const { pathToFileURL } = require('node:url');
 const realLaya = require('../desktop/laya.cjs');
 const { touchIdPlatform, createTouchIdUnlock } = require('../desktop/touch-id.cjs');
+const { plain, until, startMain, safeStorage } = require('./helpers/harness.cjs');
 
-const root = path.resolve(__dirname, '..');
-const source = fs.readFileSync(path.join(root, 'desktop/main.cjs'), 'utf8');
 const PASSWORD = 'synthetic touch password';
 const DAY = 24 * 60 * 60 * 1000;
 const START = Date.UTC(2026, 9, 3, 12);
-// Values created inside the vm context have foreign prototypes.
-const plain = value => JSON.parse(JSON.stringify(value));
-// Waits up to 5 seconds, a turn of the event loop at a time: reaching the prompt reads the disk, which a busy machine slows.
-async function waitFor(condition, what) {
-  const end = performance.now() + 5000;
-  while (!condition() && performance.now() < end) await new Promise(resolve => setImmediate(resolve));
-  assert.ok(condition(), what);
-}
 
 async function folder(t) {
   const userData = await fsp.mkdtemp(path.join(os.tmpdir(), 'secondhand-touch-id-main-'));
@@ -37,71 +25,32 @@ async function folder(t) {
 // prompt is shown and no Keychain item is touched.
 async function desktop(t, { userData, platform = 'darwin', canPrompt = true, encryptionAvailable = true, clock = { now: START }, dialog = {}, isPackaged = false, env = {} } = {}) {
   userData ||= await folder(t);
-  let invoke;
-  let bridge;
-  let window;
   const prompts = [];
-  const sent = [];
-  const timers = [];
   let answer = async () => {};
   let onUnseal = () => {};
   let onRemove = async () => {};
-  const safeStorage = {
-    isEncryptionAvailable: () => encryptionAvailable,
-    encryptString: text => Buffer.from(`sealed:${Buffer.from(text).toString('hex')}`),
-    decryptString: bytes => {
-      onUnseal();
-      const text = bytes.toString();
-      if (!text.startsWith('sealed:')) throw new Error('Not sealed by this computer.');
-      return Buffer.from(text.slice(7), 'hex').toString();
-    }
-  };
+  const keychain = safeStorage({ available: encryptionAvailable, unsealing: () => onUnseal() });
   const systemPreferences = {
     canPromptTouchID: () => { if (platform !== 'darwin') assert.fail('Touch ID is asked about on macOS only'); return canPrompt; },
     promptTouchID: reason => { prompts.push(reason); return answer(); }
   };
-  class BrowserWindow {
-    constructor() {
-      window = this;
-      this.webContents = { mainFrame: { url: pathToFileURL(path.join(root, 'renderer/index.html')).href },
-        setWindowOpenHandler() {}, on() {}, send(...args) { sent.push(plain(args)); } };
-    }
-    show() {} focus() {} setMenuBarVisibility() {} once() {} on() {} loadFile() {}
-    isDestroyed() { return false; }
-  }
-  const app = { isPackaged, setName() {}, setPath() {}, getPath: () => userData,
-    requestSingleInstanceLock: () => true, whenReady: () => Promise.resolve(), on() {} };
-  const electron = { app, BrowserWindow, safeStorage, systemPreferences, ipcMain: { handle(_name, handler) { invoke = handler; } },
-    dialog: { showErrorBox() { assert.fail('Desktop setup failed'); }, ...dialog },
-    shell: {}, clipboard: {}, powerMonitor: { on() {} },
-    session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, webRequest: { onBeforeRequest() {} } } } };
-  const overrides = {
-    electron,
+  class SyntheticDate extends Date { static now() { return clock.now; } }
+  const main = await startMain({ userData, platform, env, packaged: isPackaged, dialog, electron: { safeStorage: keychain, systemPreferences }, modules: {
     // main.cjs's own file removals wait for `removing`, so a test can act while one is under way.
     'node:fs/promises': { ...fsp, rm: async (file, options) => { await onRemove(file); return fsp.rm(file, options); } },
-    './bridge.cjs': { ...require('../desktop/bridge.cjs'), startBridge: async (_directory, _getId, handler) => { bridge = handler; return { close: async () => {} }; } },
-    './extension-setup.cjs': { getExtensionSetup: async () => ({ prepared: true }) },
-    './registration.cjs': { registerHost: async () => ({}) },
-    './test-storage-path.cjs': { testStoragePath: () => null },
     './laya.cjs': { ...realLaya, createLaya: options => ({ ...realLaya.createLaya(options), startUpdates() {}, update() {} }) }
-  };
-  class SyntheticDate extends Date { static now() { return clock.now; } }
-  vm.runInNewContext(source, {
-    require: name => Object.hasOwn(overrides, name) ? overrides[name] : require(name.startsWith('.') ? path.join(root, 'desktop', name) : name),
-    __dirname: path.join(root, 'desktop'), process: { platform, env, argv: ['synthetic-electron'] },
-    setTimeout: (_callback, ms) => { timers.push(ms); return timers.length; }, clearTimeout() {}, Buffer, Date: SyntheticDate
-  });
-  for (let attempt = 0; !(window && bridge) && attempt < 200; attempt++) await new Promise(resolve => setTimeout(resolve, 5));
-  assert.ok(window && bridge, 'The desktop window and bridge were not started');
+  }, globals: { Date: SyntheticDate } });
   const sealedPath = path.join(userData, 'touch-unlock.bin');
   return {
-    userData, sealedPath, prompts, sent, timers, clock,
+    userData, sealedPath, prompts, sent: main.sent, clock,
+    // The milliseconds of every timer main.cjs set, in order.
+    get timers() { return main.timers.map(timer => timer.ms); },
     answer: callback => { answer = callback; },
     unsealing: callback => { onUnseal = callback; },
     removing: callback => { onRemove = callback; },
-    invoke: (method, argument) => invoke({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, method, ...(argument === undefined ? [] : [argument])),
-    request: type => bridge({ id: 'synthetic', type }, { extensionId: 'a'.repeat(32) }),
-    sealed: async () => JSON.parse(safeStorage.decryptString(await fsp.readFile(sealedPath))),
+    invoke: main.invoke,
+    request: type => main.bridge({ id: 'synthetic', type }, { extensionId: 'a'.repeat(32) }),
+    sealed: async () => JSON.parse(keychain.decryptString(await fsp.readFile(sealedPath))),
     slots: async () => JSON.parse(await fsp.readFile(path.join(userData, 'vault.secondhand'), 'utf8')).slots
   };
 }
@@ -253,7 +202,7 @@ test('a cancelled prompt shared by the app and Chrome refuses both, asks once, a
   app.answer(() => cancel ? Promise.reject(new Error('Canceled by user.')) : new Promise((_resolve, reject) => { cancel = () => reject(new Error('Canceled by user.')); }));
   const fromApp = app.invoke('unlockWithTouchId').then(() => assert.fail('unlocked'), error => error.message);
   const fromChrome = app.request('unlockWithTouchId');
-  await waitFor(() => Boolean(cancel), 'the prompt is up');
+  await until(() => Boolean(cancel), 'the prompt to be up');
   cancel();
   assert.equal(await fromApp, 'Touch ID didn’t unlock SecondHand (Canceled by user.). Enter your password.');
   assert.deepEqual(plain(await fromChrome), { unlocked: false, reason: 'cancelled' });
@@ -270,7 +219,7 @@ test('a password unlock while the Touch ID prompt is up wins: Touch ID answers u
   let approve;
   app.answer(() => new Promise(resolve => { approve = resolve; }));
   const attempt = app.invoke('unlockWithTouchId');
-  await waitFor(() => Boolean(approve), 'the prompt is up');
+  await until(() => Boolean(approve), 'the prompt to be up');
   assert.equal((await app.invoke('unlock', PASSWORD)).unlocked, true);
   let reads = 0;
   app.unsealing(() => { reads++; });
@@ -500,7 +449,7 @@ test('a backup restored while the Touch ID prompt is up isn’t opened by it: To
   let approve;
   app.answer(() => new Promise(resolve => { approve = resolve; }));
   const asking = app.request('unlockWithTouchId');
-  await waitFor(() => Boolean(approve), 'the prompt is up');
+  await until(() => Boolean(approve), 'the prompt to be up');
   let answered;
   duringRestore(app, async () => { approve(); answered = plain(await asking); });
   assert.deepEqual(plain(await app.invoke('importBackup')), { cancelled: false });

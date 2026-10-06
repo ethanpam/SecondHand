@@ -2,18 +2,11 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const vm = require('node:vm');
-const { pathToFileURL } = require('node:url');
 const realLaya = require('../desktop/laya.cjs');
-
-const root = path.resolve(__dirname, '..');
-// Values created inside the vm context have foreign prototypes.
-const plain = value => JSON.parse(JSON.stringify(value));
-const source = fs.readFileSync(path.join(root, 'desktop/main.cjs'), 'utf8');
+const { plain, startMain, safeStorage } = require('./helpers/harness.cjs');
 
 // Runs the real main process and vault against a temporary folder. Only the
 // operating system's protected storage is simulated, so no Keychain is touched.
@@ -24,11 +17,7 @@ async function desktop(t, { encryptionAvailable = true, shell = {}, env = {}, is
     userData = await fsp.mkdtemp(path.join(os.tmpdir(), 'secondhand-recovery-main-'));
     t.after(() => fsp.rm(userData, { recursive: true, force: true }));
   }
-  let invoke;
-  let window;
-  let bridge;
   const dialogs = [];
-  const timers = [];
   // The files main.cjs reads.
   const reads = [];
   const clipboard = { text: '', writeText(text) { this.text = text; }, readText() { return this.text; }, clear() { this.text = ''; } };
@@ -37,56 +26,22 @@ async function desktop(t, { encryptionAvailable = true, shell = {}, env = {}, is
     if (!dialog[name]) assert.fail(`Unexpected ${name}`);
     return dialog[name](options);
   };
-  const safeStorage = {
-    isEncryptionAvailable: () => encryptionAvailable,
-    encryptString: text => Buffer.from(`sealed:${Buffer.from(text).toString('hex')}`),
-    decryptString: bytes => {
-      const text = bytes.toString();
-      if (!text.startsWith('sealed:')) throw new Error('Not sealed by this computer.');
-      return Buffer.from(text.slice(7), 'hex').toString();
-    }
-  };
-  class BrowserWindow {
-    constructor() {
-      window = this;
-      this.webContents = { mainFrame: { url: pathToFileURL(path.join(root, 'renderer/index.html')).href },
-        setWindowOpenHandler() {}, on() {}, send() {} };
-    }
-    show() {} focus() {} setMenuBarVisibility() {} once() {} on() {} loadFile() {}
-    isDestroyed() { return false; }
-  }
-  const app = { isPackaged, setName() {}, setPath() {}, getPath: () => userData,
-    requestSingleInstanceLock: () => true, whenReady: () => Promise.resolve(), on() {} };
-  const electron = { app, BrowserWindow, safeStorage, ipcMain: { handle(_name, handler) { invoke = handler; } },
-    dialog: { showErrorBox() { assert.fail('Desktop setup failed'); }, showOpenDialog: asked('showOpenDialog'), showSaveDialog: asked('showSaveDialog'), showMessageBox: asked('showMessageBox') },
-    shell, clipboard, powerMonitor: { on() {} },
-    session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, webRequest: { onBeforeRequest() {} } } } };
-  // A Mac without Touch ID; tests/desktop-touch-id-main.test.cjs covers Touch ID.
-  electron.systemPreferences = { canPromptTouchID: () => false };
-  const overrides = {
-    electron,
-    'node:fs/promises': { ...fsp, readFile: (file, ...rest) => { reads.push(String(file)); return fsp.readFile(file, ...rest); } },
-    './bridge.cjs': { ...require('../desktop/bridge.cjs'), startBridge: async (_directory, _getId, handler) => { bridge = handler; return { close: async () => {} }; } },
-    './extension-setup.cjs': { getExtensionSetup: async () => ({ prepared: false }) },
-    './registration.cjs': { registerHost: async () => ({}) },
-    './test-storage-path.cjs': { testStoragePath: () => null },
-    // The real Laya runtime, minus its background download and update checks (tests/desktop-laya-main.test.cjs covers those).
-    './laya.cjs': { ...realLaya, createLaya: options => ({ ...realLaya.createLaya(options), startUpdates() {}, update() {} }) }
-  };
-  vm.runInNewContext(source, {
-    require: name => Object.hasOwn(overrides, name) ? overrides[name] : require(name.startsWith('.') ? path.join(root, 'desktop', name) : name),
-    __dirname: path.join(root, 'desktop'), process: { platform: 'darwin', env, argv: ['synthetic-electron'] },
-    setTimeout: (callback, ms) => { timers.push({ callback, ms }); return timers.length; }, clearTimeout() {}, Buffer
-  });
-  for (let attempt = 0; !window && attempt < 200; attempt++) await new Promise(resolve => setTimeout(resolve, 5));
-  assert.ok(window, 'The desktop window was not created');
+  const main = await startMain({ userData, platform: 'darwin', env, packaged: isPackaged,
+    dialog: { showOpenDialog: asked('showOpenDialog'), showSaveDialog: asked('showSaveDialog'), showMessageBox: asked('showMessageBox') },
+    electron: { safeStorage: safeStorage({ available: encryptionAvailable }), shell, clipboard },
+    modules: {
+      'node:fs/promises': { ...fsp, readFile: (file, ...rest) => { reads.push(String(file)); return fsp.readFile(file, ...rest); } },
+      './extension-setup.cjs': { getExtensionSetup: async () => ({ prepared: false }) },
+      // The real Laya runtime, minus its background download and update checks (tests/desktop-laya-main.test.cjs covers those).
+      './laya.cjs': { ...realLaya, createLaya: options => ({ ...realLaya.createLaya(options), startUpdates() {}, update() {} }) }
+    } });
   return {
-    userData, dialogs, timers, clipboard, reads,
+    userData, dialogs, timers: main.timers, clipboard, reads,
     vaultPath: path.join(userData, 'vault.secondhand'),
     secretPath: path.join(userData, 'device-reset.bin'),
-    invoke: (method, argument) => invoke({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, method, ...(argument === undefined ? [] : [argument])),
+    invoke: main.invoke,
     // A request from the extension with this ID.
-    request: request => bridge({ id: 'synthetic', ...request }, { extensionId: EXTENSION })
+    request: request => main.bridge({ id: 'synthetic', ...request }, { extensionId: EXTENSION })
   };
 }
 const EXTENSION = 'a'.repeat(32);

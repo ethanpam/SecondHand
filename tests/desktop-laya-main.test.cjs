@@ -7,15 +7,11 @@ const fs = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
-const vm = require('node:vm');
-const { pathToFileURL } = require('node:url');
 const realLaya = require('../desktop/laya.cjs');
 const { MODEL_FILES } = require('../desktop/laya-model.cjs');
+const { plain, startMain } = require('./helpers/harness.cjs');
 
-const root = path.resolve(__dirname, '..');
-const source = fs.readFileSync(path.join(root, 'desktop/main.cjs'), 'utf8');
 const extensionId = 'a'.repeat(32);
-const plain = value => JSON.parse(JSON.stringify(value));
 const small = path.join(__dirname, 'fixtures/laya/small-tokenizer');
 const DECISION = { type: 'noul', instructions: 'Is the candidate the correct answer?' };
 
@@ -63,9 +59,6 @@ async function desktop(t, { settings = { extensionId }, settingsText, manifest, 
   t.after(() => fs.rmSync(userData, { recursive: true, force: true }));
   if (settingsText !== undefined) fs.writeFileSync(path.join(userData, 'settings.json'), settingsText);
   else if (settings !== null) fs.writeFileSync(path.join(userData, 'settings.json'), JSON.stringify(settings));
-  let invoke;
-  let window;
-  let quit;
   const writes = [];
   const runner = { loads: 0, releases: 0, async load() { runner.loads++; return {
     async run(batch) { return { data: new Float32Array(batch.rows * batch.count), dims: [batch.rows, batch.count] }; },
@@ -78,47 +71,16 @@ async function desktop(t, { settings = { extensionId }, settingsText, manifest, 
     async lock() { this.unlocked = false; }
     getData() { return this.data; }
   }
-  class BrowserWindow {
-    constructor() {
-      window = this;
-      this.webContents = { mainFrame: { url: pathToFileURL(path.join(root, 'renderer/index.html')).href }, setWindowOpenHandler() {}, on() {}, send() {} };
-    }
-    show() {} focus() {} setMenuBarVisibility() {} once() {} on() {} loadFile() {}
-    isDestroyed() { return false; }
-  }
-  const app = { isPackaged: packaged, setName() {}, setPath() {}, getPath: () => userData, requestSingleInstanceLock: () => true,
-    whenReady: () => Promise.resolve(), on(name, handler) { if (name === 'before-quit') quit = handler; }, quit() {} };
-  const electron = { app, BrowserWindow, ipcMain: { handle(_name, handler) { invoke = handler; } },
-    dialog: { showErrorBox() { assert.fail('Desktop setup failed'); } }, shell: {}, clipboard: {}, powerMonitor: { on() {} },
-    session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, webRequest: { onBeforeRequest() {} } } } };
-  // A Mac without Touch ID; tests/desktop-touch-id-main.test.cjs covers Touch ID.
-  electron.systemPreferences = { canPromptTouchID: () => false };
-  const overrides = {
-    electron,
+  const main = await startMain({ userData, packaged, env, modules: {
     './vault.cjs': { ...require('../desktop/vault.cjs'), Vault, atomicWrite: async (file, bytes) => { writes.push({ file, json: JSON.parse(bytes.toString()) }); } },
-    './bridge.cjs': { ...require('../desktop/bridge.cjs'), startBridge: async () => ({ close: async () => {} }) },
-    './extension-setup.cjs': { getExtensionSetup: async () => ({ prepared: true }) },
-    './registration.cjs': { registerHost: async () => ({}) },
-    './test-storage-path.cjs': { testStoragePath: () => null },
     './laya.cjs': { ...realLaya, createLaya: options => {
       const laya = realLaya.createLaya({ ...options, ...(manifest ? { manifest } : {}), updateUrl, runner, checkEveryMs: 60 * 60 * 1000 });
       created.push({ options, laya });
       t.after(() => laya.close());
       return laya;
     } }
-  };
-  vm.runInNewContext(source, {
-    require: name => Object.hasOwn(overrides, name) ? overrides[name] : require(name.startsWith('.') ? path.join(root, 'desktop', name) : name),
-    __dirname: path.join(root, 'desktop'), process: { platform: process.platform, env, argv: ['synthetic-electron'] },
-    setTimeout: () => 1, clearTimeout() {}, Buffer
-  });
-  for (let attempt = 0; !invoke && attempt < 200; attempt++) await new Promise(resolve => setTimeout(resolve, 5));
-  assert.ok(invoke, 'The desktop did not finish starting');
-  return {
-    userData, writes, runner, created,
-    invoke: (method, argument) => invoke({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, method, ...(argument === undefined ? [] : [argument])),
-    quit: () => quit({ preventDefault() {} })
-  };
+  } });
+  return { userData, writes, runner, created, invoke: main.invoke, quit: main.quit };
 }
 const ready = async app => { await until(async () => (await app.invoke('layaStatus')).state === 'ready', 'Laya to be ready'); };
 const off = { extensionId, layaEnabled: false };
