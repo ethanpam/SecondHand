@@ -477,6 +477,21 @@ test('no catalog text uses an em dash', () => {
   assert.deepEqual(found, []);
 });
 
+test('French keeps « and » on the same line as the words they quote, with a no-break space and no quote mark lost (#196)', () => {
+  const found = [];
+  let opening = 0, closing = 0;
+  for (const [key, value] of Object.entries(strings.catalogs.fr)) {
+    for (const text of typeof value === 'string' ? [value] : [value.one, value.other]) {
+      opening += (text.match(/«/g) || []).length;
+      closing += (text.match(/»/g) || []).length;
+      if (/«(?! )|(?<! )»/.test(text)) found.push(key);
+    }
+  }
+  assert.deepEqual(unique(found), [], 'every « is followed and every » preceded by U+00A0');
+  assert.equal(opening, 51, 'French has 51 «');
+  assert.equal(closing, 51, 'French has 51 »');
+});
+
 test('every language is named in its own words in every catalog and offered in the picker', () => {
   const natives = { en: 'English', es: 'Español', vi: 'Tiếng Việt', zh: '中文（简体）', fr: 'Français', ar: 'العربية' };
   for (const code of strings.LANGUAGES) for (const [name, native] of Object.entries(natives)) assert.equal(strings.catalogs[code][`language.${name}`], native, `${code} language.${name}`);
