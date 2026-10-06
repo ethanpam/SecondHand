@@ -488,7 +488,8 @@
   }
   // After the applicant's click: one listed box's answer, in the profile's own format. Only for the
   // saved field the rules matched to that box, never a password, code, signature or SSN box. Null when
-  // the box may not be read; { empty } when it holds no answer; { unreadable } when its answer doesn't fit the field.
+  // the box may not be read; { empty } when it holds no answer; { unreadable } when its answer doesn't fit the field;
+  // { repeated } when the page asks for the field in more than one box.
   const DATE_TYPED = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/;
   // The order a typed date is in (#142): as its box asks for it ("MM/DD/YYYY", "dd/mm/aaaa", "jj/mm/aaaa") in its labels,
   // placeholder, description or title, or as its numbers allow only one way. Null when it can't be told: never guessed.

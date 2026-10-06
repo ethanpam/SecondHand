@@ -41,12 +41,14 @@ function newerBuild(candidate, current) {
   const at = next.findIndex((part, index) => part !== now[index]);
   return at >= 0 && next[at] > now[at];
 }
-// The build marker of the copy in the prepared folder, or null when there is no readable one.
+// The build marker of the copy in the prepared folder, or null when there is no readable one. A path that isn't a
+// local folder is left to the preparation's own check.
 async function copiedBuild(directory) {
   try {
-    const [folder, marker] = await Promise.all([fs.lstat(directory), fs.lstat(path.join(directory, MARKER_FILE))]);
-    if (!folder.isDirectory() || folder.isSymbolicLink() || !marker.isFile() || marker.isSymbolicLink()) return null;
-    return buildOf(await fs.readFile(path.join(directory, MARKER_FILE), 'utf8'));
+    const folder = await fs.lstat(directory);
+    if (!folder.isDirectory() || folder.isSymbolicLink()) return null;
+    const marker = await fs.lstat(path.join(directory, MARKER_FILE));
+    return marker.isFile() && !marker.isSymbolicLink() ? buildOf(await fs.readFile(path.join(directory, MARKER_FILE), 'utf8')) : null;
   } catch (error) {
     if (error.code === 'ENOENT') return null;
     throw error;
