@@ -1475,6 +1475,10 @@ function sitePilotStep(tabId) {
       if (origin !== pilot.origin) return stopSitePilot(tabId, pilot, siteResult('stopped', say('worker.siteOriginChanged')));
       await requireSite(origin); guard();
       const before = await siteNavigation(tabId); guard();
+      // The next page loaded after this step read the address, so it answered for a page this step doesn't hold. Its own
+      // load event found this step running: the next look (the side panel's or the widget's) takes it.
+      if ((await chrome.tabs.get(tabId)).url !== tab.url) return prior;
+      guard();
       if (['protected', 'review', 'errors', 'frames'].includes(before.reason)) return stopSitePilot(tabId, pilot, siteResult('waiting', say(`worker.siteNext.${before.reason}`)));
       if (pilot.awaiting && (!before.step || pilot.attempted.has(before.step))) {
         if (Date.now() - pilot.awaiting < 15000) return prior;
