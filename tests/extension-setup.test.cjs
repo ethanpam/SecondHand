@@ -111,7 +111,7 @@ test('bundled public key pins the same Chrome ID on every platform and copy loca
   const manifest = JSON.parse(await fs.readFile(path.join(root, 'extension/manifest.json'), 'utf8'));
   assert.equal(extensionIdFromKey(manifest.key), 'jogldddafjfbmfjnjlbjloakjbecnjpl');
   assert.throws(() => extensionIdFromKey('not a public key'), { message: 'The bundled extension key is invalid.' });
-  assert.throws(() => extensionIdFromKey(Buffer.from('not DER').toString('base64')), { code: /^ERR_OSSL_/ }, 'base64 that isn’t a public key is refused by the key parser');
+  assert.throws(() => extensionIdFromKey(Buffer.from('not DER').toString('base64')), { message: 'Failed to read asymmetric key' }, 'base64 that isn’t a public key is refused by the key parser');
   assert.equal(bundledDirectory({ isPackaged: false, getAppPath: () => root }), path.join(root, 'extension'));
   assert.equal(bundledDirectory({ isPackaged: true }, '/packaged/resources'), path.join('/packaged/resources', 'extension'));
 });
