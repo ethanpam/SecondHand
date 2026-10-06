@@ -12,8 +12,10 @@ const extensionURL = file => `chrome-extension://${extensionId}/${file}`;
 const source = file => fs.readFileSync(path.join(__dirname, '../extension', file), 'utf8');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const BUILD = source('panel.js').match(/const BUILD = '([^']+)'/)[1];
-// An outdated worker: the widget's line beside its Restart button, and the side panel's notice above its own.
-const OUTDATED = 'SecondHand was updated.';
+// An outdated worker: the widget's line beside its Restart button (the whole of it, or the short form when the
+// frame can't hold the whole), and the side panel's notice above its own.
+const OUTDATED = 'SecondHand was updated. Restart it, then reload this page or go on to the next one.';
+const OUTDATED_SHORT = 'SecondHand was updated.';
 const OUTDATED_PANEL = 'SecondHand was updated and needs to restart. This side panel will close. To use SecondHand again, reload the page with your form or go on to its next page.';
 
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -967,7 +969,15 @@ test('a worker that never answers gets a plain notice and a Restart button in th
   assert.equal(side.get('status').textContent, '');
   assert.equal(side.get('panel-autofill').disabled, true);
   assert.equal(side.get('panel-autofill').hidden, true, 'only the restart is offered');
-  assert.doesNotMatch(`${OUTDATED} ${OUTDATED_PANEL} ${EN['widget.restartTitle']}`, /chrome:\/\/|reload arrow/, 'no address to type and no arrow to find');
+  assert.doesNotMatch(`${OUTDATED} ${OUTDATED_SHORT} ${OUTDATED_PANEL} ${EN['widget.restartTitle']}`, /chrome:\/\/|reload arrow/, 'no address to type and no arrow to find');
+  assert.equal(widget.get('widget').classList.contains('restartable'), true);
+  // The outdated worker is asked once, in the oldest form of the request, for a frame with room for a line.
+  assert.deepEqual(plainRequests(widget.requests).filter(request => request.type === 'ui:widgetSize'), [{ type: 'ui:widgetSize', line: true }]);
+  // A frame too small for the whole notice gets the short form beside the button.
+  const small = await panel(t, { launcher: true, silent: true });
+  Object.defineProperties(small.get('widget-text'), { scrollHeight: { get() { return this.textContent === OUTDATED ? 56 : 28; } }, clientHeight: { get: () => 42 } });
+  small.window.dispatchEvent(new small.window.Event('resize'));
+  assert.equal(small.get('widget-text').textContent, OUTDATED_SHORT);
 
   // A worker that answers page state but not a newer message is outdated too.
   const partial = await panel(t, { launcher: true, silent: ['ui:autofill'], build: BUILD });
@@ -984,7 +994,7 @@ test('a worker from another build gets the same notice even though it answers, a
   const widget = await panel(t, { launcher: true, build: 'older-build' });
   let reloads = 0;
   widget.window.chrome.runtime.reload = () => { reloads++; };
-  assert.deepEqual(plainRequests(widget.requests), [{ type: 'ui:ping' }]);
+  assert.deepEqual(plainRequests(widget.requests), [{ type: 'ui:ping' }, { type: 'ui:widgetSize', line: true }]);
   assert.equal(widget.get('widget-text').textContent, OUTDATED);
   assert.equal(widget.get('widget-text').title, OUTDATED);
   await widget.userClick('autofill');
@@ -996,7 +1006,8 @@ test('a worker from another build gets the same notice even though it answers, a
   // The frame is now left behind by the reload: it says how to get SecondHand back on this page.
   assert.equal(widget.get('widget-text').textContent, EN['panel.reloadPage']);
   assert.equal(widget.get('restart').hidden, true);
-  assert.deepEqual(plainRequests(widget.requests), [{ type: 'ui:ping' }], 'the outdated worker is asked nothing more');
+  assert.equal(widget.get('widget').classList.contains('restartable'), false);
+  assert.deepEqual(plainRequests(widget.requests), [{ type: 'ui:ping' }, { type: 'ui:widgetSize', line: true }], 'the outdated worker is asked nothing more');
 
   const side = await panel(t, { build: 'older-build' });
   let restarts = 0;
@@ -2122,7 +2133,7 @@ test('a widget left on a page when SecondHand reloaded asks for the page to be r
   runtime.sendMessage = async () => { throw new Error('Extension context invalidated.'); };
   await widget.userClick('autofill');
   assert.equal(widget.get('widget-text').textContent, strings.english('panel.reloadPage'));
-  assert.equal(widget.get('widget-text').textContent, 'Reload this page to use SecondHand. That clears what you typed here.');
+  assert.equal(widget.get('widget-text').textContent, 'SecondHand is back on the next page. To use it here, reload this page (the round arrow by the address bar); that clears what you typed.');
   assert.equal(widget.get('widget').classList.contains('outdated'), true);
   assert.equal(widget.get('restart').hidden, true, 'SecondHand already restarted: only the page is left to reload');
   // A frame too small for both sentences keeps the one that says what to do; the tooltip has both.
@@ -2131,7 +2142,7 @@ test('a widget left on a page when SecondHand reloaded asks for the page to be r
   small.window.chrome.runtime.sendMessage = async () => { throw new Error('Extension context invalidated.'); };
   Object.defineProperties(small.get('widget-text'), { scrollHeight: { get() { return this.textContent === EN['panel.reloadPage'] ? 56 : 28; } }, clientHeight: { get: () => 42 } });
   await small.userClick('autofill');
-  assert.equal(small.get('widget-text').textContent, 'Reload this page to use SecondHand.');
+  assert.equal(small.get('widget-text').textContent, 'Reload this page to use SecondHand, or go on to the next page.');
   assert.equal(small.get('widget-text').title, EN['panel.reloadPage']);
   // Letters that overhang their line by a pixel are not a line cut off.
   const snug = await panel(t, { launcher: true });

@@ -122,8 +122,12 @@
     // The reader hid the card: only the logo shows, until they click it or the page changes.
     let collapsed = false;
     // Why the widget is outdated: its worker is older than this page (panel.outdated), which Restart
-    // fixes, or SecondHand reloaded and left this frame behind (panel.reloadPage).
+    // fixes, or SecondHand reloaded and left this frame behind (panel.reloadPage). An outdated worker
+    // is asked once for a frame with room for a line, in the oldest form of that request.
     let outdatedKey = 'panel.outdated';
+    let roomAsked = false;
+    // What an outdated widget says: the whole of it, or the short form when its frame can't hold the whole.
+    const OUTDATED_LINES = { 'panel.outdated': ['widget.outdatedLong', 'widget.outdated'], 'panel.reloadPage': ['panel.reloadPage', 'panel.reloadPageShort'] };
     let ai = { note: null, reason: '' };
     let cursor = 0;
     let pollTimer;
@@ -139,7 +143,7 @@
     const trouble = error => { if (error.outdated) { outdated = true; outdatedKey = error.messageKey; } return problem(error); };
 
     function statusText() {
-      if (outdated) return t(outdatedKey === 'panel.reloadPage' ? 'panel.reloadPage' : 'widget.outdated');
+      if (outdated) return t((OUTDATED_LINES[outdatedKey] || OUTDATED_LINES['panel.outdated'])[0]);
       if (working) return t('widget.working');
       if (note) return words(note, 120);
       if (!result) return !site ? t(startedBefore() ? 'widget.iowaReadyAgain' : 'widget.iowaReady') : languageTrouble ? t('widget.languageCheckFailed') : t('widget.siteReady', { host: hostOf(site.origin) });
@@ -155,6 +159,7 @@
       const pill = card && collapsed && !outdated;
       $('widget').hidden = !card || pill;
       $('widget').classList.toggle('outdated', outdated);
+      $('widget').classList.toggle('restartable', outdated && outdatedKey !== 'panel.reloadPage');
       $('pill').hidden = card && !pill;
       $('pill').title = t(pill ? 'widget.showTitle' : 'widget.pillTitle');
       $('pill').setAttribute('aria-label', t(pill ? 'widget.showTitle' : 'widget.pillTitle'));
@@ -184,9 +189,13 @@
       $('widget-text').classList.toggle('visually-hidden', !message);
       // The translated view is offered until Autofill has something to report.
       $('translate-offer').hidden = outdated || Boolean(note) || working || Boolean(result) || !known || !pageLanguage || pageLanguage === language;
-      // A frame left behind can't grow: when it can't hold the whole line, the short one says what to do.
-      // Letters overhang their line by a pixel or so; a line cut off is 14px more.
-      if (outdated && outdatedKey === 'panel.reloadPage' && $('widget-text').scrollHeight - $('widget-text').clientHeight > 7) $('widget-text').textContent = t('panel.reloadPageShort');
+      // When the frame can't hold the whole notice, the short form says what to do. Letters overhang
+      // their line by a pixel or so; a line cut off is 14px more.
+      if (outdated && $('widget-text').scrollHeight - $('widget-text').clientHeight > 7) $('widget-text').textContent = t((OUTDATED_LINES[outdatedKey] || OUTDATED_LINES['panel.outdated'])[1]);
+      if (outdated && outdatedKey !== 'panel.reloadPage' && !roomAsked) {
+        roomAsked = true;
+        send({ type: 'ui:widgetSize', line: true }).catch(() => {});
+      }
       // The widget is as wide and as tall as what it shows, up to 272px by 150px (see panel.css). An outdated
       // worker is not asked for anything more; its notice fills the frame the widget already has.
       const room = message || !$('translate-offer').hidden;
@@ -326,8 +335,10 @@
     document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
     window.addEventListener('pagehide', () => clearTimeout(pollTimer), { once: true });
     render();
-    // The widget measures its own width for its frame: measure again whenever one of its fonts has loaded.
+    // The widget measures its own width for its frame: measure again whenever one of its fonts has loaded,
+    // and fit the notice again when the frame itself changes.
     document.fonts?.addEventListener('loadingdone', render);
+    window.addEventListener('resize', render);
     checkBuild().catch(error => { note = trouble(error); render(); }).then(poll);
   }
 

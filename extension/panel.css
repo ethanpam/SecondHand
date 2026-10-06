@@ -28,10 +28,13 @@ body.launcher-surface{background:none}#launcher{width:100%;height:100%;display:f
 #widget-text{line-height:16px;min-width:0;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:5}
 /* A line to read widens the widget to its 272px. Five lines of it and the translation offer make the widget 150px tall, the most its frame allows. */
 #widget-text:not(.visually-hidden){width:max-content;max-width:254px}
-/* An outdated worker can't be asked for another frame, so one row fills the frame the widget already has:
-   the logo, up to three lines of what happened, and a button when one helps. */
+/* An outdated worker may not give the widget another frame (one is asked for), so the notice fits the frame the
+   widget already has: a row of the logo, up to three lines of 12px, and a button when one helps. */
 #widget.outdated{width:100%;height:100%;flex-direction:row;align-items:center;gap:8px;padding:0 8px}.widget.outdated .widget-row{display:contents}.widget.outdated .widget-logo{order:-1;margin:0}
 .widget.outdated #widget-text{flex:1;width:auto;max-width:none;font-size:12px;line-height:14px;-webkit-line-clamp:3}
+/* A taller frame gets the panel's text size and more lines, with the button under the text. */
+@media(min-height:80px){.widget.outdated #widget-text{font-size:13px;line-height:16px;-webkit-line-clamp:4}
+  #widget.outdated.restartable{flex-direction:column;align-items:stretch;justify-content:center;gap:4px;padding:6px 8px}.widget.outdated.restartable .widget-row{display:flex}.widget.outdated.restartable .widget-logo{order:0;margin-inline-end:auto}.widget.outdated.restartable #widget-text{flex:none;-webkit-line-clamp:2}}
 /* Hiding the card leaves the logo in the page's corner, where a click brings the card back. */
 .widget-hide{display:flex;flex:none;align-items:center;justify-content:center;width:24px;height:24px;margin-inline:-2px;padding:0;border:0;border-radius:50%;background:none;color:var(--muted-foreground)}.widget-hide:hover{background:var(--muted);color:var(--foreground)}.widget-hide svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2.5;stroke-linecap:round}
 /* The logo alone fills its round frame, so the ring a keyboard gives it is drawn inside the circle. */
