@@ -1,7 +1,7 @@
 'use strict';
 // #184: a student pantry's intake (Jotform) asked for the student status, the help wanted, where the income comes from, and
 // whether the family gets cash assistance. The rules answer them from the saved lists: an option is checked only when it is
-// the one option that names a saved answer, and a question where one saved answer names several options stays with the applicant.
+// the one option that names a saved answer. Options one saved answer names together stay unchecked, and the question stays open.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const generic = require('../extension/generic-adapter.js');
@@ -43,18 +43,40 @@ test('the live form fills from saved answers: each saved answer checks the one o
   assert.ok([...doc.querySelectorAll('input:checked')].every(box => box.getAttribute('data-secondhand-filled') === 'rule'));
 });
 
-test('a saved answer that names several options leaves the whole question with the applicant: On-Campus Job and Off-Campus Job are both a job', () => {
-  for (const incomeSources of ['job', 'job,financial-aid', 'financial-aid,job,family-support']) {
-    const doc = page(qaForm('income'));
-    const result = generic.plan(doc);
-    assert.deepEqual(fillAll(doc, result, { incomeSources }).filled, [], incomeSources);
-    assert.deepEqual(checked(doc, 'q5[]'), [], incomeSources);
-  }
-  // A graduate student at Feirstein is a graduate student too: which one this applicant is can't be told.
-  const doc = page(qaForm('student'));
+test('a saved answer that names several options leaves those options unchecked and the question open; the rest are checked', () => {
+  // On-Campus Job and Off-Campus Job are both a job: which one is the applicant's can't be told.
+  const doc = page(qaForm('income'));
   const result = generic.plan(doc);
-  assert.deepEqual(fillAll(doc, result, { studentLevel: 'graduate' }).filled, []);
-  assert.deepEqual(checked(doc, 'q3[]'), []);
+  const filled = fillAll(doc, result, { incomeSources: 'job,financial-aid,family-support' });
+  assert.deepEqual([filled.filled, filled.partial], [[result.matched[0].id], [result.matched[0].id]], 'filled, and only in part');
+  assert.deepEqual(checked(doc, 'q5[]'), ['Financial Aid', 'Family Support']);
+  // The question stays in the plan as one the rules matched, marked as answered in part: it still needs the applicant, and isn't filled again.
+  const again = generic.plan(doc);
+  assert.deepEqual(again.matched.map(({ key, partial }) => ({ key, partial })), [{ key: 'incomeSources', partial: true }]);
+  assert.deepEqual(fillAll(doc, again, { incomeSources: 'job,financial-aid,family-support' }).filled, []);
+  assert.deepEqual(checked(doc, 'q5[]'), ['Financial Aid', 'Family Support']);
+  assert.deepEqual(generic.navigationFields(doc).map(field => field.answered), [false], 'Fill and continue never moves on past it');
+  // Once the applicant checks a box of their own, it is answered.
+  doc.getElementById('input_5_2').click();
+  assert.deepEqual(generic.plan(doc).matched, []);
+  assert.deepEqual(generic.navigationFields(doc).map(field => field.answered), [true]);
+  // With a job alone, no option is the job's: nothing is checked, and the question stays open as it was.
+  const job = page(qaForm('income'));
+  const plan = generic.plan(job);
+  const none = fillAll(job, plan, { incomeSources: 'job' });
+  assert.deepEqual([none.filled, none.partial, checked(job, 'q5[]')], [[], [], []]);
+  assert.deepEqual(generic.plan(job).matched.map(({ key, partial }) => ({ key, partial })), [{ key: 'incomeSources', partial: undefined }]);
+  // A graduate student at Feirstein is a graduate student too. A question with one answer can't be answered in part.
+  const student = page(qaForm('student'));
+  assert.deepEqual(fillAll(student, generic.plan(student), { studentLevel: 'graduate' }).filled, []);
+  assert.deepEqual(checked(student, 'q3[]'), []);
+});
+
+test('a question answered in full reports nothing as partial', () => {
+  const doc = page(qaForm('income', 'help'));
+  const filled = fillAll(doc, generic.plan(doc), { incomeSources: 'financial-aid,other', helpWanted: 'food-pantry' });
+  assert.deepEqual([filled.filled.length, filled.partial], [2, []]);
+  assert.deepEqual(generic.plan(doc).matched, []);
 });
 
 test('an answer no option names fills nothing, and Other and None go only to their own options', () => {

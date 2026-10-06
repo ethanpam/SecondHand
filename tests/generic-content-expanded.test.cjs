@@ -82,3 +82,17 @@ test('absent navigation module leaves the page manual and cannot advance', t => 
   assert.deepEqual(page.tell({ type: 'secondhand:generic:navigation' }), { canAdvance: false });
   assert.deepEqual(page.tell({ type: 'secondhand:generic:advance', token: 'unknown' }), { advanced: false });
 });
+
+test('a checkbox question answered in part says so through the content boundary, in the fill and in the next plan (#184)', async t => {
+  const boxes = ['Financial Aid', 'Family Support', 'On-Campus Job', 'Off-Campus Job'].map((value, n) => `<label><input type="checkbox" name="income" id="i${n}" value="${value}"> ${value}</label>`).join('');
+  const page = content(t, { html: `<form><fieldset><legend>Current Source of Income/Resources</legend>${boxes}</fieldset></form>` });
+  const plan = await page.ask({ type: 'secondhand:generic:plan' });
+  const [{ id, key }] = plan.matched;
+  assert.equal(key, 'incomeSources');
+  const result = await page.ask({ type: 'secondhand:generic:fill', token: plan.token, assignments: [{ id, key, guessed: false }], values: { incomeSources: 'job,financial-aid' } });
+  assert.deepEqual([result.filled, result.partial], [[id], [id]]);
+  const again = await page.ask({ type: 'secondhand:generic:plan' });
+  assert.deepEqual(again.matched.map(field => ({ key: field.key, partial: field.partial })), [{ key: 'incomeSources', partial: true }]);
+  const whole = await page.ask({ type: 'secondhand:generic:fill', token: again.token, assignments: [], values: {} });
+  assert.deepEqual(whole.partial, []);
+});
