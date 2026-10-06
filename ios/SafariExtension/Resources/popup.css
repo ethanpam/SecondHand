@@ -28,3 +28,5 @@ select, input[type="text"] { width: 100%; padding: 10px; font: inherit; font-siz
   select, input[type="text"] { background: #132c26; color: #f0f4e7; }
   .quiet, .footnote, .muted { color: #b8c9ba; }
 }
+
+#site-origin, .field { overflow-wrap: anywhere; }

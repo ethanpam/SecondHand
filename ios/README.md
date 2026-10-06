@@ -33,6 +33,18 @@ Documents are limited to 20 MB; text extraction and camera scans support up to 2
 
 QA uses the explicitly synthetic, not-for-filing 1040-SR, 2025 W-2, 2026 1099-NEC Copy B, and SSA-1099 in `Tests/Fixtures`. They are included only in the unit-test bundle, not the shipping app. Tests check names, address, and selected amounts against the scan, plus image recognition, blank/invalid input, page ordering, and the page limit. Filled PDF annotation appearances are rendered for OCR; garbled embedded text falls back to image recognition. Camera capture still requires a physical-device check.
 
+## Approved websites
+
+1. Review and save your profile. In Settings, enable **Allow approved websites during this session**, choose whether to include SSN/annual income, and authorize ten minutes of sharing.
+2. Open an HTTPS form in Safari and open SecondHand. Choose **Allow this site** and grant Safari access. Approval applies to that exact origin, not its subdomains or embedded forms. SSN/income require an additional site-specific checkbox and inclusion in the app session.
+3. Start assistance. Review suggested field matches, choose matches for unclear fields, optionally select **Remember these matches for this site**, then choose **Fill selected details**. General pages never fill themselves on load.
+4. **Next** is enabled only for one recognized Next/Continue button when visible native required controls validate and no visible form errors remain. Every click rechecks the page. Optional blank fields do not block Next. After manually editing the site, reopen the popup or choose **Check current page**. The next page gets a fresh review, including single-page forms.
+5. Remove access in the popup or the app's **Approved websites** list. Removal ends the native sharing session. **Forget this site’s remembered matches** clears its saved mappings. Re-approval does not reuse a removed approval's matches.
+
+Only top-level forms and ordinary text/select controls are supported. Credentials, payment/final-submission steps, signatures, other-person fields, embedded forms, and required custom widgets stay manual. This feature does not promise complete applications on every site. Native release enforces exact approved origins independently of Safari permissions; older sharing sessions remain Iowa-only.
+
+`node --test ios/Tests/*.test.js` exercises URL scopes, matching, navigation, revocation and workflow behavior. `node ios/scripts/smoke-approved-sites.cjs` runs the real popup and page engine through two local Chromium pages, with synthetic native responses and no external requests. This browser replay is not a physical-iPhone Safari permission test. See [Apple’s permission documentation](https://developer.apple.com/documentation/safariservices/managing-safari-web-extension-permissions).
+
 ## Application assistance scope
 
 [Watch the live iPhone Safari QA video](https://github.com/ethanpam/secondHand/blob/e411cfbbf77f7e0169c3ca0c6afea2fa35da2c4f/ios/docs/qa/iphone-live-safari-demo.mp4) · [QA results and offline demo](docs/qa/README.md)
@@ -41,7 +53,7 @@ The live recording shows the installed Safari extension selecting the home-addre
 
 **This is a guided auto-apply prototype, not a verified end-to-end Iowa integration.** The app shares the laptop implementation's inspected primary-applicant schema and verified Continue/required-question checks. Live application submission, physical-device behavior, and an authenticated SNAP renewal flow remain unverified. Automated tests use synthetic local forms; the recorded live test was separately authorized with awareness that Iowa may save filled fields before submission.
 
-The assistant automatically matches first/middle/last name, explicit home/mobile phone numbers, and home address on the [inspected applicant page](../docs/iowa-portal.md). For other eligible text/select fields, the user must explicitly choose which saved answer belongs there. These mappings apply only to the current page; the assistant does not guess household, eligibility, or financial semantics.
+The assistant automatically matches first/middle/last name, explicit home/mobile phone numbers, and home address on the [inspected applicant page](../docs/iowa-portal.md). For other eligible text/select fields, the user must explicitly choose which saved answer belongs there. You can explicitly remember reviewed mappings for the same site and unchanged field; the assistant does not guess household, eligibility, or financial semantics.
 
 If you saved a **Yes** or **No** answer to **Do you have a home address?** in your profile, the assistant selects it on the verified, unanswered question. With no saved answer, the question is left for you; the assistant never infers it from your address. It answers whenever it runs on the applicant page: on **Start application assistance**, on **Resume**, and when the page loads after an extension **Continue**. It uses Iowa's normal choice control. After **Yes**, it scans the newly revealed fields again and fills the address in the same run. It preserves existing Yes/No answers and refuses a choice that could reset existing home or mailing details. If it can't select your saved answer, the extension tells you the question was left for you.
 

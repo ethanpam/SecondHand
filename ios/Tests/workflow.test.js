@@ -374,9 +374,9 @@ test("receipt recording requires the receipt page and user confirmation, then cl
   assert.equal(h.calls.storage.some(write => write.includes("EXAMPLE-123")), false);
 });
 
-test("manifest restricts optional host access to Iowa and runs a nonpersistent Safari background", () => {
+test("manifest requests additional HTTPS sites only as optional access and runs a nonpersistent Safari background", () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "../SafariExtension/Resources/manifest.json"), "utf8"));
-  assert.deepEqual(manifest.optional_host_permissions, ["https://hhsservices.iowa.gov/*"]);
+  assert.deepEqual(manifest.optional_host_permissions, ["https://*/*"]);
   assert.equal(manifest.host_permissions, undefined);
   assert.equal(manifest.externally_connectable, undefined);
   assert.equal(manifest.background.persistent, false);
@@ -411,7 +411,7 @@ async function popupHarness(initial) {
   const resources = path.join(__dirname, "../SafariExtension/Resources");
   const dom = new JSDOM(fs.readFileSync(path.join(resources, "popup.html"), "utf8"), { runScripts: "outside-only", url: "https://extension.invalid/popup.html" });
   const messages = [], permissionCalls = [];
-  let response = initial;
+  let response = {site: {origin: "https://hhsservices.iowa.gov", approved: true, iowa: true}, ...initial};
   dom.window.browser = {
     runtime: { async sendMessage(input) { messages.push(input); return response; } },
     permissions: { async request(input) { permissionCalls.push(input); return true; } }

@@ -62,7 +62,7 @@ final class AppUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 20))
         app.tabBars.buttons["Settings"].tap()
-        let ssn = app.switches["Include my SSN for this Iowa session"]
+        let ssn = app.switches["Include my SSN for this session"]
         for _ in 0..<8 where !ssn.isHittable { app.swipeUp() }
         XCTAssertTrue(ssn.isHittable)
         XCTAssertEqual(ssn.value as? String, "0")

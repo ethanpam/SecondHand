@@ -1,12 +1,24 @@
 {
   "manifest_version": 3,
-  "name": "SecondHand for Iowa",
-  "version": "1.1.0",
-  "description": "Fill supported Iowa application steps, review your answers, and approve each continuation and submission.",
-  "permissions": ["activeTab", "scripting", "nativeMessaging", "storage"],
-  "optional_host_permissions": ["https://hhsservices.iowa.gov/*"],
+  "name": "SecondHand Autofill",
+  "version": "1.2.0",
+  "description": "Review and fill saved details on websites you approve, then choose Next when required answers are complete.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "nativeMessaging",
+    "storage"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
   "background": {
-    "scripts": ["iowa-adapter.js", "field-mapper.js", "application-assistant.js", "background.js"],
+    "scripts": [
+      "iowa-adapter.js",
+      "field-mapper.js",
+      "application-assistant.js",
+      "background.js"
+    ],
     "persistent": false
   },
   "icons": {

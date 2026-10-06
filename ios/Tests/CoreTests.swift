@@ -3,6 +3,49 @@ import CryptoKit
 @testable import SecondHand
 
 final class CoreTests: XCTestCase {
+    func testWebsiteApprovalScopesAndSessionMigration() throws {
+        let origin = "https://forms.example.test"
+        let url = origin + "/apply?step=1"
+        XCTAssertEqual(WebsiteApproval.origin(url), origin)
+        XCTAssertTrue(WebsiteApproval.allowsPage(url))
+        for raw in ["http://forms.example.test/a", "https://person@forms.example.test/a", "https://forms.example.test:444/a", "https://127.0.0.1/a", "https://localhost/a", origin + "/login", origin + "/checkout", origin + "/a#signin"] {
+            XCTAssertFalse(WebsiteApproval.allowsPage(raw), raw)
+        }
+        let fields = ["firstName": "Example", "ssn": "000-12-3456", "annualIncome": "68450", "monthlyIncome": "1000", "hasHomeAddress": "yes"]
+        var session = AutofillSession(expiresAt: Date().addingTimeInterval(600), fields: fields)
+        let basic = WebsiteApproval(origin: origin)
+        XCTAssertNil(session.fields(for: url, approvals: [basic]))
+        session.approvedSitesEnabled = true
+        XCTAssertNil(session.fields(for: url, approvals: []))
+        XCTAssertEqual(session.fields(for: url, approvals: [basic]), ["firstName": "Example"])
+        let sensitive = WebsiteApproval(origin: origin, includeSensitive: true)
+        XCTAssertEqual(session.fields(for: url, approvals: [sensitive])?["ssn"], fields["ssn"])
+        XCTAssertNil(session.fields(for: "https://sub.forms.example.test/apply", approvals: [sensitive]))
+        XCTAssertNil(session.fields(for: origin + "/login", approvals: [sensitive]))
+        XCTAssertNil(session.fields(for: "https://hhsservices.iowa.gov/apspssp/ssp.portal/login/personalInfoSignup", approvals: [WebsiteApproval(origin: WebsiteApproval.iowaOrigin, includeSensitive: true)]))
+        session.approvedSitesEnabled = nil
+        let old = try JSONDecoder().decode(AutofillSession.self, from: JSONEncoder().encode(session))
+        XCTAssertNil(old.fields(for: url, approvals: [sensitive]))
+        session.expiresAt = Date().addingTimeInterval(-1)
+        XCTAssertNil(session.fields(for: url, approvals: [sensitive]))
+    }
+
+    func testWebsiteApprovalsAreEncryptedAndRejectWildcards() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let vault = try SecureVault(directory: directory, key: SymmetricKey(size: .bits256))
+        let site = WebsiteApproval(origin: "https://private.example.test", includeSensitive: true)
+        try vault.saveWebsiteApprovals([site])
+        XCTAssertEqual(try vault.loadWebsiteApprovals(), [site])
+        let disk = try Data(contentsOf: directory.appendingPathComponent("sites.sealed"))
+        XCTAssertFalse(String(decoding: disk, as: UTF8.self).contains(site.origin))
+        for invalid in [[site, site], [WebsiteApproval(origin: "https://*.example.test")], [WebsiteApproval(origin: WebsiteApproval.iowaOrigin)]] {
+            XCTAssertThrowsError(try vault.saveWebsiteApprovals(invalid))
+        }
+        try vault.saveWebsiteApprovals([])
+        XCTAssertTrue(try vault.loadWebsiteApprovals().isEmpty)
+    }
+
     func testAppPINValidationAndSaltedCredentials() throws {
         for invalid in ["", "123", "12345", "123456", "abcd", "１２３４"] {
             XCTAssertThrowsError(try AppAuthentication(pin: invalid))

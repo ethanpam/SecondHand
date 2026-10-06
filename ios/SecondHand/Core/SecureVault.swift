@@ -107,6 +107,29 @@ final class SecureVault {
         return data
     }
 
+    static func websiteApprovals() throws -> [WebsiteApproval] { try shared().loadWebsiteApprovals() }
+
+    func loadWebsiteApprovals() throws -> [WebsiteApproval] {
+        guard let data = try read(named: "sites.sealed") else { return [] }
+        let sites = try JSONDecoder().decode([WebsiteApproval].self, from: data)
+        guard sites.count <= 50, Set(sites.map(\.origin)).count == sites.count,
+              sites.allSatisfy({ WebsiteApproval.origin($0.origin) == $0.origin && $0.origin != WebsiteApproval.iowaOrigin }) else { throw VaultError.invalidFile }
+        return sites
+    }
+
+    func saveWebsiteApprovals(_ sites: [WebsiteApproval]) throws {
+        guard sites.count <= 50, Set(sites.map(\.origin)).count == sites.count,
+              sites.allSatisfy({ WebsiteApproval.origin($0.origin) == $0.origin && $0.origin != WebsiteApproval.iowaOrigin }) else { throw VaultError.invalidFile }
+        try write(JSONEncoder().encode(sites), named: "sites.sealed")
+    }
+
+    static func setWebsiteApproval(_ site: WebsiteApproval, approved: Bool) throws {
+        let vault = try shared()
+        var sites = try vault.loadWebsiteApprovals().filter { $0.origin != site.origin }
+        if approved { sites.append(site) }
+        try vault.saveWebsiteApprovals(sites)
+    }
+
     static func writeAutofillSession(_ session: AutofillSession) throws {
         guard session.isValid() else { throw VaultError.invalidSession }
         try shared().write(JSONEncoder().encode(session), named: "session.sealed")
@@ -189,6 +212,7 @@ final class SecureVault {
     func deleteAll() throws {
         try Self.revokeAutofillSession()
         try Self.removeAllPendingReceipts()
+        try Self.shared().remove(named: "sites.sealed")
         for url in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) {
             try FileManager.default.removeItem(at: url)
         }
