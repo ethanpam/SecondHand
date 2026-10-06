@@ -404,13 +404,10 @@ export function Home() {
                   Click Autofill in the corner and approve once in the desktop
                   app, or choose Always allow. SecondHand moves past
                   information-only screens and fills the pages it knows.
-                  Anything missing is flagged so you can jump straight to it. It
-                  can choose Save and Continue on the applicant, home-address
-                  and Tell Us More pages, Iowa’s screening questions, and the
-                  pages for one person’s saved job, pension, Social Security,
-                  rent, utilities or cash, but only when it knows every question
-                  there and every required answer is filled in. Review every
-                  answer and the first suggested home address before you submit.
+                  Anything missing is flagged so you can jump straight to it. On
+                  some pages it knows, it selects Save and Continue, but only
+                  when every required answer is filled in. Review every answer
+                  and the first suggested home address before you submit.
                 </p>
               </div>
               <a
