@@ -553,6 +553,29 @@ test('on a page with no checklist, the side panel names each question Autofill l
   assert.equal(iowa.get('panel-left').hidden, false);
 });
 
+test('on a page with no checklist, the side panel names what Autofill filled, folded away, with guesses marked', async t => {
+  const filledQuestions = [{ label: ' First name ', guessed: false }, { label: 'Email', guessed: true }, { label: '', guessed: false }, { label: 7 }, 'ZIP'];
+  const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: { ...siteDone, filled: 3, filledQuestions } });
+  assert.equal(view.get('filled-section').hidden, true);
+  await view.userClick('panel-autofill');
+  assert.equal(view.get('filled-section').hidden, false);
+  assert.equal(view.get('filled-section').open, false, 'folded until the reader wants the names');
+  assert.equal(view.get('filled-title').textContent, 'Filled by SecondHand');
+  assert.equal(view.get('filled-summary').textContent, '3 questions');
+  const rows = [...view.get('filled-list').children];
+  assert.deepEqual(rows.map(row => [row.tagName, row.querySelector('.checklist-label').textContent, row.querySelector('.checklist-detail').textContent]), [
+    ['DIV', 'First name', 'Done'], ['DIV', 'Email', 'Guessed, check it'], ['DIV', 'A question with no label', 'Done']]);
+  assert.equal(rows.every(row => row.querySelectorAll('.checklist-mark svg').length === 1), true, 'each is marked done');
+  assert.equal(view.get('filled-list').querySelector('button'), null, 'rows are names, not links');
+  // The list leaves with the tab, and Iowa's own checklist never gets one.
+  view.tabs.current = { id: 8, url: 'http://example.invalid/' };
+  view.listeners.activated({ tabId: 8 }); await settle();
+  assert.equal(view.get('filled-section').hidden, true);
+  const iowa = await panel(t, { autofill: { ...doneResult, filledQuestions: [{ label: 'First name', guessed: false }] } });
+  await iowa.userClick('panel-autofill');
+  assert.equal(iowa.get('filled-section').hidden, true);
+});
+
 test('after Autofill, a question whose answer isn’t saved says to type it in Iowa’s form, and one note points to My information', async t => {
   const autofill = { ...doneResult, needYou: ['firstName', 'middleName', 'unverified'], notSaved: ['firstName', 'middleName', 'lastName'] };
   const view = await panel(t, { autofill });

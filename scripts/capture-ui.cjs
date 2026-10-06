@@ -388,6 +388,10 @@ async function sites() {
       await expect(page.locator('#fname')).toHaveValue(smoke.syntheticProfile.firstName, { timeout: 20000 });
       await page.waitForTimeout(2000);
       await panelShot(running, panel, 'panel-site-filled', () => !document.getElementById('panel-autofill').disabled && /\d/.test(document.getElementById('status').textContent));
+      // The names of what was filled, opened.
+      await panel.click('#filled-section > summary');
+      await panelShot(running, panel, 'panel-site-filled-open', () => document.getElementById('filled-section').open);
+      await panel.evaluate(() => { document.getElementById('filled-section').open = false; });
       // The same site with Laya turned off in the app.
       await open(PANTRY, { laya: 'off' });
       await recheck(panel);
@@ -503,7 +507,7 @@ async function recording() {
 const sessions = [
   [iowaCard, ['card-ready', 'card-focus', 'card-hidden', 'card-hidden-focus', 'card-working', 'card-need-you', 'card-ready-again', 'card-message', 'card-locked', 'card-closed', 'card-pill']],
   [iowaPanel, ['panel-iowa', 'panel-header', 'panel-focus', 'panel-working', 'panel-iowa-filled', 'panel-checklist', 'panel-iowa-again', 'panel-locked', 'panel-closed', 'panel-info', 'panel-elsewhere', 'panel-arabic', 'panel-questions']],
-  [sites, ['panel-site-off', 'panel-site-filled', 'panel-laya-off', 'panel-save', 'panel-all-sites-off', 'card-site', 'card-offer']],
+  [sites, ['panel-site-off', 'panel-site-filled', 'panel-site-filled-open', 'panel-laya-off', 'panel-save', 'panel-all-sites-off', 'card-site', 'card-offer']],
   [outdated, ['card-outdated', 'panel-outdated', 'card-reload']],
   [recording, ['card-autofill']]
 ];

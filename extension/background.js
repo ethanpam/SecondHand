@@ -933,7 +933,8 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
     }
     let filled = 0, placedByLaya = 0;
     // `left` names what needYou lists, for the side panel: each key with the page's own label for its question.
-    const needYou = [], left = [], savable = [];
+    // `filledQuestions` names what was filled the same way, and whether it was a guess.
+    const needYou = [], left = [], filledQuestions = [], savable = [];
     for (const frame of initial) {
       const { frameId } = frame;
       let { plan, planned } = frame;
@@ -966,6 +967,8 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
         const placed = assignments.filter(({ id }) => result.filled.includes(id) && !result.rejected.includes(id));
         if (!placed.length) break;
         filled += placed.length;
+        const named = new Map([...plan.unmatched, ...plan.matched].map(field => [field.id, typeof field.label === 'string' ? field.label.trim().slice(0, LABEL_LIMIT) : '']));
+        for (const { id, guessed } of placed) filledQuestions.push({ label: named.get(id) || '', guessed: guessed === true });
         placedByLaya += placed.filter(({ id }) => fromLaya.has(`${frameId}|${id}`)).length;
         plan = await planGeneral(tabId, frameId, prefix);
         planned = ruleAssignments(plan);
@@ -986,7 +989,7 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
           label: typeof field.label === 'string' ? field.label.trim().slice(0, LABEL_LIMIT) : '' });
       }
     }
-    return { filled, needYou, left, savable, laya: placedByLaya, reason: prepared.reason };
+    return { filled, needYou, left, filledQuestions: filledQuestions.slice(0, 80), savable, laya: placedByLaya, reason: prepared.reason };
   } finally { values = null; questionTranslation.forget(); }
 }
 
@@ -1017,11 +1020,11 @@ async function fillSiteOnce(tabId, url, guesses) {
       const hosts = pending.map(frame => new URL(frame.origin).hostname).join(', ');
       return siteResult('waiting', say('worker.formInsideFrames', { hosts }));
     }
-    const { needYou, left, savable, laya: suggested, reason } = await fillPlan(tabId, url, frames, { prefix: true, laya });
+    const { needYou, left, filledQuestions, savable, laya: suggested, reason } = await fillPlan(tabId, url, frames, { prefix: true, laya });
     keepSavable(tabId, url, siteOrigin(url), savable);
     const tally = await tallySite(tabId, frames);
     const filled = tally.rule + tally.guess;
-    return siteResult('done', siteSummary(filled, tally.guess, needYou, tally.next, suggested, reason), { filled, guessed: tally.guess, needYou, left, ...(suggested ? { laya: suggested } : {}) });
+    return siteResult('done', siteSummary(filled, tally.guess, needYou, tally.next, suggested, reason), { filled, guessed: tally.guess, needYou, left, filledQuestions, ...(suggested ? { laya: suggested } : {}) });
   } catch (error) {
     const { state, ...message } = failed(error);
     return siteResult(state, message);
@@ -1032,9 +1035,9 @@ async function fillSiteOnce(tabId, url, guesses) {
 async function fillIowaGeneral(tabId, state, plan, guard, laya = null) {
   const { pageKey } = state.page;
   try {
-    const { filled, needYou, left, savable, laya: suggested, reason } = await fillPlan(tabId, state.url, [{ frameId: 0, plan }], { guard, laya });
+    const { filled, needYou, left, filledQuestions, savable, laya: suggested, reason } = await fillPlan(tabId, state.url, [{ frameId: 0, plan }], { guard, laya });
     keepSavable(tabId, state.url, '', savable);
-    return { state: 'done', filled, needYou, left, ...say('result.thenTodo', { summary: withReason(withLaya(filledSummary(filled, needYou), suggested), reason), todo: { key: GENERAL_TODO, params: {} } }),
+    return { state: 'done', filled, needYou, left, filledQuestions, ...say('result.thenTodo', { summary: withReason(withLaya(filledSummary(filled, needYou), suggested), reason), todo: { key: GENERAL_TODO, params: {} } }),
       todo: english(GENERAL_TODO), todoKey: GENERAL_TODO, todoParams: {}, pageKey, ...(suggested ? { laya: suggested } : {}) };
   } catch (error) {
     return { ...failed(error), filled: 0, needYou: [], pageKey };

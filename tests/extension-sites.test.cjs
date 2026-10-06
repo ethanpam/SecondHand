@@ -375,6 +375,7 @@ test('autofill on an approved site asks for the planned keys once and fills with
   assert.deepEqual(fill.values, { fullName: 'Synthetic private first Synthetic private last', zip: '50309' }, 'only the values being placed reach the page');
   assert.deepEqual(plain(response.data), { state: 'done', filled: 2, guessed: 0, needYou: [w.page.idOf('pickup'), w.page.idOf('size')].map(id => `f0:${id}`),
     left: [{ key: `f0:${w.page.idOf('pickup')}`, label: 'Preferred pickup day' }, { key: `f0:${w.page.idOf('size')}`, label: 'size' }],
+    filledQuestions: [{ label: 'name', guessed: false }, { label: 'zip', guessed: false }],
     message: 'Filled 2 · 2 left for you. Check your answers before you submit.', messageKey: 'result.siteFilledNeedYou', messageParams: { count: 2, needYou: 2 }, pageKey: 'general' });
   assert.deepEqual(plain(response.data.needYou), ['f0:sh-2-1', 'f0:sh-2-0'], 'need-you ids come from the latest plan');
   assert.deepEqual(plain(response.data.left.map(item => item.key)), plain(response.data.needYou), 'and each is named, in the same order');
@@ -555,6 +556,9 @@ test('AI guesses join the one desktop request and are filled with the guessed ma
   assert.equal(result.filled, 3);
   assert.equal(result.guessed, 2);
   assert.equal(result.message, 'Filled 3 · 2 guessed · 1 left for you. Check your answers before you submit.');
+  // Each filled question is named for the side panel, with the guesses marked.
+  assert.deepEqual(plain(result.filledQuestions).map(item => item.guessed), [false, true, true]);
+  assert.ok(plain(result.filledQuestions).every(item => typeof item.label === 'string'));
   assert.doesNotMatch(JSON.stringify(result), /Synthetic private|5155550100/);
 });
 

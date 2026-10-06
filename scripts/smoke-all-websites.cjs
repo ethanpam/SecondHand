@@ -218,6 +218,14 @@ async function main() {
     await expect.poll(() => page.evaluate(() => Boolean(document.getElementById('guardian').closest('[data-secondhand-attention]'))), { timeout: 15000 }).toBe(true);
     assert.equal(await page.evaluate(() => Boolean(document.getElementById('apt').closest('[data-secondhand-attention]'))), false);
     assert.equal(await page.locator('#guardian').inputValue(), '', 'finding a question writes nothing');
+    // What was filled is named too, folded away until opened: the four household answers, none a guess.
+    assert.equal(await panel.visible('#filled-section'), true);
+    assert.equal(await panel.evaluate(() => document.getElementById('filled-section').open), false);
+    assert.equal(await panel.text('#filled-summary'), en('questions.count', { count: 4 }));
+    await panel.click('#filled-section > summary');
+    await expect.poll(() => panel.evaluate(() => document.getElementById('filled-section').open), { timeout: 5000 }).toBe(true);
+    assert.deepEqual(await panel.evaluate(() => [...document.querySelectorAll('#filled-list > *')].map(row => [row.querySelector('.checklist-label').textContent, row.querySelector('.checklist-detail').textContent])),
+      [HOUSEHOLD_QUESTIONS.young, HOUSEHOLD_QUESTIONS.middle, HOUSEHOLD_QUESTIONS.older, HOUSEHOLD_QUESTIONS.student].map(label => [label, en('checklist.complete')]));
     await expect.poll(() => panel.visible('#save-section'), { timeout: 15000 }).toBe(true);
     await expect.poll(() => panel.text('#save-list')).toBe(`${HOUSEHOLD_QUESTIONS.apt}${en('save.answerFirst')}`);
     await page.locator('#apt').fill('Unit 5');

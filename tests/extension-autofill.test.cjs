@@ -252,6 +252,7 @@ test('an unknown Iowa page gets one general fill, then waits for the applicant t
   assert.equal(response.ok, true, response.error);
   // `left` names what needYou lists, in the page's own words (a question the plan gave no label has none).
   assert.deepEqual(plain(response.data), { state: 'done', filled: 2, needYou: ['sh-1-3', 'sh-1-2'], left: [{ key: 'sh-1-3', label: 'Is anyone blind?' }, { key: 'sh-1-2', label: '' }],
+    filledQuestions: [{ label: '', guessed: false }, { label: '', guessed: false }],
     message: 'Filled 2 · 2 left for you. Check your answers, then click Continue.', todo: 'Check your answers, then click Continue.', pageKey: 'iowa-manual',
     messageKey: 'result.thenTodo', messageParams: { summary: { key: 'result.filledNeedYou', params: { count: 2, needYou: 2 } }, todo: { key: 'worker.checkThenContinue', params: {} } },
     todoKey: 'worker.checkThenContinue', todoParams: {} });

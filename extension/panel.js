@@ -348,9 +348,12 @@
     // The questions Autofill left for the reader, and which of them the link under the status goes to next.
     let left = [];
     let leftCursor = 0;
-    // On a page with no checklist, those questions by name, as the worker read them from the page.
+    // On a page with no checklist, those questions by name, as the worker read them from the page, and the
+    // questions Autofill filled there.
     let named = [];
     let namedSignature = '';
+    let filledNames = [];
+    let filledSignature = '';
     let site = null;
     let page = null;
     // The questions the last Autofill on this page could have filled but had no saved answer for.
@@ -494,13 +497,14 @@
       renderSummary();
     }
     function clearPage() {
-      fillable = false; autopilot = false; told = false; ran = false; left = []; leftCursor = 0; named = []; site = null; page = null; notSaved = []; checklistSignature = '';
+      fillable = false; autopilot = false; told = false; ran = false; left = []; leftCursor = 0; named = []; filledNames = []; site = null; page = null; notSaved = []; checklistSignature = '';
       savable = []; savableSignature = '';
       $('page-checklist').replaceChildren();
       $('checklist-section').hidden = true;
       $('save-list').replaceChildren();
       $('save-section').hidden = true;
       renderLeft();
+      renderFilled();
       resetQuestions();
       resetSummary();
     }
@@ -575,6 +579,26 @@
       }
       $('left-section').hidden = !named.length;
     }
+    // The questions Autofill filled on a page with no checklist, by name, with guesses marked. Folded away by default.
+    function renderFilled() {
+      const signature = JSON.stringify([language, filledNames]);
+      if (signature !== filledSignature) {
+        filledSignature = signature;
+        $('filled-list').replaceChildren(...filledNames.map(item => {
+          const row = document.createElement('div');
+          row.className = 'checklist-item info complete';
+          const mark = document.createElement('span'); mark.className = 'checklist-mark'; mark.setAttribute('aria-hidden', 'true'); mark.append(checkMark());
+          const copy = document.createElement('span'); copy.className = 'checklist-copy';
+          const label = document.createElement('span'); label.className = 'checklist-label'; label.dir = 'auto'; label.textContent = item.label || t('left.unnamed');
+          const detail = document.createElement('span'); detail.className = 'checklist-detail'; detail.textContent = t(item.guessed ? 'filled.guessed' : 'checklist.complete');
+          copy.append(label, detail);
+          row.append(mark, copy);
+          return row;
+        }));
+        $('filled-summary').textContent = filledNames.length ? t('questions.count', { count: filledNames.length }) : '';
+      }
+      $('filled-section').hidden = !filledNames.length;
+    }
     // One row per question with no saved answer: its own words, then Save to My information once the page holds an answer.
     function renderSaves() {
       const signature = JSON.stringify([language, savable]);
@@ -631,6 +655,9 @@
       const answered = new Set(savable.filter(item => item.answered).map(item => item.id));
       named = ran && !listed.length ? left.map(key => ({ key, label: names.get(key) || '', done: answered.has(key) })) : [];
       renderLeft();
+      filledNames = ran && !listed.length && Array.isArray(result.filledQuestions)
+        ? result.filledQuestions.filter(item => typeof item?.label === 'string').slice(0, 80).map(item => ({ label: fixedText(item.label.trim(), 200), guessed: item.guessed === true })) : [];
+      renderFilled();
       const loading = target?.status === 'loading';
       if (site?.enabled && !site.ready) show({ key: loading ? 'panel.waitingLoad' : 'panel.reloadToRead' });
       // What Autofill reported, with its count of what is left kept current as the reader answers.
@@ -1075,7 +1102,7 @@
     function relabel() {
       applyStatic();
       $('language').value = language;
-      if (page) { renderChecklist(); renderLeft(); renderSaves(); }
+      if (page) { renderChecklist(); renderLeft(); renderFilled(); renderSaves(); }
       renderStatus();
       renderDesktop();
       resetQuestions();

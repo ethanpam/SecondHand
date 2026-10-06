@@ -134,6 +134,8 @@
     'checklist.rowLabel': '{label}: {status}. Go to this question.',
     'left.title': 'Left for you',
     'left.unnamed': 'A question with no label',
+    'filled.title': 'Filled by SecondHand',
+    'filled.guessed': 'Guessed, check it',
 
     'questions.show': 'Show questions in English',
     'questions.refresh': 'Update the question list',
@@ -473,6 +475,8 @@
     'checklist.rowLabel': '{label}: {status}. Ir a esta pregunta.',
     'left.title': 'Por contestar',
     'left.unnamed': 'Una pregunta sin etiqueta',
+    'filled.title': 'Llenadas por SecondHand',
+    'filled.guessed': 'Sugerida, revísela',
 
     'questions.show': 'Ver las preguntas en español',
     'questions.refresh': 'Actualizar la lista de preguntas',
@@ -809,6 +813,8 @@
     'checklist.rowLabel': '{label}: {status}. Đến câu hỏi này.',
     'left.title': 'Còn lại cho bạn',
     'left.unnamed': 'Một câu hỏi không có nhãn',
+    'filled.title': 'SecondHand đã điền',
+    'filled.guessed': 'Đoán, hãy kiểm tra',
 
     'questions.show': 'Xem các câu hỏi bằng tiếng Việt',
     'questions.refresh': 'Cập nhật danh sách câu hỏi',
@@ -1146,6 +1152,8 @@
     'checklist.rowLabel': '{label}：{status}。前往此问题。',
     'left.title': '留给您的问题',
     'left.unnamed': '没有标签的问题',
+    'filled.title': 'SecondHand 已填写',
+    'filled.guessed': '推测的，请核对',
 
     'questions.show': '用中文显示问题',
     'questions.refresh': '更新问题列表',
@@ -1483,6 +1491,8 @@
     'checklist.rowLabel': '{label} : {status}. Aller à cette question.',
     'left.title': 'Il vous reste',
     'left.unnamed': 'Une question sans libellé',
+    'filled.title': 'Rempli par SecondHand',
+    'filled.guessed': 'Deviné, vérifiez-le',
 
     'questions.show': 'Afficher les questions en français',
     'questions.refresh': 'Mettre à jour la liste des questions',
@@ -1820,6 +1830,8 @@
     'checklist.rowLabel': '{label}: {status}. انتقل إلى هذا السؤال.',
     'left.title': 'المتبقي لك',
     'left.unnamed': 'سؤال بلا تسمية',
+    'filled.title': 'عبّأها SecondHand',
+    'filled.guessed': 'تخمين، راجعه',
 
     'questions.show': 'عرض الأسئلة بالعربية',
     'questions.refresh': 'تحديث قائمة الأسئلة',

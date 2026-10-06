@@ -67,6 +67,9 @@ footer{border-top:1px solid var(--border);margin-top:12px;padding:12px 0 16px}
 /* The page's questions in the applicant's language. */
 .questions-pending{margin:0 0 8px}
 .checklist-item.info{cursor:default}
+/* The folded list of what was filled: its heading row opens and closes it, and says which with an arrow. */
+details.filled>summary{list-style:none;cursor:pointer;border-radius:8px}details.filled>summary::-webkit-details-marker{display:none}details.filled>summary:focus-visible{outline-offset:4px}
+details.filled>summary>span{display:flex;align-items:center;gap:10px}details.filled>summary>span::after{content:"";width:7px;height:7px;border:solid var(--muted-foreground);border-width:1.5px 1.5px 0 0;transform:rotate(45deg);margin-inline-end:4px}details.filled[open]>summary>span::after{transform:rotate(135deg);margin-top:-4px}
 /* What this page says: key points Chrome writes on this computer. */
 .summary-caveat{color:var(--muted-foreground);margin:0 0 8px}.summary-english{margin:8px 0 0}
 .summary-card{background:#fff;border:1px solid var(--border);border-radius:12px;padding:4px 14px}
