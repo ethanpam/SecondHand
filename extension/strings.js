@@ -269,6 +269,7 @@
 
     'questions.show': 'Show questions in English',
     'questions.refresh': 'Update the question list',
+    'questions.listHint': 'The questions below are in the form’s own words.',
     'questions.title': 'Questions on this page',
     'questions.count': { one: '{count} question', other: '{count} questions' },
     'questions.reading': 'Reading this page’s questions…',
@@ -766,6 +767,7 @@
 
     'questions.show': 'Ver las preguntas en español',
     'questions.refresh': 'Actualizar la lista de preguntas',
+    'questions.listHint': 'Las preguntas de abajo están en el idioma del formulario.',
     'questions.title': 'Preguntas de esta página',
     'questions.count': { one: '{count} pregunta', other: '{count} preguntas' },
     'questions.reading': 'Leyendo las preguntas de esta página…',
@@ -1260,6 +1262,7 @@
 
     'questions.show': 'Xem các câu hỏi bằng tiếng Việt',
     'questions.refresh': 'Cập nhật danh sách câu hỏi',
+    'questions.listHint': 'Các câu hỏi bên dưới dùng đúng lời của biểu mẫu.',
     'questions.title': 'Các câu hỏi trên trang này',
     'questions.count': { one: '{count} câu hỏi', other: '{count} câu hỏi' },
     'questions.reading': 'Đang đọc các câu hỏi của trang này…',
@@ -1755,6 +1758,7 @@
 
     'questions.show': '用中文显示问题',
     'questions.refresh': '更新问题列表',
+    'questions.listHint': '下面的问题是表格自己的原文。',
     'questions.title': '此页面上的问题',
     'questions.count': { one: '{count} 个问题', other: '{count} 个问题' },
     'questions.reading': '正在读取此页面的问题…',
@@ -2250,6 +2254,7 @@
 
     'questions.show': 'Afficher les questions en français',
     'questions.refresh': 'Mettre à jour la liste des questions',
+    'questions.listHint': 'Les questions ci-dessous sont dans les mots du formulaire.',
     'questions.title': 'Questions de cette page',
     'questions.count': { one: '{count} question', other: '{count} questions' },
     'questions.reading': 'Lecture des questions de cette page…',
@@ -2745,6 +2750,7 @@
 
     'questions.show': 'عرض الأسئلة بالعربية',
     'questions.refresh': 'تحديث قائمة الأسئلة',
+    'questions.listHint': 'الأسئلة أدناه بكلمات النموذج نفسه.',
     'questions.title': 'الأسئلة في هذه الصفحة',
     'questions.count': { one: 'عدد الأسئلة: {count}', other: 'عدد الأسئلة: {count}' },
     'questions.reading': 'جارٍ قراءة أسئلة هذه الصفحة…',

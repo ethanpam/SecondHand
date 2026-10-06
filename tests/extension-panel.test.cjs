@@ -2690,6 +2690,29 @@ test('#185: the side panel lists Laya’s guesses by their own words, and a trus
   assert.equal(view.get('status').textContent, GUESSED, 'found: nothing more to say');
 });
 
+test('in another language, a site’s question lists point to the translated view, then show each question translated over the form’s words', async t => {
+  const ai = translatorStub();
+  const questions = { lang: 'en', pending: 0, questions: GUESSES.map(({ id, label }) => ({ id, label })) };
+  const view = await panel(t, { tab: pantryTab, site: PANTRY_SITE, result: guessedDone, language: 'es-ES', Translator: ai.Translator, LanguageDetector: detectorStub().LanguageDetector, questions });
+  assert.equal(view.get('words-hint').hidden, false);
+  assert.equal(view.get('words-hint-text').textContent, 'Las preguntas de abajo están en el idioma del formulario.');
+  assert.equal(view.get('words-translate').textContent, 'Ver las preguntas en español', 'the question list’s button, under the line');
+  assert.equal(view.get('questions-show').hidden, true, 'one button for it, the one nearer what it is for');
+  view.get('words-translate').click(); await settle();
+  assert.equal(ai.calls.translate.length, 0, 'only a trusted click');
+  await view.userClick('words-translate'); await settle();
+  const row = view.window.document.querySelector('[data-guess-id="f0:sh-1-1"]');
+  assert.deepEqual([...row.querySelectorAll('.checklist-label, .checklist-detail')].map(element => element.textContent),
+    ['[es] How many people live in your household?', 'How many people live in your household?'], 'the reader’s language on top, the form’s words under it');
+  assert.equal(row.getAttribute('aria-label'), strings.text('es', 'guesses.rowLabel', { label: '[es] How many people live in your household?' }));
+  assert.equal(view.get('words-hint').hidden, true, 'translated, the line has nothing left to say');
+  assert.equal(view.get('questions-show').textContent, spanish('questions.refresh'));
+  assert.equal(view.get('questions-show').hidden, false);
+  // In English there is nothing to point to.
+  const english = await panel(t, { tab: pantryTab, site: PANTRY_SITE, result: guessedDone, Translator: ai.Translator });
+  assert.equal(english.get('words-hint').hidden, true);
+});
+
 test('#185: the guess list shows only well-formed questions, in the applicant’s language, and is gone with no guesses', async t => {
   const odd = { ...guessedDone, layaGuesses: [...GUESSES, { id: 'not an id!', label: 'Bad id' }, { id: 'f0:sh-1-5', label: 7 }, null] };
   const view = await panel(t, { tab: pantryTab, site: PANTRY_SITE, result: odd, language: 'es' });

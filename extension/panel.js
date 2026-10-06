@@ -702,9 +702,30 @@
       $('checklist-note').hidden = !(ran && entries.some(item => item.status !== 'complete' && notSaved.includes(item.key)));
       $('checklist-section').hidden = !entries.length;
     }
+    // A question in the page's own words, as the lists below show it: once Chrome's translator has put the page's
+    // questions in the reader's language (Show questions in ...), that on top and the page's words under it, to
+    // match it with the form.
+    function questionWords(text, fallback = '') {
+      const words = fixedText(text, 200).trim();
+      const own = translated.get(text) || translated.get(words);
+      const label = document.createElement('span'); label.className = 'checklist-label'; label.dir = 'auto'; label.textContent = own ? fixedText(own, 400) : words || fallback;
+      if (!own || own === words) return [label];
+      const original = document.createElement('span'); original.className = 'checklist-detail'; original.dir = 'auto'; original.textContent = words;
+      return [label, original];
+    }
+    // Until then, in a language other than English, one line says the questions are the form's words, with the
+    // question list's own button under it, which puts them in the reader's.
+    const questionsOffered = () => Boolean(target) && fillable && service.supported() && (language !== 'en' || Boolean(questions)) && !questionBusy;
+    const wordsHinted = () => Boolean(site) && language !== 'en' && !translated.size && questionsOffered() &&
+      (named.length || held.length || layaGuesses.length || filledNames.length || savable.length) > 0;
+    function renderWordsHint() {
+      $('words-hint').hidden = !wordsHinted();
+      $('words-translate').textContent = needsDownload ? t('translate.download', { language: languageName(language) }) : t('questions.show');
+      $('words-translate').disabled = working || questionBusy;
+    }
     // A page with no checklist: one row per question Autofill left, in the page's own words. A row finds its question.
     function renderLeft() {
-      const signature = JSON.stringify([language, named]);
+      const signature = JSON.stringify([language, named, translated.size]);
       if (signature !== namedSignature) {
         namedSignature = signature;
         $('left-list').replaceChildren(...named.map(item => {
@@ -713,11 +734,11 @@
           const mark = document.createElement('span'); mark.className = 'checklist-mark'; mark.setAttribute('aria-hidden', 'true');
           if (item.done) mark.append(checkMark());
           const copy = document.createElement('span'); copy.className = 'checklist-copy';
-          const label = document.createElement('span'); label.className = 'checklist-label'; label.dir = 'auto'; label.textContent = item.label || t('left.unnamed');
           const status = t(item.done ? 'checklist.complete' : item.held ? 'left.held' : 'checklist.missing');
           const detail = document.createElement('span'); detail.className = 'checklist-detail'; detail.textContent = status;
-          copy.append(label, detail);
-          button.setAttribute('aria-label', t('checklist.rowLabel', { label: item.label || t('left.unnamed'), status }));
+          const words = questionWords(item.label, t('left.unnamed'));
+          copy.append(...words, detail);
+          button.setAttribute('aria-label', t('checklist.rowLabel', { label: words[0].textContent, status }));
           button.append(mark, copy);
           button.addEventListener('click', trusted(() => { if (!button.disabled) focusField(item.key); }));
           return button;
@@ -729,7 +750,7 @@
     }
     // The questions Autofill filled on a page with no checklist, by name, with guesses marked. Folded away by default.
     function renderFilled() {
-      const signature = JSON.stringify([language, filledNames]);
+      const signature = JSON.stringify([language, filledNames, translated.size]);
       if (signature !== filledSignature) {
         filledSignature = signature;
         $('filled-list').replaceChildren(...filledNames.map(item => {
@@ -737,9 +758,8 @@
           row.className = 'checklist-item info complete';
           const mark = document.createElement('span'); mark.className = 'checklist-mark'; mark.setAttribute('aria-hidden', 'true'); mark.append(checkMark());
           const copy = document.createElement('span'); copy.className = 'checklist-copy';
-          const label = document.createElement('span'); label.className = 'checklist-label'; label.dir = 'auto'; label.textContent = item.label || t('left.unnamed');
           const detail = document.createElement('span'); detail.className = 'checklist-detail'; detail.textContent = t(item.guessed ? 'filled.guessed' : 'checklist.complete');
-          copy.append(label, detail);
+          copy.append(...questionWords(item.label, t('left.unnamed')), detail);
           row.append(mark, copy);
           return row;
         }));
@@ -749,15 +769,14 @@
     }
     // One row per question with no saved answer: its own words, then Save to My information once the page holds an answer.
     function renderSaves() {
-      const signature = JSON.stringify([language, savable]);
+      const signature = JSON.stringify([language, savable, translated.size]);
       if (signature === savableSignature) return;
       savableSignature = signature;
       $('save-list').replaceChildren(...savable.map(item => {
         const row = document.createElement('div');
         row.className = 'checklist-item save-row'; row.dataset.saveId = item.id;
         const copy = document.createElement('span'); copy.className = 'checklist-copy';
-        const label = document.createElement('span'); label.className = 'checklist-label'; label.dir = 'auto'; label.textContent = fixedText(item.label, 200);
-        copy.append(label);
+        copy.append(...questionWords(item.label));
         row.append(copy);
         if (item.answered) {
           const button = document.createElement('button');
@@ -781,15 +800,14 @@
     }
     // One row per held question, in its own words. The section's one button fills them all.
     function renderHeld() {
-      const signature = JSON.stringify(held);
+      const signature = JSON.stringify([held, translated.size]);
       if (signature === heldSignature) return;
       heldSignature = signature;
       $('held-list').replaceChildren(...held.map(item => {
         const row = document.createElement('div');
         row.className = 'checklist-item'; row.dataset.heldId = item.id;
         const copy = document.createElement('span'); copy.className = 'checklist-copy';
-        const label = document.createElement('span'); label.className = 'checklist-label'; label.dir = 'auto'; label.textContent = fixedText(item.label, 200);
-        copy.append(label);
+        copy.append(...questionWords(item.label));
         row.append(copy);
         return row;
       }));
@@ -797,7 +815,7 @@
     }
     // One row per question Laya guessed, in its own words, with the dotted outline it has on the page. A row finds it there.
     function renderGuesses() {
-      const signature = JSON.stringify([language, layaGuesses]);
+      const signature = JSON.stringify([language, layaGuesses, translated.size]);
       if (signature === guessesSignature) return;
       guessesSignature = signature;
       $('guesses-list').replaceChildren(...layaGuesses.map(item => {
@@ -806,9 +824,8 @@
         button.disabled = working || !target;
         const mark = document.createElement('span'); mark.className = 'checklist-mark guess-mark'; mark.setAttribute('aria-hidden', 'true');
         const copy = document.createElement('span'); copy.className = 'checklist-copy';
-        const label = document.createElement('span'); label.className = 'checklist-label'; label.dir = 'auto'; label.textContent = fixedText(item.label, 200);
-        copy.append(label);
-        button.setAttribute('aria-label', t('guesses.rowLabel', { label: fixedText(item.label, 200) }));
+        copy.append(...questionWords(item.label));
+        button.setAttribute('aria-label', t('guesses.rowLabel', { label: copy.firstChild.textContent }));
         button.append(mark, copy);
         button.addEventListener('click', trusted(() => { if (!button.disabled) focusField(item.id); }));
         return button;
@@ -1009,7 +1026,8 @@
     function renderQuestionControls() {
       const readable = Boolean(target) && fillable;
       const supported = service.supported();
-      $('questions-show').hidden = !(readable && supported && (language !== 'en' || questions)) || questionBusy;
+      // The line above the lists offers the same button, nearer what it is for.
+      $('questions-show').hidden = !questionsOffered() || wordsHinted();
       $('questions-show').disabled = working || questionBusy;
       $('questions-show').textContent = needsDownload ? t('translate.download', { language: languageName(language) }) : t(questions ? 'questions.refresh' : 'questions.show');
       // Without Chrome's translator the feature is hidden behind one plain line.
@@ -1018,6 +1036,7 @@
       $('questions-note').textContent = note ? words(note.message) : '';
       $('questions-note').classList.toggle('error', Boolean(note?.error));
       $('questions').hidden = !readable || !questions;
+      renderWordsHint();
     }
     function renderQuestionList() {
       $('questions-list').replaceChildren(...(questions?.items || []).map(questionRow));
@@ -1101,6 +1120,7 @@
         if (!current()) return;
         translated = results;
         renderQuestionList();
+        renderLeft(); renderFilled(); renderSaves(); renderHeld(); renderGuesses(); renderWordsHint();
         say({ key: 'translate.done' });
       } catch (error) {
         say({ key: 'translate.failed', params: { detail: fixedText(error.message, 200) } }, true);
@@ -1328,15 +1348,16 @@
       focusField(left[leftCursor++ % left.length]);
     }));
     $('questions-show').addEventListener('click', trusted(() => { if (!$('questions-show').disabled) showQuestions(true); }));
+    $('words-translate').addEventListener('click', trusted(() => { if (!$('words-translate').disabled) showQuestions(true); }));
     $('summary-get').addEventListener('click', trusted(() => { if (!$('summary-get').disabled) summarize(true); }));
     // The choice is saved in this extension's storage; the widget follows through the storage event.
     function relabel() {
       applyStatic();
       $('language').value = language;
-      if (page) { renderChecklist(); renderLeft(); renderFilled(); renderSaves(); renderGuesses(); }
+      resetQuestions();
+      if (page) { renderChecklist(); renderLeft(); renderFilled(); renderSaves(); renderHeld(); renderGuesses(); }
       renderStatus();
       renderDesktop();
-      resetQuestions();
       resetSummary();
       controls();
       startSummary();
