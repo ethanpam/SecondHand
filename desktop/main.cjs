@@ -98,7 +98,7 @@ if (nativeOrigin) {
   // On sites other than Iowa's portal, these get their own named confirmation unless Always allow is on (#175).
   // Autofill holds them back and fills the rest; the side panel's Fill sensitive details asks for them (#176).
   const SENSITIVE_FIELDS = ['ssn', 'hasSsn', 'hasSsnAnswer', 'birthDate', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'assetsOnHand', 'monthlyMedicalExpenses',
-    'usCitizen', 'disabled', 'blind', 'healthLimitation', 'medicare'];
+    'usCitizen', 'disabled', 'blind', 'healthLimitation', 'medicare', 'incomeSources', 'currentBenefits'];
   // Household counts aren't among them (#175), age-band counts and those worked out from members' birth dates included.
   // At most 50 trusted sites, and at most 50 with Always allow on this site.
   const MAX_TRUSTED_SITES = 50;
