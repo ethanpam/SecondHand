@@ -10,7 +10,15 @@ function render(response) {
   const workflow = response?.workflow;
   const scan = response?.scan;
   node("status").textContent = response?.message || "Unable to check the session. Try again.";
-  node("start").hidden = !!workflow;
+  const site = response?.site;
+  node("site-controls").hidden = !site || site.iowa;
+  node("site-origin").textContent = site ? `${site.origin} · ${site.approved ? "Approved" : "Not approved"}` : "";
+  node("site-sensitive").checked = site?.includeSensitive === true;
+  node("site-sensitive-row").hidden = site?.approved === true;
+  node("allow-site").hidden = site?.approved === true;
+  node("remove-site").hidden = !site?.approved;
+  node("forget-mappings").hidden = !site?.approved;
+  node("start").hidden = !!workflow || !site?.approved;
   node("setup").hidden = !!workflow;
   node("session").hidden = !workflow;
   node("page").hidden = !scan;
@@ -20,6 +28,8 @@ function render(response) {
   node("save-receipt").disabled = true;
   node("confirmation").value = "";
   node("fields").replaceChildren();
+  node("remember").checked = false;
+  node("remember-row").hidden = true;
   actionIDs = {};
   if (!workflow) return;
   const remaining = Math.max(0, Math.ceil((workflow.expiresAt - Date.now()) / 60000));
@@ -35,7 +45,7 @@ function render(response) {
     const label = document.createElement("label");
     label.className = "field";
     const caption = document.createElement("span");
-    caption.textContent = field.label;
+    caption.textContent = field.label + (field.remembered ? " · Remembered match" : field.suggestedKey ? " · Suggested match" : "");
     const select = document.createElement("select");
     select.dataset.fieldId = field.id;
     const skip = document.createElement("option");
@@ -45,17 +55,19 @@ function render(response) {
       if (field.allowedKeys && !field.allowedKeys.includes(key)) continue;
       const option = document.createElement("option");
       option.value = key; option.textContent = title;
-      option.selected = field.key === key;
+      option.selected = (field.key || field.suggestedKey) === key;
       select.append(option);
     }
     label.append(caption, select); node("fields").append(label);
   }
   node("fill").hidden = !mappable || !scan.fields.length;
+  node("remember-row").hidden = node("fill").hidden;
   node("counts").textContent = `${scan.populated || 0} already filled · ${scan.ambiguous || 0} unclear fields left for you`;
   const next = scan.actions.find(action => action.kind === "continue");
   const submit = scan.actions.find(action => action.kind === "submit");
-  actionIDs = { continue: next?.id, submit: submit?.id };
+  actionIDs = { continue: next?.id, submit: submit?.id, nextReady: next?.ready === true };
   node("continue").hidden = !next || pendingSubmission || suspended || scan.kind === "signature" || scan.kind === "receipt";
+  node("continue").disabled = !actionIDs.nextReady;
   node("signature").hidden = scan.kind !== "signature" || !submit || pendingSubmission || suspended;
   node("receipt").hidden = scan.kind !== "receipt" || suspended;
 }
@@ -63,6 +75,7 @@ function updateButtons() {
   for (const button of document.querySelectorAll("button")) {
     button.disabled = busy && !["stop", "pause"].includes(button.id);
   }
+  node("continue").disabled = busy || !actionIDs.nextReady;
   node("submit").disabled = busy || !node("reviewed").checked;
   node("save-receipt").disabled = busy || !node("confirmed").checked || !node("confirmation").value.trim();
 }
@@ -104,10 +117,12 @@ node("start").addEventListener("click", async () => {
   node("start").disabled = true;
   // Host access is requested only from this explicit user gesture.
   try {
-    const granted = await browser.permissions.request({ origins: ["https://hhsservices.iowa.gov/*"] });
-    if (!granted) { node("status").textContent = "Allow access to Iowa’s website to start application assistance."; return; }
+    const origin = snapshot?.site?.origin;
+    if (!origin || !snapshot.site.approved) return;
+    const granted = await browser.permissions.request({ origins: [origin + "/*"] });
+    if (!granted) { node("status").textContent = "Allow access to this website to start assistance."; return; }
     await send({ command: "start" });
-  } catch { node("status").textContent = "Allow this extension on Iowa’s website in Safari, then try Start again."; }
+  } catch { node("status").textContent = "Allow this extension on this website in Safari, then try Start again."; }
   finally { requestingPermission = false; node("start").disabled = busy; }
 });
 for (const [id, command] of [["refresh", "status"], ["pause", "pause"], ["resume", "resume"], ["stop", "stop"]]) {
@@ -116,7 +131,7 @@ for (const [id, command] of [["refresh", "status"], ["pause", "pause"], ["resume
 node("fill").addEventListener("click", () => {
   const assignments = [...node("fields").querySelectorAll("select")].filter(select => select.value)
     .map(select => ({ id: select.dataset.fieldId, key: select.value }));
-  send({ command: "fill", previewToken: snapshot?.scan?.previewToken, assignments });
+  send({ command: "fill", previewToken: snapshot?.scan?.previewToken, assignments, remember: node("remember").checked });
 });
 node("continue").addEventListener("click", () => send({ command: "act", previewToken: snapshot?.scan?.previewToken, actionID: actionIDs.continue }));
 node("reviewed").addEventListener("change", () => { node("submit").disabled = busy || !node("reviewed").checked; });
@@ -129,4 +144,17 @@ node("confirmation").addEventListener("input", receiptReady);
 node("save-receipt").addEventListener("click", () => {
   if (node("confirmed").checked) send({ command: "receipt", previewToken: snapshot?.scan?.previewToken, confirmed: true, confirmationNumber: node("confirmation").value });
 });
+node("allow-site").addEventListener("click", async () => {
+  if (busy || requestingPermission || !snapshot?.site) return;
+  const {origin} = snapshot.site;
+  const includeSensitive = node("site-sensitive").checked;
+  requestingPermission = true;
+  try {
+    if (await browser.permissions.request({origins: [origin + "/*"]})) await send({command: "approve-site", origin, includeSensitive});
+    else node("status").textContent = "Website access was not approved.";
+  } catch { node("status").textContent = "Allow this website in Safari’s extension settings, then try again."; }
+  finally { requestingPermission = false; }
+});
+node("remove-site").addEventListener("click", () => send({command: "remove-site", origin: snapshot?.site?.origin}));
+node("forget-mappings").addEventListener("click", () => send({command: "forget-mappings", origin: snapshot?.site?.origin}));
 send({ command: "status" });

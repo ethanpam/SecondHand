@@ -18,6 +18,30 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             return
         }
 
+        if ["siteStatus", "approveSite", "removeSite"].contains(action) {
+            guard let origin = WebsiteApproval.origin(pageURL), origin != WebsiteApproval.iowaOrigin,
+                  WebsiteApproval.allowsPage(pageURL) else { respond(["error": "unsupported_request"], to: context); return }
+            do {
+                if action == "approveSite" {
+                    guard Set(message.keys) == Set(["action", "pageURL", "includeSensitive"]),
+                          let sensitive = message["includeSensitive"] as? Bool,
+                          let session = try SecureVault.readAutofillSession(), session.isValid(), session.approvedSitesEnabled == true else {
+                        respond(["error": "session_unavailable"], to: context); return
+                    }
+                    try SecureVault.setWebsiteApproval(WebsiteApproval(origin: origin, includeSensitive: sensitive), approved: true)
+                } else {
+                    guard Set(message.keys) == Set(["action", "pageURL"]) else { respond(["error": "unsupported_request"], to: context); return }
+                    if action == "removeSite" {
+                        try SecureVault.revokeAutofillSession()
+                        try SecureVault.setWebsiteApproval(WebsiteApproval(origin: origin), approved: false)
+                    }
+                }
+                let site = try SecureVault.websiteApprovals().first { $0.origin == origin }
+                respond(["origin": origin, "approved": site != nil, "includeSensitive": site?.includeSensitive ?? false, "revision": site?.revision.uuidString ?? ""], to: context)
+            } catch { respond(["error": "site_unavailable"], to: context) }
+            return
+        }
+
         if action == "recordReceipt" {
             guard Set(message.keys) == Set(["action", "pageURL", "confirmationNumber", "receiptID"]),
                   let number = message["confirmationNumber"] as? String, number.count <= 100,
@@ -39,7 +63,7 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
 
         let allowed = action == "applicationFields" ? IowaApplicationBridge.allowedFieldKeys : Self.allowedKeys
         guard Set(message.keys) == Set(["action", "pageURL", "keys"]),
-              (action == "applicationFields" && IowaApplicationBridge.allowsApplicationPage(pageURL))
+              (action == "applicationFields" && WebsiteApproval.allowsPage(pageURL))
                 || (action == "contactFields" && Self.isAllowedPage(pageURL)),
               let keys = message["keys"] as? [String],
               !keys.isEmpty, keys.count <= allowed.count,
@@ -53,8 +77,11 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
                 respond(["error": "session_unavailable"], to: context)
                 return
             }
+            guard let authorized = session.fields(for: pageURL, approvals: try SecureVault.websiteApprovals()) else {
+                respond(["error": "site_not_approved"], to: context); return
+            }
             let requested = Set(keys)
-            let fields = session.fields.filter {
+            let fields = authorized.filter {
                 requested.contains($0.key) && !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     && $0.value.count <= 250
             }

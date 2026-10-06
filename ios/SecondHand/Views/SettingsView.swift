@@ -2,12 +2,15 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var store: AppStore
+    @Environment(\.scenePhase) private var scenePhase
     @State private var error: String?
     @State private var deletingData = false
     @State private var isWorking = false
     @State private var editingProfile = false
     @State private var authorizingApplication = false
     @State private var sharingSSN = false
+    @State private var approvedSitesEnabled = false
+    @State private var approvedWebsites: [WebsiteApproval] = []
     @State private var annualIncomeID: UUID?
 
     var body: some View {
@@ -21,7 +24,7 @@ struct SettingsView: View {
                         }
                         VStack(alignment: .leading, spacing: 14) {
                             setupStep(1, title: "Enable the extension", detail: "In iPhone Settings, open Safari → Extensions → Second Hand and turn it on. On some iOS versions, Safari is under Apps.")
-                            setupStep(2, title: "Allow application sharing below", detail: "Review your profile, then approve a temporary copy of your contact details, home address, monthly income, and monthly housing amount.")
+                            setupStep(2, title: "Allow application sharing below", detail: "Review your profile, then approve a temporary sharing session. Enable approved websites to use other sites.")
                             setupStep(3, title: "Start in Safari", detail: "Open the Iowa portal and sign in yourself. Open Second Hand from Safari’s page menu, allow access to the Iowa site, and start the guided application. It fills recognized empty fields and pauses when it needs you.")
                             setupStep(4, title: "Review and approve submission", detail: "Answer unsupported questions and handle verification, uploads, signatures, and consent yourself. Review the application, then explicitly approve its final submission in the extension. Enter the confirmation number from Iowa’s receipt to save it in Second Hand.")
                         }
@@ -38,7 +41,11 @@ struct SettingsView: View {
                             Text("Review your profile today before allowing autofill.")
                                 .font(.subheadline).foregroundStyle(.secondary)
                         }
-                        Toggle("Include my SSN for this Iowa session", isOn: $sharingSSN)
+                        Toggle("Allow approved websites during this session", isOn: $approvedSitesEnabled)
+                            .disabled(store.autofillExpiresAt.map { $0 > Date() } == true)
+                        Text("In Safari, open SecondHand on a website and choose Allow this site. Each exact website needs approval; subdomains and embedded forms are not included.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Toggle("Include my SSN for this session", isOn: $sharingSSN)
                             .disabled(store.data.profile.ssn.isEmpty || store.autofillExpiresAt.map { $0 > Date() } == true)
                         Text("Annual income to share").font(.subheadline.weight(.semibold))
                         Picker("Annual income to share", selection: $annualIncomeID) {
@@ -93,6 +100,24 @@ struct SettingsView: View {
                     }
 
                     AppCard {
+                        SectionLabel(title: "Approved websites")
+                        if approvedWebsites.isEmpty { Text("No additional websites approved.").foregroundStyle(.secondary) }
+                        ForEach(approvedWebsites) { site in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(site.origin).font(.subheadline).textSelection(.enabled)
+                                Text(site.includeSensitive ? "Contact, SSN and income if included in the session" : "Contact details only").font(.caption)
+                                Button("Remove website", role: .destructive) {
+                                    do {
+                                        try store.revokeAutofill()
+                                        try SecureVault.setWebsiteApproval(site, approved: false)
+                                        approvedWebsites = try SecureVault.websiteApprovals()
+                                    } catch { self.error = error.localizedDescription }
+                                }
+                            }
+                        }
+                        Text("Removing a website ends the active sharing session. Safari website permissions can also be removed in iPhone Settings.").font(.caption).foregroundStyle(.secondary)
+                    }
+                    AppCard {
                         HStack(alignment: .top, spacing: 14) {
                             IconBadge(symbol: "lock.shield")
                             SectionLabel(title: "Private by design", subtitle: "Your profile and documents are saved locally with encryption. Second Hand has no account or cloud sync.")
@@ -141,19 +166,23 @@ struct SettingsView: View {
             }
             .background(AppTheme.canvas)
             .navigationTitle("Settings")
+            .task { do { approvedWebsites = try SecureVault.websiteApprovals() } catch { self.error = error.localizedDescription } }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { do { approvedWebsites = try SecureVault.websiteApprovals() } catch { self.error = error.localizedDescription } }
+            }
             .sheet(isPresented: $editingProfile) { ProfileEditor() }
             .confirmationDialog("Share application details for 10 minutes?", isPresented: $authorizingApplication, titleVisibility: .visible) {
                 Button("Allow application sharing") {
                     isWorking = true
                     Task {
-                        do { try await store.authorizeAutofill(sharingSSN: sharingSSN, annualIncomeID: annualIncomeID) }
+                        do { try await store.authorizeAutofill(sharingSSN: sharingSSN, annualIncomeID: annualIncomeID, approvedSitesEnabled: approvedSitesEnabled) }
                         catch { self.error = error.localizedDescription }
                         isWorking = false
                     }
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This includes name, email, home and mobile phone, home address, your saved Yes or No to ‘Do you have a home address?’, monthly income, and monthly housing cost. SSN: \(sharingSSN ? "included" : "not included"). Annual income: \(annualIncomeID == nil ? "not included" : "the selected amount and year"). The assistant doesn’t guess answers. Iowa’s website can save filled information before submission. You still review answers and approve final submission.")
+                Text("Approved websites: \(approvedSitesEnabled ? "enabled" : "not enabled"). This includes name, email, home and mobile phone, home address, your saved Yes or No to ‘Do you have a home address?’, monthly income, and monthly housing cost. SSN: \(sharingSSN ? "included" : "not included"). Annual income: \(annualIncomeID == nil ? "not included" : "the selected amount and year"). The assistant doesn’t guess answers. Iowa’s website can save filled information before submission. You still review answers and approve final submission.")
             }
             .confirmationDialog("Permanently delete all app data?", isPresented: $deletingData, titleVisibility: .visible) {
                 Button("Delete all app data", role: .destructive) {

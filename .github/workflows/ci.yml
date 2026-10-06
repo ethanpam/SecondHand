@@ -36,6 +36,8 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Unit tests
         run: npm test
+      - name: Safari extension unit tests
+        run: node --test ios/Tests/*.test.js
       - name: Syntax and extension permission checks
         run: npm run check
       - name: Install website

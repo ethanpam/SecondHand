@@ -265,14 +265,14 @@ final class AppStore: ObservableObject {
         } while revision != reminderRevision
     }
 
-    func authorizeAutofill(sharingSSN: Bool = false, annualIncomeID: UUID? = nil) async throws {
+    func authorizeAutofill(sharingSSN: Bool = false, annualIncomeID: UUID? = nil, approvedSitesEnabled: Bool = false) async throws {
         _ = try storage()
         guard !data.profile.firstName.isEmpty || !data.profile.lastName.isEmpty else { throw AppError.noContact }
         guard let reviewed = data.profile.reviewedAt, reviewed <= Date(), Date().timeIntervalSince(reviewed) < 24 * 60 * 60 else {
             throw AppError.reviewRequired
         }
         let expiry = Date().addingTimeInterval(10 * 60)
-        try SecureVault.writeAutofillSession(AutofillSession(expiresAt: expiry, fields: data.profile.applicationFields(sharingSSN: sharingSSN, annualIncomeID: annualIncomeID)))
+        try SecureVault.writeAutofillSession(AutofillSession(expiresAt: expiry, fields: data.profile.applicationFields(sharingSSN: sharingSSN, annualIncomeID: annualIncomeID), approvedSitesEnabled: approvedSitesEnabled))
         autofillExpiresAt = expiry
     }
 
