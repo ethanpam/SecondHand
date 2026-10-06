@@ -193,7 +193,9 @@ function validateInformationValue(definition, input) {
   if (type === 'state' && !STATE_CODES.has(value.toUpperCase())) throw new Error(`${label} must be a recognized two-letter state or postal-region abbreviation.`);
   if (key === 'ssn' && !/^\d{3}-?\d{2}-?\d{4}$/.test(value)) throw new Error('Enter a nine-digit Social Security number or leave it blank.');
   if (key === 'taxYear' && !/^(19|20)\d{2}$/.test(value)) throw new Error('Tax year must contain four digits from 1900 to 2099.');
+  if (key === 'monthlyHours' && (!/^\d{1,3}(\.\d{1,2})?$/.test(value) || Number(value) > 744)) throw new Error('Hours per month must be between 0 and 744.');
   if (key === 'hoursPerWeek' && (!/^\d{1,3}(\.\d{1,2})?$/.test(value) || Number(value) > 168)) throw new Error('Hours per week must be between 0 and 168.');
+  if (key === 'pregnancyExpectedBabies' && !/^(?:[1-9]|1\d|20)$/.test(value)) throw new Error('Number of expected babies must be a whole number from 1 to 20, or left blank.');
   return type === 'state' ? value.toUpperCase() : value;
 }
 

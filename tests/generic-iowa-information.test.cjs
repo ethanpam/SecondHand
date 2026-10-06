@@ -131,15 +131,19 @@ test('shared dynamicQuestions household screens expose only independent househol
   assert.equal(doc.querySelector('input[name="firstName"]').value, ''); doc.defaultView.close();
 });
 
-test('only observed screening headings open the shared route; unknown personal forms and consent remain protected', () => {
+test('strict screening pages protect incomplete layouts from generic fallback and preserve distinct steps', () => {
   const adapter = require('../extension/iowa-adapter.js');
   const url = URL.replace('ssaVerificationRender', 'dynamicQuestions');
-  for (const heading of ['Job Information', 'Income Information', 'Expenses Information', 'Property Information']) {
+  const stepKeys = new Set();
+  for (const [heading, pageKey] of [['Job Information', 'iowa-job-screening'], ['Income Information', 'iowa-income-screening'],
+    ['Expenses Information', 'iowa-expenses-screening'], ['Property Information', 'iowa-property-screening']]) {
     const doc = page(`<h2>${heading}</h2><form id="answerSet" action="simple" method="post">${choice('Does your household pay utilities?')}</form>`, url);
     const probe = adapter.probePage(doc, url);
-    assert.equal(probe.pageKey, 'iowa-household-screening-rules'); assert.equal(probe.kind, 'manual'); assert.equal(probe.canAdvance, false); assert.equal(probe.todo, undefined);
+    assert.equal(probe.pageKey, `${pageKey}-unverified`); stepKeys.add(probe.pageKey);
+    assert.equal(probe.kind, 'manual'); assert.equal(probe.canAdvance, false); assert.ok(probe.todo, 'a manual instruction prevents generic/model fallback');
     assert.equal(adapter.captureNavigation(doc, url), null); doc.defaultView.close();
   }
+  assert.equal(stepKeys.size, 4, 'same route has separate known semantic screening steps');
   for (const variant of [url + '?person=1', url + '/', url + '#other-person']) {
     const doc = page('<h2>Expenses Information</h2><form id="answerSet" action="simple" method="post">' + choice('Does your household pay utilities?') + '</form>', variant);
     const probe = adapter.probePage(doc, variant); assert.notEqual(probe.pageKey, 'iowa-household-screening-rules'); assert.ok(probe.todo); doc.defaultView.close();

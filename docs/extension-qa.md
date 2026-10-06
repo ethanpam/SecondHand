@@ -48,10 +48,14 @@ separate hypothetical address page to demonstrate the unverified-layout pause.
 
 The browser smoke also exercises the sanitized primary-applicant **Tell Us More** fixture: it requests only `birthDate`, formats it as `MM/DD/YYYY`, preserves manual and hidden controls, and makes zero Next clicks. Changed person phase, form, or heading prevents profile release. The sidebar exposes static checklist labels without the applicant name, birth date, private navigation snapshot, or access receipt.
 
+The complete `dynamicQuestionsStart` fixture has separate cases for a captured Male/no-SSN path, the exact birthplace/eating follow-ups, and a valid visible SSN whose submitted mirror agrees. The mirror handler is an explicitly synthetic test stand-in, not a copy or validation of Iowa’s external masking script. Its ordinary fixture intentionally leaves the mirror unsynchronized. Positive cases require one Next only, including with the captured optional card middle name blank. A reload must not repeat that step. Missing answers pause until manually completed; unknown controls, page errors, dialogs, or mismatched SSNs remain paused. Locking the desktop or changing an answer during navigation approval prevents Next. Only static metadata reaches the sidebar.
+
+The later-page browser cases use the captured Background Information fixture and the Job and Job History fixture. They assert one scalar request and one Next on the former; one `getRecordFields` request, exact selection of the second fictional person, explicit recent-change No answers, conditional filling, and one Next on the latter. Missing records, a conflicting selected owner, a locked access receipt, or an owner edit during desktop approval prevent financial filling and Next. The native sidebar shows static checklist labels and no record name, employer, amount, or record ID. These are real extension/Chromium interactions with locally fulfilled documents and an explicit native-response stub; the desktop chooser and real native authorization are covered separately.
+
 The browser smoke also checks conditional address/program branches,
 preservation of existing answers, potentially destructive parent choices,
 full-document navigation and extension reinjection, consent pauses, per-page
-verified applicant/address Save and Continue, lock/access-revision changes, and that sidebar messages omit profile values and private navigation tokens.
+verified applicant/address/Tell Us More Save and Continue, lock/access-revision changes, and that sidebar messages omit profile values and private navigation tokens.
 
 The applicant fixture uses sanitized metadata from the observed blank Iowa
 form. The new home-address fixture reconstructs observed controls with a public
@@ -60,6 +64,8 @@ end-to-end filing, and passing them does not mean the extension can complete an
 entire SNAP application.
 
 The separately authorized [live journey](iowa-live-journey.md) was operated manually through E-Signature and stopped with all signature controls untouched. It is not part of the isolated extension smoke or the earlier video, and it does not establish automated end-to-end filing.
+
+The October 6 later-page capture was also operator-driven with the extension off. It ended at the Submit Application introduction without signature or final submission. The six scalar and five record adapters are tested against reconstructed fixtures; this is not live automated end-to-end evidence. Focused record tests cover explicit owners, duplicate/mismatched owners, existing answers, separate net/gross amounts, explicit checkbox No, changed approval snapshots, and single-use Next. Native tests separately enforce exact scopes, one-record projection, local choice, and access-revision invalidation.
 
 Earlier published isolated walkthroughs show the former **Start guided autofill** controls and session protocol. Those videos are historical evidence of that build; current scripts use **Autofill** / **Stop**, per-request native authorization, and `accessRevision` checks. They do not retroactively establish live portal behavior.
 

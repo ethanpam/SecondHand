@@ -1,5 +1,5 @@
 'use strict';
-importScripts('address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'strings.js', 'translation.js');
+importScripts('address-policy.js', 'iowa-later-adapter.js', 'iowa-record-adapter.js', 'iowa-adapter.js', 'generic-adapter.js', 'strings.js', 'translation.js');
 if (typeof globalThis.SecondHandGeneric?.requestKeys !== 'function' || typeof globalThis.SecondHandGeneric.deriveValues !== 'function' || !Array.isArray(globalThis.SecondHandGeneric.GENERIC_KEYS) ||
   typeof globalThis.SecondHandGeneric.unsafeQuestion !== 'function' || typeof globalThis.SecondHandGeneric.layaQuestion !== 'function' ||
   typeof globalThis.SecondHandGeneric.isBandKey !== 'function' || !Array.isArray(globalThis.SecondHandGeneric.SAVE_KEYS)) {
@@ -14,7 +14,7 @@ if (typeof globalThis.SecondHandTranslation?.create !== 'function') {
 // Must match BUILD in panel.js: change both together, with every change to the extension. The panel
 // compares them to tell when Chrome is still running an older worker than the pages it loaded from
 // disk, and the worker compares it with the build the desktop app ships to update itself (#85).
-const BUILD = '2026-10-06.6';
+const BUILD = '2026-10-06.8';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
@@ -56,7 +56,7 @@ const KEPT_PAGES = 8;
 // tabId -> { steps, handled, running }. Memory only: a page can never turn autofill on,
 // and if Chrome restarts this worker, autofill is off and the widget shows Autofill again.
 const autopilots = new Map();
-const MAX_STEPS = 15;
+const MAX_STEPS = 64;
 // tabId -> the Iowa page (origin + path) where the general engine found fields, until the tab navigates.
 const generalPages = new Map();
 const GENERAL_TODO = 'worker.checkThenContinue';
@@ -119,7 +119,7 @@ async function activePortal(tabId) {
   return tab;
 }
 async function inject(tabId) {
-  await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js'] });
+  await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ['address-policy.js', 'iowa-later-adapter.js', 'iowa-record-adapter.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js'] });
 }
 async function readPage(tabId, navigationPreview = true) {
   const tab = await activePortal(tabId);
@@ -191,7 +191,7 @@ async function fillPage(tabId, state, pilot) {
       const fresh = pass === 0 ? state : await readPage(tabId);
       currentPilot(tabId, pilot);
       if (fresh.page.kind === 'blocked') break; // A household answer can reveal CAPTCHA.
-      if (fresh.page.pageKey !== pageKey || !fresh.scan.recognizedPage) throw fault('worker.pageChangedAutofill');
+      if (fresh.pageInstance !== state.pageInstance || fresh.page.pageKey !== pageKey || !fresh.scan.recognizedPage) throw fault('worker.pageChangedAutofill');
       const offered = fresh.scan.fields.map(field => field.key).filter(key => !attempted.has(key));
       offered.forEach(key => attempted.add(key));
       const keys = offered.filter(key => typeof values[key] === 'string' && values[key]);
@@ -201,7 +201,7 @@ async function fillPage(tabId, state, pilot) {
       currentPilot(tabId, pilot);
       if ((await activePortal(tabId)).url !== url) throw fault('worker.pageChangedAutofill');
       currentPilot(tabId, pilot);
-      const result = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:fill', token: fresh.scan.token, fields: keys,
+      const result = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:fill', token: fresh.scan.token, pageInstance: fresh.pageInstance, fields: keys,
         values: Object.fromEntries(keys.map(key => [key, values[key]])) }, { frameId: 0 });
       currentPilot(tabId, pilot);
       if (!result?.ok) throw fault('worker.pageUnsafe');
@@ -211,7 +211,7 @@ async function fillPage(tabId, state, pilot) {
     values = null;
     const after = await readPage(tabId);
     currentPilot(tabId, pilot);
-    if (after.url !== url || (after.page.pageKey !== pageKey && after.page.kind !== 'blocked')) throw fault('worker.pageChangedCheck');
+    if (after.pageInstance !== state.pageInstance || after.url !== url || (after.page.pageKey !== pageKey && after.page.kind !== 'blocked')) throw fault('worker.pageChangedCheck');
     if (filled > 0) await nativeRequest('recordProgress', { url: safeUrl(url), filledCount: Math.min(filled, 100) }).catch(() => {});
     currentPilot(tabId, pilot);
     const missing = needYou(after.page);
@@ -227,26 +227,89 @@ async function fillPage(tabId, state, pilot) {
   } finally { values = null; }
 }
 
+async function fillRecordPage(tabId, state, pilot) {
+  const pageKey = state.page.pageKey, request = SecondHandIowa.recordRequest(pageKey);
+  let values = null;
+  try {
+    const desktop = await desktopStatus(); currentPilot(tabId, pilot);
+    if (!desktop?.unlocked) return { state: 'locked', filled: 0, needYou: [], ...say('worker.unlockToAutofill'), pageKey };
+    const recipient = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:recordContext', token: state.scan.token, pageInstance: state.pageInstance }, { frameId: 0 });
+    currentPilot(tabId, pilot);
+    if (!request || !recipient?.ok || (recipient.personName !== undefined && (typeof recipient.personName !== 'string' || recipient.personName.length > 200))) throw fault('worker.pageChangedReview');
+    const response = await nativeRequest('getRecordFields', { url: safeUrl(state.url), pageKey, recordType: request.recordType, fields: request.fields,
+      ...(recipient.personName ? { personName: recipient.personName } : {}) });
+    currentPilot(tabId, pilot);
+    const revision = receiptRevision(response);
+    if (response?.reason === 'recordMissing') return { state: 'waiting', filled: 0, needYou: needYou(state.page), ...say('worker.recordMissing'), pageKey };
+    if (!response?.values || typeof response.values !== 'object' || Array.isArray(response.values) || typeof response.recordId !== 'string' ||
+        !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(response.recordId) || typeof response.values.person !== 'string' || !response.values.person.trim() ||
+        Object.entries(response.values).some(([key, value]) => !request.fields.includes(key) || typeof value !== 'string' || value.length > 200)) throw fault('worker.desktopUnexpected');
+    values = response.values;
+    let filled = 0; const unsaved = new Set();
+    // A single approved record covers bounded conditional reveals. Never request a whole record list.
+    for (let pass = 0; pass < 6; pass++) {
+      const fresh = pass === 0 ? state : await readPage(tabId); currentPilot(tabId, pilot);
+      if (fresh.url !== state.url || fresh.pageInstance !== state.pageInstance || fresh.page.pageKey !== pageKey || !fresh.scan.recognizedPage) throw fault('worker.pageChangedAutofill');
+      const offered = fresh.scan.fields.map(field => field.key).filter(key => !pilot.attempted.has(key));
+      offered.forEach(key => pilot.attempted.add(key));
+      const keys = offered.filter(key => typeof values[key] === 'string' && values[key]);
+      offered.filter(key => !keys.includes(key)).forEach(key => unsaved.add(key));
+      if (!keys.length) break;
+      await checkAccess(revision); currentPilot(tabId, pilot);
+      if ((await activePortal(tabId)).url !== state.url) throw fault('worker.pageChangedAutofill');
+      currentPilot(tabId, pilot);
+      const result = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:fill', token: fresh.scan.token, pageInstance: fresh.pageInstance,
+        fields: keys, values }, { frameId: 0 });
+      currentPilot(tabId, pilot);
+      if (!result?.ok) throw fault('worker.pageUnsafe');
+      filled += result.filledCount;
+      if (!result.filledCount) break;
+    }
+    values = null;
+    const after = await readPage(tabId); currentPilot(tabId, pilot);
+    if (after.url !== state.url || after.pageInstance !== state.pageInstance || after.page.pageKey !== pageKey) throw fault('worker.pageChangedCheck');
+    pilot.accessRevision = revision;
+    if (filled > 0) await nativeRequest('recordProgress', { url: safeUrl(state.url), filledCount: Math.min(filled, 100) }).catch(() => {});
+    currentPilot(tabId, pilot);
+    const missing = needYou(after.page), summary = filled ? filledSummary(filled, missing) : missing.length ? { key: 'result.needYouNotSaved', params: { count: missing.length } } : { key: 'result.nothingNew', params: {} };
+    return { state: 'done', filled, needYou: missing, notSaved: missing.filter(key => unsaved.has(key)), ...say(summary.key, summary.params), pageKey };
+  } catch (error) { return { ...failed(error), filled: 0, needYou: [], pageKey }; }
+  finally { values = null; }
+}
+
+const NAVIGATION_PAGES = new Set(SecondHandIowa.NAVIGATION_PAGE_KEYS);
+// Semantic identity is separate from a document UUID. A same-step server reload must never
+// turn a possibly successful Next into another automatic attempt. The two Tell Us More routes
+// are one step; independently observed household screens have fixed, nonpersonal step keys.
+function stepIdentity(state) {
+  if (['iowa-tell-us-more', 'iowa-self-details'].includes(state.page.pageKey)) return 'iowa-tell-us-more';
+  return state.page.stepKey || `${safeUrl(state.url)}|${state.page.pageKey}`;
+}
 async function advanceVerified(tabId, state, pilot, filledResult, authorize = false) {
-  const pageKey = state.page.pageKey;
-  if (!['iowa-personal-information', 'iowa-select-address'].includes(pageKey) || !state.page.canAdvance || !state.nextToken) return filledResult;
+  const pageKey = state.page.pageKey, semantic = stepIdentity(state);
+  if (!NAVIGATION_PAGES.has(pageKey) || !state.page.canAdvance || !state.nextToken) return filledResult;
+  if (pilot.navigationAttempts.has(semantic)) return filledResult;
+  if (typeof state.pageInstance !== 'string' || !state.pageInstance) throw fault('worker.pageChangedReview');
+  // Keep the already-captured token across native approval. Re-capturing after approval would
+  // silently approve answers changed while the desktop dialog was open.
+  if (authorize && SecondHandIowa.recordRequest(pageKey) && Number.isSafeInteger(pilot.accessRevision)) { await checkAccess(pilot.accessRevision); currentPilot(tabId, pilot); }
   if (authorize || !Number.isSafeInteger(pilot.accessRevision)) {
     const response = await nativeRequest('getFields', { url: safeUrl(state.url), fields: [] });
     currentPilot(tabId, pilot);
     pilot.accessRevision = receiptRevision(response);
     if (!response?.values || Object.keys(response.values).length) throw fault('worker.invalidNavigation');
   }
-  // Bind the snapshot before the final desktop/tab checks: an edit during those
-  // checks invalidates the existing token instead of silently approving new data.
-  const fresh = await readPage(tabId);
+  const fresh = await readPage(tabId, false);
   currentPilot(tabId, pilot);
-  if (fresh.url !== state.url || fresh.page.pageKey !== pageKey || !fresh.page.canAdvance || !fresh.nextToken) throw fault('worker.pageChangedReview');
+  if (fresh.pageInstance !== state.pageInstance || fresh.url !== state.url || fresh.page.pageKey !== pageKey || !fresh.page.canAdvance) throw fault('worker.pageChangedReview');
   await checkAccess(pilot.accessRevision);
   currentPilot(tabId, pilot);
   if ((await activePortal(tabId)).url !== state.url) throw fault('worker.pageChangedBeforeNext');
   currentPilot(tabId, pilot);
-  pilot.waiting = null; // one attempt, including uncertain navigation responses
-  const result = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:next', token: fresh.nextToken, authorized: true }, { frameId: 0 });
+  pilot.waiting = null;
+  // Consume before sending, even if the port disappears during the form POST.
+  pilot.navigationAttempts.add(semantic);
+  const result = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:next', token: state.nextToken, pageInstance: state.pageInstance, authorized: true }, { frameId: 0 });
   currentPilot(tabId, pilot);
   if (!result?.advanced) return { ...filledResult, state: 'waiting', ...(result?.reason ? adapterSays(result.reason) : say('worker.reviewContinueIowa')), pageKey };
   return { ...filledResult, state: 'continuing', ...say('worker.selectedSaveContinue'), pageKey };
@@ -262,7 +325,10 @@ function step(tabId) {
     if (autopilots.get(tabId) !== pilot) return results.get(tabId) || null;
     const { page } = state;
     pilot.pageKey = page.pageKey;
-    const signature = `${safeUrl(state.url)}|${page.pageKey}`;
+    const signature = stepIdentity(state);
+    if (pilot.currentStep && pilot.currentStep !== signature) results.delete(tabId);
+    pilot.currentStep = signature;
+    if (pilot.navigationAttempts.has(signature)) return results.get(tabId) || null;
     if (pilot.handled.has(signature) && !(pilot.waiting === signature && (page.canAdvance || state.scan.fields.some(field => !pilot.attempted.has(field.key))))) return results.get(tabId) || null;
     const resuming = pilot.handled.has(signature);
     if (!resuming) pilot.attempted = new Set();
@@ -289,10 +355,11 @@ function step(tabId) {
         if (page.pageKey === 'iowa-select-address') {
           result = await advanceVerified(tabId, state, pilot, { filled: 0, needYou: [], pageKey: page.pageKey }, true);
         } else {
-          result = await fillPage(tabId, state, pilot);
+          result = await (SecondHandIowa.recordRequest(page.pageKey) ? fillRecordPage(tabId, state, pilot) : fillPage(tabId, state, pilot));
           currentPilot(tabId, pilot);
-          if (result.state === 'done' && page.pageKey === 'iowa-personal-information') {
+          if (result.state === 'done' && NAVIGATION_PAGES.has(page.pageKey)) {
             const fresh = await readPage(tabId); currentPilot(tabId, pilot);
+            if (fresh.pageInstance !== state.pageInstance || fresh.page.pageKey !== page.pageKey) throw fault('worker.pageChangedReview');
             if (fresh.page.canAdvance) result = await advanceVerified(tabId, fresh, pilot, result);
             else pilot.waiting = signature;
           }
@@ -331,7 +398,7 @@ function step(tabId) {
 }
 async function startAutopilot(tabId) {
   if (autopilots.get(tabId)?.running) return autopilots.get(tabId).running;
-  const pilot = { steps: 0, handled: new Set(), running: null, waiting: null, accessRevision: null, attempted: new Set() };
+  const pilot = { steps: 0, handled: new Set(), navigationAttempts: new Set(), running: null, waiting: null, accessRevision: null, attempted: new Set() };
   autopilots.set(tabId, pilot);
   try { await activePortal(tabId); currentPilot(tabId, pilot); return step(tabId); }
   catch (error) { return stopAutopilot(tabId, { ...failed(error), filled: 0, needYou: [], pageKey: results.get(tabId)?.pageKey || '' }, pilot); }

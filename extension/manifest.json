@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "SecondHand \u00b7 Iowa SNAP companion",
+  "name": "SecondHand",
   "version": "0.4.0",
-  "description": "A local Iowa SNAP assistant: recognize supported pages, fill approved fields, and guide you through Save and Continue.",
+  "description": "A local application assistant: recognize supported forms, fill approved fields, and guide you through each step.",
   "minimum_chrome_version": "116",
   "permissions": [
     "activeTab",
@@ -44,6 +44,8 @@
       ],
       "js": [
         "address-policy.js",
+        "iowa-later-adapter.js",
+        "iowa-record-adapter.js",
         "iowa-adapter.js",
         "generic-adapter.js",
         "page-text.js",

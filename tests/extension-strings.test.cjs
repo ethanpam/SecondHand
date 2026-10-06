@@ -66,6 +66,18 @@ function adapterTexts(raw) {
     const body = expressionAt(code, start.index + start[0].length - 1).slice(1, -1);
     for (const entry of body.matchAll(/(?:^|,)\s*\w+:\s*/g)) texts.add(literals(expressionAt(body, entry.index + entry[0].length))[0]?.text);
   }
+  // New exact-page adapters define question labels as the fourth yn() argument
+  // and job labels in a fixed LABELS object. These are application copy too.
+  for (const match of /const LABELS =/.test(code) ? [] : code.matchAll(/\byn\(\s*/g)) {
+    let at = match.index + match[0].length;
+    for (let index = 0; index < 4; index++) {
+      const argument = expressionAt(code, at);
+      if (index === 3) for (const item of literals(argument)) texts.add(item.text);
+      at += argument.length + 1;
+    }
+  }
+  const recordLabels = code.match(/const LABELS = (\{[^;]+\});/);
+  if (recordLabels) for (const item of literals(recordLabels[1])) texts.add(item.text);
   return [...texts].filter(text => text && /^[A-Z]|^template:/.test(text));
 }
 // Literals that reach the screen through show(...), .textContent =, .title =, or an aria-label.
@@ -137,13 +149,100 @@ test('fixed English from the Iowa adapter maps to its key; anything else is pass
 });
 
 test('every label, instruction, and reason the Iowa adapter and content script can show is in the catalog', () => {
-  const texts = [...adapterTexts(source('iowa-adapter.js')), ...adapterTexts(source('content.js'))];
+  const texts = ['iowa-adapter.js', 'iowa-later-adapter.js', 'iowa-record-adapter.js', 'content.js'].flatMap(file => adapterTexts(source(file)));
   assert.ok(texts.length > 70, `found ${texts.length}`);
   const missing = texts.filter(text => text.startsWith('template:')
     ? text !== 'template:${definition.label}: review existing dependent answers'
     : strings.describeEnglish(text).key === 'detail');
   assert.deepEqual(missing, []);
   assert.equal(en['iowa.reviewDependent'], '{label}: review existing dependent answers');
+});
+
+function assertLocalizedPage(page, scan) {
+  assert.ok(page);
+  const publicText = [page.heading, page.todo, page.reason, ...page.checklist.map(row => row.label), ...scan.fields.map(row => row.label)].filter(Boolean);
+  for (const value of publicText) {
+    const message = strings.describeEnglish(value);
+    assert.notEqual(message.key, 'detail', `${page.pageKey}: ${value}`);
+    for (const code of strings.LANGUAGES) {
+      const translated = strings.text(code, message.key, message.params);
+      assert.ok(translated.trim(), `${code}: ${message.key}`);
+      // These short words are spelled the same in the two languages.
+      const sharedWord = (code === 'es' && message.key === 'iowa.utility.gas') || (code === 'fr' && message.key === 'iowa.asset.type');
+      if (code !== 'en' && !sharedWord) assert.notEqual(translated, value, `${code}: ${message.key} must be translated`);
+    }
+  }
+}
+
+test('all six later scalar pages localize their headings, conditional questions, and paused or ready instructions', () => {
+  const later = require('../extension/iowa-later-adapter.js');
+  const fixtures = require('./fixtures/iowa-later-pages.cjs');
+  for (const kind of ['emergency', 'background', 'jobs', 'income', 'expenses', 'property']) {
+    const url = fixtures.url(kind), doc = onScreen(fixtures.makeHtml(kind), url);
+    try {
+      const initial = later.probePage(doc, url);
+      assert.equal(initial.kind, 'fillable', kind);
+      assertLocalizedPage(initial, later.scan(doc, url));
+      if (kind === 'background') {
+        doc.getElementById('answerSets0.answers8.answerValue').value = 'Spanish';
+        doc.getElementById('question0566').className = 'questionAnswer';
+        assertLocalizedPage(later.probePage(doc, url), later.scan(doc, url));
+        doc.getElementById('answerSets0.answers8.answerValue').value = 'English';
+        doc.getElementById('question0566').className = 'disabledQuestion hidden questionAnswer';
+      }
+      const scan = later.scan(doc, url);
+      const profile = Object.fromEntries(scan.fields.map(item => [item.key, 'no']));
+      if (kind === 'background') Object.assign(profile, { preferredLanguage: 'English', birthState: 'IA', race: '' });
+      later.fill(doc, url, scan.bindings, later.pageValues(initial.pageKey, profile));
+      const ready = later.probePage(doc, url);
+      assert.equal(ready.canAdvance, true, kind);
+      assertLocalizedPage(ready, later.scan(doc, url));
+      const token = later.captureNavigation(doc, url);
+      const advanced = later.advance(doc, url, token);
+      assert.equal(advanced.advanced, true, kind);
+      assert.notEqual(strings.describeEnglish(advanced.reason).key, 'detail');
+      assert.notEqual(strings.describeEnglish(later.advance(doc, url, token).reason).key, 'detail');
+      doc.querySelector('form').setAttribute('action', 'changed');
+      assertLocalizedPage(later.probePage(doc, url), later.scan(doc, url));
+    } finally { doc.defaultView.close(); }
+  }
+});
+
+test('all five record pages localize owner, money, utility, and asset labels without using saved values as copy', () => {
+  const records = require('../extension/iowa-record-adapter.js');
+  const job = require('./fixtures/iowa-job-history.cjs');
+  const financial = require('./fixtures/iowa-financial-records.cjs');
+  const cases = {
+    job: { person: 'Avery Example', workOrTraining: 'Work', startDate: '2026-02-03', selfEmployed: 'no', employer: 'Fictional Employer', jobTitle: 'Synthetic Clerk', monthlyHours: '120', amount: '850.50', frequency: 'Every Other Week', tipsOrCommissions: '0', incomeExpectedSame: 'yes', changedJobs30Days: 'no', stoppedWorking30Days: 'no', fewerHours30Days: 'no' },
+    retirement: { person: 'Jordan Sample', type: 'Private Pension', amount: '345.67', frequency: 'Monthly' },
+    rent: { person: 'Avery Example', type: 'Rent', amount: '560', frequency: 'Monthly' },
+    utilities: { person: 'Jordan Sample', gas: 'yes', electricity: 'yes', waterSewage: 'no', telephone: 'yes', petFees: 'no', garageRent: 'no', landlordExtra: 'no', garbage: 'no', heatingCooling: 'yes' },
+    assets: { person: 'Avery Example', type: 'Cash/Uncashed Check', currentValue: '90', amountOwed: '0', accountOrPolicy: '', institution: '', acquiredDate: '2026-01-03' }
+  };
+  for (const [kind, values] of Object.entries(cases)) {
+    const fixture = kind === 'job' ? job : financial;
+    const doc = onScreen(kind === 'job' ? fixture.makeHtml() : fixture.makeHtml(kind), fixture.URL);
+    fixture.attachHandlers(doc);
+    try {
+      for (let pass = 0; pass < 5; pass++) {
+        const scan = records.scan(doc, fixture.URL), page = records.probePage(doc, fixture.URL);
+        assertLocalizedPage(page, scan);
+        assert.doesNotMatch(JSON.stringify({ page, fields: scan.fields }), /Avery|Jordan|345\.67|850\.50|Fictional Employer/);
+        assert.notEqual(records.fill(doc, fixture.URL, scan.bindings, values).unsafe, true);
+      }
+      assert.equal(records.probePage(doc, fixture.URL).canAdvance, true, kind);
+    } finally { doc.defaultView.close(); }
+  }
+});
+
+test('a missing record gives a translated action to save an explicit owner and restart Autofill', () => {
+  assert.equal(strings.english('worker.recordMissing'), 'Add an explicitly owned matching record in SecondHand, then click Autofill again.');
+  assert.deepEqual(strings.describeEnglish(strings.english('worker.recordMissing')), { key: 'worker.recordMissing', params: {} });
+  for (const code of strings.LANGUAGES) {
+    const value = strings.text(code, 'worker.recordMissing');
+    assert.match(value, /SecondHand/);
+    if (code !== 'en') assert.notEqual(value, strings.english('worker.recordMissing'));
+  }
 });
 
 // An Iowa portal page as the adapter sees it, with every element on screen.
@@ -186,17 +285,17 @@ function onScreen(html, url) {
 }
 const saveButton = doc => doc.querySelector('#dqButtonId309').textContent.trim();
 
-test('on Tell Us More, SecondHand says which saved answers it can fill and leaves Save and Continue to the applicant', () => {
+test('on Tell Us More, SecondHand explains that incomplete questions pause automatic Continue', () => {
   const self = onScreen(selfDetails.html, selfDetails.URL), start = onScreen(tellUsMore.html, tellUsMore.URL);
   assert.deepEqual(keyed(adapter.probePage(self, selfDetails.URL)), { pageKey: 'iowa-self-details', todo: 'iowa.selfDetailsTodo', reason: 'iowa.selfDetailsReason' });
-  assert.deepEqual(keyed(adapter.probePage(start, tellUsMore.URL)), { pageKey: 'iowa-tell-us-more', todo: 'iowa.startDetailsTodo', reason: 'iowa.startDetailsReason' });
-  // SecondHand never clicks on either page, and the button the sentences name is the one Iowa shows.
+  assert.deepEqual(keyed(adapter.probePage(start, tellUsMore.URL)), { pageKey: 'iowa-tell-us-more', todo: 'iowa.missingAnswers', reason: 'iowa.startDetailsReason' });
+  // Both incomplete fixtures pause; the button named in the instructions is Iowa’s actual button.
   assert.equal(adapter.probePage(self, selfDetails.URL).canAdvance, false);
   assert.equal(adapter.probePage(start, tellUsMore.URL).canAdvance, false);
   assert.equal(saveButton(self), 'Save and Continue');
   assert.equal(saveButton(start), 'Save and Continue');
   assert.equal(en['iowa.selfDetailsReason'], 'SecondHand can fill your saved date of birth on this page. Answer the other questions yourself, then click Save and Continue in Iowa’s form.');
-  assert.equal(en['iowa.startDetailsReason'], 'SecondHand can fill the answers you saved in My information on this page. Answer the other questions yourself, then click Save and Continue in Iowa’s form.');
+  assert.equal(en['iowa.startDetailsReason'], 'SecondHand continues only when the supported questions are complete and this page has no errors or unsupported questions.');
 });
 
 test('on the date-of-birth Tell Us More page, every question left to the applicant is named in the catalog', () => {

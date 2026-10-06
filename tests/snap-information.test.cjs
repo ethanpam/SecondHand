@@ -56,6 +56,21 @@ test('new personal and helper details use bounded strings, actual dates and cont
     [{ helperName: 'bad\0' }, 'Application helper’s name is invalid.']]) assert.throws(() => validateProfile(value), { message }, Object.keys(value)[0]);
 });
 
+test('eating with the household is distinct from purchasing and preparing meals', () => {
+  const legacy = validateStoredProfile({ eatsWithHousehold: 'yes' });
+  assert.equal(legacy.eatsMealsWithHousehold, '', 'an existing meal-preparation answer cannot answer the eating question');
+  const profile = validateProfile({ eatsWithHousehold: 'no', eatsMealsWithHousehold: 'yes' });
+  assert.equal(profile.eatsWithHousehold, 'no');
+  assert.equal(profile.eatsMealsWithHousehold, 'yes');
+  assert.equal(SNAP_IOWA_ONLY_FIELDS.includes('eatsMealsWithHousehold'), true);
+});
+
+test('expected babies are an explicit bounded count, never inferred from pregnancy', () => {
+  assert.equal(validateProfile({ pregnant: 'yes' }).pregnancyExpectedBabies, '');
+  for (const value of ['', '1', '2', '20']) assert.equal(validateProfile({ pregnancyExpectedBabies: value }).pregnancyExpectedBabies, value);
+  for (const value of ['0', '-1', '1.5', '21', '01', 'two']) assert.throws(() => validateProfile({ pregnancyExpectedBabies: value }));
+});
+
 test('all local lists require unique IDs, fixed keys, bounded records and dense plain arrays', () => {
   for (const record of catalog.records) {
     const original = [{ id: id(2) }], copy = structuredClone(original);
@@ -81,7 +96,7 @@ test('record money, frequency and dates are explicit and never generate scalar i
   const p = validateProfile(input);
   assert.equal(p.jobs[0].frequency, 'Every Other Week'); assert.equal(p.assets[0].person, '');
   assert.equal(p.monthlyEarnedIncome, ''); assert.equal(p.householdWorking, ''); assert.equal(p.monthlyRent, ''); assert.equal(p.paysHousing, '');
-  const money = 'Amount must be a nonnegative dollar amount, or blank if unknown.';
+  const money = 'Gross income per pay period must be a nonnegative dollar amount, or blank if unknown.';
   for (const [extra, message] of [[{ amount: '-1' }, money], [{ amount: '1.234' }, money], [{ amount: '1e4' }, money], [{ amount: '100000000' }, money],
     [{ frequency: 'biweekly' }, 'Choose a supported answer for How often.'], [{ startDate: '2026-02-30' }, 'Start date must be a valid date.'],
     [{ startDate: '2026-02-01', endDate: '2026-01-01' }, 'An end date cannot be before its start date.'], [{ hoursPerWeek: '168.01' }, 'Hours per week must be between 0 and 168.']]) {
@@ -110,5 +125,61 @@ test('household details stay per person, preserve explicit answers, and retain t
     [{ ssn: '123456789', hasSsnAnswer: 'no' }, 'A household member has a Social Security number entered but having one is answered No.'], [{ pregnant: true }, 'Pregnant is invalid.'],
     [{ pregnancyDueDate: '2026-02-30' }, 'Expected due date must be a valid date.'], [{ birthState: 'ZZ' }, 'U.S. state of birth must be a recognized two-letter state or postal-region abbreviation.']]) {
     assert.throws(() => validateProfile({ householdMembers: [own(), { id: id(8), firstName: 'Other', relationship: 'other', ...extra }] }, today), { message }, JSON.stringify(extra));
+  }
+});
+
+test('job-period and self-employment answers are separate explicit records, never inferred from legacy pay or taxes', () => {
+  const old = validateStoredProfile({ jobs: [{ id: id(15), person: 'Fictional Owner', amount: '1000', hoursPerWeek: '40', selfEmployed: 'yes' }],
+    taxStatements: [{ id: id(16), documentType: '1099-nec', annualIncome: '48000' }] });
+  for (const field of ['workOrTraining', 'monthlyHours', 'tipsOrCommissions', 'incomeExpectedSame', 'changedJobs30Days',
+    'stoppedWorking30Days', 'fewerHours30Days', 'selfEmploymentMonthlyNet', 'hasBusinessExpenses']) assert.equal(old.jobs[0][field], '', field);
+  assert.equal(old.jobs[0].amount, '1000'); assert.equal(old.jobs[0].hoursPerWeek, '40'); assert.equal(old.monthlyEarnedIncome, '');
+  const saved = validateRecords('jobs', [{ id: id(15), workOrTraining: 'Work', monthlyHours: '744', tipsOrCommissions: '0',
+    incomeExpectedSame: 'no', changedJobs30Days: 'yes', stoppedWorking30Days: 'no', fewerHours30Days: 'no',
+    selfEmploymentMonthlyNet: '1250.50', hasBusinessExpenses: 'yes' }])[0];
+  assert.equal(saved.monthlyHours, '744'); assert.equal(saved.selfEmploymentMonthlyNet, '1250.50');
+  assert.equal(saved.amount, ''); assert.equal(saved.selfEmployed, '');
+  for (const value of ['0', '0.25', '160.50', '744']) assert.equal(validateRecords('jobs', [{ id: id(1), monthlyHours: value }])[0].monthlyHours, value);
+  for (const extra of [{ monthlyHours: '-1' }, { monthlyHours: '744.01' }, { monthlyHours: '1e2' }, { monthlyHours: '1.001' },
+    { workOrTraining: 'work' }, { workOrTraining: 'Self-employed' }, { tipsOrCommissions: '-1' }, { selfEmploymentMonthlyNet: '100000000' },
+    { incomeExpectedSame: true }, { hasBusinessExpenses: 'Yes' }, { payFrequency: 'Monthly' }, { grossPay: '1' }]) {
+    assert.throws(() => validateRecords('jobs', [{ id: id(1), ...extra }]), JSON.stringify(extra));
+  }
+});
+
+test('captured current-address energy assistance and uncovered aged/disabled medical questions never inherit broader answers', () => {
+  for (const value of ['yes', 'no']) {
+    const stored = validateStoredProfile({ receivedEnergyAssistance: value, paysMedical: value, paysMedicare: value });
+    assert.equal(stored.receivedEnergyAssistanceCurrentAddress, '');
+    assert.equal(stored.paysUncoveredAgedDisabledMedical, '');
+    const explicit = validateProfile({ receivedEnergyAssistance: value, paysMedical: value,
+      receivedEnergyAssistanceCurrentAddress: value === 'yes' ? 'no' : 'yes', paysUncoveredAgedDisabledMedical: value === 'yes' ? 'no' : 'yes' });
+    assert.equal(explicit.receivedEnergyAssistance, value); assert.equal(explicit.paysMedical, value);
+    assert.notEqual(explicit.receivedEnergyAssistanceCurrentAddress, value); assert.notEqual(explicit.paysUncoveredAgedDisabledMedical, value);
+  }
+  for (const key of ['receivedEnergyAssistanceCurrentAddress', 'paysUncoveredAgedDisabledMedical']) {
+    assert.ok(SNAP_IOWA_ONLY_FIELDS.includes(key));
+    assert.throws(() => validateProfile({ [key]: true }));
+  }
+});
+
+test('person-owned utilities stay separate from household utility answers and never receive inferred owners', () => {
+  const p = validateStoredProfile({ utilityGas: 'yes', utilityElectricity: 'no', monthlyUtilities: '300', firstName: 'Avery' });
+  assert.deepEqual(p.utilityExpenses, []);
+  const row = validateProfile({ utilityGas: 'yes', utilityElectricity: 'no', utilityExpenses: [{ id: id(18), person: 'Other Person', gas: 'no', electricity: 'yes' }] }).utilityExpenses[0];
+  assert.equal(row.person, 'Other Person'); assert.equal(row.gas, 'no'); assert.equal(row.electricity, 'yes');
+  for (const key of ['waterSewage', 'telephone', 'petFees', 'garageRent', 'landlordExtra', 'garbage', 'heatingCooling']) assert.equal(row[key], '');
+  assert.equal(validateRecords('utilityExpenses', [{ id: id(18) }])[0].person, '');
+  assert.equal(isRequestField('utilityExpenses'), false);
+  for (const extra of [{ gas: true }, { gas: 'Yes' }, { utilityGas: 'yes' }, { amount: '300' }]) assert.throws(() => validateRecords('utilityExpenses', [{ id: id(18), ...extra }]));
+});
+
+test('own-or-buy property, conservatorship-or-trust, and registered vehicles remain separate explicit answers', () => {
+  const pairs = [['hasRealProperty', 'ownsOrBuyingProperty'], ['hasTrust', 'hasConservatorshipOrTrust'], ['hasVehicle', 'ownsOrRegisteredVehicle']];
+  for (const [oldKey, newKey] of pairs) for (const value of ['yes', 'no']) {
+    const legacy = validateStoredProfile({ [oldKey]: value }); assert.equal(legacy[newKey], ''); assert.equal(legacy[oldKey], value);
+    const explicit = validateProfile({ [oldKey]: value, [newKey]: value === 'yes' ? 'no' : 'yes' });
+    assert.equal(explicit[oldKey], value); assert.notEqual(explicit[newKey], value); assert.ok(SNAP_IOWA_ONLY_FIELDS.includes(newKey));
+    assert.throws(() => validateProfile({ [newKey]: true }));
   }
 });
