@@ -147,6 +147,9 @@ for (const { format, fixture, env } of SETS) {
       t.diagnostic(`${task}: ${decisions} decisions, ${filled} filled, ${right} right by the key, ${wrong.length} wrong (budget ${WRONG_FILL_BUDGETS[format][task] * 100}% of decisions).`);
       for (const item of wrong) t.diagnostic(`  wrong: ${item.question} → ${item.filled} (key: ${item.key ?? 'leave it'}) on ${item.form}`);
     }
+    // Laya's best guesses (#185) are reported, never held to a budget (#189).
+    const { filled, right, wrongRate, wrong } = result.guessing;
+    t.diagnostic(`guessing: ${filled} best guesses, ${right} right by the key, ${wrong.length} wrong${wrongRate === null ? '' : ` (${(wrongRate * 100).toFixed(2)}% of the guesses)`}. A report, not a budget.`);
     assert.deepEqual(overBudget(result, WRONG_FILL_BUDGETS[format]), []);
   });
 }
