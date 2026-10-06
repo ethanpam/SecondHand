@@ -506,6 +506,9 @@ async function main() {
         const { page: probed, result } = (await widget.evaluate(() => chrome.runtime.sendMessage({ type: 'ui:pageState' }))).data;
         assert.equal(probed.pageKey, step.pageKey, `${step.name} is classified as ${step.pageKey}`);
         if (step.disabled) assert.ok(result.filled > 0, 'SecondHand fills the applicant page');
+        // A disabled button fires no click, so the worker's own result says it never tried to continue
+        // (it would say it is continuing, or waiting after a try).
+        if (step.disabled) assert.equal(result.state, 'done', 'SecondHand does not try to continue');
         const expected = step.line(code, result.filled);
         await expect.poll(() => lineProblems(widget, expected, code), { timeout: 10000, message: `${code} ${step.name}` }).toEqual([]);
         assert.equal(await page.evaluate(() => window.__nextClicks || 0), 0, 'SecondHand does not continue');
