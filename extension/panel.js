@@ -173,7 +173,7 @@
       // A frame left behind can't grow: when it can't hold the whole line, the short one says what to do.
       // Letters overhang their line by a pixel or so; a line cut off is 14px more.
       if (outdated && outdatedKey === 'panel.reloadPage' && $('widget-text').scrollHeight - $('widget-text').clientHeight > 7) $('widget-text').textContent = t('panel.reloadPageShort');
-      // The widget is as wide and as tall as what it shows, up to 272px by 130px (see panel.css). An outdated
+      // The widget is as wide and as tall as what it shows, up to 272px by 150px (see panel.css). An outdated
       // worker is not asked for anything more; its notice fills the frame the widget already has.
       const room = message || !$('translate-offer').hidden;
       const box = outdated || $('widget').hidden ? null : $('widget').getBoundingClientRect();

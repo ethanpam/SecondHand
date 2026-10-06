@@ -14,12 +14,12 @@
   let generalUrl = ''; // the unverified page where the general engine found fields
   let messageRow = false; // the widget shows a line to read above its row
   let cardWidth = 0; // the widget's measured width; 0 until it measures
-  let cardHeight = 0; // and its measured height: 46px for its row alone, up to 130px with all it can hold
+  let cardHeight = 0; // and its measured height: 46px for its row alone, up to 150px with all it can hold
   let cardHidden = false; // the reader hid the widget on this page: its frame is the logo alone
   const strings = value => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
   // The widget's frame is as wide as the widget measured itself, never past 272px or the screen.
   const fits = width => Number.isInteger(width) && width > 0 && width <= 1000;
-  const tall = height => Number.isInteger(height) && height >= 46 && height <= 130;
+  const tall = height => Number.isInteger(height) && height >= 46 && height <= 150;
   const frameWidth = width => `min(${width || 272}px, 272px, calc(100vw - 24px))`;
 
   function withOwnPanelHidden(work) {

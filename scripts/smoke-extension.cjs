@@ -451,7 +451,7 @@ async function main() {
     console.log('Autopilot: the household question is answered from saved programs and the CAPTCHA is left to the applicant.');
 
     // On an Iowa page SecondHand doesn't fill, the widget says what Autofill will do, then what to do next, every
-    // word of it on screen, in each language SecondHand speaks, in a frame never past 272 by 110 (#110).
+    // word of it on screen, in each language SecondHand speaks, in a frame never past 272 by 150 (#110).
     const host = page.locator('[data-secondhand-assistant]');
     // The frame follows the widget's measured size a moment later: then the whole line and the whole widget show.
     const whole = () => {
@@ -475,19 +475,19 @@ async function main() {
         await expect(widget.locator('#widget-text')).toBeVisible();
         await expect.poll(() => widget.evaluate(whole), { timeout: 10000 }).toBe(true);
         const ready = await host.boundingBox();
-        assert.ok(ready.width <= 272 && ready.height > 46 && ready.height <= 110, `${code} before Autofill: the frame is ${ready.width} by ${ready.height}`);
+        assert.ok(ready.width <= 272 && ready.height > 46 && ready.height <= 150, `${code} before Autofill: the frame is ${ready.width} by ${ready.height}`);
         await widget.locator('#autofill').click();
         await expect(widget.locator('#widget-text')).toHaveText(strings.text(code, key), { timeout: 20000 });
         await expect(widget.locator('#widget-text')).toBeVisible();
         await expect.poll(() => widget.evaluate(whole), { timeout: 10000 }).toBe(true);
         const box = await host.boundingBox();
-        assert.ok(box.width <= 272 && box.height > 46 && box.height <= 110, `${code} ${key}: the frame is ${box.width} by ${box.height}`);
+        assert.ok(box.width <= 272 && box.height > 46 && box.height <= 150, `${code} ${key}: the frame is ${box.width} by ${box.height}`);
         assert.deepEqual(await calls('getFields'), [], 'nothing is asked of the desktop for a page SecondHand does not fill');
       }
     }
     await (await launcherFrame()).evaluate(() => localStorage.removeItem('secondhand.language'));
     currentSelfVariant = 'verified';
-    console.log(`Widget: on Iowa pages SecondHand doesn’t fill, what Autofill will do and then the whole next step show in ${strings.LANGUAGES.join(', ')}, in a frame no larger than 272 by 110.`);
+    console.log(`Widget: on Iowa pages SecondHand doesn’t fill, what Autofill will do and then the whole next step show in ${strings.LANGUAGES.join(', ')}, in a frame no larger than 272 by 150.`);
 
     // The keyboard can hide the widget, down to the round logo in the page's corner, and bring it back from there.
     widget = await startFixture();

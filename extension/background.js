@@ -1278,7 +1278,7 @@ function keepSummary(tabId, id, summary) {
 // The widget can't size its own frame, so its tab's content script fits the frame to the
 // widget's measured width, one row taller while it shows a line.
 const cardWidth = width => Number.isInteger(width) && width > 0 && width <= 1000; // CSS pixels; the page caps it
-const cardHeight = height => Number.isInteger(height) && height >= 46 && height <= 130; // the widget's row alone, up to four lines and the translation offer above it
+const cardHeight = height => Number.isInteger(height) && height >= 46 && height <= 150; // the widget's row alone, up to five lines and the translation offer above it
 async function widgetSize(tabId, line, width, height, pill) {
   // `pill` is there only when the reader hid the widget: the frame is then the logo alone.
   const reply = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:widgetSize', line, ...(width === undefined ? {} : { width }), ...(height === undefined ? {} : { height }), ...(pill ? { pill: true } : {}) }, { frameId: 0 });

@@ -1856,7 +1856,7 @@ test('the Iowa widget frame is as wide as the widget measured itself, never past
   page.setKind('fillable');
   page.window.dispatchEvent(new page.window.Event('popstate'));
   assert.equal(host.style.height, '95px', 'and the widget gets its height back');
-  for (const height of [0, 45, 131, 80.5, '80', null]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height }), undefined, `height ${height}`);
+  for (const height of [0, 45, 151, 80.5, '80', null]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height }), undefined, `height ${height}`);
   assert.equal(host.style.height, '95px');
   page.request({ type: 'secondhand:widgetSize', line: true });
   assert.equal(host.style.height, '86px', 'a widget that could not measure itself gets a row for its line');
