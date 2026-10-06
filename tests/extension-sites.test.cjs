@@ -95,6 +95,8 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
     read({ token, id, key }) {
       const field = token === current?.token ? current.ids.get(id) : null;
       if (!field || field.key !== key) return null;
+      // `repeated`: the page asks the question in more than one box, as in a member's section with no heading (#142).
+      if (field.repeated) return { repeated: true };
       return field.typed === undefined ? { empty: true } : field.typed === null ? { unreadable: true } : { value: field.typed };
     },
     // The id a field has in the latest plan.
@@ -799,7 +801,11 @@ function siteContent(t, { url = SITE_URL, engine = true, settled = null, offers 
       focusField: (doc, id) => { calls.push(`focus:${id}`); if (id !== 'sh-2') return false; doc.getElementById('day').focus(); return true; },
       // Save to My information (#98): which listed boxes hold an answer, and one box's answer after the click.
       answeredIds: (doc, token, ids) => { calls.push(`answered:${token}:${ids.join(',')}`); return token === 'plan-1' ? ids.filter(id => id === 'sh-1') : []; },
-      readAnswer: (doc, token, id, key) => { calls.push(`read:${token}:${id}:${key}`); return token === 'plan-1' && id === 'sh-1' && key === 'county' ? { value: 'Story', element: doc.getElementById('name') } : null; }
+      readAnswer: (doc, token, id, key) => {
+        calls.push(`read:${token}:${id}:${key}`);
+        if (token === 'plan-1' && id === 'sh-3') return { repeated: true, element: doc.getElementById('name') };
+        return token === 'plan-1' && id === 'sh-1' && key === 'county' ? { value: 'Story', element: doc.getElementById('name') } : null;
+      }
     };
   }
   window.eval(source('page-text.js'));
@@ -2405,6 +2411,18 @@ test('an unanswered or unreadable box, an unknown question, or the app’s refus
   assert.equal(w.nativeTypes().filter(type => type === 'saveFields').length, 1);
 });
 
+test('a question the page asks in more than one box, as in a member’s section with no heading, saves nothing and says why (#142)', async () => {
+  const w = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { name: 'dob', key: 'birthDate', repeated: true }] });
+  await autofill(w);
+  const dob = `f0:${w.page.idOf('dob')}`;
+  w.page.type('dob', '1985-04-12');
+  const refused = await saveAnswer(w, dob);
+  assert.equal(refused.ok, false);
+  assert.equal(refused.errorKey, 'worker.answerRepeated');
+  assert.equal(refused.error, strings.english('worker.answerRepeated'));
+  assert.equal(w.nativeTypes().includes('saveFields'), false, 'nothing reaches the app');
+});
+
 test('a page that changed, or a site turned off, forgets the list and reads nothing', async () => {
   const w = siteWorker({ enabled: true });
   await autofill(w);
@@ -2473,12 +2491,13 @@ test('a site frame says which listed boxes hold an answer, by id, and reads one 
   assert.deepEqual(plain(page.request({ type: 'secondhand:generic:answered', token: 'plan-1', ids: ['sh-1', 'sh-2'] })), { answered: ['sh-1'] });
   assert.deepEqual(plain(page.request({ type: 'secondhand:generic:read', token: 'plan-1', id: 'sh-1', key: 'county' })), { value: 'Story' }, 'the value only, nothing else of the box');
   assert.deepEqual(plain(page.request({ type: 'secondhand:generic:read', token: 'plan-1', id: 'sh-2', key: 'county' })), { readable: false });
+  assert.deepEqual(plain(page.request({ type: 'secondhand:generic:read', token: 'plan-1', id: 'sh-3', key: 'birthDate' })), { repeated: true }, 'a question the page asks twice (#142)');
   for (const message of [{ type: 'secondhand:generic:answered', token: 'plan-1', ids: 'sh-1' }, { type: 'secondhand:generic:answered', token: 7, ids: [] },
     { type: 'secondhand:generic:read', token: 'plan-1', id: 'sh-1' }, { type: 'secondhand:generic:read', token: 'plan-1', id: ['sh-1'], key: 'county' }]) {
     assert.deepEqual(plain(page.request(message)), { ok: false, error: 'This page could not be checked safely. Review it manually.' }, JSON.stringify(message));
   }
   assert.equal(page.request({ type: 'secondhand:generic:read', token: 'plan-1', id: 'sh-1', key: 'county' }, { id: 'another-extension' }), undefined);
-  assert.deepEqual(page.calls.filter(call => typeof call === 'string' && call.startsWith('read:')), ['read:plan-1:sh-1:county', 'read:plan-1:sh-2:county']);
+  assert.deepEqual(page.calls.filter(call => typeof call === 'string' && call.startsWith('read:')), ['read:plan-1:sh-1:county', 'read:plan-1:sh-2:county', 'read:plan-1:sh-3:birthDate']);
 });
 
 // #135: answers the app left out because a saved date of birth is after today or more than 130 years ago.
