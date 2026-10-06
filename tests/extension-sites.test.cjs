@@ -1562,7 +1562,7 @@ test('Laya not ready: the widget’s plan says so after one readiness check, and
   // Custom answers can match an otherwise unknown question, so a closed app must be opened to check either path.
   const alone = plain((await autofill(siteWorker({ enabled: true, fields: [{ ...REACH }], desktop: { reachable: false } }))).data);
   assert.equal(alone.state, 'offline');
-  assert.equal(alone.message, 'Open the SecondHand app, then click Autofill again.');
+  assert.equal(alone.message, 'Open the SecondHand app, then start Autofill again.');
   assert.equal((await autofill(siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...REACH }], desktop: { reachable: false } }))).data.state, 'offline');
 });
 

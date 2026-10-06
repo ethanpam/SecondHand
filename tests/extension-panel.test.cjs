@@ -670,8 +670,8 @@ test('when the app says Touch ID is ready, Unlock asks the app for Touch ID and 
 });
 
 test('when Touch ID doesn’t unlock, Unlock does what it does today: brings SecondHand forward, and says why', async t => {
-  const lines = { cancelled: 'Touch ID didn’t unlock SecondHand. Enter your password in SecondHand, then click Autofill.',
-    off: 'Unlock SecondHand, then click Autofill.' };
+  const lines = { cancelled: 'Touch ID didn’t unlock SecondHand. Enter your password in SecondHand, then start Autofill again.',
+    off: 'Unlock SecondHand, then start Autofill again.' };
   for (const [reason, line] of Object.entries(lines)) {
     const view = await panel(t, { desktop: { unlocked: false, touchId: 'ready' }, unlockWithTouchId: () => ({ unlocked: false, reason }) });
     await view.userClick('desktop-action'); await tick();
@@ -693,7 +693,7 @@ test('when Touch ID is off, or the app says nothing about it, Unlock only brings
     await view.userClick('desktop-action');
     assert.equal(view.types().includes('ui:unlockWithTouchId'), false, String(touchId));
     assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:showApp')), { type: 'ui:showApp', confirmed: true }, String(touchId));
-    assert.equal(view.get('desktop-status').textContent, 'Unlock SecondHand, then click Autofill.', String(touchId));
+    assert.equal(view.get('desktop-status').textContent, 'Unlock SecondHand, then start Autofill again.', String(touchId));
   }
 });
 
@@ -713,7 +713,7 @@ async function until(check, ms = 4000) {
   }
 }
 const CLOSED = { connected: false, unlocked: false, laya: 'unavailable' };
-const offlineResult = { state: 'offline', filled: 0, needYou: [], message: 'Open the SecondHand app, then click Autofill again.', messageKey: 'worker.openAppThenAutofill', messageParams: {}, pageKey: 'iowa-personal-information' };
+const offlineResult = { state: 'offline', filled: 0, needYou: [], message: 'Open the SecondHand app, then start Autofill again.', messageKey: 'worker.openAppThenAutofill', messageParams: {}, pageKey: 'iowa-personal-information' };
 
 test('Open SecondHand asks the worker to open the app, waits for it, then shows it locked with Unlock', async t => {
   const view = await panel(t, { desktop: CLOSED });
@@ -730,7 +730,7 @@ test('Open SecondHand asks the worker to open the app, waits for it, then shows 
   assert.equal(view.get('desktop-action').textContent, 'Unlock');
   await view.userClick('desktop-action');
   assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'ui:showApp', confirmed: true });
-  assert.match(view.get('desktop-status').textContent, /Unlock SecondHand, then click Autofill/);
+  assert.match(view.get('desktop-status').textContent, /Unlock SecondHand, then start Autofill again/);
   assert.equal(view.types().filter(type => type === 'ui:openApp').length, 1);
 });
 
@@ -1020,7 +1020,7 @@ test('widget shows Unlock when the vault is locked and returns to Autofill after
   await view.userClick('unlock');
   assert.deepEqual(plainRequests(view.requests.findLast(request => request.type !== 'ui:widgetSize')), { type: 'ui:showApp', confirmed: true });
   assert.equal(view.get('autofill').hidden, false);
-  assert.match(view.get('widget-text').textContent, /Unlock SecondHand, then click Autofill/);
+  assert.match(view.get('widget-text').textContent, /Unlock SecondHand, then start Autofill again/);
   assert.equal(view.get('widget-text').classList.contains('visually-hidden'), false);
 });
 
@@ -1039,7 +1039,7 @@ test('widget offers Open SecondHand in Autofill’s place when the app is closed
   assert.deepEqual(plainRequests(offline.requests.find(request => request.type === 'ui:openApp')), { type: 'ui:openApp', confirmed: true });
   assert.equal(offline.get('open-app').hidden, true);
   assert.equal(offline.get('autofill').hidden, false);
-  assert.match(offline.get('widget-text').textContent, /Unlock SecondHand, then click Autofill/);
+  assert.match(offline.get('widget-text').textContent, /Unlock SecondHand, then start Autofill again/);
   // An open that fails says so in one line that stays, and Autofill is back to check again.
   const failing = await panel(t, { launcher: true, os: 'win', autofill: offlineResult, openApp: () => ({ ok: false, error: 'SecondHand could not be started (Windows error 2).' }) });
   await failing.userClick('autofill');
