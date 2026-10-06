@@ -1,18 +1,17 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const vm = require('node:vm');
 const catalog = require('../shared/snap-information.js');
 const { validateProfile, validateStoredProfile, validateRecords, PROFILE_FIELDS, REQUEST_FIELDS, LIST_FIELDS, SNAP_IOWA_ONLY_FIELDS,
   MEMBER_FIELDS, MAX_RECORDS, isRequestField, releasedValue } = require('../shared/schema.cjs');
+const { runFile } = require('./helpers/harness.cjs');
 const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const today = { today: '2026-10-05' };
 const own = extra => ({ id: id(1), relationship: 'self', ...extra });
 
 test('the immutable catalog is identical in browser and Node, with unique typed fields and no approval/credential fields', () => {
-  const context = vm.createContext({});
-  vm.runInContext(fs.readFileSync(require.resolve('../shared/snap-information.js'), 'utf8'), context);
+  const context = {};
+  runFile('shared/snap-information.js', context);
   assert.deepEqual(JSON.parse(JSON.stringify(context.SecondHandSnapInformation)), JSON.parse(JSON.stringify(catalog)));
   assert.ok(Object.isFrozen(catalog) && Object.isFrozen(catalog.sections[0].fields[0]));
   const keys = catalog.scalarFields.map(field => field.key);

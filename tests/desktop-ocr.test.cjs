@@ -3,13 +3,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
-const syncFs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const vm = require('node:vm');
 const { LIMITS, documentKind, validatePages, progress } = require('../desktop/ocr-limits.cjs');
 const { createDocumentReader, readSelectedFile } = require('../desktop/ocr-service.cjs');
 const { assetPath, ORIGIN } = require('../desktop/ocr-engine.cjs');
+const { runFile } = require('./helpers/harness.cjs');
 const ID = 'b1be3de2-8bcc-4f07-94a6-f534f0b34047';
 const OTHER = 'fd2bda70-5d1e-4d3c-9d34-4e7c1607f2e5';
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -167,7 +166,7 @@ test('preload exposes correlated document actions and sanitizes progress without
     invoke: (...args) => invokes.push(args), on: (channel, listener) => listeners.set(channel, listener),
     removeListener: (channel, listener) => { if (listeners.get(channel) === listener) listeners.delete(channel); }
   } };
-  vm.runInNewContext(syncFs.readFileSync(path.join(__dirname, '../desktop/preload.cjs'), 'utf8'), { require: name => { assert.equal(name, 'electron'); return electron; } });
+  runFile('desktop/preload.cjs', { require: name => { assert.equal(name, 'electron'); return electron; } });
   api.readDocument(ID); api.cancelDocumentRead(ID);
   assert.deepEqual(invokes, [['secondhand:invoke', 'readDocument', ID], ['secondhand:invoke', 'cancelDocumentRead', ID]]);
   const unsubscribe = api.onDocumentProgress(value => events.push(JSON.parse(JSON.stringify(value))));

@@ -1,17 +1,14 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const vm = require('node:vm');
 const { webcrypto } = require('node:crypto');
 const { JSDOM } = require('jsdom');
 const adapter = require('../extension/iowa-adapter.js');
 const strings = require('../extension/strings.js');
 const forms = require('./fixtures/pantry-forms.cjs');
-const { plain, layout, serviceWorker, nativeHost } = require('./helpers/harness.cjs');
+const { plain, runFile, evalFile, layout, serviceWorker, nativeHost } = require('./helpers/harness.cjs');
 
-const source = file => fs.readFileSync(path.join(__dirname, '../extension', file), 'utf8');
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
 const SITE_URL = 'https://pantry.example.org/intake?step=1';
 const ORIGIN = 'https://pantry.example.org';
@@ -305,13 +302,13 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(reso
 test('the worker loads the site engine, its text, and its translator next to the Iowa adapter and refuses to start without any of them', () => {
   const imported = [];
   const chrome = { runtime: { onMessage: { addListener: () => {} } }, tabs: {}, sidePanel: { setPanelBehavior: async () => {} } };
-  assert.throws(() => vm.runInNewContext(source('background.js'), { chrome, SecondHandIowa: adapter, importScripts: (...files) => imported.push(...files), crypto: webcrypto, URL, Map, Set }), /generic-adapter\.js/);
+  assert.throws(() => runFile('extension/background.js', { chrome, SecondHandIowa: adapter, importScripts: (...files) => imported.push(...files), crypto: webcrypto, URL, Map, Set }), /generic-adapter\.js/);
   assert.deepEqual(imported, ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'strings.js', 'translation.js']);
-  assert.throws(() => vm.runInNewContext(source('background.js'), { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }), /strings\.js/);
-  assert.throws(() => vm.runInNewContext(source('background.js'), { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }),
+  assert.throws(() => runFile('extension/background.js', { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }), /strings\.js/);
+  assert.throws(() => runFile('extension/background.js', { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }),
     /translation\.js/, 'a worker that can’t translate questions for Laya doesn’t start');
   const { layaQuestion: _, ...older } = generic;
-  assert.throws(() => vm.runInNewContext(source('background.js'), { chrome, SecondHandIowa: adapter, SecondHandGeneric: older, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }),
+  assert.throws(() => runFile('extension/background.js', { chrome, SecondHandIowa: adapter, SecondHandGeneric: older, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }),
     /generic-adapter\.js/, 'an engine without Laya’s question rule is refused');
 });
 
@@ -786,8 +783,8 @@ function siteContent(t, { url = SITE_URL, engine = true, settled = null, offers 
       }
     };
   }
-  window.eval(source('page-text.js'));
-  window.eval(source('generic-content.js'));
+  evalFile(window, 'extension/page-text.js');
+  evalFile(window, 'extension/generic-content.js');
   return { window, frames, calls, reports,
     host: () => window.document.querySelector('[data-secondhand-assistant]'),
     request(message, sender = { id: extensionId }) { let response; listener?.(message, sender, value => { response = value; }); return response; },
@@ -811,14 +808,14 @@ test('on approved sites the widget is a closed, full-size extension iframe in th
   assert.equal(host.getAttribute('data-secondhand-size'), 'full');
   assert.equal(host.style.height, '46px');
   assert.equal(host.style.position, 'fixed');
-  page.window.eval(source('generic-content.js'));
+  evalFile(page.window, 'extension/generic-content.js');
   assert.equal(page.frames.length, 1, 'injecting again keeps one widget');
 
   const child = page.window.document.createElement('iframe');
   page.window.document.body.append(child);
   child.contentWindow.SecondHandGeneric = page.window.SecondHandGeneric;
   child.contentWindow.chrome = page.window.chrome;
-  child.contentWindow.eval(source('generic-content.js'));
+  evalFile(child.contentWindow, 'extension/generic-content.js');
   assert.equal(child.contentWindow.document.querySelector('[data-secondhand-assistant]'), null);
   assert.equal(siteContent(t, { engine: false }).host(), null);
   assert.equal(siteContent(t, { url: 'http://pantry.example.org/intake' }).host(), null);
@@ -1173,7 +1170,7 @@ test('an https subframe answers plans without creating a widget', t => {
   const reports = [];
   dom.window.chrome = { runtime: { id: extensionId, onMessage: { addListener: callback => { listener = callback; } }, sendMessage: async message => { reports.push(plain(message)); } } };
   dom.window.SecondHandGeneric = { plan: () => pantryPlan(), offers: () => true };
-  dom.window.eval(source('generic-content.js'));
+  evalFile(dom.window, 'extension/generic-content.js');
   assert.equal(typeof listener, 'function');
   assert.deepEqual(reports, [{ type: 'secondhand:generic:form', helps: true }]);
   let result;
@@ -2150,7 +2147,7 @@ function livePage(t, html, { url = OTHER_URL, framesReply = { frames: false }, l
   const listeners = [], reports = [];
   window.chrome = { runtime: { id: extensionId, getURL: extensionURL, onMessage: { addListener: callback => { listeners.push(callback); } },
     sendMessage: async message => { reports.push(plain(message)); return structuredClone(framesReply); } } };
-  const load = () => { for (const file of SITE_SCRIPT.js) window.eval(source(file)); };
+  const load = () => { for (const file of SITE_SCRIPT.js) evalFile(window, `extension/${file}`); };
   for (let i = 0; i < loads; i++) load();
   return { window, listeners, reports, load,
     cards: () => window.document.querySelectorAll('[data-secondhand-assistant]').length,

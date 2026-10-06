@@ -7,7 +7,7 @@ const test = require('node:test');
 const { JSDOM } = require('jsdom');
 const adapter = require('../extension/iowa-adapter.js');
 const strings = require('../extension/strings.js');
-const { plain, layout } = require('./helpers/harness.cjs');
+const { plain, evalFile, layout } = require('./helpers/harness.cjs');
 const extensionId = 'a'.repeat(32);
 const extensionURL = file => `chrome-extension://${extensionId}/${file}`;
 const source = file => fs.readFileSync(path.join(__dirname, '../extension', file), 'utf8');
@@ -63,8 +63,8 @@ function content(t, url = `${adapter.PORTAL}/applicant`, { engine = true, matche
     focusField: (_document, _url, key) => { if (key !== 'firstName') return false; window.document.getElementById('firstName').focus(); return true; },
     fill: (_document, _url, bindings, values) => { for (const binding of bindings) binding.element.value = values[binding.key]; return { filled: bindings.map(binding => binding.key), skipped: [] }; }
   };
-  window.eval(source('page-text.js'));
-  window.eval(source('content.js'));
+  evalFile(window, 'extension/page-text.js');
+  evalFile(window, 'extension/content.js');
   return { window, frames, calls, setKind: (value, instruction) => { kind = value; todo = instruction; }, get continued() { return continued; }, get advanced() { return advanced; },
     host: () => window.document.querySelector('[data-secondhand-assistant]'),
     request(message, sender = { id: extensionId }) { let response; listener?.(message, sender, value => { response = value; }); return response; },
@@ -84,7 +84,7 @@ test('on-page assistant is isolated in a fixed extension iframe only on the exac
   assert.equal(page.frames[0].referrerPolicy, 'no-referrer');
   assert.equal(page.frames[0].getAttribute('sandbox'), 'allow-scripts allow-same-origin');
   assert.equal(page.frames[0].getAttribute('allow'), 'language-detector', 'the widget may use Chrome’s on-device language detector');
-  page.window.eval(source('content.js'));
+  evalFile(page.window, 'extension/content.js');
   assert.equal(page.frames.length, 1);
 
   const wrong = content(t, 'https://hhsservices.iowa.gov.evil.example/apspssp/ssp.portal');
@@ -95,7 +95,7 @@ test('on-page assistant is isolated in a fixed extension iframe only on the exac
   page.window.document.body.append(child);
   child.contentWindow.SecondHandIowa = page.window.SecondHandIowa;
   child.contentWindow.chrome = page.window.chrome;
-  child.contentWindow.eval(source('content.js'));
+  evalFile(child.contentWindow, 'extension/content.js');
   assert.equal(child.contentWindow.secondHandContentInstalled, undefined);
 });
 
@@ -382,7 +382,7 @@ async function panel(t, initial = {}) {
   }
   // Run the page's own scripts, in the order panel.html lists them.
   for (const [, file] of source('panel.html').matchAll(/<script src="([^"]+)"/g)) {
-    window.eval(source(file));
+    evalFile(window, `extension/${file}`);
     // A shorter wait before a download that never starts is reported (the service's own tests cover the timing).
     if (file === 'translation.js' && initial.stallMs) {
       const service = window.SecondHandTranslation;

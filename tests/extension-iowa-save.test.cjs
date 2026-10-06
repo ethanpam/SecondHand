@@ -4,16 +4,13 @@
 // page the Iowa rules fill, or one with an Iowa instruction, it reads nothing.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const { JSDOM } = require('jsdom');
 const adapter = require('../extension/iowa-adapter.js');
 const personal = require('./fixtures/iowa-personal-information.cjs');
 const tellUsMore = require('./fixtures/iowa-tell-us-more.cjs');
-const { plain, layout } = require('./helpers/harness.cjs');
+const { plain, evalFile, layout } = require('./helpers/harness.cjs');
 
 const extensionId = 'a'.repeat(32);
-const source = file => fs.readFileSync(path.join(__dirname, '../extension', file), 'utf8');
 const REFUSED = { ok: false, error: 'SecondHand fills this page with its Iowa rules.' };
 const UNSAFE = { ok: false, error: 'This page could not be checked safely. Review it manually, then rescan.' };
 const EXPENSES = `${adapter.PORTAL}/applyForBenefits/expenses`;
@@ -33,13 +30,13 @@ function iowaTab(t, html = expenses, url = EXPENSES, { engine = true } = {}) {
   layout(document);
   let listener;
   window.chrome = { runtime: { id: extensionId, getURL: file => `chrome-extension://${extensionId}/${file}`, onMessage: { addListener: callback => { listener = callback; } } } };
-  for (const file of ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js']) window.eval(source(file));
+  for (const file of ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js']) evalFile(window, `extension/${file}`);
   const engineCalls = [];
   const real = window.SecondHandGeneric;
   window.SecondHandGeneric = engine ? { ...real,
     answeredIds: (...args) => { engineCalls.push('answeredIds'); return real.answeredIds(...args); },
     readAnswer: (...args) => { engineCalls.push('readAnswer'); return real.readAnswer(...args); } } : undefined;
-  window.eval(source('content.js'));
+  evalFile(window, 'extension/content.js');
   return {
     document, engineCalls, layout: () => layout(document),
     type(id, value) { const element = document.getElementById(id); element.value = value; element.dispatchEvent(new window.Event('input', { bubbles: true })); },

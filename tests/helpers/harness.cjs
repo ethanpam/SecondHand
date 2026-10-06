@@ -31,6 +31,16 @@ async function until(condition, what) {
 
 // A repository file, by its path from the repository root.
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+// Runs a repository file in a new vm context with `globals`, under the file's own path, so coverage reports
+// it. `source` is its text when a test changes it first.
+const runFile = (file, globals, source = read(file)) => vm.runInNewContext(source, globals, { filename: path.join(root, file) });
+// Runs a repository file in a jsdom window made with runScripts: 'outside-only', as one of the page's scripts.
+// Its sourceURL names it by its path, so coverage reports it.
+const evalFile = (window, file, source = read(file)) => window.eval(`${source}\n//# sourceURL=${pathToFileURL(path.join(root, file)).href}`);
+// The desktop window's scripts, run in the order renderer/index.html lists them.
+function loadRenderer(window) {
+  for (const [, file] of read('renderer/index.html').matchAll(/<script src="([^"]+)"/g)) evalFile(window, path.posix.join('renderer', file));
+}
 
 // jsdom has no layout engine. `layout` gives every element now in the document the same visible,
 // in-viewport box; a test that needs one off screen or hidden overrides it on that element.
@@ -136,7 +146,7 @@ function safeStorage({ available = true, unsealing = () => {} } = {}) {
 // Runs desktop/main.cjs in its own vm context. `modules` replaces modules it requires, by name; the rest
 // are the real ones. `globals` are the context's globals besides require, __dirname and Buffer.
 function runMain(modules, globals) {
-  return vm.runInNewContext(read('desktop/main.cjs'), {
+  return runFile('desktop/main.cjs', {
     require: name => Object.hasOwn(modules, name) ? modules[name] : require(name.startsWith('.') ? path.join(root, 'desktop', name) : name),
     __dirname: path.join(root, 'desktop'), Buffer, ...globals
   });
@@ -164,11 +174,11 @@ function serviceWorker() {
         if (url !== `${chrome.runtime.getURL('background.js')}` || !disk) throw new TypeError('Failed to fetch');
         return { ok: true, text: async () => withBuild(disk) };
       };
-      run = () => vm.runInNewContext(build ? withBuild(build) : code, {
+      run = () => runFile('extension/background.js', {
         chrome, SecondHandIowa: require('../../extension/iowa-adapter.js'), SecondHandGeneric: require('../../extension/generic-adapter.js'),
         SecondHandStrings: require('../../extension/strings.js'), SecondHandTranslation: require('../../extension/translation.js'),
         importScripts: () => {}, crypto: require('node:crypto').webcrypto, setTimeout, clearTimeout, URL, Map, Set, console, fetch, ...globals
-      });
+      }, build ? withBuild(build) : code);
       run();
       return worker;
     },
@@ -207,4 +217,4 @@ function nativeHost({ posted = () => {}, answer }) {
   };
 }
 
-module.exports = { root, plain, tick, deferred, until, read, BOX, layout, layoutElements, laidOut, startMain, runMain, safeStorage, serviceWorker, nativeHost };
+module.exports = { root, plain, tick, deferred, until, read, runFile, evalFile, loadRenderer, BOX, layout, layoutElements, laidOut, startMain, runMain, safeStorage, serviceWorker, nativeHost };
