@@ -802,6 +802,12 @@ function siteContent(t, { url = SITE_URL, engine = true, settled = null, offers 
         calls.push(`read:${token}:${id}:${key}`);
         if (token === 'plan-1' && id === 'sh-3') return { repeated: true, element: doc.getElementById('name') };
         return token === 'plan-1' && id === 'sh-1' && key === 'county' ? { value: 'Story', element: doc.getElementById('name') } : null;
+      },
+      // Remember for next time (#186): one open question's answer, after the click.
+      readOpen: (doc, token, id) => {
+        calls.push(`readOpen:${token}:${id}`);
+        if (token === 'plan-1' && id === 'sh-3') return { empty: true, element: doc.getElementById('day') };
+        return token === 'plan-1' && id === 'sh-2' ? { value: 'Monday', element: doc.getElementById('day') } : null;
       }
     };
   }
@@ -2901,6 +2907,18 @@ test('a site frame says which listed boxes hold an answer, by id, and reads one 
   }
   assert.equal(page.request({ type: 'secondhand:generic:read', token: 'plan-1', id: 'sh-1', key: 'county' }, { id: 'another-extension' }), undefined);
   assert.deepEqual(page.calls.filter(call => typeof call === 'string' && call.startsWith('read:')), ['read:plan-1:sh-1:county', 'read:plan-1:sh-2:county', 'read:plan-1:sh-3:birthDate']);
+});
+
+test('a site frame reads one open question’s answer only when the worker asks for it, and sends the answer alone (#186)', t => {
+  const page = siteContent(t);
+  assert.deepEqual(plain(page.request({ type: 'secondhand:generic:readOpen', token: 'plan-1', id: 'sh-2' })), { value: 'Monday' }, 'the value only, nothing else of the box');
+  assert.deepEqual(plain(page.request({ type: 'secondhand:generic:readOpen', token: 'plan-1', id: 'sh-3' })), { empty: true });
+  assert.deepEqual(plain(page.request({ type: 'secondhand:generic:readOpen', token: 'plan-1', id: 'sh-1' })), { readable: false });
+  for (const message of [{ type: 'secondhand:generic:readOpen', token: 'plan-1' }, { type: 'secondhand:generic:readOpen', token: 7, id: 'sh-2' }, { type: 'secondhand:generic:readOpen', token: 'plan-1', id: ['sh-2'] }]) {
+    assert.deepEqual(plain(page.request(message)), { ok: false, error: 'This page could not be checked safely. Review it manually.' }, JSON.stringify(message));
+  }
+  assert.equal(page.request({ type: 'secondhand:generic:readOpen', token: 'plan-1', id: 'sh-2' }, { id: 'another-extension' }), undefined);
+  assert.deepEqual(page.calls.filter(call => typeof call === 'string' && call.startsWith('readOpen:')), ['readOpen:plan-1:sh-2', 'readOpen:plan-1:sh-3', 'readOpen:plan-1:sh-1']);
 });
 
 // #135: answers the app left out because a saved date of birth is after today or more than 130 years ago.
