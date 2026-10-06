@@ -296,7 +296,8 @@ test('50 trusted sites with the longest host names, Always allow on each, and ev
   assert.equal(longestHost(0).length, 253);
   const sites = Array.from({ length: 50 }, (_, n) => `https://${longestHost(n)}`);
   for (const site of sites) assert.deepEqual(plain(await app.request({ type: 'trustSite', url: `${site}/apply` })), { trusted: true, origin: site });
-  for (const site of sites) await app.request({ type: 'getFields', url: `${site}/apply`, fields: ['ssn'] });
+  // Fill sensitive details (#176) asks for the SSN Autofill held back on each site.
+  for (const site of sites) await app.request({ type: 'getFields', url: `${site}/apply`, fields: ['ssn'], sensitive: true });
   await app.invoke('setAutofillTrust', true);
   assert.deepEqual(plain(await app.request({ type: 'trustAllSites' })), { allSites: true });
   assert.ok((await fsp.stat(path.join(app.userData, 'settings.json'))).size > 26000, 'the largest settings.json SecondHand can write');
