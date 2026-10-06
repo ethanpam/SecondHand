@@ -132,9 +132,9 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
         if (request.type === 'getFields') {
           duringGetFields?.(tab);
           if (vault.getFieldsError) return fail(vault.getFieldsError);
-          // `fieldsReason`: why the app left saved answers out (#135).
+          // `fieldsReason`: why the app left saved answers out (#135). `held`: fields an app that broke Iowa's rule held back (#176).
           return reply({ accessRevision: 0, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])),
-            ...(vault.fieldsReason !== undefined ? { reason: vault.fieldsReason } : {}) });
+            ...(vault.fieldsReason !== undefined ? { reason: vault.fieldsReason } : {}), ...(vault.held ? { held: vault.held } : {}) });
         }
         fail('Unsupported bridge request.');
       } })
@@ -331,6 +331,17 @@ test('a locked, cancelled, or unreadable general fill on an unknown Iowa page st
   }
   // Once the engine found fields, the page offers Autofill again, for example after unlocking.
   assert.equal((await locked.panel({ type: 'ui:pageState' })).data.page.todo, 'Check your answers, then click Continue.');
+});
+
+test('Iowa’s portal holds nothing back: a reply that says it did fills nothing, and Fill sensitive details has nothing to ask for (#176)', async () => {
+  const w = worker({ kind: 'manual', engine: generalEngine, general: financialPlan(), desktop: { values: financialValues, held: ['monthlyEarnedIncome'] } });
+  const result = plain((await autofill(w)).data);
+  assert.deepEqual([result.state, result.messageKey], ['error', 'worker.desktopUnexpected']);
+  assert.equal(w.calls.content.some(message => message.type === 'secondhand:generic:fill'), false);
+  const asked = w.calls.native.length;
+  assert.equal((await w.panel({ type: 'ui:fillHeld', confirmed: true })).errorKey, 'worker.heldGone');
+  assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).held, undefined);
+  assert.equal(w.calls.native.length, asked, 'the app is asked nothing');
 });
 
 test('a general fill the page interrupted by changing asks for Autofill again on an unknown Iowa page', async () => {
