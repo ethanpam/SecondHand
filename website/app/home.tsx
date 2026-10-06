@@ -110,8 +110,16 @@ export function Home() {
                 It answers Iowa’s Tell Us More questions only from answers you
                 saved in My information. If you turn on Laya, SecondHand’s AI on
                 this computer, it fills more questions and marks them as guesses
-                to check. It moves past information-only screens for you; on
-                every other page, you choose when to move on.
+                to check. It moves past information-only screens for you. It
+                also selects Save and Continue on Tell Us More, Iowa’s
+                emergency SNAP questions, Background Information, the Job,
+                Income, Expenses and Property Information pages, and the pages
+                for one person’s saved job, pension, Social Security, rent,
+                utilities or cash. It does this only when it knows every
+                question on the page, every required answer is filled in, and
+                Iowa shows no error or pop-up. On any page not named here, or if
+                any of that is not true, you move on yourself. You handle
+                consent, signatures and submission.
               </p>
               <p>
                 The side panel works in English, Spanish, Vietnamese, Chinese,
@@ -396,11 +404,13 @@ export function Home() {
                   Click Autofill in the corner and approve once in the desktop
                   app, or choose Always allow. SecondHand moves past
                   information-only screens and fills the pages it knows.
-                  Anything missing is flagged so you can jump straight to it. On
-                  verified applicant and home-address screens, it can choose
-                  Save and Continue automatically. Review all answers and the
-                  first suggested home address before submitting; other Next
-                  buttons stay manual.
+                  Anything missing is flagged so you can jump straight to it. It
+                  can choose Save and Continue on the applicant, home-address
+                  and Tell Us More pages, Iowa’s screening questions, and the
+                  pages for one person’s saved job, pension, Social Security,
+                  rent, utilities or cash, but only when it knows every question
+                  there and every required answer is filled in. Review every
+                  answer and the first suggested home address before you submit.
                 </p>
               </div>
               <a
