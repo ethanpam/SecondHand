@@ -10,7 +10,7 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === 'seatbelt';
 // so Cloudflare keeps no per-request logs for this Worker.
 const workerConfig = {
   name: 'secondhand',
-  main: 'vinext/server/fetch-handler',
+  main: './worker.ts',
   compatibility_flags: ['nodejs_compat'],
   observability: { enabled: false },
   r2_buckets: [{ binding: 'FILES', bucket_name: 'secondhand-downloads' }],
