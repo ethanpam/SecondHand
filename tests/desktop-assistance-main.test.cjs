@@ -488,7 +488,7 @@ test('getFields says whether an SSN is saved without ever releasing the number',
   assert.deepEqual(plain((await site.request({ type: 'getFields', url: PANTRY, fields: ['hasSsn'] })).values), { hasSsn: 'yes' });
   assert.equal(site.prompts.length, 1);
   assert.equal(site.prompts[0].title, 'Share sensitive details?');
-  assert.deepEqual(plain(site.prompts[0].buttons), ['Cancel', 'Allow once']);
+  assert.deepEqual(plain(site.prompts[0].buttons), ['Cancel', 'Allow once', 'Always allow on this site']);
   assert.match(site.prompts[0].detail, /Whether you have a Social Security number/);
 });
 
@@ -660,6 +660,200 @@ test('turning all websites off, from the extension or the app, stops sites it al
   await assert.rejects(renderer.invoke('trustAllSites'), /Request denied/, 'only the extension turns it on, after Chrome’s prompt');
   await renderer.invoke('lock');
   await assert.rejects(renderer.invoke('turnOffAllSites'), /Unlock/);
+});
+
+// Always allow on this site (#175): offered by the sensitive prompt, which shows only while Always allow is off.
+const PANTRY_SITE = 'https://pantry.example.org';
+const ALWAYS_HERE = 2;
+const SENSITIVE_PROFILE = { firstName: 'Synthetic', ssn: '123-45-6789', birthDate: '1985-04-12' };
+// A desktop whose sensitive prompts would answer Always allow on this site, with `settings` and a profile with sensitive details.
+async function alwaysAllowing(settings, options = {}) {
+  const app = await desktop({ settings, profile: SENSITIVE_PROFILE, ...options });
+  app.answer(async () => ({ response: ALWAYS_HERE }));
+  return app;
+}
+const sensitiveRequest = (url = PANTRY) => ({ type: 'getFields', url, fields: ['firstName', 'ssn', 'birthDate'] });
+
+test('the sensitive prompt offers Always allow on this site: saved for that site, it fills there with no prompt after, and nowhere else', async () => {
+  const app = await alwaysAllowing({ extensionId, trustedSites: [PANTRY_SITE, WIC] });
+  const before = (await app.request({ type: 'status' })).accessRevision;
+  const reply = await app.request(sensitiveRequest());
+  assert.deepEqual(plain(reply.values), SENSITIVE_PROFILE);
+  const [prompt] = app.prompts;
+  assert.equal(prompt.title, 'Share sensitive details?');
+  assert.deepEqual(plain(prompt.buttons), ['Cancel', 'Allow once', 'Always allow on this site']);
+  assert.equal(prompt.defaultId, 0, 'Cancel stays the default');
+  assert.equal(prompt.cancelId, 0);
+  assert.match(prompt.detail, /\n\nChoose “Always allow on this site” to fill on https:\/\/pantry\.example\.org without asking from now on, sensitive details included\. You can remove it on the Chrome extension page\.$/);
+  assert.ok(reply.accessRevision > before, 'earlier receipts are outdated');
+  assert.equal(reply.accessRevision, (await app.request({ type: 'status' })).accessRevision, 'the values carry the new receipt');
+  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: false, trustedSites: [PANTRY_SITE, WIC], alwaysAllowedSites: [PANTRY_SITE] });
+  const status = await app.invoke('status');
+  assert.deepEqual(plain(status.alwaysAllowedSites), [PANTRY_SITE]);
+  assert.equal(status.autofillWithoutAsking, false, 'Always allow on this computer stays off');
+
+  // That site fills with no prompt from now on, sensitive details and everyday answers alike.
+  assert.deepEqual(plain((await app.request(sensitiveRequest(`${PANTRY_SITE}/another-page`))).values), SENSITIVE_PROFILE);
+  assert.deepEqual(plain((await app.request({ type: 'getFields', url: PANTRY, fields: ['firstName'] })).values), { firstName: 'Synthetic' });
+  assert.equal(app.prompts.length, 1);
+  // Another site still asks.
+  app.answer(async () => ({ response: 1 }));
+  await app.request(sensitiveRequest(`${WIC}/apply`));
+  assert.deepEqual(app.prompts.map(prompt => prompt.title), ['Share sensitive details?', 'Share sensitive details?']);
+  // The everyday prompt keeps its own Always allow, for this computer.
+  await app.request({ type: 'getFields', url: `${WIC}/apply`, fields: ['firstName'] });
+  assert.deepEqual(plain(app.prompts.at(-1).buttons), ['Cancel', 'Allow once', 'Always allow on this computer']);
+
+  const restarted = await desktop({ settings: app.writes.at(-1).json, profile: SENSITIVE_PROFILE });
+  assert.deepEqual(plain((await restarted.request(sensitiveRequest())).values), SENSITIVE_PROFILE);
+  assert.equal(restarted.prompts.length, 0, 'it survives a restart');
+});
+
+test('Always allow on this site belongs to the extension ID that asked, never covers Iowa’s portal, and still needs SecondHand unlocked', async () => {
+  // Saved for another extension ID: this one is asked, then refused.
+  const other = await alwaysAllowing({ extensionId: 'c'.repeat(32), trustedSites: [PANTRY_SITE], alwaysAllowedSites: [PANTRY_SITE] });
+  await assert.rejects(other.request(sensitiveRequest()), /SecondHand access changed/);
+  assert.equal(other.prompts.length, 1);
+  assert.equal(other.writes.some(write => write.json.alwaysAllowedSites), false, 'nothing is saved for it');
+
+  // Iowa's portal shares its origin with the rest of hhsservices.iowa.gov, which all websites lets in as another site.
+  const iowaSite = await alwaysAllowing({ extensionId, allSites: true });
+  await iowaSite.request(sensitiveRequest('https://hhsservices.iowa.gov/other/apply'));
+  assert.deepEqual(plain((await iowaSite.invoke('status')).alwaysAllowedSites), ['https://hhsservices.iowa.gov']);
+  iowaSite.answer(async () => ({ response: 1 }));
+  await iowaSite.request({ type: 'getFields', fields: ['firstName', 'ssn'] });
+  assert.equal(iowaSite.prompts.length, 2, 'Iowa’s portal keeps its own rule');
+  assert.equal(iowaSite.prompts[1].title, 'Let Chrome fill this form?');
+
+  const app = await alwaysAllowing({ extensionId, trustedSites: [PANTRY_SITE], alwaysAllowedSites: [PANTRY_SITE] });
+  for (const key of schema.SNAP_IOWA_ONLY_FIELDS) {
+    await assert.rejects(app.request({ type: 'getFields', url: PANTRY, fields: [key] }), /only be shared with Iowa/);
+  }
+  await app.invoke('lock');
+  await assert.rejects(app.request(sensitiveRequest()), /Unlock SecondHand first/);
+  assert.equal(app.prompts.length, 0);
+});
+
+test('Always allow on this site is dropped when the site is turned off, from the extension or the app, even while locked', async () => {
+  const settings = { extensionId, trustedSites: [PANTRY_SITE, WIC], alwaysAllowedSites: [PANTRY_SITE, WIC] };
+  const app = await alwaysAllowing(settings);
+  await app.invoke('lock');
+  const revision = (await app.request({ type: 'status' })).accessRevision;
+  assert.deepEqual(plain(await app.request({ type: 'untrustSite', url: PANTRY })), { trusted: false, origin: PANTRY_SITE });
+  assert.ok((await app.request({ type: 'status' })).accessRevision > revision, 'an access receipt from before can’t fill it');
+  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: false, trustedSites: [WIC], alwaysAllowedSites: [WIC] });
+  await app.invoke('unlock', 'synthetic password');
+  app.answer(async () => ({ response: 1 }));
+  await app.request({ type: 'trustSite', url: PANTRY });
+  app.answer(async () => ({ response: 1 }));
+  await app.request(sensitiveRequest());
+  assert.equal(app.prompts.at(-1).title, 'Share sensitive details?', 'trusted again, it asks again');
+
+  const fromApp = await alwaysAllowing(settings);
+  const status = await fromApp.invoke('removeTrustedSite', PANTRY_SITE);
+  assert.deepEqual(plain([status.trustedSites, status.alwaysAllowedSites]), [[WIC], [WIC]]);
+  assert.deepEqual(fromApp.writes.at(-1).json.alwaysAllowedSites, [WIC]);
+
+  // A site all websites lets in, never trusted on its own: turning it off from the extension takes Always allow back too.
+  const anywhere = await alwaysAllowing({ extensionId, allSites: true, alwaysAllowedSites: ['https://never.example.net'] });
+  await anywhere.request({ type: 'untrustSite', url: ANYWHERE });
+  assert.deepEqual(plain((await anywhere.invoke('status')).alwaysAllowedSites), []);
+  assert.equal(anywhere.writes.at(-1).json.alwaysAllowedSites, undefined, 'an empty list isn’t saved');
+  const writes = anywhere.writes.length;
+  await anywhere.request({ type: 'untrustSite', url: ANYWHERE });
+  assert.equal(anywhere.writes.length, writes, 'a site already off saves nothing');
+});
+
+test('turning all websites off drops Always allow on the sites it let in, and keeps it on sites trusted on their own', async () => {
+  const settings = { extensionId, trustedSites: [WIC], allSites: true, alwaysAllowedSites: [PANTRY_SITE, WIC] };
+  const app = await alwaysAllowing(settings);
+  await app.invoke('lock');
+  await app.request({ type: 'untrustAllSites' });
+  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: false, trustedSites: [WIC], alwaysAllowedSites: [WIC] });
+  await app.invoke('unlock', 'synthetic password');
+  assert.deepEqual(plain((await app.request(sensitiveRequest(`${WIC}/apply`))).values), SENSITIVE_PROFILE);
+  assert.equal(app.prompts.length, 0, 'the site trusted on its own keeps it');
+
+  const fromApp = await alwaysAllowing(settings);
+  assert.deepEqual(plain((await fromApp.invoke('turnOffAllSites')).alwaysAllowedSites), [WIC]);
+  assert.deepEqual(fromApp.writes.at(-1).json.alwaysAllowedSites, [WIC]);
+});
+
+test('Always allow on this site is dropped when the extension ID changes, and doesn’t come back with the old ID', async () => {
+  const app = await alwaysAllowing({ extensionId, trustedSites: [PANTRY_SITE], alwaysAllowedSites: [PANTRY_SITE] });
+  await app.invoke('connectExtension', extensionId);
+  assert.deepEqual(plain((await app.invoke('status')).alwaysAllowedSites), [PANTRY_SITE], 'the same ID keeps it');
+  await app.invoke('connectExtension', 'b'.repeat(32));
+  assert.deepEqual(app.writes.at(-1).json, { extensionId: 'b'.repeat(32), autofillWithoutAsking: false, trustedSites: [PANTRY_SITE] });
+  await app.invoke('connectExtension', extensionId);
+  assert.deepEqual(plain((await app.invoke('status')).alwaysAllowedSites), []);
+  app.answer(async () => ({ response: 1 }));
+  await app.request(sensitiveRequest());
+  assert.equal(app.prompts.at(-1).title, 'Share sensitive details?');
+});
+
+test('the app removes Always allow on one site, which stays trusted and asks again; it needs SecondHand unlocked', async () => {
+  const app = await alwaysAllowing({ extensionId, trustedSites: [PANTRY_SITE, WIC], alwaysAllowedSites: [PANTRY_SITE, WIC] });
+  const revision = (await app.request({ type: 'status' })).accessRevision;
+  const status = await app.invoke('removeAlwaysAllowedSite', PANTRY_SITE);
+  assert.deepEqual(plain([status.trustedSites, status.alwaysAllowedSites]), [[PANTRY_SITE, WIC], [WIC]]);
+  assert.ok((await app.request({ type: 'status' })).accessRevision > revision, 'an access receipt from before can’t fill it');
+  assert.deepEqual(app.writes.at(-1).json, { extensionId, autofillWithoutAsking: false, trustedSites: [PANTRY_SITE, WIC], alwaysAllowedSites: [WIC] });
+  app.answer(async () => ({ response: 1 }));
+  await app.request(sensitiveRequest());
+  assert.equal(app.prompts.at(-1).title, 'Share sensitive details?');
+  await assert.rejects(app.invoke('removeAlwaysAllowedSite', PANTRY_SITE), /That site isn’t in your Always allow list/);
+  await assert.rejects(app.invoke('removeAlwaysAllowedSite', 42), /That site isn’t in your Always allow list/);
+  await app.invoke('lock');
+  await assert.rejects(app.invoke('removeAlwaysAllowedSite', WIC), /Unlock SecondHand first/);
+});
+
+test('a saved Always allow list keeps only sites SecondHand is on, as https origins, at most 50, and only with a saved extension ID', async () => {
+  const tooLong = `https://${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(62)}`;
+  const stored = await desktop({ settings: { extensionId, trustedSites: [PANTRY_SITE, 'https://ok.example.org'],
+    alwaysAllowedSites: [PANTRY_SITE, 'https://elsewhere.example.org', 'http://pantry.example.org', `${PANTRY_SITE}/intake`, 'javascript:1', 42, tooLong, PANTRY_SITE, 'https://ok.example.org'] } });
+  assert.deepEqual(plain((await stored.invoke('status')).alwaysAllowedSites), [PANTRY_SITE, 'https://ok.example.org']);
+  const fiftyOne = Array.from({ length: 51 }, (_, n) => `https://site-${n}.example.org`);
+  const many = await desktop({ settings: { extensionId, allSites: true, alwaysAllowedSites: fiftyOne } });
+  assert.deepEqual(plain((await many.invoke('status')).alwaysAllowedSites), fiftyOne.slice(0, 50), 'a saved list longer than 50 keeps the first 50');
+  const noId = await desktop({ settings: { extensionId: 'not an extension ID', trustedSites: [PANTRY_SITE], alwaysAllowedSites: [PANTRY_SITE] } });
+  assert.deepEqual(plain((await noId.invoke('status')).alwaysAllowedSites), []);
+});
+
+test('SecondHand always allows at most 50 sites: Always allow on a 51st is refused, and Allow once still fills', async () => {
+  const fifty = Array.from({ length: 50 }, (_, n) => `https://site-${n}.example.org`);
+  const app = await alwaysAllowing({ extensionId, trustedSites: [PANTRY_SITE], allSites: true, alwaysAllowedSites: fifty });
+  const writes = app.writes.length;
+  await assert.rejects(app.request(sensitiveRequest()), /Remove a site under Sites that fill sensitive details without asking before adding another/);
+  assert.equal(app.writes.length, writes, 'nothing is saved');
+  assert.deepEqual(plain((await app.invoke('status')).alwaysAllowedSites), fifty);
+  app.answer(async () => ({ response: 1 }));
+  assert.deepEqual(plain((await app.request(sensitiveRequest())).values), SENSITIVE_PROFILE);
+});
+
+test('a lock or a site turned off while the sensitive prompt is open saves no Always allow and fills nothing', async t => {
+  for (const [change, [apply, refusal]] of Object.entries(ACCESS_CHANGES)) await t.test(change, async () => {
+    const app = await desktop({ settings: { extensionId, trustedSites: [WIC], allSites: true }, profile: SENSITIVE_PROFILE });
+    const prompt = holdPrompt(app);
+    const pending = app.request(sensitiveRequest());
+    await prompt.shown();
+    await apply(app);
+    prompt.answer(ALWAYS_HERE);
+    await assert.rejects(pending, refusal);
+    assert.equal(app.writes.some(write => write.json.alwaysAllowedSites), false, 'nothing about the site is saved');
+    if (change === 'lock') await app.invoke('unlock', 'synthetic password');
+    assert.deepEqual(plain((await app.invoke('status')).alwaysAllowedSites), []);
+  });
+});
+
+test('a lock while Always allow on this site is being saved refuses the reply', async t => {
+  for (const change of ['lock', 'lock and unlock']) await t.test(change, async () => {
+    const [apply, refusal] = ACCESS_CHANGES[change];
+    let saving = true;
+    const app = await alwaysAllowing({ extensionId, trustedSites: [PANTRY_SITE] },
+      { beforeWrite: async file => { if (saving && file.endsWith('settings.json')) { saving = false; await apply(app); } } });
+    await assert.rejects(app.request(sensitiveRequest()), refusal);
+  });
 });
 
 // A stand-in for desktop/laya.cjs (#38) running a noul-v1 model, with its exact interface. `scores(state)` plays the model.
@@ -877,7 +1071,7 @@ test('without Always allow, answers that needed sensitive facts fold into the sa
   assert.equal(app.prompts.length, 1, 'one prompt, not two');
   const [prompt] = app.prompts;
   assert.equal(prompt.title, 'Share sensitive details?');
-  assert.deepEqual(plain(prompt.buttons), ['Cancel', 'Allow once']);
+  assert.deepEqual(plain(prompt.buttons), ['Cancel', 'Allow once', 'Always allow on this site']);
   assert.equal(prompt.cancelId, 0);
   assert.match(prompt.message, /pantry\.example\.org/);
   assert.match(prompt.detail, /Date of birth/);
@@ -922,6 +1116,23 @@ test('a lock while the "Share sensitive details?" prompt is open releases nothin
     await assert.rejects(pending, change === 'lock' ? /Unlock SecondHand first/ : /SecondHand access changed/, change);
     assert.equal(app.prompts.length, 1, 'no prompt for the everyday answer');
   }
+});
+
+test('Always allow on this site from Laya’s sensitive prompt saves the site, and its answers and saved fields fill there with no prompt after', async () => {
+  const app = await answering(asking);
+  app.answer(async () => ({ response: ALWAYS_HERE }));
+  const allowed = await app.request(answerRequest([sixty, veteran]));
+  assert.deepEqual(plain(allowed.answers), { 'f0:sh-1-3': 'No', 'f0:sh-1-4': 'No' });
+  assert.equal(allowed.accessRevision, (await app.request({ type: 'status' })).accessRevision, 'the answers carry the new receipt');
+  const [prompt] = app.prompts;
+  assert.equal(prompt.title, 'Share sensitive details?');
+  assert.deepEqual(plain(prompt.buttons), ['Cancel', 'Allow once', 'Always allow on this site']);
+  assert.match(prompt.detail, /\n\nChoose “Always allow on this site” to fill on https:\/\/pantry\.example\.org without asking from now on, sensitive details included\./);
+  assert.deepEqual(app.writes.at(-1).json.alwaysAllowedSites, [PANTRY_SITE]);
+  assert.equal((await app.invoke('status')).autofillWithoutAsking, false);
+  assert.deepEqual(plain((await app.request(answerRequest([sixty, veteran]))).answers), { 'f0:sh-1-3': 'No', 'f0:sh-1-4': 'No' });
+  assert.deepEqual(plain((await app.request({ type: 'getFields', url: PANTRY, fields: ['birthDate', 'county'] })).values), { birthDate: '1985-04-12', county: 'Polk' });
+  assert.equal(app.prompts.length, 1);
 });
 
 test('on Iowa’s portal, answers follow getFields’ Iowa rule: a prompt only without Always allow, and never a sensitive one', async () => {
@@ -1149,7 +1360,7 @@ test('band counts and the student answer come from the household list; counts by
   await asked.request({ type: 'getFields', url: PANTRY, fields: ['householdCount:0-5', 'birthDate'] });
   assert.equal(asked.prompts[1].title, 'Share sensitive details?');
   assert.match(asked.prompts[1].detail, /^Date of birth\n/);
-  assert.match(asked.prompts[1].detail, /Other fields: People in the household aged 0 to 5\.$/);
+  assert.match(asked.prompts[1].detail, /Other fields: People in the household aged 0 to 5\.\n/);
 });
 
 test('without the household list, the manual counts are everyday answers and band counts have no answer', async () => {
