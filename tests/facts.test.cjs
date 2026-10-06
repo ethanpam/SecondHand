@@ -228,3 +228,9 @@ test('the student status, income sources, current benefits and the help wanted b
   assert.throws(() => buildFacts({ incomeSources: 'lottery' }, { today: TODAY }), /incomeSources/);
   assert.throws(() => buildFacts({ studentLevel: 'college' }, { today: TODAY }), /studentLevel/);
 });
+
+test('the fictional profile’s income answers agree with each other: no income, and no source of income (#184)', () => {
+  const facts = byId(buildFacts({ ...fixture, county: 'Story' }, { today: TODAY }));
+  assert.deepEqual([facts['income.other'], facts['income.total'], facts['income.sources']],
+    ['The household has no other income.', 'The household has no income.', 'The household has no source of income.']);
+});
