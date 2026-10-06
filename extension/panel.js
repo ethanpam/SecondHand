@@ -1012,8 +1012,12 @@
       schedulePoll();
     }
     chrome.tabs.onActivated?.addListener(() => { invalidateTarget(); refresh(); });
-    chrome.tabs.onUpdated?.addListener((tabId, change) => {
-      if (target?.id === tabId && (change.url || change.status === 'loading')) { invalidateTarget(); refresh(); }
+    // The page in this panel's tab changed. With no Iowa page or site on screen, the active tab may have just
+    // opened one: look now rather than at the next poll.
+    chrome.tabs.onUpdated?.addListener((tabId, change, tab) => {
+      if (!change.url && change.status !== 'loading') return;
+      if (target?.id === tabId) { invalidateTarget(); refresh(); }
+      else if (!target && tab?.active) refresh();
     });
     document.addEventListener('visibilitychange', () => { if (!document.hidden && !working && !stopped) { refresh(); desktopStatus(); } });
     window.addEventListener('pagehide', () => { stopped = true; clearTimeout(pollTimer); }, { once: true });
