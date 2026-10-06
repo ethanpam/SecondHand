@@ -10,7 +10,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { pathToFileURL } = require('node:url');
 const realLaya = require('../desktop/laya.cjs');
-const { touchIdPlatform } = require('../desktop/touch-id.cjs');
+const { touchIdPlatform, createTouchIdUnlock } = require('../desktop/touch-id.cjs');
 
 const root = path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'desktop/main.cjs'), 'utf8');
@@ -237,6 +237,71 @@ test('two Touch ID requests at once share one prompt', async t => {
   assert.equal(fromApp.unlocked, true);
   assert.deepEqual(plain(fromChrome), { unlocked: true });
   assert.deepEqual(app.prompts, ['unlock SecondHand']);
+});
+
+test('a cancelled prompt shared by the app and Chrome refuses both, asks once, and keeps Touch ID on', async t => {
+  const { app } = await withTouchId(t);
+  await app.invoke('lock');
+  let cancel;
+  // The first prompt waits to be cancelled; a second one would be cancelled at once.
+  app.answer(() => cancel ? Promise.reject(new Error('Canceled by user.')) : new Promise((_resolve, reject) => { cancel = () => reject(new Error('Canceled by user.')); }));
+  const fromApp = app.invoke('unlockWithTouchId').then(() => assert.fail('unlocked'), error => error.message);
+  const fromChrome = app.request('unlockWithTouchId');
+  for (let tries = 0; !cancel && tries < 100; tries++) await new Promise(resolve => setImmediate(resolve));
+  cancel();
+  assert.equal(await fromApp, 'Touch ID didn’t unlock SecondHand (Canceled by user.). Enter your password.');
+  assert.deepEqual(plain(await fromChrome), { unlocked: false, reason: 'cancelled' });
+  assert.deepEqual(app.prompts, ['unlock SecondHand'], 'one prompt');
+  assert.equal((await app.invoke('status')).touchId, 'ready');
+  app.answer(async () => {});
+  assert.equal((await app.invoke('unlockWithTouchId')).unlocked, true, 'the next request asks again');
+  assert.equal(app.prompts.length, 2);
+});
+
+test('a password unlock while the Touch ID prompt is up wins: Touch ID answers unlocked and reads no key', async t => {
+  const { app } = await withTouchId(t);
+  await app.invoke('lock');
+  let approve;
+  app.answer(() => new Promise(resolve => { approve = resolve; }));
+  const attempt = app.invoke('unlockWithTouchId');
+  for (let tries = 0; !approve && tries < 100; tries++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal((await app.invoke('unlock', PASSWORD)).unlocked, true);
+  let reads = 0;
+  app.unsealing(() => { reads++; });
+  approve();
+  assert.equal((await attempt).unlocked, true);
+  assert.equal(reads, 0, 'the key isn’t read once the password won');
+  assert.equal((await app.invoke('status')).touchId, 'ready');
+});
+
+test('a password unlock that finishes while Touch ID reads its key wins too', async t => {
+  const { app } = await withTouchId(t);
+  await app.invoke('lock');
+  let password;
+  app.unsealing(() => { app.unsealing(() => {}); password = app.invoke('unlock', PASSWORD); });
+  assert.equal((await app.invoke('unlockWithTouchId')).unlocked, true);
+  assert.equal((await password).unlocked, true);
+  const status = await app.invoke('status');
+  assert.equal(status.touchId, 'ready');
+  assert.equal(status.touchIdNotice, null);
+});
+
+test('an unexpected error in a Touch ID unlock fails loudly, keeps Touch ID on, and the next request asks again', async t => {
+  const { app } = await withTouchId(t);
+  await app.invoke('lock');
+  const vaultPath = path.join(app.userData, 'vault.secondhand');
+  const bytes = await fsp.readFile(vaultPath);
+  const sealed = await fsp.readFile(app.sealedPath);
+  await fsp.writeFile(vaultPath, 'not an encrypted file');
+  await assert.rejects(app.invoke('unlockWithTouchId'), /^Error: The local operation could not be completed\. Please try again\.$/);
+  await assert.rejects(app.request('unlockWithTouchId'), /Invalid encrypted vault file/, 'Chrome gets the error, not a reason');
+  const status = await app.invoke('status');
+  assert.equal(status.touchId, 'ready');
+  assert.equal(status.touchIdNotice, null);
+  assert.deepEqual(await fsp.readFile(app.sealedPath), sealed, 'the key is kept');
+  await fsp.writeFile(vaultPath, bytes);
+  assert.equal((await app.invoke('unlockWithTouchId')).unlocked, true);
+  assert.equal(app.prompts.length, 3);
 });
 
 test('turning Touch ID off removes its slot and the sealed key; the other slots stay', async t => {
@@ -521,6 +586,30 @@ test('from Chrome: status says only ready or off, and unlockWithTouchId unlocks 
   assert.equal((await app.invoke('status')).unlocked, true);
   assert.deepEqual(app.sent.slice(sent), [['secondhand:unlocked', { lockRevision }]]);
   assert.equal(plain(await app.request('status')).unlocked, true);
+});
+
+// Turning Touch ID on adds the slot first, then saves the sealed key; a key that can't be saved takes its slot away again.
+test('a turn-on whose key can’t be saved removes the slot it added, and says so if that fails too', async t => {
+  const userData = await folder(t);
+  await fsp.writeFile(path.join(userData, 'a file'), 'synthetic');
+  // The key file's folder is a file, so the key can't be saved.
+  const filePath = path.join(userData, 'a file', 'touch-unlock.bin');
+  const slots = [];
+  let removing = null;
+  const vault = { unlocked: true, checkPassword: async () => {},
+    setTouchIdKey: async key => { slots.push(key ? 'add' : 'remove'); if (!key && removing) throw removing; } };
+  const platform = { supported: () => true, sealingAvailable: () => true, prompt: async () => {}, seal: text => Buffer.from(text), unseal: bytes => bytes.toString() };
+  const touchId = createTouchIdUnlock({ vault, platform, filePath, revision: () => 1 });
+  await assert.rejects(touchId.turnOn(PASSWORD), error => /^Touch ID couldn’t be turned on \(.+\)\. Your password still works\.$/.test(error.publicMessage));
+  assert.deepEqual(slots, ['add', 'remove']);
+  removing = new Error('synthetic disk failure');
+  await assert.rejects(touchId.turnOn(PASSWORD), error =>
+    /^Touch ID couldn’t be turned on \(.+\), and its slot couldn’t be removed \(synthetic disk failure\)\. Turn Touch ID off and try again\.$/.test(error.publicMessage));
+  assert.deepEqual(slots, ['add', 'remove', 'add', 'remove']);
+  platform.seal = () => { throw new Error('synthetic Keychain failure'); };
+  await assert.rejects(touchId.turnOn(PASSWORD), error => error.publicMessage === 'Touch ID couldn’t be turned on (synthetic Keychain failure). Your password still works.');
+  assert.equal(slots.length, 4, 'a key that can’t be sealed adds no slot');
+  await assert.rejects(fsp.access(filePath));
 });
 
 test('the Touch ID test hook works only in an unpackaged build in test mode, and never asks macOS or the Keychain', () => {
