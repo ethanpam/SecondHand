@@ -658,6 +658,27 @@ test('money on hand and medical expenses are held back on other sites without Al
   assert.equal(allowed.prompts.length, 0, 'Always allow covers them on other sites too');
 });
 
+test('income sources and current benefits are held back on other sites without Always allow; student status and the help wanted are everyday answers (#184)', async () => {
+  const answers = { studentLevel: 'undergraduate', incomeSources: 'financial-aid,family-support', currentBenefits: 'snap,school-meals', helpWanted: 'food-pantry,fresh-produce' };
+  const app = await desktop({ settings: { extensionId, trustedSites: ['https://pantry.example.org'] } });
+  await app.invoke('saveProfile', answers);
+  app.answer(async () => ({ response: 1 }));
+  const autofill = plain(await app.request({ type: 'getFields', url: PANTRY, fields: Object.keys(answers) }));
+  assert.deepEqual([autofill.values, autofill.held], [{ studentLevel: 'undergraduate', helpWanted: 'food-pantry,fresh-produce' }, ['incomeSources', 'currentBenefits']]);
+  assert.equal(app.prompts.at(-1).title, 'Let Chrome fill this form?');
+  assert.deepEqual(plain((await app.request({ type: 'getFields', url: PANTRY, fields: ['incomeSources', 'currentBenefits'], sensitive: true })).values),
+    { incomeSources: 'financial-aid,family-support', currentBenefits: 'snap,school-meals' });
+  assert.equal(app.prompts.at(-1).title, 'Share sensitive details?');
+  assert.match(app.prompts.at(-1).detail, /^Where your household’s income comes from, Benefits your household gets now\n/);
+  assert.deepEqual(plain((await app.request({ type: 'getFields', fields: Object.keys(answers) })).values), answers);
+  assert.equal(app.prompts.at(-1).title, 'Let Chrome fill this form?', 'Iowa keeps its own trust rules: never a sensitive prompt');
+
+  const allowed = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org'] } });
+  await allowed.invoke('saveProfile', answers);
+  assert.deepEqual(plain((await allowed.request({ type: 'getFields', url: PANTRY, fields: Object.keys(answers) })).values), answers);
+  assert.equal(allowed.prompts.length, 0, 'Always allow covers them on other sites too');
+});
+
 test('turning a site off in the extension drops it from the trusted list at once, even while locked, with no prompt', async () => {
   const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: ['https://pantry.example.org', 'https://wic.example.gov'] } });
   let revision = (await app.request({ type: 'status' })).accessRevision;
