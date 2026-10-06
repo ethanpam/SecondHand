@@ -366,7 +366,7 @@ test('with Laya ready, its answer joins the general fill on an unknown Iowa page
   assert.deepEqual(plain(w.calls.content.find(message => message.type === 'secondhand:generic:fill').assignments).at(-1), { id: blind.id, option: 'No', guessed: true });
   assert.equal(result.filled, 3);
   assert.equal(result.laya, 1);
-  assert.equal(result.message, 'Filled 3 · 1 need you. Guesses were suggested by Laya on this computer. Check your answers, then click Continue.');
+  assert.equal(result.message, 'Filled 3 · 1 need you. Suggestions came from Laya on this computer. Check your answers, then click Continue.');
   assert.doesNotMatch(JSON.stringify(answer), /Synthetic private/);
 });
 

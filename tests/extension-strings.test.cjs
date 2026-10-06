@@ -389,6 +389,23 @@ test('in every language, the lines on the Iowa pages SecondHand fills no longer 
   }
 });
 
+test('#189: in every language, the summary’s count of suggested answers never uses the word for Laya’s best guesses', () => {
+  // Each language's word for a guess, as its "N guessed by Laya, check them" line says it.
+  const guessWords = { en: /guess/i, es: /adivin|suposici/i, vi: /đoán/i, zh: /推测/, fr: /devin|suppos/i, ar: /خم/ };
+  assert.deepEqual(Object.keys(guessWords), [...strings.LANGUAGES]);
+  for (const [code, pattern] of Object.entries(guessWords)) {
+    const catalog = strings.catalogs[code];
+    for (const key of ['widget.layaGuessed', 'result.layaGuessed']) for (const text of [catalog[key].one, catalog[key].other]) assert.match(text, pattern, `${code} ${key} says guess`);
+    assert.match(catalog['guesses.title'], pattern, `${code} guesses.title says guess`);
+    // The fills an AI suggested (or a rule left to check), outlined in dashed amber, and the line that says Laya suggested them.
+    for (const key of ['widget.filledSuggested', 'result.siteFilledSuggested', 'result.siteFilledSuggestedNeedYou', 'result.suggestedByLaya']) {
+      assert.equal(typeof catalog[key], 'string', `${code} ${key}`);
+      assert.doesNotMatch(catalog[key], pattern, `${code} ${key}`);
+    }
+  }
+  for (const key of ['widget.filledGuessed', 'result.siteFilledGuessed', 'result.siteFilledGuessedNeedYou']) assert.equal(Object.hasOwn(en, key), false, `${key} is gone`);
+});
+
 test('the side panel’s English line about Autofill on Iowa says what it fills, where it continues, and what Laya and you check (#167)', () => {
   const policy = en['panel.iowaPolicy'];
   for (const words of ['first suggested home address', 'Laya', 'Social Security number', 'to check', 'Continue']) assert.ok(policy.includes(words), words);

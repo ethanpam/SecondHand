@@ -471,46 +471,41 @@ if (nativeOrigin) {
       const generation = accessRevision;
       const now = today();
       const profile = vault.getData().profile;
-      // Laya guesses only off Iowa's portal (#185).
-      const { answers, guesses, sensitive, sensitiveFields } = await fieldAnswers.answer({ questions: request.questions, profile, budgetMs: request.budgetMs, today: now, guess: !iowa });
+      // Sure answers only: Laya's best guesses (#185) were mostly wrong on the final holdout, so it isn't asked for them (#189).
+      const { answers, sensitive, sensitiveFields } = await fieldAnswers.answer({ questions: request.questions, profile, budgetMs: request.budgetMs, today: now });
       requireUnlocked();
       if (generation !== accessRevision) throw publicError('SecondHand access changed. Click Autofill again.');
-      // Laya's sure answers and its best guesses, in page order.
-      const guessed = question => Object.hasOwn(guesses, question.id);
-      const chosen = request.questions.filter(question => Object.hasOwn(answers, question.id) || guessed(question));
+      const chosen = request.questions.filter(question => Object.hasOwn(answers, question.id));
       // Laya had no age from a saved birth date it can't use; the questions it left say why (#135).
       const reason = chosen.length < request.questions.length && household.hasUnusableBirthDate(profile, { today: now }) ? { reason: 'birthDate' } : {};
-      const release = list => ({ answers: Object.fromEntries(list.filter(question => !guessed(question)).map(question => [question.id, answers[question.id]])),
-        guesses: Object.fromEntries(list.filter(guessed).map(question => [question.id, guesses[question.id]])) });
-      if (!chosen.length) return { ...release([]), accessRevision, ...reason };
+      if (!chosen.length) return { answers: {}, accessRevision, ...reason };
       // Answers are profile information: they follow getFields' approval, each question listed
-      // with the option that would be filled, a guess marked as one. Iowa's portal keeps its rule of no sensitive prompt.
-      const lines = list => list.map(question => guessed(question) ? `“${question.label}”: ${guesses[question.id]} (a guess)` : `“${question.label}”: ${answers[question.id]}`).join('\n');
-      const guessNote = list => list.some(guessed) ? '\n\nLaya isn’t sure of the answers marked “a guess”. SecondHand marks them on the page for you to check.' : '';
+      // with the option that would be filled. Iowa's portal keeps its rule of no sensitive prompt.
+      const lines = list => list.map(question => `“${question.label}”: ${answers[question.id]}`).join('\n');
       const these = list => list.length === 1 ? 'this answer' : 'these answers';
       const approve = (list, sensitivePrompt = null) => approveRelease({ context, iowa, origin, generation,
         message: `Fill ${these(list)} into ${iowa ? 'Iowa’s application' : origin}?`,
-        items: `Laya, SecondHand’s AI on this computer, picked ${these(list)} from your saved information:\n${lines(list)}${guessNote(list)}`, sensitive: sensitivePrompt });
+        items: `Laya, SecondHand’s AI on this computer, picked ${these(list)} from your saved information:\n${lines(list)}`, sensitive: sensitivePrompt });
       const count = chosen.length;
       // Laya reads every sensitive fact at once, so the prompt names them all and says how many
-      // answers needed them; which fact decided an answer is not known. A guess never needs one.
+      // answers needed them; which fact decided an answer is not known.
       const needed = sensitive.length;
       const which = needed === count ? these(chosen) : `${needed} of these answers`;
       const uses = needed === count ? (count === 1 ? 'It uses' : 'They use') : `${needed} of them ${needed === 1 ? 'uses' : 'use'}`;
       const asksSensitive = !iowa && needed > 0;
       const approved = await approve(chosen, asksSensitive ? { message: `Fill ${count === 1 ? 'this answer' : `these ${count} answers`} on ${origin}? ${uses} sensitive details.`,
-        detail: `${sensitiveFields.map(fieldLabel).join(', ')}\n\nLaya, SecondHand’s AI on this computer, read these saved details to pick ${which}. The details stay on this computer. Only allow this if you meant to give these answers to ${origin}:\n${lines(chosen)}${guessNote(chosen)}` } : null);
+        detail: `${sensitiveFields.map(fieldLabel).join(', ')}\n\nLaya, SecondHand’s AI on this computer, read these saved details to pick ${which}. The details stay on this computer. Only allow this if you meant to give these answers to ${origin}:\n${lines(chosen)}` } : null);
       touch();
-      if (approved) return { ...release(chosen), accessRevision, ...reason };
+      if (approved) return { answers, accessRevision, ...reason };
       // Cancel on "Share sensitive details?" drops only the answers that needed sensitive details (#42).
       // That prompt shows only without Always allow, so the others then ask "Let Chrome fill this form?".
       const everyday = asksSensitive ? chosen.filter(question => !sensitive.includes(question.id)) : [];
-      if (!everyday.length) return { ...release([]), accessRevision, ...reason };
+      if (!everyday.length) return { answers: {}, accessRevision, ...reason };
       requireUnlocked();
       if (generation !== accessRevision) throw publicError('SecondHand access changed. Click Autofill again.');
       const kept = await approve(everyday);
       touch();
-      return { ...release(kept ? everyday : []), accessRevision, ...reason };
+      return { answers: kept ? Object.fromEntries(everyday.map(question => [question.id, answers[question.id]])) : {}, accessRevision, ...reason };
     } catch (error) {
       if (error.publicMessage) throw error;
       if (error.code === 'LAYA_NOT_READY') throw layaNotReady();

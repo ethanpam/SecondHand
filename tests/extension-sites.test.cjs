@@ -603,7 +603,7 @@ test('AI guesses join the one desktop request and are filled with the guessed ma
   const result = plain(response.data);
   assert.equal(result.filled, 3);
   assert.equal(result.guessed, 2);
-  assert.equal(result.message, 'Filled 3 · 2 guessed · 1 need you. Check your answers before you submit.');
+  assert.equal(result.message, 'Filled 3 · 2 suggested · 1 need you. Check your answers before you submit.');
   assert.doesNotMatch(JSON.stringify(result), /Synthetic private|5155550100/);
 });
 
@@ -1450,7 +1450,7 @@ test('with Laya ready, the widget’s plan says so, and its match fills a text b
   assert.equal(result.filled, 2);
   assert.equal(result.guessed, 1);
   assert.equal(result.laya, 1);
-  assert.equal(result.message, 'Filled 2 · 1 guessed · 1 need you. Check your answers before you submit. Guesses were suggested by Laya on this computer.');
+  assert.equal(result.message, 'Filled 2 · 1 suggested · 1 need you. Check your answers before you submit. Suggestions came from Laya on this computer.');
   assert.equal(result.messageKey, 'result.suggestedByLaya');
   assert.doesNotMatch(JSON.stringify(layaCalls(w)), /Synthetic private|synthetic\.private|50309/, 'no saved value is ever sent to Laya');
 });
@@ -1470,7 +1470,7 @@ test('Laya answers a choice question from the saved profile: the option is picke
   assert.equal(w.page.fields[1].mark, 'guess');
   assert.deepEqual(result.needYou, [idOf(w, 'pet')], '"Do you have a pet?" stays under need you');
   assert.equal(result.guessed, 1);
-  assert.equal(result.message, 'Filled 2 · 1 guessed · 1 need you. Check your answers before you submit. Guesses were suggested by Laya on this computer.');
+  assert.equal(result.message, 'Filled 2 · 1 suggested · 1 need you. Check your answers before you submit. Suggestions came from Laya on this computer.');
   assert.deepEqual(w.nativeTypes().filter(type => type !== 'status'), ['warmLaya', 'answerFields', 'getFields'],
     'Laya is readied, answers the choice questions first, and the saved values follow');
   assert.doesNotMatch(JSON.stringify(layaCalls(w)), /Synthetic private|synthetic\.private|50309/, 'no saved value is ever sent to Laya');
@@ -1492,7 +1492,7 @@ test('a question whose label hides a zero-width space stays with the applicant, 
   assert.deepEqual(answerRequest.questions.map(question => question.label), [SIXTY.label, PET.label], 'Laya gets every other question');
   assert.deepEqual(w.page.answered(), ['name', 'sixty']);
   assert.deepEqual(result.needYou, [idOf(w, 'delivery'), idOf(w, 'pet')], 'the hidden-character question is left to the applicant');
-  assert.equal(result.message, 'Filled 2 · 1 guessed · 2 need you. Check your answers before you submit. Guesses were suggested by Laya on this computer.');
+  assert.equal(result.message, 'Filled 2 · 1 suggested · 2 need you. Check your answers before you submit. Suggestions came from Laya on this computer.');
 });
 
 test('answers alone fill under their own access receipt, which is checked before the page is touched', async () => {
@@ -1560,7 +1560,7 @@ test('Laya not ready: the widget’s plan says so after one readiness check, and
   assert.deepEqual(today.nativeTypes(), ['warmLaya', 'status', 'status', 'getFields', 'status'], 'custom availability is checked; Laya is not asked again in the same click');
   assert.equal(guessed.guessed, 1);
   assert.equal(guessed.laya, undefined);
-  assert.equal(guessed.message, 'Filled 2 · 1 guessed · 2 need you. Check your answers before you submit.');
+  assert.equal(guessed.message, 'Filled 2 · 1 suggested · 2 need you. Check your answers before you submit.');
 
   const unguessed = siteWorker({ enabled: true, fields: openQuestions(), desktop: { values: SAVED } });
   await plan(unguessed);
@@ -1703,7 +1703,7 @@ test('#185: Laya’s guess fills a single-choice question with its own mark; the
   assert.deepEqual([result.filled, result.guessed, result.laya, result.layaGuessed], [3, 1, 1, 1], 'the guess is filled, apart from the sure answer');
   assert.deepEqual(result.layaGuesses, [{ id: size, label: SIZE.label }]);
   assert.deepEqual(result.needYou, [idOf(w, 'pet')]);
-  assert.equal(result.message, 'Filled 3 · 1 guessed · 1 need you. Check your answers before you submit. Guesses were suggested by Laya on this computer. 1 guessed by Laya, check it.');
+  assert.equal(result.message, 'Filled 3 · 1 suggested · 1 need you. Check your answers before you submit. Suggestions came from Laya on this computer. 1 guessed by Laya, check it.');
   assert.equal(result.messageKey, 'result.layaGuessed');
   assert.deepEqual(plain((await w.panel({ type: 'ui:pageState' })).data).result.layaGuesses, [{ id: size, label: SIZE.label }]);
   assert.deepEqual(plain((await w.panel({ type: 'ui:focusField', key: size })).data), { focused: true }, 'the side panel finds it after the fill planned the page again');
@@ -2952,7 +2952,7 @@ test('when Laya answers without a saved date of birth it can’t use, the click 
   const w = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...SIXTY }, { ...PET }], desktop: layaDesktop(play) });
   const result = plain((await autofill(w)).data);
   assert.equal(result.filled, 2);
-  assert.equal(result.message, `Filled 2 · 1 guessed · 1 need you. Check your answers before you submit. Guesses were suggested by Laya on this computer. ${BIRTH_DATE_REASON}`);
+  assert.equal(result.message, `Filled 2 · 1 suggested · 1 need you. Check your answers before you submit. Suggestions came from Laya on this computer. ${BIRTH_DATE_REASON}`);
   const both = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...SIXTY }, { ...PET }], desktop: { ...layaDesktop(play), fieldsReason: 'birthDate' } });
   assert.equal(plain((await autofill(both)).data).message.split(BIRTH_DATE_REASON).length, 2, 'the same reason is said once');
 });

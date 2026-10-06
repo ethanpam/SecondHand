@@ -7,7 +7,7 @@
   const summary = globalThis.SecondHandSummary;
   // Must match BUILD in background.js: change both together. Chrome loads these pages
   // from disk right away but keeps running the old worker until SecondHand is reloaded.
-  const BUILD = '2026-10-06.14';
+  const BUILD = '2026-10-06.15';
   // The applicant's language: the choice saved in this extension's storage, else the browser's.
   let language = strings.language();
   const t = (key, params = {}) => strings.text(language, key, params);
@@ -117,7 +117,8 @@
         const guessed = Number(result.guessed) || 0;
         // Questions held back for Fill sensitive details (#176) matched saved answers: it says where they wait instead.
         const held = Number.isInteger(result.held) && result.held > 0 ? result.held : 0;
-        const summary = filled > 0 ? (guessed > 0 ? t('widget.filledGuessed', { count: filled, guessed }) : t('widget.filled', { count: filled }))
+        // The dashed marks of an AI's suggestions are "suggested", so they can't be taken for Laya's best guesses (#189).
+        const summary = filled > 0 ? (guessed > 0 ? t('widget.filledSuggested', { count: filled, suggested: guessed }) : t('widget.filled', { count: filled }))
           : held ? '' : fieldKeys(result.needYou).length ? t('widget.nothingMatches') : words(fromResult(result), 120);
         // Laya's best guesses (#185), apart from its sure answers.
         const layaGuessed = Number.isInteger(result.layaGuessed) && result.layaGuessed > 0 ? result.layaGuessed : 0;

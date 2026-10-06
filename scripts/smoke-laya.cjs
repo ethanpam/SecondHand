@@ -136,7 +136,7 @@ async function main() {
     // #39: a text box the rules miss is matched by Laya and filled from the vault as a guess.
     let widget = await open(CONTACT, 'ready');
     await widget.locator('#autofill').click();
-    await expect(widget.locator('#widget-text')).toHaveText(`${en('widget.filledGuessed', { count: 2, guessed: 1 })} · ${en('widget.suggestedByLaya')}`, { timeout: 20000 });
+    await expect(widget.locator('#widget-text')).toHaveText(`${en('widget.filledSuggested', { count: 2, suggested: 1 })} · ${en('widget.suggestedByLaya')}`, { timeout: 20000 });
     await expect(page.locator('#name')).toHaveValue(`${syntheticProfile.firstName} ${syntheticProfile.lastName}`);
     await expect(page.locator('#reach')).toHaveValue(syntheticProfile.email);
     assert.equal(await mark('#name'), 'rule');
@@ -152,7 +152,7 @@ async function main() {
     // #42: "Is anyone in your household 60 or older?" gets "No" for a household with no seniors; the pet question needs the applicant.
     widget = await open(HOUSEHOLD, 'ready');
     await widget.locator('#autofill').click();
-    await expect(widget.locator('#widget-text')).toHaveText(`${en('widget.filledGuessed', { count: 2, guessed: 1 })} · ${en('widget.suggestedByLaya')}`, { timeout: 20000 });
+    await expect(widget.locator('#widget-text')).toHaveText(`${en('widget.filledSuggested', { count: 2, suggested: 1 })} · ${en('widget.suggestedByLaya')}`, { timeout: 20000 });
     await expect(page.locator('input[name="sixty"][value="no"]')).toBeChecked();
     await expect(page.locator('input[name="sixty"][value="yes"]')).not.toBeChecked();
     assert.equal(await mark('input[name="sixty"][value="no"]'), 'guess');
@@ -220,7 +220,7 @@ async function main() {
     await expect.poll(() => panel.text('#panel-autofill')).toBe(en('panel.autofill'));
     await panel.click('#panel-autofill');
     await expect(page.locator('input[name="sixty"][value="no"]')).toBeChecked({ timeout: 20000 });
-    await expect.poll(() => panel.text('#status'), { timeout: 15000 }).toBe(en('result.suggestedByLaya', { summary: { key: 'result.siteFilledGuessedNeedYou', params: { count: 2, guessed: 1, needYou: 1 } } }));
+    await expect.poll(() => panel.text('#status'), { timeout: 15000 }).toBe(en('result.suggestedByLaya', { summary: { key: 'result.siteFilledSuggestedNeedYou', params: { count: 2, suggested: 1, needYou: 1 } } }));
     await expect.poll(() => panel.text('#laya-status'), { timeout: 15000 }).toBe(en('desktop.layaReady'));
     assert.deepEqual((await layaRequests()).map(call => call.type), ['answerFields']);
     console.log(`Side panel Autofill with Laya ready: "${await panel.text('#status')}" and "${en('desktop.layaReady')}"`);
