@@ -438,6 +438,22 @@ async function main() {
     await page.locator('.nav-item[data-view="privacy"]').click();
     await expect(page.locator('#touch-id-setting')).toBeVisible();
     await expect(page.locator('#touch-id-toggle')).not.toBeChecked();
+    // Privacy & backups is readable (#166): its text at least 13px, hints 12px, all at 4.5:1, at 100% and at 200% zoom.
+    const privacyText = '#view-privacy :is(p, h3, strong, label), .field-hint';
+    const privacy = await unreadableText(page, privacyText, 13);
+    assert.equal(privacy.length, 0, `Text too small or faint on Privacy & backups:\n${privacy.join('\n')}`);
+    await captureDiagnostic(page, 'desktop-privacy.png', { fullPage: true });
+    const privacyWidth = await page.evaluate(() => window.innerWidth);
+    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(2));
+    await expect.poll(() => page.evaluate(() => window.innerWidth)).toBeLessThanOrEqual(Math.ceil(privacyWidth / 2));
+    const privacyOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    assert.ok(privacyOverflow <= 1, `no sideways scrolling on Privacy & backups at 200% (${privacyOverflow}px)`);
+    const privacyZoomed = await unreadableText(page, privacyText, 13);
+    assert.equal(privacyZoomed.length, 0, `Text too small or faint on Privacy & backups at 200% zoom:\n${privacyZoomed.join('\n')}`);
+    const drawnPrivacy = await application.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString('base64'));
+    await fs.writeFile(path.join(root, 'artifacts/privacy-zoom-200.png'), Buffer.from(drawnPrivacy, 'base64'));
+    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1));
+    await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(privacyWidth);
     // Turning it on opens the password dialog; the box stays clear until the password is checked.
     await page.locator('#touch-id-toggle').click();
     await expect(page.locator('#touch-id-dialog')).toBeVisible();
@@ -546,7 +562,7 @@ async function main() {
     await expect(page.locator('#setup-resume-text')).toHaveText('Finish setting up: 0 of 6 steps');
     assert.deepEqual((await page.evaluate(() => window.secondHand.getData())).profile, {});
     assert.deepEqual(errors, []);
-    console.log('Electron UI smoke passed: guided setup offered after the recovery key, saved step by step with a household list, finished later from Overview and readable at 200% zoom; Laya downloads on its own on a new install and stays off once turned off, create, save full applicant choices, Iowa’s questions about you and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence, readable hints, Touch ID on (test hook) with a lock-screen lock, a Touch ID unlock, and Touch ID ready at once after a restart, recovery key password reset that keeps Touch ID, clear Iowa’s questions, start over (which removes Touch ID) and its setup offer.');
+    console.log('Electron UI smoke passed: guided setup offered after the recovery key, saved step by step with a household list, finished later from Overview and readable at 200% zoom; Laya downloads on its own on a new install and stays off once turned off, create, save full applicant choices, Iowa’s questions about you and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence, readable hints and Privacy & backups text (also at 200% zoom), Touch ID on (test hook) with a lock-screen lock, a Touch ID unlock, and Touch ID ready at once after a restart, recovery key password reset that keeps Touch ID, clear Iowa’s questions, start over (which removes Touch ID) and its setup offer.');
   } catch (error) {
     if (page && !page.isClosed()) {
       const auth = await page.evaluate(() => ({
