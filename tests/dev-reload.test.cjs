@@ -33,25 +33,29 @@ test('editor and OS scratch files never trigger a reload', () => {
   }
 });
 
-test('a burst of saves is coalesced into one reload per affected part', async () => {
+test('a burst of saves is coalesced into one reload per affected part', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const flushes = [];
   const batcher = createBatcher(kinds => flushes.push([...kinds].sort()), 20);
   batcher.add('extension');
   batcher.add('extension');
   batcher.add('desktop');
-  await new Promise(resolve => setTimeout(resolve, 60));
+  t.mock.timers.tick(19);
+  assert.deepEqual(flushes, [], 'the batch waits for the burst to end');
+  t.mock.timers.tick(1);
   assert.deepEqual(flushes, [['desktop', 'extension']]);
   batcher.add('extension');
-  await new Promise(resolve => setTimeout(resolve, 60));
+  t.mock.timers.tick(20);
   assert.deepEqual(flushes, [['desktop', 'extension'], ['extension']]);
 });
 
-test('a cancelled batch does not reload', async () => {
+test('a cancelled batch does not reload', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const flushes = [];
   const batcher = createBatcher(kinds => flushes.push(kinds), 20);
   batcher.add('desktop');
   batcher.cancel();
-  await new Promise(resolve => setTimeout(resolve, 60));
+  t.mock.timers.tick(60);
   assert.deepEqual(flushes, []);
 });
 

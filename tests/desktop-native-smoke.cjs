@@ -53,14 +53,23 @@ async function runHost(executable, args, env, requests) {
   }
 }
 
-// A stand-in at the app path. With Chrome's origin it is the real native host (desktop/main.cjs).
+// A stand-in at the app path. With Chrome's origin it is the real native host (desktop/main.cjs), which
+// records in `startsRecord` the process ID of each app it starts, as it starts it and so before it answers.
 // Started without one, the way openApp starts SecondHand, it records how it was started and quits.
-async function standInApp(directory, record) {
+async function standInApp(directory, record, startsRecord) {
   await fs.mkdir(directory);
   await fs.writeFile(path.join(directory, 'package.json'), JSON.stringify({ name: 'secondhand-native-smoke-stand-in', main: 'main.cjs' }));
   await fs.writeFile(path.join(directory, 'main.cjs'), `'use strict';
-if (process.argv.some(argument => argument.startsWith('chrome-extension://'))) require(${JSON.stringify(path.join(root, 'desktop/main.cjs'))});
-else {
+if (process.argv.some(argument => argument.startsWith('chrome-extension://'))) {
+  const childProcess = require('node:child_process');
+  const { spawn } = childProcess;
+  childProcess.spawn = (...args) => {
+    const child = spawn(...args);
+    require('node:fs').appendFileSync(${JSON.stringify(startsRecord)}, JSON.stringify({ pid: child.pid ?? null }) + '\\n');
+    return child;
+  };
+  require(${JSON.stringify(path.join(root, 'desktop/main.cjs'))});
+} else {
   require('node:fs').appendFileSync(${JSON.stringify(record)}, JSON.stringify({ pid: process.pid, args: process.argv.slice(1),
     userData: process.env.SECONDHAND_USER_DATA ?? null, testMode: process.env.SECONDHAND_TEST_MODE ?? null, testUserData: process.env.SECONDHAND_TEST_USER_DATA ?? null }) + '\\n');
   require('electron').app.exit(0);
@@ -93,18 +102,29 @@ async function launches(record) {
   catch (error) { if (error.code === 'ENOENT') return []; throw error; }
 }
 
-// The apps a host started, once the first has run. Their process IDs go in `started` so they are ended.
-async function startedApps(record, started) {
+// Whether a copy of the program `file` is running: Windows won't open a running program's file for writing.
+async function running(file) {
+  try { await (await fs.open(file, 'r+')).close(); return false; }
+  catch (error) { if (error.code === 'EBUSY') return true; throw error; }
+}
+
+// Ends the process `pid`, unless it has ended already.
+function end(pid) {
+  try { process.kill(pid); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+}
+
+// The apps a host started, once every one has run. Each records how it was started and is then ended;
+// `unrecorded`, given those recorded, answers whether an app the host started has yet to.
+async function startedApps(record, unrecorded) {
+  const ended = new Set();
   const deadline = Date.now() + 20000;
-  while (!(await launches(record)).length) {
-    if (Date.now() > deadline) throw new Error('The host answered launched, but the app it started never ran.');
+  for (;;) {
+    const recorded = await launches(record);
+    for (const { pid } of recorded) if (!ended.has(pid)) { ended.add(pid); end(pid); }
+    if (recorded.length && !(await unrecorded(recorded))) return recorded;
+    if (Date.now() > deadline) throw new Error('The host answered launched, but an app it started never ran.');
     await new Promise(resolve => setTimeout(resolve, 100));
   }
-  // A second start would have recorded by now; the host starts the app once.
-  await new Promise(resolve => setTimeout(resolve, 2000));
-  const recorded = await launches(record);
-  started.push(...recorded.map(item => item.pid));
-  return recorded;
 }
 
 (async () => {
@@ -126,7 +146,6 @@ async function startedApps(record, started) {
       : { request: { id: 'open-app', type: 'openApp' }, received: { id: 'open-app', type: 'showApp' }, data: { shown: true }, answer: { opened: 'shown' } }
   ];
   let bridge;
-  const started = [];
   try {
     bridge = await startBridge(userData, () => extensionId, async (request, context) => {
       assert.equal(context.extensionId, extensionId);
@@ -169,25 +188,27 @@ async function startedApps(record, started) {
       const answers = await runHost(path.join(installed, 'secondHand-native.exe'), [], { ...closedEnv, NODE_OPTIONS: `--require ${JSON.stringify(script)}` }, opens);
       assert.deepEqual(answers, launched);
       assert.ok(Date.now() - began < STAND_IN_STAYS_MS / 2, 'The relay’s output stayed open while the app it started ran: the app kept the relay’s handles.');
-      const recorded = await startedApps(record, started);
+      // A copy the relay started runs until it has recorded and is ended, so once none is running, every one has recorded.
+      const recorded = await startedApps(record, () => running(path.join(installed, 'secondHand.exe')));
       // Compared as real paths: the temporary folder may be named in its short 8.3 form.
       const real = file => realpathSync.native(file);
       assert.deepEqual(recorded.map(({ pid, executable, folder, ...launch }) => ({ ...launch, executable: real(executable), folder: real(folder) })),
         [{ args: [], localAppData: temporary, testMode: null, testUserData: null, executable: real(path.join(installed, 'secondHand.exe')), folder: real(installed) }]);
     } else {
       const standIn = path.join(temporary, 'stand-in');
-      await standInApp(standIn, record);
+      const startsRecord = path.join(temporary, 'starts.jsonl');
+      await standInApp(standIn, record, startsRecord);
       assert.deepEqual(await runHost(executable, [standIn], closedEnv, opens), launched);
-      const recorded = await startedApps(record, started);
+      // The host has ended, so these are all the apps it started.
+      const starts = (await launches(startsRecord)).map(({ pid }) => pid);
+      const recorded = await startedApps(record, seen => starts.some(pid => !seen.some(launch => launch.pid === pid)));
       assert.deepEqual(recorded.map(({ pid, ...launch }) => launch), [{ args: [standIn], userData, testMode: null, testUserData: null }]);
+      assert.deepEqual(recorded.map(({ pid }) => pid), starts, 'the app that ran is the one the host started');
     }
     process.stdout.write(windowsRelay
       ? 'Native messaging subprocess smoke passed: with the app closed, the Windows relay started the secondHand.exe beside it once, with no arguments, without its handles or test settings.\n'
       : 'Native messaging subprocess smoke passed: with the app closed, openApp started it once, with the app path and data folder, without Chrome’s origin or test settings.\n');
   } finally {
-    for (const pid of started) {
-      try { process.kill(pid); } catch (error) { if (error.code !== 'ESRCH') throw error; }
-    }
     if (bridge) await bridge.close();
     // A Windows stand-in just ended may hold its file for a moment.
     await fs.rm(temporary, { recursive: true, force: true, maxRetries: 10 });

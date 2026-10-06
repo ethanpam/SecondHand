@@ -3,13 +3,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
-const syncFs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const vm = require('node:vm');
 const { LIMITS, documentKind, validatePages, progress } = require('../desktop/ocr-limits.cjs');
 const { createDocumentReader, readSelectedFile } = require('../desktop/ocr-service.cjs');
 const { assetPath, ORIGIN } = require('../desktop/ocr-engine.cjs');
+const { runFile } = require('./helpers/harness.cjs');
 const ID = 'b1be3de2-8bcc-4f07-94a6-f534f0b34047';
 const OTHER = 'fd2bda70-5d1e-4d3c-9d34-4e7c1607f2e5';
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -41,16 +40,17 @@ test('OCR result validation bounds pages, text, word boxes, and strips extra pay
   assert.deepEqual(validatePages(alternate), alternate);
   alternate.pages[0].alternative.words[0].bbox.x1 = 1001;
   assert.throws(() => validatePages(alternate), { code: 'OUTPUT_LIMIT' });
+  // Each change, and the error code the reader reports for it.
   const cases = [
-    value => { value.pageCount = 2; },
-    value => { value.pages[0].text = 'x'.repeat(LIMITS.textPerPage + 1); },
-    value => { value.pages[0].width = 1000000; },
-    value => { value.pages[0].confidence = NaN; },
-    value => { value.pages[0].words[0].bbox.x1 = 1000; },
-    value => { value.pages[0].words[0].bbox.x0 = 99; },
-    value => { value.pages[0].words[0].confidence = Infinity; }
+    [value => { value.pageCount = 2; }, 'READ_FAILED'],
+    [value => { value.pages[0].text = 'x'.repeat(LIMITS.textPerPage + 1); }, 'OUTPUT_LIMIT'],
+    [value => { value.pages[0].width = 1000000; }, 'OUTPUT_LIMIT'],
+    [value => { value.pages[0].confidence = NaN; }, 'OUTPUT_LIMIT'],
+    [value => { value.pages[0].words[0].bbox.x1 = 1000; }, 'OUTPUT_LIMIT'],
+    [value => { value.pages[0].words[0].bbox.x0 = 99; }, 'OUTPUT_LIMIT'],
+    [value => { value.pages[0].words[0].confidence = Infinity; }, 'OUTPUT_LIMIT']
   ];
-  for (const change of cases) { const value = page(); change(value); assert.throws(() => validatePages(value)); }
+  for (const [change, code] of cases) { const value = page(); change(value); assert.throws(() => validatePages(value), { code }, change.toString()); }
   assert.equal(progress({ phase: 'recognizing', page: 13, total: 13 }), null);
   assert.equal(progress({ phase: 'Synthetic applicant text', page: 1, total: 1 }), null);
 });
@@ -167,7 +167,7 @@ test('preload exposes correlated document actions and sanitizes progress without
     invoke: (...args) => invokes.push(args), on: (channel, listener) => listeners.set(channel, listener),
     removeListener: (channel, listener) => { if (listeners.get(channel) === listener) listeners.delete(channel); }
   } };
-  vm.runInNewContext(syncFs.readFileSync(path.join(__dirname, '../desktop/preload.cjs'), 'utf8'), { require: name => { assert.equal(name, 'electron'); return electron; } });
+  runFile('desktop/preload.cjs', { require: name => { assert.equal(name, 'electron'); return electron; } });
   api.readDocument(ID); api.cancelDocumentRead(ID);
   assert.deepEqual(invokes, [['secondhand:invoke', 'readDocument', ID], ['secondhand:invoke', 'cancelDocumentRead', ID]]);
   const unsubscribe = api.onDocumentProgress(value => events.push(JSON.parse(JSON.stringify(value))));

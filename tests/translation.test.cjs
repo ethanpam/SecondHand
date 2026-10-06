@@ -69,7 +69,9 @@ test('a ready translator translates each text once per page, on this computer, a
   await assert.rejects(oddService.translate(await oddService.translator('en', 'es'), 'en', 'es', ['Name']), /translat/i, 'a reply that is not text is an error');
 });
 
-test('a download reports its progress; one that never starts says so; one that fails is tried again on the next click', async () => {
+test('a download reports its progress; one that never starts says so; one that fails is tried again on the next click', async t => {
+  // The test runs the clock the stall timer counts on.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   let monitor;
   let finish;
   const downloading = chromeAI({ translator: 'downloadable', create: options => { options.monitor(monitor = new EventTarget()); return new Promise(resolve => { finish = resolve; }); } });
@@ -80,13 +82,15 @@ test('a download reports its progress; one that never starts says so; one that f
   monitor.dispatchEvent(progress(1));
   finish({ async translate(text) { return text; } });
   await pending;
-  await new Promise(resolve => setTimeout(resolve, 60));
+  t.mock.timers.tick(60);
   assert.deepEqual(seen, [0, 0.5, 1], 'no stall once Chrome is downloading');
 
   const stuck = chromeAI({ translator: 'downloadable', create: () => new Promise(() => {}) });
   const stalls = [];
   translation.create(stuck.scope, { stallMs: 20 }).translator('en', 'es', { onStall: () => stalls.push('stalled') });
-  await new Promise(resolve => setTimeout(resolve, 60));
+  t.mock.timers.tick(19);
+  assert.deepEqual(stalls, [], 'not before its stall time');
+  t.mock.timers.tick(1);
   assert.deepEqual(stalls, ['stalled']);
 
   let attempts = 0;

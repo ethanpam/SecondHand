@@ -4,14 +4,12 @@ const assert = require('node:assert/strict');
 const { JSDOM } = require('jsdom');
 const generic = require('../extension/generic-adapter.js');
 const catalog = require('../shared/snap-information.js');
+const { layoutElements } = require('./helpers/harness.cjs');
 const URL = 'https://hhsservices.iowa.gov/apspssp/ssp.portal/applyForBenefits/ssaVerificationRender';
 const self = '<ul><li class="current"><a title="Start Application | Active">Start Application</a></li><li class="next"><a title="People | Unvisited">People</a></li></ul><p>Please give us additional information about yourself. If you cannot answer a question you can skip it.</p>';
 const choice = (label, name = 'question', options = ['Yes', 'No']) => `<fieldset><legend>${label}</legend>${options.map((option, index) => `<label><input type="radio" name="${name}" value="${index}">${option}</label>`).join('')}</fieldset>`;
 function page(body, url = URL) {
-  const doc = new JSDOM(`<!doctype html><body>${body}</body>`, { url, pretendToBeVisual: true }).window.document;
-  doc.defaultView.Element.prototype.getBoundingClientRect = () => ({ left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 });
-  doc.defaultView.Element.prototype.getClientRects = function () { return [this.getBoundingClientRect()]; };
-  return doc;
+  return layoutElements(new JSDOM(`<!doctype html><body>${body}</body>`, { url, pretendToBeVisual: true }).window);
 }
 const cases = [
  ['Are you an Iowa resident?', 'applicantIowaResident'], ['Were you born in the United States?', 'bornInUs'],

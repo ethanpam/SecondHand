@@ -35,6 +35,12 @@ uv run --project ~/Projects/LayaStudio python ML_model/eval/decisions.py --runti
 node ML_model/eval/page_latency.cjs --model <export> --format choice-v2 --form <form url> --runs 30 --out <name>.json
 ```
 
+`app_accuracy.cjs` fills the final holdout through the desktop's own request code with a real export, one fictional household's choice question at a time and each form's text boxes at once, and checks every fill against the answer key (#143). It builds the holdout as the reports above did (400 households, seed 11, 8 per question) and leaves out the click's time limit, so a busy computer answers the same. `WRONG_FILL_BUDGETS` is the share of each task's decisions a format may fill wrong; `tests/laya-parity.test.cjs` runs the same check with `SECONDHAND_LAYA_ACCURACY=1`. The measured runs are `round2-onnx-int8-final-app-fills.json` and `round4-onnx-int8-final-app-fills.json`.
+
+```
+node ML_model/eval/app_accuracy.cjs --model <export> --format noul-v1 --out <name>.json
+```
+
 The runtime comparison for #37 is in `docs/superpowers/specs/2026-09-27-laya-runtime-spike.md`.
 
 `runtime_fixtures.py` writes the Python reference outputs that the desktop app's JavaScript Laya runtime (#38) is tested against: token ids, prompts, and int8 ONNX probabilities for a fixed sample of rows. There is one file per model format: `tests/fixtures/laya/parity-noul.json` from round 2's export (the shipped model) and `parity-choice.json` from a `choice-v2` export. Each file names the checkpoint it came from. Its docstring has the commands. `tests/laya-parity.test.cjs` checks each against its own export and skips a format whose export isn't given:

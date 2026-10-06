@@ -2,18 +2,11 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const vm = require('node:vm');
-const { pathToFileURL } = require('node:url');
 const realLaya = require('../desktop/laya.cjs');
-
-const root = path.resolve(__dirname, '..');
-// Values created inside the vm context have foreign prototypes.
-const plain = value => JSON.parse(JSON.stringify(value));
-const source = fs.readFileSync(path.join(root, 'desktop/main.cjs'), 'utf8');
+const { plain, startMain, safeStorage } = require('./helpers/harness.cjs');
 
 // Runs the real main process and vault against a temporary folder. Only the
 // operating system's protected storage is simulated, so no Keychain is touched.
@@ -24,11 +17,7 @@ async function desktop(t, { encryptionAvailable = true, shell = {}, env = {}, is
     userData = await fsp.mkdtemp(path.join(os.tmpdir(), 'secondhand-recovery-main-'));
     t.after(() => fsp.rm(userData, { recursive: true, force: true }));
   }
-  let invoke;
-  let window;
-  let bridge;
   const dialogs = [];
-  const timers = [];
   // The files main.cjs reads.
   const reads = [];
   const clipboard = { text: '', writeText(text) { this.text = text; }, readText() { return this.text; }, clear() { this.text = ''; } };
@@ -37,56 +26,22 @@ async function desktop(t, { encryptionAvailable = true, shell = {}, env = {}, is
     if (!dialog[name]) assert.fail(`Unexpected ${name}`);
     return dialog[name](options);
   };
-  const safeStorage = {
-    isEncryptionAvailable: () => encryptionAvailable,
-    encryptString: text => Buffer.from(`sealed:${Buffer.from(text).toString('hex')}`),
-    decryptString: bytes => {
-      const text = bytes.toString();
-      if (!text.startsWith('sealed:')) throw new Error('Not sealed by this computer.');
-      return Buffer.from(text.slice(7), 'hex').toString();
-    }
-  };
-  class BrowserWindow {
-    constructor() {
-      window = this;
-      this.webContents = { mainFrame: { url: pathToFileURL(path.join(root, 'renderer/index.html')).href },
-        setWindowOpenHandler() {}, on() {}, send() {} };
-    }
-    show() {} focus() {} setMenuBarVisibility() {} once() {} on() {} loadFile() {}
-    isDestroyed() { return false; }
-  }
-  const app = { isPackaged, setName() {}, setPath() {}, getPath: () => userData,
-    requestSingleInstanceLock: () => true, whenReady: () => Promise.resolve(), on() {} };
-  const electron = { app, BrowserWindow, safeStorage, ipcMain: { handle(_name, handler) { invoke = handler; } },
-    dialog: { showErrorBox() { assert.fail('Desktop setup failed'); }, showOpenDialog: asked('showOpenDialog'), showSaveDialog: asked('showSaveDialog'), showMessageBox: asked('showMessageBox') },
-    shell, clipboard, powerMonitor: { on() {} },
-    session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, webRequest: { onBeforeRequest() {} } } } };
-  // A Mac without Touch ID; tests/desktop-touch-id-main.test.cjs covers Touch ID.
-  electron.systemPreferences = { canPromptTouchID: () => false };
-  const overrides = {
-    electron,
-    'node:fs/promises': { ...fsp, readFile: (file, ...rest) => { reads.push(String(file)); return fsp.readFile(file, ...rest); } },
-    './bridge.cjs': { ...require('../desktop/bridge.cjs'), startBridge: async (_directory, _getId, handler) => { bridge = handler; return { close: async () => {} }; } },
-    './extension-setup.cjs': { getExtensionSetup: async () => ({ prepared: false }) },
-    './registration.cjs': { registerHost: async () => ({}) },
-    './test-storage-path.cjs': { testStoragePath: () => null },
-    // The real Laya runtime, minus its background download and update checks (tests/desktop-laya-main.test.cjs covers those).
-    './laya.cjs': { ...realLaya, createLaya: options => ({ ...realLaya.createLaya(options), startUpdates() {}, update() {} }) }
-  };
-  vm.runInNewContext(source, {
-    require: name => Object.hasOwn(overrides, name) ? overrides[name] : require(name.startsWith('.') ? path.join(root, 'desktop', name) : name),
-    __dirname: path.join(root, 'desktop'), process: { platform: 'darwin', env, argv: ['synthetic-electron'] },
-    setTimeout: (callback, ms) => { timers.push({ callback, ms }); return timers.length; }, clearTimeout() {}, Buffer
-  });
-  for (let attempt = 0; !window && attempt < 200; attempt++) await new Promise(resolve => setTimeout(resolve, 5));
-  assert.ok(window, 'The desktop window was not created');
+  const main = await startMain({ userData, platform: 'darwin', env, packaged: isPackaged,
+    dialog: { showOpenDialog: asked('showOpenDialog'), showSaveDialog: asked('showSaveDialog'), showMessageBox: asked('showMessageBox') },
+    electron: { safeStorage: safeStorage({ available: encryptionAvailable }), shell, clipboard },
+    modules: {
+      'node:fs/promises': { ...fsp, readFile: (file, ...rest) => { reads.push(String(file)); return fsp.readFile(file, ...rest); } },
+      './extension-setup.cjs': { getExtensionSetup: async () => ({ prepared: false }) },
+      // The real Laya runtime, minus its background download and update checks (tests/desktop-laya-main.test.cjs covers those).
+      './laya.cjs': { ...realLaya, createLaya: options => ({ ...realLaya.createLaya(options), startUpdates() {}, update() {} }) }
+    } });
   return {
-    userData, dialogs, timers, clipboard, reads,
+    userData, dialogs, timers: main.timers, clipboard, reads,
     vaultPath: path.join(userData, 'vault.secondhand'),
     secretPath: path.join(userData, 'device-reset.bin'),
-    invoke: (method, argument) => invoke({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, method, ...(argument === undefined ? [] : [argument])),
+    invoke: main.invoke,
     // A request from the extension with this ID.
-    request: request => bridge({ id: 'synthetic', ...request }, { extensionId: EXTENSION })
+    request: request => main.bridge({ id: 'synthetic', ...request }, { extensionId: EXTENSION })
   };
 }
 const EXTENSION = 'a'.repeat(32);
@@ -112,7 +67,7 @@ test('a password created with reset on this computer can be reset there, and tur
 
   const off = await app.invoke('setDeviceReset', false);
   assert.equal(off.deviceReset, false);
-  await assert.rejects(fsp.access(app.secretPath));
+  await assert.rejects(fsp.access(app.secretPath), { code: 'ENOENT' });
   await app.invoke('lock');
   await assert.rejects(app.invoke('resetPassword', { method: 'device', password: 'synthetic third password' }), /isn’t set up/);
 
@@ -130,7 +85,7 @@ test('without protected storage, a new password still gets a recovery key and re
   assert.equal(created.status.deviceReset, false);
   assert.equal(created.status.recoveryKey, true);
   assert.match(created.recoveryKey, /^[0-9A-Z]{4}(?:-[0-9A-Z]{4}){7}$/);
-  await assert.rejects(fsp.access(app.secretPath));
+  await assert.rejects(fsp.access(app.secretPath), { code: 'ENOENT' });
   await assert.rejects(app.invoke('setDeviceReset', true), /couldn’t save a reset option/);
 });
 
@@ -165,9 +120,9 @@ test('starting over erases the locked information and reset secret, keeps settin
   assert.equal(erased.exists, false);
   assert.equal(erased.unlocked, false);
   assert.equal(erased.deviceReset, false);
-  await assert.rejects(fsp.access(path.join(userData, 'vault.secondhand')));
-  await assert.rejects(fsp.access(path.join(userData, 'vault.secondhand.before-import-1-abcd1234')));
-  await assert.rejects(fsp.access(app.secretPath));
+  await assert.rejects(fsp.access(path.join(userData, 'vault.secondhand')), { code: 'ENOENT' });
+  await assert.rejects(fsp.access(path.join(userData, 'vault.secondhand.before-import-1-abcd1234')), { code: 'ENOENT' });
+  await assert.rejects(fsp.access(app.secretPath), { code: 'ENOENT' });
   await fsp.access(settings);
 
   const created = await app.invoke('createVault', { password: 'synthetic new password', allowDeviceReset: false });
@@ -236,7 +191,7 @@ test('every refused or cancelled restore leaves the saved information as it was'
   const copies = (await fsp.readdir(app.userData)).filter(name => name.startsWith('vault.secondhand.before-import-'));
   assert.equal(copies.length, 1);
   assert.deepEqual(await fsp.readFile(path.join(app.userData, copies[0])), before.vault);
-  await assert.rejects(fsp.access(path.join(app.userData, 'setup-progress.json')));
+  await assert.rejects(fsp.access(path.join(app.userData, 'setup-progress.json')), { code: 'ENOENT' });
   await app.invoke('unlock', PASSWORD);
   assert.equal((await app.invoke('getData')).profile.firstName, 'Backed up');
 });
@@ -251,7 +206,7 @@ test('export: refused before a password exists, nothing written when cancelled, 
   assert.deepEqual(app.dialogs, [], 'no file is asked for');
   await app.invoke('createVault', { password: PASSWORD, allowDeviceReset: false });
   assert.deepEqual(plain(await app.invoke('exportBackup')), { cancelled: true });
-  await assert.rejects(fsp.access(target));
+  await assert.rejects(fsp.access(target), { code: 'ENOENT' });
   cancel = false;
   await app.invoke('lock');
   assert.deepEqual(plain(await app.invoke('exportBackup')), { cancelled: false }, 'a locked app can save its locked copy');
@@ -292,7 +247,7 @@ test('Save writes the recovery key and how to use it to the file the person pick
   await assert.rejects(app.invoke('saveRecoveryKey', 'not a recovery key'), /Enter the recovery key exactly as it was shown/);
   assert.deepEqual(app.dialogs, [], 'a key that isn’t one is never offered for saving');
   assert.deepEqual(plain(await app.invoke('saveRecoveryKey', recoveryKey)), { cancelled: true });
-  await assert.rejects(fsp.access(target));
+  await assert.rejects(fsp.access(target), { code: 'ENOENT' });
   assert.equal(app.dialogs[0].options.defaultPath, 'SecondHand recovery key.txt');
   cancel = false;
   assert.deepEqual(plain(await app.invoke('saveRecoveryKey', recoveryKey.toLowerCase())), { cancelled: false });
@@ -327,27 +282,31 @@ test('a new recovery key needs SecondHand unlocked, stops the old key working, a
   assert.equal((await app.invoke('resetPassword', { recoveryKey: second, password: 'synthetic second password' })).unlocked, true);
 });
 
-// settings.json (#139): 50 trusted sites with the longest host name DNS allows (253 characters), with every
-// other setting on, are saved and read back after a restart.
+// settings.json (#139): 50 trusted sites with the longest host name DNS allows (253 characters), each with Always
+// allow on this site (#175), and every other setting on, are saved and read back after a restart.
 const longestHost = n => `${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${`site${String(n).padStart(2, '0')}`.padEnd(61, 'x')}`;
-const trusting = { showMessageBox: async () => ({ response: 1 }) };
+// Trust this site, Trust all websites and Allow once are the second button; Always allow on this site is the third.
+const trusting = { showMessageBox: async options => ({ response: options.title === 'Share sensitive details?' ? 2 : 1 }) };
 
-test('50 trusted sites with the longest host names, and every other setting, survive a restart', async t => {
+test('50 trusted sites with the longest host names, Always allow on each, and every other setting, survive a restart', async t => {
   const app = await desktop(t, { dialog: trusting });
   await app.invoke('createVault', { password: PASSWORD, allowDeviceReset: false });
   await app.invoke('connectExtension', EXTENSION);
-  await app.invoke('setAutofillTrust', true);
   await app.invoke('setLayaEnabled', false);
   assert.equal(longestHost(0).length, 253);
   const sites = Array.from({ length: 50 }, (_, n) => `https://${longestHost(n)}`);
   for (const site of sites) assert.deepEqual(plain(await app.request({ type: 'trustSite', url: `${site}/apply` })), { trusted: true, origin: site });
+  // Fill sensitive details (#176) asks for the SSN Autofill held back on each site.
+  for (const site of sites) await app.request({ type: 'getFields', url: `${site}/apply`, fields: ['ssn'], sensitive: true });
+  await app.invoke('setAutofillTrust', true);
   assert.deepEqual(plain(await app.request({ type: 'trustAllSites' })), { allSites: true });
-  assert.ok((await fsp.stat(path.join(app.userData, 'settings.json'))).size > 13000, 'the largest settings.json SecondHand can write');
+  assert.ok((await fsp.stat(path.join(app.userData, 'settings.json'))).size > 26000, 'the largest settings.json SecondHand can write');
 
   const restarted = await desktop(t, { userData: app.userData });
   const status = await restarted.invoke('status');
   assert.equal(status.settingsNotice, null);
   assert.deepEqual(plain(status.trustedSites), sites);
+  assert.deepEqual(plain(status.alwaysAllowedSites), sites);
   assert.equal(status.extensionId, EXTENSION);
   assert.equal(status.autofillWithoutAsking, true);
   assert.equal(status.allSites, true);

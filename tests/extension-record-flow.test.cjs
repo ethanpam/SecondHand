@@ -1,8 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const vm = require('node:vm');
+const { runFile } = require('./helpers/harness.cjs');
 const { webcrypto } = require('node:crypto');
 const adapter = require('../extension/iowa-adapter.js');
 const generic = require('../extension/generic-adapter.js');
@@ -82,7 +81,7 @@ function worker({ selectedOwner = '', values = PRIVATE_RECORD, nativeHook, conte
         };
       } }
   };
-  vm.runInNewContext(fs.readFileSync(require.resolve('../extension/background.js'), 'utf8'), {
+  runFile('extension/background.js', {
     chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, SecondHandTranslation: translation,
     importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL: globalThis.URL, Map, Set, console
   });

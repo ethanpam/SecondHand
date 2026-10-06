@@ -168,7 +168,7 @@ function validateRequest(request) {
       typeof request.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(request.id)) throw new Error('Invalid request identifier.');
   let allowed;
   if (BARE_REQUESTS.includes(request.type)) allowed = ['id', 'type'];
-  else if (request.type === 'getFields') allowed = ['id', 'type', 'url', 'fields'];
+  else if (request.type === 'getFields') allowed = ['id', 'type', 'url', 'fields', 'sensitive'];
   else if (request.type === 'getRecordFields') allowed = ['id', 'type', 'url', 'pageKey', 'recordType', 'fields', 'personName'];
   else if (request.type === 'saveFields') allowed = ['id', 'type', 'url', 'fields'];
   else if (request.type === 'trustSite' || request.type === 'untrustSite') allowed = ['id', 'type', 'url'];
@@ -183,6 +183,9 @@ function validateRequest(request) {
     if (!isHttpsSiteUrl(request.url)) throw new Error('Only an https site without credentials or a custom port is allowed.');
   } else if (!BARE_REQUESTS.includes(request.type) && !isPortalUrl(request.url)) throw new Error('Only the supported Iowa portal is allowed.');
   if (request.type === 'getFields' && !isIowaNavigationAuthorization(request)) validateFieldScope(request.fields);
+  // Fill sensitive details (#176) asks with `sensitive: true` for the details Autofill held back on a site other than
+  // Iowa's portal, which holds nothing back. The desktop checks that each field is one it holds back.
+  if (Object.hasOwn(request, 'sensitive') && (request.sensitive !== true || isPortalUrl(request.url))) throw new Error('Invalid request for sensitive details.');
   if (Object.hasOwn(LAYA_REQUESTS, request.type)) {
     validateQuestions(request[LAYA_REQUESTS[request.type].list], LAYA_REQUESTS[request.type]);
     if (!Number.isInteger(request.budgetMs) || request.budgetMs < 1 || request.budgetMs > MAX_BUDGET_MS) throw new Error('Invalid time budget for Laya.');

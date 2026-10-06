@@ -7,15 +7,11 @@ const fs = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
-const vm = require('node:vm');
-const { pathToFileURL } = require('node:url');
 const realLaya = require('../desktop/laya.cjs');
 const { MODEL_FILES } = require('../desktop/laya-model.cjs');
+const { plain, startMain } = require('./helpers/harness.cjs');
 
-const root = path.resolve(__dirname, '..');
-const source = fs.readFileSync(path.join(root, 'desktop/main.cjs'), 'utf8');
 const extensionId = 'a'.repeat(32);
-const plain = value => JSON.parse(JSON.stringify(value));
 const small = path.join(__dirname, 'fixtures/laya/small-tokenizer');
 const DECISION = { type: 'noul', instructions: 'Is the candidate the correct answer?' };
 
@@ -60,17 +56,19 @@ const until = async (condition, what) => {
 async function desktop(t, { settings = { extensionId }, settingsText, manifest, updateUrl = null, shipped = false, env = {}, unlocked = true, packaged = false } = {}) {
   assert.ok(manifest || shipped, 'Give the desktop a local manifest, or keep Laya off with the shipped one');
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'secondhand-laya-main-'));
-  t.after(() => fs.rmSync(userData, { recursive: true, force: true }));
+  const created = [];
+  // Laya closes, and every check and download it started ends, before its folder goes: one still writing
+  // would make the folder again.
+  t.after(async () => {
+    for (const { laya, runs } of created) { await laya.close(); await Promise.all(runs); }
+    fs.rmSync(userData, { recursive: true, force: true });
+  });
   if (settingsText !== undefined) fs.writeFileSync(path.join(userData, 'settings.json'), settingsText);
   else if (settings !== null) fs.writeFileSync(path.join(userData, 'settings.json'), JSON.stringify(settings));
-  let invoke;
-  let window;
-  let quit;
   const writes = [];
   const runner = { loads: 0, releases: 0, async load() { runner.loads++; return {
     async run(batch) { return { data: new Float32Array(batch.rows * batch.count), dims: [batch.rows, batch.count] }; },
     async release() { runner.releases++; } }; } };
-  const created = [];
   class Vault {
     constructor() { this.unlocked = unlocked; this.data = { profile: {}, applications: [] }; }
     async exists() { return true; }
@@ -78,47 +76,21 @@ async function desktop(t, { settings = { extensionId }, settingsText, manifest, 
     async lock() { this.unlocked = false; }
     getData() { return this.data; }
   }
-  class BrowserWindow {
-    constructor() {
-      window = this;
-      this.webContents = { mainFrame: { url: pathToFileURL(path.join(root, 'renderer/index.html')).href }, setWindowOpenHandler() {}, on() {}, send() {} };
-    }
-    show() {} focus() {} setMenuBarVisibility() {} once() {} on() {} loadFile() {}
-    isDestroyed() { return false; }
-  }
-  const app = { isPackaged: packaged, setName() {}, setPath() {}, getPath: () => userData, requestSingleInstanceLock: () => true,
-    whenReady: () => Promise.resolve(), on(name, handler) { if (name === 'before-quit') quit = handler; }, quit() {} };
-  const electron = { app, BrowserWindow, ipcMain: { handle(_name, handler) { invoke = handler; } },
-    dialog: { showErrorBox() { assert.fail('Desktop setup failed'); } }, shell: {}, clipboard: {}, powerMonitor: { on() {} },
-    session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, webRequest: { onBeforeRequest() {} } } } };
-  // A Mac without Touch ID; tests/desktop-touch-id-main.test.cjs covers Touch ID.
-  electron.systemPreferences = { canPromptTouchID: () => false };
-  const overrides = {
-    electron,
+  const main = await startMain({ userData, packaged, env, modules: {
     './vault.cjs': { ...require('../desktop/vault.cjs'), Vault, atomicWrite: async (file, bytes) => { writes.push({ file, json: JSON.parse(bytes.toString()) }); } },
-    './bridge.cjs': { ...require('../desktop/bridge.cjs'), startBridge: async () => ({ close: async () => {} }) },
-    './extension-setup.cjs': { getExtensionSetup: async () => ({ prepared: true }) },
-    './registration.cjs': { registerHost: async () => ({}) },
-    './test-storage-path.cjs': { testStoragePath: () => null },
     './laya.cjs': { ...realLaya, createLaya: options => {
       const laya = realLaya.createLaya({ ...options, ...(manifest ? { manifest } : {}), updateUrl, runner, checkEveryMs: 60 * 60 * 1000 });
-      created.push({ options, laya });
-      t.after(() => laya.close());
+      // The checks and downloads main.cjs starts, so a test can wait until they are over.
+      const runs = [];
+      for (const name of ['startUpdates', 'update', 'startDownload']) {
+        const start = laya[name];
+        laya[name] = (...args) => { const run = start(...args); runs.push(run); return run; };
+      }
+      created.push({ options, laya, runs });
       return laya;
     } }
-  };
-  vm.runInNewContext(source, {
-    require: name => Object.hasOwn(overrides, name) ? overrides[name] : require(name.startsWith('.') ? path.join(root, 'desktop', name) : name),
-    __dirname: path.join(root, 'desktop'), process: { platform: process.platform, env, argv: ['synthetic-electron'] },
-    setTimeout: () => 1, clearTimeout() {}, Buffer
-  });
-  for (let attempt = 0; !invoke && attempt < 200; attempt++) await new Promise(resolve => setTimeout(resolve, 5));
-  assert.ok(invoke, 'The desktop did not finish starting');
-  return {
-    userData, writes, runner, created,
-    invoke: (method, argument) => invoke({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, method, ...(argument === undefined ? [] : [argument])),
-    quit: () => quit({ preventDefault() {} })
-  };
+  } });
+  return { userData, writes, runner, created, invoke: main.invoke, quit: main.quit };
 }
 const ready = async app => { await until(async () => (await app.invoke('layaStatus')).state === 'ready', 'Laya to be ready'); };
 const off = { extensionId, layaEnabled: false };
@@ -150,7 +122,8 @@ test('an applicant who turned Laya off stays off: startup checks, downloads, and
   assert.equal(status.laya.state, 'off');
   assert.equal(status.laya.enabled, false);
   assert.deepEqual(plain(await app.invoke('layaStatus')), plain(status.laya));
-  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(app.created[0].runs.length, 1, 'startup ran its update check');
+  await Promise.all(app.created[0].runs);
   assert.equal(app.runner.loads, 0);
   assert.deepEqual(server.requests, []);
   assert.equal(fs.existsSync(path.join(app.userData, 'models')), false);
@@ -203,7 +176,7 @@ const RESET = 'SecondHand couldn’t read its settings file, so it reset the Chr
 const KEPT_OFF = `${RESET} Laya stays off.`;
 const BACK_ON = `${RESET} Laya is on again. If you had turned it off, turn it off again on that page.`;
 const site = 'https://pantry.example.org';
-const written = JSON.stringify({ extensionId, autofillWithoutAsking: true, trustedSites: [site], layaEnabled: false, allSites: true });
+const written = JSON.stringify({ extensionId, autofillWithoutAsking: true, trustedSites: [site], layaEnabled: false, allSites: true, alwaysAllowedSites: [site] });
 
 test('a settings file that can’t be read is reset and the app says what was reset; Laya’s off choice is kept when it can still be read', async t => {
   const cases = [
@@ -212,7 +185,8 @@ test('a settings file that can’t be read is reset and the app says what was re
     ['damaged where Laya’s choice was', `${written.slice(0, written.indexOf('"layaEnabled"'))}"layaEnab\u0000`, BACK_ON],
     ['not settings', '[false]', BACK_ON],
     ['empty', '', BACK_ON],
-    ['too large', JSON.stringify({ extensionId, layaEnabled: false, padding: 'x'.repeat(16 * 1024) }), BACK_ON]
+    // Past the 32 KB that two full lists of the longest sites, and the other settings, fit in (#175).
+    ['too large', JSON.stringify({ extensionId, layaEnabled: false, padding: 'x'.repeat(32 * 1024) }), BACK_ON]
   ];
   for (const [name, settingsText, notice] of cases) {
     const server = await modelServer(t);
@@ -222,10 +196,12 @@ test('a settings file that can’t be read is reset and the app says what was re
     assert.equal(status.extensionId, null, `${name}: Chrome is disconnected`);
     assert.equal(status.autofillWithoutAsking, false, name);
     assert.deepEqual(plain(status.trustedSites), [], name);
+    assert.deepEqual(plain(status.alwaysAllowedSites), [], name);
     assert.equal(status.allSites, false, name);
     if (notice === KEPT_OFF) {
       assert.equal(status.laya.state, 'off', name);
-      await new Promise(resolve => setTimeout(resolve, 50));
+      assert.equal(app.created[0].runs.length, 1, `${name}: startup ran its update check`);
+      await Promise.all(app.created[0].runs);
       assert.deepEqual(server.requests, [], `${name}: nothing is checked or downloaded`);
     } else {
       assert.equal(status.laya.enabled, true, name);
@@ -255,6 +231,7 @@ test('a missing or readable settings file has no notice', async t => {
   assert.equal(status.extensionId, extensionId);
   assert.equal(status.autofillWithoutAsking, true);
   assert.deepEqual(plain(status.trustedSites), [site]);
+  assert.deepEqual(plain(status.alwaysAllowedSites), [site]);
   assert.equal(status.allSites, true);
   assert.equal(status.laya.state, 'off');
 });

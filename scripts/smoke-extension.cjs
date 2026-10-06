@@ -395,6 +395,33 @@ async function main() {
       return page.frames().find(frame => frame.url() === launcherUrl);
     };
     const calls = type => worker.evaluate(type => globalThis.__nativeSmoke.calls.filter(call => call.type === type), type);
+    // The worker's own state, so a check that nothing more happened waits on it, not on the clock (#143): the clicks
+    // and page polls it has received, whether it is busy (handling a click, running an autopilot step or a site
+    // fill), and whether an autopilot waits for the applicant. A waiting autopilot looks at the page again at each poll.
+    await worker.evaluate(() => {
+      globalThis.__smokeProbe = { actions: 0, polls: 0 };
+      chrome.runtime.onMessage.addListener(message => {
+        if (message?.confirmed === true) globalThis.__smokeProbe.actions++;
+        if (message?.type === 'ui:pageState') globalThis.__smokeProbe.polls++;
+      });
+    });
+    const workerState = () => worker.evaluate(() => ({ ...globalThis.__smokeProbe, waiting: autopilots.size,
+      busy: Boolean(clicksUnderway || siteRuns.size || [...autopilots.values()].some(pilot => pilot.running)) }));
+    // Waits until the worker has handled the click made after `since` (when given) and is busy with nothing. With an
+    // autopilot left waiting, it waits too for the step the next page poll starts to finish. After that nothing more
+    // happens until the page or the applicant changes something.
+    async function settled(since) {
+      await expect.poll(async () => { const state = await workerState(); return !state.busy && (!since || state.actions > since.actions); }, { timeout: 20000 }).toBe(true);
+      const state = await workerState();
+      if (!state.waiting) return;
+      await expect.poll(async () => { const now = await workerState(); return !now.busy && now.polls >= state.polls + 2; }, { timeout: 20000 }).toBe(true);
+    }
+    // The side panel's Autofill, once the worker has handled the click and nothing is under way.
+    async function autofillSettled() {
+      const since = await workerState();
+      await panel.click('#panel-autofill');
+      await settled(since);
+    }
 
     // Leaving Iowa's site turns a running autofill off, so every flow starts clean.
     async function resetTo(url, { profile = {}, locked = false } = {}) {
@@ -415,8 +442,16 @@ async function main() {
 
     // Untrusted page messages can never start autofill.
     let widget = await startFixture();
-    await page.evaluate(() => window.postMessage({ type: 'ui:autofill', confirmed: true }, '*'));
-    await page.waitForTimeout(200);
+    const beforePost = await workerState();
+    await page.evaluate(() => new Promise(resolve => {
+      // Listeners hear a message in the order they were added, so when this one does, the page's scripts have.
+      addEventListener('message', function heard(event) { if (event.data?.type === 'ui:autofill') { removeEventListener('message', heard); resolve(); } });
+      window.postMessage({ type: 'ui:autofill', confirmed: true }, '*');
+    }));
+    // Two more page polls from the widget: one began and was answered after the message.
+    await expect.poll(async () => (await workerState()).polls, { timeout: 15000 }).toBeGreaterThanOrEqual(beforePost.polls + 2);
+    await settled();
+    assert.equal((await workerState()).actions, beforePost.actions, 'the worker received no click');
     assert.deepEqual(await calls('getFields'), []);
 
     // One click fills the whole applicant page, including revealed sections.
@@ -737,7 +772,7 @@ async function main() {
       const requests = await calls('getFields');
       assert.equal(requests.length, 2);
       assert.deepEqual(requests.filter(call => call.url === addressUrl).map(call => call.fields), [[]]);
-      await page.waitForTimeout(1800);
+      await settled();
       assert.equal((await calls('getFields')).length, 2);
       assert.equal(await page.evaluate(() => window.__manualNextClicks), 0);
       console.log(`Address ${variant}: one applicant Next, first suggestion selected, one address Next, no address profile values.`);
@@ -747,10 +782,9 @@ async function main() {
       currentAddressVariant = variant; verifiedAddressNext.length = 0;
       await resetTo(addressUrl);
       await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
-      await panel.click('#panel-autofill');
       const before = await page.evaluate(() => JSON.stringify(document.__addressQa));
       const requests = (await calls('getFields')).length;
-      await page.waitForTimeout(1800);
+      await autofillSettled();
       await expect(page.locator('#homeAddressIndex0')).not.toBeChecked();
       await expect(page.locator('#homeAddressIndex1')).toBeChecked();
       assert.equal(await page.evaluate(() => JSON.stringify(document.__addressQa)), before);
@@ -784,7 +818,7 @@ async function main() {
     await panel.click('#panel-autofill');
     await expect.poll(() => page.evaluate(() => document.__addressQa.selectionClicks.length), { timeout: 20000 }).toBe(1);
     await expect.poll(() => panel.text('[data-key="addressReview"]')).toContain('Do it yourself');
-    await page.waitForTimeout(1800);
+    await settled();
     assert.deepEqual(await page.evaluate(() => document.__addressQa), { selectionClicks: ['0'], selectedIndexes: [], shownCountyRows: [], nextClicks: 0 });
     await expect(enteredCounty).toBeVisible();
     assert.equal(await enteredCounty.inputValue(), countyBefore);
@@ -798,7 +832,7 @@ async function main() {
     await expect(page.locator('[data-qa-only]')).toBeVisible({ timeout: 20000 });
     await expect.poll(() => panel.text('[data-key="addressReview"]')).toContain('address');
     const hypotheticalRequests = (await calls('getFields')).length;
-    await page.waitForTimeout(1800);
+    await settled();
     assert.equal(await page.evaluate(() => window.__addressNextClicks), 0);
     assert.equal(await page.evaluate(() => window.__addressChoiceEvents), 0);
     assert.equal((await calls('getFields')).length, hypotheticalRequests);
@@ -826,7 +860,7 @@ async function main() {
     await panel.click('#panel-autofill');
     await expect(page.locator(`[id="${selfFixture.DOB_ID}"]`)).toHaveValue('04/12/1985', { timeout: 20000 });
     await expect.poll(() => panel.text('[data-key="birthDate"]')).toContain('Done');
-    await page.waitForTimeout(1800);
+    await settled();
     assert.deepEqual(await selfControls(), untouched);
     assert.deepEqual(await page.evaluate(() => window.__selfQa), { nextClicks: 0, manualChanges: 0 });
     assert.deepEqual((await calls('getFields')).map(call => ({ url: call.url, fields: call.fields })), [{ url: selfDetailsUrl, fields: ['birthDate'] }]);
@@ -843,8 +877,7 @@ async function main() {
       currentSelfVariant = variant;
       await resetTo(selfDetailsUrl);
       await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
-      await panel.click('#panel-autofill');
-      await page.waitForTimeout(1800);
+      await autofillSettled();
       await expect(page.locator(`[id="${selfFixture.DOB_ID}"]`)).toHaveValue('');
       assert.deepEqual(await calls('getFields'), []);
       assert.deepEqual(await page.evaluate(() => window.__selfQa), { nextClicks: 0, manualChanges: 0 });
@@ -871,7 +904,7 @@ async function main() {
     await expect.poll(startChecked, { timeout: 20000 }).toEqual(answered);
     await expect(page.locator(`[id="${tellUsMore.MARITAL_ID}"]`)).toHaveValue('Never Married');
     for (const key of startRows) await expect.poll(() => panel.text(`[data-key="${key}"]`)).toContain('Done');
-    await page.waitForTimeout(1800);
+    await settled();
     assert.deepEqual(await startChecked(), answered);
     assert.deepEqual(await startBoxes(), ['', '', '', '']);
     assert.deepEqual(await page.evaluate(() => window.__startQa), { nextClicks: 0, shown: ['question08008', 'question08107', 'question08108', 'question08109',
@@ -903,7 +936,7 @@ async function main() {
     for (const key of ['ssnCardFirstName', 'ssnCardMiddleName', 'ssnCardLastName']) await expect.poll(() => panel.text(`[data-key="${key}"]`)).toContain('Done');
     await expect.poll(() => panel.text('[data-key="ssn"]')).toContain('Do it yourself');
     await expect(ssnMirror()).toHaveValue('');
-    await page.waitForTimeout(1800);
+    await settled();
     assert.equal(await page.evaluate(() => window.__startQa.nextClicks), 0);
     assert.deepEqual((await calls('getFields')).map(call => call.fields), [startFields]);
     for (const index of [9, 13, 14, 17]) await expect(page.locator(`[id="answerSets0.answers${index}.answerValue"]`)).toHaveValue('');
@@ -933,8 +966,7 @@ async function main() {
     currentStartVariant = 'people';
     await resetTo(startDetailsUrl, { profile: sensitiveProfile });
     await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
-    await panel.click('#panel-autofill');
-    await page.waitForTimeout(1800);
+    await autofillSettled();
     assert.deepEqual(await calls('getFields'), []);
     assert.deepEqual(await startBoxes(), ['', '', '', '']);
     assert.deepEqual(await startChecked(), []);
@@ -951,16 +983,18 @@ async function main() {
       currentStartVariant = variant;
       await resetTo(startDetailsUrl, { profile: { ...completeStartProfile, ...profile } });
       await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+      const since = await workerState();
       await panel.click('#panel-autofill');
+      await settled(since);
     }
     await startCompleteCase();
     await expect.poll(startNextClicks, { timeout: 20000 }).toBe(1);
-    await page.waitForTimeout(1800);
+    await settled();
     assert.equal(await startNextClicks(), 1);
     assert.deepEqual((await calls('getFields')).map(call => call.fields), [startFields]);
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page.locator('[data-secondhand-assistant]')).toBeAttached();
-    await page.waitForTimeout(1800);
+    await settled();
     assert.equal(await startNextClicks(), 0, 'same-step reload cannot repeat a potentially accepted Continue');
     assert.equal((await calls('getFields')).length, 1, 'same-step reload does not request the profile again');
     console.log('Tell Us More: complete no-SSN page continues once; reload cannot duplicate the same step.');
@@ -989,7 +1023,7 @@ async function main() {
     for (const variant of ['unknown', 'error', 'modal', 'mirror-mismatch']) {
       await startCompleteCase(variant, variant === 'mirror-mismatch' ? { hasSsn: 'yes', ssn: '123456789', ssnCardNameMatches: 'yes' } : {});
       if (variant !== 'modal') await expect(page.locator(`[id="${tellUsMore.DOB_ID}"]`)).toHaveValue('04/12/1985', { timeout: 20000 });
-      await page.waitForTimeout(1800);
+      await settled();
       assert.equal(await startNextClicks(), 0, variant);
       if (variant === 'modal') assert.deepEqual(await calls('getFields'), []);
       if (variant === 'mirror-mismatch') await expect.poll(() => panel.text('[data-key="ssn"]')).toContain('Do it yourself');
@@ -998,7 +1032,7 @@ async function main() {
 
     await startCompleteCase('verified', { blind: '' });
     await expect(page.locator(`[id="${tellUsMore.DOB_ID}"]`)).toHaveValue('04/12/1985', { timeout: 20000 });
-    await page.waitForTimeout(1800);
+    await settled();
     assert.equal(await startNextClicks(), 0);
     await page.locator(`[id="${tellUsMore.radioId(27, 2)}"]`).check();
     await expect.poll(startNextClicks, { timeout: 20000 }).toBe(1);
@@ -1008,7 +1042,7 @@ async function main() {
     for (const interruption of ['lock', 'edited-during-approval']) {
       await startCompleteCase('verified', { blind: '' });
       await expect(page.locator(`[id="${tellUsMore.DOB_ID}"]`)).toHaveValue('04/12/1985', { timeout: 20000 });
-      await page.waitForTimeout(1800);
+      await settled();
       await worker.evaluate(interruption => {
         if (interruption === 'lock') globalThis.__nativeSmoke.lockAfterFields = true;
         else globalThis.__nativeSmoke.holdNavigation = true;
@@ -1020,7 +1054,7 @@ async function main() {
         await page.locator(`[id="${tellUsMore.MARITAL_ID}"]`).selectOption('Widowed');
         await worker.evaluate(() => { const state = globalThis.__nativeSmoke; state.holdNavigation = false; state.releaseNavigation(); });
       }
-      await page.waitForTimeout(1800);
+      await settled();
       assert.equal(await startNextClicks(), 0, interruption);
       console.log(`Tell Us More ${interruption}: authorization cannot continue the changed or locked page.`);
     }
@@ -1033,7 +1067,7 @@ async function main() {
     for (const key of startRows.filter(key => key !== 'ssnCardName')) {
       await expect.poll(() => panel.text(`[data-key="${key}"]`), { timeout: 20000 }).toContain('Not saved in SecondHand: add it in My information');
     }
-    await page.waitForTimeout(1800);
+    await settled();
     assert.deepEqual(await startChecked(), []);
     await expect(page.locator(`[id="${tellUsMore.DOB_ID}"]`)).toHaveValue('');
     await expect(page.locator(`[id="${tellUsMore.MARITAL_ID}"]`)).toHaveValue('');
@@ -1051,7 +1085,7 @@ async function main() {
     await panel.click('#panel-autofill');
     await expect(page.locator('[id="answerSets0.answers187.answerValue"]')).toHaveValue('Iowa', { timeout: 20000 });
     await expect.poll(() => page.evaluate(() => window.__backgroundQa.nextClicks), { timeout: 20000 }).toBe(1);
-    await page.waitForTimeout(1800);
+    await settled();
     assert.equal(await page.evaluate(() => window.__backgroundQa.nextClicks), 1);
     assert.deepEqual((await calls('getFields')).map(call => call.url), [backgroundUrl]);
     assert.deepEqual(await calls('getRecordFields'), []);
@@ -1072,7 +1106,7 @@ async function main() {
     await expect(page.locator('[id="answerSets0.personSelection"]')).toHaveValue('1', { timeout: 20000 });
     await expect(page.locator('[id="answerSets0.answers8.answerValue"]')).toHaveValue('850.50', { timeout: 20000 });
     await expect.poll(() => page.evaluate(() => document.__jobQa.nextClicks), { timeout: 20000 }).toBe(1);
-    await page.waitForTimeout(1800);
+    await settled();
     assert.equal(await page.evaluate(() => document.__jobQa.nextClicks), 1);
     const requests = await calls('getRecordFields'); assert.equal(requests.length, 1);
     assert.equal(requests[0].pageKey, 'iowa-job-history'); assert.equal(requests[0].recordType, 'jobs'); assert.ok(requests[0].fields.includes('person'));
@@ -1093,7 +1127,7 @@ async function main() {
         await page.locator('[id="answerSets0.personSelection"]').selectOption('0');
         await worker.evaluate(() => { const state = globalThis.__nativeSmoke; state.holdRecord = false; state.releaseRecord(); });
       }
-      await page.waitForTimeout(2200);
+      await settled();
       assert.equal(await page.evaluate(() => document.__jobQa.nextClicks), 0);
       await expect(page.locator('[id="answerSets0.answers8.answerValue"]')).toHaveValue('');
       await expect(page.locator('[id="answerSets0.answers4.answerValue"]')).toHaveValue('');
