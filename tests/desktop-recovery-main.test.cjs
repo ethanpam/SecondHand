@@ -18,11 +18,15 @@ const source = fs.readFileSync(path.join(root, 'desktop/main.cjs'), 'utf8');
 // Runs the real main process and vault against a temporary folder. Only the
 // operating system's protected storage is simulated, so no Keychain is touched.
 // Dialogs answer with `dialog`'s functions, each call recorded; the clipboard and timers are simulated.
-async function desktop(t, { encryptionAvailable = true, shell = {}, env = {}, isPackaged = false, dialog = {} } = {}) {
-  const userData = await fsp.mkdtemp(path.join(os.tmpdir(), 'secondhand-recovery-main-'));
-  t.after(() => fsp.rm(userData, { recursive: true, force: true }));
+// Given `userData`, it starts again on that folder, as a restart does.
+async function desktop(t, { encryptionAvailable = true, shell = {}, env = {}, isPackaged = false, dialog = {}, userData } = {}) {
+  if (!userData) {
+    userData = await fsp.mkdtemp(path.join(os.tmpdir(), 'secondhand-recovery-main-'));
+    t.after(() => fsp.rm(userData, { recursive: true, force: true }));
+  }
   let invoke;
   let window;
+  let bridge;
   const dialogs = [];
   const timers = [];
   // The files main.cjs reads.
@@ -62,7 +66,7 @@ async function desktop(t, { encryptionAvailable = true, shell = {}, env = {}, is
   const overrides = {
     electron,
     'node:fs/promises': { ...fsp, readFile: (file, ...rest) => { reads.push(String(file)); return fsp.readFile(file, ...rest); } },
-    './bridge.cjs': { ...require('../desktop/bridge.cjs'), startBridge: async () => ({ close: async () => {} }) },
+    './bridge.cjs': { ...require('../desktop/bridge.cjs'), startBridge: async (_directory, _getId, handler) => { bridge = handler; return { close: async () => {} }; } },
     './extension-setup.cjs': { getExtensionSetup: async () => ({ prepared: false }) },
     './registration.cjs': { registerHost: async () => ({}) },
     './test-storage-path.cjs': { testStoragePath: () => null },
@@ -80,9 +84,12 @@ async function desktop(t, { encryptionAvailable = true, shell = {}, env = {}, is
     userData, dialogs, timers, clipboard, reads,
     vaultPath: path.join(userData, 'vault.secondhand'),
     secretPath: path.join(userData, 'device-reset.bin'),
-    invoke: (method, argument) => invoke({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, method, ...(argument === undefined ? [] : [argument]))
+    invoke: (method, argument) => invoke({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, method, ...(argument === undefined ? [] : [argument])),
+    // A request from the extension with this ID.
+    request: request => bridge({ id: 'synthetic', ...request }, { extensionId: EXTENSION })
   };
 }
+const EXTENSION = 'a'.repeat(32);
 
 test('a password created with reset on this computer can be reset there, and turning it off removes the secret', async t => {
   const app = await desktop(t);
@@ -318,4 +325,41 @@ test('a new recovery key needs SecondHand unlocked, stops the old key working, a
   await app.invoke('lock');
   await assert.rejects(app.invoke('resetPassword', { recoveryKey: first, password: 'synthetic second password' }), /That recovery key didn’t work/);
   assert.equal((await app.invoke('resetPassword', { recoveryKey: second, password: 'synthetic second password' })).unlocked, true);
+});
+
+// settings.json (#139): 50 trusted sites with the longest host name DNS allows (253 characters), with every
+// other setting on, are saved and read back after a restart.
+const longestHost = n => `${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${`site${String(n).padStart(2, '0')}`.padEnd(61, 'x')}`;
+const trusting = { showMessageBox: async () => ({ response: 1 }) };
+
+test('50 trusted sites with the longest host names, and every other setting, survive a restart', async t => {
+  const app = await desktop(t, { dialog: trusting });
+  await app.invoke('createVault', { password: PASSWORD, allowDeviceReset: false });
+  await app.invoke('connectExtension', EXTENSION);
+  await app.invoke('setAutofillTrust', true);
+  await app.invoke('setLayaEnabled', false);
+  assert.equal(longestHost(0).length, 253);
+  const sites = Array.from({ length: 50 }, (_, n) => `https://${longestHost(n)}`);
+  for (const site of sites) assert.deepEqual(plain(await app.request({ type: 'trustSite', url: `${site}/apply` })), { trusted: true, origin: site });
+  assert.deepEqual(plain(await app.request({ type: 'trustAllSites' })), { allSites: true });
+  assert.ok((await fsp.stat(path.join(app.userData, 'settings.json'))).size > 13000, 'the largest settings.json SecondHand can write');
+
+  const restarted = await desktop(t, { userData: app.userData });
+  const status = await restarted.invoke('status');
+  assert.equal(status.settingsNotice, null);
+  assert.deepEqual(plain(status.trustedSites), sites);
+  assert.equal(status.extensionId, EXTENSION);
+  assert.equal(status.autofillWithoutAsking, true);
+  assert.equal(status.allSites, true);
+  assert.equal(status.laya.state, 'off');
+});
+
+test('a site whose host name is longer than DNS allows can’t be trusted', async t => {
+  const app = await desktop(t, { dialog: trusting });
+  await app.invoke('createVault', { password: PASSWORD, allowDeviceReset: false });
+  await app.invoke('connectExtension', EXTENSION);
+  const tooLong = `https://${longestHost(0)}x/apply`;
+  await assert.rejects(app.request({ type: 'trustSite', url: tooLong }), error => error.publicMessage === 'This site’s address is too long for SecondHand to trust.');
+  assert.deepEqual(app.dialogs, [], 'nothing is asked');
+  assert.deepEqual(plain((await app.invoke('status')).trustedSites), []);
 });
