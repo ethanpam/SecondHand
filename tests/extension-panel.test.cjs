@@ -1141,6 +1141,14 @@ test('once Autofill has been started again from this Chrome, both surfaces say t
   assert.match(first.get('widget-text').textContent, /once nothing is left, SecondHand clicks Save and Continue\. To check and continue yourself, click Stop\. It erases nothing\.$/);
 });
 
+test('the side panel’s name is its first heading, so a screen reader’s list of headings starts there', async t => {
+  const view = await panel(t, {});
+  const headings = [...view.window.document.querySelectorAll('#sidepanel h1, #sidepanel h2, #sidepanel h3')];
+  assert.equal(headings[0].tagName, 'H1');
+  assert.equal(headings[0].textContent.includes('SecondHand'), true);
+  assert.equal(view.window.document.querySelectorAll('#sidepanel h1').length, 1);
+});
+
 test('side panel turns its button into Stop while autofill is on', async t => {
   const view = await panel(t, { autopilot: true, result: waitingResult });
   assert.equal(view.get('panel-autofill').textContent, 'Stop Autofill');
