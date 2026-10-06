@@ -336,7 +336,7 @@ test('the completeness check itself catches English passed to the screen', () =>
     $('status').textContent = ready ? 'Ready' : \`\${count} need you\`;
     button.title = 'Open details';
     row.setAttribute('aria-label', \`\${label}: Done\`);
-    show({ key: 'panel.filling' }); mark.textContent = '✓'; // show('commented out')`));
+    show({ key: 'panel.stopping' }); mark.textContent = '✓'; // show('commented out')`));
   assert.deepEqual(found.map(item => item.text), ['That field isn’t on screen right now.', 'Ready', ' need you', 'Open details', ': Done']);
 });
 

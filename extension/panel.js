@@ -81,6 +81,12 @@
   // When SecondHand didn't open: one line saying where to open it on this computer.
   const DIDNT_OPEN = { mac: 'desktop.didntOpenMac', win: 'desktop.didntOpenWindows' };
   const didntOpen = async () => ({ key: DIDNT_OPEN[(await chrome.runtime.getPlatformInfo()).os] || 'desktop.didntOpen' });
+  // While Autofill waits for the app: what it waits for, and where to find the app's window, which can open
+  // behind Chrome, on this computer.
+  const FIND_WINDOW = { mac: 'widget.findWindowMac', win: 'widget.findWindowWindows' };
+  let findWindow = 'widget.findWindow';
+  chrome.runtime.getPlatformInfo?.().then(info => { findWindow = FIND_WINDOW[info?.os] || findWindow; }).catch(() => {});
+  const waitingForApp = () => ({ key: 'joined', params: { first: { key: 'widget.working' }, second: { key: findWindow } } });
 
   // Every fixed word on either surface comes from the catalog.
   function applyStatic() {
@@ -191,7 +197,7 @@
     const readyLine = () => !startedBefore() ? t('widget.iowaReady') : pageKey === 'iowa-personal-information' ? t('widget.addressNext') : '';
     function statusText() {
       if (outdated) return t((OUTDATED_LINES[outdatedKey] || OUTDATED_LINES['panel.outdated'])[0]);
-      if (working) return t('widget.working');
+      if (working) return words(waitingForApp());
       if (note) return words(note, 120);
       if (!result) return !site ? readyLine() : languageTrouble ? t('widget.languageCheckFailed') : t('widget.siteReady', { host: hostOf(site.origin) });
       // What the worker reported, in the side panel's words, without the count of what is left: the link beside
@@ -1204,7 +1210,7 @@
       if ($('panel-autofill').disabled) return;
       const stopping = autopilot;
       if (!stopping && !site) noteStarted();
-      const result = await act(stopping ? { type: 'ui:stop', confirmed: true } : { type: 'ui:autofill', confirmed: true }, { key: stopping ? 'panel.stopping' : 'panel.filling' });
+      const result = await act(stopping ? { type: 'ui:stop', confirmed: true } : { type: 'ui:autofill', confirmed: true }, stopping ? { key: 'panel.stopping' } : waitingForApp());
       if (result) autopilot = !stopping && continuing(result);
       if (reported(result)) show(briefly(fromResult(result)), result.state === 'error');
       controls();

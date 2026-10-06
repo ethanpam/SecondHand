@@ -341,7 +341,8 @@ async function panel(t, initial = {}) {
     else if (payload.type === 'ui:pageText') data = structuredClone(initial.pageText ?? { pages: [] });
     else if (payload.type === 'ui:keepSummary') data = { kept: true };
     else if (payload.type === 'ui:widgetSize') data = { sized: true };
-    else if (payload.type === 'ui:autofill') { state.result = initial.autofill || doneResult; state.autopilot = Boolean(initial.autopilotAfterAutofill); data = structuredClone(state.result); }
+    // `autofillHeld`: a promise the app's answer waits for, as while its window asks for permission.
+    else if (payload.type === 'ui:autofill') { await initial.autofillHeld; state.result = initial.autofill || doneResult; state.autopilot = Boolean(initial.autopilotAfterAutofill); data = structuredClone(state.result); }
     else if (payload.type === 'ui:stop') { state.autopilot = false; state.result = { state: 'stopped', filled: 0, needYou: [], message: 'Autofill stopped. Nothing was erased.', pageKey: 'iowa-personal-information' }; data = structuredClone(state.result); }
     else if (payload.type === 'ui:desktopStatus') data = { ...desktop };
     else if (payload.type === 'ui:focusField') data = { focused: true };
@@ -1089,6 +1090,28 @@ test('while Autofill waits for answers it would save and continue after, both su
   // Anywhere else, Stop only ends Autofill.
   const waiting = await panel(t, { autopilot: true, result: waitingResult });
   assert.equal(waiting.get('stop-note').textContent, 'Stop ends Autofill and erases nothing.');
+});
+
+test('while Autofill waits for the app, both surfaces say where its window is on this computer', async t => {
+  for (const [os, where] of [['mac', 'Can’t see that window? Click SecondHand in the Dock.'], ['win', 'Can’t see that window? Click SecondHand in the taskbar.'],
+    ['linux', 'Can’t see that window? It may be behind Chrome.']]) {
+    const waiting = `Waiting for the SecondHand app. If its window asks for your OK, nothing is filled until you allow it. ${where}`;
+    let release;
+    const autofillHeld = new Promise(done => { release = done; });
+    const card = await panel(t, { launcher: true, os, autofillHeld });
+    const cardClick = card.userClick('autofill');
+    await settle();
+    assert.equal(card.get('widget-text').textContent, waiting, os);
+    assert.equal(card.get('autofill').disabled, true);
+    const side = await panel(t, { os, autofillHeld });
+    const sideClick = side.userClick('panel-autofill');
+    await settle();
+    assert.equal(side.get('status').textContent, waiting, os);
+    release();
+    await Promise.all([cardClick, sideClick]);
+    await settle();
+    assert.match(card.get('widget-text').textContent, /^Filled 3 answers/);
+  }
 });
 
 test('once Autofill has been started again from this Chrome, both surfaces say the short form of what it waits for, without Stop’s note', async t => {
