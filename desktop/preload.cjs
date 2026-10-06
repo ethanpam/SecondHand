@@ -70,6 +70,8 @@ contextBridge.exposeInMainWorld('secondHand', Object.freeze({
   connectExtension: extensionId => invoke('connectExtension', extensionId),
   setAutofillTrust: enabled => invoke('setAutofillTrust', enabled),
   removeTrustedSite: origin => invoke('removeTrustedSite', origin),
+  // Always allow on a site is only ever taken back here; the sensitive prompt is the one place that adds it.
+  removeAlwaysAllowedSite: origin => invoke('removeAlwaysAllowedSite', origin),
   turnOffAllSites: () => invoke('turnOffAllSites'),
   layaStatus: () => invoke('layaStatus'),
   setLayaEnabled: enabled => invoke('setLayaEnabled', enabled),

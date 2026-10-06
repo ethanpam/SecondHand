@@ -82,6 +82,11 @@ if (nativeOrigin) {
   let extensionSetupPending = false;
   let autofillWithoutAsking = false;
   let trustedSites = [];
+  // Always allow on this site (#175): sites where the sensitive prompt's third button lets SecondHand fill
+  // without asking, sensitive details included, for the saved extension ID only. Each is a site SecondHand is
+  // on: it goes when that site is turned off, when all websites turns off and the site isn't trusted on its
+  // own, and when the extension ID changes. Saved only while there are any.
+  let alwaysAllowedSites = [];
   // SecondHand on all websites: any https site may ask, as a trusted one does. Saved only while on.
   let allSites = false;
   // Laya is on unless the person turned it off. Until they choose, this is undefined and not saved.
@@ -92,12 +97,15 @@ if (nativeOrigin) {
   const SENSITIVE_FIELDS = ['ssn', 'hasSsn', 'hasSsnAnswer', 'birthDate', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'assetsOnHand', 'monthlyMedicalExpenses',
     'usCitizen', 'disabled', 'blind', 'healthLimitation', 'medicare'];
   // Household counts aren't among them (#175), age-band counts and those worked out from members' birth dates included.
+  // At most 50 trusted sites, and at most 50 with Always allow on this site.
   const MAX_TRUSTED_SITES = 50;
   // A trusted site's host name is at most 253 characters, the longest DNS allows, so its origin is at most 261.
   const MAX_HOST_LENGTH = 253;
   const hostTooLong = origin => new URL(origin).hostname.length > MAX_HOST_LENGTH;
-  // settings.json at its largest: 50 origins of 261 characters (13.2 KB) and the other settings. 16 KB holds it.
-  const MAX_SETTINGS_BYTES = 16 * 1024;
+  // A saved list of sites: https origins with a host name DNS allows, each once, at most 50.
+  const savedSites = list => Array.isArray(list) ? [...new Set(list.filter(origin => typeof origin === 'string' && siteOrigin(origin) === origin && !hostTooLong(origin)))].slice(0, MAX_TRUSTED_SITES) : [];
+  // settings.json at its largest: two lists of 50 origins of 261 characters (26.4 KB) and the other settings. 32 KB holds it.
+  const MAX_SETTINGS_BYTES = 32 * 1024;
   // The guided first-run setup's progress: how many of its six steps are done. Not sensitive, and kept
   // beside the settings only while the setup is under way.
   const SETUP_STEPS = 6;
@@ -172,6 +180,7 @@ if (nativeOrigin) {
     const details = await vault.inspect().catch(() => null);
     return { exists: await vault.exists(), unlocked: vault.unlocked, lockRevision, recoveryKey: Boolean(details?.recoveryKey),
       deviceReset: Boolean(details?.deviceReset) && await hasDeviceSecret(), deviceResetSupported, extensionId, autofillWithoutAsking, trustedSites: [...trustedSites], allSites,
+      alwaysAllowedSites: [...alwaysAllowedSites],
       touchId: await touchIdUnlock.state(), touchIdSupported: touchIdUnlock.supported(), touchIdNotice: touchIdUnlock.notice, settingsNotice,
       bridgeRunning: Boolean(bridge), platform: process.platform, laya: await layaStatus(),
       extensionSetup: await getExtensionSetup(app).catch(() => ({ prepared: false, available: false })) };
@@ -194,7 +203,8 @@ if (nativeOrigin) {
     if (!vault.unlocked) throw publicError('Unlock SecondHand first.');
   }
   async function saveSettings() {
-    await atomicWrite(configPath, Buffer.from(JSON.stringify({ extensionId, autofillWithoutAsking, trustedSites, layaEnabled, ...(allSites && { allSites }) })));
+    await atomicWrite(configPath, Buffer.from(JSON.stringify({ extensionId, autofillWithoutAsking, trustedSites, layaEnabled, ...(allSites && { allSites }),
+      ...(alwaysAllowedSites.length > 0 && { alwaysAllowedSites }) })));
     settingsNotice = null;
   }
   // settings.json at startup. None is a new install. A file that can't be read, or isn't settings, leaves
@@ -214,9 +224,11 @@ if (nativeOrigin) {
       return;
     }
     if (EXTENSION_ID.test(config.extensionId || '')) { extensionId = config.extensionId; autofillWithoutAsking = config.autofillWithoutAsking === true; }
-    if (Array.isArray(config.trustedSites)) trustedSites = [...new Set(config.trustedSites.filter(origin => typeof origin === 'string' && siteOrigin(origin) === origin && !hostTooLong(origin)))].slice(0, MAX_TRUSTED_SITES);
+    trustedSites = savedSites(config.trustedSites);
     if (typeof config.layaEnabled === 'boolean') layaEnabled = config.layaEnabled;
     allSites = config.allSites === true;
+    // Always allow on this site belongs to the saved extension ID, on sites SecondHand is still on.
+    if (extensionId) alwaysAllowedSites = savedSites(config.alwaysAllowedSites).filter(siteAllowed);
   }
   // A site other than Iowa's portal may receive saved answers when the person trusted it, or every
   // https site while all websites is on. Always allow covers sensitive details there too (#175).
@@ -226,6 +238,15 @@ if (nativeOrigin) {
     if (!allSites) return;
     accessRevision++;
     allSites = false;
+    // Always allow on a site all websites let in goes with it; a site trusted on its own keeps it.
+    alwaysAllowedSites = alwaysAllowedSites.filter(site => trustedSites.includes(site));
+    await saveSettings();
+  }
+  // Turning a site off, from the extension or the app, takes back Always allow on it too.
+  async function untrust(origin) {
+    accessRevision++;
+    trustedSites = trustedSites.filter(site => site !== origin);
+    alwaysAllowedSites = alwaysAllowedSites.filter(site => site !== origin);
     await saveSettings();
   }
   async function saveExtensionRegistration(id) {
@@ -234,7 +255,7 @@ if (nativeOrigin) {
     try { registration = await registerHost(app, id); }
     catch (error) { throw publicError(error.message.startsWith('On Windows') ? error.message : 'Could not prepare the Chrome connection. Try again or see the setup instructions.'); }
     // Trust belongs to one extension identity; a different ID must be approved again.
-    if (id !== extensionId) autofillWithoutAsking = false;
+    if (id !== extensionId) { autofillWithoutAsking = false; alwaysAllowedSites = []; }
     extensionId = id;
     accessRevision++;
     await saveSettings();
@@ -248,18 +269,21 @@ if (nativeOrigin) {
   }
   // One approval before saved information reaches a website: getFields' values, or the answers
   // Laya picked from them. Always allow, for the extension ID it was saved with, covers everything,
-  // `sensitive` details included (#175). Otherwise it asks with Cancel, Allow once, and Always allow,
-  // or for `sensitive` details, with Cancel and Allow once.
+  // `sensitive` details included (#175); so does Always allow on this site, there alone and never on
+  // Iowa's portal, which shares its origin with the rest of hhsservices.iowa.gov. Otherwise it asks with
+  // Cancel, Allow once, and Always allow on this computer, or for `sensitive` details, Always allow on this site.
   // `generation` is the access revision the information was read under. False when cancelled.
   async function approveRelease({ context, iowa, origin, generation, message, items, sensitive = null }) {
-    if (autofillWithoutAsking && extensionId === context.extensionId) return true;
+    const allowedHere = !iowa && alwaysAllowedSites.includes(origin);
+    if ((autofillWithoutAsking || allowedHere) && extensionId === context.extensionId) return true;
     if (fieldRequestPending) throw publicError('Another field request is waiting for your approval.');
     fieldRequestPending = true;
     try {
       mainWindow.show(); mainWindow.focus();
       const answer = await dialog.showMessageBox(mainWindow, sensitive ? {
-        type: 'warning', title: 'Share sensitive details?', message: sensitive.message, detail: sensitive.detail,
-        buttons: ['Cancel', 'Allow once'], defaultId: 0, cancelId: 0, noLink: true
+        type: 'warning', title: 'Share sensitive details?', message: sensitive.message,
+        detail: `${sensitive.detail}\n\nChoose “Always allow on this site” to fill on ${origin} without asking from now on, sensitive details included. You can remove it on the Chrome extension page.`,
+        buttons: ['Cancel', 'Allow once', 'Always allow on this site'], defaultId: 0, cancelId: 0, noLink: true
       } : {
         type: 'question', title: 'Let Chrome fill this form?', message,
         detail: `Website: ${iowa ? PORTAL_URL : origin}\n\n${items}\n\nChoose “Always allow” to let the SecondHand extension fill without asking whenever this app is unlocked, on every site SecondHand is on. That includes your Social Security number, birth date, income, and citizenship and disability answers. You can turn it off on the Chrome extension page. The website may save entered information. Review every answer before continuing.${iowa ? "\n\nOn the verified initial applicant page, SecondHand may click ordinary Save and Continue after checking completeness. On the supported home-address confirmation page, it will automatically select Iowa's first possible home-address suggestion and choose Save and Continue. This applies to home-address suggestions only. These actions send entered answers to Iowa, which may save them immediately. Review the chosen home address before final submission. Other question pages require manual Next. This approval does not authorize consent, signatures, or submitting your application." : ''}`,
@@ -268,8 +292,10 @@ if (nativeOrigin) {
       if (answer.response !== 1 && answer.response !== 2) return false;
       requireUnlocked();
       if (generation !== accessRevision || extensionId !== context.extensionId) throw publicError('SecondHand access changed. Click Autofill again.');
-      if (answer.response === 2 && !sensitive) {
-        autofillWithoutAsking = true;
+      if (answer.response === 2) {
+        if (!sensitive) autofillWithoutAsking = true;
+        else if (alwaysAllowedSites.length >= MAX_TRUSTED_SITES) throw publicError('Remove a site under Sites that fill sensitive details without asking before adding another.');
+        else alwaysAllowedSites = [...alwaysAllowedSites, origin];
         const approvedRevision = ++accessRevision;
         await saveSettings();
         requireUnlocked();
@@ -394,11 +420,7 @@ if (nativeOrigin) {
     if (request.type === 'untrustAllSites') { await turnOffAllSites(); return { allSites: false }; }
     if (request.type === 'untrustSite') {
       const origin = siteOrigin(request.url);
-      if (trustedSites.includes(origin)) {
-        accessRevision++;
-        trustedSites = trustedSites.filter(site => site !== origin);
-        await saveSettings();
-      }
+      if (trustedSites.includes(origin) || alwaysAllowedSites.includes(origin)) await untrust(origin);
       return { trusted: false, origin };
     }
     requireUnlocked();
@@ -754,8 +776,15 @@ if (nativeOrigin) {
     async removeTrustedSite(origin) {
       requireUnlocked();
       if (typeof origin !== 'string' || !trustedSites.includes(origin)) throw publicError('That site isn’t in your trusted list.');
+      await untrust(origin);
+      touch(); return status();
+    },
+    // Takes back Always allow on one site, which stays trusted.
+    async removeAlwaysAllowedSite(origin) {
+      requireUnlocked();
+      if (typeof origin !== 'string' || !alwaysAllowedSites.includes(origin)) throw publicError('That site isn’t in your Always allow list.');
       accessRevision++;
-      trustedSites = trustedSites.filter(site => site !== origin);
+      alwaysAllowedSites = alwaysAllowedSites.filter(site => site !== origin);
       await saveSettings();
       touch(); return status();
     },

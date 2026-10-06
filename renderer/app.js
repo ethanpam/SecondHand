@@ -1039,27 +1039,33 @@
     renderLaya(laya);
   }
 
+  // The sites you trust, and those with Always allow on this site (#175), each with a Remove button that asks the
+  // desktop. Removing a trusted site takes back its Always allow too, so both lists show the desktop's answer.
   function renderTrustedSites() {
-    const sites = Array.isArray(vaultStatus.trustedSites) ? vaultStatus.trustedSites : [];
-    $('trusted-sites').replaceChildren(...sites.map(origin => {
+    renderSites('trusted-sites', 'trustedSites', origin => api.removeTrustedSite(origin), origin => `SecondHand will no longer fill forms on ${origin}.`);
+    renderSites('always-allowed-sites', 'alwaysAllowedSites', origin => api.removeAlwaysAllowedSite(origin), origin => `Always allow on this site is off for ${origin}.`);
+  }
+  function renderSites(id, key, remove, removed) {
+    const sites = Array.isArray(vaultStatus[key]) ? vaultStatus[key] : [];
+    $(id).replaceChildren(...sites.map(origin => {
       const row = element('li', 'trusted-site');
-      const remove = element('button', 'text-button', 'Remove');
-      remove.type = 'button';
-      remove.addEventListener('click', () => {
+      const button = element('button', 'text-button', 'Remove');
+      button.type = 'button';
+      button.addEventListener('click', () => {
         const generation = vaultGeneration;
-        pending(remove, async () => {
+        pending(button, async () => {
           try {
-            const status = await api.removeTrustedSite(origin);
+            const status = await remove(origin);
             if (generation !== vaultGeneration) return;
             vaultStatus = { ...vaultStatus, ...status }; renderTrustedSites();
-            toast(`SecondHand will no longer fill forms on ${origin}.`);
+            toast(removed(origin));
           } catch (error) { if (generation === vaultGeneration) showError('autofill-trust-error', error); }
         });
       });
-      row.append(element('code', '', origin), remove);
+      row.append(element('code', '', origin), button);
       return row;
     }));
-    $('trusted-sites-empty').hidden = sites.length > 0;
+    $(`${id}-empty`).hidden = sites.length > 0;
   }
 
   // SecondHand on all websites. Only the extension can turn it on: Chrome asks for access to every
@@ -1550,7 +1556,8 @@
       try {
         const status = await api.turnOffAllSites();
         if (generation !== vaultGeneration) return;
-        vaultStatus = { ...vaultStatus, ...status }; renderAllSites();
+        // Always allow on the sites all websites let in goes with it.
+        vaultStatus = { ...vaultStatus, ...status }; renderAllSites(); renderTrustedSites();
         toast('SecondHand will no longer fill forms on every website. Sites you trusted one by one stay on.');
       } catch (error) { if (generation === vaultGeneration) showError('autofill-trust-error', error); }
     });
