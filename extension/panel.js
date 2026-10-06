@@ -119,7 +119,10 @@
         const held = Number.isInteger(result.held) && result.held > 0 ? result.held : 0;
         const summary = filled > 0 ? (guessed > 0 ? t('widget.filledGuessed', { count: filled, guessed }) : t('widget.filled', { count: filled }))
           : held ? '' : fieldKeys(result.needYou).length ? t('widget.nothingMatches') : words(fromResult(result), 120);
-        const notes = [ai.note ? words(ai.note) : '', Number(result.laya) > 0 ? t('widget.suggestedByLaya') : '', held ? t('widget.held', { count: held }) : ''].filter(Boolean);
+        // Laya's best guesses (#185), apart from its sure answers.
+        const layaGuessed = Number.isInteger(result.layaGuessed) && result.layaGuessed > 0 ? result.layaGuessed : 0;
+        const notes = [ai.note ? words(ai.note) : '', Number(result.laya) > 0 ? t('widget.suggestedByLaya') : '', layaGuessed ? t('widget.layaGuessed', { count: layaGuessed }) : '',
+          held ? t('widget.held', { count: held }) : ''].filter(Boolean);
         return notes.length ? [summary.replace(/\.$/, ''), ...notes].filter(Boolean).join(' · ') : summary;
       }
       if (result.state === 'done') {
@@ -332,6 +335,9 @@
     // by id and their own words. One button asks the app for all of them.
     let held = [];
     let heldSignature = '';
+    // Laya's best guesses (#185): the questions the last Autofill filled with one, by id and their own words, to find and check.
+    let layaGuesses = [];
+    let guessesSignature = '';
     let contextRevision = 0;
     let checklistSignature = '';
     let working = false;
@@ -451,12 +457,15 @@
       fillable = false; autopilot = false; site = null; page = null; notSaved = []; checklistSignature = '';
       savable = []; savableSignature = '';
       held = []; heldSignature = '';
+      layaGuesses = []; guessesSignature = '';
       $('page-checklist').replaceChildren();
       $('checklist-section').hidden = true;
       $('save-list').replaceChildren();
       $('save-section').hidden = true;
       $('held-list').replaceChildren();
       $('held-section').hidden = true;
+      $('guesses-list').replaceChildren();
+      $('guesses-section').hidden = true;
       resetQuestions();
       resetSummary();
     }
@@ -540,6 +549,26 @@
       }));
       $('held-section').hidden = !held.length;
     }
+    // One row per question Laya guessed, in its own words, with the dotted outline it has on the page. A row finds it there.
+    function renderGuesses() {
+      const signature = JSON.stringify([language, layaGuesses]);
+      if (signature === guessesSignature) return;
+      guessesSignature = signature;
+      $('guesses-list').replaceChildren(...layaGuesses.map(item => {
+        const button = document.createElement('button');
+        button.type = 'button'; button.className = 'checklist-item'; button.dataset.guessId = item.id;
+        button.disabled = working || !target;
+        const mark = document.createElement('span'); mark.className = 'checklist-mark guess-mark'; mark.setAttribute('aria-hidden', 'true');
+        const copy = document.createElement('span'); copy.className = 'checklist-copy';
+        const label = document.createElement('span'); label.className = 'checklist-label'; label.dir = 'auto'; label.textContent = fixedText(item.label, 200);
+        copy.append(label);
+        button.setAttribute('aria-label', t('guesses.rowLabel', { label: fixedText(item.label, 200) }));
+        button.append(mark, copy);
+        button.addEventListener('click', trusted(() => { if (!button.disabled) focusField(item.id); }));
+        return button;
+      }));
+      $('guesses-section').hidden = !layaGuesses.length;
+    }
     function render(state) {
       if (!state || typeof state !== 'object') throw keyedError('panel.pageUnreadable');
       page = state.page || {};
@@ -552,9 +581,12 @@
         .slice(0, 40).map(({ id, label, answered }) => ({ id, label, answered }));
       held = (Array.isArray(state.held) ? state.held : []).filter(item => fieldKeys([item?.id]).length && typeof item.label === 'string')
         .slice(0, 40).map(({ id, label }) => ({ id, label }));
+      layaGuesses = (Array.isArray(result?.layaGuesses) ? result.layaGuesses : []).filter(item => fieldKeys([item?.id]).length && typeof item.label === 'string')
+        .slice(0, 40).map(({ id, label }) => ({ id, label }));
       renderChecklist();
       renderSaves();
       renderHeld();
+      renderGuesses();
       const loading = target?.status === 'loading';
       if (site?.enabled && !site.ready) show({ key: loading ? 'panel.waitingLoad' : 'panel.reloadToRead' });
       else if (reported(result)) show(fromResult(result), result.state === 'error');
@@ -1014,7 +1046,7 @@
     function relabel() {
       applyStatic();
       $('language').value = language;
-      if (page) { renderChecklist(); renderSaves(); }
+      if (page) { renderChecklist(); renderSaves(); renderGuesses(); }
       renderStatus();
       renderDesktop();
       resetQuestions();
