@@ -736,7 +736,7 @@ test('widget on a fillable page offers one-click Autofill and cycles through wha
   await view.userClick('autofill');
   assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:autofill')), { type: 'ui:autofill', confirmed: true });
   assert.equal(view.types().includes('ui:plan'), false, 'Iowa never asks the on-device AI');
-  assert.equal(view.get('widget-text').textContent, 'Filled 3');
+  assert.equal(view.get('widget-text').textContent, 'Filled 3. Stop erases nothing.', 'what it did, and what its Stop button would do');
   assert.equal(view.get('need-you').hidden, false);
   assert.equal(view.get('need-you').textContent, '2 questions left');
   assert.equal(view.get('widget-text').classList.contains('visually-hidden'), false, 'what Autofill did is shown above the link to what is left');
@@ -880,18 +880,18 @@ test('while autofill is on, the widget shows Stop and the current instruction', 
   await view.userClick('autofill');
   assert.equal(view.get('stop').hidden, false);
   assert.equal(view.get('autofill').hidden, true);
-  assert.equal(view.get('widget-text').textContent, 'Filled 3 · Check your answers, then click Save and Continue.');
+  assert.equal(view.get('widget-text').textContent, 'Filled 3 · Check your answers, then click Save and Continue. Stop erases nothing.');
   view.state.result = waitingResult;
   view.window.document.dispatchEvent(new view.window.Event('visibilitychange'));
   await tick(); await tick();
-  assert.equal(view.get('widget-text').textContent, 'Type the characters shown in Iowa’s security check, then click Continue.', 'polls follow the worker while autofill is on');
+  assert.equal(view.get('widget-text').textContent, 'Type the characters shown in Iowa’s security check, then click Continue. Stop erases nothing.', 'polls follow the worker while autofill is on');
   view.get('stop').click(); await tick();
   assert.equal(view.types().includes('ui:stop'), false);
   await view.userClick('stop');
   assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:stop')), { type: 'ui:stop', confirmed: true });
   assert.equal(view.get('stop').hidden, true);
   assert.equal(view.get('autofill').hidden, false);
-  assert.equal(view.get('widget-text').textContent, 'Autofill stopped. Nothing was erased.');
+  assert.equal(view.get('widget-text').textContent, 'Autofill stopped. Nothing was erased.', 'and no longer what Stop would do');
   assert.equal(view.get('widget-text').classList.contains('visually-hidden'), false, 'what Stop did is shown');
   assert.equal(view.get('stop').title, EN['widget.stopTitle']);
 });
@@ -900,15 +900,18 @@ test('a widget that loads mid-run picks up the running autofill', async t => {
   const view = await panel(t, { launcher: true, kind: 'blocked', autopilot: true, result: waitingResult });
   assert.equal(view.get('widget').hidden, false, 'instructions stay readable on steps that need you');
   assert.equal(view.get('stop').hidden, false);
-  assert.equal(view.get('widget-text').textContent, 'Type the characters shown in Iowa’s security check, then click Continue.');
+  assert.equal(view.get('widget-text').textContent, 'Type the characters shown in Iowa’s security check, then click Continue. Stop erases nothing.');
 });
 
 test('side panel turns its button into Stop while autofill is on', async t => {
   const view = await panel(t, { autopilot: true, result: waitingResult });
   assert.equal(view.get('panel-autofill').textContent, 'Stop Autofill');
+  assert.equal(view.get('stop-note').hidden, false);
+  assert.equal(view.get('stop-note').textContent, 'Stop ends Autofill and erases nothing.');
   await view.userClick('panel-autofill');
   assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:stop')), { type: 'ui:stop', confirmed: true, tabId: 7 });
   assert.equal(view.get('panel-autofill').textContent, 'Start Autofill');
+  assert.equal(view.get('stop-note').hidden, true);
 });
 
 test('a worker that never answers gets a plain notice and a Restart button in the widget and the side panel', async t => {
@@ -1397,7 +1400,7 @@ test('results the worker names by key show in Spanish in the widget and the side
     todo: 'Answer what is left in Iowa’s form. When the page is complete, SecondHand goes to the next one.', todoKey: 'iowa.missingAnswers', todoParams: {} };
   const widget = await panel(t, { launcher: true, language: 'es-ES', autofill: iowa });
   await widget.userClick('autofill');
-  assert.equal(widget.get('widget-text').textContent, `${strings.text('es', 'widget.filled', { count: 3 })} · ${spanish('iowa.missingAnswers')}`);
+  assert.equal(widget.get('widget-text').textContent, `${strings.text('es', 'widget.filled', { count: 3 })} · ${spanish('iowa.missingAnswers')} ${spanish('widget.stopNote')}`);
   assert.equal(widget.get('need-you').textContent, 'Faltan 2');
   assert.equal(widget.get('widget-text').title, strings.text('es', iowa.messageKey, iowa.messageParams));
   const side = await panel(t, { language: 'es-ES', autofill: iowa });

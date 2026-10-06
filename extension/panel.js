@@ -136,11 +136,13 @@
         const notes = [ai.note ? words(ai.note) : '', Number(result.laya) > 0 ? t('widget.suggestedByLaya') : ''].filter(Boolean);
         return notes.length ? [summary.replace(/\.$/, ''), ...notes].join(' · ') : summary;
       }
+      // While Autofill is on, what Stop would do goes after what is happening.
+      const said = text => autopilot ? `${/[.!?…。]$/.test(text) ? text : `${text}.`} ${t('widget.stopNote')}` : text;
       if (result.state === 'done') {
         const todo = words({ key: result.todoKey, params: result.todoParams, text: result.todo }, 90);
-        return [t('widget.filled', { count: Number(result.filled) || 0 }), todo].filter(Boolean).join(' · ');
+        return said([t('widget.filled', { count: Number(result.filled) || 0 }), todo].filter(Boolean).join(' · '));
       }
-      return words(fromResult(result), 120);
+      return said(words(fromResult(result), 120));
     }
     function render() {
       // There is a card for this page, unless the reader hid it. An outdated card keeps its steps on screen.
@@ -475,6 +477,8 @@
       $('panel-autofill').classList.toggle('secondary', Boolean(desktopAction));
       // Where the questions left are listed by name, each row goes to its own.
       $('panel-left').hidden = !target || !left.length || named.length > 0;
+      // While Autofill is on, what its button does now.
+      $('stop-note').hidden = !target || !autopilot;
       $('panel-left').disabled = working;
       $('open-iowa').hidden = Boolean(target) || !away || halted;
       $('panel-left').textContent = t('panel.goToLeft', { count: left.length || 1 });

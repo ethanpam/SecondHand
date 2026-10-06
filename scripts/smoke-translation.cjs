@@ -96,7 +96,7 @@ async function main() {
     await widget.locator('#autofill').click();
     await expect.poll(() => page.evaluate(() => window.__nextClicks), { timeout: 20000 }).toBe(1);
     assert.equal(await page.inputValue('#lastName'), smoke.syntheticProfile.lastName);
-    await expect(widget.locator('#widget-text')).toHaveText(es('worker.selectedSaveContinue'), { timeout: 20000 });
+    await expect(widget.locator('#widget-text')).toHaveText(`${es('worker.selectedSaveContinue')} ${es('widget.stopNote')}`, { timeout: 20000 });
     console.log(`Widget: Autofill fills the fixture and reports in Spanish: ${es('worker.selectedSaveContinue')}`);
 
     // The offer opens the side panel straight on the page's questions: every one, in Spanish.

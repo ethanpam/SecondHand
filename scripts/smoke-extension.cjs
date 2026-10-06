@@ -427,7 +427,7 @@ async function main() {
     await widget.locator('#autofill').click();
     await expect.poll(() => page.url(), { timeout: 20000 }).toBe(`${portal}/applyForBenefits/letsGetStarted`);
     widget = await launcherFrame();
-    await expect(widget.locator('#widget-text')).toHaveText('Read and accept Iowa’s consent, then click Continue.', { timeout: 20000 });
+    await expect(widget.locator('#widget-text')).toHaveText('Read and accept Iowa’s consent, then click Continue. Stop erases nothing.', { timeout: 20000 });
     await expect(widget.locator('#stop')).toBeVisible();
     await page.locator('#termChkbox').check();
     await page.locator('button.saveButton').click();
@@ -445,7 +445,7 @@ async function main() {
     widget = await launcherFrame();
     await widget.locator('#autofill').click();
     await expect(page.locator('#householdApplyProgYes')).toBeChecked({ timeout: 20000 });
-    await expect(widget.locator('#widget-text')).toHaveText('Filled 1 · Type the characters shown in Iowa’s security check, then click Continue.', { timeout: 20000 });
+    await expect(widget.locator('#widget-text')).toHaveText('Filled 1 · Type the characters shown in Iowa’s security check, then click Continue. Stop erases nothing.', { timeout: 20000 });
     assert.deepEqual((await calls('getFields'))[0].fields, ['programSnap', 'programFip', 'programMedicaid']);
     assert.equal(await page.evaluate(() => window.__continues), 0);
     console.log('Autopilot: the household question is answered from saved programs and the CAPTCHA is left to the applicant.');
@@ -478,7 +478,8 @@ async function main() {
         const ready = await host.boundingBox();
         assert.ok(ready.width <= 272 && ready.height > 46 && ready.height <= 150, `${code} before Autofill: the frame is ${ready.width} by ${ready.height}`);
         await widget.locator('#autofill').click();
-        await expect(widget.locator('#widget-text')).toHaveText(strings.text(code, key), { timeout: 20000 });
+        // Autofill is still on, waiting for the applicant: the line ends with what Stop would do.
+        await expect(widget.locator('#widget-text')).toHaveText(`${strings.text(code, key)} ${strings.text(code, 'widget.stopNote')}`, { timeout: 20000 });
         await expect(widget.locator('#widget-text')).toBeVisible();
         await expect.poll(() => widget.evaluate(whole), { timeout: 10000 }).toBe(true);
         const box = await host.boundingBox();
