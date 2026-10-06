@@ -450,6 +450,10 @@ async function sites() {
       await expect.poll(() => panel.evaluate(() => !document.getElementById('panel-autofill').disabled), { timeout: 20000 }).toBe(true);
       await panel.click('#panel-autofill');
       await panelShot(running, panel, 'panel-site-guessed', () => !document.getElementById('guesses-section').hidden);
+      // The same in Spanish: what Laya guessed, in the words the panel uses for it there.
+      await chooseLanguage(panel, 'es');
+      await panelShot(running, panel, 'panel-site-guessed-es', () => document.getElementById('language').value === 'es' && !document.getElementById('guesses-section').hidden && !/Guessed/.test(document.getElementById('guesses-title').textContent));
+      await chooseLanguage(panel, 'en');
       await panel.close();
     });
     // The card on other sites, with the side panel closed.
@@ -550,7 +554,7 @@ async function recording() {
 const sessions = [
   [iowaCard, ['card-ready', 'card-focus', 'card-hidden', 'card-hidden-focus', 'card-working', 'card-need-you', 'card-hidden-waiting', 'card-ready-again', 'card-message', 'card-locked', 'card-closed', 'card-pill']],
   [iowaPanel, ['panel-iowa', 'panel-header', 'panel-focus', 'panel-working', 'panel-iowa-filled', 'panel-checklist', 'panel-iowa-again', 'panel-locked', 'panel-closed', 'panel-info', 'panel-elsewhere', 'panel-elsewhere-es', 'panel-arabic', 'panel-questions']],
-  [sites, ['panel-site-off', 'panel-site-filled', 'panel-site-filled-open', 'panel-laya-off', 'panel-save', 'panel-site-held', 'panel-site-guessed', 'panel-all-sites-off', 'card-site', 'card-offer', 'card-offer-filled']],
+  [sites, ['panel-site-off', 'panel-site-filled', 'panel-site-filled-open', 'panel-laya-off', 'panel-save', 'panel-site-held', 'panel-site-guessed', 'panel-site-guessed-es', 'panel-all-sites-off', 'card-site', 'card-offer', 'card-offer-filled']],
   [outdated, ['card-outdated', 'panel-outdated', 'card-reload']],
   [recording, ['card-autofill']]
 ];
