@@ -113,5 +113,19 @@ function studentNameGrade(profile) {
   return name && grade ? `${name}, ${grade}` : '';
 }
 
-module.exports = { BAND_PREFIX, COUNT_BANDS, MAX_YEARS_BACK, calendarDate, localToday, localDate, birthDateProblem, ageOn, listed, hasUnusableBirthDate, memberAges, householdCounts,
-  parseBand, isBandKey, bandCount, bandLabel, studentNameGrade };
+// The named fields the household list answers, beside the age-band counts: its size, its counts by age, and the student.
+const LIST_ANSWERS = Object.freeze(['householdSize', ...Object.keys(COUNT_BANDS), 'studentNameGrade']);
+// What the household list lacks for these fields a page asked for and got no answer to (#180): { need: 'list' } when no list
+// is saved, or { need: 'birthDate', person } when a count by age needs a birth date the list doesn't have, `person` naming the
+// first such member as My information does ('you', or their row number). Null when none of them is the list's to answer.
+function listNeed(profile, fields) {
+  const byAge = field => isBandKey(field) || Object.hasOwn(COUNT_BANDS, field);
+  if (!fields.some(field => byAge(field) || LIST_ANSWERS.includes(field))) return null;
+  if (!listed(profile)) return { need: 'list' };
+  const index = members(profile).findIndex(member => typeof member.birthDate !== 'string' || !member.birthDate.trim());
+  if (index < 0 || !fields.some(byAge)) return null;
+  return { need: 'birthDate', person: members(profile)[index].relationship === 'self' ? 'you' : index + 1 };
+}
+
+module.exports = { BAND_PREFIX, COUNT_BANDS, MAX_YEARS_BACK, LIST_ANSWERS, calendarDate, localToday, localDate, birthDateProblem, ageOn, listed, hasUnusableBirthDate, memberAges, householdCounts,
+  parseBand, isBandKey, bandCount, bandLabel, studentNameGrade, listNeed };
