@@ -56,7 +56,7 @@
   "healthLimitation": "no",
   "medicare": "no",
   "studentLevel": "not-student",
-  "incomeSources": "family-support",
+  "incomeSources": "none",
   "currentBenefits": "school-meals",
   "helpWanted": "food-pantry,fresh-produce",
   "householdMembers": [
