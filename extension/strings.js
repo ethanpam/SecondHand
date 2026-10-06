@@ -9,6 +9,21 @@
   // Keys never change meaning. A value is a string, or { one, other } chosen by params.count.
   // Iowa's own buttons keep their English names in other languages: the portal shows them in English.
   const en = Object.freeze({
+    "panel.fillAndContinue": "Fill and continue",
+    "panel.fillAndContinueHint": "Uses saved answers only. Clicks ordinary Next when this page is complete, which may send and save answers. Stops for missing answers, errors, consent, signatures, payment, and final submission.",
+    "worker.siteContinuing": "Filled this page and clicked Next. Checking the next page…",
+    "worker.siteOriginChanged": "Stopped because the application moved to another website. Start again there if you want to continue.",
+    "worker.siteFillBusy": "Wait for the current Autofill to finish.",
+    "worker.siteNext.missing": "Complete the required answers, then choose Fill and continue again.",
+    "worker.siteNext.unknown": "This page has a control SecondHand cannot verify. Review it and continue yourself.",
+    "worker.siteNext.review": "Review the guesses or open dialog, then continue yourself.",
+    "worker.siteNext.protected": "This step needs your review. Handle consent, signatures, payment, and final submission yourself.",
+    "worker.siteNext.no-next": "No single ordinary Next button was found. Continue this page yourself.",
+    "worker.siteNext.errors": "The page shows an error. Correct it before continuing.",
+    "worker.siteNext.changed": "The page changed or Next did not open a new step. Review it; SecondHand will not click twice.",
+    "worker.siteNext.unsupported": "SecondHand cannot verify this page’s Next action. Continue yourself.",
+    "worker.siteNext.frames": "This page contains an embedded form. Review it and continue yourself.",
+
     // Verified later Iowa pages: fixed labels only; never applicant answers.
     "iowa.heading.iowa-emergency-screening": "Emergency Supplemental Nutrition Assistance Program (SNAP)",
     "iowa.question.emergencyIncomeUnder150": "Does the household expect to have less than $150 income this month?",
@@ -469,6 +484,21 @@
 
   // Needs a human Spanish review before release (see the #34 notes).
   const es = Object.freeze({
+    "panel.fillAndContinue": "Rellenar y continuar",
+    "panel.fillAndContinueHint": "Usa solo respuestas guardadas. Pulsa Siguiente cuando la página está completa; esto puede enviar y guardar respuestas. Se detiene ante datos faltantes, errores, consentimiento, firmas, pagos y envío final.",
+    "worker.siteContinuing": "Página rellenada y Siguiente pulsado. Revisando la siguiente página…",
+    "worker.siteOriginChanged": "Se detuvo porque la solicitud pasó a otro sitio web. Inicie de nuevo allí si desea continuar.",
+    "worker.siteFillBusy": "Espere a que termine el autocompletado actual.",
+    "worker.siteNext.missing": "Complete las respuestas obligatorias y vuelva a elegir Rellenar y continuar.",
+    "worker.siteNext.unknown": "Esta página tiene un control que SecondHand no puede verificar. Revísela y continúe usted.",
+    "worker.siteNext.review": "Revise las suposiciones o el diálogo abierto y continúe usted.",
+    "worker.siteNext.protected": "Este paso requiere su revisión. Gestione usted el consentimiento, las firmas, los pagos y el envío final.",
+    "worker.siteNext.no-next": "No se encontró un único botón Siguiente normal. Continúe esta página usted.",
+    "worker.siteNext.errors": "La página muestra un error. Corríjalo antes de continuar.",
+    "worker.siteNext.changed": "La página cambió o Siguiente no abrió otro paso. Revísela; SecondHand no pulsará dos veces.",
+    "worker.siteNext.unsupported": "SecondHand no puede verificar la acción Siguiente de esta página. Continúe usted.",
+    "worker.siteNext.frames": "Esta página contiene un formulario incrustado. Revíselo y continúe usted.",
+
     // Verified later Iowa pages: fixed labels only; never applicant answers.
     "iowa.heading.iowa-emergency-screening": "SNAP de emergencia",
     "iowa.question.emergencyIncomeUnder150": "¿Espera el hogar tener ingresos de menos de $150 este mes?",
@@ -925,6 +955,21 @@
   });
   // Needs a human Vietnamese review before release.
   const vi = Object.freeze({
+    "panel.fillAndContinue": "Điền và tiếp tục",
+    "panel.fillAndContinueHint": "Chỉ dùng câu trả lời đã lưu. Bấm Tiếp khi trang đã hoàn tất; thao tác này có thể gửi và lưu câu trả lời. Dừng khi thiếu thông tin, có lỗi, cần đồng ý, ký tên, thanh toán hoặc nộp đơn cuối cùng.",
+    "worker.siteContinuing": "Đã điền trang này và bấm Tiếp. Đang kiểm tra trang kế tiếp…",
+    "worker.siteOriginChanged": "Đã dừng vì đơn chuyển sang trang web khác. Hãy bắt đầu lại tại đó nếu muốn tiếp tục.",
+    "worker.siteFillBusy": "Hãy đợi lần tự điền hiện tại hoàn tất.",
+    "worker.siteNext.missing": "Điền các câu trả lời bắt buộc rồi chọn Điền và tiếp tục lần nữa.",
+    "worker.siteNext.unknown": "Trang này có mục mà SecondHand không thể xác minh. Hãy kiểm tra và tự tiếp tục.",
+    "worker.siteNext.review": "Kiểm tra các câu trả lời phỏng đoán hoặc hộp thoại đang mở rồi tự tiếp tục.",
+    "worker.siteNext.protected": "Bước này cần bạn kiểm tra. Hãy tự đồng ý, ký tên, thanh toán và nộp đơn cuối cùng.",
+    "worker.siteNext.no-next": "Không tìm thấy một nút Tiếp thông thường duy nhất. Hãy tự tiếp tục trang này.",
+    "worker.siteNext.errors": "Trang đang báo lỗi. Hãy sửa lỗi trước khi tiếp tục.",
+    "worker.siteNext.changed": "Trang đã thay đổi hoặc nút Tiếp chưa mở bước mới. Hãy kiểm tra; SecondHand sẽ không bấm hai lần.",
+    "worker.siteNext.unsupported": "SecondHand không thể xác minh thao tác Tiếp của trang này. Hãy tự tiếp tục.",
+    "worker.siteNext.frames": "Trang này chứa biểu mẫu nhúng. Hãy kiểm tra và tự tiếp tục.",
+
     // Verified later Iowa pages: fixed labels only; never applicant answers.
     "iowa.heading.iowa-emergency-screening": "SNAP khẩn cấp",
     "iowa.question.emergencyIncomeUnder150": "Hộ gia đình có dự kiến thu nhập dưới $150 trong tháng này không?",
@@ -1382,6 +1427,21 @@
 
   // Needs a human Simplified Chinese review before release.
   const zh = Object.freeze({
+    "panel.fillAndContinue": "填写并继续",
+    "panel.fillAndContinueHint": "仅使用已保存的答案。页面填写完整后点击普通的“下一步”，这可能会发送并保存答案。遇到缺失答案、错误、同意、签名、付款或最终提交时会停止。",
+    "worker.siteContinuing": "已填写此页并点击“下一步”。正在检查下一页…",
+    "worker.siteOriginChanged": "申请已转到另一个网站，因此已停止。如需继续，请在该网站重新开始。",
+    "worker.siteFillBusy": "请等待当前自动填写完成。",
+    "worker.siteNext.missing": "请填写必填答案，然后再次选择“填写并继续”。",
+    "worker.siteNext.unknown": "此页有 SecondHand 无法验证的控件。请检查并自行继续。",
+    "worker.siteNext.review": "请检查推测的答案或打开的对话框，然后自行继续。",
+    "worker.siteNext.protected": "此步骤需要您检查。请自行处理同意、签名、付款和最终提交。",
+    "worker.siteNext.no-next": "未找到唯一的普通“下一步”按钮。请自行继续此页。",
+    "worker.siteNext.errors": "页面显示错误。请先更正再继续。",
+    "worker.siteNext.changed": "页面已改变，或“下一步”未打开新步骤。请检查；SecondHand 不会重复点击。",
+    "worker.siteNext.unsupported": "SecondHand 无法验证此页的“下一步”操作。请自行继续。",
+    "worker.siteNext.frames": "此页包含嵌入式表单。请检查并自行继续。",
+
     // Verified later Iowa pages: fixed labels only; never applicant answers.
     "iowa.heading.iowa-emergency-screening": "紧急补充营养援助计划（SNAP）",
     "iowa.question.emergencyIncomeUnder150": "您家预计本月收入低于 $150 吗？",
@@ -1839,6 +1899,21 @@
 
   // Needs a human French review before release.
   const fr = Object.freeze({
+    "panel.fillAndContinue": "Remplir et continuer",
+    "panel.fillAndContinueHint": "Utilise uniquement les réponses enregistrées. Clique sur Suivant quand la page est complète, ce qui peut envoyer et enregistrer les réponses. S’arrête aux réponses manquantes, erreurs, consentements, signatures, paiements et à l’envoi final.",
+    "worker.siteContinuing": "Page remplie et Suivant cliqué. Vérification de la page suivante…",
+    "worker.siteOriginChanged": "Arrêt car la demande est passée sur un autre site. Relancez sur ce site pour continuer.",
+    "worker.siteFillBusy": "Attendez la fin du remplissage en cours.",
+    "worker.siteNext.missing": "Complétez les réponses obligatoires, puis choisissez à nouveau Remplir et continuer.",
+    "worker.siteNext.unknown": "Cette page contient un contrôle que SecondHand ne peut pas vérifier. Vérifiez-la et continuez vous-même.",
+    "worker.siteNext.review": "Vérifiez les réponses supposées ou la boîte de dialogue ouverte, puis continuez vous-même.",
+    "worker.siteNext.protected": "Cette étape nécessite votre vérification. Gérez vous-même le consentement, les signatures, les paiements et l’envoi final.",
+    "worker.siteNext.no-next": "Aucun bouton Suivant ordinaire unique trouvé. Continuez vous-même cette page.",
+    "worker.siteNext.errors": "La page affiche une erreur. Corrigez-la avant de continuer.",
+    "worker.siteNext.changed": "La page a changé ou Suivant n’a pas ouvert une nouvelle étape. Vérifiez ; SecondHand ne cliquera pas deux fois.",
+    "worker.siteNext.unsupported": "SecondHand ne peut pas vérifier l’action Suivant de cette page. Continuez vous-même.",
+    "worker.siteNext.frames": "Cette page contient un formulaire intégré. Vérifiez-le et continuez vous-même.",
+
     // Verified later Iowa pages: fixed labels only; never applicant answers.
     "iowa.heading.iowa-emergency-screening": "Aide alimentaire SNAP d’urgence",
     "iowa.question.emergencyIncomeUnder150": "Le foyer prévoit-il un revenu inférieur à 150 $ ce mois-ci ?",
@@ -2296,6 +2371,21 @@
 
   // Needs a human Arabic review before release. Counts use "label: number" so no plural agreement is needed.
   const ar = Object.freeze({
+    "panel.fillAndContinue": "ملء ومتابعة",
+    "panel.fillAndContinueHint": "يستخدم الإجابات المحفوظة فقط. ينقر التالي العادي عند اكتمال الصفحة، وقد يرسل الإجابات ويحفظها. يتوقف عند الإجابات الناقصة والأخطاء والموافقة والتوقيع والدفع والإرسال النهائي.",
+    "worker.siteContinuing": "تم ملء الصفحة والنقر على التالي. جارٍ فحص الصفحة التالية…",
+    "worker.siteOriginChanged": "توقف لأن الطلب انتقل إلى موقع آخر. ابدأ من جديد هناك إذا أردت المتابعة.",
+    "worker.siteFillBusy": "انتظر انتهاء الملء التلقائي الحالي.",
+    "worker.siteNext.missing": "أكمل الإجابات المطلوبة ثم اختر ملء ومتابعة مرة أخرى.",
+    "worker.siteNext.unknown": "تحتوي الصفحة على عنصر لا يستطيع SecondHand التحقق منه. راجعها وتابع بنفسك.",
+    "worker.siteNext.review": "راجع الإجابات المخمّنة أو مربع الحوار المفتوح ثم تابع بنفسك.",
+    "worker.siteNext.protected": "تحتاج هذه الخطوة إلى مراجعتك. تولَّ الموافقة والتوقيع والدفع والإرسال النهائي بنفسك.",
+    "worker.siteNext.no-next": "لم يتم العثور على زر تالي عادي واحد. تابع هذه الصفحة بنفسك.",
+    "worker.siteNext.errors": "تعرض الصفحة خطأ. صححه قبل المتابعة.",
+    "worker.siteNext.changed": "تغيرت الصفحة أو لم يفتح التالي خطوة جديدة. راجعها؛ لن ينقر SecondHand مرتين.",
+    "worker.siteNext.unsupported": "لا يستطيع SecondHand التحقق من إجراء التالي في هذه الصفحة. تابع بنفسك.",
+    "worker.siteNext.frames": "تحتوي الصفحة على نموذج مضمّن. راجعه وتابع بنفسك.",
+
     // Verified later Iowa pages: fixed labels only; never applicant answers.
     "iowa.heading.iowa-emergency-screening": "برنامج المساعدة الغذائية التكميلية الطارئة (SNAP)",
     "iowa.question.emergencyIncomeUnder150": "هل تتوقع الأسرة دخلًا أقل من 150 دولارًا هذا الشهر؟",

@@ -168,7 +168,9 @@ function serviceWorker() {
     // sees the request, and fails without one.
     start({ chrome, globals = {}, build, disk, fetched = () => {} }) {
       const code = read('extension/background.js');
-      const withBuild = value => code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${value}';`);
+      // Preserve source offsets when simulating an older, shorter build number so V8
+      // combines coverage from those runs with the current worker (for example .9 → .10).
+      const withBuild = (value, preserveOffsets = false) => code.replace(/^const BUILD = '[^']+';$/m, original => `const BUILD = '${value}';`.padEnd(preserveOffsets ? original.length : 0));
       const fetch = async (url, options) => {
         fetched(url, options);
         if (url !== `${chrome.runtime.getURL('background.js')}` || !disk) throw new TypeError('Failed to fetch');
@@ -178,7 +180,7 @@ function serviceWorker() {
         chrome, SecondHandIowa: require('../../extension/iowa-adapter.js'), SecondHandGeneric: require('../../extension/generic-adapter.js'),
         SecondHandStrings: require('../../extension/strings.js'), SecondHandTranslation: require('../../extension/translation.js'),
         importScripts: () => {}, crypto: require('node:crypto').webcrypto, setTimeout, clearTimeout, URL, Map, Set, console, fetch, ...globals
-      }, build ? withBuild(build) : code);
+      }, build ? withBuild(build, true) : code);
       run();
       return worker;
     },

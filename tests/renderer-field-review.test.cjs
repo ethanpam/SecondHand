@@ -71,7 +71,7 @@ test('profile checking sends the complete draft and household, renders accessibl
   view.get('check-profile-fields').click();
   const request = view.requests[0].request;
   assert.equal(request.useLaya, false);
-  assert.deepEqual(Object.keys(request.profile).sort(), [...PROFILE_FIELDS].sort());
+  assert.deepEqual(Object.keys(request.profile).sort(), PROFILE_FIELDS.filter(key => key !== 'customFields').sort());
   assert.equal(request.profile.email, 'unfinished@');
   assert.equal(request.profile.householdMembers[1].firstName, 'Casey');
   assert.equal(view.get('save-profile').disabled, false);

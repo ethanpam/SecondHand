@@ -54,7 +54,7 @@ enum ProfileDocumentParser {
         context.evaluateScript("var modules = {'node:crypto': {randomUUID: function() { throw new Error('Unavailable'); }}}; function require(name) { if (!(name in modules)) throw new Error('Unknown module'); return modules[name]; }")
         // Load the shared CommonJS dependencies before their consumers. These
         // bundled scripts receive only the fixed in-memory module registry.
-        for name in ["snap-information", "household", "schema", "facts", "document-layout", "document-w2", "document-ssa1099", "document-1099nec", "document-parser"] {
+        for name in ["snap-information", "household", "custom-fields", "schema", "facts", "document-layout", "document-w2", "document-ssa1099", "document-1099nec", "document-parser"] {
             let scriptExtension = name == "snap-information" ? "js" : "cjs"
             guard let url = Bundle.main.url(forResource: name, withExtension: scriptExtension) else { throw DocumentOCRError.unreadable }
             let script = try String(contentsOf: url, encoding: .utf8)

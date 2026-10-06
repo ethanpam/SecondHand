@@ -11,6 +11,7 @@ const { pathToFileURL, URL } = require('node:url');
 const { Vault, atomicWrite, normalizeRecoveryKey, MAX_VAULT_BYTES } = require('./vault.cjs');
 const { startBridge, runNativeHost, nativeStreams, appLaunch, startApp, extensionFromOrigin, EXTENSION_ID, isIowaNavigationAuthorization } = require('./bridge.cjs');
 const recordFields = require('./record-fields.cjs');
+const { validateCustomQuestions, matchCustomFields } = require('../shared/custom-fields.cjs');
 const { registerHost } = require('./registration.cjs');
 const { getExtensionSetup, prepareBundledExtension } = require('./extension-setup.cjs');
 const { testStoragePath } = require('./test-storage-path.cjs');
@@ -362,6 +363,45 @@ if (nativeOrigin) {
     touch();
     return { recordId, values, accessRevision: receipt.accessRevision };
   }
+  // Custom answers and ordinary general-site navigation are separate, explicit
+  // requests. Neither can expose a profile key, record list, or model context.
+  function checkGeneralAccess(request, context, generation) {
+    requireUnlocked();
+    const origin = siteOrigin(request.url);
+    if (!origin || isPortalUrl(request.url)) throw publicError('This request is only supported on other HTTPS sites.');
+    if (extensionId !== context?.extensionId || generation !== accessRevision) throw publicError('SecondHand access changed. Click Autofill again.');
+    if (!siteAllowed(origin)) throw publicError('This site isn’t trusted. Turn on SecondHand for it first.');
+    return origin;
+  }
+  async function releaseCustomFields(request, context) {
+    const generation = accessRevision, origin = checkGeneralAccess(request, context, generation);
+    try {
+      if (Object.keys(request).some(key => !['id', 'type', 'url', 'fields'].includes(key))) throw new Error();
+      validateCustomQuestions(request.fields);
+    } catch { throw publicError('This page asked for unsupported custom-answer questions.'); }
+    if (fieldRequestPending) throw publicError('Another field request is waiting for your approval.');
+    let matched;
+    try { matched = matchCustomFields(vault.getData().profile.customFields, request.fields); }
+    catch { throw publicError('Check your saved custom answers in My information.'); }
+    if (!matched.matches.length) { touch(); return { values: {}, accessRevision }; }
+    const receipt = await approveRelease({ context, iowa: false, origin, generation, withReceipt: true,
+      sensitive: { message: `Fill these custom answers on ${origin}?`,
+        detail: 'Custom answers are treated as sensitive. Only allow this if these exact questions and answers belong on this site:\n\n' +
+          matched.matches.map(row => `${row.label}: ${JSON.stringify(row.value)}`).join('\n') } });
+    checkGeneralAccess(request, context, receipt ? receipt.accessRevision : generation);
+    touch();
+    return { values: receipt ? matched.values : {}, accessRevision };
+  }
+  async function authorizeSiteNavigation(request, context) {
+    const generation = accessRevision, origin = checkGeneralAccess(request, context, generation);
+    if (Object.keys(request).some(key => !['id', 'type', 'url'].includes(key))) throw publicError('This navigation request is invalid.');
+    const receipt = await approveRelease({ context, iowa: false, origin, generation, withReceipt: true,
+      message: `Allow an ordinary Next step on ${origin}?`,
+      items: 'No saved profile fields will be read. After checking this page is complete, SecondHand may click an ordinary Next, Continue, or Save and Continue button. This can send entered answers to the website, which may save them immediately. Review the page first. This approval does not authorize consent, signatures, certification, payments, or final submission.' });
+    checkGeneralAccess(request, context, receipt ? receipt.accessRevision : generation);
+    if (!receipt) throw publicError('You cancelled this navigation request.');
+    touch(); return { accessRevision: receipt.accessRevision };
+  }
   // warmLaya: when an Autofill click starts on a page with open questions, the model's first load
   // after idle (process start, checksum, load: seconds) happens here, not in the click's Laya
   // budget. Answers with Laya's state; a model that fails to load reports as an error.
@@ -462,8 +502,12 @@ if (nativeOrigin) {
     return { build: setup.build, copy: 'ready' };
   }
   async function bridgeRequest(request, context) {
-    if (request.type === 'status') return { unlocked: vault.unlocked, applicationCount: vault.unlocked ? vault.getData().applications.length : 0, accessRevision, allSites,
-      laya: await extensionLayaState(), extension: await shippedExtension(), touchId: await touchIdUnlock.state() };
+    if (request.type === 'status') {
+      const laya = await extensionLayaState(), extension = await shippedExtension(), touchId = await touchIdUnlock.state();
+      const data = vault.unlocked ? vault.getData() : null;
+      return { unlocked: vault.unlocked, applicationCount: data ? data.applications.length : 0, accessRevision, allSites, laya, extension, touchId,
+        ...(Array.isArray(data?.profile.customFields) && data.profile.customFields.length ? { customFieldsAvailable: true } : {}) };
+    }
     // The side panel's Unlock: this app's Touch ID prompt, which macOS shows over Chrome. Only whether
     // it unlocked, or why not, goes back; the window hears of an unlock to show the saved information.
     if (request.type === 'unlockWithTouchId') {
@@ -498,7 +542,7 @@ if (nativeOrigin) {
         mainWindow.show(); mainWindow.focus();
         const answer = await dialog.showMessageBox(mainWindow, {
           type: 'question', title: 'Trust this site?', message: `Let SecondHand fill forms on ${origin}?`,
-          detail: `When you click Autofill on this site, SecondHand fills the saved answers it can match. It never clicks Next or Submit. ${SITE_RULES}. You can remove this site on the Chrome extension page.`,
+          detail: `When you click Autofill on this site, SecondHand fills the saved answers it can match. Autofill fills only. If you choose Fill and continue, SecondHand may use ordinary Next after checking completeness and desktop authorization. This can send entered answers to the site. Consent, signatures, and final submission stay with you. ${SITE_RULES}. You can remove this site on the Chrome extension page.`,
           buttons: ['Cancel', 'Trust this site'], defaultId: 1, cancelId: 0, noLink: true
         });
         if (answer.response !== 1) throw publicError('You cancelled trusting this site.');
@@ -524,7 +568,7 @@ if (nativeOrigin) {
         mainWindow.show(); mainWindow.focus();
         const answer = await dialog.showMessageBox(mainWindow, {
           type: 'question', title: 'Trust all websites?', message: 'Let SecondHand fill forms on any website?',
-          detail: `Nothing is filled until you click Autofill on a website. Then SecondHand fills the saved answers it can match there. It never clicks Next or Submit. ${SITE_RULES}, on every site. You can turn this off in SecondHand’s side panel in Chrome or on the Chrome extension page.`,
+          detail: `Nothing is filled until you click Autofill or Fill and continue on a website. SecondHand fills the saved answers it can match there. Autofill fills only. If you choose Fill and continue, SecondHand may use ordinary Next after checking completeness and desktop authorization. This can send entered answers to the site. Consent, signatures, and final submission stay with you. ${SITE_RULES}, on every site. You can turn this off in SecondHand’s side panel in Chrome or on the Chrome extension page.`,
           buttons: ['Cancel', 'Trust all websites'], defaultId: 1, cancelId: 0, noLink: true
         });
         if (answer.response !== 1) throw publicError('You cancelled trusting all websites.');
@@ -540,6 +584,8 @@ if (nativeOrigin) {
       } finally { fieldRequestPending = false; }
     }
     if (request.type === 'getRecordFields') return releaseRecord(request, context);
+    if (request.type === 'getCustomFields') return releaseCustomFields(request, context);
+    if (request.type === 'authorizeSiteNavigation') return authorizeSiteNavigation(request, context);
     if (request.type === 'getFields') {
       const iowa = isPortalUrl(request.url);
       const navigationOnly = isIowaNavigationAuthorization(request);

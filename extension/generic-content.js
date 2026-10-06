@@ -25,6 +25,7 @@
   let restoring = false; // Wait for the worker to recheck site access after a cached page returns.
   let activation = 0;
   let watch = null;
+  const observedRoots = new Set();
   const strings = value => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
   // The widget's frame is as wide as the widget measured itself, never past 272px or the screen.
   const fits = width => Number.isInteger(width) && width > 0 && width <= 1000;
@@ -118,6 +119,7 @@
   function check() {
     checkTimer = null;
     if (off || suspended || restoring) return;
+    observeRoots();
     const now = engine.offers(document) === true;
     const changed = now !== helps;
     helps = now;
@@ -130,6 +132,7 @@
     clearInterval(watch);
     watch = null;
     observer.disconnect();
+    observedRoots.clear();
   }
   function turnOff() {
     off = true;
@@ -154,10 +157,21 @@
     if (off || suspended || restoring || checkTimer || records.every(record => panelHost && (record.target === panelHost || panelHost.contains(record.target)))) return;
     checkTimer = setTimeout(check, CHECK_MS);
   });
+  function observeRoots() {
+    const roots = [document.documentElement, ...(engine.deepQueryAll?.(document, '*') || []).map(element => element.shadowRoot).filter(root => root?.mode === 'open')];
+    let added = false;
+    for (const root of roots) {
+      if (!root || observedRoots.has(root)) continue;
+      observedRoots.add(root); added = true;
+      observer.observe(root, { subtree: true, childList: true, attributes: true, characterData: true });
+    }
+    return added;
+  }
   function observe() {
-    observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
-    // Pages that rebuild their body (single-page forms) get the widget back.
-    if (topFrame && watch === null) watch = setInterval(placeCard, 1000);
+    observeRoots();
+    // attachShadow does not produce a document mutation. Discover a newly opened root
+    // without patching the site's DOM APIs; cached/off pages stop this one timer.
+    if (watch === null) watch = setInterval(() => { if (observeRoots()) check(); else placeCard(); }, 1000);
   }
 
   check();
@@ -237,6 +251,12 @@
           if (url.protocol === 'https:' && url.origin !== location.origin) origins.add(url.origin);
         }
         respond({ origins: [...origins] });
+      } else if (message.type === 'secondhand:generic:navigation') {
+        const navigation = globalThis.SecondHandNavigation;
+        respond(navigation ? withOwnPanelHidden(() => navigation.snapshot(document)) : { canAdvance: false });
+      } else if (message.type === 'secondhand:generic:advance') {
+        const navigation = globalThis.SecondHandNavigation;
+        respond(navigation && typeof message.token === 'string' ? withOwnPanelHidden(() => navigation.advance(document, message.token)) : { advanced: false });
       } else if (message.type === 'secondhand:generic:plan') {
         respond(planMetadata(withOwnPanelHidden(() => engine.plan(document))));
       } else if (message.type === 'secondhand:generic:fill') {

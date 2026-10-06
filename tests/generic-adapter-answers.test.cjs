@@ -82,7 +82,7 @@ test('text boxes, a lone checkbox, div checkboxes, and listboxes never take an o
   const google = page(forms.googleChoices);
   const plan = generic.plan(google);
   const skipped = generic.fillFields(google, plan.token, [{ id: open(plan, 'Which items do you need?').id, option: 'Produce', guessed: true },
-    { id: open(plan, 'County').id, option: 'Polk', guessed: true }], {});
+    { id: plan.matched.find(item => item.key === 'county').id, option: 'Polk', guessed: true }], {});
   assert.deepEqual(skipped.filled, []);
   assert.equal(google.querySelector('[aria-checked="true"][aria-label="Produce"]'), null);
 });
