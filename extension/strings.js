@@ -381,7 +381,7 @@
     'detail': '{detail} (mensaje en inglés)',
 
     'widget.autofill': 'Autocompletar',
-    'widget.autofillIowaTitle': 'Autocompletar llena las respuestas que guardó y continúa donde SecondHand puede. Revise cada respuesta, su número de Seguro Social y la dirección de casa que elige antes de enviar.',
+    'widget.autofillIowaTitle': 'Autocompletar llena las respuestas que usted guardó y continúa donde SecondHand puede. Revise cada respuesta, su número de Seguro Social y la dirección de casa que elige Autocompletar antes de enviar.',
     'widget.autofillSiteTitle': 'Llena una vez los campos compatibles de este sitio. Revise cada respuesta.',
     'widget.unlock': 'Desbloquear SecondHand',
     'widget.stop': 'Detener',
@@ -1092,7 +1092,7 @@
     'detail': '{detail}（英文信息）',
 
     'widget.autofill': '自动填写',
-    'widget.autofillIowaTitle': '自动填写会填写您保存的答案，并在 SecondHand 能继续的地方继续。提交前请核对每个答案、您的社会安全号码，以及它选择的住家地址。',
+    'widget.autofillIowaTitle': '自动填写会填写您保存的答案，并在 SecondHand 能继续的地方继续。提交前请核对每个答案、您的社会安全号码，以及自动填写选择的住家地址。',
     'widget.autofillSiteTitle': '在此网站上一次性填写支持的栏位。请核对每个答案。',
     'widget.unlock': '解锁 SecondHand',
     'widget.stop': '停止',
