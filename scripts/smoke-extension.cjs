@@ -499,6 +499,10 @@ async function main() {
     await expect(widget.locator('#autofill')).toBeHidden();
     await expect.poll(async () => { const box = await host.boundingBox(); return `${box.width} by ${box.height}`; }, { timeout: 10000 }).toBe('46 by 46');
     assert.equal(await host.evaluate(element => element.style.borderRadius), '50%');
+    // The logo fills its round frame, so the keyboard's ring is drawn inside the circle, where it shows.
+    await expect(widget.locator('#pill:focus-visible')).toBeVisible();
+    const ring = await widget.evaluate(() => { const style = getComputedStyle(document.getElementById('pill')); return [style.outlineStyle, style.outlineWidth, style.outlineOffset]; });
+    assert.deepEqual(ring, ['solid', '3px', '-5px'], 'a 3px ring, 5px inside the logo’s edge');
     await page.keyboard.press('Enter');
     await expect(widget.locator('#autofill')).toBeVisible();
     await expect(widget.locator('#hide')).toBeFocused();
