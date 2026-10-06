@@ -20,7 +20,10 @@ async function inspectLayout(page) {
   await expect(page.locator('.brand').first()).toHaveAccessibleName('SecondHand home');
   await expect(page.locator('.brand').first()).toHaveText('SecondHand');
   await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', '/brand/secondhand-icon.png');
-  assert.equal(await page.locator('.brand-mark').first().evaluate(image => image.complete && image.naturalWidth > 0), true, 'The mascot must load');
+  // The mascot loads lazily, so wait until it has loaded or failed before checking that it loaded.
+  const mascot = page.locator('.brand-mark').first();
+  await expect.poll(() => mascot.evaluate(image => image.complete), { message: 'The mascot must load' }).toBe(true);
+  assert.equal(await mascot.evaluate(image => image.complete && image.naturalWidth > 0), true, 'The mascot must load');
   assert.equal(await page.evaluate(width => document.documentElement.scrollWidth > width + 1, page.viewportSize().width), false, 'Page must not overflow horizontally');
 }
 
