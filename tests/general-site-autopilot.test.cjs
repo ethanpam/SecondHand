@@ -285,3 +285,16 @@ test('an uncertain Next response without observable navigation stops and is neve
   assert.equal(w.state.clicks, 1); assert.equal(w.state.advances, 1);
   assert.equal(w.native.filter(item => item.type === 'authorizeSiteNavigation').length, 1);
 });
+
+test('a step that read the address just before the next page loaded leaves that page to the next look, which fills it', async () => {
+  const w = worker({ values: { firstName: 'Synthetic', zip: '50309' } });
+  await w.start(); assert.equal(w.state.clicks, 1);
+  // The next page loads while a step that read the old address asks for the page's navigation state, so the new page
+  // answers. Its own load event finds that step still running.
+  w.state.onNavigation = async () => { w.state.onNavigation = null; w.move(); };
+  await w.info();
+  await until(async () => !w.state.onNavigation && (await w.info()).data.autopilot === true && w.state.clicks === 2, 'the next look to fill the new page and click its Next');
+  assert.equal(w.state.fields[0].answer, '50309');
+  assert.equal(w.native.filter(item => item.type === 'authorizeSiteNavigation').length, 2);
+  await w.stop();
+});
