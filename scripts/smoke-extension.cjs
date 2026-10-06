@@ -1180,7 +1180,7 @@ async function main() {
       await expect.poll(() => panel.text(`[data-key="${key}"]`), { timeout: 20000 }).toContain('No saved answer: type it in Iowa’s form');
     }
     assert.equal(await panel.visible('#checklist-note'), true);
-    assert.match(await panel.text('#checklist-note'), /Add it in the SecondHand app, under My information/);
+    assert.match(await panel.text('#checklist-note'), /add it in the SecondHand app, under My information/);
     await settled();
     assert.deepEqual(await startChecked(), []);
     await expect(page.locator(`[id="${tellUsMore.DOB_ID}"]`)).toHaveValue('');

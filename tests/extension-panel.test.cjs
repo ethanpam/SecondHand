@@ -612,7 +612,7 @@ test('after Autofill, a question whose answer isn’t saved says to type it in I
   assert.equal(view.row('firstName').getAttribute('aria-label'), 'First name: No saved answer: type it in Iowa’s form. Go to this question.');
   // Where the answer goes now is on the row; where to save it for next time is said once, above the list.
   assert.equal(view.get('checklist-note').hidden, false);
-  assert.equal(view.get('checklist-note').textContent, 'No saved answer? Add it in the SecondHand app, under My information, to have it filled next time.');
+  assert.equal(view.get('checklist-note').textContent, 'To have an answer filled next time, add it in the SecondHand app, under My information.');
   // A question answered since shows as done; one SecondHand can't fill still says to do it yourself.
   assert.equal(detail('lastName'), 'Done');
   assert.equal(detail('unverified'), 'Do it yourself');
