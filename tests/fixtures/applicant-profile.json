@@ -55,6 +55,10 @@
   "blind": "no",
   "healthLimitation": "no",
   "medicare": "no",
+  "studentLevel": "not-student",
+  "incomeSources": "family-support",
+  "currentBenefits": "school-meals",
+  "helpWanted": "food-pantry,fresh-produce",
   "householdMembers": [
     { "id": "0f2c8d4e-1a3b-4c5d-8e6f-7a8b9c0d1e2f", "firstName": "Avery", "lastName": "Example", "birthDate": "1985-04-12", "relationship": "self", "student": "no", "grade": "" },
     { "id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", "firstName": "Riley", "lastName": "Example", "birthDate": "2015-09-03", "relationship": "child", "student": "yes", "grade": "5th" },
