@@ -350,7 +350,9 @@ async function main() {
     await expect(page.locator('#toast')).toHaveText('SecondHand will no longer fill forms on every website. Sites you trusted one by one stay on.');
     await expect(page.locator('#all-sites-status')).toHaveText(/^All websites: off\. /);
     assert.equal(JSON.parse(await fs.readFile(settingsPath, 'utf8')).allSites, undefined, 'turning it off is saved');
-    await page.waitForTimeout(1500);
+    // The app's Laya runtime is off: it checks and downloads nothing while off, and this start never turned it on, so a
+    // request could only have come from a check the start began, before the window opened (#143: state, not a wait).
+    assert.deepEqual(await page.evaluate(() => window.secondHand.layaStatus().then(status => [status.state, status.enabled])), ['off', false]);
     assert.equal(layaServer.requests.length, layaRequests, 'Laya, turned off, checked and downloaded nothing after the restart');
     const restored = await page.evaluate(() => window.secondHand.getData());
     assert.deepEqual(withoutIds(restored.profile), withoutIds(applicantFixture));
