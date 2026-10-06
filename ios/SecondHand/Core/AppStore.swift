@@ -206,6 +206,18 @@ final class AppStore: ObservableObject {
         if !profile.postalCode.isEmpty && profile.postalCode.range(of: #"^\d{5}(-\d{4})?$"#, options: .regularExpression) == nil {
             throw AppError.invalidProfile("Enter a five-digit ZIP code, optionally followed by four more digits.")
         }
+        if !profile.ssn.isEmpty && profile.ssn.range(of: #"^\d{3}-?\d{2}-?\d{4}$"#, options: .regularExpression) == nil {
+            throw AppError.invalidProfile("Enter a nine-digit Social Security number or leave it blank.")
+        }
+        guard profile.annualIncome.count <= 50 else { throw AppError.invalidProfile("Keep up to 50 annual income entries.") }
+        for entry in profile.annualIncome {
+            guard !entry.amount.isEmpty, entry.amount.range(of: #"^\d{1,9}(\.\d{1,2})?$"#, options: .regularExpression) != nil,
+                  entry.year.isEmpty || entry.year.range(of: #"^(19|20)\d{2}$"#, options: .regularExpression) != nil,
+                  !entry.category.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  entry.category.count <= 250, entry.source.count <= 250, entry.fieldID.count <= 100 else {
+                throw AppError.invalidProfile("Each annual income entry needs an amount and income type. Use a four-digit year when known.")
+            }
+        }
         for value in [profile.monthlyIncome, profile.monthlyHousingCost] where !value.isEmpty {
             guard value.range(of: #"^\d{1,9}(\.\d{1,2})?$"#, options: .regularExpression) != nil else {
                 throw AppError.invalidProfile("Enter monthly amounts as numbers, such as 1250 or 1250.50, without a dollar sign or commas.")
@@ -253,14 +265,14 @@ final class AppStore: ObservableObject {
         } while revision != reminderRevision
     }
 
-    func authorizeAutofill() async throws {
+    func authorizeAutofill(sharingSSN: Bool = false, annualIncomeID: UUID? = nil) async throws {
         _ = try storage()
         guard !data.profile.firstName.isEmpty || !data.profile.lastName.isEmpty else { throw AppError.noContact }
         guard let reviewed = data.profile.reviewedAt, reviewed <= Date(), Date().timeIntervalSince(reviewed) < 24 * 60 * 60 else {
             throw AppError.reviewRequired
         }
         let expiry = Date().addingTimeInterval(10 * 60)
-        try SecureVault.writeAutofillSession(AutofillSession(expiresAt: expiry, fields: data.profile.applicationFields))
+        try SecureVault.writeAutofillSession(AutofillSession(expiresAt: expiry, fields: data.profile.applicationFields(sharingSSN: sharingSSN, annualIncomeID: annualIncomeID)))
         autofillExpiresAt = expiry
     }
 

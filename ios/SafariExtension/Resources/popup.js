@@ -42,6 +42,7 @@ function render(response) {
     skip.value = ""; skip.textContent = "Leave this field for me"; select.append(skip);
     for (const [key, title] of Object.entries(response.savedFields)) {
       if (field.key && key !== field.key) continue;
+      if (field.allowedKeys && !field.allowedKeys.includes(key)) continue;
       const option = document.createElement("option");
       option.value = key; option.textContent = title;
       option.selected = field.key === key;

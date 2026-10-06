@@ -654,3 +654,47 @@ test("generic Continue respects required checkbox groups, aria requirements, and
   scan = inspect(doc);
   assert.deepEqual(await act(doc, doc.location.href, scan.token, scan.actions[0].id, false), { attempted: true, kind: "continue" });
 });
+
+
+test("explicit own SSN and annual fields accept only the corresponding approved values", async () => {
+  const doc = page('<h1>Your information</h1><form><label>Your Social Security number<input id="ssn" maxlength="9" type="tel"></label><label>Annual wages<input id="annual" type="number"></label><label>Tax year<input id="year" type="number"></label><label>Monthly income<input id="monthly"></label></form>', BASE + "income");
+  const scan = inspect(doc);
+  assert.deepEqual(scan.fields[0].allowedKeys, ["ssn"]);
+  assert.deepEqual(scan.fields[1].allowedKeys, ["annualIncome"]);
+  assert.deepEqual(scan.fields[2].allowedKeys, ["annualIncomeYear"]);
+  assert.equal(scan.fields[3].allowedKeys.includes("annualIncome"), false);
+  const assignments = ["ssn", "annualIncome", "annualIncomeYear"].map((key, i) => ({id: scan.fields[i].id, key}));
+  const result = await fill(doc, scan, {ssn: "000-12-3456", annualIncome: "68450.00", annualIncomeYear: "2025"}, assignments);
+  assert.equal(result.filled, 3);
+  assert.equal(doc.querySelector("#ssn").value, "000123456");
+  assert.equal(doc.querySelector("#annual").value, "68450.00");
+  assert.equal(doc.querySelector("#year").value, "2025");
+  assert.equal(doc.querySelector("#monthly").value, "");
+  assert.equal(JSON.stringify(inspect(doc)).includes("000123456"), false);
+});
+
+test("SSN and annual values cannot be mapped to generic or monthly fields", async () => {
+  for (const key of ["ssn", "annualIncome", "annualIncomeYear"]) {
+    const doc = page('<h1>Income</h1><form><label>Monthly income<input></label></form>', BASE + "income");
+    const scan = inspect(doc);
+    assert.equal((await fill(doc, scan, {[key]: "123"}, [{id: scan.fields[0].id, key}])).error, "invalid_fields");
+    assert.equal(doc.querySelector("input").value, "");
+  }
+  const doc = page('<h1>Details</h1><form><fieldset><legend>Household member</legend><label>Your SSN<input></label></fieldset><label>Spouse SSN<input></label></form>', BASE + "details");
+  assert.deepEqual(inspect(doc).fields, []);
+});
+
+test("SSN formatting rejects partial or malformed numbers", () => {
+  const doc = page('<form><label>Your SSN<input maxlength="11"></label></form>', BASE + "details");
+  const field = doc.querySelector("input");
+  assert.equal(assistant.formatValue("ssn", "000123456", field), "000-12-3456");
+  for (const value of ["1234", "000-123456", "abc-12-3456"]) assert.equal(assistant.formatValue("ssn", value, field), null);
+});
+
+
+test("annual Social Security benefit income is not confused with an SSN", async () => {
+  const doc = page('<h1>Income</h1><form><label>Annual Social Security benefits<input></label></form>', BASE + "income");
+  const scan = inspect(doc);
+  assert.deepEqual(scan.fields[0].allowedKeys, ["annualIncome"]);
+  assert.equal((await fill(doc, scan, {annualIncome: "18600.00"}, [{id: scan.fields[0].id, key: "annualIncome"}])).filled, 1);
+});
