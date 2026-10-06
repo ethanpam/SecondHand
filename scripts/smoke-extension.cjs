@@ -539,6 +539,8 @@ async function main() {
     // consent for the applicant, then continues again and fills the applicant page.
     await resetTo(`${portal}/applyForBenefits/welcome`);
     widget = await launcherFrame();
+    // As on a first run, the card says what Stop would do; a Chrome that started Autofill again gets the short form.
+    await widget.evaluate(() => localStorage.removeItem('secondhand.autofillStarted'));
     await widget.locator('#autofill').click();
     await expect.poll(() => page.url(), { timeout: 20000 }).toBe(`${portal}/applyForBenefits/letsGetStarted`);
     widget = await launcherFrame();
@@ -558,6 +560,7 @@ async function main() {
     // The household question is answered from saved program choices; the CAPTCHA stays with the applicant.
     await resetTo(`${portal}/applyForBenefits/guestLogin`);
     widget = await launcherFrame();
+    await widget.evaluate(() => localStorage.removeItem('secondhand.autofillStarted'));
     await widget.locator('#autofill').click();
     await expect(page.locator('#householdApplyProgYes')).toBeChecked({ timeout: 20000 });
     // The fill revealed the security check, so the step after it leaves the applicant's next move on the card.
@@ -642,6 +645,8 @@ async function main() {
         const offered = await widget.locator('#translate-offer').isVisible();
         if (step.pageKey === 'iowa-personal-information' || offered) assert.ok(before.height > 46, `${code} ${step.name} before Autofill: the frame holds the line (${before.width} by ${before.height})`);
         else assert.equal(before.height, 46, `${code} ${step.name} before Autofill: the card is its buttons`);
+        // As on a first run, so the line after the click is its longest: it ends with what Stop would do.
+        await widget.evaluate(() => localStorage.removeItem('secondhand.autofillStarted'));
         await widget.locator('#autofill').click();
         await expect.poll(async () => (await widget.evaluate(() => chrome.runtime.sendMessage({ type: 'ui:pageState' })))?.data?.result?.state, { timeout: 20000 }).toMatch(/^(waiting|done)$/);
         const { page: probed, result } = (await widget.evaluate(() => chrome.runtime.sendMessage({ type: 'ui:pageState' }))).data;
@@ -720,6 +725,8 @@ async function main() {
       await expect.poll(() => beforeProblems(widget, code, 'iowa-self-details-unverified'), { timeout: 10000, message: `${code} at 260px before Autofill` }).toEqual([]);
       const before = await frameBox();
       await expect.poll(() => narrowest(widget), { timeout: 10000, message: `${code} at 260px before Autofill: the widget is as narrow as its line lets it be` }).toBe('');
+      // As on a first run, so the line is its longest (see above).
+      await widget.evaluate(() => localStorage.removeItem('secondhand.autofillStarted'));
       await widget.locator('#autofill').click();
       await settledLine(code, () => wholeSteps[0].line(code));
       await expect.poll(() => narrowest(widget), { timeout: 10000, message: `${code} at 260px: the widget is as narrow as its line lets it be` }).toBe('');
@@ -744,6 +751,7 @@ async function main() {
         await page.locator('.saveAndContinueButton').evaluate(button => button.setAttribute('disabled', ''));
         await expect.poll(() => beforeProblems(widget, code, 'iowa-personal-information'), { timeout: 10000, message: `${code} at ${width}px before Autofill` }).toEqual([]);
         const before = await frameBox();
+        await widget.evaluate(() => localStorage.removeItem('secondhand.autofillStarted'));
         await widget.locator('#autofill').click();
         await settledLine(code, filled => wholeSteps[2].line(code, filled));
         if (Number(width) < 640) await expect.poll(() => narrowest(widget), { timeout: 10000, message: `${code} at ${width}px: the widget is as narrow as its line lets it be` }).toBe('');
