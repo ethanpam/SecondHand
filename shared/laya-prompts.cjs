@@ -145,5 +145,12 @@ const UNSAFE_QUESTION = /^social security$|^(enter )?(the |your |a )?codes?$|\b(
 const normal = value => String(value || '').toLowerCase().replace(/[‘’']/g, '').replace(/#/g, ' number ').replace(/\*/g, ' ').replace(/[^a-z0-9+]+/g, ' ').trim();
 const unsafeQuestion = field => [field?.label, ...(Array.isArray(field?.options) ? field.options : [])].some(text => UNSAFE_QUESTION.test(normal(text)));
 
+// #185: questions about the sensitive details (SENSITIVE_FIELDS in desktop/main.cjs): the SSN, birth date and age,
+// income and work, money on hand and property, medical costs, citizenship and immigration, disability, health and
+// pregnancy, and Medicare. Laya never guesses at one; only a sure answer goes there. Matched against the same
+// normalized text as UNSAFE_QUESTION, label and options.
+const SENSITIVE_QUESTION = /\b(social security|ssn|ssi|ssdi|itin|birth\w*|born|dob|ages?|aged|how old|years old|income\w*|earn\w*|wages?|salary|salaries|paychecks?|pay stubs?|employ\w*|unemploy\w*|jobs?|work|works|working|worked|pensions?|child support|alimony|money|cash|savings?|bank\w*|checking|assets?|resources|property|properties|vehicles?|medical\w*|medicines?|medications?|prescriptions?|doctors?|dental|dentists?|hospital\w*|clinics?|citizen\w*|immigra\w*|legal status|lawful\w*|aliens?|green card|naturaliz\w*|permanent residents?|refugees?|asylum|visas?|undocumented|documented|disab\w*|handicap\w*|impair\w*|blind\w*|deaf\w*|health\w*|insurance|insured|pregnan\w*|expecting|medicare|medicaid)\b/;
+const sensitiveQuestion = field => [field?.label, ...(Array.isArray(field?.options) ? field.options : [])].some(text => SENSITIVE_QUESTION.test(normal(text)));
+
 module.exports = { DECISION, QUESTIONS, ABSTAIN, TEXT_TYPES, CHOICE_TYPES, MATCH_KEYS, KEY_ABOUT, NEVER_SUGGESTED, MATCH_CANDIDATES, matchState, matchableBox, offeredFields, factsCover, answerState,
-  CHOICE, UNSAFE_QUESTION, OTHER_PERSON_ROLE, MEMBER_DETAIL, CHILD_ROLE, PERSON_DETAIL, COMBINED_ADDRESS_QUESTION, PERSON_NOT_AMOUNT, unsafeQuestion };
+  CHOICE, UNSAFE_QUESTION, OTHER_PERSON_ROLE, MEMBER_DETAIL, CHILD_ROLE, PERSON_DETAIL, COMBINED_ADDRESS_QUESTION, PERSON_NOT_AMOUNT, unsafeQuestion, SENSITIVE_QUESTION, sensitiveQuestion };
