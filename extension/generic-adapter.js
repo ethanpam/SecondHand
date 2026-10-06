@@ -188,18 +188,24 @@
     const text = normal(option);
     return Object.entries(CHOICE_OPTIONS[key]).filter(([code, pattern]) => pattern.test(text) && (!NEGATED.test(text) || ['none', 'not-student'].includes(code))).map(([code]) => code);
   };
-  // The options a saved answer checks: for each saved choice, the one option that names it. Null when a saved choice names more
-  // than one option (On-Campus Job and Off-Campus Job are both a job): then the whole question stays with the applicant.
+  // The options a saved answer checks: for each saved choice, the one option that names it. A saved choice that names more than
+  // one option (On-Campus Job and Off-Campus Job are both a job) checks none of them, and leaves the question `ambiguous`.
   function chosenOptions(key, options, value) {
     const named = options.map(option => optionCodes(key, option));
     const picks = new Set();
+    let ambiguous = false;
     for (const code of String(value).split(',').filter(Boolean)) {
       const naming = named.flatMap((codes, index) => codes.includes(code) ? [index] : []);
-      if (naming.length > 1) return null;
-      if (naming.length) picks.add(naming[0]);
+      if (naming.length > 1) ambiguous = true;
+      else if (naming.length) picks.add(naming[0]);
     }
-    return [...picks].sort((a, b) => a - b);
+    return { picks: [...picks].sort((a, b) => a - b), ambiguous };
   }
+  // Checkbox groups SecondHand answered in part (#184), by their first box: the boxes it checked. While those are still the
+  // only boxes checked, the question needs the applicant for the options it left.
+  const answeredInPart = new WeakMap();
+  const inPart = entry => entry.kind === 'checkbox' && answeredInPart.has(entry.elements[0]) &&
+    entry.elements.every(box => box.checked === answeredInPart.get(entry.elements[0]).includes(box));
   const NAME_HINTS = Object.freeze({ fname: 'first name', firstname: 'first name', lname: 'last name', lastname: 'last name', dob: 'date of birth',
     zipcode: 'zip code', postalcode: 'postal code', hhsize: 'household size', tel: 'phone', telephone: 'phone', email: 'email', zip: 'zip', city: 'city', state: 'state' });
   const STATES = Object.freeze({ AL: 'alabama', AK: 'alaska', AZ: 'arizona', AR: 'arkansas', CA: 'california', CO: 'colorado', CT: 'connecticut', DE: 'delaware',
@@ -630,8 +636,8 @@
     return entries;
   }
   function scan(doc) {
-    // A div question is only safe to leave to the rules when nothing on it asks for secrets.
-    return questionsOn(doc).filter(entry => !answered(entry) && !(ARIA_TYPES[entry.kind] && UNSAFE.test(normal(entry.labels.join(' ')))));
+    // A div question is only safe to leave to the rules when nothing on it asks for secrets. One SecondHand answered in part stays.
+    return questionsOn(doc).filter(entry => (!answered(entry) || inPart(entry)) && !(ARIA_TYPES[entry.kind] && UNSAFE.test(normal(entry.labels.join(' ')))));
   }
 
   // The page's questions for the applicant to read in their language: ids and labels only,
@@ -668,7 +674,8 @@
       const result = rules[index];
       if (IOWA_KEYS.includes(result.key) && rules.filter(rule => rule.key === result.key).length !== 1) { unmatched.push({ id, ...fieldOf(entry) }); return; }
       if (IOWA_KEYS.includes(result.key)) entry.iowaState = iowaEntryState(entry);
-      if (result.confidence === 'high') { matched.push({ id, key: result.key, confidence: 'high', label: entry.labels[0] || '' }); return; }
+      // Answered in part (#184): it still needs the applicant, and nothing fills it again.
+      if (result.confidence === 'high') { matched.push({ id, key: result.key, confidence: 'high', label: entry.labels[0] || '', ...(inPart(entry) ? { partial: true } : {}) }); return; }
       unmatched.push({ id, ...fieldOf(entry) });
     });
     current = { token, doc, map };
@@ -824,7 +831,7 @@
   function chooseOption(options, key, value) {
     const wanted = normal(value);
     if (answerKind(key) === 'yesno') return options.findIndex(option => new RegExp(`^${wanted}\\b`).test(normal(option)));
-    if (answerKind(key) === 'one') { const picks = chosenOptions(key, options, value); return picks?.length === 1 ? picks[0] : -1; }
+    if (answerKind(key) === 'one') { const { picks, ambiguous } = chosenOptions(key, options, value); return !ambiguous && picks.length === 1 ? picks[0] : -1; }
     if (answerKind(key) === 'ageRange') return options.findIndex(option => { const range = ageRange(option); return range && Number(value) >= Number(range[1]) && (range[2] === '+' || range[2] === ' and older' || range[2] === ' or older' || Number(value) <= Number(range[2])); });
     if (key === 'state') return options.findIndex(option => [wanted, normal(STATES[String(value).toUpperCase()])].includes(normal(option)));
     if (answerKind(key) === 'count') {
@@ -891,10 +898,12 @@
       return option.getAttribute('aria-checked') === 'true' || { pending: option };
     }
     if (entry.kind === 'checkbox' && entry.elements.length > 1 && answerKind(key) === 'several') {
-      const picks = chosenOptions(key, optionsOf(entry), value);
-      if (!picks?.length) return false;
+      const { picks, ambiguous } = chosenOptions(key, optionsOf(entry), value);
+      if (!picks.length) return false;
       for (const index of picks) entry.elements[index].click();
-      return picks.every(index => entry.elements[index].checked);
+      if (!picks.every(index => entry.elements[index].checked)) return false;
+      if (ambiguous) answeredInPart.set(first, picks.map(index => entry.elements[index]));
+      return true;
     }
     if (entry.kind === 'checkbox' && entry.elements.length === 1 && answerKind(key) === 'yesno') {
       if (value !== 'yes') return false;
@@ -1062,8 +1071,8 @@
   }
   function fillFields(doc, token, assignments, values) {
     const ids = (Array.isArray(assignments) ? assignments : []).map(item => item?.id);
-    if (!current || current.token !== token || current.doc !== doc) return { ok: false, filled: [], skipped: ids, rejected: [], pending: [] };
-    const filled = [], skipped = [], rejected = [], pending = [];
+    if (!current || current.token !== token || current.doc !== doc) return { ok: false, filled: [], skipped: ids, rejected: [], pending: [], partial: [] };
+    const filled = [], skipped = [], rejected = [], pending = [], partial = [];
     current.pending = new Map();
     for (const assignment of assignments) {
       const entry = current.map.get(assignment?.id);
@@ -1096,8 +1105,9 @@
       }
       mark(doc, entry, kind, assignment.id);
       filled.push(assignment.id);
+      if (inPart(entry)) partial.push(assignment.id);
     }
-    return { ok: true, filled, skipped, rejected, pending };
+    return { ok: true, filled, skipped, rejected, pending, partial };
   }
   // Waits for the choices fillFields left pending to show as checked. One the page never
   // checks (or a stale plan's) is reported as skipped; only confirmed choices count as filled.
@@ -1156,7 +1166,7 @@
   // serialized to the worker; unsupported visible controls remain explicit blockers.
   function navigationFields(doc) {
     const entries = questionsOn(doc), covered = new Set(entries.flatMap(entry => entry.elements));
-    const fields = entries.map(entry => ({ elements: [...entry.elements, ...(entry.kind === 'ariaCombo' && listboxFor(entry) ? [listboxFor(entry)] : [])], answered: answered(entry), required: fieldOf(entry).required,
+    const fields = entries.map(entry => ({ elements: [...entry.elements, ...(entry.kind === 'ariaCombo' && listboxFor(entry) ? [listboxFor(entry)] : [])], answered: answered(entry) && !inPart(entry), required: fieldOf(entry).required,
       safe: !entry.invalidLabels && !applicantOnly(entry) && !protectedCustom(fieldOf(entry)) && !entry.labels.some(otherPersonQuestion) && !besideForm(entry, doc), supported: true }));
     for (const control of deepQueryAll(doc, 'input,select,textarea,[contenteditable],[role="textbox"],[role="radio"],[role="checkbox"],[role="switch"],[role="combobox"],[role="listbox"],[role="slider"],[role="spinbutton"]')) {
       if (covered.has(control) || !rendered(control) || control.disabled || control.getAttribute('aria-disabled') === 'true' || control.type === 'hidden' || ['submit', 'button', 'reset', 'image'].includes(control.type)) continue;

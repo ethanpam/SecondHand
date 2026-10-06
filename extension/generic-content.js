@@ -88,8 +88,10 @@
       token: text(plan.token),
       // The language this frame declares: with Chrome's detector, it decides how its questions are read to Laya.
       lang: document.documentElement.lang || '',
-      // A matched question's own label lets the side panel name it when its saved answer is missing.
-      matched: plan.matched.map(field => ({ id: text(field.id), key: text(field.key), confidence: text(field.confidence), ...(typeof field.label === 'string' ? { label: field.label } : {}) })),
+      // A matched question's own label lets the side panel name it when its saved answer is missing. One the rules answered
+      // in part (#184) still needs the applicant.
+      matched: plan.matched.map(field => ({ id: text(field.id), key: text(field.key), confidence: text(field.confidence), ...(typeof field.label === 'string' ? { label: field.label } : {}),
+        ...(field.partial === true ? { partial: true } : {}) })),
       unmatched: plan.unmatched.map(field => ({ id: text(field.id), label: typeof field.label === 'string' ? field.label : '',
         type: typeof field.type === 'string' ? field.type : '', options: strings(field.options), required: field.required === true }))
     };
@@ -267,9 +269,9 @@
         const result = withOwnPanelHidden(() => engine.fillFields(document, message.token, message.assignments, message.values));
         const validIds = ids => Array.isArray(ids) && ids.every(id => typeof id === 'string');
         const settledResult = result => {
-          if (!result || !validIds(result.filled) || !validIds(result.skipped) || !validIds(result.rejected)) return null;
+          if (!result || !validIds(result.filled) || !validIds(result.skipped) || !validIds(result.rejected) || !validIds(result.partial)) return null;
           return { ok: result.ok === true, ...(result.pageChanged === true ? { pageChanged: true } : {}),
-            filled: strings(result.filled), skipped: strings(result.skipped), rejected: strings(result.rejected) };
+            filled: strings(result.filled), skipped: strings(result.skipped), rejected: strings(result.rejected), partial: strings(result.partial) };
         };
         // Some pages (Google Forms) confirm a chosen option a moment after the click: answer once it settles.
         engine.settle(document, message.token, result).then(
