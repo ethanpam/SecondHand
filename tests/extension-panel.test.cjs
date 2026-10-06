@@ -885,8 +885,12 @@ test('widget frame fits the logo and its buttons, grows for the yellow link, and
   assert.equal(sizes().length, 3, 'the same width is not asked for again');
 });
 
+// A Chrome that has started Autofill before, on an Iowa page where the card has nothing to say before Autofill.
+const quietCard = { launcher: true, pageState: state => ({ ...structuredClone(state), page: { ...structuredClone(state.page), pageKey: 'iowa-tell-us-more' } }),
+  autofill: { state: 'locked', filled: 0, needYou: [], message: 'Unlock SecondHand to autofill.', pageKey: 'iowa-tell-us-more' } };
+
 test('widget frame is taller for a line and stays as wide as the widget with it', async t => {
-  const view = await panel(t, { launcher: true, autofill: { state: 'locked', filled: 0, needYou: [], message: 'Unlock SecondHand to autofill.', pageKey: 'iowa-personal-information' } });
+  const view = await panel(t, { ...quietCard, storage: new Map([['secondhand.autofillStarted', '1']]) });
   // jsdom lays nothing out: as Chrome would, the widget is as wide as its buttons without the line, its
   // row alone is 46px tall, and the line takes more rows the narrower the widget is.
   const card = view.get('widget');
@@ -896,36 +900,36 @@ test('widget frame is taller for a line and stays as wide as the widget with it'
     return { width, height: hidden ? 46 : width < 200 ? 97.3 : 71.6 };
   };
   const sizes = () => plainRequests(view.requests.filter(request => request.type === 'ui:widgetSize'));
+  // Before the click the widget's row alone, the frame it starts with; then a locked app, said in a line beside Unlock.
   await view.userClick('autofill');
-  // Before the click the widget says what Autofill will do; a locked app's Unlock button needs no line.
-  assert.deepEqual(sizes(), [{ type: 'ui:widgetSize', line: true }, { type: 'ui:widgetSize', line: true, width: 232, height: 72, narrowWidth: 181, narrowHeight: 98 },
-    { type: 'ui:widgetSize', line: false, width: 181, height: 46 }]);
-  await view.userClick('unlock');
-  assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: true, width: 232, height: 72, narrowWidth: 181, narrowHeight: 98 },
+  assert.deepEqual(sizes(), [{ type: 'ui:widgetSize', line: true, width: 232, height: 72, narrowWidth: 181, narrowHeight: 98 }],
     'how tall the line makes it at its own width, and at its buttons’ width');
   assert.equal(card.getAttribute('style'), '', 'measuring leaves nothing behind');
   assert.equal(view.get('widget-text').classList.contains('visually-hidden'), false);
-  await view.userClick('autofill');
-  assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: false, width: 181, height: 46 });
 });
 
 test('widget frame is as tall as the widget measured itself, and is asked for again when its lines change', async t => {
-  const view = await panel(t, { launcher: true, autofill: { state: 'locked', filled: 0, needYou: [], message: 'Unlock SecondHand to autofill.', pageKey: 'iowa-personal-information' } });
-  // The row alone, then the row under two lines of 16px with the 4px between them; three lines at the row's width.
+  const view = await panel(t, { ...quietCard, storage: new Map([['secondhand.autofillStarted', '1']]) });
+  // The row alone, then the row under two lines of 16px with the 4px between them, or three for the longer
+  // line while Autofill waits for the app; three lines at the row's width.
   const card = view.get('widget');
   card.getBoundingClientRect = () => {
-    if (view.get('widget-text').classList.contains('visually-hidden')) return { width: 180.4, height: 46 };
-    return card.style.width ? { width: parseFloat(card.style.width), height: 95.6 } : { width: 253.1, height: 79.6 };
+    const text = view.get('widget-text');
+    if (text.classList.contains('visually-hidden')) return { width: 180.4, height: 46 };
+    return card.style.width ? { width: parseFloat(card.style.width), height: 95.6 } : { width: 253.1, height: text.textContent.startsWith('Waiting') ? 95.6 : 79.6 };
   };
   const sizes = () => plainRequests(view.requests.filter(request => request.type === 'ui:widgetSize'));
   const withLine = { type: 'ui:widgetSize', line: true, width: 254, height: 80, narrowWidth: 181, narrowHeight: 96 };
+  const longer = { ...withLine, height: 96 };
   await view.userClick('autofill');
-  assert.deepEqual(sizes(), [{ type: 'ui:widgetSize', line: true }, withLine, { type: 'ui:widgetSize', line: false, width: 181, height: 46 }]);
+  assert.deepEqual(sizes(), [longer, withLine], 'the row alone is the frame it starts with; a line makes the frame as tall as the widget with it');
   await view.userClick('unlock');
-  assert.deepEqual(sizes().at(-1), withLine, 'a line to read makes the frame as tall as the widget with it');
+  assert.equal(sizes().length, 2, 'the same size is not asked for again');
   await view.userClick('autofill');
-  assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: false, width: 181, height: 46 });
-  assert.equal(sizes().length, 5, 'the same size is not asked for again');
+  assert.deepEqual(sizes().slice(-2), [longer, withLine]);
+  await view.userClick('unlock');
+  await view.userClick('unlock');
+  assert.equal(sizes().length, 4);
 });
 
 test('widget is a pill off the applicant page and opens the side panel from it', async t => {
@@ -1005,9 +1009,11 @@ test('widget shows Unlock when the vault is locked and returns to Autofill after
   await view.userClick('autofill');
   assert.equal(view.get('unlock').hidden, false);
   assert.equal(view.get('autofill').hidden, true);
-  assert.equal(view.get('widget-text').classList.contains('visually-hidden'), true, 'the Unlock button says it all');
+  assert.equal(view.get('widget-text').textContent, 'The SecondHand app on this computer is locked.', 'as the side panel says it');
+  assert.equal(view.get('widget-text').classList.contains('visually-hidden'), false);
+  assert.equal(view.get('unlock').textContent, 'Unlock', 'the side panel’s button');
   await view.userClick('unlock');
-  assert.deepEqual(plainRequests(view.requests.slice(-2)), [{ type: 'ui:showApp', confirmed: true }, { type: 'ui:widgetSize', line: true }]);
+  assert.deepEqual(plainRequests(view.requests.findLast(request => request.type !== 'ui:widgetSize')), { type: 'ui:showApp', confirmed: true });
   assert.equal(view.get('autofill').hidden, false);
   assert.match(view.get('widget-text').textContent, /Unlock SecondHand, then click Autofill/);
   assert.equal(view.get('widget-text').classList.contains('visually-hidden'), false);
@@ -1020,8 +1026,8 @@ test('widget offers Open SecondHand in Autofill’s place when the app is closed
   assert.equal(offline.get('unlock').hidden, true);
   assert.equal(offline.get('open-app').hidden, false);
   assert.equal(offline.get('open-app').textContent, 'Open SecondHand');
-  assert.match(offline.get('widget-text').textContent, /Open the SecondHand app/, 'screen readers still hear why');
-  assert.equal(offline.get('widget-text').classList.contains('visually-hidden'), true, 'the button says it all: the card grows no row');
+  assert.equal(offline.get('widget-text').textContent, 'The SecondHand app on this computer is closed.', 'as the side panel says it');
+  assert.equal(offline.get('widget-text').classList.contains('visually-hidden'), false);
   offline.get('open-app').click(); await tick();
   assert.equal(offline.types().includes('ui:openApp'), false, 'an untrusted click does nothing');
   await offline.userClick('open-app');

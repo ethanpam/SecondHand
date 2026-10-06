@@ -200,6 +200,9 @@
       if (working) return words(waitingForApp());
       if (note) return words(note, 120);
       if (!result) return !site ? readyLine() : languageTrouble ? t('widget.languageCheckFailed') : t('widget.siteReady', { host: hostOf(site.origin) });
+      // A locked or closed app is said as the side panel says it, beside the button that is the step.
+      if (result.state === 'locked') return t('desktop.locked');
+      if (result.state === 'offline') return t('desktop.notRunning');
       // What the worker reported, in the side panel's words, without the count of what is left: the link beside
       // it carries that. While Autofill is on, what Stop would do goes after it: on a page that waits for answers,
       // where SecondHand clicks Save and Continue once nothing is left, that Stop lets the reader check and
@@ -249,9 +252,9 @@
       $('widget-text').title = outdated ? statusText() : fixedText(details.filter(Boolean).join(' '), 240);
       // The status is always read to screen readers, and shown as a line whenever it says something the
       // buttons don't: on Iowa, what Autofill will do before it is clicked; then what it did and what it
-      // waits for; a problem; an outdated extension. Unlock and Open SecondHand say their own step, and
-      // another site's name before Autofill is no news.
-      const message = outdated || Boolean(note) || working || (result ? !locked && !closed : known && !site && Boolean(readyLine()));
+      // waits for; a locked or closed app; a problem; an outdated extension. Another site's name before
+      // Autofill is no news.
+      const message = outdated || Boolean(note) || working || Boolean(result) || (known && !site && Boolean(readyLine()));
       $('widget-text').classList.toggle('visually-hidden', !message);
       // The translated view is offered whenever the page is in another language, before and after Autofill.
       $('translate-offer').hidden = outdated || Boolean(note) || working || !known || !pageLanguage || pageLanguage === language;
