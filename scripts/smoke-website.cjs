@@ -178,16 +178,21 @@ async function inspectStaticDemo(page) {
 }
 
 async function inspectDemoMotion(page) {
+  // At 1440x1000 the heading is on screen when the page opens, so it would type while a slow page loads
+  // (#160). Reduced motion keeps it from starting until the check has scrolled away from it.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto(site, { waitUntil: 'networkidle' });
   // The demo sits under the hero, so it starts from the footer, where the demo is off screen.
   const footer = page.locator('.site-footer');
   await footer.evaluate(element => element.scrollIntoView({ behavior: 'instant', block: 'end' }));
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
   const heading = page.locator('#demo-heading');
   const text = page.locator('.text-type');
   const content = page.locator('.text-type__content');
   const demo = page.locator('.autofill-demo');
   await expect(text).toHaveAttribute('data-running', 'false');
   await expect(demo).toHaveAttribute('data-running', 'false');
+  await expect(content).toHaveText('');
   await demo.evaluate(element => {
     const samples = [];
     function record() {

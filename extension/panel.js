@@ -7,7 +7,7 @@
   const summary = globalThis.SecondHandSummary;
   // Must match BUILD in background.js: change both together. Chrome loads these pages
   // from disk right away but keeps running the old worker until SecondHand is reloaded.
-  const BUILD = '2026-10-06.6';
+  const BUILD = '2026-10-06.7';
   // The applicant's language: the choice saved in this extension's storage, else the browser's.
   let language = strings.language();
   const t = (key, params = {}) => strings.text(language, key, params);
@@ -525,10 +525,10 @@
     }
     function controls() {
       const off = Boolean(target && site && !site.enabled);
-      // What Autofill will do on Iowa's form, said before it is clicked, in full until it has been started once
-      // from this Chrome. Once it has run on this page, the status line says what it did.
+      // What Autofill will do on Iowa's form, said before it is clicked. Once it has run on this page, the status
+      // line says what it did.
       $('iowa-policy').hidden = !target || Boolean(site) || autopilot || told;
-      $('iowa-policy').textContent = t(startedBefore() ? 'panel.iowaPolicyAgain' : 'panel.iowaPolicy');
+      $('iowa-policy').textContent = t('panel.iowaPolicy');
       $('panel-autofill').title = withShortcut('', COMMANDS.autofill);
       $('panel-left').title = withShortcut('', COMMANDS.nextQuestion);
       const pending = site?.enabled && site.ready ? site.frames.filter(frame => !frame.enabled) : [];

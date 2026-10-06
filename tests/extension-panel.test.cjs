@@ -1402,10 +1402,11 @@ test('Iowa widget and sidebar say what Autofill will do before it is clicked, in
   const FIRST = 'The SecondHand app asks you first. Then it fills each page and goes to the next by itself. If Iowa lists addresses, it picks the first: check it. It never signs or submits.';
   assert.equal(widget.get('widget-text').textContent, FIRST);
   assert.equal(widget.get('widget-text').classList.contains('visually-hidden'), false, 'the widget shows it, not only its tooltip');
-  assert.match(widget.get('autofill').title, /^SecondHand fills each page and goes to the next by itself\. If Iowa lists addresses, it picks the first one: check it before you submit\. It never signs or submits\.$/);
+  assert.equal(widget.get('autofill').title, EN['widget.autofillIowaTitle']);
   const sidebar = await panel(t, { storage });
   assert.equal(sidebar.get('iowa-policy').hidden, false);
-  assert.equal(sidebar.get('iowa-policy').textContent, 'The SecondHand app asks you before anything is filled. Then Autofill fills each page and goes to the next one by itself. If Iowa lists addresses, it picks the first one: check it before you submit. It never does the security check, signs, or submits for you.');
+  // The side panel's line says what Autofill does on Iowa (#167), on every page until Autofill has run there.
+  assert.equal(sidebar.get('iowa-policy').textContent, EN['panel.iowaPolicy']);
   assert.equal(sidebar.get('iowa-policy').classList.contains('note'), false, 'it is not small print');
   assert.equal(sidebar.get('panel-autofill').textContent, 'Start Autofill', 'on Iowa the button starts something that goes on by itself');
   // Once Autofill has run, the status line says what it did and the note is not repeated under it.
@@ -1419,7 +1420,7 @@ test('Iowa widget and sidebar say what Autofill will do before it is clicked, in
   // The short version still says to check the address it picks.
   assert.equal(widget.get('widget-text').textContent, 'SecondHand fills each page and goes to the next by itself. If Iowa lists addresses, it picks the first: check it. It never signs or submits.');
   const later = await panel(t, { storage });
-  assert.equal(later.get('iowa-policy').textContent, 'Autofill fills each page and goes to the next one by itself. If Iowa lists addresses, it picks the first one: check it before you submit. It never signs or submits.');
+  assert.equal(later.get('iowa-policy').textContent, EN['panel.iowaPolicy'], 'the side panel says all of it every time');
   const laterWidget = await panel(t, { launcher: true, storage });
   await laterWidget.userClick('autofill');
   assert.deepEqual([...storage.keys()].sort(), ['secondhand.autofillStarted', 'secondhand.build'], 'the widget notes a start too; the side panel had noted its build');
