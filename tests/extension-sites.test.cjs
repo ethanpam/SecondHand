@@ -26,8 +26,9 @@ const SENSITIVE = ['ssn', 'birthDate', 'ageRange', 'totalMonthlyIncome', 'annual
   'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare'];
 const generic = {
   GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey,
-  requestKeys: keys => [...new Set(keys.flatMap(key => key === 'fullName' ? ['firstName', 'lastName'] : [key]))],
-  deriveValues: values => ({ ...values, ...(values.firstName && values.lastName ? { fullName: `${values.firstName} ${values.lastName}` } : {}) })
+  requestKeys: keys => [...new Set(keys.flatMap(key => key === 'fullName' ? ['firstName', 'lastName'] : key === 'ageRange' ? ['birthDate'] : [key]))],
+  deriveValues: values => ({ ...values, ...(values.firstName && values.lastName ? { fullName: `${values.firstName} ${values.lastName}` } : {}),
+    ...(values.birthDate ? { ageRange: '41' } : {}) })
 };
 const PICKUP = { name: 'pickup', label: 'Preferred pickup day', type: 'select-one', options: ['Monday', 'Friday'], required: true };
 const pantryFields = () => [{ name: 'name', key: 'fullName' }, { name: 'zip', key: 'zip' }, { name: 'size', key: 'householdSize' }, { ...PICKUP }];
@@ -263,12 +264,21 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
           duringGetFields?.(tab, plain(request));
           // The app's rule: a site it doesn't trust gets nothing unless all websites is on.
           if ((vault.refuseUntrusted || untrusted(request.url)) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
+          // Fill sensitive details (#176): `sensitiveError` is the app's answer to its sensitive prompt when it isn't Allow
+          // (Cancel), or a function of the request that gives it for one site.
+          const refusal = typeof vault.sensitiveError === 'function' ? vault.sensitiveError(plain(request)) : vault.sensitiveError;
+          if (request.sensitive && refusal) return fail(refusal);
           if (vault.cancelOrigin === new URL(request.url).origin) return fail('You cancelled this field request.');
           if (vault.getFieldsError) return fail(vault.getFieldsError);
           // `fieldsReason`: why the app left saved answers out (#135), or a function of the request that says it for one site.
           const reason = typeof vault.fieldsReason === 'function' ? vault.fieldsReason(plain(request)) : vault.fieldsReason;
-          return reply({ accessRevision: vault.accessRevision, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])),
-            ...(reason !== undefined ? { reason } : {}) });
+          // `holds`: the sensitive fields the app holds back from Autofill without Always allow (#176), or a function of
+          // the request that gives the reply's `held` exactly, beside every saved answer asked for.
+          const played = typeof vault.holds === 'function';
+          const held = played ? vault.holds(plain(request)) : request.sensitive ? [] : request.fields.filter(key => (vault.holds || []).includes(key));
+          return reply({ accessRevision: vault.accessRevision,
+            values: Object.fromEntries(request.fields.filter(key => vault.values[key] && (played || !held.includes(key))).map(key => [key, vault.values[key]])),
+            ...((played ? held !== undefined : held.length) ? { held } : {}), ...(reason !== undefined ? { reason } : {}) });
         }
         fail('Unsupported bridge request.');
       } })
@@ -2724,4 +2734,242 @@ test('when the app refuses to save because of a saved date of birth, the side pa
   assert.deepEqual([refused.errorKey, refused.errorParams], ['detail', { detail: refusal }], 'the app’s own words, not a fixed error');
   assert.equal(strings.text('en', refused.errorKey, refused.errorParams), refusal);
   assert.ok((await savable(w)).some(item => item.id === size), 'the answer stays on the list to save once the date is fixed');
+});
+
+// #176: without Always allow, the app holds back the sensitive details that would need its own prompt. Autofill fills
+// everything else at once, and those questions wait under need-you and in the side panel's list for one Fill sensitive
+// details click, which asks the app for them alone.
+const SENSITIVE_SAVED = { firstName: 'Synthetic private first', lastName: 'Synthetic private last', birthDate: '1985-04-12', ssn: '123-45-6789' };
+const sensitiveForm = () => [{ name: 'name', key: 'fullName' }, { name: 'dob', key: 'birthDate', label: 'Date of birth' }, { name: 'ssn', key: 'ssn', label: 'Social Security number' }, { ...PICKUP }];
+const holding = (options = {}) => siteWorker({ enabled: true, fields: sensitiveForm(), ...options, desktop: { values: SENSITIVE_SAVED, holds: ['birthDate', 'ssn'], ...options.desktop } });
+const fillHeld = w => w.panel({ type: 'ui:fillHeld', confirmed: true });
+const heldList = async w => plain((await w.panel({ type: 'ui:pageState' })).data).held;
+const WAITING = 'Check your answers before you submit. 2 sensitive details wait until you click Fill sensitive details in the side panel.';
+
+test('without Always allow, Autofill fills everything else at once; the held questions count as need-you and wait in the side panel’s list (#176)', async () => {
+  const w = holding();
+  const result = plain((await autofill(w)).data);
+  assert.deepEqual(w.native.filter(call => call.type === 'getFields').map(({ fields, sensitive }) => ({ fields, sensitive })), [{ fields: ['firstName', 'lastName', 'birthDate', 'ssn'], sensitive: undefined }],
+    'one request, as before');
+  assert.deepEqual(w.page.answered(), ['name']);
+  const fills = w.content.filter(call => call.type === 'secondhand:generic:fill');
+  assert.deepEqual(fills.map(call => Object.keys(call.values)), [['fullName']], 'only the answers the app gave reach the page');
+  const [dob, ssn, pickup] = ['dob', 'ssn', 'pickup'].map(name => `f0:${w.page.idOf(name)}`);
+  assert.deepEqual(result, { state: 'done', filled: 1, guessed: 0, needYou: [pickup, dob, ssn], held: 2, pageKey: 'general',
+    message: `Filled 1 · 3 need you. ${WAITING}`, messageKey: 'result.withHeld',
+    messageParams: { summary: { key: 'result.siteFilledNeedYou', params: { count: 1, needYou: 3 } }, count: 2 } });
+  assert.doesNotMatch(JSON.stringify(result), /1985|123-45/);
+
+  // The side panel lists them by their own words. Date of birth is a saved field, but its answer was held back,
+  // not missing: it is never offered to Save to My information.
+  const state = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.deepEqual(state.held, [{ id: dob, label: 'Date of birth' }, { id: ssn, label: 'Social Security number' }]);
+  assert.equal(state.savable, undefined);
+  assert.equal(plain((await w.launcher({ type: 'ui:pageState' })).data).held, undefined, 'the on-page widget never gets the list');
+  assert.equal(w.contentTypes().includes('secondhand:generic:read'), false);
+
+  // Nothing waits when nothing was held: everything filled in one go.
+  const allowed = holding({ desktop: { holds: [] } });
+  const everything = plain((await autofill(allowed)).data);
+  assert.deepEqual([everything.filled, everything.held, everything.message], [3, undefined, 'Filled 3 · 1 need you. Check your answers before you submit.']);
+  assert.equal(await heldList(allowed), undefined);
+});
+
+test('a page whose only saved answers were held back says how many wait, not that nothing matched (#176)', async () => {
+  const w = holding({ fields: sensitiveForm().filter(field => field.name !== 'name') });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.filled, 0);
+  assert.equal(result.message, '3 need you. 2 sensitive details wait until you click Fill sensitive details in the side panel.');
+  assert.deepEqual(w.contentTypes().filter(type => type === 'secondhand:generic:fill'), [], 'nothing was filled');
+  const one = holding({ fields: [{ name: 'ssn', key: 'ssn', label: 'Social Security number' }] });
+  assert.equal(plain((await autofill(one)).data).message, '1 need you. 1 sensitive detail waits until you click Fill sensitive details in the side panel.');
+});
+
+test('Fill sensitive details asks the app for the held fields alone, in the site’s name, and fills only those questions (#176)', async () => {
+  const w = holding();
+  await autofill(w);
+  const [dob, ssn, pickup] = ['dob', 'ssn', 'pickup'].map(name => w.page.idOf(name));
+  // The plan the click's last pass made, which the page still holds.
+  const token = 'plan-2';
+  assert.equal(await w.panel({ type: 'ui:fillHeld' }), undefined, 'only a confirmed click');
+  assert.equal(await w.launcher({ type: 'ui:fillHeld', confirmed: true }), undefined, 'only the side panel');
+  const asked = w.native.length;
+  const response = await fillHeld(w);
+  assert.equal(response.ok, true, response.error);
+  assert.deepEqual(w.native.slice(asked).map(({ type, url, fields, sensitive }) => ({ type, url, fields, sensitive })),
+    [{ type: 'getFields', url: `${ORIGIN}/intake`, fields: ['birthDate', 'ssn'], sensitive: true }, { type: 'status', url: undefined, fields: undefined, sensitive: undefined }],
+    'the held fields alone, then the access check before the page is touched');
+  const fill = w.content.at(-1);
+  assert.deepEqual({ type: fill.type, frameId: fill.frameId, token: fill.token, assignments: fill.assignments, values: fill.values }, { type: 'secondhand:generic:fill', frameId: 0, token,
+    assignments: [{ id: dob, key: 'birthDate', guessed: false }, { id: ssn, key: 'ssn', guessed: false }], values: { birthDate: '1985-04-12', ssn: '123-45-6789' } });
+  assert.deepEqual(w.page.answered(), ['name', 'dob', 'ssn']);
+  const result = plain(response.data);
+  assert.deepEqual(result, { state: 'done', filled: 3, guessed: 0, needYou: [`f0:${pickup}`], pageKey: 'general',
+    message: 'Filled 3 · 1 need you. Check your answers before you submit.', messageKey: 'result.siteFilledNeedYou', messageParams: { count: 3, needYou: 1 } });
+  assert.deepEqual(plain((await w.panel({ type: 'ui:pageState' })).data).result, result, 'the tab’s result says so too');
+  assert.equal(await heldList(w), undefined, 'nothing waits now');
+  assert.equal((await fillHeld(w)).errorKey, 'worker.heldGone', 'and nothing is asked twice');
+  assert.equal(w.nativeTypes().filter(type => type === 'getFields').length, 2);
+});
+
+test('Cancel in the app’s sensitive prompt leaves everything filled in place and keeps the held questions listed (#176)', async () => {
+  const w = holding({ desktop: { sensitiveError: 'You cancelled this field request.' } });
+  const result = plain((await autofill(w)).data);
+  const list = await heldList(w);
+  const cancelled = plain(await fillHeld(w));
+  assert.deepEqual([cancelled.ok, cancelled.errorKey, cancelled.error], [false, 'worker.heldCancelled', 'Cancelled. The sensitive details weren’t filled, and they are still listed.']);
+  assert.deepEqual(w.page.answered(), ['name'], 'what was filled stays, and nothing more is');
+  assert.deepEqual(await heldList(w), list);
+  assert.deepEqual(plain((await w.panel({ type: 'ui:pageState' })).data).result, result);
+  // Any other refusal says what it was, and keeps them listed too.
+  w.vault.sensitiveError = 'Unlock SecondHand first.';
+  assert.deepEqual(plain(await fillHeld(w)).errorParams, { detail: 'Unlock SecondHand first.' });
+  w.vault.reachable = false;
+  assert.equal((await fillHeld(w)).errorKey, 'worker.desktopOffline');
+  assert.deepEqual(await heldList(w), list);
+  // Allow once, later, fills them.
+  w.vault.reachable = true; w.vault.sensitiveError = null;
+  assert.equal(plain((await fillHeld(w)).data).filled, 3);
+  assert.deepEqual(w.page.answered(), ['name', 'dob', 'ssn']);
+});
+
+test('a question worked out from a held detail waits for it, and fills from the same one request (#176)', async () => {
+  const fields = [{ name: 'name', key: 'fullName' }, { name: 'dob', key: 'birthDate', label: 'Date of birth' }, { name: 'age', key: 'ageRange', label: 'Age range' }];
+  const w = holding({ fields, desktop: { holds: ['birthDate'] } });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.held, 2);
+  assert.deepEqual((await heldList(w)).map(item => item.label), ['Date of birth', 'Age range']);
+  await fillHeld(w);
+  assert.deepEqual(w.native.filter(call => call.sensitive).map(call => call.fields), [['birthDate']]);
+  assert.deepEqual(w.content.at(-1).values, { birthDate: '1985-04-12', ageRange: '41' });
+  assert.deepEqual(w.page.answered(), ['name', 'dob', 'age']);
+});
+
+test('a held question with no saved answer stays with the applicant after Fill sensitive details (#176)', async () => {
+  const w = holding({ desktop: { values: { ...SENSITIVE_SAVED, ssn: '' } } });
+  await autofill(w);
+  const response = plain((await fillHeld(w)).data);
+  assert.deepEqual(w.page.answered(), ['name', 'dob']);
+  assert.deepEqual(response.needYou, ['pickup', 'ssn'].map(name => `f0:${w.page.idOf(name)}`));
+  assert.equal(response.held, undefined);
+  assert.equal(await heldList(w), undefined, 'the app answered: nothing waits for it');
+});
+
+test('the held list is forgotten when the page changes or its site goes, and a new Autofill makes it again (#176)', async () => {
+  const loaded = holding();
+  await autofill(loaded);
+  loaded.events.updated(7, { status: 'loading' });
+  assert.equal(await heldList(loaded), undefined);
+  assert.equal((await fillHeld(loaded)).errorKey, 'worker.heldGone');
+  const moved = holding();
+  await autofill(moved);
+  moved.tab.url = `${ORIGIN}/intake?step=2`;
+  assert.equal(await heldList(moved), undefined);
+  assert.equal((await fillHeld(moved)).errorKey, 'worker.heldGone');
+  const off = holding();
+  await autofill(off);
+  off.registered.clear(); off.permissions.clear();
+  assert.equal((await fillHeld(off)).ok, false);
+  const revoked = holding();
+  await autofill(revoked);
+  revoked.revoke([`${ORIGIN}/*`]); await settle();
+  assert.equal((await fillHeld(revoked)).errorKey, 'worker.heldGone', 'Chrome took the site back');
+  const turnedOff = holding();
+  await autofill(turnedOff);
+  assert.equal((await turnedOff.panel({ type: 'ui:disableSite', confirmed: true })).ok, true);
+  assert.equal((await fillHeld(turnedOff)).errorKey, 'worker.heldGone');
+  const closed = holding();
+  await autofill(closed);
+  closed.events.removed(7);
+  assert.equal((await fillHeld(closed)).errorKey, 'worker.heldGone');
+  const planned = holding();
+  await autofill(planned);
+  await plan(planned);
+  assert.equal(await heldList(planned), undefined, 'the widget’s next click plans the page again');
+  for (const each of [loaded, moved, off, revoked, turnedOff, closed, planned]) assert.equal(each.native.some(call => call.sensitive), false, 'the app is asked nothing');
+
+  const again = holding();
+  await autofill(again);
+  again.vault.holds = ['ssn'];
+  await autofill(again);
+  assert.deepEqual((await heldList(again)).map(item => item.label), ['Social Security number'], 'the new click’s list replaces the old one');
+  again.vault.holds = [];
+  again.vault.values = { ...SENSITIVE_SAVED };
+  await autofill(again);
+  assert.equal(await heldList(again), undefined);
+});
+
+test('an embedded form’s held details are asked for in that form’s own site’s name, and fill only that frame; a Cancel there keeps them (#176)', async () => {
+  const child = secondFrame({ enabled: true, fields: [{ name: 'ssn', key: 'ssn', label: 'Social Security number' }] });
+  const w = holding({ fields: [{ name: 'name', key: 'fullName' }, { name: 'dob', key: 'birthDate', label: 'Date of birth' }], frames: [child],
+    desktop: { sensitiveError: request => request.url.startsWith(FRAME_ORIGIN) ? 'You cancelled this field request.' : undefined } });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.held, 2);
+  const dob = `f0:${w.page.idOf('dob')}`, ssn = `f4:${child.page.idOf('ssn')}`;
+  assert.deepEqual(await heldList(w), [{ id: dob, label: 'Date of birth' }, { id: ssn, label: 'Social Security number' }]);
+  assert.equal((await fillHeld(w)).errorKey, 'worker.heldCancelled');
+  assert.deepEqual(w.native.filter(call => call.sensitive).map(({ url, fields }) => [url, fields]), [[`${ORIGIN}/intake`, ['birthDate']], [`${FRAME_ORIGIN}/form`, ['ssn']]],
+    'one request for each site, in its own name');
+  assert.deepEqual([w.page.answered(), child.page.answered()], [['name', 'dob'], []], 'the host page’s allowed detail filled; the form’s waits');
+  assert.deepEqual(await heldList(w), [{ id: ssn, label: 'Social Security number' }]);
+  const kept = plain((await w.panel({ type: 'ui:pageState' })).data).result;
+  assert.deepEqual([kept.filled, kept.held, kept.needYou], [2, 1, [ssn]], 'the tab’s result counts what filled, and what still waits');
+  w.vault.sensitiveError = null;
+  assert.equal(plain((await fillHeld(w)).data).filled, 3);
+  assert.deepEqual(w.content.filter(call => call.type === 'secondhand:generic:fill' && call.frameId === 4).map(call => [call.documentId, call.values]), [['doc-4', { ssn: '123-45-6789' }]]);
+  assert.deepEqual(child.page.answered(), ['ssn']);
+});
+
+test('an embedded form that moved on takes its held questions with it; nothing is asked for them (#176)', async () => {
+  const child = secondFrame({ enabled: true, fields: [{ name: 'ssn', key: 'ssn', label: 'Social Security number' }] });
+  const w = holding({ fields: [{ name: 'name', key: 'fullName' }], frames: [child] });
+  await autofill(w);
+  assert.equal((await heldList(w)).length, 1);
+  child.documentId = 'doc-4-next';
+  assert.equal(await heldList(w), undefined, 'the list forgets it');
+  const response = plain(await fillHeld(w));
+  assert.equal(response.errorKey, 'worker.heldGone');
+  assert.equal(w.native.some(call => call.sensitive), false);
+});
+
+test('Fill sensitive details fills under the access receipt the app gave it, on the page it was made for (#176)', async () => {
+  const w = holding({ duringStatus: (vault, count) => { if (count === 3) vault.accessRevision++; } });
+  await autofill(w);
+  const changed = plain(await fillHeld(w));
+  assert.equal(changed.errorKey, 'worker.accessChanged');
+  assert.deepEqual(w.page.answered(), ['name'], 'nothing reaches the page');
+  assert.equal((await heldList(w)).length, 2, 'they still wait');
+  const locked = holding();
+  await autofill(locked);
+  locked.vault.unlocked = false;
+  assert.equal((await fillHeld(locked)).errorKey, 'worker.unlockToAutofill');
+  assert.deepEqual(locked.page.answered(), ['name']);
+});
+
+test('a held list the desktop gets wrong fills nothing and shows a fixed error (#176)', async () => {
+  // A field it wasn't asked for, one named twice, one it also answered, an empty list, or not a list.
+  for (const holds of [() => ['zip'], () => ['ssn', 'ssn'], () => ['ssn'], () => [], () => 'ssn']) {
+    const w = holding({ desktop: { holds } });
+    const result = plain((await autofill(w)).data);
+    assert.deepEqual([result.state, result.messageKey], ['error', 'worker.desktopUnexpected'], holds.toString());
+    assert.deepEqual(w.page.answered(), [], holds.toString());
+    assert.equal(await heldList(w), undefined);
+  }
+  // The reply to Fill sensitive details never holds anything back.
+  const w = holding();
+  await autofill(w);
+  w.vault.holds = request => request.sensitive ? ['ssn'] : undefined;
+  assert.equal((await fillHeld(w)).errorKey, 'worker.desktopUnexpected');
+  assert.deepEqual(w.page.answered(), ['name']);
+  assert.equal((await heldList(w)).length, 2, 'they still wait');
+});
+
+test('the held list holds the reload, as the need-you list does (#176)', async () => {
+  const w = updating({ enabled: true, fields: sensitiveForm(), desktop: { values: SENSITIVE_SAVED, holds: ['birthDate', 'ssn'] } });
+  await autofill(w);
+  await statusRow(w);
+  assert.equal(w.reloads(), 0);
+  assert.equal(plain((await fillHeld(w)).data).filled, 3);
+  await statusRow(w);
+  assert.equal(w.reloads(), 0, 'the pickup day still needs the applicant');
 });

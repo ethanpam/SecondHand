@@ -299,7 +299,7 @@ async function panel(t, initial = {}) {
   const tabs = { current: initial.tab || { id: 7, url: `${adapter.PORTAL}/applicant` } };
   // A site other than Iowa: metadata only, never a checklist or autopilot.
   const state = initial.site ? { page: { kind: 'general', pageKey: 'general' }, result: initial.result || null, autopilot: false, site: { ...initial.site },
-    ...(initial.savable ? { savable: structuredClone(initial.savable) } : {}) } : {
+    ...(initial.savable ? { savable: structuredClone(initial.savable) } : {}), ...(initial.held ? { held: structuredClone(initial.held) } : {}) } : {
     page: { kind: initial.kind || 'fillable', pageKey: 'iowa-personal-information', reason: 'Complete this step in Iowa’s form.', checklist: [
       { key: 'firstName', label: 'First name', status: 'missing', required: true, fillable: true },
       { key: 'lastName', label: 'Last name', status: 'complete', required: true, fillable: true },
@@ -342,6 +342,14 @@ async function panel(t, initial = {}) {
       if (initial.saveError) return { ok: false, ...initial.saveError };
       state.savable = state.savable.filter(item => item.id !== payload.id);
       data = { saved: true };
+    }
+    else if (payload.type === 'ui:fillHeld') {
+      // Fill sensitive details (#176): the app's sensitive prompt for the held questions, then the tab's new result.
+      await initial.fillHeldAnswered;
+      if (initial.fillHeldError) return { ok: false, ...initial.fillHeldError };
+      delete state.held;
+      state.result = structuredClone(initial.heldResult);
+      data = structuredClone(state.result);
     }
     else if (payload.type === 'ui:showApp') data = { shown: true };
     else if (payload.type === 'ui:unlockWithTouchId' && initial.unlockWithTouchId) {
@@ -1912,4 +1920,88 @@ test('the list shows only well-formed questions, in the applicant’s language, 
   assert.equal(view.window.document.querySelector('[data-save-id="f0:sh-2-2"] button').textContent, 'Guardar en “My information”');
   const none = await panel(t, { tab: pantryTab, site: PANTRY_SITE });
   assert.equal(none.get('save-section').hidden, true);
+});
+
+// Fill sensitive details (#176): the questions whose saved answers the app held back until the applicant allows them.
+const HELD = [{ id: 'f0:sh-2-0', label: 'Date of birth' }, { id: 'f0:sh-2-1', label: 'Social Security number' }];
+const WAITING = 'Filled 1 · 3 need you. Check your answers before you submit. 2 sensitive details wait until you click Fill sensitive details in the side panel.';
+const heldDone = { state: 'done', filled: 1, guessed: 0, needYou: ['f0:sh-2-2', 'f0:sh-2-0', 'f0:sh-2-1'], held: 2, message: WAITING, messageKey: 'result.withHeld',
+  messageParams: { summary: { key: 'result.siteFilledNeedYou', params: { count: 1, needYou: 3 } }, count: 2 }, pageKey: 'general' };
+const heldFilled = { state: 'done', filled: 3, guessed: 0, needYou: ['f0:sh-2-2'], message: 'Filled 3 · 1 need you. Check your answers before you submit.',
+  messageKey: 'result.siteFilledNeedYou', messageParams: { count: 3, needYou: 1 }, pageKey: 'general' };
+
+test('the side panel lists the held questions by their own words with one Fill sensitive details button, which asks the worker from a trusted click (#176)', async t => {
+  let answer;
+  const view = await panel(t, { tab: pantryTab, site: PANTRY_SITE, held: HELD, result: heldDone, heldResult: heldFilled, fillHeldAnswered: new Promise(resolve => { answer = resolve; }) });
+  assert.equal(view.get('held-section').hidden, false);
+  assert.equal(view.get('held-title').textContent, 'Sensitive details waiting');
+  assert.equal(view.get('held-section').querySelector('.save-hint').textContent, 'SecondHand fills these only after you allow it in the SecondHand app.');
+  assert.deepEqual([...view.window.document.querySelectorAll('[data-held-id]')].map(row => [row.dataset.heldId, row.textContent]),
+    [['f0:sh-2-0', 'Date of birth'], ['f0:sh-2-1', 'Social Security number']]);
+  assert.equal(view.get('held-fill').textContent, 'Fill sensitive details');
+  assert.equal(view.get('held-section').querySelectorAll('button').length, 1, 'one button for them all');
+  assert.equal(view.get('status').textContent, WAITING);
+  view.get('held-fill').click(); await tick();
+  assert.equal(view.types().includes('ui:fillHeld'), false, 'only a trusted click');
+  view.clickNow('held-fill');
+  assert.equal(view.get('held-fill').disabled, true, 'while the app asks');
+  await tick(); await tick();
+  assert.equal(view.get('status').textContent, 'Allow or cancel in the SecondHand app.');
+  answer();
+  for (let i = 0; i < 6; i++) await tick();
+  assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:fillHeld')), { type: 'ui:fillHeld', confirmed: true, tabId: 7 });
+  assert.equal(view.get('status').textContent, heldFilled.message);
+  assert.equal(view.get('held-section').hidden, true, 'nothing waits now');
+  assert.equal(view.window.document.querySelectorAll('[data-held-id]').length, 0);
+});
+
+test('a Cancel in the app keeps the held questions listed, with the button, and says so (#176)', async t => {
+  const view = await panel(t, { tab: pantryTab, site: PANTRY_SITE, held: HELD, result: heldDone,
+    fillHeldError: { error: strings.english('worker.heldCancelled'), errorKey: 'worker.heldCancelled', errorParams: {} } });
+  await view.userClick('held-fill');
+  assert.equal(view.get('status').textContent, 'Cancelled. The sensitive details weren’t filled, and they are still listed.');
+  assert.equal(view.get('status').classList.contains('error'), true);
+  assert.equal(view.window.document.querySelectorAll('[data-held-id]').length, 2);
+  assert.equal(view.get('held-fill').disabled, false);
+});
+
+test('the held list shows only well-formed questions, in the applicant’s language, and is gone with nothing held (#176)', async t => {
+  const odd = [...HELD, { id: 'not an id!', label: 'Bad id' }, { id: 'f0:sh-2-3', label: 42 }, null];
+  const view = await panel(t, { tab: pantryTab, site: PANTRY_SITE, held: odd, language: 'es' });
+  assert.deepEqual([...view.window.document.querySelectorAll('[data-held-id]')].map(row => row.dataset.heldId), ['f0:sh-2-0', 'f0:sh-2-1']);
+  assert.equal(view.get('held-title').textContent, 'Datos sensibles en espera');
+  assert.equal(view.get('held-fill').textContent, 'Llenar datos sensibles');
+  view.get('language').value = 'fr';
+  view.get('language').dispatchEvent(new view.window.Event('change'));
+  assert.equal(view.get('held-fill').textContent, 'Remplir les informations sensibles');
+  const none = await panel(t, { tab: pantryTab, site: PANTRY_SITE });
+  assert.equal(none.get('held-section').hidden, true);
+});
+
+test('the widget counts held questions under need-you, says they wait in the side panel, and follows the worker once they fill (#176)', async t => {
+  const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: heldDone });
+  await view.userClick('autofill');
+  assert.equal(view.get('need-you').textContent, '3 need you');
+  assert.equal(view.get('widget-text').textContent, 'Filled 1 · 2 sensitive details wait in the side panel');
+  // Fill sensitive details in the side panel changes the tab's result: the widget takes it at its next look.
+  view.state.result = structuredClone(heldFilled);
+  view.window.document.dispatchEvent(new view.window.Event('visibilitychange'));
+  await tick(); await tick();
+  assert.equal(view.get('need-you').textContent, '1 need you');
+  assert.equal(view.get('widget-text').textContent, 'Filled 3');
+  // With nothing held any more, it keeps its own result again.
+  view.state.result = { ...heldFilled, filled: 9 };
+  view.window.document.dispatchEvent(new view.window.Event('visibilitychange'));
+  await tick(); await tick();
+  assert.equal(view.get('widget-text').textContent, 'Filled 3');
+
+  // Nothing else filled: the held questions matched, so it never says that nothing matched.
+  const only = { ...heldDone, filled: 0, held: 1, needYou: ['f0:sh-2-1'], message: strings.text('en', 'result.withHeld', { summary: { key: 'result.siteNeedYou', params: { count: 1 } }, count: 1 }) };
+  const alone = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: only });
+  await alone.userClick('autofill');
+  assert.equal(alone.get('widget-text').textContent, '1 sensitive detail waits in the side panel');
+  assert.equal(alone.get('need-you').textContent, '1 need you');
+  const spanish = await panel(t, { launcher: true, language: 'es', tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: heldDone });
+  await spanish.userClick('autofill');
+  assert.equal(spanish.get('widget-text').textContent, 'Completadas: 1 · 2 datos sensibles esperan en el panel lateral');
 });

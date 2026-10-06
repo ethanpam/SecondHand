@@ -137,6 +137,16 @@ test('site trust requests carry only an https site URL; the desktop decides whic
   assert.throws(() => validateRequest({ id: 'x', type: 'recordProgress', url: site, filledCount: 1 }), /Iowa portal/);
 });
 
+test('Fill sensitive details asks for the held fields with sensitive: true, on an https site other than Iowa’s portal (#176)', () => {
+  const request = { id: 'held', type: 'getFields', url: 'https://pantry.example.org/intake', fields: ['ssn', 'birthDate'], sensitive: true };
+  assert.deepEqual(validateRequest(request), request);
+  for (const sensitive of [false, 'true', 1, null]) assert.throws(() => validateRequest({ ...request, sensitive }), /sensitive details/, JSON.stringify(sensitive));
+  assert.throws(() => validateRequest({ ...request, fields: [] }), /profile fields/);
+  assert.throws(() => validateRequest({ ...request, url: PORTAL_URL }), /sensitive details/, 'Iowa’s portal holds nothing back');
+  assert.throws(() => validateRequest({ ...request, url: `${PORTAL_URL}/applyForBenefits/enterPersonalInfo`, fields: [] }), /sensitive details/, 'nor is it a navigation authorization');
+  for (const type of ['saveFields', 'trustSite', 'answerFields']) assert.throws(() => validateRequest({ ...request, type }), /Unexpected|answers|questions/, type);
+});
+
 test('turning all websites on or off carries nothing but the request itself', () => {
   for (const type of ['trustAllSites', 'untrustAllSites']) {
     assert.deepEqual(validateRequest({ id: 'all', type }), { id: 'all', type });

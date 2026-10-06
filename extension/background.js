@@ -14,7 +14,7 @@ if (typeof globalThis.SecondHandTranslation?.create !== 'function') {
 // Must match BUILD in panel.js: change both together, with every change to the extension. The panel
 // compares them to tell when Chrome is still running an older worker than the pages it loaded from
 // disk, and the worker compares it with the build the desktop app ships to update itself (#85).
-const BUILD = '2026-10-06.2';
+const BUILD = '2026-10-06.3';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
@@ -39,6 +39,11 @@ const siteRuns = new Map(); // tabId -> the fill running on an approved site, so
 // the questions the last Autofill matched to a saved field that has no saved answer. Memory only, forgotten when
 // the tab navigates. Keys and plan ids stay in the worker; the side panel gets each question's id and label.
 const savables = new Map();
+// Fill sensitive details (#176). tabId -> { url, origin, reason, items: Map(id -> { frameId, documentId, planId, token, key, label, url, fields }) }:
+// the questions the last Autofill matched to a saved field whose answer the app held back until the applicant allows it, each
+// with the address of its site and the held fields it needs. Memory only, forgotten when the tab navigates or a new fill starts.
+// Keys and plan ids stay in the worker; the side panel gets each question's id and label.
+const heldDetails = new Map();
 const sitePlans = new Map(); // tabId -> { url, frames } the widget's on-device AI saw. Field metadata only.
 // Tabs whose widget asked the side panel to open on the question list. The panel takes it once.
 const questionViews = new Set();
@@ -511,6 +516,7 @@ async function forgetRevokedOnce() {
   await chrome.scripting.unregisterContentScripts({ ids: owned.map(script => script.id) });
   for (const origin of revoked) {
     for (const [tabId, kept] of savables) if (kept.origin === origin) savables.delete(tabId);
+    for (const [tabId, kept] of heldDetails) if (kept.origin === origin) heldDetails.delete(tabId);
     for (const [tabId, stored] of sitePlans) if (siteOrigin(stored.url) === origin) sitePlans.delete(tabId);
     for (const tabId of [...pageReads.keys()]) forgetReads(tabId, entry => siteOrigin(entry.url) === origin);
   }
@@ -562,6 +568,7 @@ async function disableSite(tabId) {
   if (owned.length) await chrome.scripting.unregisterContentScripts({ ids: owned.map(script => script.id) });
   results.delete(tabId);
   sitePlans.delete(tabId);
+  heldDetails.delete(tabId);
   forgetReads(tabId, entry => siteOrigin(entry.url) === origin);
   // The site and the embedded forms no other site uses are forgotten.
   const remaining = await chrome.scripting.getRegisteredContentScripts();
@@ -672,10 +679,11 @@ async function noteUpdate(shipped) {
 }
 // Nothing under way: no click, no Autofill left on, no site fill, and no plan waiting for its fill.
 // Approval prompts belong to a click or a fill. Nor anything the applicant is still working through (#142):
-// a reload would wipe a tab's need-you list and Save offers, and they last until the tab moves on or closes.
+// a reload would wipe a tab's need-you list, Save offers and held details, and they last until the tab moves on or closes.
 const showsNeedYou = result => ['done', 'waiting'].includes(result?.state) && Array.isArray(result.needYou) && result.needYou.length > 0;
 function reloadWhenIdle() {
-  if (selfUpdate?.state !== 'due' || clicksUnderway || autopilots.size || siteRuns.size || sitePlans.size || savables.size || [...results.values()].some(showsNeedYou)) return;
+  if (selfUpdate?.state !== 'due' || clicksUnderway || autopilots.size || siteRuns.size || sitePlans.size || savables.size || heldDetails.size ||
+    [...results.values()].some(showsNeedYou)) return;
   selfUpdate = null;
   chrome.runtime.reload();
 }
@@ -816,17 +824,21 @@ async function tallySite(tabId, frames) {
 // A summary that says when Laya suggested the guesses.
 const withLaya = (summary, laya) => laya ? { key: 'result.suggestedByLaya', params: { summary } } : summary;
 const withReason = (summary, reason) => reason ? { key: 'result.withReason', params: { summary, reason } } : summary;
+// A summary that says how many questions wait for Fill sensitive details (#176).
+const withHeld = (summary, held) => held ? { key: 'result.withHeld', params: { summary, count: held } } : summary;
 // A click's reasons as one, each said once.
 const reasons = (...list) => list.filter((reason, index) => reason && list.findIndex(other => other?.key === reason.key) === index)
   .reduce((all, next) => all ? joined(all, next) : next, null);
-function siteSummary(filled, guessed, needYou, next, laya, reason = null) {
+// `held`: how many of the need-you questions wait for Fill sensitive details. Their saved answers matched, so a page
+// with nothing else filled doesn't say that nothing matched.
+function siteSummary(filled, guessed, needYou, next, laya, reason = null, held = 0) {
   let summary;
   if (filled) {
     const key = guessed ? (needYou.length ? 'result.siteFilledGuessedNeedYou' : 'result.siteFilledGuessed') : needYou.length ? 'result.siteFilledNeedYou' : 'result.siteFilled';
     summary = { key, params: { count: filled, ...(guessed ? { guessed } : {}), ...(needYou.length ? { needYou: needYou.length } : {}) } };
-  } else if (needYou.length) summary = { key: 'result.nothingMatchesNeedYou', params: { count: needYou.length } };
+  } else if (needYou.length) summary = { key: held ? 'result.siteNeedYou' : 'result.nothingMatchesNeedYou', params: { count: needYou.length } };
   else summary = { key: next ? 'result.nothingToFillNext' : 'result.nothingToFill', params: {} };
-  const shown = withReason(withLaya(summary, laya), reason);
+  const shown = withReason(withHeld(withLaya(summary, laya), held), reason);
   return say(shown.key, shown.params);
 }
 
@@ -877,6 +889,8 @@ async function siteFramePlans(tabId, url, stopForPending = false) {
 async function planSite(tabId) {
   const { tab, origin } = await activeSite(tabId);
   await requireSite(origin);
+  // A new plan for the page: questions the last click held back go with the last plan (#176).
+  heldDetails.delete(tabId);
   const { frames } = await siteFramePlans(tabId, tab.url);
   // Whether Laya will answer this click's open questions. When it will, the widget leaves Chrome's AI off.
   const { boxes, choices } = layaQuestions(frames, true);
@@ -989,10 +1003,36 @@ function answerSites(frames) {
     // An embedded frame without the address Chrome gave for it is never filled under another's.
     if (typeof url !== 'string') throw fault(FRAME_ERROR);
     const origin = new URL(url).origin;
-    if (!sites.has(origin)) sites.set(origin, { url, frameIds: new Set(), keys: [], values: null, reason: null });
+    if (!sites.has(origin)) sites.set(origin, { url, frameIds: new Set(), keys: [], values: null, reason: null, held: [] });
     sites.get(origin).frameIds.add(frameId);
   }
   return [...sites.values()];
+}
+// The sensitive details the app held back from a site's request (#176): fields the request named, each once and with no
+// answer beside it. Iowa's portal holds nothing back.
+function heldBack(response, site) {
+  if (response.held === undefined) return [];
+  const { held } = response;
+  if (SecondHandIowa.isSupportedUrl(site.url) || !Array.isArray(held) || !held.length || new Set(held).size !== held.length ||
+    held.some(field => !site.keys.includes(field) || Object.hasOwn(response.values, field))) throw fault('worker.desktopUnexpected');
+  return held;
+}
+
+// One fill message to the plan a frame holds, and its reply checked: every id it filled, rejected or skipped is one it was
+// given. On an approved site (`prefix`), a failure other than a missing page or a page that changed is the frame's.
+async function fillFrame(tabId, { frameId, documentId }, message, prefix) {
+  try {
+    const result = prefix && frameId === 0 ? await topSiteMessage(tabId, message) : await chrome.tabs.sendMessage(tabId, message, frameTarget(frameId, documentId));
+    const assigned = new Set(message.assignments.map(item => item.id));
+    const validIds = ids => Array.isArray(ids) && ids.every(id => typeof id === 'string' && assigned.has(id)) && new Set(ids).size === ids.length;
+    // The page changed while its choices settled: the fill starts over from a new click.
+    if (result?.pageChanged === true) throw Object.assign(fault('worker.pageChangedAutofill'), { code: 'page-changed' });
+    if (!result?.ok || !validIds(result.filled) || !validIds(result.rejected) || (result.skipped !== undefined && !validIds(result.skipped))) throw fault('worker.pageUnsafe');
+    return result;
+  } catch (error) {
+    if (!prefix || error.code === 'site-not-ready' || error.code === 'page-changed') throw error;
+    throw fault(FRAME_ERROR);
+  }
 }
 
 // Fills from a general-engine plan: for each site in the page, one desktop request for the keys planned
@@ -1081,6 +1121,7 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       guard();
       receipt(receiptRevision(response));
       site.reason = desktopReason(response);
+      site.held = heldBack(response, site);
       site.values = SecondHandGeneric.deriveValues(response.values);
     }
     // The answers came before getFields: an Always allow in its prompt outdates their receipt.
@@ -1091,11 +1132,11 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       for (const [id, option] of prepared.mapAnswers(reply.entries)) addLaya(id, { option });
     }
     let filled = 0, placedByLaya = 0;
-    const needYou = [], savable = [];
+    const needYou = [], savable = [], held = [];
     for (const frame of initial) {
       const { frameId, documentId } = frame;
       // A frame gets only its own site's saved values.
-      const { keys, values } = siteOf(frameId);
+      const { url: siteUrl, keys, values, held: heldFields } = siteOf(frameId);
       let { plan, planned } = frame;
       const refused = new Map(); // Refused answers stay local to this frame.
       if (revision !== null) for (let pass = 1; ; pass++) {
@@ -1109,19 +1150,7 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
         guard();
         if (current.url !== url || !current.active) throw fault('worker.pageChangedAutofill');
         const placing = Object.fromEntries(assignments.filter(item => item.key !== undefined).map(({ key }) => [key, values[key]]));
-        let result;
-        try {
-          const message = { type: 'secondhand:generic:fill', token: plan.token, assignments, values: placing };
-          result = prefix && frameId === 0 ? await topSiteMessage(tabId, message) : await chrome.tabs.sendMessage(tabId, message, frameTarget(frameId, documentId));
-          const assigned = new Set(assignments.map(item => item.id));
-          const validIds = ids => Array.isArray(ids) && ids.every(id => typeof id === 'string' && assigned.has(id)) && new Set(ids).size === ids.length;
-          // The page changed while its choices settled: the fill starts over from a new click.
-          if (result?.pageChanged === true) throw Object.assign(fault('worker.pageChangedAutofill'), { code: 'page-changed' });
-          if (!result?.ok || !validIds(result.filled) || !validIds(result.rejected) || (result.skipped !== undefined && !validIds(result.skipped))) throw fault('worker.pageUnsafe');
-        } catch (error) {
-          if (!prefix || error.code === 'site-not-ready' || error.code === 'page-changed') throw error;
-          throw fault(FRAME_ERROR);
-        }
+        const result = await fillFrame(tabId, frame, { type: 'secondhand:generic:fill', token: plan.token, assignments, values: placing }, prefix);
         for (const { id, key } of assignments) if (result.rejected.includes(id)) refused.set(key ?? `option:${id}`, id);
         const placed = assignments.filter(({ id }) => result.filled.includes(id) && !result.rejected.includes(id));
         if (!placed.length) break;
@@ -1134,15 +1163,26 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       const missing = [...plan.unmatched, ...plan.matched].map(field => field.id);
       for (const [key, id] of refused) if (!missing.includes(id) && !plan.matched.some(field => field.key === key)) missing.push(id);
       needYou.push(...missing.map(id => prefix ? `f${frameId}:${id}` : id));
+      // A question the side panel lists, in the plan the click left on the page.
+      const kept = field => ({ id: prefix ? `f${frameId}:${field.id}` : field.id, frameId, documentId, planId: field.id, token: plan.token, key: field.key,
+        label: typeof field.label === 'string' ? field.label.trim().slice(0, LABEL_LIMIT) : '' });
+      // Questions the rules matched to a saved field whose answer the app held back (#176): they wait for Fill sensitive
+      // details, each with the held fields it needs.
+      const waiting = new Set();
+      for (const field of plan.matched) {
+        const fields = SecondHandGeneric.requestKeys([field.key]).filter(key => heldFields.includes(key));
+        if (!fields.length) continue;
+        waiting.add(field.id);
+        held.push({ ...kept(field), url: siteUrl, fields });
+      }
       // Questions the rules matched to a saved field with no saved answer: the side panel offers to save the applicant's own (#98).
       for (const field of plan.matched) {
-        if (!SecondHandGeneric.SAVE_KEYS.includes(field.key) || !keys.includes(field.key) || (typeof values?.[field.key] === 'string' && values[field.key])) continue;
-        savable.push({ id: prefix ? `f${frameId}:${field.id}` : field.id, frameId, documentId, planId: field.id, token: plan.token, key: field.key,
-          label: typeof field.label === 'string' ? field.label.trim().slice(0, LABEL_LIMIT) : '' });
+        if (waiting.has(field.id) || !SecondHandGeneric.SAVE_KEYS.includes(field.key) || !keys.includes(field.key) || (typeof values?.[field.key] === 'string' && values[field.key])) continue;
+        savable.push(kept(field));
       }
     }
     // Why the desktop left answers out, from every site's replies, each reason said once.
-    return { filled, needYou, savable, laya: placedByLaya, reason: reasons(prepared.reason, ...answers.map(reply => reply.reason), ...sites.map(site => site.reason)) };
+    return { filled, needYou, savable, held, laya: placedByLaya, reason: reasons(prepared.reason, ...answers.map(reply => reply.reason), ...sites.map(site => site.reason)) };
   } finally {
     for (const site of sites) site.values = null;
     questionTranslation.forget();
@@ -1154,6 +1194,8 @@ async function fillSiteOnce(tabId, url, guesses) {
   try {
     const stored = sitePlans.get(tabId);
     sitePlans.delete(tabId);
+    // The click plans the page again: questions the last one held back go with the last plan.
+    heldDetails.delete(tabId);
     let frames, pending, laya;
     if (guesses === undefined) {
       ({ frames, pending } = await siteFramePlans(tabId, url, true));
@@ -1177,11 +1219,13 @@ async function fillSiteOnce(tabId, url, guesses) {
       const hosts = pending.map(frame => new URL(frame.origin).hostname).join(', ');
       return siteResult('waiting', say('worker.formInsideFrames', { hosts }));
     }
-    const { needYou, savable, laya: suggested, reason } = await fillPlan(tabId, url, frames, { prefix: true, laya });
+    const { needYou, savable, held, laya: suggested, reason } = await fillPlan(tabId, url, frames, { prefix: true, laya });
     keepSavable(tabId, url, siteOrigin(url), savable);
+    keepHeld(tabId, url, siteOrigin(url), held, reason);
     const tally = await tallySite(tabId, frames);
     const filled = tally.rule + tally.guess;
-    return siteResult('done', siteSummary(filled, tally.guess, needYou, tally.next, suggested, reason), { filled, guessed: tally.guess, needYou, ...(suggested ? { laya: suggested } : {}) });
+    return siteResult('done', siteSummary(filled, tally.guess, needYou, tally.next, suggested, reason, held.length),
+      { filled, guessed: tally.guess, needYou, ...(suggested ? { laya: suggested } : {}), ...(held.length ? { held: held.length } : {}) });
   } catch (error) {
     const { state, ...message } = failed(error);
     return siteResult(state, message);
@@ -1213,11 +1257,13 @@ async function fillSite(tabId, guesses) {
 async function pageState(tabId, route) {
   const state = await currentPageState(tabId, route);
   if (route !== undefined) return state;
-  // Only the side panel (no route) opens the question list the widget asked for, and gets the questions it may save.
+  // Only the side panel (no route) opens the question list the widget asked for, and gets the questions it may save
+  // and those whose answers wait for Fill sensitive details.
   const shown = questionViews.delete(tabId) ? { ...state, showQuestions: true } : state;
   if (state.site && !(state.site.enabled && state.site.ready)) return shown;
   const savable = await savableState(tabId);
-  return savable.length ? { ...shown, savable } : shown;
+  const held = await heldState(tabId);
+  return { ...shown, ...(savable.length ? { savable } : {}), ...(held.length ? { held } : {}) };
 }
 
 // Save to My information (#98). The last Autofill's questions with no saved answer, kept for the tab.
@@ -1225,10 +1271,10 @@ function keepSavable(tabId, url, origin, items) {
   if (items.length) savables.set(tabId, { url, origin, items: new Map(items.map(item => [item.id, item])) });
   else savables.delete(tabId);
 }
-// The frame a kept question is in, with its address as Chrome gives it (#137): on a site, only while the site
-// (and that embedded form) is on. Null once an embedded form's frame holds another document: its questions
-// went with the page they were on.
-async function savableFrame(tabId, kept, { frameId, documentId }) {
+// The frame a kept question (a Save offer or a held detail) is in, with its address as Chrome gives it (#137): on a
+// site, only while the site (and that embedded form) is on. Null once an embedded form's frame holds another document:
+// its questions went with the page they were on.
+async function keptFrame(tabId, kept, { frameId, documentId }) {
   if (!kept.origin) {
     await activePortal(tabId);
     return { frameId: 0, url: kept.url };
@@ -1256,7 +1302,7 @@ async function savableState(tabId) {
   }
   const answered = new Set();
   for (const items of groups.values()) {
-    const frame = await savableFrame(tabId, kept, items[0]);
+    const frame = await keptFrame(tabId, kept, items[0]);
     if (!frame) { for (const item of items) kept.items.delete(item.id); continue; }
     const reply = await savableMessage(tabId, kept, frame, { type: 'secondhand:generic:answered', token: items[0].token, ids: items.map(item => item.planId) });
     if (!Array.isArray(reply?.answered) || reply.answered.some(id => typeof id !== 'string')) throw fault('worker.pageCheckUnsafe');
@@ -1272,7 +1318,7 @@ async function saveAnswer(tabId, id) {
   const kept = savables.get(tabId);
   const item = kept?.items.get(id);
   if (!item || (await chrome.tabs.get(tabId)).url !== kept.url) throw fault('worker.answerGone');
-  const frame = await savableFrame(tabId, kept, item);
+  const frame = await keptFrame(tabId, kept, item);
   if (!frame) throw fault('worker.answerGone');
   const read = await savableMessage(tabId, kept, frame, { type: 'secondhand:generic:read', token: item.token, id: item.planId, key: item.key });
   if (read?.empty === true) throw fault('worker.answerFirst');
@@ -1286,6 +1332,89 @@ async function saveAnswer(tabId, id) {
   kept.items.delete(id);
   if (!kept.items.size) savables.delete(tabId);
   return { saved: true };
+}
+
+// Fill sensitive details (#176). The last Autofill's held questions, kept for the tab.
+function keepHeld(tabId, url, origin, items, reason) {
+  if (items.length) heldDetails.set(tabId, { url, origin, reason, items: new Map(items.map(item => [item.id, item])) });
+  else heldDetails.delete(tabId);
+}
+// The held questions still on the page as the click left it: those in an embedded form that moved on to another page go.
+async function heldOnPage(tabId) {
+  const kept = heldDetails.get(tabId);
+  if (!kept) return null;
+  if ((await chrome.tabs.get(tabId)).url !== kept.url || !(await siteEnabled(kept.origin))) { heldDetails.delete(tabId); return null; }
+  const documents = new Map([...kept.items.values()].map(item => [`${item.frameId}|${item.documentId}`, item]));
+  for (const item of documents.values()) {
+    if (await keptFrame(tabId, kept, item)) continue;
+    for (const [id, other] of kept.items) if (other.frameId === item.frameId && other.documentId === item.documentId) kept.items.delete(id);
+  }
+  if (!kept.items.size) { heldDetails.delete(tabId); return null; }
+  return kept;
+}
+// Each held question's id and label, for the side panel.
+async function heldState(tabId) {
+  const kept = await heldOnPage(tabId);
+  return kept ? [...kept.items.values()].map(({ id, label }) => ({ id, label })) : [];
+}
+// After the applicant's Fill sensitive details click in the side panel: for each site whose answers the app held back, in
+// page order, one getFields for those fields alone with `sensitive: true`, which shows the app's sensitive prompt in that
+// site's name. What it allows fills those questions only, in the plan the click left on the page. A Cancel leaves
+// everything already filled in place and the questions still held. The tab's result then counts what filled and what waits.
+async function fillHeld(tabId) {
+  const kept = await heldOnPage(tabId);
+  if (!kept) throw fault('worker.heldGone');
+  const placed = new Set();
+  let reason = null;
+  try {
+    for (const url of new Set([...kept.items.values()].map(item => item.url))) {
+      const items = [...kept.items.values()].filter(item => item.url === url);
+      reason = reasons(reason, await fillHeldSite(tabId, kept, url, items, placed));
+      // The app answered for this site: its questions no longer wait, whether or not each had a saved answer.
+      for (const item of items) kept.items.delete(item.id);
+    }
+  } finally {
+    if (!kept.items.size) heldDetails.delete(tabId);
+    heldChanged(tabId, kept, placed, reason);
+  }
+  return results.get(tabId);
+}
+// One site's held questions: the app's sensitive prompt, then each frame's questions filled under the receipt it gave.
+// Why the app left answers out, when it did.
+async function fillHeldSite(tabId, kept, url, items, placed) {
+  let response;
+  try { response = await nativeRequest('getFields', { url: safeUrl(url), fields: [...new Set(items.flatMap(item => item.fields))], sensitive: true }); }
+  catch (error) { throw error.code !== 'offline' && /cancelled/i.test(error.message) ? fault('worker.heldCancelled') : error; }
+  if (!response?.values || typeof response.values !== 'object' || Array.isArray(response.values) || response.held !== undefined) throw fault('worker.desktopUnexpected');
+  const revision = receiptRevision(response);
+  const reason = desktopReason(response);
+  let values = SecondHandGeneric.deriveValues(response.values);
+  try {
+    const frames = new Map();
+    for (const item of items) frames.set(`${item.frameId}|${item.token}`, [...(frames.get(`${item.frameId}|${item.token}`) || []), item]);
+    for (const questions of frames.values()) {
+      const assignments = questions.filter(({ key }) => typeof values[key] === 'string' && values[key]).map(({ planId, key }) => ({ id: planId, key, guessed: false }));
+      if (!assignments.length) continue;
+      await checkAccess(revision);
+      const current = await chrome.tabs.get(tabId);
+      if (current.url !== kept.url || !current.active) throw fault('worker.pageChangedAutofill');
+      const result = await fillFrame(tabId, questions[0], { type: 'secondhand:generic:fill', token: questions[0].token, assignments,
+        values: Object.fromEntries(assignments.map(({ key }) => [key, values[key]])) }, true);
+      for (const { id, planId } of questions) if (result.filled.includes(planId) && !result.rejected.includes(planId)) placed.add(id);
+    }
+  } finally { values = null; }
+  return reason;
+}
+// The tab's result after Fill sensitive details: the questions it filled leave need-you and count as filled, and those
+// still held are said. Only the result of the click that held them back changes.
+function heldChanged(tabId, kept, placed, reason) {
+  const result = results.get(tabId);
+  if (result?.state !== 'done' || result.pageKey !== 'general' || !result.held) return;
+  const filled = result.filled + placed.size;
+  const needYou = result.needYou.filter(id => !placed.has(id));
+  const held = kept.items.size;
+  remember(tabId, siteResult('done', siteSummary(filled, result.guessed, needYou, false, result.laya, reasons(kept.reason, reason), held),
+    { filled, guessed: result.guessed, needYou, ...(result.laya ? { laya: result.laya } : {}), ...(held ? { held } : {}) }));
 }
 async function currentPageState(tabId, route) {
   const tab = await chrome.tabs.get(tabId);
@@ -1558,6 +1687,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   else if (panel && message.type === 'ui:pageText') run = () => pageText(tabId);
   else if (panel && message.type === 'ui:keepSummary' && typeof message.id === 'string') run = async () => keepSummary(tabId, message.id, message.summary);
   else if (panel && message.type === 'ui:saveAnswer' && message.confirmed === true && typeof message.id === 'string') run = () => saveAnswer(tabId, message.id);
+  else if (panel && message.type === 'ui:fillHeld' && message.confirmed === true) run = () => fillHeld(tabId);
   else if (launcher && message.type === 'ui:widgetSize' && typeof message.line === 'boolean' && cardSize(message)) run = () => widgetSize(tabId, message.line, message);
   else return;
   // A click holds off an update until it settles; after any request, a waiting update may reload.
@@ -1572,7 +1702,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
 chrome.tabs.onActivated?.addListener(info => {
   for (const tabId of autopilots.keys()) if (tabId !== info.tabId) stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], ...say('worker.stoppedTabChanged'), pageKey: results.get(tabId)?.pageKey || '' });
 });
-chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); generalPages.delete(tabId); sitePlans.delete(tabId); questionViews.delete(tabId); pageReads.delete(tabId); formFrames.delete(tabId); formChecks.delete(tabId); savables.delete(tabId); });
+chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); generalPages.delete(tabId); sitePlans.delete(tabId); questionViews.delete(tabId); pageReads.delete(tabId); formFrames.delete(tabId); formChecks.delete(tabId); savables.delete(tabId); heldDetails.delete(tabId); });
 chrome.tabs.onUpdated?.addListener((tabId, change) => {
   if (change.status === 'loading') {
     results.delete(tabId);
@@ -1580,6 +1710,7 @@ chrome.tabs.onUpdated?.addListener((tabId, change) => {
     formFrames.set(tabId, new Set());
     formChecks.delete(tabId);
     savables.delete(tabId);
+    heldDetails.delete(tabId);
     generalPages.delete(tabId);
     sitePlans.delete(tabId);
     questionViews.delete(tabId);

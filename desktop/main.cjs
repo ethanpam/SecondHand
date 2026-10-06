@@ -94,6 +94,7 @@ if (nativeOrigin) {
   // What was reset because settings.json couldn't be read at startup, until a setting is saved (#139).
   let settingsNotice = null;
   // On sites other than Iowa's portal, these get their own named confirmation unless Always allow is on (#175).
+  // Autofill holds them back and fills the rest; the side panel's Fill sensitive details asks for them (#176).
   const SENSITIVE_FIELDS = ['ssn', 'hasSsn', 'hasSsnAnswer', 'birthDate', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'assetsOnHand', 'monthlyMedicalExpenses',
     'usCitizen', 'disabled', 'blind', 'healthLimitation', 'medicare'];
   // Household counts aren't among them (#175), age-band counts and those worked out from members' birth dates included.
@@ -267,15 +268,17 @@ if (nativeOrigin) {
     if (!LAYA_STATES.includes(state)) throw new Error(`Laya reported an unknown state: ${String(state)}`);
     return { state };
   }
+  // Whether saved information goes to a website with no dialog. Always allow, for the extension ID it was
+  // saved with, covers everything, sensitive details included (#175); so does Always allow on this site, there
+  // alone and never on Iowa's portal, which shares its origin with the rest of hhsservices.iowa.gov.
+  const releasedWithoutAsking = ({ context, iowa, origin }) =>
+    (autofillWithoutAsking || (!iowa && alwaysAllowedSites.includes(origin))) && extensionId === context.extensionId;
   // One approval before saved information reaches a website: getFields' values, or the answers
-  // Laya picked from them. Always allow, for the extension ID it was saved with, covers everything,
-  // `sensitive` details included (#175); so does Always allow on this site, there alone and never on
-  // Iowa's portal, which shares its origin with the rest of hhsservices.iowa.gov. Otherwise it asks with
-  // Cancel, Allow once, and Always allow on this computer, or for `sensitive` details, Always allow on this site.
+  // Laya picked from them. Unless it is released without asking, it asks with Cancel, Allow once, and
+  // Always allow on this computer, or for `sensitive` details, Always allow on this site.
   // `generation` is the access revision the information was read under. False when cancelled.
   async function approveRelease({ context, iowa, origin, generation, message, items, sensitive = null }) {
-    const allowedHere = !iowa && alwaysAllowedSites.includes(origin);
-    if ((autofillWithoutAsking || allowedHere) && extensionId === context.extensionId) return true;
+    if (releasedWithoutAsking({ context, iowa, origin })) return true;
     if (fieldRequestPending) throw publicError('Another field request is waiting for your approval.');
     fieldRequestPending = true;
     try {
@@ -484,24 +487,36 @@ if (nativeOrigin) {
       if (!request.fields.every(isRequestField)) throw publicError('This page asked for something SecondHand doesn’t share.');
       if (!iowa && request.fields.some(field => SNAP_IOWA_ONLY_FIELDS.includes(field))) throw publicError('These SNAP answers can only be shared with Iowa’s application.');
       const sensitive = iowa ? [] : request.fields.filter(field => SENSITIVE_FIELDS.includes(field));
-      const approved = await approveRelease({ context, iowa, origin, generation: accessRevision,
-        message: navigationOnly ? 'Continue this verified Iowa step?' : `Fill these saved answers into ${iowa ? 'Iowa’s application' : origin}?`,
-        items: navigationOnly ? 'No saved profile fields will be read for this step.' : request.fields.map(fieldLabel).join(', '),
-        sensitive: sensitive.length ? { message: `Fill sensitive details on ${origin}?`,
-          detail: `${sensitive.map(fieldLabel).join(', ')}\n\nOnly allow this if you meant to give these details to ${origin}. Other fields: ${request.fields.filter(field => !sensitive.includes(field)).map(fieldLabel).join(', ') || 'none'}.` } : null });
-      if (!approved) throw publicError('You cancelled this field request.');
-      if (navigationOnly) { touch(); return { values: {}, accessRevision }; }
-      const profile = vault.getData().profile;
-      const now = today();
-      const values = {};
-      for (const field of request.fields) {
-        const value = releasedValue(profile, field, { today: now });
-        if (typeof value === 'string' && value.trim()) values[field] = value;
+      // The side panel's Fill sensitive details (#176) asks for the details Autofill held back, and only for those.
+      if (request.sensitive === true && (iowa || sensitive.length !== request.fields.length)) throw publicError('Only sensitive details on a site other than Iowa’s application are asked for this way.');
+      // Autofill's request holds back the sensitive details that would need their own dialog, and answers the rest after
+      // the everyday one when that applies (#176). The reply names them; Fill sensitive details asks for them alone.
+      const held = request.sensitive === true || releasedWithoutAsking({ context, iowa, origin }) ? [] : sensitive;
+      const fields = request.fields.filter(field => !held.includes(field));
+      if (fields.length || navigationOnly) {
+        const approved = await approveRelease({ context, iowa, origin, generation: accessRevision,
+          message: navigationOnly ? 'Continue this verified Iowa step?' : `Fill these saved answers into ${iowa ? 'Iowa’s application' : origin}?`,
+          items: navigationOnly ? 'No saved profile fields will be read for this step.' : fields.map(fieldLabel).join(', '),
+          sensitive: request.sensitive === true ? { message: `Fill sensitive details on ${origin}?`,
+            detail: `${fields.map(fieldLabel).join(', ')}\n\nOnly allow this if you meant to give these details to ${origin}.` } : null });
+        if (!approved) throw publicError('You cancelled this field request.');
       }
-      // An answer left out because a saved birth date can't be used stays with the applicant, who is told why (#135).
-      const blocked = request.fields.some(field => !Object.hasOwn(values, field) && blockedByBirthDate(profile, field, { today: now }));
+      if (navigationOnly) { touch(); return { values: {}, accessRevision }; }
+      const values = {};
+      let blocked = false;
+      // Nothing is read when every field asked for was held back.
+      if (fields.length) {
+        const profile = vault.getData().profile;
+        const now = today();
+        for (const field of fields) {
+          const value = releasedValue(profile, field, { today: now });
+          if (typeof value === 'string' && value.trim()) values[field] = value;
+        }
+        // An answer left out because a saved birth date can't be used stays with the applicant, who is told why (#135).
+        blocked = fields.some(field => !Object.hasOwn(values, field) && blockedByBirthDate(profile, field, { today: now }));
+      }
       touch();
-      return { values, accessRevision, ...(blocked ? { reason: 'birthDate' } : {}) };
+      return { values, accessRevision, ...(held.length ? { held } : {}), ...(blocked ? { reason: 'birthDate' } : {}) };
     }
     if (request.type === 'saveFields') return saveAnswers(request, context);
     if (request.type === 'recordProgress') {
