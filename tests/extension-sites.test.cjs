@@ -175,6 +175,9 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
         if (message.type === 'secondhand:generic:answered') return { answered: model.answeredIds(message.token, message.ids) };
         if (message.type === 'secondhand:generic:read') return model.read(plain(message));
         if (message.type === 'secondhand:generic:pageText') return structuredClone(frame ? frame.pageText || { lang: '', text: '' } : pageText);
+        // An embedded frame says whether its page has a form SecondHand can help with (#157): `helps` on the frame.
+        // `off`: SecondHand was turned off for the frame, which answers nothing. `answering`: a test holds the answer back.
+        if (message.type === 'secondhand:generic:helps' && frame) { await frame.answering; return frame.off ? undefined : { helps: frame.helps === true }; }
         throw new Error(`Unexpected content message ${message.type}`);
       },
       onActivated: event('activated'), onRemoved: event('removed'), onUpdated: event('updated')
@@ -1982,6 +1985,100 @@ test('an embedded form tells the top frame to show the card, with a yes or no on
   assert.deepEqual([...w.native, ...off.native], [], 'nothing reaches the desktop');
 });
 
+// #157: Chrome stops an idle worker and starts it again for the next event. Which embedded frames have a form was in its
+// memory only, so the new worker asks the tab's frames again before it counts a report, and the top page's card stays right.
+const SECOND_FORM_ORIGIN = 'https://forms.example.com';
+function formReporter(w) {
+  const report = (frame, helps) => w.send({ type: 'secondhand:generic:form', helps },
+    { id: 'testextension', url: frame ? `${frame.origin}/form` : w.tab.url, frameId: frame ? frame.frameId : 0, tab: { id: 7, url: w.tab.url } });
+  // What the worker last told the top page: whether a form in one of its frames shows the card.
+  const card = () => w.content.filter(call => call.type === 'secondhand:generic:formFrames').at(-1)?.helps;
+  const asked = () => w.content.filter(call => call.type === 'secondhand:generic:helps').map(call => [call.frameId, call.documentId]);
+  return { report, card, asked };
+}
+
+test('after a worker restart, the card goes when the last embedded form does, and stays while another is there', async () => {
+  const one = secondFrame({ helps: true });
+  const w = siteWorker({ url: OTHER_URL, allSites: true, frames: [one] });
+  const { report, card, asked } = formReporter(w);
+  w.events.updated(7, { status: 'loading' });
+  await report(one, true);
+  assert.equal(card(), true);
+  w.restart();
+  one.helps = false;
+  assert.deepEqual(plain(await report(one, false)), { frames: false });
+  assert.equal(card(), false, 'the form is gone: so is the card');
+  assert.deepEqual(asked(), [[4, 'doc-4']], 'the frame is asked in the document Chrome placed');
+
+  // Two embedded forms; after the restart a third frame's form comes and goes. The first is still there.
+  const first = secondFrame({ helps: true }), second = { origin: SECOND_FORM_ORIGIN, frameId: 5 };
+  const two = siteWorker({ url: OTHER_URL, allSites: true, frames: [first, second] });
+  const forms2 = formReporter(two);
+  two.events.updated(7, { status: 'loading' });
+  await forms2.report(first, true);
+  two.restart();
+  second.helps = true;
+  assert.deepEqual(plain(await forms2.report(second, true)), { frames: true });
+  second.helps = false;
+  assert.deepEqual(plain(await forms2.report(second, false)), { frames: true });
+  assert.equal(forms2.card(), true, 'the first form still shows the card');
+  assert.deepEqual(forms2.asked(), [[4, 'doc-4'], [5, 'doc-5']], 'asked once, after the restart');
+  assert.deepEqual([...w.native, ...two.native], [], 'nothing reaches the desktop');
+});
+
+test('after a worker restart, a top page that asks hears about forms already in its frames, and reports that come together share one check', async () => {
+  const one = secondFrame({ helps: true }), other = { origin: SECOND_FORM_ORIGIN, frameId: 5, helps: true };
+  const w = siteWorker({ url: OTHER_URL, allSites: true, frames: [one, other] });
+  const { report, card, asked } = formReporter(w);
+  w.events.updated(7, { status: 'loading' });
+  await report(one, true);
+  await report(other, true);
+  w.restart();
+  assert.deepEqual(plain(await report(null, false)), { frames: true }, 'the top page asks, as when SecondHand is turned on for an open page');
+  w.restart();
+  one.helps = false; other.helps = false;
+  const sent = asked().length;
+  await Promise.all([report(one, false), report(other, false)]);
+  assert.deepEqual(asked().slice(sent), [[4, 'doc-4'], [5, 'doc-5']], 'each frame is asked once');
+  assert.equal(card(), false);
+  // A page that loads after a restart starts over: its frames report as they load, and nothing is asked.
+  w.restart();
+  w.events.updated(7, { status: 'loading' });
+  const before = asked().length;
+  assert.deepEqual(plain(await report(null, false)), { frames: false });
+  assert.equal(asked().length, before);
+});
+
+test('after a worker restart, a report that waited while the tab loaded another page counts for nothing there', async () => {
+  let answer;
+  const one = secondFrame({ helps: true, answering: new Promise(resolve => { answer = resolve; }) });
+  const w = siteWorker({ url: OTHER_URL, allSites: true, frames: [one] });
+  const { report, card } = formReporter(w);
+  w.restart();
+  const old = report(one, true);
+  await settle();
+  w.events.updated(7, { status: 'loading' });
+  answer();
+  assert.deepEqual(plain(await old), { frames: false });
+  assert.equal(card(), undefined, 'the new page isn’t told about the old page’s form');
+  assert.deepEqual(plain(await report(null, false)), { frames: false }, 'the new page’s frames report as they load');
+});
+
+test('after a worker restart, only frames on sites that are on are asked about their forms, and one turned off counts for none', async () => {
+  const pantry = secondFrame({ enabled: true, helps: true }), ads = { origin: 'https://ads.example.com', frameId: 6, helps: true };
+  const quiet = { origin: SECOND_FORM_ORIGIN, frameId: 5, enabled: true, helps: true, off: true };
+  const w = siteWorker({ enabled: true, frames: [pantry, ads, quiet] });
+  const { report, card, asked } = formReporter(w);
+  w.events.updated(7, { status: 'loading' });
+  await report(pantry, true);
+  w.restart();
+  pantry.helps = false;
+  assert.deepEqual(plain(await report(pantry, false)), { frames: false });
+  assert.equal(card(), false, 'a frame of a site that is off never shows the card');
+  assert.deepEqual(asked(), [[4, 'doc-4'], [5, 'doc-5']]);
+  assert.equal(w.content.some(call => call.frameId === 6), false);
+});
+
 // #137: saved answers for a form embedded from another site are asked for in that site's name, the address Chrome
 // gives for the frame, and each site's answers are approved and filled apart.
 const EMBED_URL = `${FRAME_ORIGIN}/pantry-signup`;
@@ -2145,6 +2242,25 @@ test('an embedded form reports whether it has a form and never makes a card of i
   assert.deepEqual(frame.reports.at(-1), { type: 'secondhand:generic:form', helps: false });
   const empty = livePage(t, '<p>Advertisement</p>', { url: 'https://ads.example.com/frame', top: false });
   assert.deepEqual(empty.reports, [], 'a frame without a form says nothing');
+});
+
+test('an embedded frame tells the worker whether its page has a form when the worker asks, with a yes or no only (#157)', async t => {
+  const ask = (page, sender = { id: extensionId }) => {
+    let reply;
+    for (const listener of page.listeners) listener({ type: 'secondhand:generic:helps' }, sender, value => { reply = value; });
+    return reply === undefined ? undefined : plain(reply);
+  };
+  const frame = livePage(t, '<form><label for="fname">First name</label><input id="fname" value="Synthetic typed answer"></form>', { url: `${FRAME_ORIGIN}/form`, top: false });
+  assert.deepEqual(ask(frame), { helps: true });
+  assert.equal(ask(frame, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
+  frame.window.document.querySelector('form').remove();
+  await wait(CHECK_WAIT);
+  assert.deepEqual(ask(frame), { helps: false });
+  assert.deepEqual(ask(livePage(t, '<p>Advertisement</p>', { url: 'https://ads.example.com/frame', top: false })), { helps: false });
+  assert.equal(ask(livePage(t, forms.plainPantry)), undefined, 'the top page places its own card');
+  const off = livePage(t, '<form><label for="fname">First name</label><input id="fname"></form>', { url: `${FRAME_ORIGIN}/form`, top: false });
+  off.tell({ type: 'secondhand:generic:off' });
+  assert.equal(ask(off), undefined, 'a frame SecondHand was turned off for answers nothing');
 });
 
 test('the top page shows the card for an embedded form the worker tells it about', async t => {

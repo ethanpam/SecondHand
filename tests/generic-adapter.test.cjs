@@ -451,6 +451,48 @@ test('text dates, state names, and pre-filled answers are handled without overwr
   assert.equal(filled.filled.length, 2);
 });
 
+// #156: a text date box gets the saved date in the order it asks for, read as Save reads a typed date (#142).
+function fillDate(html) {
+  const doc = page(html);
+  const result = generic.plan(doc);
+  const dob = result.matched.find(item => item.key === 'birthDate');
+  assert.ok(dob, `${html}: matched to the birth date`);
+  const filled = generic.fillFields(doc, result.token, [{ id: dob.id, key: 'birthDate', guessed: false }], { birthDate: '1985-04-12' });
+  return { value: doc.getElementById('dob').value, filled: filled.filled.includes(dob.id) };
+}
+const dobBox = (label, attributes = '') => `<label for="dob">${label}</label><input id="dob" ${attributes}><span id="hint">Use DD/MM/YYYY</span>`;
+test('a text date box gets the saved date in the order its label, placeholder, description or title asks for', () => {
+  for (const [label, attributes, value] of [
+    ['Date of birth (MM/DD/YYYY)', '', '04/12/1985'],
+    ['Date of birth (DD/MM/YYYY)', '', '12/04/1985'],
+    ['Date of birth (YYYY-MM-DD)', '', '1985-04-12'],
+    // The hint only in the placeholder.
+    ['Date of birth', 'placeholder="MM/DD/YYYY"', '04/12/1985'],
+    ['Date of birth', 'placeholder="dd/mm/yyyy"', '12/04/1985'],
+    ['Date of birth', 'placeholder="YYYY-MM-DD"', '1985-04-12'],
+    // Spanish and French forms write the year as AAAA, and French the day as JJ.
+    ['Fecha de nacimiento (DD/MM/AAAA)', 'autocomplete="bday"', '12/04/1985'],
+    ['Fecha de nacimiento', 'autocomplete="bday" placeholder="dd/mm/aaaa"', '12/04/1985'],
+    ['Fecha de nacimiento (AAAA-MM-DD)', 'autocomplete="bday"', '1985-04-12'],
+    ['Date de naissance', 'autocomplete="bday" placeholder="jj/mm/aaaa"', '12/04/1985'],
+    ['Date of birth', 'aria-describedby="hint"', '12/04/1985'],
+    ['Date of birth', 'title="Day, month and year: DD-MM-YYYY"', '12/04/1985'],
+    // The same hint in the label and the placeholder is one order.
+    ['Date of birth (MM/DD/YYYY)', 'placeholder="MM/DD/YYYY"', '04/12/1985'],
+    ['Date of birth (YYYY-MM-DD)', 'placeholder="YYYY-MM-DD"', '1985-04-12']]) {
+    assert.deepEqual(fillDate(dobBox(label, attributes)), { value, filled: true }, `${label} ${attributes}`);
+  }
+});
+
+test('a date box with no hint gets the date month first, a date input gets it as ISO, and a box asking for two orders gets nothing', () => {
+  for (const label of ['Date of birth', 'Birthday', 'DOB']) assert.deepEqual(fillDate(`<label for="dob">${label}</label><input id="dob">`), { value: '04/12/1985', filled: true }, label);
+  for (const label of ['Date of birth (DD/MM/YYYY)', 'Date of birth (MM/DD/YYYY)', 'Date of birth']) {
+    assert.deepEqual(fillDate(dobBox(label, 'type="date"')), { value: '1985-04-12', filled: true }, `${label}: the browser shows a date input in its own order`);
+  }
+  // Which order the page wants can't be told: the applicant answers it.
+  assert.deepEqual(fillDate(dobBox('Date of birth (MM/DD/YYYY)', 'placeholder="DD/MM/YYYY"')), { value: '', filled: false });
+});
+
 test('a stale plan, an unknown key, or a field changed since planning is never filled', () => {
   const doc = page(forms.plainPantry);
   const first = generic.plan(doc);

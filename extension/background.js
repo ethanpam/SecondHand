@@ -14,7 +14,7 @@ if (typeof globalThis.SecondHandTranslation?.create !== 'function') {
 // Must match BUILD in panel.js: change both together, with every change to the extension. The panel
 // compares them to tell when Chrome is still running an older worker than the pages it loaded from
 // disk, and the worker compares it with the build the desktop app ships to update itself (#85).
-const BUILD = '2026-10-05.6';
+const BUILD = '2026-10-06.1';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
@@ -606,6 +606,7 @@ async function removeAllSites() {
     const origin = siteOrigin(tab.url);
     if (!origin || await siteEnabled(origin)) continue;
     formFrames.delete(tab.id);
+    formChecks.delete(tab.id);
     // Every frame of the page drops SecondHand: the top one its card, embedded ones their reports.
     try { await chrome.tabs.sendMessage(tab.id, { type: 'secondhand:generic:off' }); }
     catch (error) { if (!NO_RECEIVER.includes(error.message)) throw error; }
@@ -680,18 +681,54 @@ function reloadWhenIdle() {
 }
 
 // tabId -> ids of embedded frames whose page has a form SecondHand can help with, so the top page shows
-// its card for a form inside an iframe. Yes or no only; never what a form asks.
+// its card for a form inside an iframe. Yes or no only; never what a form asks. Memory only: a tab is here from
+// its page load, and after Chrome restarts the worker it isn't until the worker asks the tab's frames (#157).
 const formFrames = new Map();
+// tabId -> the worker asking the tab's frames. Reports that come meanwhile wait for its one answer.
+const formChecks = new Map();
+// Each embedded frame Chrome places on a site that is on says whether its page has a form. One without
+// SecondHand's script yet reports when it loads, and one SecondHand was turned off for answers nothing.
+async function askFormFrames(tabId, top) {
+  const frames = new Set();
+  for (const frame of await enabledSiteFrames(tabId, top)) {
+    if (frame.frameId === 0) continue;
+    let reply;
+    try { reply = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:helps' }, frameTarget(frame.frameId, frame.documentId)); }
+    catch (error) { if (NO_RECEIVER.includes(error.message)) continue; throw error; }
+    if (reply === undefined) continue;
+    if (typeof reply?.helps !== 'boolean') throw fault(FRAME_ERROR);
+    if (reply.helps) frames.add(frame.frameId);
+  }
+  return frames;
+}
+// Whether the answer still holds: false when the tab loaded another page, closed, or was turned off meanwhile.
+function knowFormFrames(tabId, top) {
+  if (!formChecks.has(tabId)) {
+    const check = askFormFrames(tabId, top).then(frames => {
+      const current = formChecks.get(tabId) === check;
+      if (current) { formFrames.set(tabId, frames); formChecks.delete(tabId); }
+      return current;
+    }, error => {
+      if (formChecks.get(tabId) === check) formChecks.delete(tabId);
+      throw error;
+    });
+    formChecks.set(tabId, check);
+  }
+  return formChecks.get(tabId);
+}
 async function formReport(sender, helps) {
   const tabId = sender.tab.id;
   const top = siteOrigin(sender.tab.url), own = siteOrigin(sender.url);
   if (!top || !own || !(await siteEnabled(top)) || !(await siteEnabled(own))) return undefined;
-  const frames = formFrames.get(tabId) || new Set();
+  // The top page's card may be out of date for a tab the worker had to ask about: it is told either way.
+  const asked = !formFrames.has(tabId);
+  // A report that waited while the page moved on was the old page's.
+  if (asked && !(await knowFormFrames(tabId, top))) return { frames: false };
+  const frames = formFrames.get(tabId);
   const before = frames.size > 0;
   if (sender.frameId > 0) { if (helps) frames.add(sender.frameId); else frames.delete(sender.frameId); }
-  if (frames.size) formFrames.set(tabId, frames); else formFrames.delete(tabId);
   const now = frames.size > 0;
-  if (sender.frameId > 0 && now !== before) {
+  if (sender.frameId > 0 && (now !== before || asked)) {
     // A top page that hasn't loaded yet asks when it does.
     try { await chrome.tabs.sendMessage(tabId, { type: 'secondhand:generic:formFrames', helps: now }, { frameId: 0 }); }
     catch (error) { if (!NO_RECEIVER.includes(error.message)) throw error; }
@@ -1534,11 +1571,13 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
 chrome.tabs.onActivated?.addListener(info => {
   for (const tabId of autopilots.keys()) if (tabId !== info.tabId) stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], ...say('worker.stoppedTabChanged'), pageKey: results.get(tabId)?.pageKey || '' });
 });
-chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); generalPages.delete(tabId); sitePlans.delete(tabId); questionViews.delete(tabId); pageReads.delete(tabId); formFrames.delete(tabId); savables.delete(tabId); });
+chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); generalPages.delete(tabId); sitePlans.delete(tabId); questionViews.delete(tabId); pageReads.delete(tabId); formFrames.delete(tabId); formChecks.delete(tabId); savables.delete(tabId); });
 chrome.tabs.onUpdated?.addListener((tabId, change) => {
   if (change.status === 'loading') {
     results.delete(tabId);
-    formFrames.delete(tabId);
+    // A new page starts over: its frames report as they load.
+    formFrames.set(tabId, new Set());
+    formChecks.delete(tabId);
     savables.delete(tabId);
     generalPages.delete(tabId);
     sitePlans.delete(tabId);
