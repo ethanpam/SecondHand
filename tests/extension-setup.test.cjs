@@ -56,6 +56,29 @@ test('a prepared copy from another build is not prepared until it is refreshed',
   assert.equal(markerOf(await fs.readFile(path.join(stale.directory, 'background.js'), 'utf8')), CURRENT_BUILD);
 });
 
+test('an older app never replaces a copy a newer app prepared, and says why (#142)', async t => {
+  const { app, directory } = await fixture(t);
+  // The newer app is this repository's; the older one ships the same files under an older build marker.
+  const current = await prepareBundledExtension(app);
+  const snapshot = async () => Promise.all(EXTENSION_FILES.map(file => fs.readFile(path.join(current.directory, file)).catch(() => null)));
+  const before = await snapshot();
+  const older = { ...app, isPackaged: true };
+  const resources = await olderBundle(directory);
+  const setup = await getExtensionSetup(older, resources);
+  assert.deepEqual({ build: setup.build, exists: setup.exists, prepared: setup.prepared, newerCopy: setup.newerCopy },
+    { build: OLD_BUILD, exists: true, prepared: false, newerCopy: CURRENT_BUILD });
+  await assert.rejects(prepareBundledExtension(older, resources),
+    error => error.publicMessage === error.message && error.message.includes(CURRENT_BUILD) && error.message.includes(OLD_BUILD));
+  assert.deepEqual(await snapshot(), before, 'not one file was written');
+  assert.equal((await getExtensionSetup(app)).newerCopy, null, 'the app that prepared it sees its own build, nothing newer');
+  // A newer copy missing a file isn't ready to load, and is still never repaired with older files.
+  await fs.unlink(path.join(current.directory, 'panel.css'));
+  assert.equal((await getExtensionSetup(older, resources)).newerCopy, null);
+  await assert.rejects(prepareBundledExtension(older, resources), error => error.message.includes(CURRENT_BUILD));
+  await assert.rejects(fs.lstat(path.join(current.directory, 'panel.css')), { code: 'ENOENT' });
+  assert.equal(markerOf(await fs.readFile(path.join(current.directory, 'background.js'), 'utf8')), CURRENT_BUILD);
+});
+
 test('a refresh writes background.js last, so its build marker means every other file is already new', async t => {
   const { app, directory } = await fixture(t);
   const resources = await olderBundle(directory);

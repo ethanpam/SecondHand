@@ -184,7 +184,7 @@ For live reloading, run `npm run dev` (run `npx playwright install chromium` onc
 | `npm start` | Runs the desktop app. |
 | `npm run dev` | Runs the app and a Chromium with the extension, reloading on edits. |
 | `npm test` | Unit tests: encryption, messaging, schema, portal adapters, and the extension's panels. |
-| `npm run check` | Syntax checks and the extension's permission rules. |
+| `npm run check` | Syntax checks, the extension's permission rules, and a newer `BUILD` (in `extension/background.js` and `extension/panel.js`) whenever `extension/` changed since main. |
 | `npm run test:ocr` | Exercises bundled offline OCR on a generated synthetic image; pass `-- --input tests/fixtures/ocr/synthetic-1040sr.pdf` for the tax-form sample. |
 | `npm run test:ocr:ui` | Reads the synthetic tax form in the desktop app and verifies review, draft merging, encrypted saving, and lock/unlock. |
 | `npm run test:ui` | Drives the real Electron app end to end. Needs a desktop session. |
