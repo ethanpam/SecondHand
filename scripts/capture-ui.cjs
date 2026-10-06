@@ -490,7 +490,7 @@ async function outdated() {
     const { open, card } = session;
     await open(applicant);
     const frame = await card();
-    await expect(frame.locator('#widget')).toHaveClass(/outdated/, { timeout: 20000 });
+    await expect(frame.locator('#restart')).toBeVisible({ timeout: 20000 });
     await cardShot(session, 'card-outdated');
     const panel = await openPanel(session);
     await panelShot(session, panel, 'panel-outdated', () => !document.getElementById('desktop-action').hidden);

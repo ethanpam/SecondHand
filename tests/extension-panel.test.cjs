@@ -1125,6 +1125,48 @@ test('a worker that never answers gets a plain notice and a Restart button in th
   assert.equal(partial.requests.length, before, 'an outdated worker is not polled again');
 });
 
+test('an outdated card the page can size directly is drawn whole, can be hidden, and asks the page, not the worker', async t => {
+  const widget = await panel(t, { launcher: true, silent: true });
+  assert.equal(widget.get('hide').hidden, true, 'without the page’s word, hiding would leave an empty frame over the page');
+  assert.equal(widget.get('widget').classList.contains('outdated'), true, 'and the notice keeps to the frame it has');
+  const posted = [];
+  widget.window.postMessage = (data, origin) => posted.push([data, origin]);
+  // The greeting counts only from the page around the card.
+  widget.window.dispatchEvent(new widget.window.MessageEvent('message', { data: { type: 'secondhand:cardHello' }, source: null }));
+  assert.equal(widget.get('hide').hidden, true);
+  widget.window.dispatchEvent(new widget.window.MessageEvent('message', { data: { type: 'secondhand:cardHello' }, source: widget.window.parent }));
+  assert.equal(widget.get('hide').hidden, false);
+  // The page sizes the frame, so the notice is drawn as any card is: the whole of it, Restart, and the way to hide it.
+  assert.equal(widget.get('widget').classList.contains('outdated'), false);
+  assert.equal(widget.get('widget-text').textContent, OUTDATED);
+  assert.equal(widget.get('restart').hidden, false);
+  assert.deepEqual(plain(posted.map(([data]) => data)), [{ type: 'secondhand:cardSize', line: true }], 'asked of the page, as the worker would be');
+  assert.equal(posted[0][1], '*', 'jsdom knows no page around the card');
+  const sizes = widget.requests.filter(request => request.type === 'ui:widgetSize').length;
+  await widget.userClick('hide');
+  assert.equal(widget.get('widget').hidden, true);
+  assert.equal(widget.get('pill').hidden, false);
+  assert.equal(widget.get('pill').title, EN['widget.showWaitingTitle'], 'the hidden notice still needs the reader');
+  assert.deepEqual(plain(posted.map(([data]) => data)).at(-1), { type: 'secondhand:cardSize', line: true, pill: true });
+  assert.equal(widget.requests.filter(request => request.type === 'ui:widgetSize').length, sizes, 'the outdated worker is not asked');
+  await widget.userClick('pill');
+  assert.equal(widget.get('widget').hidden, false);
+  assert.equal(widget.get('widget-text').textContent, OUTDATED);
+  assert.deepEqual(plain(posted.map(([data]) => data)).at(-1), { type: 'secondhand:cardSize', line: true });
+  // A card left behind when SecondHand restarted can be hidden the same way.
+  const left = await panel(t, { launcher: true });
+  const leftPosted = [];
+  left.window.postMessage = data => leftPosted.push(data);
+  left.window.dispatchEvent(new left.window.MessageEvent('message', { data: { type: 'secondhand:cardHello' }, source: left.window.parent }));
+  delete left.window.chrome.runtime.id;
+  left.window.chrome.runtime.sendMessage = async () => { throw new Error('Extension context invalidated.'); };
+  await left.userClick('autofill');
+  assert.equal(left.get('widget-text').textContent, EN['panel.reloadPage']);
+  assert.equal(left.get('widget').classList.contains('outdated'), false);
+  await left.userClick('hide');
+  assert.deepEqual(plain(leftPosted).at(-1), { type: 'secondhand:cardSize', line: true, pill: true });
+});
+
 test('a worker from another build gets the same notice even though it answers, and Restart reloads SecondHand', async t => {
   const widget = await panel(t, { launcher: true, build: 'older-build' });
   let reloads = 0;
@@ -2076,6 +2118,34 @@ test('the Iowa widget frame is as wide as the widget measured itself, never past
   assert.equal(host.style.height, '95px');
   page.request({ type: 'secondhand:widgetSize', line: true });
   assert.equal(host.style.height, '86px', 'a widget that could not measure itself gets a row for its line');
+});
+
+test('an outdated card asks the Iowa page’s content script directly for its frame, and only its own frame is heard', t => {
+  const page = content(t);
+  const host = page.host();
+  const [frame] = page.frames;
+  assert.ok(frame.contentWindow, 'the card’s frame has a window');
+  // Once the card loads, the script tells it that it can be asked directly.
+  const greeted = [];
+  frame.contentWindow.postMessage = (data, origin) => greeted.push([data, origin]);
+  frame.dispatchEvent(new page.window.Event('load'));
+  assert.deepEqual(plain(greeted), [[{ type: 'secondhand:cardHello' }, `chrome-extension://${extensionId}`]]);
+  const post = (data, { source = frame.contentWindow, origin = `chrome-extension://${extensionId}` } = {}) =>
+    page.window.dispatchEvent(new page.window.MessageEvent('message', { data, source, origin }));
+  page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 95 });
+  const hidden = { type: 'secondhand:cardSize', line: true, width: 254, height: 95, pill: true };
+  // The page's own scripts, another origin, and a size the worker would refuse change nothing.
+  post(hidden, { source: page.window });
+  post(hidden, { origin: 'https://hhsservices.iowa.gov' });
+  for (const pill of ['true', 1, null, false]) post({ ...hidden, pill });
+  for (const height of [45, 151, '95']) post({ type: 'secondhand:cardSize', line: true, width: 254, height });
+  post({ ...hidden, type: 'secondhand:widgetSize' });
+  assert.deepEqual([host.style.height, host.getAttribute('data-secondhand-size')], ['95px', 'full']);
+  post(hidden);
+  assert.deepEqual([host.style.width, host.style.height, host.style.borderRadius, host.getAttribute('data-secondhand-size')], ['46px', '46px', '50%', 'pill']);
+  // The card shown again, as tall as its notice needs.
+  post({ type: 'secondhand:cardSize', line: true, width: 254, height: 118 });
+  assert.deepEqual([host.style.height, host.getAttribute('data-secondhand-size')], ['118px', 'full']);
 });
 
 test('the Iowa widget the reader hid is the round logo alone, until the widget asks for its card back', t => {

@@ -1831,6 +1831,29 @@ test('the site widget frame is as tall as the widget measured itself, from its r
   assert.equal(page.host().style.height, '46px');
 });
 
+test('an outdated site card asks the page’s content script directly for its frame, and only its own frame is heard', t => {
+  const page = siteContent(t);
+  const host = page.host();
+  const [frame] = page.frames;
+  const greeted = [];
+  frame.contentWindow.postMessage = (data, origin) => greeted.push([data, origin]);
+  frame.dispatchEvent(new page.window.Event('load'));
+  assert.deepEqual(plain(greeted), [[{ type: 'secondhand:cardHello' }, `chrome-extension://${extensionId}`]], 'the script tells its card it can be asked directly');
+  const post = (data, { source = frame.contentWindow, origin = `chrome-extension://${extensionId}` } = {}) =>
+    page.window.dispatchEvent(new page.window.MessageEvent('message', { data, source, origin }));
+  page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 95 });
+  const hidden = { type: 'secondhand:cardSize', line: true, width: 254, height: 95, pill: true };
+  post(hidden, { source: page.window });
+  post(hidden, { origin: new URL(SITE_URL).origin });
+  post({ ...hidden, pill: 'yes' });
+  post({ type: 'secondhand:cardSize', line: true, height: 151 });
+  assert.equal(host.getAttribute('data-secondhand-size'), 'full');
+  post(hidden);
+  assert.deepEqual([host.style.width, host.style.height, host.style.borderRadius, host.getAttribute('data-secondhand-size')], ['46px', '46px', '50%', 'pill']);
+  post({ type: 'secondhand:cardSize', line: true, width: 254, height: 118 });
+  assert.deepEqual([host.style.height, host.getAttribute('data-secondhand-size')], ['118px', 'full']);
+});
+
 test('the site widget the reader hid is the round logo alone, until the widget asks for its card back', t => {
   const page = siteContent(t);
   const host = page.host();

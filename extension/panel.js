@@ -147,6 +147,14 @@
     // is asked once for a frame with room for a line, in the oldest form of that request.
     let outdatedKey = 'panel.outdated';
     let roomAsked = false;
+    // The page's content script said it can size this card's frame when asked directly, which an outdated card
+    // needs: its worker can't (it is older than the card, or gone after SecondHand restarted).
+    let pageSizes = false;
+    window.addEventListener('message', event => {
+      if (event.source !== window.parent || event.data?.type !== 'secondhand:cardHello' || pageSizes) return;
+      pageSizes = true;
+      render();
+    });
     // What an outdated widget says: the whole of it, or the short form when its frame can't hold the whole.
     const OUTDATED_LINES = { 'panel.outdated': ['widget.outdatedLong', 'widget.outdated'], 'panel.reloadPage': ['panel.reloadPage', 'panel.reloadPageShort'] };
     let ai = { note: null, reason: '' };
@@ -177,10 +185,14 @@
     function render() {
       // There is a card for this page, unless the reader hid it. An outdated card keeps its steps on screen.
       const card = known || autopilot || outdated;
-      const pill = card && collapsed && !outdated;
+      // An outdated card can be hidden too, when the page's content script can be asked directly (see below).
+      const pill = card && collapsed && (!outdated || pageSizes);
       $('widget').hidden = !card || pill;
-      $('widget').classList.toggle('outdated', outdated);
-      $('widget').classList.toggle('restartable', outdated && outdatedKey !== 'panel.reloadPage');
+      // An outdated card the page can size directly is drawn as any other card; one it can't keeps the compact
+      // notice that fits the frame it already has.
+      const direct = outdated && pageSizes;
+      $('widget').classList.toggle('outdated', outdated && !direct);
+      $('widget').classList.toggle('restartable', outdated && !direct && outdatedKey !== 'panel.reloadPage');
       $('pill').hidden = card && !pill;
       // A hidden card that waits for the reader marks its logo with a dot and says so in the logo's name.
       const needYou = ['done', 'waiting'].includes(result?.state) ? fieldKeys(result.needYou) : [];
@@ -196,7 +208,7 @@
       $('unlock').hidden = outdated || autopilot || !locked;
       $('open-app').hidden = outdated || autopilot || !closed;
       $('restart').hidden = !outdated || outdatedKey === 'panel.reloadPage';
-      $('hide').hidden = outdated;
+      $('hide').hidden = outdated && !pageSizes;
       $('autofill').disabled = working;
       // Answers still to give show as a link that finds each one in the form.
       $('need-you').hidden = outdated || !needYou.length;
@@ -217,20 +229,25 @@
       $('translate-offer').hidden = outdated || Boolean(note) || working || !known || !pageLanguage || pageLanguage === language;
       // When the frame can't hold the whole notice, the short form says what to do. Letters overhang
       // their line by a pixel or so; a line cut off is 14px more.
-      if (outdated && $('widget-text').scrollHeight - $('widget-text').clientHeight > 7) $('widget-text').textContent = t((OUTDATED_LINES[outdatedKey] || OUTDATED_LINES['panel.outdated'])[1]);
+      if (outdated && !direct && $('widget-text').scrollHeight - $('widget-text').clientHeight > 7) $('widget-text').textContent = t((OUTDATED_LINES[outdatedKey] || OUTDATED_LINES['panel.outdated'])[1]);
       // Screen readers hear the same words, from a region outside the card, so a card the reader hid still speaks.
       // A page with nothing for SecondHand to do has no card, and says nothing.
       const spoken = card ? $('widget-text').textContent : '';
       if ($('widget-status').textContent !== spoken) $('widget-status').textContent = spoken;
-      if (outdated && outdatedKey !== 'panel.reloadPage' && !roomAsked) {
+      if (outdated && !direct && outdatedKey !== 'panel.reloadPage' && !roomAsked) {
         roomAsked = true;
         send({ type: 'ui:widgetSize', line: true }).catch(() => {});
       }
       // The widget is as wide and as tall as what it shows, up to 272px by 150px (see panel.css). An outdated
       // worker is not asked for anything more; its notice fills the frame the widget already has.
       const room = message || !$('translate-offer').hidden;
-      const size = outdated || $('widget').hidden ? frame.size : measure(message);
+      const size = (outdated && !direct) || $('widget').hidden ? frame.size : measure(message);
       if (!outdated && (room !== frame.line || JSON.stringify(size) !== JSON.stringify(frame.size) || pill !== frame.pill)) fitFrame(room, size, pill);
+      // The worker can't size an outdated card's frame, so the page's content script is asked directly, in the same terms.
+      if (direct && (room !== frame.line || JSON.stringify(size) !== JSON.stringify(frame.size) || pill !== frame.pill)) {
+        frame = { line: room, size, pill };
+        window.parent.postMessage({ type: 'secondhand:cardSize', line: room, ...size, ...(pill ? { pill } : {}) }, location.ancestorOrigins?.[0] || '*');
+      }
     }
     // The widget's own size, not its frame's, so it can ask for a wider frame than it has. While a
     // line shows, also its size for a narrow page (see content.js): as wide as its buttons alone, or

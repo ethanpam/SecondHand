@@ -56,6 +56,25 @@
     panelHost.style.setProperty('height', full ? `${size.height || (messageRow ? 86 : 46)}px` : '46px', 'important');
   }
 
+  // A card whose worker can't size its frame (an older build than the card, or none after SecondHand restarted)
+  // asks this script directly, in the same terms. Only the card's own frame is heard: a page's script can post a
+  // message too, but never as that frame.
+  const cardOrigin = chrome.runtime.getURL('').replace(/\/$/, '');
+  // The widget's own size for its frame, from the worker or from the card itself: whether it shows a line, its
+  // measured width and height (and those a narrow page keeps), and whether the reader hid it to its logo.
+  const sizeAsked = message => typeof message?.line === 'boolean' && SIZES.every(key => message[key] === undefined || (/height$/i.test(key) ? tall : fits)(message[key])) &&
+    (message.pill === undefined || message.pill === true);
+  function fitCard(message) {
+    messageRow = message.line;
+    card = Object.fromEntries(SIZES.filter(key => message[key] !== undefined).map(key => [key, message[key]]));
+    cardHidden = message.pill === true;
+    if (panelHost) sizePanel();
+  }
+  window.addEventListener('message', event => {
+    if (!panelHost || !panelFrame || event.source !== panelFrame.contentWindow || event.origin !== cardOrigin) return;
+    if (event.data?.type === 'secondhand:cardSize' && sizeAsked(event.data)) fitCard(event.data);
+  });
+
   function ensurePanel() {
     if (!adapter.isSupportedUrl(location.href)) {
       pending = null;
@@ -80,6 +99,8 @@
       panelFrame.setAttribute('sandbox', 'allow-scripts allow-same-origin');
       panelFrame.setAttribute('allow', 'language-detector'); // lets the widget check the page's language on this computer
       panelFrame.referrerPolicy = 'no-referrer';
+      // Tells the card it can ask this script to hide it, should its worker be unable to.
+      panelFrame.addEventListener('load', () => panelFrame.contentWindow?.postMessage({ type: 'secondhand:cardHello' }, cardOrigin));
       for (const [property, value] of Object.entries({ width: '100%', height: '100%', display: 'block', border: '0', margin: '0', padding: '0', 'border-radius': 'inherit', background: 'transparent' })) panelFrame.style.setProperty(property, value, 'important');
       shadow.append(panelFrame);
     }
@@ -234,12 +255,8 @@
         respond(withOwnPanelHidden(questions));
       } else if (message.type === 'secondhand:pageText') {
         respond(withOwnPanelHidden(pageText));
-      } else if (message.type === 'secondhand:widgetSize' && typeof message.line === 'boolean' && SIZES.every(key => message[key] === undefined || (/height$/i.test(key) ? tall : fits)(message[key])) &&
-        (message.pill === undefined || message.pill === true)) {
-        messageRow = message.line;
-        card = Object.fromEntries(SIZES.filter(key => message[key] !== undefined).map(key => [key, message[key]]));
-        cardHidden = message.pill === true;
-        if (panelHost) sizePanel();
+      } else if (message.type === 'secondhand:widgetSize' && sizeAsked(message)) {
+        fitCard(message);
         respond({ sized: Boolean(panelHost) });
       } else if (message.type === 'secondhand:generic:focus' && typeof message.id === 'string' && engine) {
         respond({ focused: Boolean(withOwnPanelHidden(() => engine.focusField(document, message.id))) });
