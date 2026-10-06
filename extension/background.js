@@ -681,9 +681,11 @@ async function noteUpdate(shipped) {
 // Approval prompts belong to a click or a fill. Nor anything the applicant is still working through (#142):
 // a reload would wipe a tab's need-you list, Save offers and held details, and they last until the tab moves on or closes.
 const showsNeedYou = result => ['done', 'waiting'].includes(result?.state) && Array.isArray(result.needYou) && result.needYou.length > 0;
+// Laya's best guesses wait for the applicant to check them too (#185).
+const showsLayaGuesses = result => Array.isArray(result?.layaGuesses) && result.layaGuesses.length > 0;
 function reloadWhenIdle() {
   if (selfUpdate?.state !== 'due' || clicksUnderway || autopilots.size || siteRuns.size || sitePlans.size || savables.size || heldDetails.size ||
-    [...results.values()].some(showsNeedYou)) return;
+    [...results.values()].some(result => showsNeedYou(result) || showsLayaGuesses(result))) return;
   selfUpdate = null;
   chrome.runtime.reload();
 }
@@ -779,6 +781,8 @@ async function enabledSiteFrames(tabId, origin) {
 }
 
 const siteResult = (state, message, extra = {}) => ({ state, filled: 0, guessed: 0, needYou: [], ...message, pageKey: 'general', ...extra });
+// A result's count of Laya's best guesses on screen, and each one's id and label for the side panel to list (#185). Nothing when there are none.
+const layaGuessResult = (count, list) => count || list.length ? { layaGuessed: count, layaGuesses: list } : {};
 const filledSummary = (filled, needYou) => needYou.length ? { key: 'result.filledNeedYou', params: { count: filled, needYou: needYou.length } } : { key: 'result.filled', params: { count: filled } };
 
 // Runs in the page, so Chrome serializes it and it must stand alone. Counts the questions
@@ -793,7 +797,8 @@ function tallyPage() {
     return true;
   };
   const counted = new Set();
-  const tally = { rule: 0, guess: 0, next: false };
+  // Laya's best guesses (#185) are counted apart from the other guesses.
+  const tally = { rule: 0, guess: 0, layaGuess: 0, next: false };
   for (const element of document.querySelectorAll('[data-secondhand-filled]')) {
     if (!shown(element)) continue;
     // A radio or checkbox group is one question, marked on every option, native or div-based (Google Forms).
@@ -802,7 +807,8 @@ function tallyPage() {
       ? `${element.type}|${element.form ? Array.from(document.forms).indexOf(element.form) : -1}|${element.name}` : group || element;
     if (counted.has(question)) continue;
     counted.add(question);
-    if (element.getAttribute('data-secondhand-filled') === 'guess') tally.guess++; else tally.rule++;
+    const kind = element.getAttribute('data-secondhand-filled');
+    if (kind === 'guess') tally.guess++; else if (kind === 'laya-guess') tally.layaGuess++; else tally.rule++;
   }
   tally.next = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], [role="button"]'))
     .some(control => shown(control) && /^next\b/i.test((control.textContent || control.value || '').trim()));
@@ -813,10 +819,11 @@ async function tallySite(tabId, frames) {
     const frameIds = frames.map(frame => frame.frameId);
     const injections = await chrome.scripting.executeScript({ target: { tabId, frameIds }, func: tallyPage });
     if (!Array.isArray(injections) || injections.length !== frameIds.length || new Set(injections.map(item => item.frameId)).size !== frameIds.length) throw fault(FRAME_ERROR);
-    const total = { rule: 0, guess: 0, next: false };
+    const total = { rule: 0, guess: 0, layaGuess: 0, next: false };
+    const count = value => Number.isInteger(value) && value >= 0;
     for (const { frameId, result: tally } of injections) {
-      if (!frameIds.includes(frameId) || !Number.isInteger(tally?.rule) || tally.rule < 0 || !Number.isInteger(tally.guess) || tally.guess < 0 || typeof tally.next !== 'boolean') throw fault(FRAME_ERROR);
-      total.rule += tally.rule; total.guess += tally.guess; total.next ||= tally.next;
+      if (!frameIds.includes(frameId) || !count(tally?.rule) || !count(tally.guess) || !count(tally.layaGuess) || typeof tally.next !== 'boolean') throw fault(FRAME_ERROR);
+      total.rule += tally.rule; total.guess += tally.guess; total.layaGuess += tally.layaGuess; total.next ||= tally.next;
     }
     return total;
   } catch { throw fault(FRAME_ERROR); }
@@ -826,19 +833,22 @@ const withLaya = (summary, laya) => laya ? { key: 'result.suggestedByLaya', para
 const withReason = (summary, reason) => reason ? { key: 'result.withReason', params: { summary, reason } } : summary;
 // A summary that says how many questions wait for Fill sensitive details (#176).
 const withHeld = (summary, held) => held ? { key: 'result.withHeld', params: { summary, count: held } } : summary;
+// A summary that says how many answers are Laya's best guesses, for the applicant to check (#185).
+const withLayaGuesses = (summary, layaGuessed) => layaGuessed ? { key: 'result.layaGuessed', params: { summary, count: layaGuessed } } : summary;
 // A click's reasons as one, each said once.
 const reasons = (...list) => list.filter((reason, index) => reason && list.findIndex(other => other?.key === reason.key) === index)
   .reduce((all, next) => all ? joined(all, next) : next, null);
 // `held`: how many of the need-you questions wait for Fill sensitive details. Their saved answers matched, so a page
 // with nothing else filled doesn't say that nothing matched.
-function siteSummary(filled, guessed, needYou, next, laya, reason = null, held = 0) {
+// `layaGuessed`: how many of the filled questions have Laya's best guess (#185).
+function siteSummary(filled, guessed, needYou, next, laya, reason = null, held = 0, layaGuessed = 0) {
   let summary;
   if (filled) {
     const key = guessed ? (needYou.length ? 'result.siteFilledGuessedNeedYou' : 'result.siteFilledGuessed') : needYou.length ? 'result.siteFilledNeedYou' : 'result.siteFilled';
     summary = { key, params: { count: filled, ...(guessed ? { guessed } : {}), ...(needYou.length ? { needYou: needYou.length } : {}) } };
   } else if (needYou.length) summary = { key: held ? 'result.siteNeedYou' : 'result.nothingMatchesNeedYou', params: { count: needYou.length } };
   else summary = { key: next ? 'result.nothingToFillNext' : 'result.nothingToFill', params: {} };
-  const shown = withReason(withHeld(withLaya(summary, laya), held), reason);
+  const shown = withReason(withHeld(withLayaGuesses(withLaya(summary, laya), layaGuessed), held), reason);
   return say(shown.key, shown.params);
 }
 
@@ -983,15 +993,22 @@ async function layaSuggestions(url, boxes, budgetMs) {
   if (!entries || entries.some(([id, key]) => !sent.has(id) || !AI_KEYS.includes(key))) throw fault('worker.layaUnusable');
   return entries;
 }
-// [id, optionText] pairs for choice questions (#42), with the access receipt they were made under.
+// [id, optionText] pairs for choice questions (#42), with the access receipt they were made under, and Laya's best
+// guesses (#185): [id, optionText] pairs for single-choice questions it has no sure answer for, never on Iowa's portal.
+const LAYA_GUESS_TYPES = Object.freeze(['radio', 'select']);
 async function layaAnswers(url, choices, budgetMs) {
   const payload = layaPayload('answerFields', url, 'questions', choices, LAYA.questions, budgetMs);
   const reply = await askLaya('answerFields', payload);
   if (reply === null) return null;
-  const sent = new Map(payload.questions.map(question => [question.id, question.options]));
+  const sent = new Map(payload.questions.map(question => [question.id, question]));
+  const asked = ([id, option]) => sent.has(id) && typeof option === 'string' && sent.get(id).options.includes(option);
   const entries = plainEntries(reply?.answers);
-  if (!entries || entries.some(([id, option]) => !sent.has(id) || typeof option !== 'string' || !sent.get(id).includes(option))) throw fault('worker.layaUnusable');
-  return { entries, revision: receiptRevision(reply), reason: desktopReason(reply) };
+  if (!entries || !entries.every(asked)) throw fault('worker.layaUnusable');
+  // A desktop app from before #185 sends no guesses.
+  const guesses = reply.guesses === undefined ? [] : plainEntries(reply.guesses);
+  if (!guesses || guesses.some(entry => !asked(entry) || !LAYA_GUESS_TYPES.includes(sent.get(entry[0]).type) || Object.hasOwn(reply.answers, entry[0])) ||
+    (guesses.length && SecondHandIowa.isSupportedUrl(url))) throw fault('worker.layaUnusable');
+  return { entries, guesses, revision: receiptRevision(reply), reason: desktopReason(reply) };
 }
 
 // The sites a click's answers go to, in page order, each with its frames (#137). A frame's site is its own
@@ -1053,12 +1070,13 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
     const siteOf = frameId => sites.find(site => site.frameIds.has(frameId));
     const place = id => prefix ? [Number(id.slice(1, id.indexOf(':'))), id.slice(id.indexOf(':') + 1)] : [0, id];
     const open = laya === false ? { boxes: [], choices: [] } : layaQuestions(initial, prefix);
-    const fromLaya = new Set();
+    // Laya's sure answers and matches, and apart from them its best guesses (#185).
+    const fromLaya = new Set(), fromLayaGuess = new Set();
     const addLaya = (id, answer) => {
       const [frameId, own] = place(id);
       const frame = initial.find(candidate => candidate.frameId === frameId);
       frame.planned = [...frame.planned, { id: own, ...answer, guessed: true }];
-      fromLaya.add(`${frameId}|${own}`);
+      (answer.layaGuess ? fromLayaGuess : fromLaya).add(`${frameId}|${own}`);
     };
     // Every receipt in a click must agree: an Always allow in a later prompt outdates the earlier ones,
     // and outdated answers are never filled.
@@ -1127,12 +1145,14 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
     // The answers came before getFields: an Always allow in its prompt outdates their receipt.
     // Without answers to fill, their receipt doesn't matter.
     for (const reply of answers) {
-      if (!reply.entries.length) continue;
+      if (!reply.entries.length && !reply.guesses.length) continue;
       receipt(reply.revision);
       for (const [id, option] of prepared.mapAnswers(reply.entries)) addLaya(id, { option });
+      for (const [id, option] of prepared.mapAnswers(reply.guesses)) addLaya(id, { option, layaGuess: true });
     }
     let filled = 0, placedByLaya = 0;
-    const needYou = [], savable = [], held = [];
+    // The questions Laya's best guesses went to, each with its own words, for the side panel to list (#185).
+    const needYou = [], savable = [], held = [], layaGuesses = [];
     for (const frame of initial) {
       const { frameId, documentId } = frame;
       // A frame gets only its own site's saved values.
@@ -1156,6 +1176,10 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
         if (!placed.length) break;
         filled += placed.length;
         placedByLaya += placed.filter(({ id }) => fromLaya.has(`${frameId}|${id}`)).length;
+        for (const { id } of placed.filter(item => fromLayaGuess.has(`${frameId}|${item.id}`))) {
+          const label = frame.plan.unmatched.find(field => field.id === id).label;
+          layaGuesses.push({ id: prefix ? `f${frameId}:${id}` : id, label: label.trim().slice(0, LABEL_LIMIT) });
+        }
         plan = await planGeneral(tabId, frameId, prefix, documentId);
         planned = ruleAssignments(plan);
         if (pass === MAX_GENERAL_PASSES) break;
@@ -1182,7 +1206,7 @@ async function fillPlan(tabId, url, frames, { prefix = false, guard = () => {}, 
       }
     }
     // Why the desktop left answers out, from every site's replies, each reason said once.
-    return { filled, needYou, savable, held, laya: placedByLaya, reason: reasons(prepared.reason, ...answers.map(reply => reply.reason), ...sites.map(site => site.reason)) };
+    return { filled, needYou, savable, held, laya: placedByLaya, layaGuesses, reason: reasons(prepared.reason, ...answers.map(reply => reply.reason), ...sites.map(site => site.reason)) };
   } finally {
     for (const site of sites) site.values = null;
     questionTranslation.forget();
@@ -1219,13 +1243,13 @@ async function fillSiteOnce(tabId, url, guesses) {
       const hosts = pending.map(frame => new URL(frame.origin).hostname).join(', ');
       return siteResult('waiting', say('worker.formInsideFrames', { hosts }));
     }
-    const { needYou, savable, held, laya: suggested, reason } = await fillPlan(tabId, url, frames, { prefix: true, laya });
+    const { needYou, savable, held, laya: suggested, layaGuesses, reason } = await fillPlan(tabId, url, frames, { prefix: true, laya });
     keepSavable(tabId, url, siteOrigin(url), savable);
     keepHeld(tabId, url, siteOrigin(url), held, reason);
     const tally = await tallySite(tabId, frames);
-    const filled = tally.rule + tally.guess;
-    return siteResult('done', siteSummary(filled, tally.guess, needYou, tally.next, suggested, reason, held.length),
-      { filled, guessed: tally.guess, needYou, ...(suggested ? { laya: suggested } : {}), ...(held.length ? { held: held.length } : {}) });
+    const filled = tally.rule + tally.guess + tally.layaGuess;
+    return siteResult('done', siteSummary(filled, tally.guess, needYou, tally.next, suggested, reason, held.length, tally.layaGuess),
+      { filled, guessed: tally.guess, needYou, ...(suggested ? { laya: suggested } : {}), ...(held.length ? { held: held.length } : {}), ...layaGuessResult(tally.layaGuess, layaGuesses) });
   } catch (error) {
     const { state, ...message } = failed(error);
     return siteResult(state, message);
@@ -1413,8 +1437,9 @@ function heldChanged(tabId, kept, placed, reason) {
   const filled = result.filled + placed.size;
   const needYou = result.needYou.filter(id => !placed.has(id));
   const held = kept.items.size;
-  remember(tabId, siteResult('done', siteSummary(filled, result.guessed, needYou, false, result.laya, reasons(kept.reason, reason), held),
-    { filled, guessed: result.guessed, needYou, ...(result.laya ? { laya: result.laya } : {}), ...(held ? { held } : {}) }));
+  const { layaGuessed = 0, layaGuesses = [] } = result;
+  remember(tabId, siteResult('done', siteSummary(filled, result.guessed, needYou, false, result.laya, reasons(kept.reason, reason), held, layaGuessed),
+    { filled, guessed: result.guessed, needYou, ...(result.laya ? { laya: result.laya } : {}), ...(held ? { held } : {}), ...layaGuessResult(layaGuessed, layaGuesses) }));
 }
 async function currentPageState(tabId, route) {
   const tab = await chrome.tabs.get(tabId);
