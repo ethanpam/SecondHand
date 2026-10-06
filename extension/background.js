@@ -249,7 +249,8 @@ async function advanceVerified(tabId, state, pilot, filledResult, authorize = fa
   const result = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:next', token: fresh.nextToken, authorized: true }, { frameId: 0 });
   currentPilot(tabId, pilot);
   if (!result?.advanced) return { ...filledResult, state: 'waiting', ...(result?.reason ? adapterSays(result.reason) : say('worker.reviewContinueIowa')), pageKey };
-  return { ...filledResult, state: 'continuing', ...say('worker.selectedSaveContinue'), pageKey };
+  // On the address page, what SecondHand chose is said as it happens.
+  return { ...filledResult, state: 'continuing', ...say(pageKey === 'iowa-select-address' ? 'worker.pickedAddress' : 'worker.selectedSaveContinue'), pageKey };
 }
 
 function step(tabId) {
@@ -1620,7 +1621,7 @@ function keepSummary(tabId, id, summary) {
 // The widget can't size its own frame, so its tab's content script fits the frame to the
 // widget's measured size, taller while it shows a line.
 const cardWidth = width => Number.isInteger(width) && width > 0 && width <= 1000; // CSS pixels; the page caps it
-const cardHeight = height => Number.isInteger(height) && height >= 46 && height <= 150; // the widget's row alone, up to five lines and the translation offer above it
+const cardHeight = height => Number.isInteger(height) && height >= 46 && height <= 166; // the widget's row alone, up to six lines and the translation offer above it
 const CARD_SIZES = ['width', 'height', 'narrowWidth', 'narrowHeight'];
 const cardSize = message => CARD_SIZES.every(key => message[key] === undefined || (/height$/i.test(key) ? cardHeight : cardWidth)(message[key]));
 async function widgetSize(tabId, line, message) {

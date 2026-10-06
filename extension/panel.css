@@ -25,10 +25,10 @@ body.launcher-surface{background:none}#launcher{width:100%;height:100%;display:f
 .widget-primary{flex:none;height:32px;padding:0 14px;border:0;border-radius:100px;background:var(--primary);color:#fff;font-weight:500;white-space:nowrap}.widget-primary:hover:enabled{background:var(--pressed)}
 /* The card's text is the side panel's size. */
 .widget-link{padding:0;border:0;background:none;font-weight:500;line-height:16px;text-decoration:underline;text-underline-offset:3px;white-space:nowrap}#need-you{font-weight:600}#translate-offer{align-self:flex-start}
-#widget-text{line-height:16px;min-width:0;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:5}
-/* A line to read widens the widget to its 272px. Five lines of it and the translation offer make the widget 150px tall, the most its
-   frame allows; without the offer there is room for a sixth line, which a narrow page's narrower widget may need. */
-#widget-text:not(.visually-hidden){width:max-content;max-width:min(254px,100%)}#widget:not(.outdated):has(#translate-offer[hidden]) #widget-text{-webkit-line-clamp:6}
+#widget-text{line-height:16px;min-width:0;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:6}
+/* A line to read widens the widget to its 272px. Six lines of it and the translation offer make the widget 166px tall, the most its
+   frame allows; without the offer there is room for a seventh line, which a narrow page's narrower widget may need. */
+#widget-text:not(.visually-hidden){width:max-content;max-width:min(254px,100%)}#widget:not(.outdated):has(#translate-offer[hidden]) #widget-text{-webkit-line-clamp:7}
 /* An outdated worker may not give the widget another frame (one is asked for), so the notice fits the frame the
    widget already has: a row of the logo, up to three lines of 12px, and a button when one helps. */
 #widget.outdated{width:100%;height:100%;flex-direction:row;align-items:center;gap:8px;padding:0 8px}.widget.outdated .widget-row{display:contents}.widget.outdated .widget-logo{order:-1;margin:0}

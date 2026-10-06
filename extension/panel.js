@@ -131,6 +131,8 @@
     $('launcher').hidden = false;
     const service = translation.create();
     let known = false;
+    // Which Iowa page the tab shows, as the worker read it.
+    let pageKey = '';
     let autopilot = false;
     let site = null;
     let result = null;
@@ -171,11 +173,14 @@
     // An outdated worker keeps its notice on screen and is not polled again.
     const trouble = error => { if (error.outdated) { outdated = true; outdatedKey = error.messageKey; } return problem(error); };
 
+    // Before Autofill on Iowa: all of what it does, until it has been started once from this Chrome. After that, only
+    // where it matters: on the applicant page, that the address page after it may have SecondHand pick an address.
+    const readyLine = () => !startedBefore() ? t('widget.iowaReady') : pageKey === 'iowa-personal-information' ? t('widget.addressNext') : '';
     function statusText() {
       if (outdated) return t((OUTDATED_LINES[outdatedKey] || OUTDATED_LINES['panel.outdated'])[0]);
       if (working) return t('widget.working');
       if (note) return words(note, 120);
-      if (!result) return !site ? t(startedBefore() ? 'widget.iowaReadyAgain' : 'widget.iowaReady') : languageTrouble ? t('widget.languageCheckFailed') : t('widget.siteReady', { host: hostOf(site.origin) });
+      if (!result) return !site ? readyLine() : languageTrouble ? t('widget.languageCheckFailed') : t('widget.siteReady', { host: hostOf(site.origin) });
       // What the worker reported, in the side panel's words, without the count of what is left: the link beside
       // it carries that. While Autofill is on, what Stop would do goes after it. Why Chrome's AI guessed
       // nothing stays in the tooltip.
@@ -223,7 +228,7 @@
       // buttons don't: on Iowa, what Autofill will do before it is clicked; then what it did and what it
       // waits for; a problem; an outdated extension. Unlock and Open SecondHand say their own step, and
       // another site's name before Autofill is no news.
-      const message = outdated || Boolean(note) || working || (result ? !locked && !closed : known && !site);
+      const message = outdated || Boolean(note) || working || (result ? !locked && !closed : known && !site && Boolean(readyLine()));
       $('widget-text').classList.toggle('visually-hidden', !message);
       // The translated view is offered whenever the page is in another language, before and after Autofill.
       $('translate-offer').hidden = outdated || Boolean(note) || working || !known || !pageLanguage || pageLanguage === language;
@@ -238,7 +243,7 @@
         roomAsked = true;
         send({ type: 'ui:widgetSize', line: true }).catch(() => {});
       }
-      // The widget is as wide and as tall as what it shows, up to 272px by 150px (see panel.css). An outdated
+      // The widget is as wide and as tall as what it shows, up to 272px by 166px (see panel.css). An outdated
       // worker is not asked for anything more; its notice fills the frame the widget already has.
       const room = message || !$('translate-offer').hidden;
       const size = (outdated && !direct) || $('widget').hidden ? frame.size : measure(message);
@@ -288,6 +293,7 @@
           const page = state?.page || {};
           site = siteOf(state);
           known = page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo) || Boolean(site?.enabled);
+          pageKey = typeof page.pageKey === 'string' ? page.pageKey : '';
           autopilot = Boolean(state?.autopilot);
           // While autofill runs, the worker moves ahead between polls. Otherwise keep
           // this widget's own result and adopt the worker's only after a reload, or while

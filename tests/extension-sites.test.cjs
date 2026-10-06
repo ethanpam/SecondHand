@@ -1818,14 +1818,14 @@ test('the site widget frame is as wide as the widget measured itself, never past
   assert.match(page.host().style.width, /^min\(272px/);
 });
 
-test('the site widget frame is as tall as the widget measured itself, from its row alone to five lines above it', t => {
+test('the site widget frame is as tall as the widget measured itself, from its row alone to six lines above it', t => {
   const page = siteContent(t);
   assert.equal(page.host().style.height, '46px');
-  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 150 })), { sized: true });
-  assert.equal(page.host().style.height, '150px');
+  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 166 })), { sized: true });
+  assert.equal(page.host().style.height, '166px');
   assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: false, width: 152, height: 46 })), { sized: true });
   assert.equal(page.host().style.height, '46px');
-  for (const height of [0, 45, 151, 80.5, '80', null]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height }), undefined, `height ${height}`);
+  for (const height of [0, 45, 167, 80.5, '80', null]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height }), undefined, `height ${height}`);
   assert.equal(page.host().style.height, '46px');
   assert.equal(page.request({ type: 'secondhand:widgetSize', line: true, height: 95 }, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
   assert.equal(page.host().style.height, '46px');
@@ -1846,7 +1846,7 @@ test('an outdated site card asks the page’s content script directly for its fr
   post(hidden, { source: page.window });
   post(hidden, { origin: new URL(SITE_URL).origin });
   post({ ...hidden, pill: 'yes' });
-  post({ type: 'secondhand:cardSize', line: true, height: 151 });
+  post({ type: 'secondhand:cardSize', line: true, height: 167 });
   assert.equal(host.getAttribute('data-secondhand-size'), 'full');
   post(hidden);
   assert.deepEqual([host.style.width, host.style.height, host.style.borderRadius, host.getAttribute('data-secondhand-size')], ['46px', '46px', '50%', 'pill']);
@@ -1880,7 +1880,7 @@ test('the site widget frame keeps the widget as narrow as its buttons on a narro
   page.request({ type: 'secondhand:widgetSize', line: false, width: 133 });
   assert.equal(page.host().style.height, '46px');
   for (const key of ['height', 'narrowWidth', 'narrowHeight']) assert.equal(page.request({ ...size, [key]: 5000 }), undefined, key);
-  for (const value of [0, 45, 151, 1.5, '97', null]) assert.equal(page.request({ ...size, narrowHeight: value }), undefined, `narrowHeight ${value}`);
+  for (const value of [0, 45, 167, 1.5, '97', null]) assert.equal(page.request({ ...size, narrowHeight: value }), undefined, `narrowHeight ${value}`);
 });
 
 test('a site frame answers the page-text request with its declared language and its words, never an answer, for our extension only', t => {

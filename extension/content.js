@@ -19,7 +19,7 @@
   const strings = value => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
   // The widget's frame is as wide as the widget measured itself, never past 272px or the screen.
   const fits = width => Number.isInteger(width) && width > 0 && width <= 1000;
-  const tall = height => Number.isInteger(height) && height >= 46 && height <= 150;
+  const tall = height => Number.isInteger(height) && height >= 46 && height <= 166;
   const frameWidth = width => `min(${width || 272}px, 272px, calc(100vw - 24px))`;
   const SIZES = ['width', 'height', 'narrowWidth', 'narrowHeight'];
 
@@ -45,7 +45,7 @@
     panelHost.setAttribute('data-secondhand-size', full ? 'full' : 'pill');
     fitHost();
   }
-  // The frame is as wide and as tall as the widget measured itself: 46px for its row alone, up to 150px with
+  // The frame is as wide and as tall as the widget measured itself: 46px for its row alone, up to 166px with
   // all it can hold. A page under 640px wide keeps the widget as narrow as its buttons, or the least wider
   // that shows its whole line, and gives the line more rows instead, so the widget covers little more of the
   // page than it does without a line.

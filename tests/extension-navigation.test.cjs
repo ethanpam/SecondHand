@@ -111,7 +111,11 @@ test('verified address uses no-data authorization and polling cannot replace its
   assert.equal(w.model.nextToken, token);
   assert.equal(w.calls.content.at(-1).navigationPreview, false);
   held.resolve();
-  assert.equal((await run).data.state, 'continuing');
+  const result = (await run).data;
+  assert.equal(result.state, 'continuing');
+  // What SecondHand chose is said as it happens, with what to check.
+  assert.equal(result.messageKey, 'worker.pickedAddress');
+  assert.equal(result.message, 'SecondHand picked Iowa’s first suggested home address and clicked Save and Continue. Make sure it is your address before you submit.');
   assert.equal(w.model.nextCount, 1);
   assert.deepEqual(requests(w).map(request => request.fields), [[]]);
   assert.equal(requests(w)[0].url, `${adapter.PORTAL}/applyForBenefits/addressValidation`);

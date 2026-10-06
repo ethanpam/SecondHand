@@ -513,7 +513,7 @@ async function main() {
     console.log('Autopilot: the household question is answered from saved programs and the CAPTCHA is left to the applicant.');
 
     // On an Iowa page SecondHand doesn't fill, the widget says what Autofill will do, then the whole next step,
-    // every word of it on screen, in each language SecondHand speaks, in a frame never past 272 by 150 (#110).
+    // every word of it on screen, in each language SecondHand speaks, in a frame never past 272 by 166 (#110).
     // The language is chosen as the side panel saves it, in the extension's own storage.
     const host = page.locator('[data-secondhand-assistant]');
     const frameBox = () => host.boundingBox();
@@ -527,7 +527,7 @@ async function main() {
     const lineProblems = async (frame, expected, code) => {
       const line = await widgetLine(frame), box = await frameBox();
       return [line.text !== expected && `text "${line.text}"`, !line.shown && 'line hidden', line.clipped && 'line clipped',
-        !line.inFrame && 'line past the frame', box.width > 272 && `frame ${box.width}px wide`, box.height > 150 && `frame ${box.height}px tall`,
+        !line.inFrame && 'line past the frame', box.width > 272 && `frame ${box.width}px wide`, box.height > 166 && `frame ${box.height}px tall`,
         line.dir !== strings.direction(code) && `dir ${line.dir}`].filter(Boolean);
     };
     const stopNote = code => strings.text(code, 'widget.stopNote');
@@ -538,11 +538,17 @@ async function main() {
       { name: 'Enter Personal Information, Save and Continue disabled', url: `${applicant}?next=stay`, pageKey: 'iowa-personal-information', disabled: true,
         line: (code, filled) => `${strings.text(code, 'result.thenTodo', { summary: { key: 'result.filled', params: { count: filled } }, todo: { key: 'iowa.reviewSaveContinue' } })} ${stopNote(code)}` }
     ];
-    // Before Autofill the line says what Autofill will do. Autofill has been started from this profile above, so
-    // it is the short line. On these English pages the widget may offer the page in the applicant's language too.
-    const beforeProblems = async (frame, code) => {
+    // Before Autofill: Autofill has been started from this profile above, so the card speaks only where it matters.
+    // On the applicant page it says what the address page after it may bring; elsewhere it is its buttons. On these
+    // English pages the widget may offer the page in the applicant's language too.
+    const beforeProblems = async (frame, code, pageKey) => {
       const offer = await frame.evaluate(() => !document.getElementById('translate-offer').hidden);
-      return [...await lineProblems(frame, strings.text(code, 'widget.iowaReadyAgain'), code), code === 'en' && offer && 'offer on an English page'].filter(Boolean);
+      const english = code === 'en' && offer && 'offer on an English page';
+      if (pageKey !== 'iowa-personal-information') {
+        const shown = await frame.evaluate(() => !document.getElementById('widget-text').classList.contains('visually-hidden'));
+        return [shown && 'a line where there is nothing to say', english].filter(Boolean);
+      }
+      return [...await lineProblems(frame, strings.text(code, 'widget.addressNext'), code), english].filter(Boolean);
     };
     // On a narrow page the widget is as wide as its buttons alone, or the least wider that shows its whole line:
     // a frame 24px narrower would be narrower than the buttons, or would cut the line.
@@ -577,10 +583,11 @@ async function main() {
         widget = await launcherFrame();
         await expect(widget.locator('#autofill')).toBeVisible({ timeout: 20000 });
         if (step.disabled) await page.locator('.saveAndContinueButton').evaluate(button => button.setAttribute('disabled', ''));
-        await expect.poll(() => beforeProblems(widget, code), { timeout: 10000, message: `${code} ${step.name} before Autofill` }).toEqual([]);
+        await expect.poll(() => beforeProblems(widget, code, step.pageKey), { timeout: 10000, message: `${code} ${step.name} before Autofill` }).toEqual([]);
         const before = await frameBox();
-        assert.ok(before.height > 46, `${code} ${step.name} before Autofill: the frame holds the line (${before.width} by ${before.height})`);
         const offered = await widget.locator('#translate-offer').isVisible();
+        if (step.pageKey === 'iowa-personal-information' || offered) assert.ok(before.height > 46, `${code} ${step.name} before Autofill: the frame holds the line (${before.width} by ${before.height})`);
+        else assert.equal(before.height, 46, `${code} ${step.name} before Autofill: the card is its buttons`);
         await widget.locator('#autofill').click();
         await expect.poll(async () => (await widget.evaluate(() => chrome.runtime.sendMessage({ type: 'ui:pageState' })))?.data?.result?.state, { timeout: 20000 }).toMatch(/^(waiting|done)$/);
         const { page: probed, result } = (await widget.evaluate(() => chrome.runtime.sendMessage({ type: 'ui:pageState' }))).data;
@@ -599,7 +606,7 @@ async function main() {
       }
     }
     for (const line of measured) console.log(`Widget frame, ${line}.`);
-    console.log(`Widget: on Iowa pages SecondHand doesn’t fill, what Autofill will do and then the whole next step show in ${strings.LANGUAGES.join(', ')}, in a frame no larger than 272 by 150, and Arabic reads right to left.`);
+    console.log(`Widget: on Iowa pages SecondHand doesn’t fill, what Autofill will do and then the whole next step show in ${strings.LANGUAGES.join(', ')}, in a frame no larger than 272 by 166, and Arabic reads right to left.`);
     await (await launcherFrame()).evaluate(() => globalThis.SecondHandStrings.setLanguage('en'));
 
     // The keyboard can hide the widget, down to the round logo in the page's corner, and bring it back from there.
@@ -654,7 +661,7 @@ async function main() {
       await (await launcherFrame()).evaluate(code => globalThis.SecondHandStrings.setLanguage(code), code);
       await resetTo(selfDetailsUrl);
       widget = await launcherFrame();
-      await expect.poll(() => beforeProblems(widget, code), { timeout: 10000, message: `${code} at 260px before Autofill` }).toEqual([]);
+      await expect.poll(() => beforeProblems(widget, code, 'iowa-self-details-unverified'), { timeout: 10000, message: `${code} at 260px before Autofill` }).toEqual([]);
       const before = await frameBox();
       await expect.poll(() => narrowest(widget), { timeout: 10000, message: `${code} at 260px before Autofill: the widget is as narrow as its line lets it be` }).toBe('');
       await widget.locator('#autofill').click();
@@ -679,7 +686,7 @@ async function main() {
         widget = await launcherFrame();
         await expect(widget.locator('#autofill')).toBeVisible();
         await page.locator('.saveAndContinueButton').evaluate(button => button.setAttribute('disabled', ''));
-        await expect.poll(() => beforeProblems(widget, code), { timeout: 10000, message: `${code} at ${width}px before Autofill` }).toEqual([]);
+        await expect.poll(() => beforeProblems(widget, code, 'iowa-personal-information'), { timeout: 10000, message: `${code} at ${width}px before Autofill` }).toEqual([]);
         const before = await frameBox();
         await widget.locator('#autofill').click();
         await settledLine(code, filled => wholeSteps[2].line(code, filled));

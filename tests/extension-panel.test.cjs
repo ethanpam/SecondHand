@@ -1449,7 +1449,7 @@ for (const loading of [false, true]) {
 test('Iowa widget and sidebar say what Autofill will do before it is clicked, in full the first time; other sites do not', async t => {
   const storage = new Map();
   const widget = await panel(t, { launcher: true, storage });
-  const FIRST = 'The SecondHand app asks you first. Then it fills each page and goes to the next by itself. If Iowa lists addresses, it picks the first: check it. It never signs or submits.';
+  const FIRST = 'The SecondHand app asks you first. Then SecondHand fills each page and moves on. If Iowa suggests addresses, SecondHand picks the first: make sure it is yours. It never signs or sends your application.';
   assert.equal(widget.get('widget-text').textContent, FIRST);
   assert.equal(widget.get('widget-text').classList.contains('visually-hidden'), false, 'the widget shows it, not only its tooltip');
   assert.equal(widget.get('autofill').title, EN['widget.autofillIowaTitle']);
@@ -1463,12 +1463,18 @@ test('Iowa widget and sidebar say what Autofill will do before it is clicked, in
   await sidebar.userClick('panel-autofill');
   assert.equal(sidebar.get('iowa-policy').hidden, true);
   assert.match(sidebar.get('status').textContent, /^Filled 3/);
-  // Started once from this Chrome, the next page and the next tab get the short version, on both surfaces.
+  // Started once from this Chrome, the card says only what matters where it matters: on the applicant page, that
+  // Iowa's address page comes next.
   assert.equal(storage.get('secondhand.autofillStarted'), '1');
   widget.window.dispatchEvent(Object.assign(new widget.window.Event('storage'), { key: 'secondhand.autofillStarted' }));
   await settle();
-  // The short version still says to check the address it picks.
-  assert.equal(widget.get('widget-text').textContent, 'SecondHand fills each page and goes to the next by itself. If Iowa lists addresses, it picks the first: check it. It never signs or submits.');
+  assert.equal(widget.get('widget-text').textContent, 'On the next page, if Iowa suggests addresses, SecondHand picks the first: make sure it is yours.');
+  assert.equal(widget.get('widget-status').textContent, widget.get('widget-text').textContent);
+  // Elsewhere on Iowa's form the card is only its buttons, and says nothing.
+  const elsewhere = await panel(t, { launcher: true, storage, pageState: state => ({ ...structuredClone(state), page: { ...structuredClone(state.page), pageKey: 'iowa-tell-us-more' } }) });
+  assert.equal(elsewhere.get('widget-text').classList.contains('visually-hidden'), true);
+  assert.equal(elsewhere.get('widget-status').textContent, '');
+  assert.equal(elsewhere.get('autofill').hidden, false);
   const later = await panel(t, { storage });
   assert.equal(later.get('iowa-policy').textContent, EN['panel.iowaPolicy'], 'the side panel says all of it every time');
   const laterWidget = await panel(t, { launcher: true, storage });
@@ -2114,7 +2120,7 @@ test('the Iowa widget frame is as wide as the widget measured itself, never past
   page.setKind('fillable');
   page.window.dispatchEvent(new page.window.Event('popstate'));
   assert.equal(host.style.height, '95px', 'and the widget gets its height back');
-  for (const height of [0, 45, 151, 80.5, '80', null]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height }), undefined, `height ${height}`);
+  for (const height of [0, 45, 167, 80.5, '80', null]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height }), undefined, `height ${height}`);
   assert.equal(host.style.height, '95px');
   page.request({ type: 'secondhand:widgetSize', line: true });
   assert.equal(host.style.height, '86px', 'a widget that could not measure itself gets a row for its line');
@@ -2138,7 +2144,7 @@ test('an outdated card asks the Iowa page’s content script directly for its fr
   post(hidden, { source: page.window });
   post(hidden, { origin: 'https://hhsservices.iowa.gov' });
   for (const pill of ['true', 1, null, false]) post({ ...hidden, pill });
-  for (const height of [45, 151, '95']) post({ type: 'secondhand:cardSize', line: true, width: 254, height });
+  for (const height of [45, 167, '95']) post({ type: 'secondhand:cardSize', line: true, width: 254, height });
   post({ ...hidden, type: 'secondhand:widgetSize' });
   assert.deepEqual([host.style.height, host.getAttribute('data-secondhand-size')], ['95px', 'full']);
   post(hidden);
@@ -2164,7 +2170,7 @@ test('the Iowa widget the reader hid is the round logo alone, until the widget a
   assert.equal(host.getAttribute('data-secondhand-size'), 'full');
 });
 
-test('the Iowa widget frame is as tall as its line needs, up to 150px, and narrow on a narrow page', t => {
+test('the Iowa widget frame is as tall as its line needs, up to 166px, and narrow on a narrow page', t => {
   const page = content(t);
   const host = page.host();
   const size = { type: 'secondhand:widgetSize', line: true, width: 272, height: 72, narrowWidth: 133, narrowHeight: 97 };
@@ -2173,8 +2179,8 @@ test('the Iowa widget frame is as tall as its line needs, up to 150px, and narro
   assert.equal(host.style.height, '72px');
   page.request({ ...size, height: 108 });
   assert.equal(host.style.height, '108px');
-  page.request({ ...size, height: 150 });
-  assert.equal(host.style.height, '150px', 'five lines and the translation offer');
+  page.request({ ...size, height: 166 });
+  assert.equal(host.style.height, '166px', 'six lines and the translation offer');
   // Under 640px wide, the frame keeps the widget's buttons' width and the line's rows, as the page resizes.
   page.request(size);
   Object.defineProperty(page.window, 'innerWidth', { value: 639, configurable: true });
@@ -2196,7 +2202,7 @@ test('the Iowa widget frame is as tall as its line needs, up to 150px, and narro
   for (const key of ['height', 'narrowWidth', 'narrowHeight']) {
     for (const value of [0, 1.5, '97', 5000, null]) assert.equal(page.request({ ...size, [key]: value }), undefined, `${key} ${value}`);
   }
-  for (const value of [45, 151]) assert.equal(page.request({ ...size, narrowHeight: value }), undefined, `narrowHeight ${value}`);
+  for (const value of [45, 167]) assert.equal(page.request({ ...size, narrowHeight: value }), undefined, `narrowHeight ${value}`);
   page.setKind('manual');
   page.window.dispatchEvent(new page.window.Event('popstate'));
   assert.equal(host.style.height, '46px', 'a pill');
