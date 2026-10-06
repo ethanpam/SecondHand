@@ -275,6 +275,21 @@ async function inspectWhatItDoes(page) {
   await inspectLayout(page);
   await expect(page.locator('main')).not.toContainText(/Details link|\bDetails\b to open/);
   await expect(page.locator('img.guide-card')).not.toHaveAttribute('alt', /Details/);
+  // The card picture is a 2x capture of the real card (scripts/capture-guide-card.cjs), shown at the card's real size.
+  // It loads lazily, so bring it into view and wait until it has loaded or failed.
+  const card = page.locator('img.guide-card');
+  await card.scrollIntoViewIfNeeded();
+  await expect.poll(() => card.evaluate(image => image.complete), { message: 'The card picture must load', timeout: 15_000 }).toBe(true);
+  const picture = () => card.evaluate(image => ({ loaded: image.complete && image.naturalWidth > 0, natural: [image.naturalWidth, image.naturalHeight],
+    attributes: [Number(image.getAttribute('width')), Number(image.getAttribute('height'))], width: image.getBoundingClientRect().width, viewport: document.documentElement.clientWidth }));
+  const wide = await picture();
+  assert.equal(wide.loaded, true, 'The card picture must load');
+  assert.deepEqual(wide.natural, wide.attributes, 'The card picture\'s width and height must match its pixel size');
+  assert.equal(wide.width, wide.natural[0] / 2, 'At 1440px the card picture must show at half its pixel width, the card\'s real size');
+  await page.setViewportSize({ width: 390, height: 844 });
+  const narrow = await picture();
+  assert.ok(narrow.width <= narrow.viewport, 'At 390px the card picture must fit the screen');
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await expect(page.locator('section[aria-labelledby="after-update"]')).toContainText('If it comes with a newer extension');
   await expect(page.locator('section[aria-labelledby="after-update"]')).toContainText('reloads itself');
   await expect(page.locator('section[aria-labelledby="after-update"]')).toContainText('0.4.0 or earlier');

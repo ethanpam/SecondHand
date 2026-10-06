@@ -106,8 +106,8 @@ export default function ChromeExtensionGuide() {
             className="guide-media guide-card"
             src="/guide/iowa-card.png"
             alt="The SecondHand card on Iowa’s page, with the SecondHand logo and an Autofill button."
-            width={624}
-            height={228}
+            width={374}
+            height={208}
             unoptimized
           />
           <p>
