@@ -1239,6 +1239,7 @@ async function saveAnswer(tabId, id) {
   const read = await savableMessage(tabId, kept, frame, { type: 'secondhand:generic:read', token: item.token, id: item.planId, key: item.key });
   if (read?.empty === true) throw fault('worker.answerFirst');
   if (read?.unreadable === true) throw fault('worker.answerUnreadable');
+  if (read?.repeated === true) throw fault('worker.answerRepeated');
   if (typeof read?.value !== 'string' || !read.value.trim() || read.value.length > 200) throw fault('worker.answerGone');
   let reply;
   try { reply = await nativeRequest('saveFields', { url: safeUrl(frame.url), fields: { [item.key]: read.value } }); }

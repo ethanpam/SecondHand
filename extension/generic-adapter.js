@@ -490,6 +490,27 @@
   // saved field the rules matched to that box, never a password, code, signature or SSN box. Null when
   // the box may not be read; { empty } when it holds no answer; { unreadable } when its answer doesn't fit the field.
   const DATE_TYPED = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/;
+  // The order a typed date is in (#142): as its box asks for it ("MM/DD/YYYY", "dd/mm/aaaa", "jj/mm/aaaa") in its labels,
+  // placeholder, description or title, or as its numbers allow only one way. Null when it can't be told: never guessed.
+  const MONTH_FIRST = /\bmm? dd? (yyyy|yy|aaaa|aa)\b/;
+  const DAY_FIRST = /\b(dd?|jj?) mm? (yyyy|yy|aaaa|aa)\b/;
+  function typedDate(text, entry) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+    const typed = DATE_TYPED.exec(text);
+    if (!typed) return null;
+    const element = entry.elements[0];
+    const words = normal([...entry.labels, idsText(element.ownerDocument, element.getAttribute('aria-describedby')), element.getAttribute('title') || ''].join(' '));
+    const [first, second] = [Number(typed[1]), Number(typed[2])];
+    const monthFirst = MONTH_FIRST.test(words), dayFirst = DAY_FIRST.test(words);
+    let leads = null;
+    if (monthFirst !== dayFirst) leads = monthFirst ? 'month' : 'day';
+    else if (first === second || (first <= 12 && second > 12)) leads = 'month';
+    else if (first > 12 && second <= 12) leads = 'day';
+    if (!leads) return null;
+    const [month, day] = leads === 'month' ? [first, second] : [second, first];
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    return `${typed[3]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
   function answerIn(entry, key) {
     const first = entry.elements[0];
     const kind = answerKind(key);
@@ -508,11 +529,7 @@
       const amount = text.replace(/^\$\s*/, '').replace(/,(?=\d{3}(\D|$))/g, '');
       return /^\d{1,8}(\.\d{1,2})?$/.test(amount) ? amount : null;
     }
-    if (kind === 'date') {
-      if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
-      const typed = DATE_TYPED.exec(text);
-      return typed ? `${typed[3]}-${typed[1].padStart(2, '0')}-${typed[2].padStart(2, '0')}` : null;
-    }
+    if (kind === 'date') return typedDate(text, entry);
     if (kind === 'state') {
       if (entry.kind === 'select' && Object.hasOwn(STATES, String(first.value).toUpperCase())) return String(first.value).toUpperCase();
       const code = Object.keys(STATES).find(state => state === text.toUpperCase() || STATES[state] === normal(text));
@@ -526,6 +543,9 @@
     if (!entry || ARIA_TYPES[entry.kind] || !entry.elements.every(element => element.isConnected && eligible(element))) return null;
     const label = entry.labels.join(' ');
     if (match(entry).key !== key || applicantOnly(entry) || CODE.test(normal(label)) || otherPersonQuestion(label)) return null;
+    // The page asks for this field in more than one box, as a household member's section with no heading of its own
+    // does: whose answer each box holds can't be told, so none is read as the applicant's (#142).
+    if (questionsOn(doc).filter(other => match(other).key === key).length > 1) return { repeated: true };
     if (!answered(entry)) return { empty: true };
     const value = answerIn(entry, key);
     return value === null ? { unreadable: true } : { value };
