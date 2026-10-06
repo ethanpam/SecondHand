@@ -1,5 +1,7 @@
 # SecondHand download website
 
+For an end-to-end user and engineering walkthrough, see the [detailed website guide](../docs/applications/website.md).
+
 Public download site for the local-only SecondHand desktop application. This site stores installers and a checksum list in R2. It has no applicant forms, account system, analytics, or applicant-data storage. Hosting infrastructure can process ordinary connection logs.
 
 ## Develop

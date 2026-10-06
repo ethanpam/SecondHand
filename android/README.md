@@ -1,5 +1,7 @@
 # Second Hand for Android
 
+For an end-to-end user and engineering walkthrough, see the [detailed Android app guide](../docs/applications/android-app.md).
+
 An offline Iowa SNAP companion built with Kotlin and Jetpack Compose. It follows the iPhone app's ivory and forest-green design, four-tab layout, notice-based renewal tracker, and encrypted personal document vault.
 
 The in-app browser provides the same guided application workflow as the iOS assistant: share saved answers for ten minutes, fill verified applicant fields, explicitly map other eligible fields, review each page, sign on Iowa's website, and separately approve submission. A confirmation is recorded only after the user checks Iowa's result and supplies its number.
