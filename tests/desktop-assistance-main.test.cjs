@@ -259,7 +259,7 @@ test('untrusted autofill asks once per click with Allow once, Always allow, and 
   assert.equal((await app.request({ type: 'getFields', fields: ['firstName'] })).values.firstName, 'Synthetic');
   assert.deepEqual(plain(app.prompts[0].buttons), ['Cancel', 'Allow once', 'Always allow on this computer']);
   // Always allow covers sensitive details too (#175), and the prompt that turns it on says so.
-  assert.match(app.prompts[0].detail, /Choose “Always allow” to let the SecondHand extension fill without asking whenever this app is unlocked, on every site SecondHand is on\. That includes your Social Security number, birth date, income, and citizenship and disability answers\. You can turn it off on the Chrome extension page\./);
+  assert.match(app.prompts[0].detail, /Choose “Always allow” to let the SecondHand extension fill without asking whenever this app is unlocked, on every site SecondHand is on\. That includes your Social Security number, birth date, income, benefits, and citizenship and disability answers\. You can turn it off on the Chrome extension page\./);
   assert.match(app.prompts[0].detail, /initial applicant page/);
   assert.match(app.prompts[0].detail, /first possible home-address suggestion and choose Save and Continue/);
   assert.match(app.prompts[0].detail, /home-address suggestions only/);
@@ -601,7 +601,7 @@ test('a saved No to having a Social Security number answers Iowa without a numbe
 });
 
 // What "Trust this site?" and "Trust all websites?" say about Always allow (#175).
-const ALWAYS_ALLOW_INCLUDES = 'It asks before filling unless you chose Always allow. Always allow on this computer includes your Social Security number, date of birth, income, money on hand, medical expenses, and your answers about citizenship, disability, blindness, health, Medicare, and having a Social Security number';
+const ALWAYS_ALLOW_INCLUDES = 'It asks before filling unless you chose Always allow. Always allow on this computer includes your Social Security number, date of birth, income and where it comes from, the benefits your household gets, money on hand, medical expenses, and your answers about citizenship, disability, blindness, health, Medicare, and having a Social Security number';
 const escaped = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 test('your citizenship, disability, blindness, health, Medicare and Social Security answers are held back on other sites without Always allow, and fill from the sensitive prompt', async () => {

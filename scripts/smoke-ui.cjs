@@ -261,7 +261,7 @@ async function main() {
     await expect(page.locator('#all-sites-status')).toHaveText('All websites: off. To turn it on, open SecondHand’s side panel in Chrome and choose Use SecondHand on all websites.');
     await expect(page.locator('#all-sites-off')).toBeHidden();
     // Let Chrome autofill without asking says it covers sensitive details on every site, and no site has Always allow on this site yet (#175).
-    await expect(page.locator('#autofill-trust-hint')).toContainText('on every site SecondHand is on. That includes your Social Security number, birth date, income, and citizenship and disability answers.');
+    await expect(page.locator('#autofill-trust-hint')).toContainText('on every site SecondHand is on. That includes your Social Security number, birth date, income, benefits, and citizenship and disability answers.');
     await expect(page.locator('#always-allowed-sites-empty')).toBeVisible();
     await expect(page.locator('#always-allowed-sites li')).toHaveCount(0);
     // Turning it off is saved, and stays off after a restart (checked below).

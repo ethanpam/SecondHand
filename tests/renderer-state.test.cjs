@@ -755,7 +755,7 @@ test('the trust setting says plainly that it fills sensitive details without ask
   const hint = view.get('autofill-trust-hint');
   assert.equal(view.get('autofill-trust').getAttribute('aria-describedby'), 'autofill-trust-hint', 'a screen reader reads it with the checkbox');
   assert.equal(text(hint), 'When SecondHand is unlocked, Chrome can fill your saved answers without another pop-up, on every site SecondHand is on. ' +
-    'That includes your Social Security number, birth date, income, and citizenship and disability answers. ' +
+    'That includes your Social Security number, birth date, income, benefits, and citizenship and disability answers. ' +
     'It also continues through supported Iowa applicant, home-address, complete Tell Us More, screening, and financial record pages. ' +
     'It shares one person’s saved record at a time; you choose if several match. ' +
     'On other sites, optional Fill and continue uses saved answers only and may click an ordinary Next or Continue after supported questions are complete. ' +
@@ -777,7 +777,7 @@ test('Privacy & backups names everything autofill fills or clicks today and keep
   const card = text(view.window.document.querySelector('#view-privacy .autofill-card'));
   // Always allow covers sensitive details too, on every site SecondHand is on (#175).
   assert.equal(text(view.window.document.querySelector('#view-privacy .autofill-card p')), 'Autofill asks the first time. Choose Always allow to skip the pop-up while SecondHand is unlocked, ' +
-    'on every site SecondHand is on. That includes your Social Security number, birth date, income, and citizenship and disability answers. ' +
+    'on every site SecondHand is on. That includes your Social Security number, birth date, income, benefits, and citizenship and disability answers. ' +
     'When another site’s pop-up asks about those details, Always allow on this site skips it there alone. Only the saved answers a page needs leave SecondHand.');
   assert.doesNotMatch(card, /every time/);
   for (const phrase of ['first applicant page', 'Household Application Information', 'Tell Us More', 'date of birth', 'Iowa’s questions about you',
