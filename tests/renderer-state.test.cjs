@@ -796,6 +796,17 @@ test('Privacy & backups names everything autofill fills or clicks today and keep
   const address = Array.from(view.window.document.querySelectorAll('#view-privacy .autofill-card p'), text).filter(paragraph => paragraph.includes('first suggested home address'));
   assert.equal(address.length, 1);
   assert.match(address[0], /^On the verified home-address page, .*\. Check that this address is yours before you submit\.$/);
+  // Tell Us More may fill the saved Social Security number, which Iowa may not keep, so it ends on checking that number (#192).
+  const ssn = paragraphs.filter(paragraph => paragraph.includes('Social Security number') && paragraph.includes('Tell Us More'));
+  assert.equal(ssn.length, 1);
+  assert.match(ssn[0], /^On the Tell Us More page, Autofill may fill .*About you.*More SNAP information.*check that number in Iowa’s form before you continue\.$/);
+  assert.ok(ssn[0].split(/\s+/).length <= 65, `${ssn[0].split(/\s+/).length} words: ${ssn[0]}`);
+  // The four household screening pages Autofill answers from More SNAP information (#192).
+  const screening = paragraphs.filter(paragraph => ['Job Information', 'Income Information', 'Expenses Information', 'Property Information', 'More SNAP information']
+    .every(phrase => paragraph.includes(phrase)));
+  assert.equal(screening.length, 1);
+  // On other sites, sensitive answers wait for Fill sensitive details unless Always allow covers the site (#192).
+  for (const phrase of ['Fill sensitive details', 'Social Security number', 'Always allow']) assert.ok(sites[0].includes(phrase), phrase);
 });
 
 test('the document review card opens with the file name as its heading, with no line above it', async t => {
