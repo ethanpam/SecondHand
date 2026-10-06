@@ -1004,9 +1004,11 @@ test('warmLaya loads Laya’s model before a click’s questions are asked and a
 // The app's prepared copy of its extension, as extension-setup.cjs reports it. `refresh` plays
 // prepareBundledExtension, which copies only the app's own bundle; every call is counted.
 const SHIPPED = '2026-10-05.1';
-function extensionCopy({ exists = true, prepared = true, refresh = async () => {} } = {}) {
+// `newerCopy` is the build of a whole copy a newer app prepared (#142).
+function extensionCopy({ exists = true, prepared = true, newerCopy = null, refresh = async () => {} } = {}) {
   const copy = { exists, prepared, refreshes: 0 };
-  const setup = () => ({ directory: '/synthetic-local-data/chrome-extension', extensionId: 'jogldddafjfbmfjnjlbjloakjbecnjpl', version: '0.4.0', build: SHIPPED, exists: copy.exists, prepared: copy.prepared });
+  const setup = () => ({ directory: '/synthetic-local-data/chrome-extension', extensionId: 'jogldddafjfbmfjnjlbjloakjbecnjpl', version: '0.4.0', build: SHIPPED, exists: copy.exists, prepared: copy.prepared,
+    newerCopy: copy.prepared ? null : newerCopy });
   copy.module = {
     getExtensionSetup: async () => setup(),
     prepareBundledExtension: async () => { copy.refreshes++; await refresh(copy); copy.exists = true; copy.prepared = true; return setup(); }
@@ -1066,6 +1068,14 @@ test('one refresh runs at a time: status requests, and the Chrome extension page
   await prepared;
   assert.deepEqual(await status, { build: SHIPPED, copy: 'ready' }, 'status waits for the page’s refresh instead of starting another');
   assert.equal(page.refreshes, 1);
+});
+
+test('an older app never refreshes a copy a newer app prepared: status names that newer build, ready to load (#142)', async () => {
+  const copy = extensionCopy({ prepared: false, newerCopy: '2026-10-06.1' });
+  const app = await desktop({ extensionCopy: copy });
+  assert.deepEqual(await shipped(app), { build: '2026-10-06.1', copy: 'ready' });
+  assert.deepEqual(await shipped(app), { build: '2026-10-06.1', copy: 'ready' });
+  assert.equal(copy.refreshes, 0, 'nothing older is written over it');
 });
 
 test('a refresh that fails is reported, and isn’t tried again until the files are refreshed on the Chrome extension page', async () => {

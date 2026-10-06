@@ -686,7 +686,7 @@ test('the answers a page may give back are the saved profile fields, never the S
 
 const savingPage = () => page('<label for="apt">Apartment number</label><input id="apt">' +
   '<label for="county">County</label><input id="county">' +
-  '<label for="dob">Date of birth</label><input id="dob">' +
+  '<label for="dob">Date of birth (MM/DD/YYYY)</label><input id="dob">' +
   '<label for="st">State</label><select id="st"><option value="">Choose</option><option value="IA">Iowa</option><option value="MN">Minnesota</option></select>' +
   '<fieldset><legend>Is anyone in your household a veteran?</legend><label><input type="radio" name="vet" value="y">Yes</label><label><input type="radio" name="vet" value="n">No</label></fieldset>' +
   '<label for="rent">Monthly rent</label><input id="rent">' +
@@ -733,6 +733,63 @@ test('an answer that can’t be put in the profile’s format is reported unread
   for (const key of ['birthDate', 'monthlyRent', 'householdSize']) assert.deepEqual(generic.readAnswer(doc, result.token, idOf(key), key), { unreadable: true }, key);
   type('apt', 'x'.repeat(201));
   assert.deepEqual(generic.readAnswer(doc, result.token, idOf('addressLine2'), 'addressLine2'), { unreadable: true });
+});
+
+// #142: a typed date is read in the order its box asks for, or when only one order makes sense. Never guessed.
+const dateBox = (attributes = '', label = 'Date of birth') => page(`<label for="dob">${label}</label><input id="dob" ${attributes}><span id="hint">Use MM/DD/YYYY</span>`);
+function readDate(doc, typed) {
+  const result = generic.plan(doc);
+  const id = result.matched.find(item => item.key === 'birthDate').id;
+  doc.getElementById('dob').value = typed;
+  return generic.readAnswer(doc, result.token, id, 'birthDate');
+}
+test('a typed date is read in the order the box asks for: its label, placeholder, description or title', () => {
+  for (const [attributes, label, typed, value] of [
+    ['', 'Date of birth (MM/DD/YYYY)', '04/12/1985', '1985-04-12'],
+    ['', 'Date of birth mm/dd/yyyy', '4-12-1985', '1985-04-12'],
+    ['placeholder="DD/MM/YYYY"', 'Date of birth', '04/12/1985', '1985-12-04'],
+    ['placeholder="dd/mm/aaaa" autocomplete="bday"', 'Fecha de nacimiento', '04/12/1985', '1985-12-04'],
+    ['placeholder="jj/mm/aaaa"', 'Date of birth', '04.12.1985', '1985-12-04'],
+    ['aria-describedby="hint"', 'Date of birth', '04/12/1985', '1985-04-12'],
+    ['title="Day, month and year: DD-MM-YYYY"', 'Date of birth', '4-12-1985', '1985-12-04']]) {
+    assert.deepEqual(readDate(dateBox(attributes, label), typed), { value }, `${label} ${attributes}: ${typed}`);
+  }
+  // A date written in the other order than the box asks for isn't turned around.
+  assert.deepEqual(readDate(dateBox('', 'Date of birth (MM/DD/YYYY)'), '13/04/1985'), { unreadable: true });
+  assert.deepEqual(readDate(dateBox('placeholder="DD/MM/YYYY"'), '04/13/1985'), { unreadable: true });
+});
+
+test('with no order on the box, a typed date is read only when its numbers allow one order', () => {
+  for (const [typed, read] of [['13/04/1985', { value: '1985-04-13' }], ['04/13/1985', { value: '1985-04-13' }], ['5/5/1985', { value: '1985-05-05' }],
+    ['1985-04-12', { value: '1985-04-12' }], ['04/12/1985', { unreadable: true }], ['12/4/1985', { unreadable: true }], ['13/13/1985', { unreadable: true }],
+    ['00/13/1985', { unreadable: true }], ['32/01/1985', { unreadable: true }], ['04/12/85', { unreadable: true }]]) {
+    assert.deepEqual(readDate(dateBox(), typed), read, typed);
+  }
+  // A date box gives the date in its own order already.
+  assert.deepEqual(readDate(dateBox('type="date"'), '1985-04-12'), { value: '1985-04-12' });
+});
+
+test('a question the page asks more than once, as in a household member’s section with no heading, is never read as the applicant’s', () => {
+  const doc = page('<h2>About you</h2><label for="first">First name</label><input id="first"><label for="dob">Date of birth (MM/DD/YYYY)</label><input id="dob">' +
+    '<h2>Household members</h2><div class="member"><label for="first2">First name</label><input id="first2"><label for="dob2">Date of birth (MM/DD/YYYY)</label><input id="dob2"></div>' +
+    '<label for="zip">Zip code</label><input id="zip">');
+  const result = generic.plan(doc);
+  const ids = key => result.matched.filter(item => item.key === key).map(item => item.id);
+  assert.equal(ids('birthDate').length, 2, 'the section has no heading, so both boxes look like the applicant’s');
+  for (const [id, value] of [['first', 'Avery'], ['dob', '04/12/1985'], ['first2', 'Riley'], ['dob2', '09/03/2015'], ['zip', '50309']]) doc.getElementById(id).value = value;
+  for (const key of ['birthDate', 'firstName']) for (const id of ids(key)) assert.deepEqual(generic.readAnswer(doc, result.token, id, key), { repeated: true }, `${key} ${id}`);
+  assert.deepEqual(generic.readAnswer(doc, result.token, ids('zip')[0], 'zip'), { value: '50309' }, 'a question asked once is read');
+  // Answered or not, each box of a repeated question counts: the applicant's own box is often answered already.
+  doc.getElementById('dob2').value = '';
+  assert.deepEqual(generic.readAnswer(doc, result.token, ids('birthDate')[0], 'birthDate'), { repeated: true });
+  // A member section whose heading names the person is that person's: the applicant's own box is read.
+  const named = page('<label for="dob">Date of birth (MM/DD/YYYY)</label><input id="dob"><fieldset><legend>Child 1</legend><label for="kid">Date of birth</label><input id="kid"></fieldset>');
+  const plan = generic.plan(named);
+  const own = plan.matched.filter(item => item.key === 'birthDate');
+  assert.equal(own.length, 1);
+  named.getElementById('dob').value = '04/12/1985';
+  named.getElementById('kid').value = '09/03/2015';
+  assert.deepEqual(generic.readAnswer(named, plan.token, own[0].id, 'birthDate'), { value: '1985-04-12' });
 });
 
 test('password, code and signature boxes are never read, whatever key they are given', () => {

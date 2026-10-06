@@ -95,6 +95,8 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
     read({ token, id, key }) {
       const field = token === current?.token ? current.ids.get(id) : null;
       if (!field || field.key !== key) return null;
+      // `repeated`: the page asks the question in more than one box, as in a member's section with no heading (#142).
+      if (field.repeated) return { repeated: true };
       return field.typed === undefined ? { empty: true } : field.typed === null ? { unreadable: true } : { value: field.typed };
     },
     // The id a field has in the latest plan.
@@ -111,6 +113,11 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
   const permissions = new Set([...(granted ? [`${ORIGIN}/*`] : []), ...(allGranted ? [ALL] : [])]);
   // Iowa's site is a manifest permission. Chrome takes it back with https://*/* until it restarts.
   const iowa = { held: true };
+  function takeBack(origins) {
+    origins.forEach(origin => permissions.delete(origin));
+    if (origins.includes(ALL)) { for (const origin of [...permissions]) if (origin.startsWith('https://')) permissions.delete(origin); iowa.held = false; }
+    setImmediate(() => events.permissionsRemoved?.({ permissions: [], origins: [...origins] }));
+  }
   const registered = new Map([...(enabled ? [[SCRIPT_ID, structuredClone(SITE_SCRIPT)]] : []), ...(allSites ? [['site-all', structuredClone(ALL_SCRIPT)]] : [])]);
   for (const frame of frames) {
     if (frame.granted || frame.enabled) permissions.add(`${frame.origin}/*`);
@@ -178,11 +185,12 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
       remove: async ({ origins }) => {
         log.push('permissions.remove');
         if (keepAccess) return true;
-        origins.forEach(origin => permissions.delete(origin));
-        if (origins.includes(ALL)) { for (const origin of [...permissions]) if (origin.startsWith('https://')) permissions.delete(origin); iowa.held = false; }
+        takeBack(origins);
         return true;
       },
-      request: async () => { log.push('permissions.request'); throw new Error('Only the side panel may request access, inside a click.'); }
+      request: async () => { log.push('permissions.request'); throw new Error('Only the side panel may request access, inside a click.'); },
+      // Chrome says when access goes, whoever took it back: SecondHand, the person in Chrome's settings, or Chrome.
+      onRemoved: event('permissionsRemoved')
     },
     scripting: {
       executeScript: async details => {
@@ -287,9 +295,12 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
     if (url !== 'chrome-extension://testextension/background.js' || !disk) throw new TypeError('Failed to fetch');
     return { ok: true, text: async () => code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${disk}';`) };
   };
-  vm.runInNewContext(build ? code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${build}';`) : code,
+  // Starts the worker as Chrome does: at once, and again after Chrome stopped it (#142), when the new worker's listeners
+  // replace the old one's and its memory starts empty. Chrome's records (registrations, access, tabs) stay as they were.
+  const start = () => vm.runInNewContext(build ? code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${build}';`) : code,
     { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, SecondHandTranslation: translation, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console, fetch,
       ...ai, ...(clock ? { Date: { now: () => clock.now } } : {}) });
+  start();
   const send = (message, sender) => new Promise(resolve => { if (!listener(message, sender, resolve)) resolve(undefined); });
   // Whether Chrome lets SecondHand read this address.
   function covered(address) {
@@ -299,6 +310,11 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
   return {
     tab, page, vault, log, native, content, injected, tallies, opened, permissions, registered, events, send, iowa,
     reloads: () => reloads,
+    // The person removes SecondHand's access in Chrome's settings (#142).
+    revoke: origins => takeBack(origins),
+    restart: () => { listener = undefined; for (const key of Object.keys(events)) delete events[key]; start(); },
+    // The events the worker listens to, its own messages included.
+    listening: () => [...Object.keys(events), ...(listener ? ['message'] : [])].sort(),
     nativeTypes: () => native.map(call => call.type),
     contentTypes: () => content.map(call => call.type),
     panel: message => send({ tabId: 7, ...message }, { id: 'testextension', url: PANEL_URL }),
@@ -785,7 +801,11 @@ function siteContent(t, { url = SITE_URL, engine = true, settled = null, offers 
       focusField: (doc, id) => { calls.push(`focus:${id}`); if (id !== 'sh-2') return false; doc.getElementById('day').focus(); return true; },
       // Save to My information (#98): which listed boxes hold an answer, and one box's answer after the click.
       answeredIds: (doc, token, ids) => { calls.push(`answered:${token}:${ids.join(',')}`); return token === 'plan-1' ? ids.filter(id => id === 'sh-1') : []; },
-      readAnswer: (doc, token, id, key) => { calls.push(`read:${token}:${id}:${key}`); return token === 'plan-1' && id === 'sh-1' && key === 'county' ? { value: 'Story', element: doc.getElementById('name') } : null; }
+      readAnswer: (doc, token, id, key) => {
+        calls.push(`read:${token}:${id}:${key}`);
+        if (token === 'plan-1' && id === 'sh-3') return { repeated: true, element: doc.getElementById('name') };
+        return token === 'plan-1' && id === 'sh-1' && key === 'county' ? { value: 'Story', element: doc.getElementById('name') } : null;
+      }
     };
   }
   window.eval(source('page-text.js'));
@@ -991,6 +1011,148 @@ test('with Chrome’s grant for every https site kept, turning one site off unre
   assert.equal((await declined.panel({ type: 'ui:enableSite', confirmed: true })).ok, false);
   assert.equal(declined.registered.size, 0);
   assert.equal(declined.log.includes('permissions.remove'), false);
+});
+
+// Chrome takes access back (#142): the person removed it in Chrome's settings, or Chrome did.
+const untrusted = w => w.native.filter(call => call.type === 'untrustSite').map(call => call.url);
+test('when Chrome takes a site back, SecondHand stops using it and the app stops trusting it', async () => {
+  const w = siteWorker({ enabled: true });
+  w.revoke([`${ORIGIN}/*`]);
+  await settle();
+  assert.equal(w.registered.size, 0, 'its script is gone');
+  assert.deepEqual(untrusted(w), [ORIGIN]);
+  assert.equal((await w.panel({ type: 'ui:pageState' })).data.site.enabled, false);
+  assert.equal((await autofill(w)).ok, false);
+  assert.deepEqual(w.nativeTypes(), ['untrustSite'], 'nothing more reaches the app');
+  // Chrome's access given back in its settings turns nothing on: only SecondHand's own Turn on does.
+  w.permissions.add(`${ORIGIN}/*`);
+  assert.equal((await w.panel({ type: 'ui:pageState' })).data.site.enabled, false);
+});
+
+test('Chrome taking a site back takes the embedded forms it turned on; taking an embedded form’s site back leaves the page’s site on', async () => {
+  const w = siteWorker({ enabled: true, frames: [secondFrame({ enabled: true })] });
+  w.revoke([`${ORIGIN}/*`]);
+  await settle();
+  assert.equal(w.registered.size, 0);
+  assert.equal(w.permissions.size, 0, 'Chrome’s access to the embedded form goes too, as when the site is turned off');
+  assert.deepEqual(untrusted(w), [ORIGIN, FRAME_ORIGIN]);
+
+  const form = siteWorker({ enabled: true, frames: [secondFrame({ enabled: true })] });
+  form.revoke([`${FRAME_ORIGIN}/*`]);
+  await settle();
+  assert.deepEqual([...form.registered.keys()], [SCRIPT_ID]);
+  assert.deepEqual(untrusted(form), [FRAME_ORIGIN]);
+  assert.equal((await form.panel({ type: 'ui:pageState' })).data.site.enabled, true);
+});
+
+test('with the app closed when Chrome takes a site back, the site is off at once and the app hears at its next status', async () => {
+  const w = siteWorker({ enabled: true, desktop: { reachable: false } });
+  w.revoke([`${ORIGIN}/*`]);
+  await settle();
+  assert.deepEqual([...w.registered.keys()], [SCRIPT_ID], 'kept as the reminder that the app hasn’t heard');
+  assert.equal((await w.panel({ type: 'ui:pageState' })).data.site.enabled, false, 'without Chrome’s access it runs nothing');
+  w.vault.reachable = true;
+  assert.equal((await w.panel({ type: 'ui:desktopStatus' })).ok, true);
+  assert.deepEqual(w.nativeTypes(), ['untrustSite', 'status', 'untrustSite'], 'tried while closed, then before anything else is asked');
+  assert.equal(w.registered.size, 0);
+  // An app that answers but doesn't say it stopped trusting the site fails loudly.
+  const odd = siteWorker({ enabled: true, desktop: { reachable: false } });
+  odd.revoke([`${ORIGIN}/*`]);
+  await settle();
+  Object.assign(odd.vault, { reachable: true, untrustSiteError: 'The request could not be completed.' });
+  assert.equal((await odd.panel({ type: 'ui:desktopStatus' })).errorKey, 'worker.siteStillTrustedInApp');
+  assert.deepEqual([...odd.registered.keys()], [SCRIPT_ID]);
+});
+
+test('when Chrome takes back every https site, all websites turns off and the app stops trusting every site', async () => {
+  const w = siteWorker({ url: OTHER_URL, allSites: true });
+  w.revoke([ALL]);
+  await settle();
+  assert.equal(w.registered.size, 0);
+  assert.deepEqual(w.nativeTypes(), ['untrustAllSites']);
+  assert.equal(w.vault.allSites, false);
+  // A site turned on by itself goes too: Chrome took it back with every https site.
+  const both = siteWorker({ enabled: true, allSites: true });
+  both.revoke([ALL]);
+  await settle();
+  assert.equal(both.registered.size, 0);
+  assert.deepEqual(both.native.map(({ type, url }) => url ? `${type} ${url}` : type), ['untrustAllSites', `untrustSite ${ORIGIN}`]);
+});
+
+test('Chrome taking back a site SecondHand never had on asks nothing of the app; SecondHand’s own Turn off tells the app once', async () => {
+  const w = siteWorker({ granted: true });
+  w.revoke([`${ORIGIN}/*`]);
+  await settle();
+  assert.deepEqual(w.native, []);
+  // Turn off takes Chrome's access back too, and Chrome says so.
+  const off = siteWorker({ enabled: true, frames: [secondFrame({ enabled: true })] });
+  assert.equal((await off.panel({ type: 'ui:disableSite', confirmed: true })).ok, true);
+  await settle();
+  assert.deepEqual(untrusted(off), [ORIGIN, FRAME_ORIGIN]);
+});
+
+test('the Save offers and page words kept for a site Chrome took back are forgotten', async () => {
+  const w = siteWorker({ enabled: true, pageText: { lang: 'en', text: 'Synthetic pantry hours' } });
+  await autofill(w);
+  const [read] = (await w.panel({ type: 'ui:pageText' })).data.pages;
+  assert.equal((await w.panel({ type: 'ui:keepSummary', id: read.id, summary: { language: 'en', english: true, points: ['Open on Mondays.'] } })).ok, true);
+  const before = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.equal(before.savable.length, 1);
+  assert.equal(before.summary.point, 'Open on Mondays.');
+  w.revoke([`${ORIGIN}/*`]);
+  await settle();
+  // The person turns the site on again in the side panel.
+  w.permissions.add(`${ORIGIN}/*`);
+  assert.equal((await w.panel({ type: 'ui:enableSite', confirmed: true })).ok, true);
+  assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).savable, undefined);
+  assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).summary, undefined);
+  assert.equal(w.content.filter(call => call.type === 'secondhand:generic:answered').length, 1, 'the forgotten offer is never asked about again');
+});
+
+// A worker restart (#142): Chrome stops an idle service worker and starts it again for the next event. Chrome's
+// records (registrations, access) are as they were; everything the worker held in memory is gone.
+test('a restarted worker listens for every event before its first one, and the sites turned on stay on, from Chrome’s records', async () => {
+  const w = siteWorker({ enabled: true, frames: [secondFrame({ enabled: true })] });
+  w.restart();
+  assert.deepEqual(w.listening(), ['activated', 'installed', 'message', 'permissionsRemoved', 'removed', 'updated'],
+    'registered while the worker starts, so the event that woke it is heard');
+  assert.deepEqual(plain((await w.panel({ type: 'ui:pageState' })).data.site), { origin: ORIGIN, enabled: true, ready: true, frames: [{ origin: FRAME_ORIGIN, enabled: true }] });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.state, 'done', result.message);
+  assert.ok(result.filled > 0);
+  const all = siteWorker({ url: OTHER_URL, allSites: true });
+  all.restart();
+  assert.equal(plain((await all.panel({ type: 'ui:desktopStatus' })).data).allSites, true);
+  assert.equal(plain((await all.panel({ type: 'ui:pageState' })).data).site.enabled, true);
+});
+
+test('a restarted worker hears Chrome take a site back, and finds one taken back while no worker listened at its next status', async () => {
+  const w = siteWorker({ enabled: true });
+  w.restart();
+  w.revoke([`${ORIGIN}/*`]);
+  await settle();
+  assert.equal(w.registered.size, 0);
+  assert.deepEqual(untrusted(w), [ORIGIN]);
+  // Chrome's record says so all the same.
+  const missed = siteWorker({ enabled: true });
+  missed.permissions.delete(`${ORIGIN}/*`);
+  missed.restart();
+  assert.equal((await missed.panel({ type: 'ui:desktopStatus' })).ok, true);
+  assert.equal(missed.registered.size, 0);
+  assert.deepEqual(untrusted(missed), [ORIGIN]);
+});
+
+test('the last result and Save offers live in the worker’s memory only: gone after a restart, back with the next Autofill', async () => {
+  const w = siteWorker({ enabled: true });
+  await autofill(w);
+  w.restart();
+  let state = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.deepEqual({ result: state.result, savable: state.savable }, { result: null, savable: undefined });
+  assert.equal(state.site.enabled, true);
+  await autofill(w);
+  state = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.deepEqual(state.result.needYou, [`f0:${w.page.idOf('pickup')}`, `f0:${w.page.idOf('size')}`]);
+  assert.deepEqual(state.savable.map(item => item.label), ['size']);
 });
 
 test('visible iframe discovery is https only, deduplicated, and excludes the page origin', t => {
@@ -2112,9 +2274,13 @@ const UPDATE = { build: '2026-10-04.1', copy: 'ready' };
 const updating = (options = {}) => siteWorker({ build: '2026-10-03.9', disk: UPDATE.build, ...options, desktop: { extension: UPDATE, ...options.desktop } });
 const statusRow = async w => { await w.panel({ type: 'ui:desktopStatus' }); await settle(); };
 
+// Pages whose click leaves nothing for the applicant: a need-you list or a Save offer holds the reload too (#142).
+const answeredByClick = () => [{ name: 'name', key: 'fullName' }, { name: 'zip', key: 'zip' }];
+const reachable = { firstName: 'Synthetic private first', lastName: 'Synthetic private last', email: 'synthetic@example.org', phone: '5155550100' };
+
 test('a site fill waiting on its approval holds the reload; it reloads once the fill is answered', async () => {
   let approve;
-  const w = updating({ enabled: true, desktop: { delay: { getFields: new Promise(resolve => { approve = resolve; }) } } });
+  const w = updating({ enabled: true, fields: answeredByClick(), desktop: { delay: { getFields: new Promise(resolve => { approve = resolve; }) } } });
   const click = autofill(w);
   await settle();
   await statusRow(w);
@@ -2126,11 +2292,11 @@ test('a site fill waiting on its approval holds the reload; it reloads once the 
 });
 
 test('a widget’s planned fill holds the reload between its plan and its Autofill', async () => {
-  const w = updating({ enabled: true, fields: openQuestions() });
-  await plan(w);
+  const w = updating({ enabled: true, fields: openQuestions().filter(field => field.name !== 'pickup'), desktop: { values: reachable } });
+  const [reach, call] = (await plan(w)).unmatched.map(field => field.id);
   await statusRow(w);
   assert.equal(w.reloads(), 0, 'Chrome’s AI is reading the plan in the widget');
-  assert.equal((await w.launcher({ type: 'ui:autofill', confirmed: true, guesses: {} })).ok, true);
+  assert.equal((await w.launcher({ type: 'ui:autofill', confirmed: true, guesses: { [reach]: 'email', [call]: 'phone' } })).ok, true);
   await settle();
   assert.equal(w.reloads(), 1);
 });
@@ -2146,6 +2312,37 @@ test('the app’s prompt to trust all websites holds the reload until it is answ
   assert.equal((await click).ok, true);
   await settle();
   assert.equal(w.reloads(), 1);
+});
+
+test('after a click, the need-you list and Save offers stay: the reload waits until the tab moves on or closes (#142)', async () => {
+  const w = updating({ enabled: true });
+  assert.equal((await autofill(w)).data.state, 'done');
+  await statusRow(w);
+  assert.equal(w.reloads(), 0, 'the click left two questions for the applicant');
+  const size = `f0:${w.page.idOf('size')}`;
+  const state = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.deepEqual(state.result.needYou, [`f0:${w.page.idOf('pickup')}`, size]);
+  assert.deepEqual(state.savable, [{ id: size, label: 'size', answered: false }]);
+  // Saving one answer leaves the need-you list: still no reload.
+  w.page.type('size', '3');
+  assert.equal((await w.panel({ type: 'ui:saveAnswer', id: size, confirmed: true })).ok, true);
+  await statusRow(w);
+  assert.equal(w.reloads(), 0);
+  assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).result.needYou.length, 2);
+  await settle();
+  assert.equal(w.reloads(), 0);
+  // The tab moves on: nothing is left to keep, and the next message reloads.
+  w.events.updated(7, { status: 'loading' });
+  await statusRow(w);
+  assert.equal(w.reloads(), 1);
+
+  const closed = updating({ enabled: true });
+  await autofill(closed);
+  await statusRow(closed);
+  assert.equal(closed.reloads(), 0);
+  closed.events.removed(7);
+  await statusRow(closed);
+  assert.equal(closed.reloads(), 1, 'a closed tab keeps nothing');
 });
 
 // Save to My information (#98).
@@ -2212,6 +2409,18 @@ test('an unanswered or unreadable box, an unknown question, or the app’s refus
   assert.equal(refused.errorKey, 'worker.saveCancelled');
   assert.ok((await savable(w)).some(item => item.id === size), 'a refused answer stays on the list');
   assert.equal(w.nativeTypes().filter(type => type === 'saveFields').length, 1);
+});
+
+test('a question the page asks in more than one box, as in a member’s section with no heading, saves nothing and says why (#142)', async () => {
+  const w = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { name: 'dob', key: 'birthDate', repeated: true }] });
+  await autofill(w);
+  const dob = `f0:${w.page.idOf('dob')}`;
+  w.page.type('dob', '1985-04-12');
+  const refused = await saveAnswer(w, dob);
+  assert.equal(refused.ok, false);
+  assert.equal(refused.errorKey, 'worker.answerRepeated');
+  assert.equal(refused.error, strings.english('worker.answerRepeated'));
+  assert.equal(w.nativeTypes().includes('saveFields'), false, 'nothing reaches the app');
 });
 
 test('a page that changed, or a site turned off, forgets the list and reads nothing', async () => {
@@ -2282,12 +2491,13 @@ test('a site frame says which listed boxes hold an answer, by id, and reads one 
   assert.deepEqual(plain(page.request({ type: 'secondhand:generic:answered', token: 'plan-1', ids: ['sh-1', 'sh-2'] })), { answered: ['sh-1'] });
   assert.deepEqual(plain(page.request({ type: 'secondhand:generic:read', token: 'plan-1', id: 'sh-1', key: 'county' })), { value: 'Story' }, 'the value only, nothing else of the box');
   assert.deepEqual(plain(page.request({ type: 'secondhand:generic:read', token: 'plan-1', id: 'sh-2', key: 'county' })), { readable: false });
+  assert.deepEqual(plain(page.request({ type: 'secondhand:generic:read', token: 'plan-1', id: 'sh-3', key: 'birthDate' })), { repeated: true }, 'a question the page asks twice (#142)');
   for (const message of [{ type: 'secondhand:generic:answered', token: 'plan-1', ids: 'sh-1' }, { type: 'secondhand:generic:answered', token: 7, ids: [] },
     { type: 'secondhand:generic:read', token: 'plan-1', id: 'sh-1' }, { type: 'secondhand:generic:read', token: 'plan-1', id: ['sh-1'], key: 'county' }]) {
     assert.deepEqual(plain(page.request(message)), { ok: false, error: 'This page could not be checked safely. Review it manually.' }, JSON.stringify(message));
   }
   assert.equal(page.request({ type: 'secondhand:generic:read', token: 'plan-1', id: 'sh-1', key: 'county' }, { id: 'another-extension' }), undefined);
-  assert.deepEqual(page.calls.filter(call => typeof call === 'string' && call.startsWith('read:')), ['read:plan-1:sh-1:county', 'read:plan-1:sh-2:county']);
+  assert.deepEqual(page.calls.filter(call => typeof call === 'string' && call.startsWith('read:')), ['read:plan-1:sh-1:county', 'read:plan-1:sh-2:county', 'read:plan-1:sh-3:birthDate']);
 });
 
 // #135: answers the app left out because a saved date of birth is after today or more than 130 years ago.
