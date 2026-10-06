@@ -220,7 +220,7 @@ Tests only use the fictional profile in [`tests/fixtures/applicant-profile.json`
 
 ### Releases
 
-Every pull request and every push to `main` runs [CI](.github/workflows/ci.yml) on one Linux machine: `npm test` and `npm run check`, then `npm test`, `npm run typecheck`, `npm run lint` and `npm run build` in `website/`. CI installs no Electron, browsers or Laya model, so the Laya parity tests skip there. The Electron, browser, OCR, Laya and iOS smokes stay local: run the ones your change touches before merging (`test:ui`, `test:extension`, `test:translation`, `test:summary`, `test:laya`, `test:ocr`, `test:ocr:ui`, `test:native`, and the [iPhone app's tests](ios/README.md)). The [QA gate list](.claude/agents/qa.md) says which ones each area needs. Tags don't build installers, and nothing runs dependency audits: run `npm audit` in the root and in `website/`. Installers are built locally with `npm run dist:win` on Windows or `npm run dist:mac` on a Mac, and uploaded by hand. The [download website](website/README.md) explains publishing, which uses a temporary upload token that never ships in the app.
+Hosted CI workflows have been removed. Run `npm test` and `npm run check` locally, plus `npm test`, `npm run typecheck`, `npm run lint` and `npm run build` in `website/` when changing the website. Run the Electron, browser, OCR, Laya and iOS checks your change touches before merging (`test:ui`, `test:extension`, `test:translation`, `test:summary`, `test:laya`, `test:ocr`, `test:ocr:ui`, `test:native`, and the [iPhone app's tests](ios/README.md)). The [QA gate list](.claude/agents/qa.md) says which ones each area needs. Tags don't build installers, and nothing runs dependency audits: run `npm audit` in the root and in `website/`. Installers are built locally with `npm run dist:win` on Windows or `npm run dist:mac` on a Mac, and uploaded by hand. The [download website](website/README.md) explains publishing, which uses a temporary upload token that never ships in the app.
 
 ## Project layout
 
@@ -238,6 +238,8 @@ Every pull request and every push to `main` runs [CI](.github/workflows/ci.yml) 
 | `ML_model/` | Training data and evaluation for Laya, the local AI model |
 
 ## Documentation
+
+- [Detailed application guides](docs/applications/README.md): high-level usage and low-level implementation for Windows EXE, Mac DMG, iOS, Android, and the website
 
 - [Set up SecondHand](docs/setup.md): installing, adding the extension, applying, and troubleshooting
 - [Iowa portal coverage](docs/iowa-portal.md): exactly which fields and screens are supported
