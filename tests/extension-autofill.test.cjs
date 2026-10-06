@@ -1,13 +1,9 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const vm = require('node:vm');
-const { webcrypto } = require('node:crypto');
 const adapter = require('../extension/iowa-adapter.js');
 const strings = require('../extension/strings.js');
-const translation = require('../extension/translation.js');
-const { plain } = require('./helpers/harness.cjs');
+const { plain, read, serviceWorker, nativeHost } = require('./helpers/harness.cjs');
 
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
 const { GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey } = require('../extension/generic-adapter.js');
@@ -70,8 +66,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
     values: { firstName: 'Synthetic private first', hasHomeAddress: 'yes', mailingCity: 'Synthetic private city' }, ...desktop };
   const calls = { native: [], content: [], pageTabs: [], injected: [], reads: [], order: [] };
   const tab = { id: 7, active: true, url: `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo` };
-  const events = {};
-  const event = key => ({ addListener: value => { events[key] = value; } });
+  const w = serviceWorker();
   const visible = () => ['firstName', 'lastName', 'hasHomeAddress', ...(model.revealed ? ['mailingCity'] : [])];
   function pageState() {
     model.token = `preview-${model.filled.length}`;
@@ -80,7 +75,6 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
       scan: { token: model.token, recognizedPage: model.kind === 'fillable', fields: visible().filter(key => !model.filled.includes(key)).map(key => ({ key, label: key })) }
     };
   }
-  let listener;
   const chrome = {
     tabs: {
       get: async () => ({ ...tab }),
@@ -105,7 +99,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
         if (answer) return answer;
         throw new Error(`Unexpected content message ${message.type}`);
       },
-      onActivated: event('activated'), onRemoved: event('removed'), onUpdated: event('updated')
+      onActivated: w.event('activated'), onRemoved: w.event('removed'), onUpdated: w.event('updated')
     },
     sidePanel: { setPanelBehavior: async () => {}, open: async () => {} },
     scripting: { executeScript: async details => { calls.injected.push(plain(details)); }, getRegisteredContentScripts: async () => [] },
@@ -113,67 +107,46 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
     permissions: { contains: async ({ origins }) => origins.every(origin => origin === 'https://hhsservices.iowa.gov/*') },
     runtime: {
       id: 'testextension', getURL: file => `chrome-extension://testextension/${file}`,
-      onMessage: { addListener: callback => { listener = callback; } },
+      onMessage: w.onMessage,
       reload: () => { calls.order.push('reload'); },
-      connectNative: () => {
-        let onMessage, onDisconnect;
-        return {
-          onMessage: { addListener: callback => { onMessage = callback; } },
-          onDisconnect: { addListener: callback => { onDisconnect = callback; } },
-          disconnect: () => {},
-          postMessage: request => {
-            calls.native.push(request);
-            queueMicrotask(async () => {
-              // A reply the test holds back, as the app does while its approval prompt is open.
-              await vault.delay?.[request.type];
-              if (!vault.reachable) return onDisconnect();
-              // A host that runs but can't reach the desktop app answers every request with the same failure.
-              if (vault.unreachable) return onMessage({ id: request.id, ok: false, ...vault.unreachable });
-              const reply = data => onMessage({ id: request.id, ok: true, data });
-              const fail = error => onMessage({ id: request.id, ok: false, error });
-              if (request.type === 'status') return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: 0, ...(vault.layaState ? { laya: { state: vault.layaState } } : {}),
-                ...(vault.extension ? { extension: structuredClone(vault.extension) } : {}), ...(vault.touchId ? { touchId: vault.touchId } : {}) });
-              if (request.type === 'showApp') return reply({ shown: true });
-              if (request.type === 'unlockWithTouchId' && vault.touchIdUnlock) return reply(structuredClone(vault.touchIdUnlock));
-              if (request.type === 'openApp') return vault.openError ? fail(vault.openError) : reply(vault.opened || { opened: 'shown' });
-              if (request.type === 'recordProgress') return reply({ recorded: true });
-              if (request.type === 'saveFields') return reply({ saved: Object.keys(request.fields) });
-              // Laya (#39, #42): readied before a click's questions; "not ready" unless a test plays it.
-              if (request.type === 'warmLaya') return reply({ state: vault.layaState || 'unavailable' });
-              if (request.type === 'suggestFields' || request.type === 'answerFields') {
-                const play = vault.laya?.[request.type];
-                if (!play) return onMessage({ id: request.id, ok: false, error: 'Laya isn’t ready on this computer.', code: 'LAYA_NOT_READY' });
-                return reply(play(plain(request)));
-              }
-              if (request.type === 'getFields') {
-                duringGetFields?.(tab);
-                if (vault.getFieldsError) return fail(vault.getFieldsError);
-                // `fieldsReason`: why the app left saved answers out (#135).
-                return reply({ accessRevision: 0, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])),
-                  ...(vault.fieldsReason !== undefined ? { reason: vault.fieldsReason } : {}) });
-              }
-              fail('Unsupported bridge request.');
-            });
-          }
-        };
-      }
+      connectNative: nativeHost({ posted: request => { calls.native.push(request); }, answer: async (request, { reply, fail, disconnect }) => {
+        // A reply the test holds back, as the app does while its approval prompt is open.
+        await vault.delay?.[request.type];
+        if (!vault.reachable) return disconnect();
+        // A host that runs but can't reach the desktop app answers every request with the same failure.
+        if (vault.unreachable) return fail(vault.unreachable.error, vault.unreachable);
+        if (request.type === 'status') return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: 0, ...(vault.layaState ? { laya: { state: vault.layaState } } : {}),
+          ...(vault.extension ? { extension: structuredClone(vault.extension) } : {}), ...(vault.touchId ? { touchId: vault.touchId } : {}) });
+        if (request.type === 'showApp') return reply({ shown: true });
+        if (request.type === 'unlockWithTouchId' && vault.touchIdUnlock) return reply(structuredClone(vault.touchIdUnlock));
+        if (request.type === 'openApp') return vault.openError ? fail(vault.openError) : reply(vault.opened || { opened: 'shown' });
+        if (request.type === 'recordProgress') return reply({ recorded: true });
+        if (request.type === 'saveFields') return reply({ saved: Object.keys(request.fields) });
+        // Laya (#39, #42): readied before a click's questions; "not ready" unless a test plays it.
+        if (request.type === 'warmLaya') return reply({ state: vault.layaState || 'unavailable' });
+        if (request.type === 'suggestFields' || request.type === 'answerFields') {
+          const play = vault.laya?.[request.type];
+          if (!play) return fail('Laya isn’t ready on this computer.', { code: 'LAYA_NOT_READY' });
+          return reply(play(plain(request)));
+        }
+        if (request.type === 'getFields') {
+          duringGetFields?.(tab);
+          if (vault.getFieldsError) return fail(vault.getFieldsError);
+          // `fieldsReason`: why the app left saved answers out (#135).
+          return reply({ accessRevision: 0, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])),
+            ...(vault.fieldsReason !== undefined ? { reason: vault.fieldsReason } : {}) });
+        }
+        fail('Unsupported bridge request.');
+      } })
     }
   };
-  const code = fs.readFileSync(require.resolve('../extension/background.js'), 'utf8');
-  // The worker reads its own background.js from disk with fetch, as Chrome would load it on a reload.
-  const fetch = async (url, options) => {
-    calls.reads.push({ url, cache: options?.cache });
-    if (url !== 'chrome-extension://testextension/background.js' || disk === null) throw new TypeError('Failed to fetch');
-    return { ok: true, text: async () => code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${disk}';`) };
-  };
-  // Starts the worker, at once and again after Chrome stopped it (#142): Chrome and the page stay as they were.
-  const start = () => vm.runInNewContext(build ? code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${build}';`) : code,
-    { chrome, SecondHandIowa: adapter, SecondHandGeneric: engine, SecondHandStrings: strings, SecondHandTranslation: translation, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console, fetch });
-  start();
-  const send = (message, sender) => new Promise(resolve => { if (!listener(message, sender, value => { calls.order.push('reply'); resolve(value); })) resolve(undefined); });
+  // The worker reads its own background.js from disk with fetch, as Chrome would load it on a reload. It starts at once,
+  // and again after Chrome stopped it (#142): Chrome and the page stay as they were.
+  w.start({ chrome, globals: { SecondHandGeneric: engine }, build, disk, fetched: (url, options) => { calls.reads.push({ url, cache: options?.cache }); } });
+  const send = (message, sender) => w.send(message, sender, () => { calls.order.push('reply'); });
   return {
-    calls, tab, events, vault, filled: () => [...model.filled],
-    restart: () => { listener = undefined; for (const key of Object.keys(events)) delete events[key]; start(); },
+    calls, tab, events: w.events, vault, filled: () => [...model.filled],
+    restart: w.restart,
     reloads: () => calls.order.filter(step => step === 'reload').length,
     send,
     panel: message => send({ tabId: 7, ...message }, { id: 'testextension', url: PANEL_URL }),
@@ -437,7 +410,7 @@ test('pageState returns the last result for the same page and forgets it after n
 });
 
 test('the worker answers a build ping from its own pages with the build the panel expects', async () => {
-  const build = file => fs.readFileSync(require.resolve(`../extension/${file}`), 'utf8').match(/const BUILD = '([^']+)'/)?.[1];
+  const build = file => read(`extension/${file}`).match(/const BUILD = '([^']+)'/)?.[1];
   assert.ok(build('background.js'));
   assert.equal(build('background.js'), build('panel.js'), 'background.js and panel.js must change BUILD together');
   const w = worker();
@@ -555,8 +528,8 @@ function journey({ screens, desktop = {}, continueStays = false, engine = noSite
   let index = 0;
   const filled = new Set();
   const tab = { id: 7, active: true, url: `${adapter.PORTAL}${screens[0].path}` };
-  const events = {};
-  const event = key => ({ addListener: value => { events[key] = value; } });
+  const w = serviceWorker();
+  const { events } = w;
   const current = () => screens[index];
   function state() {
     const screen = current();
@@ -570,7 +543,6 @@ function journey({ screens, desktop = {}, continueStays = false, engine = noSite
     events.updated?.(7, { status: 'loading', url: tab.url });
     setImmediate(() => events.updated?.(7, { status: 'complete' }));
   }
-  let listener;
   const chrome = {
     tabs: {
       get: async () => ({ ...tab }),
@@ -587,36 +559,25 @@ function journey({ screens, desktop = {}, continueStays = false, engine = noSite
         }
         return generalPage(message, current().general || nothingPlanned()) || { focused: true };
       },
-      onActivated: event('activated'), onRemoved: event('removed'), onUpdated: event('updated')
+      onActivated: w.event('activated'), onRemoved: w.event('removed'), onUpdated: w.event('updated')
     },
     sidePanel: { setPanelBehavior: async () => {}, open: async () => {} },
     scripting: { executeScript: async () => {}, getRegisteredContentScripts: async () => [] },
     runtime: {
       id: 'testextension', getURL: file => `chrome-extension://testextension/${file}`,
-      onMessage: { addListener: callback => { listener = callback; } },
+      onMessage: w.onMessage,
       reload: () => { calls.order.push('reload'); },
-      connectNative: () => {
-        let onMessage;
-        return {
-          onMessage: { addListener: callback => { onMessage = callback; } }, onDisconnect: { addListener: () => {} }, disconnect: () => {},
-          postMessage: request => {
-            calls.native.push(request);
-            queueMicrotask(() => {
-              const reply = data => onMessage({ id: request.id, ok: true, data });
-              if (request.type === 'status') return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: 0 });
-              if (request.type === 'getFields') return reply({ accessRevision: 0, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])) });
-              if (request.type === 'warmLaya') return reply({ state: 'unavailable' });
-              if (request.type === 'suggestFields' || request.type === 'answerFields') return onMessage({ id: request.id, ok: false, error: 'Laya isn’t ready on this computer.', code: 'LAYA_NOT_READY' });
-              return reply({ recorded: true });
-            });
-          }
-        };
-      }
+      connectNative: nativeHost({ posted: request => { calls.native.push(request); }, answer: (request, { reply, fail }) => {
+        if (request.type === 'status') return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: 0 });
+        if (request.type === 'getFields') return reply({ accessRevision: 0, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])) });
+        if (request.type === 'warmLaya') return reply({ state: 'unavailable' });
+        if (request.type === 'suggestFields' || request.type === 'answerFields') return fail('Laya isn’t ready on this computer.', { code: 'LAYA_NOT_READY' });
+        return reply({ recorded: true });
+      } })
     }
   };
-  vm.runInNewContext(fs.readFileSync(require.resolve('../extension/background.js'), 'utf8'),
-    { chrome, SecondHandIowa: adapter, SecondHandGeneric: engine, SecondHandStrings: strings, SecondHandTranslation: translation, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, setImmediate, URL, Map, Set, console });
-  const send = (message, sender = { id: 'testextension', url: PANEL_URL }) => new Promise(resolve => { if (!listener({ tabId: 7, ...message }, sender, resolve)) resolve(undefined); });
+  w.start({ chrome, globals: { SecondHandGeneric: engine, setImmediate } });
+  const send = (message, sender = { id: 'testextension', url: PANEL_URL }) => w.send({ tabId: 7, ...message }, sender);
   return { calls, vault, events, send, filled: () => [...filled], at: () => current().name,
     userContinues: () => navigate(),
     leave: url => { tab.url = url; events.updated?.(7, { status: 'loading' }); setImmediate(() => events.updated?.(7, { status: 'complete' })); },

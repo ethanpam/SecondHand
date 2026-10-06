@@ -1,6 +1,6 @@
 'use strict';
-// Harnesses the test files share: the Electron main process and jsdom pages with layout. Desktop modules
-// and jsdom load only when a harness needs them.
+// Harnesses the test files share: the Electron main process, the extension's service worker, and jsdom
+// pages with layout. Desktop and extension modules, and jsdom, load only when a harness needs them.
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const vm = require('node:vm');
@@ -142,4 +142,69 @@ function runMain(modules, globals) {
   });
 }
 
-module.exports = { root, plain, tick, deferred, until, read, BOX, layout, layoutElements, laidOut, startMain, runMain, safeStorage };
+// The extension's service worker: extension/background.js in a vm context, as Chrome runs it. A test builds
+// its Chrome stand-in with `worker.event(name)` for each event the worker listens to (its listener lands in
+// `worker.events[name]`) and `worker.onMessage` for runtime.onMessage, then calls `worker.start`.
+function serviceWorker() {
+  const events = {};
+  let listener, run;
+  const worker = {
+    events,
+    event: name => ({ addListener: callback => { events[name] = callback; } }),
+    onMessage: { addListener: callback => { listener = callback; } },
+    // Runs background.js with `chrome`, and the scripts it imports (the real ones unless `globals` replaces
+    // them). `build` runs it as another build. `disk` is the build in the files Chrome would load on a
+    // reload (#85): the worker's fetch of its own background.js gets that build, after `fetched(url, options)`
+    // sees the request, and fails without one.
+    start({ chrome, globals = {}, build, disk, fetched = () => {} }) {
+      const code = read('extension/background.js');
+      const withBuild = value => code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${value}';`);
+      const fetch = async (url, options) => {
+        fetched(url, options);
+        if (url !== `${chrome.runtime.getURL('background.js')}` || !disk) throw new TypeError('Failed to fetch');
+        return { ok: true, text: async () => withBuild(disk) };
+      };
+      run = () => vm.runInNewContext(build ? withBuild(build) : code, {
+        chrome, SecondHandIowa: require('../../extension/iowa-adapter.js'), SecondHandGeneric: require('../../extension/generic-adapter.js'),
+        SecondHandStrings: require('../../extension/strings.js'), SecondHandTranslation: require('../../extension/translation.js'),
+        importScripts: () => {}, crypto: require('node:crypto').webcrypto, setTimeout, clearTimeout, URL, Map, Set, console, fetch, ...globals
+      });
+      run();
+      return worker;
+    },
+    // Chrome stopped the worker and starts it again (#142): the new worker's listeners replace the old one's,
+    // and its memory starts empty.
+    restart() { listener = undefined; for (const key of Object.keys(events)) delete events[key]; run(); },
+    // A message to the worker from `sender`, resolving with its reply (undefined when it gives none).
+    // `replied(value)` sees the reply as it is sent.
+    send: (message, sender, replied = () => {}) => new Promise(resolve => {
+      if (!listener(message, sender, value => { replied(value); resolve(value); })) resolve(undefined);
+    }),
+    // The events the worker listens to, its own messages included.
+    listening: () => [...Object.keys(events), ...(listener ? ['message'] : [])].sort()
+  };
+  return worker;
+}
+// chrome.runtime.connectNative, answered as the desktop's native host does: `posted(request)` sees each
+// request as it is sent, and `answer(request, port)` answers it a turn later with port.reply(data),
+// port.fail(error, details), or port.disconnect().
+function nativeHost({ posted = () => {}, answer }) {
+  return () => {
+    let onMessage, onDisconnect;
+    return {
+      onMessage: { addListener: callback => { onMessage = callback; } },
+      onDisconnect: { addListener: callback => { onDisconnect = callback; } },
+      disconnect: () => {},
+      postMessage: request => {
+        posted(request);
+        queueMicrotask(() => answer(request, {
+          reply: data => onMessage({ id: request.id, ok: true, data }),
+          fail: (error, details = {}) => onMessage({ id: request.id, ok: false, error, ...details }),
+          disconnect: () => onDisconnect()
+        }));
+      }
+    };
+  };
+}
+
+module.exports = { root, plain, tick, deferred, until, read, BOX, layout, layoutElements, laidOut, startMain, runMain, safeStorage, serviceWorker, nativeHost };

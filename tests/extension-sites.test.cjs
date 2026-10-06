@@ -9,8 +9,7 @@ const { JSDOM } = require('jsdom');
 const adapter = require('../extension/iowa-adapter.js');
 const strings = require('../extension/strings.js');
 const forms = require('./fixtures/pantry-forms.cjs');
-const translation = require('../extension/translation.js');
-const { plain, layout } = require('./helpers/harness.cjs');
+const { plain, layout, serviceWorker, nativeHost } = require('./helpers/harness.cjs');
 
 const source = file => fs.readFileSync(path.join(__dirname, '../extension', file), 'utf8');
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
@@ -144,9 +143,8 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
     values: { firstName: 'Synthetic private first', lastName: 'Synthetic private last', zip: '50309' }, ...desktop };
   // With `trusted`, the app trusts only those origins, as its trusted-site list does.
   const untrusted = url => Array.isArray(vault.trusted) && !vault.trusted.includes(new URL(url).origin);
-  const events = {};
-  const event = key => ({ addListener: value => { events[key] = value; } });
-  let listener;
+  const w = serviceWorker();
+  const { events, event, send } = w;
   const chrome = {
     tabs: {
       get: async () => ({ ...tab }),
@@ -227,83 +225,61 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
     sidePanel: { setPanelBehavior: async () => {}, open: async options => { opened.push(plain(options)); } },
     runtime: {
       id: 'testextension', getURL: file => `chrome-extension://testextension/${file}`,
-      onMessage: { addListener: callback => { listener = callback; } },
+      onMessage: w.onMessage,
       onInstalled: event('installed'),
       reload: () => { reloads++; },
-      connectNative: () => {
-        let onMessage, onDisconnect;
-        return {
-          onMessage: { addListener: callback => { onMessage = callback; } },
-          onDisconnect: { addListener: callback => { onDisconnect = callback; } },
-          disconnect: () => {},
-          postMessage: request => {
-            native.push(plain(request)); log.push(`native:${request.type}`);
-            queueMicrotask(async () => {
-              // A reply the test holds back, as the app does while its approval prompt is open.
-              await vault.delay?.[request.type];
-              if (!vault.reachable) return onDisconnect();
-              const reply = data => onMessage({ id: request.id, ok: true, data });
-              const fail = error => onMessage({ id: request.id, ok: false, error });
-              if (request.type === 'status') {
-                duringStatus?.(vault, ++statusChecks);
-                return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: vault.accessRevision, allSites: vault.allSites, ...(vault.layaState ? { laya: { state: vault.layaState } } : {}),
-                  ...(vault.extension ? { extension: structuredClone(vault.extension) } : {}) });
-              }
-              if (request.type === 'trustAllSites') {
-                if (vault.trustAllError) return fail(vault.trustAllError);
-                if (vault.trustAllReply) return reply(vault.trustAllReply);
-                vault.allSites = true; return reply({ allSites: true });
-              }
-              if (request.type === 'untrustAllSites') { if (vault.untrustError) return fail(vault.untrustError); vault.allSites = false; return reply({ allSites: false }); }
-              // Laya (#39, #42): readied before a click's questions; "not ready" unless a test plays it.
-              if (request.type === 'warmLaya') { vault.warming?.(); return reply({ state: vault.layaState || 'unavailable' }); }
-              if (request.type === 'suggestFields' || request.type === 'answerFields') {
-                if (untrusted(request.url) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
-                const play = vault.laya?.[request.type];
-                if (!play) return onMessage({ id: request.id, ok: false, error: 'Laya isn’t ready on this computer.', code: 'LAYA_NOT_READY' });
-                const answer = play(plain(request), vault);
-                return typeof answer === 'string' ? fail(answer) : reply(answer);
-              }
-              if (request.type === 'showApp') return reply({ shown: true });
-              if (request.type === 'trustSite') return (vault.trustError || request.url === vault.declineOrigin) ? fail(vault.trustError || 'Declined') : reply({ trusted: true, origin: new URL(request.url).origin });
-              if (request.type === 'untrustSite') return vault.untrustSiteError ? fail(vault.untrustSiteError) : reply({ trusted: false, origin: new URL(request.url).origin });
-              if (request.type === 'saveFields') {
-                if (untrusted(request.url) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
-                if (vault.saveError) return fail(vault.saveError);
-                return reply({ saved: Object.keys(request.fields) });
-              }
-              if (request.type === 'getFields') {
-                duringGetFields?.(tab, plain(request));
-                // The app's rule: a site it doesn't trust gets nothing unless all websites is on.
-                if ((vault.refuseUntrusted || untrusted(request.url)) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
-                if (vault.cancelOrigin === new URL(request.url).origin) return fail('You cancelled this field request.');
-                if (vault.getFieldsError) return fail(vault.getFieldsError);
-                // `fieldsReason`: why the app left saved answers out (#135), or a function of the request that says it for one site.
-                const reason = typeof vault.fieldsReason === 'function' ? vault.fieldsReason(plain(request)) : vault.fieldsReason;
-                return reply({ accessRevision: vault.accessRevision, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])),
-                  ...(reason !== undefined ? { reason } : {}) });
-              }
-              fail('Unsupported bridge request.');
-            });
-          }
-        };
-      }
+      connectNative: nativeHost({ posted: request => { native.push(plain(request)); log.push(`native:${request.type}`); }, answer: async (request, { reply, fail, disconnect }) => {
+        // A reply the test holds back, as the app does while its approval prompt is open.
+        await vault.delay?.[request.type];
+        if (!vault.reachable) return disconnect();
+        if (request.type === 'status') {
+          duringStatus?.(vault, ++statusChecks);
+          return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: vault.accessRevision, allSites: vault.allSites, ...(vault.layaState ? { laya: { state: vault.layaState } } : {}),
+            ...(vault.extension ? { extension: structuredClone(vault.extension) } : {}) });
+        }
+        if (request.type === 'trustAllSites') {
+          if (vault.trustAllError) return fail(vault.trustAllError);
+          if (vault.trustAllReply) return reply(vault.trustAllReply);
+          vault.allSites = true; return reply({ allSites: true });
+        }
+        if (request.type === 'untrustAllSites') { if (vault.untrustError) return fail(vault.untrustError); vault.allSites = false; return reply({ allSites: false }); }
+        // Laya (#39, #42): readied before a click's questions; "not ready" unless a test plays it.
+        if (request.type === 'warmLaya') { vault.warming?.(); return reply({ state: vault.layaState || 'unavailable' }); }
+        if (request.type === 'suggestFields' || request.type === 'answerFields') {
+          if (untrusted(request.url) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
+          const play = vault.laya?.[request.type];
+          if (!play) return fail('Laya isn’t ready on this computer.', { code: 'LAYA_NOT_READY' });
+          const answer = play(plain(request), vault);
+          return typeof answer === 'string' ? fail(answer) : reply(answer);
+        }
+        if (request.type === 'showApp') return reply({ shown: true });
+        if (request.type === 'trustSite') return (vault.trustError || request.url === vault.declineOrigin) ? fail(vault.trustError || 'Declined') : reply({ trusted: true, origin: new URL(request.url).origin });
+        if (request.type === 'untrustSite') return vault.untrustSiteError ? fail(vault.untrustSiteError) : reply({ trusted: false, origin: new URL(request.url).origin });
+        if (request.type === 'saveFields') {
+          if (untrusted(request.url) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
+          if (vault.saveError) return fail(vault.saveError);
+          return reply({ saved: Object.keys(request.fields) });
+        }
+        if (request.type === 'getFields') {
+          duringGetFields?.(tab, plain(request));
+          // The app's rule: a site it doesn't trust gets nothing unless all websites is on.
+          if ((vault.refuseUntrusted || untrusted(request.url)) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
+          if (vault.cancelOrigin === new URL(request.url).origin) return fail('You cancelled this field request.');
+          if (vault.getFieldsError) return fail(vault.getFieldsError);
+          // `fieldsReason`: why the app left saved answers out (#135), or a function of the request that says it for one site.
+          const reason = typeof vault.fieldsReason === 'function' ? vault.fieldsReason(plain(request)) : vault.fieldsReason;
+          return reply({ accessRevision: vault.accessRevision, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])),
+            ...(reason !== undefined ? { reason } : {}) });
+        }
+        fail('Unsupported bridge request.');
+      } })
     }
   };
   // A test may run the worker's clock itself: `clock.now` is what Date.now() returns. `ai` holds the
   // stand-ins for Chrome's Translator and LanguageDetector a test gives the worker; by default it has neither.
-  const code = source('background.js');
-  const fetch = async url => {
-    if (url !== 'chrome-extension://testextension/background.js' || !disk) throw new TypeError('Failed to fetch');
-    return { ok: true, text: async () => code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${disk}';`) };
-  };
-  // Starts the worker as Chrome does: at once, and again after Chrome stopped it (#142), when the new worker's listeners
-  // replace the old one's and its memory starts empty. Chrome's records (registrations, access, tabs) stay as they were.
-  const start = () => vm.runInNewContext(build ? code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${build}';`) : code,
-    { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, SecondHandTranslation: translation, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console, fetch,
-      ...ai, ...(clock ? { Date: { now: () => clock.now } } : {}) });
-  start();
-  const send = (message, sender) => new Promise(resolve => { if (!listener(message, sender, resolve)) resolve(undefined); });
+  // The worker starts as Chrome starts it: at once, and again after Chrome stopped it (#142), when the new worker's
+  // listeners replace the old one's and its memory starts empty. Chrome's records (registrations, access, tabs) stay as they were.
+  w.start({ chrome, globals: { SecondHandGeneric: generic, ...ai, ...(clock ? { Date: { now: () => clock.now } } : {}) }, build, disk });
   // Whether Chrome lets SecondHand read this address.
   function covered(address) {
     try { const origin = new URL(address).origin; return permissions.has(`${origin}/*`) || (origin === IOWA_ORIGIN ? iowa.held : permissions.has(ALL) && address.startsWith('https://')); }
@@ -314,9 +290,9 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
     reloads: () => reloads,
     // The person removes SecondHand's access in Chrome's settings (#142).
     revoke: origins => takeBack(origins),
-    restart: () => { listener = undefined; for (const key of Object.keys(events)) delete events[key]; start(); },
+    restart: w.restart,
     // The events the worker listens to, its own messages included.
-    listening: () => [...Object.keys(events), ...(listener ? ['message'] : [])].sort(),
+    listening: w.listening,
     nativeTypes: () => native.map(call => call.type),
     contentTypes: () => content.map(call => call.type),
     panel: message => send({ tabId: 7, ...message }, { id: 'testextension', url: PANEL_URL }),
