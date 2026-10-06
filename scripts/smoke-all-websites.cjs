@@ -25,6 +25,8 @@ const SEARCH = 'https://search.example.org/';
 const FORMS = 'https://forms.example.net/embed';
 const EMBEDDING = 'https://pantry.example.org/sign-up';
 const NEVER = 'https://never.example.net/apply';
+// #176: one everyday question and one sensitive one (the date of birth, in SENSITIVE_FIELDS in desktop/main.cjs).
+const DETAILS = 'https://pantry.example.org/details';
 // #98: the household questions the live QA (#89) found on a pantry form, plus one the fictional profile has no answer for.
 const HOUSEHOLD = 'https://pantry.example.org/household';
 const HOUSEHOLD_QUESTIONS = { young: '# of people in your household 0 - 17 yrs old', middle: '# of people in your household 18 - 59 yrs old', older: '# of people in your household 60 + yrs',
@@ -54,19 +56,23 @@ const pages = {
     '<label for="apt">Apartment number</label><input id="apt" name="apt"><button type="submit">Submit</button></form>'),
   [SEARCH]: formPage('Find a pantry', '<form role="search"><input type="search" name="q" aria-label="Search"><button>Search</button></form>'),
   [NEVER]: formPage('Never trusted', '<form><label for="first">First name</label><input id="first" name="first"><button type="submit">Submit</button></form>'),
+  [DETAILS]: formPage('Pantry sign-up: your details', '<form><label for="first">First name</label><input id="first" name="first">' +
+    '<label for="dob">Date of birth</label><input id="dob" name="dob" type="date"><button type="submit">Submit</button></form>'),
   [HOUSEHOLD]: formPage('Pantry order: household', `<form>${Object.entries(HOUSEHOLD_QUESTIONS).map(([id, label]) => `<label for="${id}">${label}</label><input id="${id}" name="${id}">`).join('')}` +
     '<button type="submit">Submit</button></form>')
 };
 
 // The desktop app as the worker sees it over native messaging, with Always allow on. It keeps its own
 // all-websites setting, as the real app does, and reports it in status. Asked for money on hand, or to save
-// an answer, it shows the prompt the app shows, naming the site the request names.
+// an answer, it shows the prompt the app shows, naming the site the request names. With `holds`, it plays the
+// app without Always allow (#176): Autofill's request gets those fields held back, and Fill sensitive details'
+// request (`sensitive: true`) gets the sensitive prompt, answered by the next of `answers` ('cancel' or 'allow').
 async function installDesktop(worker, profile) {
   await worker.evaluate(profile => {
-    globalThis.__desktop = { allSites: false, calls: [], saves: [], prompts: [], profile };
+    globalThis.__desktop = { allSites: false, calls: [], saves: [], prompts: [], profile, holds: [], answers: [] };
     nativeRequest = async (type, payload = {}) => {
       const desktop = globalThis.__desktop;
-      desktop.calls.push({ type, url: payload.url || '', fields: payload.fields || [] });
+      desktop.calls.push({ type, url: payload.url || '', fields: payload.fields || [], ...(payload.sensitive === true ? { sensitive: true } : {}) });
       if (type === 'status') return { unlocked: true, applicationCount: 0, accessRevision: 0, allSites: desktop.allSites, laya: { state: 'unavailable' } };
       if (type === 'trustAllSites') { desktop.allSites = true; return { allSites: true }; }
       if (type === 'untrustAllSites') { desktop.allSites = false; return { allSites: false }; }
@@ -75,8 +81,17 @@ async function installDesktop(worker, profile) {
       if (type === 'showApp') return { shown: true };
       if (type === 'warmLaya') return { state: 'unavailable' };
       if (type === 'suggestFields' || type === 'answerFields') throw Object.assign(new Error('Laya isn’t ready on this computer.'), { code: 'LAYA_NOT_READY' });
-      if (type === 'getFields' && payload.fields.includes('assetsOnHand')) desktop.prompts.push(`Fill sensitive details on ${new URL(payload.url).origin}?`);
-      if (type === 'getFields') return { accessRevision: 0, values: Object.fromEntries(payload.fields.filter(field => desktop.profile[field]).map(field => [field, desktop.profile[field]])) };
+      if (type === 'getFields' && payload.sensitive === true) {
+        desktop.prompts.push(`Fill sensitive details on ${new URL(payload.url).origin}?`);
+        const answer = desktop.answers.shift();
+        if (answer === 'cancel') throw new Error('You cancelled this field request.');
+        if (answer !== 'allow') throw new Error(`The all-websites smoke has no answer for this sensitive prompt: ${answer}`);
+      } else if (type === 'getFields' && payload.fields.includes('assetsOnHand')) desktop.prompts.push(`Fill sensitive details on ${new URL(payload.url).origin}?`);
+      if (type === 'getFields') {
+        const held = payload.sensitive === true ? [] : payload.fields.filter(field => desktop.holds.includes(field));
+        return { accessRevision: 0, values: Object.fromEntries(payload.fields.filter(field => desktop.profile[field] && !held.includes(field)).map(field => [field, desktop.profile[field]])),
+          ...(held.length ? { held } : {}) };
+      }
       if (type === 'recordProgress') return { recorded: true };
       // Save to My information (#98): the app's confirmation and save, as Allow.
       if (type === 'saveFields') {
@@ -254,6 +269,52 @@ async function main() {
     await settled();
     assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
     console.log('#98: a pantry form’s household questions filled from the fictional household list (0-17, 18-59, 60+, and the student’s name and grade); the guardian stayed blank; the typed apartment was saved to My information after the Save click.');
+
+    // #176: without Always allow, the app holds the date of birth back. One click fills the first name at once; the date of
+    // birth counts under need-you and waits in the side panel's list. Fill sensitive details asks the app for it alone:
+    // Cancel leaves the first name filled and the date listed, and Allow once fills it.
+    await worker.evaluate(() => { Object.assign(globalThis.__desktop, { holds: ['birthDate'], answers: ['cancel', 'allow'] }); globalThis.__desktop.prompts.length = 0; });
+    const heldCalls = async since => (await calls('getFields')).slice(since).map(call => ({ url: call.url, fields: call.fields, sensitive: call.sensitive === true }));
+    let since176 = (await calls('getFields')).length;
+    await page.goto(DETAILS, { waitUntil: 'domcontentloaded' });
+    const detailsWidget = await launcherFrame();
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+    await panel.click('#panel-autofill');
+    await expect(page.locator('#first')).toHaveValue(syntheticProfile.firstName, { timeout: 20000 });
+    await settled();
+    assert.equal(await page.locator('#dob').inputValue(), '', 'the date of birth waits');
+    assert.deepEqual(await heldCalls(since176), [{ url: DETAILS, fields: ['firstName', 'birthDate'], sensitive: false }], 'one request, as before');
+    await expect(detailsWidget.locator('#need-you')).toHaveText(en('widget.needYou', { count: 1 }), { timeout: 15000 });
+    await expect(detailsWidget.locator('#widget-text')).toHaveText(`${en('widget.filled', { count: 1 })} · ${en('widget.held', { count: 1 })}`);
+    await expect.poll(() => panel.visible('#held-section'), { timeout: 15000 }).toBe(true);
+    assert.equal(await panel.text('#held-list'), 'Date of birth');
+    assert.equal(await panel.text('#held-fill'), en('held.fill'));
+    const waiting = en('result.withHeld', { summary: { key: 'result.siteFilledNeedYou', params: { count: 1, needYou: 1 } }, count: 1 });
+    assert.equal(await panel.text('#status'), waiting);
+    assert.equal(await panel.visible('#save-section'), false, 'a held date of birth is saved: it is never offered to Save to My information');
+    assert.deepEqual(await worker.evaluate(() => globalThis.__desktop.prompts), [], 'nothing about it was asked yet');
+    await panel.screenshot(path.join(root, 'artifacts/held/side-panel-held.png'));
+    since176 = (await calls('getFields')).length;
+    await panel.click('#held-fill');
+    await expect.poll(() => panel.text('#status'), { timeout: 15000 }).toBe(en('worker.heldCancelled'));
+    assert.deepEqual(await heldCalls(since176), [{ url: DETAILS, fields: ['birthDate'], sensitive: true }], 'the held field alone');
+    assert.equal(await page.locator('#first').inputValue(), syntheticProfile.firstName, 'Cancel leaves what filled in place');
+    assert.equal(await page.locator('#dob').inputValue(), '');
+    assert.equal(await panel.visible('#held-section'), true, 'and keeps the date of birth listed');
+    assert.equal(await panel.text('#held-list'), 'Date of birth');
+    await panel.click('#held-fill');
+    await expect(page.locator('#dob')).toHaveValue(syntheticProfile.birthDate, { timeout: 20000 });
+    await expect.poll(() => panel.visible('#held-section'), { timeout: 15000 }).toBe(false);
+    await expect.poll(() => panel.text('#status'), { timeout: 15000 }).toBe(en('result.siteFilled', { count: 2 }));
+    await expect(detailsWidget.locator('#need-you')).toBeHidden({ timeout: 15000 });
+    await expect(detailsWidget.locator('#widget-text')).toHaveText(en('widget.filled', { count: 2 }));
+    assert.deepEqual(await worker.evaluate(() => globalThis.__desktop.prompts), ['Fill sensitive details on https://pantry.example.org?', 'Fill sensitive details on https://pantry.example.org?'],
+      'the sensitive prompt came only from the button, once for Cancel and once for Allow once');
+    await settled();
+    assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
+    await page.screenshot({ path: path.join(root, 'artifacts/held/details-filled.png') });
+    await worker.evaluate(() => { Object.assign(globalThis.__desktop, { holds: [], answers: [] }); globalThis.__desktop.prompts.length = 0; });
+    console.log('#176: without Always allow, one click filled the first name and held the date of birth; Fill sensitive details asked for it alone: Cancel kept it listed with the first name filled, and Allow once filled it.');
 
     // A page whose only input is a search box gets no card.
     since = await probe();
