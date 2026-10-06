@@ -200,7 +200,8 @@ async function main() {
     await expect(widget.locator('#widget-text')).toHaveText(`${en('widget.filled', { count: 1 })} · ${en('widget.aiUnavailable')}`, { timeout: 20000 });
     await expect(page.locator('#reach')).toHaveValue('');
     await expect(widget.locator('#need-you')).toHaveText(en('widget.needYou', { count: 1 }));
-    assert.deepEqual((await calls()).map(call => call.type), ['warmLaya', 'status', 'getFields', 'status'], 'one readiness check, then the same requests as before Laya');
+    assert.deepEqual((await calls()).map(call => call.type), ['warmLaya', 'status', 'status', 'getFields', 'status'],
+      'one readiness check, then the same requests as without Laya: custom-answer availability, then the one field release');
     widget = await open(HOUSEHOLD, 'off');
     await widget.locator('#autofill').click();
     await expect(widget.locator('#widget-text')).toHaveText(`${en('widget.filled', { count: 1 })} · ${en('widget.aiUnavailable')}`, { timeout: 20000 });
