@@ -2578,7 +2578,7 @@ test('the side panel lists the held questions by their own words with one Fill s
     [['f0:sh-2-0', 'Date of birth'], ['f0:sh-2-1', 'Social Security number']]);
   assert.equal(view.get('held-fill').textContent, 'Fill sensitive details');
   assert.equal(view.get('held-section').querySelectorAll('button').length, 1, 'one button for them all');
-  assert.equal(view.get('status').textContent, WAITING);
+  assert.equal(view.get('status').textContent, WAITING.replace('in the side panel', 'below'), 'the side panel’s own button is below the line');
   view.get('held-fill').click(); await tick();
   assert.equal(view.types().includes('ui:fillHeld'), false, 'only a trusted click');
   view.clickNow('held-fill');

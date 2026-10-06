@@ -549,8 +549,15 @@
     const STATUS = { complete: 'checklist.complete', missing: 'checklist.missing', optional: 'checklist.optional', manual: 'checklist.manual' };
     // An outdated worker ends the panel's work: its notice and Restart button stay, and nothing more is said or asked.
     let halted = false;
+    // A message the card and the side panel share, as the side panel says it: its own buttons are below the line.
+    const HERE = Object.freeze({ 'result.withHeld': 'result.withHeldBelow' });
+    function here(message) {
+      if (!message?.key) return message;
+      const params = Object.fromEntries(Object.entries(message.params || {}).map(([name, value]) => [name, value?.key ? here(value) : value]));
+      return { key: HERE[message.key] || message.key, params };
+    }
     // A message, or null for nothing to say.
-    const show = (message, error = false) => { if (halted) return; status = { message, error }; renderStatus(); };
+    const show = (message, error = false) => { if (halted) return; status = { message: here(message), error }; renderStatus(); };
     // A closed app is said once, by the desktop row and its Open SecondHand button, not again under Autofill.
     const reported = result => hasMessage(result) && result.state !== 'offline';
     function renderStatus() {

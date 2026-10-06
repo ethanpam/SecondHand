@@ -492,7 +492,7 @@ async function main() {
     await expect.poll(() => panel.visible('#held-section'), { timeout: 15000 }).toBe(true);
     assert.equal(await panel.text('#held-list'), 'Date of birth');
     assert.equal(await panel.text('#held-fill'), en('held.fill'));
-    const waiting = en('result.withHeld', { summary: { key: 'result.siteFilledNeedYou', params: { count: 1, needYou: 1 } }, count: 1 });
+    const waiting = en('result.withHeldBelow', { summary: { key: 'result.siteFilledNeedYou', params: { count: 1, needYou: 1 } }, count: 1 });
     assert.equal(await panel.text('#status'), waiting);
     assert.equal(await panel.visible('#save-section'), false, 'a held date of birth is saved: it is never offered to Save to My information');
     assert.deepEqual(await worker.evaluate(() => globalThis.__desktop.prompts), [], 'nothing about it was asked yet');
