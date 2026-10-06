@@ -95,11 +95,11 @@ SecondHand was built for **Hack Away Hunger**, the DSMHack / CharityHack 2026 ha
 ## Watch the film
 
 <p align="center">
-  <a href="docs/media/secondhand-film.mp4">
+  <a href="https://secondhand.ethanpam.workers.dev/media/secondhand-film.mp4">
     <img src="docs/media/film-poster.png" width="880" alt="Play the 46-second SecondHand film: a paper-cutout bear mascot waves beside the words SecondHand, A little help, A lot less typing, Free for Windows and Mac.">
   </a>
   <br>
-  <sub>A 46-second animated film about what SecondHand does. Click the picture to play it (MP4, 3 MB, with narration).</sub>
+  <sub>A 46-second animated film about what SecondHand does. Click the picture to play it in your browser (MP4, 3 MB, with narration).</sub>
 </p>
 
 ## How you use it
