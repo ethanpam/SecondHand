@@ -2173,6 +2173,21 @@ function livePage(t, html, { url = OTHER_URL, framesReply = { frames: false }, l
     cards: () => window.document.querySelectorAll('[data-secondhand-assistant]').length,
     tell(message) { for (const listener of listeners) listener(message, { id: extensionId }, () => {}); } };
 }
+// The errors Chrome would report as uncaught while `work` runs and the page settles. node:test fails a test on an
+// unhandled rejection, so its own listener steps aside meanwhile.
+async function uncaught(work) {
+  const runner = process.listeners('unhandledRejection');
+  const errors = [];
+  const heard = error => { errors.push(error); };
+  process.removeAllListeners('unhandledRejection');
+  process.on('unhandledRejection', heard);
+  try { await work(); await settle(); }
+  finally {
+    process.off('unhandledRejection', heard);
+    for (const listener of runner) process.on('unhandledRejection', listener);
+  }
+  return errors;
+}
 
 test('with all websites on, the card shows on a form page and stays hidden on a search-only page, a sign-in page, and a page without inputs', async t => {
   assert.equal(livePage(t, forms.plainPantry).cards(), 1);
@@ -2274,6 +2289,22 @@ test('the top page shows the card for an embedded form the worker tells it about
   page.request({ type: 'secondhand:generic:formFrames', helps: true }, { id: 'b'.repeat(32) });
   page.request({ type: 'secondhand:generic:formFrames', helps: false }, { id: 'b'.repeat(32) });
   assert.ok(page.host(), 'another extension changes nothing');
+});
+
+test('a form report the worker answers with an error is reported as uncaught, on the top page and from an embedded frame (#178)', async t => {
+  const reported = errors => errors.map(item => ({ message: item.message, messageKey: item.messageKey, messageParams: plain(item.messageParams) }));
+  const thrown = reply => ({ message: reply.error, messageKey: reply.errorKey, messageParams: reply.errorParams });
+  // The top page's report: the worker couldn't check the tab's frames, as when one answers in a way it can't trust.
+  const unchecked = { ok: false, error: strings.english('worker.frameUnsafe'), errorKey: 'worker.frameUnsafe', errorParams: {} };
+  let page, frame;
+  assert.deepEqual(reported(await uncaught(() => { page = livePage(t, forms.plainPantry, { framesReply: unchecked }); })), [thrown(unchecked)]);
+  assert.equal(page.cards(), 1, 'the page’s own form keeps its card');
+  // An embedded frame's report: the top page failed the worker's message about its card.
+  const refused = detailReply(PORT_CLOSED);
+  const form = '<form><label for="fname">First name</label><input id="fname"></form>';
+  assert.deepEqual(reported(await uncaught(() => { frame = livePage(t, form, { url: `${FRAME_ORIGIN}/form`, top: false, framesReply: refused }); })), [thrown(refused)]);
+  assert.deepEqual(reported(await uncaught(() => { frame.window.dispatchEvent(new frame.window.Event('pagehide')); })), [thrown(refused)], 'and as the frame goes');
+  assert.deepEqual(frame.reports, [{ type: 'secondhand:generic:form', helps: true }, { type: 'secondhand:generic:form', helps: false }]);
 });
 
 test('when SecondHand is turned off for the page, its card goes and the page answers nothing more', async t => {

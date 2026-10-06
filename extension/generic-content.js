@@ -103,6 +103,12 @@
     if (helps || framesHelp) ensurePanel();
     else panelHost?.remove();
   }
+  // Tells the worker whether this frame's page has a form. A report the worker couldn't count rejects with
+  // its error, which nothing here catches: Chrome reports it as uncaught (#178).
+  const report = helps => chrome.runtime.sendMessage({ type: 'secondhand:generic:form', helps }).then(reply => {
+    if (reply?.ok === false) throw Object.assign(new Error(reply.error), { messageKey: reply.errorKey, messageParams: reply.errorParams });
+    return reply;
+  });
   // The top page places its card; an embedded frame tells the worker, which tells the top page.
   function check() {
     checkTimer = null;
@@ -111,7 +117,7 @@
     const changed = now !== helps;
     helps = now;
     if (topFrame) placeCard();
-    else if (changed) chrome.runtime.sendMessage({ type: 'secondhand:generic:form', helps });
+    else if (changed) report(helps);
   }
   function stop() {
     clearTimeout(checkTimer);
@@ -121,7 +127,7 @@
 
   check();
   // A form embedded before this page loaded was reported to the worker already.
-  if (topFrame) chrome.runtime.sendMessage({ type: 'secondhand:generic:form', helps }).then(reply => { framesHelp = reply?.frames === true; placeCard(); });
+  if (topFrame) report(helps).then(reply => { framesHelp = reply?.frames === true; placeCard(); });
   document.addEventListener('DOMContentLoaded', check, { once: true });
   // Forms that load late or change: check again once the page settles. SecondHand's own card doesn't count.
   const observer = new MutationObserver(records => {
@@ -134,7 +140,7 @@
   if (topFrame) window.addEventListener('resize', () => { if (panelHost) fitHost(); });
   window.addEventListener('pagehide', () => {
     stop();
-    if (!topFrame && helps && !off) chrome.runtime.sendMessage({ type: 'secondhand:generic:form', helps: false });
+    if (!topFrame && helps && !off) report(false);
   }, { once: true });
 
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
