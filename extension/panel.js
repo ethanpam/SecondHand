@@ -225,6 +225,9 @@
       $('widget').classList.toggle('outdated', outdated && !direct);
       $('widget').classList.toggle('restartable', outdated && !direct && outdatedKey !== 'panel.reloadPage');
       $('pill').hidden = card && !pill;
+      // A hidden card's logo says the word that shows the card again; the logo of a page with nothing to fill opens the side panel.
+      $('pill').classList.toggle('labeled', pill);
+      $('pill-label').hidden = !pill;
       // A hidden card that waits for the reader marks its logo with a dot and says so in the logo's name.
       const needYou = ['done', 'waiting'].includes(result?.state) ? fieldKeys(result.needYou) : [];
       const waiting = pill && (needYou.length > 0 || ['waiting', 'error', 'locked', 'offline'].includes(result?.state) || Boolean(note));
@@ -272,7 +275,7 @@
       // The widget is as wide and as tall as what it shows, up to 272px by 166px (see panel.css). An outdated
       // worker is not asked for anything more; its notice fills the frame the widget already has.
       const room = message || !$('translate-offer').hidden;
-      const size = (outdated && !direct) || $('widget').hidden ? frame.size : measure(message);
+      const size = outdated && !direct ? frame.size : pill ? measurePill() : $('widget').hidden ? frame.size : measure(message);
       if (!outdated && (room !== frame.line || JSON.stringify(size) !== JSON.stringify(frame.size) || pill !== frame.pill)) fitFrame(room, size, pill);
       // The worker can't size an outdated card's frame, so the page's content script is asked directly, in the same terms.
       if (direct && (room !== frame.line || JSON.stringify(size) !== JSON.stringify(frame.size) || pill !== frame.pill)) {
@@ -303,6 +306,11 @@
       for (const property of ['max-width', 'width']) card.style.removeProperty(property);
       // A size it could not measure is left out.
       return Object.fromEntries(Object.entries(size).filter(([, value]) => value > 0));
+    }
+    // A hidden card's frame: as wide as its logo and the word beside it.
+    function measurePill() {
+      const width = Math.ceil($('pill').getBoundingClientRect().width);
+      return width > 0 ? { width } : {};
     }
     // The widget can't size its own frame: the worker asks this tab's content script for it.
     async function fitFrame(line, size, pill) {

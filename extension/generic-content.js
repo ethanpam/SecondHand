@@ -28,17 +28,19 @@
   const SIZES = ['width', 'height', 'narrowWidth', 'narrowHeight'];
   let line = false; // the widget shows a line to read, above its row
   let card = {}; // the widget's measured size; empty until it measures
-  let pill = false; // the reader hid the widget: its frame is the logo alone
+  let pill = false; // the reader hid the widget: its frame is the logo and the word that shows it again
   // The frame is as wide and as tall as the widget measured itself: 46px for its row alone, up to 166px with
   // all it can hold. A page under 640px wide keeps the widget as narrow as its buttons, or the least wider
   // that shows its whole line, and gives the line more rows instead, so the widget covers little more of the
   // page than it does without a line. A widget the reader
-  // hid is the round logo alone.
+  // hid is its logo and the word that shows it again, as wide as the widget measured them (the round logo alone
+  // when it gave no width).
   function fitHost() {
     const size = line && card.narrowWidth && innerWidth < 640 ? { width: card.narrowWidth, height: card.narrowHeight } : card;
+    const labeled = pill && fits(card.width);
     panelHost.setAttribute('data-secondhand-size', pill ? 'pill' : 'full');
-    panelHost.style.setProperty('border-radius', pill ? '50%' : '12px', 'important');
-    panelHost.style.setProperty('width', pill ? '46px' : frameWidth(size.width), 'important');
+    panelHost.style.setProperty('border-radius', pill ? (labeled ? '23px' : '50%') : '12px', 'important');
+    panelHost.style.setProperty('width', pill ? (labeled ? frameWidth(card.width) : '46px') : frameWidth(size.width), 'important');
     panelHost.style.setProperty('height', pill ? '46px' : `${size.height || (line ? 86 : 46)}px`, 'important');
   }
 

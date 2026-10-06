@@ -1842,23 +1842,28 @@ test('an outdated site card asks the page’s content script directly for its fr
   const post = (data, { source = frame.contentWindow, origin = `chrome-extension://${extensionId}` } = {}) =>
     page.window.dispatchEvent(new page.window.MessageEvent('message', { data, source, origin }));
   page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 95 });
-  const hidden = { type: 'secondhand:cardSize', line: true, width: 254, height: 95, pill: true };
+  const hidden = { type: 'secondhand:cardSize', line: true, width: 92, pill: true };
   post(hidden, { source: page.window });
   post(hidden, { origin: new URL(SITE_URL).origin });
   post({ ...hidden, pill: 'yes' });
   post({ type: 'secondhand:cardSize', line: true, height: 167 });
   assert.equal(host.getAttribute('data-secondhand-size'), 'full');
   post(hidden);
-  assert.deepEqual([host.style.width, host.style.height, host.style.borderRadius, host.getAttribute('data-secondhand-size')], ['46px', '46px', '50%', 'pill']);
+  assert.match(host.style.width, /^min\(92px/, 'as wide as the logo and the word beside it');
+  assert.deepEqual([host.style.height, host.style.borderRadius, host.getAttribute('data-secondhand-size')], ['46px', '23px', 'pill']);
   post({ type: 'secondhand:cardSize', line: true, width: 254, height: 118 });
   assert.deepEqual([host.style.height, host.getAttribute('data-secondhand-size')], ['118px', 'full']);
 });
 
-test('the site widget the reader hid is the round logo alone, until the widget asks for its card back', t => {
+test('the site widget the reader hid is its logo and the word that shows it again, until the widget asks for its card back', t => {
   const page = siteContent(t);
   const host = page.host();
-  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 95, pill: true })), { sized: true });
-  assert.deepEqual([host.style.width, host.style.height, host.style.borderRadius, host.getAttribute('data-secondhand-size')], ['46px', '46px', '50%', 'pill']);
+  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: true, width: 92, pill: true })), { sized: true });
+  assert.match(host.style.width, /^min\(92px/);
+  assert.deepEqual([host.style.height, host.style.borderRadius, host.getAttribute('data-secondhand-size')], ['46px', '23px', 'pill']);
+  // A widget that gives no width is the round logo alone.
+  page.request({ type: 'secondhand:widgetSize', line: true, pill: true });
+  assert.deepEqual([host.style.width, host.style.height, host.style.borderRadius], ['46px', '46px', '50%']);
   page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 95 });
   assert.match(host.style.width, /^min\(254px/);
   assert.deepEqual([host.style.height, host.style.borderRadius, host.getAttribute('data-secondhand-size')], ['95px', '12px', 'full']);

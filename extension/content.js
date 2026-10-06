@@ -15,7 +15,7 @@
   let messageRow = false; // the widget shows a line to read above its row
   let card = {}; // the widget's measured size; empty until it measures
   let full = false; // the page gets the full widget, not the pill
-  let cardHidden = false; // the reader hid the widget: its frame is the logo alone
+  let cardHidden = false; // the reader hid the widget: its frame is the logo and the word that shows it again
   const strings = value => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
   // The widget's frame is as wide as the widget measured itself, never past 272px or the screen.
   const fits = width => Number.isInteger(width) && width > 0 && width <= 1000;
@@ -51,8 +51,10 @@
   // page than it does without a line.
   function fitHost() {
     const size = messageRow && card.narrowWidth && innerWidth < 640 ? { width: card.narrowWidth, height: card.narrowHeight } : card;
-    panelHost.style.setProperty('border-radius', full ? '12px' : '50%', 'important');
-    panelHost.style.setProperty('width', full ? frameWidth(size.width) : '46px', 'important');
+    // A card the reader hid is its logo and the word that shows it again, as wide as the card measured them.
+    const labeled = !full && cardHidden && fits(card.width);
+    panelHost.style.setProperty('border-radius', full ? '12px' : labeled ? '23px' : '50%', 'important');
+    panelHost.style.setProperty('width', full ? frameWidth(size.width) : labeled ? frameWidth(card.width) : '46px', 'important');
     panelHost.style.setProperty('height', full ? `${size.height || (messageRow ? 86 : 46)}px` : '46px', 'important');
   }
 

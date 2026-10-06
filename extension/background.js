@@ -1626,7 +1626,7 @@ const CARD_SIZES = ['width', 'height', 'narrowWidth', 'narrowHeight'];
 const cardSize = message => CARD_SIZES.every(key => message[key] === undefined || (/height$/i.test(key) ? cardHeight : cardWidth)(message[key]));
 async function widgetSize(tabId, line, message) {
   const size = Object.fromEntries(CARD_SIZES.filter(key => message[key] !== undefined).map(key => [key, message[key]]));
-  // `pill` is there only when the reader hid the widget: the frame is then the logo alone.
+  // `pill` is there only when the reader hid the widget: the frame is then its logo and the word that shows it again.
   const reply = await chrome.tabs.sendMessage(tabId, { type: 'secondhand:widgetSize', line, ...size, ...(message.pill === true ? { pill: true } : {}) }, { frameId: 0 });
   if (reply?.sized !== true) throw fault('worker.requestFailed');
   return { sized: true };

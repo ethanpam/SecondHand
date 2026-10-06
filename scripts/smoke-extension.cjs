@@ -609,7 +609,7 @@ async function main() {
     console.log(`Widget: on Iowa pages SecondHand doesn’t fill, what Autofill will do and then the whole next step show in ${strings.LANGUAGES.join(', ')}, in a frame no larger than 272 by 166, and Arabic reads right to left.`);
     await (await launcherFrame()).evaluate(() => globalThis.SecondHandStrings.setLanguage('en'));
 
-    // The keyboard can hide the widget, down to the round logo in the page's corner, and bring it back from there.
+    // The keyboard can hide the widget, down to its logo and the word Show in the page's corner, and bring it back from there.
     widget = await startFixture();
     await widget.locator('#autofill').focus();
     await page.keyboard.press('Tab');
@@ -617,8 +617,9 @@ async function main() {
     await page.keyboard.press('Enter');
     await expect(widget.locator('#pill')).toBeFocused();
     await expect(widget.locator('#autofill')).toBeHidden();
-    await expect.poll(async () => { const box = await host.boundingBox(); return `${box.width} by ${box.height}`; }, { timeout: 10000 }).toBe('46 by 46');
-    assert.equal(await host.evaluate(element => element.style.borderRadius), '50%');
+    await expect.poll(async () => { const box = await host.boundingBox(); return box.height === 46 && box.width > 46 && box.width < 140; }, { timeout: 10000 }).toBe(true);
+    assert.equal(await host.evaluate(element => element.style.borderRadius), '23px');
+    await expect(widget.locator('#pill-label')).toHaveText('Show');
     // The logo fills its round frame, so the keyboard's ring is drawn inside the circle, where it shows.
     await expect(widget.locator('#pill:focus-visible')).toBeVisible();
     const ring = await widget.evaluate(() => { const style = getComputedStyle(document.getElementById('pill')); return [style.outlineStyle, style.outlineWidth, style.outlineOffset]; });

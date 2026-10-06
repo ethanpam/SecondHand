@@ -946,8 +946,8 @@ test('the widget can be hidden to its logo and shown again from it, by the reade
   const session = new Map();
   const view = await panel(t, { launcher: true, storage, session });
   const sizes = () => plainRequests(view.requests.filter(request => request.type === 'ui:widgetSize'));
-  assert.equal(view.get('hide').getAttribute('aria-label'), EN['widget.hideTitle']);
-  assert.equal(view.get('hide').title, EN['widget.hideTitle']);
+  assert.equal(view.get('hide').textContent, 'Hide', 'a word, not a sign');
+  assert.equal(view.get('hide').title, 'Hide this card. Hiding doesn’t stop Autofill.');
   view.get('hide').click(); await tick();
   assert.equal(view.get('widget').hidden, false, 'a click the page made up hides nothing');
   await view.userClick('hide');
@@ -955,6 +955,9 @@ test('the widget can be hidden to its logo and shown again from it, by the reade
   assert.equal(view.get('pill').hidden, false);
   assert.equal(view.get('pill').title, EN['widget.showTitle']);
   assert.equal(view.get('pill').getAttribute('aria-label'), EN['widget.showTitle']);
+  assert.equal(view.get('pill-label').hidden, false);
+  assert.equal(view.get('pill-label').textContent, 'Show', 'the logo says the word that shows the card again');
+  assert.equal(view.get('pill').classList.contains('labeled'), true);
   assert.equal(view.window.document.activeElement, view.get('pill'), 'the keyboard stays on the control that brings it back');
   assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: true, pill: true }, 'the frame is asked to be the logo alone');
   // It stays hidden while the page is checked again, and while Autofill runs elsewhere.
@@ -996,7 +999,7 @@ test('the widget can be hidden to its logo and shown again from it, by the reade
   // The link to what is left says what it does.
   assert.equal(next.get('need-you').title, 'Go to the next question left, in the form');
   assert.equal(next.get('details').getAttribute('aria-label'), 'Open SecondHand’s side panel');
-  assert.equal(next.get('hide').getAttribute('aria-label'), 'Hide SecondHand’s card');
+  assert.equal(next.get('hide').textContent, 'Hide');
   // Another site's widget hides the same way.
   const site = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true } });
   await site.userClick('hide');
@@ -2206,7 +2209,7 @@ test('an outdated card asks the Iowa page’s content script directly for its fr
   const post = (data, { source = frame.contentWindow, origin = `chrome-extension://${extensionId}` } = {}) =>
     page.window.dispatchEvent(new page.window.MessageEvent('message', { data, source, origin }));
   page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 95 });
-  const hidden = { type: 'secondhand:cardSize', line: true, width: 254, height: 95, pill: true };
+  const hidden = { type: 'secondhand:cardSize', line: true, width: 92, pill: true };
   // The page's own scripts, another origin, and a size the worker would refuse change nothing.
   post(hidden, { source: page.window });
   post(hidden, { origin: 'https://hhsservices.iowa.gov' });
@@ -2215,20 +2218,25 @@ test('an outdated card asks the Iowa page’s content script directly for its fr
   post({ ...hidden, type: 'secondhand:widgetSize' });
   assert.deepEqual([host.style.height, host.getAttribute('data-secondhand-size')], ['95px', 'full']);
   post(hidden);
-  assert.deepEqual([host.style.width, host.style.height, host.style.borderRadius, host.getAttribute('data-secondhand-size')], ['46px', '46px', '50%', 'pill']);
+  assert.match(host.style.width, /^min\(92px/, 'as wide as the logo and the word beside it');
+  assert.deepEqual([host.style.height, host.style.borderRadius, host.getAttribute('data-secondhand-size')], ['46px', '23px', 'pill']);
   // The card shown again, as tall as its notice needs.
   post({ type: 'secondhand:cardSize', line: true, width: 254, height: 118 });
   assert.deepEqual([host.style.height, host.getAttribute('data-secondhand-size')], ['118px', 'full']);
 });
 
-test('the Iowa widget the reader hid is the round logo alone, until the widget asks for its card back', t => {
+test('the Iowa widget the reader hid is its logo and the word that shows it again, until the widget asks for its card back', t => {
   const page = content(t);
   const host = page.host();
   page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 95 });
-  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 95, pill: true })), { sized: true });
-  assert.deepEqual([host.style.width, host.style.height, host.style.borderRadius, host.getAttribute('data-secondhand-size')], ['46px', '46px', '50%', 'pill']);
+  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: true, width: 92, pill: true })), { sized: true });
+  assert.match(host.style.width, /^min\(92px/);
+  assert.deepEqual([host.style.height, host.style.borderRadius, host.getAttribute('data-secondhand-size')], ['46px', '23px', 'pill']);
   page.window.dispatchEvent(new page.window.Event('popstate'));
-  assert.equal(host.style.width, '46px', 'it stays hidden while this page stays');
+  assert.match(host.style.width, /^min\(92px/, 'it stays hidden while this page stays');
+  // A widget that gives no width is the round logo alone.
+  page.request({ type: 'secondhand:widgetSize', line: true, pill: true });
+  assert.deepEqual([host.style.width, host.style.height, host.style.borderRadius], ['46px', '46px', '50%']);
   page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 95 });
   assert.match(host.style.width, /^min\(254px/);
   assert.deepEqual([host.style.height, host.style.borderRadius, host.getAttribute('data-secondhand-size')], ['95px', '12px', 'full']);
