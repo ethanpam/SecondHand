@@ -65,7 +65,8 @@ qa_resources += [ref("SafariExtension/Resources/" + name, "sourcecode.javascript
 qa_resources += [ref("../extension/" + name, "sourcecode.javascript") for name in
                  ["iowa-adapter.js", "address-policy.js"]]
 
-profile_import_resources = [ref("../shared/" + name + ".cjs", "sourcecode.javascript") for name in ["household", "schema", "document-parser"]]
+profile_import_resources = [ref("../shared/" + name + ".cjs", "sourcecode.javascript") for name in
+                            ["household", "schema", "facts", "document-layout", "document-w2", "document-ssa1099", "document-1099nec", "document-parser"]]
 
 products = {}
 for name, ext, kind in [("SecondHand", "app", "wrapper.application"), ("SafariExtension", "appex", "wrapper.app-extension"),
