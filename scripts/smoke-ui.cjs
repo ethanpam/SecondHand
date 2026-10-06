@@ -574,6 +574,21 @@ async function main() {
     await expect(page.locator('#setup-dialog')).not.toBeVisible();
     await expect(page.locator('#setup-resume-text')).toHaveText('Finish setting up: 0 of 6 steps');
     assert.deepEqual((await page.evaluate(() => window.secondHand.getData())).profile, {});
+    // #180: with no household list saved, Overview offers Add your household. The extension's Add your household, through the
+    // app's real bridge, opens My information at Your household. Dismiss keeps the note away, and the settings keep it so.
+    await expect(page.locator('#household-note')).toBeVisible();
+    await expect(page.locator('#household-note-text')).toHaveText('Add your household: SecondHand can then answer questions like “# of children 0–5”.');
+    await captureDiagnostic(page, 'household/overview-note.png');
+    const opened = await relayRequest(userData, 'a'.repeat(32), { id: crypto.randomUUID(), type: 'openHousehold' });
+    assert.deepEqual([opened.ok, opened.data], [true, { shown: true }], opened.error);
+    await expect(page.locator('#view-profile')).toBeVisible();
+    await expect(page.locator('#household-heading')).toBeFocused();
+    await captureDiagnostic(page, 'household/opened-from-chrome.png');
+    await page.locator('.nav-item[data-view="overview"]').click();
+    await page.locator('#household-note-dismiss').click();
+    await expect(page.locator('#household-note')).toBeHidden();
+    assert.equal(JSON.parse(await fs.readFile(path.join(userData, 'settings.json'), 'utf8')).householdNoteDismissed, true);
+    console.log('#180: with no household list saved, Overview offered Add your household; openHousehold through the bridge opened My information at Your household; Dismiss kept the note away and was saved.');
     assert.deepEqual(errors, []);
     console.log('Electron UI smoke passed: guided setup offered after the recovery key, saved step by step with a household list, the student status and the answers from lists, finished later from Overview and readable at 200% zoom; Laya downloads on its own on a new install and stays off once turned off, create, save full applicant choices, Iowa’s questions about you and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence, Touch ID on (test hook) with a lock-screen lock, a Touch ID unlock, and Touch ID ready at once after a restart, recovery key password reset that keeps Touch ID, clear Iowa’s questions, start over (which removes Touch ID) and its setup offer.');
   } catch (error) {
