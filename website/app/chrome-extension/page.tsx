@@ -105,9 +105,9 @@ export default function ChromeExtensionGuide() {
           <Image
             className="guide-media guide-card"
             src="/guide/iowa-card.png"
-            alt="The SecondHand card on Iowa’s page, with the SecondHand logo and an Autofill button."
-            width={374}
-            height={208}
+            alt="The SecondHand card on Iowa’s page. It says the SecondHand app asks first, then fills each page and goes to the next by itself, picking Iowa’s first suggested home address, and never signs or submits. Below are the SecondHand logo, an Autofill button and a button to hide the card."
+            width={652}
+            height={344}
             unoptimized
           />
           <p>
