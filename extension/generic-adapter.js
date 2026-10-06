@@ -574,18 +574,22 @@
   // the box may not be read; { empty } when it holds no answer; { unreadable } when its answer doesn't fit the field;
   // { repeated } when the page asks for the field in more than one box.
   const DATE_TYPED = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/;
-  // The order a typed date is in (#142): as its box asks for it ("MM/DD/YYYY", "dd/mm/aaaa", "jj/mm/aaaa") in its labels,
-  // placeholder, description or title, or as its numbers allow only one way. Null when it can't be told: never guessed.
-  const MONTH_FIRST = /\bmm? dd? (yyyy|yy|aaaa|aa)\b/;
-  const DAY_FIRST = /\b(dd?|jj?) mm? (yyyy|yy|aaaa|aa)\b/;
+  // The orders a date box asks for ("MM/DD/YYYY", "dd/mm/aaaa", "jj/mm/aaaa", "YYYY-MM-DD") in its labels, placeholder,
+  // description or title, each read on its own. Save reads a typed date in it (#142), and a fill writes the saved date in it (#156).
+  const DATE_ORDERS = Object.freeze({ month: /\bmm? dd? (yyyy|yy|aaaa|aa)\b/, day: /\b(dd?|jj?) mm? (yyyy|yy|aaaa|aa)\b/, year: /\b(yyyy|aaaa) mm? dd?\b/ });
+  function dateOrders(entry) {
+    const element = entry.elements[0];
+    const hints = [...entry.labels, idsText(element.ownerDocument, element.getAttribute('aria-describedby')), element.getAttribute('title') || ''].map(normal);
+    return new Set(Object.keys(DATE_ORDERS).filter(order => hints.some(hint => DATE_ORDERS[order].test(hint))));
+  }
+  // The order a typed date is in: as its box asks for it, or as its numbers allow only one way. Null when it can't be told: never guessed.
   function typedDate(text, entry) {
     if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
     const typed = DATE_TYPED.exec(text);
     if (!typed) return null;
-    const element = entry.elements[0];
-    const words = normal([...entry.labels, idsText(element.ownerDocument, element.getAttribute('aria-describedby')), element.getAttribute('title') || ''].join(' '));
+    const orders = dateOrders(entry);
     const [first, second] = [Number(typed[1]), Number(typed[2])];
-    const monthFirst = MONTH_FIRST.test(words), dayFirst = DAY_FIRST.test(words);
+    const monthFirst = orders.has('month'), dayFirst = orders.has('day');
     let leads = null;
     if (monthFirst !== dayFirst) leads = monthFirst ? 'month' : 'day';
     else if (first === second || (first <= 12 && second > 12)) leads = 'month';
@@ -719,11 +723,17 @@
     }
     return options.findIndex(option => normal(option) === wanted);
   }
-  function formatted(key, value, element) {
+  // A saved value as the box takes it. Null when the box asks for more than one date order: which it wants can't be told.
+  function formatted(key, value, entry) {
+    const element = entry.elements[0];
     const text = String(value);
     if (key === 'birthDate') {
+      if (element.type === 'date') return text;
       const [year, month, day] = text.split('-');
-      return element.type === 'date' ? text : `${month}/${day}/${year}`;
+      // In the order the box asks for (#156); month first when it doesn't say, as US forms write it.
+      const orders = dateOrders(entry);
+      if (orders.size > 1) return null;
+      return orders.has('year') ? `${year}-${month}-${day}` : orders.has('day') ? `${day}/${month}/${year}` : `${month}/${day}/${year}`;
     }
     if (key === 'phone') {
       const digits = text.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
@@ -735,8 +745,8 @@
   function fillEntry(entry, key, value) {
     const first = entry.elements[0];
     if (entry.kind === 'input' || entry.kind === 'textarea') {
-      const text = formatted(key, value, first);
-      if (first.maxLength > 0 && text.length > first.maxLength) return false;
+      const text = formatted(key, value, entry);
+      if (text === null || (first.maxLength > 0 && text.length > first.maxLength)) return false;
       return setValue(first, text);
     }
     if (entry.kind === 'select') {
