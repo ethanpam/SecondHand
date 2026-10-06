@@ -231,6 +231,8 @@
       // A hidden card that waits for the reader marks its logo with a dot and says so in the logo's name.
       const needYou = ['done', 'waiting'].includes(result?.state) ? fieldKeys(result.needYou) : [];
       const waiting = pill && (needYou.length > 0 || ['waiting', 'error', 'locked', 'offline'].includes(result?.state) || Boolean(note));
+      // It says so in words too, not only with the dot.
+      $('pill-label').textContent = t(waiting ? 'widget.showWaiting' : 'widget.show');
       $('pill').classList.toggle('waiting', waiting);
       // One name each, said once: the round logo's from its tooltip; a hidden card's from a label that starts with the
       // word it shows, and no tooltip to repeat it.
