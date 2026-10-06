@@ -29,6 +29,8 @@ contextBridge.exposeInMainWorld('secondHand', Object.freeze({
   getData: () => invoke('getData'),
   readDocument: requestId => invoke('readDocument', requestId),
   cancelDocumentRead: requestId => invoke('cancelDocumentRead', requestId),
+  reviewFields: request => invoke('reviewFields', request),
+  cancelFieldReview: () => invoke('cancelFieldReview'),
   onDocumentProgress: callback => {
     if (typeof callback !== 'function') throw new TypeError('A callback is required.');
     const listener = (_event, value) => {

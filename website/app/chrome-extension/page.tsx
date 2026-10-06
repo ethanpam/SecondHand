@@ -105,14 +105,14 @@ export default function ChromeExtensionGuide() {
           <Image
             className="guide-media guide-card"
             src="/guide/iowa-card.png"
-            alt="The SecondHand card on Iowa’s page, with an Autofill button and a Details link."
+            alt="The SecondHand card on Iowa’s page, with the SecondHand logo and an Autofill button."
             width={624}
             height={228}
             unoptimized
           />
           <p>
-            Click <strong>Autofill</strong> to fill the details you saved, or{' '}
-            <strong>Details</strong> to open the checklist in Chrome’s side
+            Click <strong>Autofill</strong> to fill the details you saved, or
+            click the SecondHand logo to open the checklist in Chrome’s side
             panel. SecondHand asks the first time before it shares your details,
             and you review and submit the application yourself.
           </p>
@@ -125,10 +125,22 @@ export default function ChromeExtensionGuide() {
         <section aria-labelledby="after-update">
           <h2 id="after-update">After you update SecondHand</h2>
           <p>
-            Open the app’s <strong>Chrome extension</strong> page and click{' '}
+            Install the new app and open it. If it comes with a newer extension,
+            the next time you open the side panel or click{' '}
+            <strong>Autofill</strong>, SecondHand refreshes the extension files
+            and the extension reloads itself. If an Iowa page was open,
+            SecondHand asks you to reload it; save your work first. Keep{' '}
+            <strong>Developer mode</strong> on at{' '}
+            <code>chrome://extensions</code>, because Chrome turns SecondHand
+            off without it. Your saved information stays in the app.
+          </p>
+          <p>
+            If you installed version 0.4.0 or earlier, its extension can’t
+            update itself, so do this once by hand. Open the app’s{' '}
+            <strong>Chrome extension</strong> page and click{' '}
             <strong>Refresh extension files</strong>. Then click the reload icon
-            on SecondHand’s card at <code>chrome://extensions</code>. Your saved
-            information stays in the app.
+            on SecondHand’s card at <code>chrome://extensions</code>, and reload
+            your Iowa tab. Later updates are automatic.
           </p>
         </section>
       </main>

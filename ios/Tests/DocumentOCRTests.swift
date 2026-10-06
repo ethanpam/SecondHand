@@ -64,9 +64,13 @@ final class DocumentOCRTests: XCTestCase {
             let analysis = try ProfileDocumentParser.analyze(result)
             XCTAssertEqual(analysis.type, type, name)
             let values = Dictionary(uniqueKeysWithValues: analysis.fields.compactMap { field in field.profileKey.map { ($0, field.value) } })
-            XCTAssertEqual(values["firstName"], "ALEXANDER", name)
-            XCTAssertEqual(values["lastName"], "SAMPLE", name)
-            XCTAssertEqual(values["addressLine1"], "1847 TEST DATA AVE", name)
+            // These samples combine the full name in one cell. The parser
+            // does not guess the first/last name boundaries for an applicant.
+            XCTAssertNil(values["firstName"], name)
+            XCTAssertNil(values["middleName"], name)
+            XCTAssertNil(values["lastName"], name)
+            XCTAssertEqual(values["addressLine1"], type == "w2" ? "1847 TEST DATA AVE, APT 4B" : "1847 TEST DATA AVE", name)
+            XCTAssertEqual(values["addressLine2"], type == "w2" ? nil : "APT 4B", name)
             XCTAssertEqual(values["city"], "DES MOINES", name)
             XCTAssertEqual(values["state"], "IA", name)
             XCTAssertEqual(values["zip"], "50309", name)

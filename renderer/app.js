@@ -28,8 +28,11 @@
   let documentRequestId = null;
   let documentBusy = false;
   let documentFields = [];
+  let documentReviewFields = [];
   let stopDocumentProgress = null;
   const documentProfileKeys = new Set(['firstName', 'middleName', 'lastName', 'ssn', 'addressLine1', 'addressLine2', 'city', 'state', 'zip']);
+  const fieldReview = { profile: { revision: 0, busy: false, descriptions: [] }, document: { revision: 0, busy: false, descriptions: [] } };
+  const fieldReviewLabels = { empty: 'Blank', 'format-passed': 'Format checks passed', 'needs-review': 'Needs review', 'check-source': 'Check source' };
   let layaPoll;
   const LAYA_POLL_MS = 500;
   // The household list (#98): each person who lives with the applicant, the applicant's own row first.
@@ -144,6 +147,7 @@
 
   function clearSensitiveUI() {
     vaultGeneration++;
+    clearFieldReviews({ resetOptIn: true });
     offerSetup = false;
     setupProgress = null;
     closeSetup();
@@ -316,6 +320,7 @@
       if (!window.confirm('Leave without saving your profile changes?')) return;
       fillProfile();
     }
+    if (view !== currentView) clearFieldReviews({ resetOptIn: true });
     if (view !== 'profile') closeSetup();
     if (currentView === 'documents' && view !== 'documents') clearDocumentReview();
     currentView = view;
@@ -333,6 +338,7 @@
   const profileControl = (field) => $('profile-form').elements.namedItem(field);
 
   function fillProfile() {
+    clearFieldReviews();
     profileRevision++;
     manualCounts = null;
     for (const key of profileFields) profileControl(key).value = typeof data.profile[key] === 'string' ? data.profile[key] : '';
@@ -416,6 +422,7 @@
     refreshMembers();
   }
   function refreshMembers() {
+    clearFieldReviews();
     const rows = memberRows();
     rows.forEach((row, index) => {
       const self = row.dataset.self === 'true';
@@ -490,6 +497,7 @@
 
   // The guided setup on screen: one step's cards, its title, and Back, Finish later, and Save and continue.
   function renderSetupStep() {
+    clearFieldReviews();
     const active = setupStep !== null;
     // Each section of My information belongs to one step; a card shows while any of its sections does.
     for (const part of $('profile-form').querySelectorAll('[data-setup-step]')) part.hidden = active && Number(part.dataset.setupStep) !== setupStep + 1;
@@ -546,10 +554,12 @@
   // a field the applicant is editing keeps their unsaved edit.
   async function profileChangedElsewhere(fields) {
     if (!vaultStatus.unlocked) return;
+    clearFieldReviews();
     const generation = vaultGeneration;
     try {
       const latest = await api.getData();
       if (generation !== vaultGeneration || !vaultStatus.unlocked) return;
+      clearFieldReviews();
       const before = data.profile;
       data = { ...data, profile: latest.profile || {} };
       if (!profileDirty) fillProfile();
@@ -561,6 +571,122 @@
     } catch (error) { if (generation === vaultGeneration) toast(error.message || 'Unable to show the answer you saved from Chrome.', true); }
   }
 
+  function fieldReviewControls() {
+    for (const scope of ['profile', 'document']) {
+      const button = $(`check-${scope}-fields`);
+      button.disabled = !api?.reviewFields || !vaultStatus.unlocked || fieldReview[scope].busy || (scope === 'document' && (documentBusy || !documentReviewFields.length));
+      button.setAttribute('aria-busy', String(fieldReview[scope].busy));
+      const optIn = $(`${scope}-review-laya`);
+      if (optIn) optIn.disabled = !api?.reviewFields;
+    }
+  }
+
+  // Review results describe one exact draft, never a saved validation flag.
+  // Invalidation also cancels model work, but correctness never depends on cancellation arriving first.
+  function clearFieldReviews({ resetOptIn = false, scopes = ['profile', 'document'] } = {}) {
+    const cancel = scopes.some(scope => fieldReview[scope].busy);
+    for (const scope of scopes) {
+      const review = fieldReview[scope];
+      review.revision++;
+      review.busy = false;
+      for (const { control, id } of review.descriptions) {
+        const remaining = (control.getAttribute('aria-describedby') || '').split(/\s+/).filter(value => value && value !== id);
+        if (remaining.length) control.setAttribute('aria-describedby', remaining.join(' ')); else control.removeAttribute('aria-describedby');
+      }
+      review.descriptions = [];
+      document.querySelectorAll(`.field-review-result[data-review-scope="${scope}"]`).forEach(node => node.remove());
+      $(`${scope}-review-other`).replaceChildren();
+      $(`${scope}-review-summary`).textContent = '';
+      $(`${scope}-review-laya-status`).textContent = '';
+      if (resetOptIn && $(`${scope}-review-laya`)) $(`${scope}-review-laya`).checked = false;
+    }
+    fieldReviewControls();
+    if (cancel && api?.cancelFieldReview) {
+      try { Promise.resolve(api.cancelFieldReview()).catch(() => {}); } catch { /* Old results still fail the revision guard. */ }
+    }
+  }
+
+  const reviewProfileDraft = () => ({ ...Object.fromEntries(profileFields.map(key => [key, String(profileControl(key).value || '')])), householdMembers: collectMembers() });
+  const reviewDocumentCandidates = () => documentReviewFields.map(field => ({ ...field.metadata, value: field.input ? field.input.value : field.value }));
+
+  function profileReviewTarget(key) {
+    let controls = [], container;
+    if (profileFields.includes(key)) {
+      const control = profileControl(key);
+      controls = control instanceof window.RadioNodeList ? Array.from(control) : [control];
+      container = controls[0]?.closest('.choice-question, .field');
+    } else if (key === 'householdMembers') container = $('household-members');
+    else {
+      const match = /^householdMembers\.(\d+)\.(firstName|lastName|birthDate|relationship|student|grade)$/.exec(key);
+      if (match) {
+        const row = memberRows()[Number(match[1])];
+        const control = row?.querySelector(`[data-member-field="${match[2]}"]`);
+        controls = control ? [control] : [];
+        container = control?.closest('.field') || row;
+      }
+    }
+    return { container: container || $('profile-review-other'), controls };
+  }
+
+  function renderFieldReview(scope, response) {
+    const results = Array.isArray(response?.[scope]) ? response[scope].slice(0, 250) : [];
+    let count = 0, needsReview = 0, checkSource = 0;
+    for (const [index, result] of results.entries()) {
+      if (!result || !Object.hasOwn(fieldReviewLabels, result.status) || typeof result.key !== 'string') continue;
+      let target;
+      if (scope === 'profile') target = profileReviewTarget(result.key);
+      else {
+        const field = documentReviewFields[index];
+        if (!field || (field.metadata.id && field.metadata.id !== result.id)) continue;
+        target = { container: field.row, controls: field.input ? [field.input] : [] };
+      }
+      const node = element('p', `field-review-result ${result.status}`);
+      node.dataset.reviewScope = scope;
+      node.dataset.reviewKey = result.key;
+      node.id = `field-review-${scope}-${index}`;
+      const label = typeof result.label === 'string' ? result.label.slice(0, 160) : 'Field';
+      const messages = Array.isArray(result.messages) ? result.messages.filter(message => typeof message === 'string').slice(0, 8).map(message => message.slice(0, 500)) : [];
+      node.append(element('span', 'field-review-sr-label', `${label}: `), element('strong', '', fieldReviewLabels[result.status]));
+      if (messages.length) node.append(document.createTextNode(` · ${messages.join(' ')}`));
+      target.container.append(node);
+      for (const control of target.controls) {
+        const ids = (control.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean);
+        control.setAttribute('aria-describedby', [...new Set([...ids, node.id])].join(' '));
+        fieldReview[scope].descriptions.push({ control, id: node.id });
+      }
+      count++;
+      if (result.status === 'needs-review') needsReview++;
+      if (result.status === 'check-source') checkSource++;
+    }
+    $(`${scope}-review-summary`).textContent = `${count} fields checked · ${needsReview} need review · ${checkSource} need a source check. These checks do not verify your answers.`;
+    $(`${scope}-review-laya-status`).textContent = typeof response?.laya?.message === 'string' ? response.laya.message.slice(0, 500) : '';
+  }
+
+  async function checkFields(scope, { rulesOnly = false } = {}) {
+    const requiredView = scope === 'profile' ? 'profile' : 'documents';
+    if (!api?.reviewFields || !vaultStatus.unlocked || currentView !== requiredView || (scope === 'document' && !documentReviewFields.length)) return;
+    clearFieldReviews({ scopes: [scope] });
+    const review = fieldReview[scope], revision = review.revision, generation = vaultGeneration;
+    const request = { profile: reviewProfileDraft(), ...(scope === 'document' ? { documentFields: reviewDocumentCandidates() } : {}), useLaya: scope === 'document' && !rulesOnly && $(`${scope}-review-laya`).checked };
+    const snapshot = JSON.stringify(request);
+    const current = () => generation === vaultGeneration && vaultStatus.unlocked && currentView === requiredView && revision === review.revision &&
+      snapshot === JSON.stringify({ profile: reviewProfileDraft(), ...(scope === 'document' ? { documentFields: reviewDocumentCandidates() } : {}), useLaya: request.useLaya });
+    review.busy = true;
+    fieldReviewControls();
+    $(`${scope}-review-summary`).textContent = request.useLaya ? 'Checking formats and requesting experimental Laya suggestions…' : 'Checking fields on this computer…';
+    try {
+      const response = await api.reviewFields(request);
+      if (current()) renderFieldReview(scope, response);
+    } catch {
+      if (current()) $(`${scope}-review-summary`).textContent = 'Checks could not be completed. Your information has not changed. Try again or review it yourself.';
+    } finally {
+      if (revision === review.revision && generation === vaultGeneration) {
+        review.busy = false;
+        fieldReviewControls();
+      }
+    }
+  }
+
   function documentControls() {
     $('read-document').disabled = documentBusy || !api?.readDocument;
     $('read-document').setAttribute('aria-busy', String(documentBusy));
@@ -569,9 +695,11 @@
     const selected = documentFields.filter(field => field.checkbox?.checked);
     $('document-selection-count').textContent = selected.length ? `${selected.length} ${selected.length === 1 ? 'detail' : 'details'} selected · profile draft only` : 'No details selected. Nothing will be changed.';
     $('apply-document-fields').disabled = documentBusy || !selected.length || !$('document-confirm-applicant').checked || !vaultStatus.unlocked;
+    fieldReviewControls();
   }
 
   function clearDocumentReview({ cancel = true } = {}) {
+    clearFieldReviews({ resetOptIn: true });
     const requestId = documentRequestId;
     const wasBusy = documentBusy;
     documentRevision++;
@@ -580,6 +708,7 @@
     if (stopDocumentProgress) { try { stopDocumentProgress(); } catch { /* Cleared generation still blocks late events. */ } }
     stopDocumentProgress = null;
     documentFields = [];
+    documentReviewFields = [];
     for (const id of ['document-fields', 'document-pages', 'document-warning-list']) $(id).replaceChildren();
     for (const id of ['document-name', 'document-type', 'document-page-summary', 'document-status', 'document-progress-label']) $(id).textContent = '';
     $('document-review').hidden = true;
@@ -641,6 +770,17 @@
       const page = Number.isInteger(field.page) && field.page > 0 ? `Page ${field.page} · ` : '';
       label.append(element('span', 'document-field-source', page + confidenceText(field.confidence)));
       const values = element('div', 'document-field-value');
+      const metadata = { label: documentText(field.label, 150) };
+      if (typeof field.id === 'string' && /^[A-Za-z0-9_.:-]{1,80}$/.test(field.id)) metadata.id = field.id;
+      if (profileFields.includes(field.profileKey)) metadata.profileKey = field.profileKey;
+      if (Number.isInteger(field.page) && field.page >= 1 && field.page <= 12) metadata.page = field.page;
+      if (typeof field.confidence === 'number' && Number.isFinite(field.confidence) && field.confidence >= 0 && field.confidence <= 100) metadata.confidence = field.confidence;
+      if (typeof field.sourceLabel === 'string' && field.sourceLabel.length <= 150) {
+        metadata.sourceLabel = field.sourceLabel;
+        label.append(element('span', 'document-field-source', `Document label: ${field.sourceLabel}`));
+      }
+      if (['applicant', 'spouse', 'document'].includes(field.sourceRole)) metadata.sourceRole = field.sourceRole;
+      const reviewField = { metadata, row, value: documentText(field.value, 500), input: null };
       if (eligible) {
         const checkbox = element('input'); checkbox.type = 'checkbox'; checkbox.id = `document-select-${index}`;
         checkbox.dataset.profileKey = key;
@@ -650,6 +790,7 @@
         const current = element('div', 'document-current'); current.append(element('span', '', 'Current profile draft'));
         const currentValue = element('div'); current.append(currentValue);
         const record = { key, checkbox, input, currentValue, current: '' };
+        reviewField.input = input;
         documentCurrent(record);
         documentFields.push(record);
         checkbox.addEventListener('change', () => {
@@ -660,13 +801,14 @@
           $('document-confirm-applicant').checked = false;
           documentControls();
         });
-        input.addEventListener('input', () => { $('document-confirm-applicant').checked = false; documentControls(); });
+        input.addEventListener('input', () => { clearFieldReviews(); $('document-confirm-applicant').checked = false; documentControls(); });
         values.append(input);
         row.append(checkbox, label, values, current);
       } else {
         values.append(element('strong', '', documentText(field.value, 500)));
         row.append(label, values, element('span', 'document-review-only', 'Review only · not added to profile'));
       }
+      documentReviewFields.push(reviewField);
       $('document-fields').append(row);
     }
     $('document-no-fields').hidden = $('document-fields').childElementCount > 0;
@@ -674,6 +816,8 @@
     $('document-review').hidden = false;
     $('document-status').textContent = 'Read locally. No information has been saved or shared.';
     documentControls();
+    // Automatic checks use rules only, even if a previous manual check opted into Laya.
+    checkFields('document', { rulesOnly: true });
   }
 
   async function readDocument() {
@@ -734,6 +878,7 @@
       documentControls();
       return;
     }
+    clearFieldReviews();
     for (const field of selected) profileControl(field.key).value = field.input.value.trim();
     syncSelf();
     profileRevision++;
@@ -1223,14 +1368,20 @@
   });
   $('document-confirm-applicant').addEventListener('change', documentControls);
   $('apply-document-fields').addEventListener('click', applyDocumentFields);
+  for (const scope of ['profile', 'document']) {
+    $(`check-${scope}-fields`).addEventListener('click', () => checkFields(scope));
+    $(`${scope}-review-laya`)?.addEventListener('change', () => clearFieldReviews({ scopes: [scope] }));
+  }
   documentControls();
   $('overview-start').addEventListener('click', () => showView('profile'));
   $('lock-button').addEventListener('click', lockVault);
   $('privacy-lock').addEventListener('click', lockVault);
   $('profile-form').addEventListener('input', (event) => {
+    clearFieldReviews();
     profileRevision++; setProfileDirty(true);
     if (['firstName', 'lastName', 'birthDate'].includes(event.target.name)) syncSelf();
   });
+  $('profile-form').addEventListener('change', () => clearFieldReviews());
   $('profile-form').addEventListener('submit', (event) => {
     event.preventDefault(); clearError('profile-error');
     const generation = vaultGeneration;

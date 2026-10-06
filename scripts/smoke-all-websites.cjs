@@ -11,7 +11,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { chromium, expect } = require('@playwright/test');
+const { chromium, expect: playwrightExpect } = require('@playwright/test');
+// Every wait counts wall-clock time, which runs on while the computer sleeps (see host-sleep.cjs).
+const expect = require('./host-sleep.cjs').sleepTolerant(playwrightExpect);
 const strings = require('../extension/strings.js');
 const { attachNativePanel, fixture, applicant, syntheticProfile } = require('./smoke-extension.cjs');
 const { validateProfile, releasedValue } = require('../shared/schema.cjs');

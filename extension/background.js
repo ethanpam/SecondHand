@@ -14,7 +14,7 @@ if (typeof globalThis.SecondHandTranslation?.create !== 'function') {
 // Must match BUILD in panel.js: change both together, with every change to the extension. The panel
 // compares them to tell when Chrome is still running an older worker than the pages it loaded from
 // disk, and the worker compares it with the build the desktop app ships to update itself (#85).
-const BUILD = '2026-10-05.4';
+const BUILD = '2026-10-05.6';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
@@ -479,6 +479,46 @@ async function forgetSites(origins) {
   if (failure) throw failure;
 }
 
+// Sites Chrome took back (#142): the person removed SecondHand's access in Chrome's settings, or Chrome did. Each
+// site or embedded form SecondHand had on that Chrome no longer allows is turned off as Turn off does, but the app
+// stops trusting it first: its registration stays until then, as the reminder that the app hasn't heard. Without
+// Chrome's access a registration runs nothing, so the site is off at once. Chrome's event starts this, and every
+// desktop status tries again before anything else is asked. Changes that come while it runs get another pass.
+let revoking = null;
+let revokedAgain = false;
+function forgetRevoked() {
+  if (revoking) { revokedAgain = true; return revoking; }
+  revoking = (async () => { do { revokedAgain = false; await forgetRevokedOnce(); } while (revokedAgain); })().finally(() => { revoking = null; });
+  return revoking;
+}
+async function forgetRevokedOnce() {
+  if ((await chrome.scripting.getRegisteredContentScripts({ ids: [ALL_SITES_ID] })).length && !(await chrome.permissions.contains({ origins: [...ALL_SITES] }))) {
+    const reply = await nativeRequest('untrustAllSites');
+    if (reply?.allSites !== false) throw fault('worker.desktopUnexpected');
+    await removeAllSites();
+  }
+  const scripts = (await chrome.scripting.getRegisteredContentScripts()).filter(script => script.id !== ALL_SITES_ID && /^(site|frame)-/.test(script.id));
+  const originsOf = script => script.matches.map(pattern => siteOrigin(pattern.slice(0, -2))).filter(Boolean);
+  const revoked = [];
+  for (const origin of new Set(scripts.flatMap(originsOf))) if (!(await chrome.permissions.contains({ origins: [`${origin}/*`] }))) revoked.push(origin);
+  if (!revoked.length) return;
+  // A revoked site's own script and the embedded forms it turned on, and any registration for a revoked embedded form.
+  const owned = scripts.filter(script => originsOf(script).some(origin => revoked.includes(origin)) || revoked.some(origin => script.id.startsWith(frameScriptPrefix(origin))));
+  const remaining = scripts.filter(script => !owned.includes(script));
+  // Its embedded forms no other site uses go too, as when the site is turned off.
+  const orphans = [...new Set(owned.flatMap(originsOf))].filter(origin => !revoked.includes(origin) && !remaining.some(script => script.matches.includes(`${origin}/*`)));
+  await untrustSites([...revoked, ...orphans]);
+  await chrome.scripting.unregisterContentScripts({ ids: owned.map(script => script.id) });
+  for (const origin of revoked) {
+    for (const [tabId, kept] of savables) if (kept.origin === origin) savables.delete(tabId);
+    for (const [tabId, stored] of sitePlans) if (siteOrigin(stored.url) === origin) sitePlans.delete(tabId);
+    for (const tabId of [...pageReads.keys()]) forgetReads(tabId, entry => siteOrigin(entry.url) === origin);
+  }
+  await dropAccess(orphans);
+}
+// Without the app, the sites wait for the next status. Anything else is a real failure, left for Chrome to report.
+const appClosed = error => error?.code === 'offline' || error?.cause?.code === 'offline';
+
 async function enableFrames(tabId) {
   const { tab, origin } = await activeSite(tabId);
   await requireSite(origin);
@@ -587,10 +627,12 @@ async function disableAllSites() {
 }
 
 // The desktop's status. When the app no longer allows all websites (turned off there, or an app from
-// before it), SecondHand turns them off in Chrome too, before anything else is asked.
+// before it), SecondHand turns them off in Chrome too, before anything else is asked. So the app hears of
+// sites Chrome took back while it was closed (#142).
 async function desktopStatus() {
   const status = await nativeRequest('status');
   if (status?.allSites !== true && (await chrome.scripting.getRegisteredContentScripts({ ids: [ALL_SITES_ID] })).length) await removeAllSites();
+  await forgetRevoked();
   await noteUpdate(status?.extension);
   return status;
 }
@@ -628,9 +670,11 @@ async function noteUpdate(shipped) {
   selfUpdate = { build: shipped.build, state: shipped.copy === 'failed' ? 'failed' : await diskBuild() === shipped.build ? 'due' : 'elsewhere' };
 }
 // Nothing under way: no click, no Autofill left on, no site fill, and no plan waiting for its fill.
-// Approval prompts belong to a click or a fill.
+// Approval prompts belong to a click or a fill. Nor anything the applicant is still working through (#142):
+// a reload would wipe a tab's need-you list and Save offers, and they last until the tab moves on or closes.
+const showsNeedYou = result => ['done', 'waiting'].includes(result?.state) && Array.isArray(result.needYou) && result.needYou.length > 0;
 function reloadWhenIdle() {
-  if (selfUpdate?.state !== 'due' || clicksUnderway || autopilots.size || siteRuns.size || sitePlans.size) return;
+  if (selfUpdate?.state !== 'due' || clicksUnderway || autopilots.size || siteRuns.size || sitePlans.size || savables.size || [...results.values()].some(showsNeedYou)) return;
   selfUpdate = null;
   chrome.runtime.reload();
 }
@@ -1204,6 +1248,7 @@ async function saveAnswer(tabId, id) {
   const read = await savableMessage(tabId, kept, frame, { type: 'secondhand:generic:read', token: item.token, id: item.planId, key: item.key });
   if (read?.empty === true) throw fault('worker.answerFirst');
   if (read?.unreadable === true) throw fault('worker.answerUnreadable');
+  if (read?.repeated === true) throw fault('worker.answerRepeated');
   if (typeof read?.value !== 'string' || !read.value.trim() || read.value.length > 200) throw fault('worker.answerGone');
   let reply;
   try { reply = await nativeRequest('saveFields', { url: safeUrl(frame.url), fields: { [item.key]: read.value } }); }
@@ -1524,5 +1569,6 @@ async function refreshSiteScripts() {
   if (stale.length) await chrome.scripting.updateContentScripts(stale.map(script => ({ id: script.id, js: [...SITE_FILES.js] })));
 }
 chrome.runtime.onInstalled?.addListener(details => { if (details.reason === 'update') void refreshSiteScripts(); });
+chrome.permissions?.onRemoved?.addListener(() => { forgetRevoked().catch(error => { if (!appClosed(error)) throw error; }); });
 // Chrome's native panel persists alongside navigation; it never opens itself.
 chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});

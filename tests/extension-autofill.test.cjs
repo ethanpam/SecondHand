@@ -167,11 +167,14 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
     if (url !== 'chrome-extension://testextension/background.js' || disk === null) throw new TypeError('Failed to fetch');
     return { ok: true, text: async () => code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${disk}';`) };
   };
-  vm.runInNewContext(build ? code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${build}';`) : code,
+  // Starts the worker, at once and again after Chrome stopped it (#142): Chrome and the page stay as they were.
+  const start = () => vm.runInNewContext(build ? code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${build}';`) : code,
     { chrome, SecondHandIowa: adapter, SecondHandGeneric: engine, SecondHandStrings: strings, SecondHandTranslation: translation, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console, fetch });
+  start();
   const send = (message, sender) => new Promise(resolve => { if (!listener(message, sender, value => { calls.order.push('reply'); resolve(value); })) resolve(undefined); });
   return {
     calls, tab, events, vault, filled: () => [...model.filled],
+    restart: () => { listener = undefined; for (const key of Object.keys(events)) delete events[key]; start(); },
     reloads: () => calls.order.filter(step => step === 'reload').length,
     send,
     panel: message => send({ tabId: 7, ...message }, { id: 'testextension', url: PANEL_URL }),
@@ -1029,8 +1032,9 @@ test('while Autofill is on, SecondHand waits; it reloads at the next message aft
 
 test('an approval prompt in a click holds the reload until the click is answered', async () => {
   let approve;
+  // Every matched question has a saved answer, so no Save offer holds the reload once Autofill stops (#142).
   const w = worker({ kind: 'manual', engine: generalEngine, general: financialPlan(), build: RUNNING, disk: '2026-10-04.1',
-    desktop: { values: financialValues, extension: { build: '2026-10-04.1', copy: 'ready' }, delay: { getFields: new Promise(resolve => { approve = resolve; }) } } });
+    desktop: { values: { ...financialValues, householdSeniors: '0' }, extension: { build: '2026-10-04.1', copy: 'ready' }, delay: { getFields: new Promise(resolve => { approve = resolve; }) } } });
   const click = autofill(w);
   await settle();
   await desktopRow(w);
@@ -1045,6 +1049,44 @@ test('an approval prompt in a click holds the reload until the click is answered
   await w.panel({ type: 'ui:stop', confirmed: true });
   await settle();
   assert.equal(w.reloads(), 1);
+});
+
+test('Save offers on an unknown Iowa page hold the reload after Autofill stops, until the last one is saved (#142)', async () => {
+  const plan = financialPlan();
+  const w = worker({ kind: 'manual', engine: generalEngine, general: plan, build: RUNNING, disk: '2026-10-04.1',
+    desktop: { values: financialValues, extension: { build: '2026-10-04.1', copy: 'ready' } } });
+  assert.equal((await autofill(w)).data.state, 'done');
+  await w.panel({ type: 'ui:stop', confirmed: true });
+  await desktopRow(w);
+  assert.equal(w.reloads(), 0, 'the household seniors question has no saved answer');
+  assert.deepEqual(plain((await w.panel({ type: 'ui:pageState' })).data).savable, [{ id: 'sh-1-2', label: '', answered: false }], 'the offer is still there');
+  plan.matched[2].typed = '1';
+  assert.equal((await w.panel({ type: 'ui:saveAnswer', id: 'sh-1-2', confirmed: true })).ok, true);
+  await settle();
+  assert.equal(w.reloads(), 1, 'nothing is left to keep');
+});
+
+// A worker restart (#142): Chrome stops an idle service worker and starts it again for the next event.
+test('a restarted worker has Autofill off, starts nothing on a page load, and finds a newer build again at the next status', async () => {
+  const w = worker({ build: RUNNING, disk: '2026-10-04.1', desktop: { extension: { build: '2026-10-04.1', copy: 'ready' } } });
+  assert.equal((await autofill(w)).data.state, 'done');
+  await desktopRow(w);
+  assert.equal(w.reloads(), 0, 'Autofill is on');
+  w.restart();
+  const state = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.deepEqual({ autopilot: state.autopilot, result: state.result }, { autopilot: false, result: null }, 'the widget offers Autofill again');
+  const sent = w.calls.content.length;
+  w.events.updated(7, { status: 'complete' });
+  await settle();
+  assert.deepEqual(w.calls.content.slice(sent), [], 'a page load starts nothing');
+  assert.equal(w.reloads(), 0, 'the new worker hasn’t heard from the app yet');
+  await desktopRow(w);
+  assert.equal(w.reloads(), 1);
+  // The person clicks Autofill again: the need-you list comes back.
+  const again = worker();
+  await autofill(again);
+  again.restart();
+  assert.deepEqual(plain((await autofill(again)).data).needYou, ['lastName']);
 });
 
 test('on a verified Iowa page, an answer the app left out because of a saved date of birth is said, and the rest still fill (#135)', async () => {

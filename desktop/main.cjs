@@ -17,6 +17,7 @@ const { touchIdPlatform, createTouchIdUnlock } = require('./touch-id.cjs');
 const { createLaya } = require('./laya.cjs');
 const { createFieldSuggestions } = require('./field-suggestions.cjs');
 const { createFieldAnswers } = require('./field-answers.cjs');
+const { createFieldReview } = require('./field-review.cjs');
 const { createOcrEngine } = require('./ocr-engine.cjs');
 const { createDocumentReader } = require('./ocr-service.cjs');
 const { requestId: documentRequestId } = require('./ocr-limits.cjs');
@@ -120,6 +121,8 @@ if (nativeOrigin) {
   // The extension's uses of that runtime: matching text boxes (#39) and answering choice questions (#42).
   const fieldSuggestions = createFieldSuggestions({ laya });
   const fieldAnswers = createFieldAnswers({ laya });
+  const fieldReview = createFieldReview({ laya });
+  let fieldReviewRevision = 0;
   const vault = new Vault(path.join(userData, 'vault.secondhand'));
   // Unlock with Touch ID on a Mac (#99). Its key is sealed in this Mac's Keychain in touch-unlock.bin.
   const touchIdUnlock = createTouchIdUnlock({ vault, filePath: path.join(userData, 'touch-unlock.bin'), revision: () => accessRevision,
@@ -362,6 +365,8 @@ if (nativeOrigin) {
     const setup = await getExtensionSetup(app);
     if (setup.prepared) return { build: setup.build, copy: 'ready' };
     if (!setup.exists) return { build: setup.build, copy: 'absent' };
+    // A newer app prepared the copy: it is never refreshed with this older build, and Chrome loads its build (#142).
+    if (setup.newerCopy) return { build: setup.newerCopy, copy: 'ready' };
     if (copyFailed) return { build: setup.build, copy: 'failed' };
     try { await refreshCopy(); }
     catch { return { build: setup.build, copy: 'failed' }; }
@@ -676,6 +681,19 @@ if (nativeOrigin) {
       return result;
     },
     cancelDocumentRead: requestId => documentReader.cancel(documentRequestId(requestId)),
+    async reviewFields(request) {
+      requireUnlocked();
+      const revision = accessRevision;
+      const sequence = ++fieldReviewRevision;
+      const isCurrent = () => vault.unlocked && !quitting && revision === accessRevision && sequence === fieldReviewRevision;
+      touch();
+      const result = await fieldReview.review(request, { today: today(), isCurrent });
+      if (!isCurrent()) throw publicError('Your information changed during review. Check it again.');
+      touch();
+      return result;
+    },
+    // Cancels only this desktop review. Other local model callers keep their own work.
+    cancelFieldReview() { fieldReviewRevision++; return true; },
     async saveProfile(profile) {
       requireUnlocked();
       const clean = validated(validateProfile, profile, { today: today() });

@@ -788,6 +788,21 @@ test('tab activation clears a stale checklist without sending data to an unsuppo
   assert.deepEqual(view.requests.filter(request => request.type === 'ui:pageState').map(request => request.tabId), [7]);
 });
 
+test('a side panel with no Iowa page follows its tab onto Iowa’s portal when it navigates, not at the next poll', async t => {
+  // A blank tab: Chrome hides its address.
+  const view = await panel(t, { tab: { id: 7, url: undefined } });
+  assert.match(view.get('status').textContent, /Open Iowa/);
+  assert.equal(view.get('panel-autofill').disabled, true);
+  view.tabs.current = { id: 7, url: `${adapter.PORTAL}/applicant`, status: 'loading' };
+  // Another tab loading in the background is not this panel's business.
+  view.listeners.updated(9, { status: 'loading' }, { id: 9, active: false }); await tick(); await tick();
+  assert.deepEqual(view.types().filter(type => type === 'ui:pageState'), []);
+  view.listeners.updated(7, { status: 'loading', url: view.tabs.current.url }, { ...view.tabs.current, active: true }); await tick(); await tick();
+  assert.deepEqual(view.requests.filter(request => request.type === 'ui:pageState').map(request => request.tabId), [7]);
+  assert.equal(view.get('panel-autofill').disabled, false);
+  assert.equal(view.get('page-checklist').children.length, 4);
+});
+
 test('a late old-tab response cannot restore a checklist', async t => {
   let resolve;
   const response = new Promise(done => { resolve = done; });

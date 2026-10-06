@@ -100,6 +100,7 @@
     if (read && typeof read.value === 'string') return { value: read.value };
     if (read?.empty === true) return { empty: true };
     if (read?.unreadable === true) return { unreadable: true };
+    if (read?.repeated === true) return { repeated: true };
     return { readable: false };
   }
 

@@ -68,7 +68,9 @@ The desktop app is the only place your details are kept. The Chrome extension ta
 
 Open **Documents** in the unlocked desktop app to read a PDF, PNG, or JPEG on your computer. English OCR is bundled with the app: no upload, OCR account, model download, or separate program is needed. It accepts files up to 30 MiB and PDFs up to 12 pages.
 
-For recognizable 1040/1040-SR layouts, review suggested primary-applicant names, home address, and Social Security number against the original. Choose which details to put in your profile draft, then review **My information** and click **Save my information**. SSNs and tax amounts are omitted when two OCR passes disagree. Tax-year amounts and spouse/dependent details are for review only; they never become current income, household answers, or eligibility decisions automatically. Other documents show extracted text without tax-form suggestions.
+For recognizable 1040/1040-SR, W-2, SSA-1099, and 1099-NEC layouts, review suggested applicant details and historical amounts against the original. Combined names remain for manual review, and a 1099-NEC recipient TIN is never assumed to be an SSN. Choose which details to put in your profile draft, then review **My information** and click **Save my information**. SSNs, other taxpayer identifiers, and tax amounts are omitted when two OCR passes disagree. Tax-year amounts, ambiguous names, and spouse/dependent details are for review only; they never become current income, household answers, or eligibility decisions automatically. Other documents show extracted text without tax-form suggestions.
+
+**Check information** reviews the profile draft for format issues and conflicting answers. Extracted document fields are also checked locally. Optional experimental Laya feedback can flag a printed document label mapped to an unexpected field; it receives labels, not your values, and never verifies or corrects a value. [Local field review](docs/field-review.md) explains the statuses and limits.
 
 The original stays in place. SecondHand keeps no document database or copied original, and clears temporary review text when you discard it, leave Documents, or lock the app. This feature is in source; availability in a public installer is separate. See [local document reading](docs/document-ocr.md) for limits and QA scope.
 
@@ -182,7 +184,7 @@ For live reloading, run `npm run dev` (run `npx playwright install chromium` onc
 | `npm start` | Runs the desktop app. |
 | `npm run dev` | Runs the app and a Chromium with the extension, reloading on edits. |
 | `npm test` | Unit tests: encryption, messaging, schema, portal adapters, and the extension's panels. |
-| `npm run check` | Syntax checks and the extension's permission rules. |
+| `npm run check` | Syntax checks, the extension's permission rules, and a newer `BUILD` (in `extension/background.js` and `extension/panel.js`) whenever `extension/` changed since main. |
 | `npm run test:ocr` | Exercises bundled offline OCR on a generated synthetic image; pass `-- --input tests/fixtures/ocr/synthetic-1040sr.pdf` for the tax-form sample. |
 | `npm run test:ocr:ui` | Reads the synthetic tax form in the desktop app and verifies review, draft merging, encrypted saving, and lock/unlock. |
 | `npm run test:ui` | Drives the real Electron app end to end. Needs a desktop session. |

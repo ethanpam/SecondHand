@@ -37,7 +37,9 @@ enum ProfileDocumentParser {
     static func analyze(_ document: RecognizedDocument) throws -> ProfileDocumentAnalysis {
         guard let context = JSContext() else { throw DocumentOCRError.unreadable }
         context.evaluateScript("var modules = {'node:crypto': {randomUUID: function() { throw new Error('Unavailable'); }}}; function require(name) { if (!(name in modules)) throw new Error('Unknown module'); return modules[name]; }")
-        for name in ["household", "schema", "document-parser"] {
+        // Load the shared CommonJS dependencies before their consumers. These
+        // bundled scripts receive only the fixed in-memory module registry.
+        for name in ["household", "schema", "facts", "document-layout", "document-w2", "document-ssa1099", "document-1099nec", "document-parser"] {
             guard let url = Bundle.main.url(forResource: name, withExtension: "cjs") else { throw DocumentOCRError.unreadable }
             let script = try String(contentsOf: url, encoding: .utf8)
             context.evaluateScript("modules['./\(name).cjs'] = (function() { var module = {exports:{}}; \(script)\n return module.exports; })();")

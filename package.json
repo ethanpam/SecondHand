@@ -31,7 +31,8 @@
     "prestart": "npm run ocr:prepare",
     "predev": "npm run ocr:prepare",
     "test:ocr": "npm run ocr:prepare && node scripts/smoke-ocr.cjs",
-    "test:ocr:ui": "npm run ocr:prepare && node scripts/smoke-document-ui.cjs"
+    "test:ocr:ui": "npm run ocr:prepare && node scripts/smoke-document-ui.cjs",
+    "review:evaluate": "node scripts/evaluate-field-review.cjs"
   },
   "dependencies": {
     "onnxruntime-node": "1.30.0"

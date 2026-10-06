@@ -72,7 +72,9 @@ api.start(async ({ bytes, format, limits }) => {
           const target = dimensions(viewport.width, viewport.height, limits, Math.max(300 / 72, 2600 / Math.max(viewport.width, viewport.height)));
           const image = canvasOf(target.width, target.height);
           canvas = image.canvas;
-          await page.render({ canvasContext: image.context, viewport: page.getViewport({ scale: target.scale }), annotationMode: pdfjs.AnnotationMode.DISABLE, background: 'rgb(255,255,255)' }).promise;
+          // Render saved appearance streams, including filled AcroForm fields.
+          // This is a bitmap only: no interactive annotation layer or PDF scripts.
+          await page.render({ canvasContext: image.context, viewport: page.getViewport({ scale: target.scale }), annotationMode: pdfjs.AnnotationMode.ENABLE, background: 'rgb(255,255,255)' }).promise;
         } else {
           const target = dimensions(bitmap.width, bitmap.height, limits);
           const image = canvasOf(target.width, target.height);

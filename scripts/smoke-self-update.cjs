@@ -11,7 +11,9 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const { chromium, _electron: electron, expect } = require('@playwright/test');
+const { chromium, _electron: electron, expect: playwrightExpect } = require('@playwright/test');
+// Every wait counts wall-clock time, which runs on while the computer sleeps (see host-sleep.cjs).
+const expect = require('./host-sleep.cjs').sleepTolerant(playwrightExpect);
 const { EXTENSION_FILES } = require('../desktop/extension-setup.cjs');
 const { HOST_NAME } = require('../desktop/bridge.cjs');
 const { fixture, attachNativePanel, applicant } = require('./smoke-extension.cjs');
