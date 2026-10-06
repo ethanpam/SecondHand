@@ -125,11 +125,12 @@ export default function ChromeExtensionGuide() {
         <section aria-labelledby="after-update">
           <h2 id="after-update">After you update SecondHand</h2>
           <p>
-            Install the new app and open it. The next time you open the side
-            panel or click <strong>Autofill</strong>, SecondHand refreshes the
-            extension files and the extension reloads itself. If an Iowa page
-            was open, SecondHand asks you to reload it; save your work first.
-            Keep <strong>Developer mode</strong> on at{' '}
+            Install the new app and open it. If it comes with a newer extension,
+            the next time you open the side panel or click{' '}
+            <strong>Autofill</strong>, SecondHand refreshes the extension files
+            and the extension reloads itself. If an Iowa page was open,
+            SecondHand asks you to reload it; save your work first. Keep{' '}
+            <strong>Developer mode</strong> on at{' '}
             <code>chrome://extensions</code>, because Chrome turns SecondHand
             off without it. Your saved information stays in the app.
           </p>

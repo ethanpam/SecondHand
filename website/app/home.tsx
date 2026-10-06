@@ -362,11 +362,12 @@ export function Home() {
                     <summary>Updating from an earlier version</summary>
                     <div className="details-body">
                       <p>
-                        Install the new app and open it. The next time you open
-                        the side panel or click Autofill, SecondHand refreshes
-                        the extension files and the extension reloads itself. If
-                        an Iowa page was open, SecondHand asks you to reload it;
-                        save your work first. Chrome may ask you to approve the
+                        Install the new app and open it. If it comes with a
+                        newer extension, the next time you open the side panel
+                        or click Autofill, SecondHand refreshes the extension
+                        files and the extension reloads itself. If an Iowa page
+                        was open, SecondHand asks you to reload it; save your
+                        work first. Chrome may ask you to approve the
                         extension’s updated permissions. Use Chrome 116 or
                         newer, and keep <strong>Developer mode</strong> on at{' '}
                         <code>chrome://extensions</code>, because Chrome turns
