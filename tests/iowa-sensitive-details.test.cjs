@@ -4,15 +4,13 @@ const assert = require('node:assert/strict');
 const { JSDOM } = require('jsdom');
 const adapter = require('../extension/iowa-adapter.js');
 const fixture = require('./fixtures/iowa-tell-us-more.cjs');
+const { layoutElements } = require('./helpers/harness.cjs');
 const keys = ['ssn', 'ssnCardFirstName', 'ssnCardMiddleName', 'ssnCardLastName'];
 const ids = [fixture.SSN_BOX_ID, 'answerSets0.answers12.answerValue', 'answerSets0.answers15.answerValue', 'answerSets0.answers16.answerValue'];
 const saved = { ssn: '123456789', ssnCardFirstName: 'Alex', ssnCardMiddleName: 'Taylor', ssnCardLastName: 'Sample' };
 function page() {
-  const doc = new JSDOM(fixture.html, { url: fixture.URL, pretendToBeVisual: true }).window.document;
-  doc.defaultView.Element.prototype.getBoundingClientRect = () => ({ left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 });
-  doc.defaultView.Element.prototype.getClientRects = function () { return [this.getBoundingClientRect()]; };
   // Keep the recorded alternate controls in the capture; styles preserve their real hidden status.
-  return doc;
+  return layoutElements(new JSDOM(fixture.html, { url: fixture.URL, pretendToBeVisual: true }).window);
 }
 function reveal(doc) {
   doc.getElementById(fixture.radioId(6, 1)).checked = true;

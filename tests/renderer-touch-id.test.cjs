@@ -5,9 +5,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { JSDOM } = require('jsdom');
+const { loadRenderer } = require('./helpers/harness.cjs');
 
 const html = fs.readFileSync(path.join(__dirname, '../renderer/index.html'), 'utf8');
-const script = ['../shared/snap-information.js', '../renderer/snap-information.js', '../renderer/app.js'].map(file => fs.readFileSync(path.join(__dirname, file), 'utf8')).join('\n');
 const tick = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve)); };
 const PASSWORD = 'synthetic touch password';
 
@@ -42,7 +42,7 @@ async function renderer(t, initial = {}, overrides = {}) {
     },
     ...overrides
   };
-  window.eval(script);
+  loadRenderer(window);
   await tick();
   const get = id => window.document.getElementById(id);
   return {

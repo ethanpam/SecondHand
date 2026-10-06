@@ -25,6 +25,8 @@ const SEARCH = 'https://search.example.org/';
 const FORMS = 'https://forms.example.net/embed';
 const EMBEDDING = 'https://pantry.example.org/sign-up';
 const NEVER = 'https://never.example.net/apply';
+// #176: one everyday question and one sensitive one (the date of birth, in SENSITIVE_FIELDS in desktop/main.cjs).
+const DETAILS = 'https://pantry.example.org/details';
 // #98: the household questions the live QA (#89) found on a pantry form, plus one the fictional profile has no answer for.
 const HOUSEHOLD = 'https://pantry.example.org/household';
 const HOUSEHOLD_QUESTIONS = { young: '# of people in your household 0 - 17 yrs old', middle: '# of people in your household 18 - 59 yrs old', older: '# of people in your household 60 + yrs',
@@ -32,6 +34,9 @@ const HOUSEHOLD_QUESTIONS = { young: '# of people in your household 0 - 17 yrs o
 // What the desktop works out from the fictional household list, as the app does: band counts and the one student's name and grade.
 const listed = validateProfile(syntheticProfile);
 const desktopProfile = { ...syntheticProfile, ...Object.fromEntries(['householdCount:18-59', 'householdCount:60+', 'studentNameGrade'].map(key => [key, releasedValue(listed, key)])) };
+// #185: a radio question no rule knows, which the stub Laya can only guess at.
+const GUESS = 'https://pantry.example.org/service-area';
+const GUESS_QUESTION = 'Do you live in our service area?';
 const IOWA_HOST = 'https://hhsservices.iowa.gov/*';
 const en = (key, params) => strings.text('en', key, params);
 
@@ -54,29 +59,53 @@ const pages = {
     '<label for="apt">Apartment number</label><input id="apt" name="apt"><button type="submit">Submit</button></form>'),
   [SEARCH]: formPage('Find a pantry', '<form role="search"><input type="search" name="q" aria-label="Search"><button>Search</button></form>'),
   [NEVER]: formPage('Never trusted', '<form><label for="first">First name</label><input id="first" name="first"><button type="submit">Submit</button></form>'),
+  [DETAILS]: formPage('Pantry sign-up: your details', '<form><label for="first">First name</label><input id="first" name="first">' +
+    '<label for="dob">Date of birth</label><input id="dob" name="dob" type="date"><button type="submit">Submit</button></form>'),
+  [GUESS]: formPage('Pantry sign-up: service area', '<form><label for="first">First name</label><input id="first" name="first">' +
+    `<fieldset><legend>${GUESS_QUESTION}</legend>${['Yes', 'No', 'Not sure'].map((option, index) => `<label><input type="radio" name="area" id="area-${index}" value="${option}">${option}</label>`).join('')}</fieldset>` +
+    '<button type="submit">Submit</button></form>'),
   [HOUSEHOLD]: formPage('Pantry order: household', `<form>${Object.entries(HOUSEHOLD_QUESTIONS).map(([id, label]) => `<label for="${id}">${label}</label><input id="${id}" name="${id}">`).join('')}` +
     '<button type="submit">Submit</button></form>')
 };
 
 // The desktop app as the worker sees it over native messaging, with Always allow on. It keeps its own
 // all-websites setting, as the real app does, and reports it in status. Asked for money on hand, or to save
-// an answer, it shows the prompt the app shows, naming the site the request names.
+// an answer, it shows the prompt the app shows, naming the site the request names. With `holds`, it plays the
+// app without Always allow (#176): Autofill's request gets those fields held back, and Fill sensitive details'
+// request (`sensitive: true`) gets the sensitive prompt, answered by the next of `answers` ('cancel' or 'allow').
+// Laya isn't ready unless a step makes it so (`laya`); then it is sure of nothing and guesses "Yes" for the
+// service-area question (#185), noting each question it is asked in `questions`.
 async function installDesktop(worker, profile) {
   await worker.evaluate(profile => {
-    globalThis.__desktop = { allSites: false, calls: [], saves: [], prompts: [], profile };
+    globalThis.__desktop = { allSites: false, calls: [], saves: [], prompts: [], profile, holds: [], answers: [], laya: 'unavailable', questions: [] };
     nativeRequest = async (type, payload = {}) => {
       const desktop = globalThis.__desktop;
-      desktop.calls.push({ type, url: payload.url || '', fields: payload.fields || [] });
-      if (type === 'status') return { unlocked: true, applicationCount: 0, accessRevision: 0, allSites: desktop.allSites, laya: { state: 'unavailable' } };
+      desktop.calls.push({ type, url: payload.url || '', fields: payload.fields || [], ...(payload.sensitive === true ? { sensitive: true } : {}) });
+      if (type === 'status') return { unlocked: true, applicationCount: 0, accessRevision: 0, allSites: desktop.allSites, laya: { state: desktop.laya } };
       if (type === 'trustAllSites') { desktop.allSites = true; return { allSites: true }; }
       if (type === 'untrustAllSites') { desktop.allSites = false; return { allSites: false }; }
       if (type === 'trustSite') return { trusted: true, origin: new URL(payload.url).origin };
       if (type === 'untrustSite') return { trusted: false, origin: new URL(payload.url).origin };
       if (type === 'showApp') return { shown: true };
-      if (type === 'warmLaya') return { state: 'unavailable' };
-      if (type === 'suggestFields' || type === 'answerFields') throw Object.assign(new Error('Laya isn’t ready on this computer.'), { code: 'LAYA_NOT_READY' });
-      if (type === 'getFields' && payload.fields.includes('assetsOnHand')) desktop.prompts.push(`Fill sensitive details on ${new URL(payload.url).origin}?`);
-      if (type === 'getFields') return { accessRevision: 0, values: Object.fromEntries(payload.fields.filter(field => desktop.profile[field]).map(field => [field, desktop.profile[field]])) };
+      if (type === 'warmLaya') return { state: desktop.laya };
+      if ((type === 'suggestFields' || type === 'answerFields') && desktop.laya !== 'ready') throw Object.assign(new Error('Laya isn’t ready on this computer.'), { code: 'LAYA_NOT_READY' });
+      if (type === 'suggestFields') return { suggestions: {} };
+      if (type === 'answerFields') {
+        desktop.questions.push(...payload.questions.map(question => ({ label: question.label, type: question.type, options: question.options })));
+        const area = payload.questions.find(question => question.label === 'Do you live in our service area?');
+        return { answers: {}, guesses: area ? { [area.id]: 'Yes' } : {}, accessRevision: 0 };
+      }
+      if (type === 'getFields' && payload.sensitive === true) {
+        desktop.prompts.push(`Fill sensitive details on ${new URL(payload.url).origin}?`);
+        const answer = desktop.answers.shift();
+        if (answer === 'cancel') throw new Error('You cancelled this field request.');
+        if (answer !== 'allow') throw new Error(`The all-websites smoke has no answer for this sensitive prompt: ${answer}`);
+      } else if (type === 'getFields' && payload.fields.includes('assetsOnHand')) desktop.prompts.push(`Fill sensitive details on ${new URL(payload.url).origin}?`);
+      if (type === 'getFields') {
+        const held = payload.sensitive === true ? [] : payload.fields.filter(field => desktop.holds.includes(field));
+        return { accessRevision: 0, values: Object.fromEntries(payload.fields.filter(field => desktop.profile[field] && !held.includes(field)).map(field => [field, desktop.profile[field]])),
+          ...(held.length ? { held } : {}) };
+      }
       if (type === 'recordProgress') return { recorded: true };
       // Save to My information (#98): the app's confirmation and save, as Allow.
       if (type === 'saveFields') {
@@ -137,6 +166,24 @@ async function main() {
     await installDesktop(worker, desktopProfile);
     assert.equal(await worker.evaluate(() => allSitesOn()), false, 'all websites starts off');
     const calls = type => worker.evaluate(type => globalThis.__desktop.calls.filter(call => call.type === type), type);
+    // The worker's own record, so a check that nothing came waits on events and state, not on the clock (#143): the
+    // tab loads Chrome reported complete (a page's content scripts have run by then), the pages whose content script
+    // reported whether they have a form, and whether the worker is busy (a click, a site fill, an autopilot step).
+    await worker.evaluate(() => {
+      globalThis.__smokeProbe = { complete: 0, reports: [] };
+      chrome.tabs.onUpdated.addListener((_tabId, change) => { if (change.status === 'complete') globalThis.__smokeProbe.complete++; });
+      chrome.runtime.onMessage.addListener((message, sender) => { if (message?.type === 'secondhand:generic:form') globalThis.__smokeProbe.reports.push(sender.url); });
+    });
+    const probe = () => worker.evaluate(() => ({ complete: globalThis.__smokeProbe.complete, reports: [...globalThis.__smokeProbe.reports],
+      busy: Boolean(clicksUnderway || siteRuns.size || [...autopilots.values()].some(pilot => pilot.running)) }));
+    // Waits until the worker is busy with nothing and, given its record from before a navigation, Chrome has finished
+    // loading the page and, for a page SecondHand is on (`reportFrom`), its content script has reported.
+    async function settled(since, { reportFrom } = {}) {
+      await expect.poll(async () => {
+        const now = await probe();
+        return !now.busy && (!since || now.complete > since.complete) && (!reportFrom || now.reports.slice(since.reports.length).includes(reportFrom));
+      }, { timeout: 20000 }).toBe(true);
+    }
     page = context.pages()[0] || await context.newPage();
     page.on('pageerror', error => errors.push(error.message));
     const extensionId = new URL(worker.url()).hostname;
@@ -148,8 +195,9 @@ async function main() {
     const cards = () => page.locator('[data-secondhand-assistant]').count();
 
     // A site that was never turned on gets nothing yet.
+    let since = await probe();
     await page.goto(PANTRY, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(1500);
+    await settled(since);
     assert.equal(await cards(), 0, 'no card on a site that is off');
 
     // Another site turned on by itself, the existing way (the desktop's trust is the stub).
@@ -195,13 +243,42 @@ async function main() {
     await expect(page.locator('#zip')).toHaveValue(syntheticProfile.zip);
     await expect(page.locator('#email')).toHaveValue(syntheticProfile.email);
     await expect(page.locator('#hh')).toHaveValue(syntheticProfile.householdSize);
-    await page.waitForTimeout(1500);
+    await settled();
     assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
     assert.equal(page.url(), PANTRY, 'nothing navigates');
     assert.deepEqual((await calls('getFields')).map(call => ({ url: call.url, fields: call.fields })),
       [{ url: PANTRY, fields: ['firstName', 'lastName', 'zip', 'email', 'householdSize'] }], 'one desktop request for this page');
     await page.screenshot({ path: path.join(root, 'artifacts/all-websites/all-websites-filled.png') });
     console.log('All websites: a form on a site never turned on filled from the fictional profile with one click; nothing was submitted.');
+
+    // #185: a radio question no rule knows gets Laya's best guess. It is filled with its own dotted outline, the side
+    // panel says how many Laya guessed and lists the question, and its row finds it on the page.
+    await worker.evaluate(() => { globalThis.__desktop.laya = 'ready'; });
+    await page.goto(GUESS, { waitUntil: 'domcontentloaded' });
+    const guessWidget = await launcherFrame();
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+    await panel.click('#panel-autofill');
+    await expect(page.locator('#area-0')).toBeChecked({ timeout: 20000 });
+    await expect(page.locator('#first')).toHaveValue(syntheticProfile.firstName);
+    await settled();
+    assert.deepEqual(await worker.evaluate(() => globalThis.__desktop.questions.splice(0)), [{ label: GUESS_QUESTION, type: 'radio', options: ['Yes', 'No', 'Not sure'] }],
+      'Laya sees the question’s words and options only');
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('input[name="area"]')].map(input => [input.checked, input.getAttribute('data-secondhand-filled'), getComputedStyle(input).outlineStyle])),
+      [[true, 'laya-guess', 'dotted'], [false, 'laya-guess', 'dotted'], [false, 'laya-guess', 'dotted']], 'the guess has its own dotted outline');
+    assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById('first')).outlineStyle), 'solid', 'a rule’s answer keeps its solid one');
+    const guessed = en('result.layaGuessed', { summary: { key: 'result.siteFilled', params: { count: 2 } }, count: 1 });
+    await expect.poll(() => panel.text('#status'), { timeout: 15000 }).toBe(guessed);
+    await expect.poll(() => panel.visible('#guesses-section'), { timeout: 15000 }).toBe(true);
+    assert.equal(await panel.text('#guesses-title'), en('guesses.title'));
+    assert.equal(await panel.text('#guesses-list'), GUESS_QUESTION);
+    await expect(guessWidget.locator('#widget-text')).toHaveText(`${en('widget.filled', { count: 2 })} · ${en('widget.layaGuessed', { count: 1 })}`, { timeout: 15000 });
+    await page.screenshot({ path: path.join(root, 'artifacts/all-websites/laya-guess-filled.png') });
+    await panel.screenshot(path.join(root, 'artifacts/all-websites/laya-guess-panel.png'));
+    await panel.click('[data-guess-id]');
+    await expect.poll(() => page.evaluate(() => Boolean(document.querySelector('fieldset[data-secondhand-attention], input[name="area"][data-secondhand-attention]'))), { timeout: 15000 }).toBe(true);
+    assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
+    await worker.evaluate(() => { globalThis.__desktop.laya = 'unavailable'; });
+    console.log('#185: a radio question no rule knows got Laya’s best guess, with its own dotted outline; the side panel said "1 guessed by Laya, check it", listed the question, and its row found it on the page.');
 
     // #98: the live QA's household questions fill from the fictional household list: counts by age and the one
     // student's name and grade. The guardian's name is never filled. The apartment, which the profile lacks, is
@@ -232,13 +309,60 @@ async function main() {
     await expect.poll(() => panel.text('#status'), { timeout: 15000 }).toBe(en('save.saved'));
     assert.deepEqual(await worker.evaluate(() => globalThis.__desktop.saves), [{ url: HOUSEHOLD, fields: { addressLine2: 'Unit 5' } }]);
     await expect.poll(() => panel.visible('#save-section'), { timeout: 15000 }).toBe(false);
-    await page.waitForTimeout(1000);
+    await settled();
     assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
     console.log('#98: a pantry form’s household questions filled from the fictional household list (0-17, 18-59, 60+, and the student’s name and grade); the guardian stayed blank; the typed apartment was saved to My information after the Save click.');
 
+    // #176: without Always allow, the app holds the date of birth back. One click fills the first name at once; the date of
+    // birth counts under need-you and waits in the side panel's list. Fill sensitive details asks the app for it alone:
+    // Cancel leaves the first name filled and the date listed, and Allow once fills it.
+    await worker.evaluate(() => { Object.assign(globalThis.__desktop, { holds: ['birthDate'], answers: ['cancel', 'allow'] }); globalThis.__desktop.prompts.length = 0; });
+    const heldCalls = async since => (await calls('getFields')).slice(since).map(call => ({ url: call.url, fields: call.fields, sensitive: call.sensitive === true }));
+    let since176 = (await calls('getFields')).length;
+    await page.goto(DETAILS, { waitUntil: 'domcontentloaded' });
+    const detailsWidget = await launcherFrame();
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+    await panel.click('#panel-autofill');
+    await expect(page.locator('#first')).toHaveValue(syntheticProfile.firstName, { timeout: 20000 });
+    await settled();
+    assert.equal(await page.locator('#dob').inputValue(), '', 'the date of birth waits');
+    assert.deepEqual(await heldCalls(since176), [{ url: DETAILS, fields: ['firstName', 'birthDate'], sensitive: false }], 'one request, as before');
+    await expect(detailsWidget.locator('#need-you')).toHaveText(en('widget.needYou', { count: 1 }), { timeout: 15000 });
+    await expect(detailsWidget.locator('#widget-text')).toHaveText(`${en('widget.filled', { count: 1 })} · ${en('widget.held', { count: 1 })}`);
+    await expect.poll(() => panel.visible('#held-section'), { timeout: 15000 }).toBe(true);
+    assert.equal(await panel.text('#held-list'), 'Date of birth');
+    assert.equal(await panel.text('#held-fill'), en('held.fill'));
+    const waiting = en('result.withHeld', { summary: { key: 'result.siteFilledNeedYou', params: { count: 1, needYou: 1 } }, count: 1 });
+    assert.equal(await panel.text('#status'), waiting);
+    assert.equal(await panel.visible('#save-section'), false, 'a held date of birth is saved: it is never offered to Save to My information');
+    assert.deepEqual(await worker.evaluate(() => globalThis.__desktop.prompts), [], 'nothing about it was asked yet');
+    await panel.screenshot(path.join(root, 'artifacts/held/side-panel-held.png'));
+    since176 = (await calls('getFields')).length;
+    await panel.click('#held-fill');
+    await expect.poll(() => panel.text('#status'), { timeout: 15000 }).toBe(en('worker.heldCancelled'));
+    assert.deepEqual(await heldCalls(since176), [{ url: DETAILS, fields: ['birthDate'], sensitive: true }], 'the held field alone');
+    assert.equal(await page.locator('#first').inputValue(), syntheticProfile.firstName, 'Cancel leaves what filled in place');
+    assert.equal(await page.locator('#dob').inputValue(), '');
+    assert.equal(await panel.visible('#held-section'), true, 'and keeps the date of birth listed');
+    assert.equal(await panel.text('#held-list'), 'Date of birth');
+    await panel.click('#held-fill');
+    await expect(page.locator('#dob')).toHaveValue(syntheticProfile.birthDate, { timeout: 20000 });
+    await expect.poll(() => panel.visible('#held-section'), { timeout: 15000 }).toBe(false);
+    await expect.poll(() => panel.text('#status'), { timeout: 15000 }).toBe(en('result.siteFilled', { count: 2 }));
+    await expect(detailsWidget.locator('#need-you')).toBeHidden({ timeout: 15000 });
+    await expect(detailsWidget.locator('#widget-text')).toHaveText(en('widget.filled', { count: 2 }));
+    assert.deepEqual(await worker.evaluate(() => globalThis.__desktop.prompts), ['Fill sensitive details on https://pantry.example.org?', 'Fill sensitive details on https://pantry.example.org?'],
+      'the sensitive prompt came only from the button, once for Cancel and once for Allow once');
+    await settled();
+    assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
+    await page.screenshot({ path: path.join(root, 'artifacts/held/details-filled.png') });
+    await worker.evaluate(() => { Object.assign(globalThis.__desktop, { holds: [], answers: [] }); globalThis.__desktop.prompts.length = 0; });
+    console.log('#176: without Always allow, one click filled the first name and held the date of birth; Fill sensitive details asked for it alone: Cancel kept it listed with the first name filled, and Allow once filled it.');
+
     // A page whose only input is a search box gets no card.
+    since = await probe();
     await page.goto(SEARCH, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(1500);
+    await settled(since, { reportFrom: SEARCH });
     assert.equal(await cards(), 0, 'no card on a search-only page');
     console.log('All websites: no card on a search-only page.');
 
@@ -305,17 +429,20 @@ async function main() {
     assert.equal((await calls('untrustAllSites')).length, 1);
     const shown = await panel.text('#status');
     assert.equal(shown, en('joined', { first: { key: 'worker.allSitesOff' }, second: { key: 'worker.chromeStillAllows' } }));
+    since = await probe();
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(1500);
+    await settled(since);
     assert.equal(await cards(), 0, 'the card stays gone after a reload');
     await panel.screenshot(path.join(root, 'artifacts/all-websites/all-websites-off-panel.png'));
     console.log(`All websites: off. The card left the open page; Chrome’s grant and Iowa’s access are kept. The side panel says: "${shown}"`);
 
     // With the grant kept and all websites off, a site that was never trusted gets nothing.
+    since = await probe();
     await page.goto(NEVER, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(1500);
+    await settled(since);
     assert.equal(await cards(), 0, 'no card on a site that was never trusted');
     assert.equal(await worker.evaluate(origin => siteEnabled(origin), new URL(NEVER).origin), false);
+    await expect.poll(() => panel.visible('#site-enable'), { timeout: 15000 }).toBe(true);
     assert.equal(await panel.visible('#panel-autofill'), false, 'the panel offers to turn the site on, not Autofill');
     assert.equal((await calls('getFields')).some(call => call.url.startsWith(new URL(NEVER).origin)), false);
     console.log('Off: a site that was never trusted gets no card and no fill, though Chrome’s grant is kept.');
@@ -338,8 +465,9 @@ async function main() {
     assert.deepEqual((await calls('untrustSite')).map(call => call.url), [new URL(WIC).origin]);
     assert.deepEqual(await worker.evaluate(() => chrome.scripting.getRegisteredContentScripts()), []);
     assert.equal(await allowed(['https://*/*']), true);
+    since = await probe();
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(1500);
+    await settled(since);
     assert.equal(await cards(), 0);
     console.log('Per-site: wic.example.org turned off under the kept grant; the app dropped it and its card is gone.');
 

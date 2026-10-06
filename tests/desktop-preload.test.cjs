@@ -2,14 +2,13 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const vm = require('node:vm');
+const { runFile } = require('./helpers/harness.cjs');
 
 test('preload forwards only valid lock revisions and treats malformed or legacy events as uncorrelated locks', () => {
   let api;
   let listener;
   let removed;
-  vm.runInNewContext(fs.readFileSync(require.resolve('../desktop/preload.cjs'), 'utf8'), {
+  runFile('desktop/preload.cjs', {
     require: name => {
       assert.equal(name, 'electron');
       return {
@@ -37,7 +36,7 @@ test('preload forwards only valid lock revisions and treats malformed or legacy 
 test('preload exposes the Laya settings actions without an arbitrary model decision endpoint', () => {
   let api;
   const calls = [];
-  vm.runInNewContext(fs.readFileSync(require.resolve('../desktop/preload.cjs'), 'utf8'), {
+  runFile('desktop/preload.cjs', {
     require: () => ({
       contextBridge: { exposeInMainWorld(_name, value) { api = value; } },
       ipcRenderer: { invoke: (...args) => { calls.push(args); return Promise.resolve(); }, on() {}, removeListener() {} }
@@ -56,7 +55,7 @@ test('preload exposes the Laya settings actions without an arbitrary model decis
 test('preload exposes bounded field review and cancellation without saving', () => {
   let api;
   const calls = [];
-  vm.runInNewContext(fs.readFileSync(require.resolve('../desktop/preload.cjs'), 'utf8'), {
+  runFile('desktop/preload.cjs', {
     require: () => ({
       contextBridge: { exposeInMainWorld(_name, value) { api = value; } },
       ipcRenderer: { invoke: (...args) => { calls.push(args); return Promise.resolve(); } }
@@ -71,7 +70,7 @@ test('preload exposes bounded field review and cancellation without saving', () 
 test('preload lets the app turn all websites off, never on: Chrome’s prompt can only come from the extension', () => {
   let api;
   const calls = [];
-  vm.runInNewContext(fs.readFileSync(require.resolve('../desktop/preload.cjs'), 'utf8'), {
+  runFile('desktop/preload.cjs', {
     require: () => ({
       contextBridge: { exposeInMainWorld(_name, value) { api = value; } },
       ipcRenderer: { invoke: (...args) => { calls.push(args); return Promise.resolve(); }, on() {}, removeListener() {} }
@@ -82,12 +81,26 @@ test('preload lets the app turn all websites off, never on: Chrome’s prompt ca
   assert.deepEqual(Object.keys(api).filter(name => /allSites/i.test(name)), ['turnOffAllSites']);
 });
 
+test('preload lets the app remove Always allow on a site, never add it: only the sensitive prompt does (#175)', () => {
+  let api;
+  const calls = [];
+  runFile('desktop/preload.cjs', {
+    require: () => ({
+      contextBridge: { exposeInMainWorld(_name, value) { api = value; } },
+      ipcRenderer: { invoke: (...args) => { calls.push(args); return Promise.resolve(); }, on() {}, removeListener() {} }
+    })
+  });
+  api.removeAlwaysAllowedSite('https://pantry.example.org');
+  assert.deepEqual(calls, [['secondhand:invoke', 'removeAlwaysAllowedSite', 'https://pantry.example.org']]);
+  assert.deepEqual(Object.keys(api).filter(name => /alwaysAllow/i.test(name)), ['removeAlwaysAllowedSite']);
+});
+
 test('preload tells My information which fields a save from Chrome changed, never their values, and exposes the setup’s progress calls', () => {
   let api;
   let listener;
   let removed;
   const calls = [];
-  vm.runInNewContext(fs.readFileSync(require.resolve('../desktop/preload.cjs'), 'utf8'), {
+  runFile('desktop/preload.cjs', {
     require: () => ({
       contextBridge: { exposeInMainWorld(_name, value) { api = value; } },
       ipcRenderer: { invoke: (...args) => { calls.push(args); return Promise.resolve(); },
@@ -119,7 +132,7 @@ test('preload offers Touch ID as named calls, and an unlock notice with only a v
   const calls = [];
   const listeners = {};
   let removed;
-  vm.runInNewContext(fs.readFileSync(require.resolve('../desktop/preload.cjs'), 'utf8'), {
+  runFile('desktop/preload.cjs', {
     require: () => ({
       contextBridge: { exposeInMainWorld(_name, value) { api = value; } },
       ipcRenderer: { invoke: (...args) => { calls.push(args); return Promise.resolve(); },

@@ -1,14 +1,8 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const vm = require('node:vm');
-const { webcrypto } = require('node:crypto');
 const adapter = require('../extension/iowa-adapter.js');
-const generic = require('../extension/generic-adapter.js');
-const strings = require('../extension/strings.js');
-const translation = require('../extension/translation.js');
-const plain = value => JSON.parse(JSON.stringify(value));
+const { plain, serviceWorker, nativeHost } = require('./helpers/harness.cjs');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
@@ -21,9 +15,8 @@ function worker({ pageKey = 'iowa-personal-information', complete = false, todo,
   const tab = { id: 7, active: true, url: `${adapter.PORTAL}/applyForBenefits/${path}` };
   const model = { pageKey, complete, todo, revealed: [], filled: [], nextCount: 0, nextToken: null, preview: 0 };
   const vault = { unlocked: true, accessRevision: 872313042, values: { firstName: 'Synthetic private first', birthDate: '1985-04-12' } };
-  const calls = { native: [], content: [] }, events = {};
-  const event = key => ({ addListener: callback => { events[key] = callback; } });
-  let listener;
+  const calls = { native: [], content: [] };
+  const w = serviceWorker();
   function pageState(message) {
     const address = model.pageKey === 'iowa-select-address';
     const self = model.pageKey === 'iowa-self-details', start = model.pageKey === 'iowa-tell-us-more';
@@ -38,7 +31,7 @@ function worker({ pageKey = 'iowa-personal-information', complete = false, todo,
       nextToken: message.navigationPreview === false ? null : model.nextToken };
   }
   const chrome = {
-    tabs: { get: async () => ({ ...tab }), onActivated: event('activated'), onUpdated: event('updated'), onRemoved: event('removed'),
+    tabs: { get: async () => ({ ...tab }), onActivated: w.event('activated'), onUpdated: w.event('updated'), onRemoved: w.event('removed'),
       sendMessage: async (_id, message) => {
         calls.content.push(plain(message));
         if (message.type === 'secondhand:pageState') return pageState(message);
@@ -56,32 +49,23 @@ function worker({ pageKey = 'iowa-personal-information', complete = false, todo,
     scripting: { executeScript: async () => {}, getRegisteredContentScripts: async () => [] },
     permissions: { contains: async () => false },
     sidePanel: { setPanelBehavior: async () => {} },
-    runtime: { id: 'testextension', getURL: file => `chrome-extension://testextension/${file}`, onMessage: { addListener: callback => { listener = callback; } },
-      connectNative: () => {
-        let reply, disconnect;
-        return { onMessage: { addListener: callback => { reply = callback; } }, onDisconnect: { addListener: callback => { disconnect = callback; } }, disconnect: () => {},
-          postMessage: request => {
-            calls.native.push(plain(request));
-            queueMicrotask(async () => {
-              try {
-                let data;
-                if (request.type === 'status') data = { unlocked: vault.unlocked, accessRevision: vault.accessRevision };
-                else if (request.type === 'getFields') data = { accessRevision: vault.accessRevision, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])) };
-                else if (request.type === 'recordProgress') data = { recorded: true };
-                else throw new Error(`Unexpected native method: ${request.type}`);
-                const override = await nativeHook?.(request, data, { model, vault, tab, calls });
-                if (override?.disconnect) { disconnect(); return; }
-                reply({ id: request.id, ok: true, data: override === undefined ? data : override });
-              } catch (error) { reply({ id: request.id, ok: false, error: error.message }); }
-            });
-          } };
-      } }
+    runtime: { id: 'testextension', getURL: file => `chrome-extension://testextension/${file}`, onMessage: w.onMessage,
+      connectNative: nativeHost({ posted: request => { calls.native.push(plain(request)); }, answer: async (request, port) => {
+        try {
+          let data;
+          if (request.type === 'status') data = { unlocked: vault.unlocked, accessRevision: vault.accessRevision };
+          else if (request.type === 'getFields') data = { accessRevision: vault.accessRevision, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])) };
+          else if (request.type === 'recordProgress') data = { recorded: true };
+          else throw new Error(`Unexpected native method: ${request.type}`);
+          const override = await nativeHook?.(request, data, { model, vault, tab, calls });
+          if (override?.disconnect) { port.disconnect(); return; }
+          port.reply(override === undefined ? data : override);
+        } catch (error) { port.fail(error.message); }
+      } }) }
   };
-  vm.runInNewContext(fs.readFileSync(require.resolve('../extension/background.js'), 'utf8'), {
-    chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, SecondHandTranslation: translation, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console
-  });
-  const send = message => new Promise(resolve => { listener({ tabId: 7, ...message }, { id: 'testextension', url: chrome.runtime.getURL('panel.html') }, resolve); });
-  return { model, vault, tab, calls, events, start: () => send({ type: 'ui:autofill', confirmed: true }), stop: () => send({ type: 'ui:stop', confirmed: true }), poll: () => send({ type: 'ui:pageState' }) };
+  w.start({ chrome });
+  const send = message => w.send({ tabId: 7, ...message }, { id: 'testextension', url: chrome.runtime.getURL('panel.html') });
+  return { model, vault, tab, calls, events: w.events, start: () => send({ type: 'ui:autofill', confirmed: true }), stop: () => send({ type: 'ui:stop', confirmed: true }), poll: () => send({ type: 'ui:pageState' }) };
 }
 const requests = w => w.calls.native.filter(call => call.type === 'getFields');
 

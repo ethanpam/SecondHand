@@ -21,7 +21,7 @@ Then, for each acceptance criterion in the issue, name the test or smoke that ex
 
 ## Health check
 
-In the worktree given (it is at `origin/main`): `npm ci`, `npm test`, `npm run check`, `npm run test:ui`, `npm run test:extension`, and the website gates.
+In the worktree given (it is at `origin/main`): `npm ci`, `npm test`, `npm run check`, `npm run test:coverage`, `npm run test:ui`, `npm run test:extension`, `npm run test:translation`, `npm run test:summary`, `npm run test:laya`, `npm run test:ocr`, `npm run test:ocr:ui`, `npm run test:native`, and the website gates.
 
 ## Flakes
 

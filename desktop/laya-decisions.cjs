@@ -66,6 +66,16 @@ function pick(scores, threshold) {
   return best.probability >= threshold && best.probability > abstain && best.probability - runnerUp.probability >= MIN_LEAD ? best.index : -1;
 }
 
+// #185: Laya's best guess on a question it has no sure answer for: the index of its top-scoring candidate when that
+// one alone scores highest and beats the abstain candidate (the last score), with no bar and no lead; otherwise -1.
+function bestGuess(scores) {
+  const candidates = scores.slice(0, -1);
+  if (!candidates.length) return -1;
+  const top = Math.max(...candidates);
+  const index = candidates.indexOf(top);
+  return top > scores.at(-1) && candidates.lastIndexOf(top) === index ? index : -1;
+}
+
 // True until the click's time budget is spent: what the click has left, never more than BUDGET_MS.
 // Its left() is the whole milliseconds still left.
 function budget(budgetMs, now = Date.now) {
@@ -111,4 +121,4 @@ async function barsFor(laya) {
   return { format, bars: BARS[format] };
 }
 
-module.exports = { BARS, MIN_LEAD, BUDGET_MS, CHOICE_BATCH, score, scoreChoices, pick, budget, timedOut, inOrder, byCost, barsFor };
+module.exports = { BARS, MIN_LEAD, BUDGET_MS, CHOICE_BATCH, score, scoreChoices, pick, bestGuess, budget, timedOut, inOrder, byCost, barsFor };

@@ -153,6 +153,32 @@ async function main() {
     assert.equal(await panel.visible('#questions-note'), true);
     console.log(`Side panel: Chrome's translator here is ${chrome}, so the list keeps the page's words and shows one line: ${await panel.text('#questions-note')}`);
 
+    // The other branch, so every run checks both: the side panel without Chrome's Translator, or with a stand-in
+    // (this smoke's only) that can't translate English to Spanish. Chrome's own comes back afterwards.
+    const standIn = chrome === 'missing' ? 'unavailable' : 'missing';
+    await panel.evaluate(standIn => {
+      window.__realTranslator = Object.getOwnPropertyDescriptor(window, 'Translator');
+      if (standIn === 'missing') delete window.Translator;
+      else window.Translator = { availability: async () => 'unavailable', create: async () => { throw new Error('The smoke’s stand-in translator translates nothing.'); } };
+    }, standIn);
+    await resetTo(instructionsUrl);
+    widget = await launcherFrame();
+    await expect(widget.locator('#translate-offer')).toBeVisible({ timeout: 20000 });
+    if (standIn === 'missing') {
+      await expect.poll(() => panel.text('#questions-note'), { timeout: 15000 }).toBe(es('translate.missing'));
+      assert.equal(await panel.visible('#questions-show'), false, 'without a translator there is no list to show');
+    } else {
+      await expect.poll(() => panel.visible('#questions-show'), { timeout: 15000 }).toBe(true);
+      await panel.click('#questions-show');
+      await expect.poll(rows, { timeout: 15000 }).toEqual(instructions);
+      await expect.poll(() => panel.text('#questions-note'), { timeout: 15000 }).toBe(es('translate.unavailable', { source: 'inglés', target: 'español' }));
+    }
+    console.log(`Side panel: with Chrome's translator ${standIn} (a stand-in), it shows: ${await panel.text('#questions-note')}`);
+    await panel.evaluate(() => {
+      if (window.__realTranslator) Object.defineProperty(window, 'Translator', window.__realTranslator); else delete window.Translator;
+      delete window.__realTranslator;
+    });
+
     // The picker: English wins over the Spanish browser, survives reloading the panel and the page, and the widget follows.
     const choose = value => panel.evaluate(value => { const select = document.getElementById('language'); select.value = value; select.dispatchEvent(new Event('change')); }, value);
     await choose('en');

@@ -188,12 +188,54 @@ final class AppUITests: XCTestCase {
             "The destructive confirmation button should be visible and hittable."
         )
         confirmDelete.tap()
-        XCTAssertTrue(app.buttons["Unlock Second Hand"].waitForExistence(timeout: 5))
+        // Deleting the data locks the app. Open it again with a test PIN.
+        openWithTestPIN(app)
+        assertProfileIsEmpty(app)
         app.terminate()
         app.launch()
-        XCTAssertTrue(app.staticTexts["Your next step starts here"].waitForExistence(timeout: 10))
+        assertProfileIsEmpty(app)
+        attachScreenshot(app, name: "Profile empty state")
+    }
+
+    /// Synthetic test value only.
+    private let testPIN = [2, 4, 6, 8]
+
+    @MainActor
+    private func openWithTestPIN(_ app: XCUIApplication) {
+        XCTAssertTrue(app.buttons["auth.digit.0"].waitForExistence(timeout: 10))
+        attachScreenshot(app, name: "PIN screen after deleting app data")
+        let proceed = app.buttons["auth.continue"]
+        // "Delete all app data" keeps the app PIN, so a simulator that ran this test before asks to enter the PIN.
+        if app.staticTexts["Create your four-digit PIN"].exists {
+            enterTestPIN(app)
+            XCTAssertEqual(proceed.label, "Continue")
+            proceed.tap()
+            XCTAssertTrue(app.staticTexts["Confirm your PIN"].waitForExistence(timeout: 5))
+            enterTestPIN(app)
+            XCTAssertEqual(proceed.label, "Create PIN")
+        } else {
+            XCTAssertTrue(app.staticTexts["Enter PIN"].exists, "After deleting app data, the app must ask to create or enter a PIN.")
+            enterTestPIN(app)
+            XCTAssertEqual(proceed.label, "Continue with PIN")
+        }
+        proceed.tap()
+        XCTAssertTrue(app.tabBars.buttons["Overview"].waitForExistence(timeout: 10))
+    }
+
+    @MainActor
+    private func enterTestPIN(_ app: XCUIApplication) {
+        for digit in testPIN { app.buttons["auth.digit.\(digit)"].tap() }
+        XCTAssertEqual(app.otherElements["auth.pin"].value as? String, "4 of 4 digits entered")
+    }
+
+    @MainActor
+    private func assertProfileIsEmpty(_ app: XCUIApplication) {
+        XCTAssertTrue(app.tabBars.buttons["Overview"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["Welcome back, Test Iowa"].exists)
-        attachScreenshot(app, name: "Overview empty state")
+        app.tabBars.buttons["Profile"].tap()
+        XCTAssertTrue(app.staticTexts["Your information, together"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Test Iowa"].exists)
+        XCTAssertEqual(app.buttons["profile.edit"].label, "Set up my profile")
     }
 
     @MainActor

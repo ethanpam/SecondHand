@@ -152,7 +152,7 @@ test('erasing while locked deletes the vault and its restore copies, keeps other
   await vault.erase();
   assert.equal(await vault.exists(), false);
   assert.deepEqual((await fs.readdir(directory)).sort(), ['other.secondhand', 'settings.json']);
-  await assert.rejects(vault.unlock(PASSPHRASE));
+  await assert.rejects(vault.unlock(PASSPHRASE), { code: 'ENOENT' }, 'the erased vault file is gone');
   await vault.create('a brand new password');
   assert.deepEqual(vault.getData().profile, {});
   await vault.lock();

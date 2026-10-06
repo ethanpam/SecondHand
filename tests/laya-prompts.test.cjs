@@ -64,6 +64,25 @@ test('consent, signature, attestation, agreement, terms, SSN, code, security and
   for (const label of SAFE_LABELS) assert.equal(prompts.unsafeQuestion({ label, options: ['Yes', 'No'] }), false, label);
 });
 
+// #185: questions about the sensitive details (SENSITIVE_FIELDS in desktop/main.cjs). Laya never guesses at one.
+const SENSITIVE_LABELS = ['What is your date of birth?', 'Birthday', 'When were you born?', 'How old are you?', 'Your age', 'Age group', 'Number of household members ages 0 to 5',
+  'What is your monthly household income?', 'Gross income', 'Does anyone in your household earn wages?', 'Are you employed?', 'Is anyone unemployed?', 'Does anyone get a pension?',
+  'How much money does your household have on hand?', 'Do you have a savings or checking account?', 'Total assets', 'Cash on hand', 'Do you own property or a vehicle?',
+  'Do you have medical expenses?', 'Do you take prescription medications?', 'Do you see a doctor regularly?', 'Are you a U.S. citizen?', 'Citizenship status',
+  'What is your immigration status?', 'Are you a lawful permanent resident?', 'Do you have a green card?', 'Do you have a disability?', 'Is anyone disabled?', 'Are you blind?',
+  'Does anyone get SSI or SSDI?', 'Do you have health insurance?', 'Does a health condition limit your work?', 'Is anyone pregnant?', 'Does anyone get Medicare?',
+  'Are you on Medicaid?', 'Social Security'];
+// Everyday questions near those words: Laya may guess these.
+const EVERYDAY_LABELS = ['Is anyone in your household a veteran?', 'How many people live in your household?', 'Do you live in Polk County?', 'Do you rent or own your home?',
+  'Are you applying for SNAP?', 'Is anyone in your household a student?', 'How did you hear about us?', 'Preferred pickup day', 'Do you have a pet?', 'Is anyone in your household 60 or older?'];
+
+test('#185: a question is about a sensitive detail by its words or its options', () => {
+  for (const label of SENSITIVE_LABELS) assert.equal(prompts.sensitiveQuestion({ label, options: ['Yes', 'No'] }), true, label);
+  for (const label of EVERYDAY_LABELS) assert.equal(prompts.sensitiveQuestion({ label, options: ['Yes', 'No'] }), false, label);
+  assert.equal(prompts.sensitiveQuestion({ label: 'Main source of support', options: ['Job', 'Social Security', 'Family'] }), true, 'an option can make a question sensitive');
+  assert.equal(prompts.sensitiveQuestion({ label: 'Your situation', options: ['Working', 'Not working'] }), true);
+});
+
 test('the desktop’s unsafe-question check is the extension engine’s, on every question in the bank', () => {
   assert.equal(prompts.UNSAFE_QUESTION.source, generic.UNSAFE_QUESTION.source);
   assert.equal(prompts.UNSAFE_QUESTION.flags, generic.UNSAFE_QUESTION.flags);

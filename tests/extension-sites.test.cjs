@@ -1,19 +1,14 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const vm = require('node:vm');
 const { webcrypto } = require('node:crypto');
 const { JSDOM } = require('jsdom');
 const adapter = require('../extension/iowa-adapter.js');
 const strings = require('../extension/strings.js');
 const forms = require('./fixtures/pantry-forms.cjs');
-const translation = require('../extension/translation.js');
+const { plain, tick, runFile, evalFile, layout, layoutElements, serviceWorker, nativeHost } = require('./helpers/harness.cjs');
 
-// Values created inside the worker's vm context have foreign prototypes.
-const plain = value => JSON.parse(JSON.stringify(value));
-const source = file => fs.readFileSync(path.join(__dirname, '../extension', file), 'utf8');
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
 const SITE_URL = 'https://pantry.example.org/intake?step=1';
 const ORIGIN = 'https://pantry.example.org';
@@ -31,8 +26,9 @@ const SENSITIVE = ['ssn', 'birthDate', 'ageRange', 'totalMonthlyIncome', 'annual
   'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare'];
 const generic = {
   GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey,
-  requestKeys: keys => [...new Set(keys.flatMap(key => key === 'fullName' ? ['firstName', 'lastName'] : [key]))],
-  deriveValues: values => ({ ...values, ...(values.firstName && values.lastName ? { fullName: `${values.firstName} ${values.lastName}` } : {}) })
+  requestKeys: keys => [...new Set(keys.flatMap(key => key === 'fullName' ? ['firstName', 'lastName'] : key === 'ageRange' ? ['birthDate'] : [key]))],
+  deriveValues: values => ({ ...values, ...(values.firstName && values.lastName ? { fullName: `${values.firstName} ${values.lastName}` } : {}),
+    ...(values.birthDate ? { ageRange: '41' } : {}) })
 };
 const PICKUP = { name: 'pickup', label: 'Preferred pickup day', type: 'select-one', options: ['Monday', 'Friday'], required: true };
 const pantryFields = () => [{ name: 'name', key: 'fullName' }, { name: 'zip', key: 'zip' }, { name: 'size', key: 'householdSize' }, { ...PICKUP }];
@@ -47,6 +43,8 @@ const pantryPlan = () => ({
 // unanswered fields on screen under fresh ids, and answering a field can reveal others.
 function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = {}) {
   let sequence = 0, current = null, listings = 0, listed = null;
+  // Laya's best guesses (#185), by the id each was filled under: the engine finds them after the next plan.
+  const layaGuessed = new Set();
   const onScreen = field => !field.hidden && (!field.revealedBy || fields.some(other => other.name === field.revealedBy && other.answered));
   const shown = field => !field.answered && onScreen(field);
   return {
@@ -69,14 +67,15 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
     fill({ token, assignments, values }) {
       if (token !== current?.token) return { ok: false, filled: [], skipped: [] };
       const filled = [], rejected = [];
-      for (const { id, key, option, guessed } of assignments) {
+      for (const { id, key, option, guessed, layaGuess } of assignments) {
         const field = current.ids.get(id);
         // Laya's answer (#42) is one of the question's own options; everything else is a saved value.
         const answer = option !== undefined ? (field?.options || []).includes(option) && option : values[key];
         if (!field || field.answered || field.refuses || !answer) continue;
         // The page flags the answer: the engine clears a text box, but a chosen option stays chosen.
         if (field.rejects) { rejected.push(id); if (field.choice) field.answered = answer; continue; }
-        field.answered = answer; field.mark = guessed ? 'guess' : 'rule';
+        field.answered = answer; field.mark = layaGuess ? 'laya-guess' : guessed ? 'guess' : 'rule';
+        if (layaGuess) layaGuessed.add(id);
         filled.push(id);
       }
       return { ok: true, filled, skipped: assignments.map(item => item.id).filter(id => !filled.includes(id) && !rejected.includes(id)), rejected };
@@ -87,7 +86,7 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
       listed = new Map(fields.filter(onScreen).map((field, index) => [`sq-${listings}-${index}`, field]));
       return { lang, questions: [...listed].map(([id, field]) => ({ id, label: field.label || field.name })) };
     },
-    focus: id => Boolean(current?.ids.has(id) || listed?.has(id)),
+    focus: id => Boolean(current?.ids.has(id) || listed?.has(id) || layaGuessed.has(id)),
     // Save to My information: the applicant types an answer the profile didn't have. The engine reports only
     // which listed boxes hold one, and reads one box after the click, for the key the rules matched to it.
     type: (name, value) => { fields.find(field => field.name === name).typed = value; },
@@ -106,7 +105,7 @@ function sitePage(fields, { next = false, tokenPrefix = 'plan', lang = 'en' } = 
 }
 
 // `build` runs the worker as another build, and `disk` is the build in the files Chrome would load on a reload (#85).
-function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSites = false, allGranted = allSites, desktop = {}, fields = pantryFields(), next, duringGetFields, duringStatus, frames = [], plan, keepAccess = false, discoveryError = false, topError, framesReply, pageText = { lang: 'en', text: '' }, clock, openTabs, lang = 'en', ai = {}, build, disk } = {}) {
+function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSites = false, allGranted = allSites, desktop = {}, fields = pantryFields(), next, duringGetFields, duringStatus, frames = [], plan, keepAccess = false, discoveryError = false, topError, formFramesError, framesReply, pageText = { lang: 'en', text: '' }, clock, openTabs, lang = 'en', ai = {}, build, disk } = {}) {
   const tab = { id: 7, active: true, url };
   const log = [], native = [], content = [], injected = [], opened = [];
   let reloads = 0;
@@ -145,9 +144,8 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
     values: { firstName: 'Synthetic private first', lastName: 'Synthetic private last', zip: '50309' }, ...desktop };
   // With `trusted`, the app trusts only those origins, as its trusted-site list does.
   const untrusted = url => Array.isArray(vault.trusted) && !vault.trusted.includes(new URL(url).origin);
-  const events = {};
-  const event = key => ({ addListener: value => { events[key] = value; } });
-  let listener;
+  const w = serviceWorker();
+  const { events, event, send } = w;
   const chrome = {
     tabs: {
       get: async () => ({ ...tab }),
@@ -155,6 +153,8 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
       query: async () => (openTabs || [tab]).map(open => ({ ...open, url: covered(open.url) ? open.url : undefined })),
       sendMessage: async (tabId, message, options) => {
         content.push({ tabId, frameId: options?.frameId, ...(options?.documentId === undefined ? {} : { documentId: options.documentId }), ...plain(message) });
+        // `formFramesError`: the top page fails the worker's message about its card, for a reason other than not having loaded.
+        if (message.type === 'secondhand:generic:formFrames' && formFramesError) throw new Error(formFramesError);
         if (['secondhand:generic:formFrames', 'secondhand:generic:off'].includes(message.type)) return undefined;
         if (options?.frameId === 0 && topError) throw new Error(topError);
         if (message.type === 'secondhand:generic:frames') return framesReply === undefined ? { origins: frames.map(frame => frame.origin) } : framesReply;
@@ -175,6 +175,9 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
         if (message.type === 'secondhand:generic:answered') return { answered: model.answeredIds(message.token, message.ids) };
         if (message.type === 'secondhand:generic:read') return model.read(plain(message));
         if (message.type === 'secondhand:generic:pageText') return structuredClone(frame ? frame.pageText || { lang: '', text: '' } : pageText);
+        // An embedded frame says whether its page has a form SecondHand can help with (#157): `helps` on the frame.
+        // `off`: SecondHand was turned off for the frame, which answers nothing. `answering`: a test holds the answer back.
+        if (message.type === 'secondhand:generic:helps' && frame) { await frame.answering; return frame.off ? undefined : { helps: frame.helps === true }; }
         throw new Error(`Unexpected content message ${message.type}`);
       },
       onActivated: event('activated'), onRemoved: event('removed'), onUpdated: event('updated')
@@ -225,83 +228,70 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
     sidePanel: { setPanelBehavior: async () => {}, open: async options => { opened.push(plain(options)); } },
     runtime: {
       id: 'testextension', getURL: file => `chrome-extension://testextension/${file}`,
-      onMessage: { addListener: callback => { listener = callback; } },
+      onMessage: w.onMessage,
       onInstalled: event('installed'),
       reload: () => { reloads++; },
-      connectNative: () => {
-        let onMessage, onDisconnect;
-        return {
-          onMessage: { addListener: callback => { onMessage = callback; } },
-          onDisconnect: { addListener: callback => { onDisconnect = callback; } },
-          disconnect: () => {},
-          postMessage: request => {
-            native.push(plain(request)); log.push(`native:${request.type}`);
-            queueMicrotask(async () => {
-              // A reply the test holds back, as the app does while its approval prompt is open.
-              await vault.delay?.[request.type];
-              if (!vault.reachable) return onDisconnect();
-              const reply = data => onMessage({ id: request.id, ok: true, data });
-              const fail = error => onMessage({ id: request.id, ok: false, error });
-              if (request.type === 'status') {
-                duringStatus?.(vault, ++statusChecks);
-                return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: vault.accessRevision, allSites: vault.allSites, ...(vault.layaState ? { laya: { state: vault.layaState } } : {}),
-                  ...(vault.extension ? { extension: structuredClone(vault.extension) } : {}) });
-              }
-              if (request.type === 'trustAllSites') {
-                if (vault.trustAllError) return fail(vault.trustAllError);
-                if (vault.trustAllReply) return reply(vault.trustAllReply);
-                vault.allSites = true; return reply({ allSites: true });
-              }
-              if (request.type === 'untrustAllSites') { if (vault.untrustError) return fail(vault.untrustError); vault.allSites = false; return reply({ allSites: false }); }
-              // Laya (#39, #42): readied before a click's questions; "not ready" unless a test plays it.
-              if (request.type === 'warmLaya') { vault.warming?.(); return reply({ state: vault.layaState || 'unavailable' }); }
-              if (request.type === 'suggestFields' || request.type === 'answerFields') {
-                if (untrusted(request.url) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
-                const play = vault.laya?.[request.type];
-                if (!play) return onMessage({ id: request.id, ok: false, error: 'Laya isn’t ready on this computer.', code: 'LAYA_NOT_READY' });
-                const answer = play(plain(request), vault);
-                return typeof answer === 'string' ? fail(answer) : reply(answer);
-              }
-              if (request.type === 'showApp') return reply({ shown: true });
-              if (request.type === 'trustSite') return (vault.trustError || request.url === vault.declineOrigin) ? fail(vault.trustError || 'Declined') : reply({ trusted: true, origin: new URL(request.url).origin });
-              if (request.type === 'untrustSite') return vault.untrustSiteError ? fail(vault.untrustSiteError) : reply({ trusted: false, origin: new URL(request.url).origin });
-              if (request.type === 'saveFields') {
-                if (untrusted(request.url) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
-                if (vault.saveError) return fail(vault.saveError);
-                return reply({ saved: Object.keys(request.fields) });
-              }
-              if (request.type === 'getFields') {
-                duringGetFields?.(tab, plain(request));
-                // The app's rule: a site it doesn't trust gets nothing unless all websites is on.
-                if ((vault.refuseUntrusted || untrusted(request.url)) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
-                if (vault.cancelOrigin === new URL(request.url).origin) return fail('You cancelled this field request.');
-                if (vault.getFieldsError) return fail(vault.getFieldsError);
-                // `fieldsReason`: why the app left saved answers out (#135), or a function of the request that says it for one site.
-                const reason = typeof vault.fieldsReason === 'function' ? vault.fieldsReason(plain(request)) : vault.fieldsReason;
-                return reply({ accessRevision: vault.accessRevision, values: Object.fromEntries(request.fields.filter(key => vault.values[key]).map(key => [key, vault.values[key]])),
-                  ...(reason !== undefined ? { reason } : {}) });
-              }
-              fail('Unsupported bridge request.');
-            });
-          }
-        };
-      }
+      connectNative: nativeHost({ posted: request => { native.push(plain(request)); log.push(`native:${request.type}`); }, answer: async (request, { reply, fail, disconnect }) => {
+        // A reply the test holds back, as the app does while its approval prompt is open.
+        await vault.delay?.[request.type];
+        if (!vault.reachable) return disconnect();
+        if (request.type === 'status') {
+          duringStatus?.(vault, ++statusChecks);
+          return reply({ unlocked: vault.unlocked, applicationCount: 0, accessRevision: vault.accessRevision, allSites: vault.allSites, ...(vault.layaState ? { laya: { state: vault.layaState } } : {}),
+            ...(vault.extension ? { extension: structuredClone(vault.extension) } : {}) });
+        }
+        if (request.type === 'trustAllSites') {
+          if (vault.trustAllError) return fail(vault.trustAllError);
+          if (vault.trustAllReply) return reply(vault.trustAllReply);
+          vault.allSites = true; return reply({ allSites: true });
+        }
+        if (request.type === 'untrustAllSites') { if (vault.untrustError) return fail(vault.untrustError); vault.allSites = false; return reply({ allSites: false }); }
+        // Laya (#39, #42): readied before a click's questions; "not ready" unless a test plays it.
+        if (request.type === 'warmLaya') { vault.warming?.(); return reply({ state: vault.layaState || 'unavailable' }); }
+        if (request.type === 'suggestFields' || request.type === 'answerFields') {
+          if (untrusted(request.url) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
+          const play = vault.laya?.[request.type];
+          if (!play) return fail('Laya isn’t ready on this computer.', { code: 'LAYA_NOT_READY' });
+          const answer = play(plain(request), vault);
+          return typeof answer === 'string' ? fail(answer) : reply(answer);
+        }
+        if (request.type === 'showApp') return reply({ shown: true });
+        if (request.type === 'trustSite') return (vault.trustError || request.url === vault.declineOrigin) ? fail(vault.trustError || 'Declined') : reply({ trusted: true, origin: new URL(request.url).origin });
+        if (request.type === 'untrustSite') return vault.untrustSiteError ? fail(vault.untrustSiteError) : reply({ trusted: false, origin: new URL(request.url).origin });
+        if (request.type === 'saveFields') {
+          if (untrusted(request.url) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
+          if (vault.saveError) return fail(vault.saveError);
+          return reply({ saved: Object.keys(request.fields) });
+        }
+        if (request.type === 'getFields') {
+          duringGetFields?.(tab, plain(request));
+          // The app's rule: a site it doesn't trust gets nothing unless all websites is on.
+          if ((vault.refuseUntrusted || untrusted(request.url)) && !vault.allSites) return fail('This site isn’t trusted. Turn on SecondHand for it first.');
+          // Fill sensitive details (#176): `sensitiveError` is the app's answer to its sensitive prompt when it isn't Allow
+          // (Cancel), or a function of the request that gives it for one site.
+          const refusal = typeof vault.sensitiveError === 'function' ? vault.sensitiveError(plain(request)) : vault.sensitiveError;
+          if (request.sensitive && refusal) return fail(refusal);
+          if (vault.cancelOrigin === new URL(request.url).origin) return fail('You cancelled this field request.');
+          if (vault.getFieldsError) return fail(vault.getFieldsError);
+          // `fieldsReason`: why the app left saved answers out (#135), or a function of the request that says it for one site.
+          const reason = typeof vault.fieldsReason === 'function' ? vault.fieldsReason(plain(request)) : vault.fieldsReason;
+          // `holds`: the sensitive fields the app holds back from Autofill without Always allow (#176), or a function of
+          // the request that gives the reply's `held` exactly, beside every saved answer asked for.
+          const played = typeof vault.holds === 'function';
+          const held = played ? vault.holds(plain(request)) : request.sensitive ? [] : request.fields.filter(key => (vault.holds || []).includes(key));
+          return reply({ accessRevision: vault.accessRevision,
+            values: Object.fromEntries(request.fields.filter(key => vault.values[key] && (played || !held.includes(key))).map(key => [key, vault.values[key]])),
+            ...((played ? held !== undefined : held.length) ? { held } : {}), ...(reason !== undefined ? { reason } : {}) });
+        }
+        fail('Unsupported bridge request.');
+      } })
     }
   };
   // A test may run the worker's clock itself: `clock.now` is what Date.now() returns. `ai` holds the
   // stand-ins for Chrome's Translator and LanguageDetector a test gives the worker; by default it has neither.
-  const code = source('background.js');
-  const fetch = async url => {
-    if (url !== 'chrome-extension://testextension/background.js' || !disk) throw new TypeError('Failed to fetch');
-    return { ok: true, text: async () => code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${disk}';`) };
-  };
-  // Starts the worker as Chrome does: at once, and again after Chrome stopped it (#142), when the new worker's listeners
-  // replace the old one's and its memory starts empty. Chrome's records (registrations, access, tabs) stay as they were.
-  const start = () => vm.runInNewContext(build ? code.replace(/^const BUILD = '[^']+';$/m, `const BUILD = '${build}';`) : code,
-    { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, SecondHandTranslation: translation, importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL, Map, Set, console, fetch,
-      ...ai, ...(clock ? { Date: { now: () => clock.now } } : {}) });
-  start();
-  const send = (message, sender) => new Promise(resolve => { if (!listener(message, sender, resolve)) resolve(undefined); });
+  // The worker starts as Chrome starts it: at once, and again after Chrome stopped it (#142), when the new worker's
+  // listeners replace the old one's and its memory starts empty. Chrome's records (registrations, access, tabs) stay as they were.
+  w.start({ chrome, globals: { SecondHandGeneric: generic, ...ai, ...(clock ? { Date: { now: () => clock.now } } : {}) }, build, disk });
   // Whether Chrome lets SecondHand read this address.
   function covered(address) {
     try { const origin = new URL(address).origin; return permissions.has(`${origin}/*`) || (origin === IOWA_ORIGIN ? iowa.held : permissions.has(ALL) && address.startsWith('https://')); }
@@ -312,9 +302,9 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
     reloads: () => reloads,
     // The person removes SecondHand's access in Chrome's settings (#142).
     revoke: origins => takeBack(origins),
-    restart: () => { listener = undefined; for (const key of Object.keys(events)) delete events[key]; start(); },
+    restart: w.restart,
     // The events the worker listens to, its own messages included.
-    listening: () => [...Object.keys(events), ...(listener ? ['message'] : [])].sort(),
+    listening: w.listening,
     nativeTypes: () => native.map(call => call.type),
     contentTypes: () => content.map(call => call.type),
     panel: message => send({ tabId: 7, ...message }, { id: 'testextension', url: PANEL_URL }),
@@ -327,13 +317,13 @@ const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(reso
 test('the worker loads the site engine, its text, and its translator next to the Iowa adapter and refuses to start without any of them', () => {
   const imported = [];
   const chrome = { runtime: { onMessage: { addListener: () => {} } }, tabs: {}, sidePanel: { setPanelBehavior: async () => {} } };
-  assert.throws(() => vm.runInNewContext(source('background.js'), { chrome, SecondHandIowa: adapter, importScripts: (...files) => imported.push(...files), crypto: webcrypto, URL, Map, Set }), /generic-adapter\.js/);
+  assert.throws(() => runFile('extension/background.js', { chrome, SecondHandIowa: adapter, importScripts: (...files) => imported.push(...files), crypto: webcrypto, URL, Map, Set }), /generic-adapter\.js/);
   assert.deepEqual(imported, ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'strings.js', 'translation.js']);
-  assert.throws(() => vm.runInNewContext(source('background.js'), { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }), /strings\.js/);
-  assert.throws(() => vm.runInNewContext(source('background.js'), { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }),
+  assert.throws(() => runFile('extension/background.js', { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }), /strings\.js/);
+  assert.throws(() => runFile('extension/background.js', { chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }),
     /translation\.js/, 'a worker that can’t translate questions for Laya doesn’t start');
   const { layaQuestion: _, ...older } = generic;
-  assert.throws(() => vm.runInNewContext(source('background.js'), { chrome, SecondHandIowa: adapter, SecondHandGeneric: older, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }),
+  assert.throws(() => runFile('extension/background.js', { chrome, SecondHandIowa: adapter, SecondHandGeneric: older, SecondHandStrings: strings, importScripts: () => {}, crypto: webcrypto, URL, Map, Set }),
     /generic-adapter\.js/, 'an engine without Laya’s question rule is refused');
 });
 
@@ -539,10 +529,13 @@ test('the page count takes each on-screen question SecondHand filled once and sp
     <input name="email" data-secondhand-filled="guess"><input name="untouched"></form>
     <section style="display:none"><input name="earlier" data-secondhand-filled="rule"><button type="button">Next</button></section>
     <div hidden><input name="tucked" data-secondhand-filled="guess"></div>
-    <button type="submit">Submit</button>`), { rule: 2, guess: 1, next: false });
+    <button type="submit">Submit</button>`), { rule: 2, guess: 1, layaGuess: 0, next: false });
   // Google Forms' div choices: every option is marked, but the question counts once.
   assert.deepEqual(run(`<div role="radiogroup">${['One', 'Two', 'Three'].map(label => `<div role="radio" aria-label="${label}" data-secondhand-filled="rule"></div>`).join('')}</div>
-    <div role="radiogroup"><div role="radio" data-secondhand-filled="guess"></div><div role="radio" data-secondhand-filled="guess"></div></div>`), { rule: 1, guess: 1, next: false });
+    <div role="radiogroup"><div role="radio" data-secondhand-filled="guess"></div><div role="radio" data-secondhand-filled="guess"></div></div>`), { rule: 1, guess: 1, layaGuess: 0, next: false });
+  // Laya's best guesses (#185) count apart from the other guesses, a group once.
+  assert.deepEqual(run(`<label><input type="radio" name="size" data-secondhand-filled="laya-guess">1</label><label><input type="radio" name="size" data-secondhand-filled="laya-guess">2</label>
+    <select name="county" data-secondhand-filled="laya-guess"></select><input name="email" data-secondhand-filled="guess">`), { rule: 0, guess: 1, layaGuess: 2, next: false });
   assert.equal(run('<button type="button">Next</button>').next, true);
   assert.equal(run('<input type="submit" value="Next page">').next, true);
   assert.equal(run('<div role="button"><span>Next</span></div>').next, true);
@@ -808,8 +801,8 @@ function siteContent(t, { url = SITE_URL, engine = true, settled = null, offers 
       }
     };
   }
-  window.eval(source('page-text.js'));
-  window.eval(source('generic-content.js'));
+  evalFile(window, 'extension/page-text.js');
+  evalFile(window, 'extension/generic-content.js');
   return { window, frames, calls, reports,
     host: () => window.document.querySelector('[data-secondhand-assistant]'),
     request(message, sender = { id: extensionId }) { let response; listener?.(message, sender, value => { response = value; }); return response; },
@@ -833,14 +826,14 @@ test('on approved sites the widget is a closed, full-size extension iframe in th
   assert.equal(host.getAttribute('data-secondhand-size'), 'full');
   assert.equal(host.style.height, '46px');
   assert.equal(host.style.position, 'fixed');
-  page.window.eval(source('generic-content.js'));
+  evalFile(page.window, 'extension/generic-content.js');
   assert.equal(page.frames.length, 1, 'injecting again keeps one widget');
 
   const child = page.window.document.createElement('iframe');
   page.window.document.body.append(child);
   child.contentWindow.SecondHandGeneric = page.window.SecondHandGeneric;
   child.contentWindow.chrome = page.window.chrome;
-  child.contentWindow.eval(source('generic-content.js'));
+  evalFile(child.contentWindow, 'extension/generic-content.js');
   assert.equal(child.contentWindow.document.querySelector('[data-secondhand-assistant]'), null);
   assert.equal(siteContent(t, { engine: false }).host(), null);
   assert.equal(siteContent(t, { url: 'http://pantry.example.org/intake' }).host(), null);
@@ -1195,7 +1188,7 @@ test('an https subframe answers plans without creating a widget', t => {
   const reports = [];
   dom.window.chrome = { runtime: { id: extensionId, onMessage: { addListener: callback => { listener = callback; } }, sendMessage: async message => { reports.push(plain(message)); } } };
   dom.window.SecondHandGeneric = { plan: () => pantryPlan(), offers: () => true };
-  dom.window.eval(source('generic-content.js'));
+  evalFile(dom.window, 'extension/generic-content.js');
   assert.equal(typeof listener, 'function');
   assert.deepEqual(reports, [{ type: 'secondhand:generic:form', helps: true }]);
   let result;
@@ -1670,6 +1663,87 @@ test('answers made before getFields’ approval: an Always allow there outdates 
 });
 
 // "What this page says" on a site that is on: the page's own words and those of each embedded form that is on.
+// #185: Laya's best guess on a single-choice question it isn't sure of: filled with its own mark, counted in the summary,
+// and listed for the side panel.
+const SIZE = { name: 'size', label: 'How many people live in your household?', type: 'radio', options: ['1', '2', '3 or more'] };
+const guessingDesktop = (guesses = request => ({ [request.questions.find(question => question.label === SIZE.label).id]: '1' })) => layaDesktop({
+  answerFields: (request, vault) => ({ answers: { [request.questions.find(question => question.label === SIXTY.label).id]: 'No' }, guesses: guesses(request), accessRevision: vault.accessRevision }) });
+
+test('#185: Laya’s guess fills a single-choice question with its own mark; the summary says how many Laya guessed, and the side panel gets each one to find', async () => {
+  const w = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...SIZE }, { ...SIXTY }, { ...PET }], desktop: guessingDesktop() });
+  const result = plain((await autofill(w)).data);
+  const size = 'f0:sh-1-1';
+  assert.deepEqual(w.content.find(call => call.type === 'secondhand:generic:fill').assignments, [{ id: 'sh-1-0', key: 'fullName', guessed: false },
+    { id: 'sh-1-2', option: 'No', guessed: true }, { id: 'sh-1-1', option: '1', guessed: true, layaGuess: true }]);
+  assert.deepEqual(w.page.fields.map(field => field.mark), ['rule', 'laya-guess', 'guess', undefined]);
+  assert.deepEqual([result.filled, result.guessed, result.laya, result.layaGuessed], [3, 1, 1, 1], 'the guess is filled, apart from the sure answer');
+  assert.deepEqual(result.layaGuesses, [{ id: size, label: SIZE.label }]);
+  assert.deepEqual(result.needYou, [idOf(w, 'pet')]);
+  assert.equal(result.message, 'Filled 3 · 1 guessed · 1 need you. Check your answers before you submit. Guesses were suggested by Laya on this computer. 1 guessed by Laya, check it.');
+  assert.equal(result.messageKey, 'result.layaGuessed');
+  assert.deepEqual(plain((await w.panel({ type: 'ui:pageState' })).data).result.layaGuesses, [{ id: size, label: SIZE.label }]);
+  assert.deepEqual(plain((await w.panel({ type: 'ui:focusField', key: size })).data), { focused: true }, 'the side panel finds it after the fill planned the page again');
+  assert.equal(strings.english('result.layaGuessed', { summary: { key: 'result.siteFilled', params: { count: 2 } }, count: 2 }),
+    'Filled 2. Check your answers before you submit. 2 guessed by Laya, check them.');
+});
+
+test('#185: guesses alone fill under their own access receipt; a desktop from before guesses sends none', async () => {
+  const only = layaDesktop({ answerFields: (request, vault) => ({ answers: {}, guesses: { [request.questions[0].id]: '1' }, accessRevision: vault.accessRevision }) });
+  const w = siteWorker({ enabled: true, fields: [{ ...SIZE }], desktop: only });
+  const result = plain((await autofill(w)).data);
+  assert.deepEqual([result.filled, result.guessed, result.laya, result.layaGuessed], [1, 0, undefined, 1]);
+  assert.equal(result.message, 'Filled 1. Check your answers before you submit. 1 guessed by Laya, check it.');
+  const stale = siteWorker({ enabled: true, fields: [{ ...SIZE }], desktop: layaDesktop({ answerFields: request => ({ answers: {}, guesses: { [request.questions[0].id]: '1' }, accessRevision: 99 }) }) });
+  const refused = plain((await autofill(stale)).data);
+  assert.equal(refused.state, 'error');
+  assert.match(refused.message, /access changed/);
+  assert.deepEqual(stale.page.answered(), []);
+  const older = siteWorker({ enabled: true, fields: [{ ...SIZE }, { ...SIXTY }], desktop: layaDesktop({ answerFields: (request, vault) => ({ answers: { [request.questions[1].id]: 'No' }, accessRevision: vault.accessRevision }) }) });
+  const before = plain((await autofill(older)).data);
+  assert.deepEqual([before.filled, before.layaGuessed, before.layaGuesses], [1, undefined, undefined]);
+});
+
+test('#185: a guess for a checkbox group, a question outside the request, one Laya also answered, or an option the question lacks fills nothing', async () => {
+  const NEEDS = { name: 'needs', label: 'Which of these does your household need?', type: 'checkbox', options: ['Produce', 'Diapers'] };
+  const id = (request, label) => request.questions.find(question => question.label === label).id;
+  const replies = [
+    request => ({ [id(request, NEEDS.label)]: 'Produce' }),
+    () => ({ 'f0:sh-9-9': '1' }),
+    request => ({ [id(request, SIXTY.label)]: 'Yes' }),
+    request => ({ [id(request, SIZE.label)]: '4' }),
+    request => ({ [id(request, SIZE.label)]: 1 }),
+    () => [],
+    () => null
+  ];
+  for (const guesses of replies) {
+    const w = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...SIZE }, { ...SIXTY }, { ...NEEDS }], desktop: guessingDesktop(guesses) });
+    const result = plain((await autofill(w)).data);
+    assert.deepEqual([result.state, result.messageKey], ['error', 'worker.layaUnusable'], guesses.toString());
+    assert.equal(w.contentTypes().includes('secondhand:generic:fill'), false, guesses.toString());
+    assert.deepEqual(w.page.answered(), []);
+  }
+});
+
+test('#185: a Spanish question’s guess fills the page’s own option, found by position', async () => {
+  const { ai } = workerAI();
+  const w = siteWorker({ enabled: true, lang: 'es', ai, fields: [{ ...SIXTY_ES }], desktop: layaDesktop({
+    answerFields: (request, vault) => ({ answers: {}, guesses: { [request.questions[0].id]: 'Yes' }, accessRevision: vault.accessRevision }) }) });
+  const result = plain((await autofill(w)).data);
+  assert.deepEqual(w.content.find(call => call.type === 'secondhand:generic:fill').assignments, [{ id: 'sh-1-0', option: 'Sí', guessed: true, layaGuess: true }]);
+  assert.deepEqual(result.layaGuesses, [{ id: 'f0:sh-1-0', label: SIXTY_ES.label }], 'the side panel lists it in the page’s own words');
+});
+
+test('#185: the guess list holds the reload, as the need-you list does', async () => {
+  const w = updating({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...SIZE }], desktop: { ...layaDesktop({
+    answerFields: (request, vault) => ({ answers: {}, guesses: { [request.questions[0].id]: '1' }, accessRevision: vault.accessRevision }) }), extension: UPDATE } });
+  assert.equal(plain((await autofill(w)).data).layaGuessed, 1);
+  await statusRow(w);
+  assert.equal(w.reloads(), 0, 'Laya’s guess is still to check');
+  w.events.updated(7, { status: 'loading' });
+  await statusRow(w);
+  assert.equal(w.reloads(), 1);
+});
+
 const sitePoints = { language: 'en', points: ['Bring a photo ID.'], english: false };
 
 test('a site’s page text is its own words, then each embedded form’s that is on; a form that is off is never read', async () => {
@@ -1758,8 +1832,7 @@ test('a site frame answers the page-text request with its declared language and 
   doc.documentElement.lang = 'en';
   doc.body.insertAdjacentHTML('afterbegin', '<p>Bring a photo ID to pickup.</p>');
   doc.getElementById('name').value = 'Synthetic private name';
-  const box = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 };
-  for (const node of doc.querySelectorAll('*')) { node.getBoundingClientRect = () => box; node.getClientRects = () => [box]; }
+  layout(doc);
   assert.deepEqual(plain(page.request({ type: 'secondhand:generic:pageText' })), { lang: 'en', text: 'Bring a photo ID to pickup.\nYour name\nPickup day' });
   assert.equal(page.request({ type: 'secondhand:generic:pageText' }, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
   delete page.window.SecondHandPageText;
@@ -1982,6 +2055,118 @@ test('an embedded form tells the top frame to show the card, with a yes or no on
   assert.deepEqual([...w.native, ...off.native], [], 'nothing reaches the desktop');
 });
 
+// #157: Chrome stops an idle worker and starts it again for the next event. Which embedded frames have a form was in its
+// memory only, so the new worker asks the tab's frames again before it counts a report, and the top page's card stays right.
+const SECOND_FORM_ORIGIN = 'https://forms.example.com';
+function formReporter(w) {
+  const report = (frame, helps) => w.send({ type: 'secondhand:generic:form', helps },
+    { id: 'testextension', url: frame ? `${frame.origin}/form` : w.tab.url, frameId: frame ? frame.frameId : 0, tab: { id: 7, url: w.tab.url } });
+  // What the worker last told the top page: whether a form in one of its frames shows the card.
+  const card = () => w.content.filter(call => call.type === 'secondhand:generic:formFrames').at(-1)?.helps;
+  const asked = () => w.content.filter(call => call.type === 'secondhand:generic:helps').map(call => [call.frameId, call.documentId]);
+  return { report, card, asked };
+}
+
+test('after a worker restart, the card goes when the last embedded form does, and stays while another is there', async () => {
+  const one = secondFrame({ helps: true });
+  const w = siteWorker({ url: OTHER_URL, allSites: true, frames: [one] });
+  const { report, card, asked } = formReporter(w);
+  w.events.updated(7, { status: 'loading' });
+  await report(one, true);
+  assert.equal(card(), true);
+  w.restart();
+  one.helps = false;
+  assert.deepEqual(plain(await report(one, false)), { frames: false });
+  assert.equal(card(), false, 'the form is gone: so is the card');
+  assert.deepEqual(asked(), [[4, 'doc-4']], 'the frame is asked in the document Chrome placed');
+
+  // Two embedded forms; after the restart a third frame's form comes and goes. The first is still there.
+  const first = secondFrame({ helps: true }), second = { origin: SECOND_FORM_ORIGIN, frameId: 5 };
+  const two = siteWorker({ url: OTHER_URL, allSites: true, frames: [first, second] });
+  const forms2 = formReporter(two);
+  two.events.updated(7, { status: 'loading' });
+  await forms2.report(first, true);
+  two.restart();
+  second.helps = true;
+  assert.deepEqual(plain(await forms2.report(second, true)), { frames: true });
+  second.helps = false;
+  assert.deepEqual(plain(await forms2.report(second, false)), { frames: true });
+  assert.equal(forms2.card(), true, 'the first form still shows the card');
+  assert.deepEqual(forms2.asked(), [[4, 'doc-4'], [5, 'doc-5']], 'asked once, after the restart');
+  assert.deepEqual([...w.native, ...two.native], [], 'nothing reaches the desktop');
+});
+
+test('after a worker restart, a top page that asks hears about forms already in its frames, and reports that come together share one check', async () => {
+  const one = secondFrame({ helps: true }), other = { origin: SECOND_FORM_ORIGIN, frameId: 5, helps: true };
+  const w = siteWorker({ url: OTHER_URL, allSites: true, frames: [one, other] });
+  const { report, card, asked } = formReporter(w);
+  w.events.updated(7, { status: 'loading' });
+  await report(one, true);
+  await report(other, true);
+  w.restart();
+  assert.deepEqual(plain(await report(null, false)), { frames: true }, 'the top page asks, as when SecondHand is turned on for an open page');
+  w.restart();
+  one.helps = false; other.helps = false;
+  const sent = asked().length;
+  await Promise.all([report(one, false), report(other, false)]);
+  assert.deepEqual(asked().slice(sent), [[4, 'doc-4'], [5, 'doc-5']], 'each frame is asked once');
+  assert.equal(card(), false);
+  // A page that loads after a restart starts over: its frames report as they load, and nothing is asked.
+  w.restart();
+  w.events.updated(7, { status: 'loading' });
+  const before = asked().length;
+  assert.deepEqual(plain(await report(null, false)), { frames: false });
+  assert.equal(asked().length, before);
+});
+
+test('after a worker restart, a report that waited while the tab loaded another page counts for nothing there', async () => {
+  let answer;
+  const one = secondFrame({ helps: true, answering: new Promise(resolve => { answer = resolve; }) });
+  const w = siteWorker({ url: OTHER_URL, allSites: true, frames: [one] });
+  const { report, card } = formReporter(w);
+  w.restart();
+  const old = report(one, true);
+  await settle();
+  w.events.updated(7, { status: 'loading' });
+  answer();
+  assert.deepEqual(plain(await old), { frames: false });
+  assert.equal(card(), undefined, 'the new page isn’t told about the old page’s form');
+  assert.deepEqual(plain(await report(null, false)), { frames: false }, 'the new page’s frames report as they load');
+});
+
+test('after a worker restart, only frames on sites that are on are asked about their forms, and one turned off counts for none', async () => {
+  const pantry = secondFrame({ enabled: true, helps: true }), ads = { origin: 'https://ads.example.com', frameId: 6, helps: true };
+  const quiet = { origin: SECOND_FORM_ORIGIN, frameId: 5, enabled: true, helps: true, off: true };
+  const w = siteWorker({ enabled: true, frames: [pantry, ads, quiet] });
+  const { report, card, asked } = formReporter(w);
+  w.events.updated(7, { status: 'loading' });
+  await report(pantry, true);
+  w.restart();
+  pantry.helps = false;
+  assert.deepEqual(plain(await report(pantry, false)), { frames: false });
+  assert.equal(card(), false, 'a frame of a site that is off never shows the card');
+  assert.deepEqual(asked(), [[4, 'doc-4'], [5, 'doc-5']]);
+  assert.equal(w.content.some(call => call.frameId === 6), false);
+});
+
+// #178: a report the worker can't count is answered with its error, in the shape of every other error reply.
+const PORT_CLOSED = 'The message port closed before a response was received.';
+const detailReply = text => ({ ok: false, error: text, errorKey: 'detail', errorParams: { detail: text } });
+test('a report the worker can’t count is answered with its usual error: the top page fails its message, or the check of the tab’s frames fails (#178)', async () => {
+  const one = secondFrame({ helps: true });
+  const refused = siteWorker({ url: OTHER_URL, allSites: true, frames: [one], formFramesError: PORT_CLOSED });
+  refused.events.updated(7, { status: 'loading' });
+  assert.deepEqual(plain(await formReporter(refused).report(one, true)), detailReply(PORT_CLOSED));
+
+  // A restarted worker that can't ask the tab's frames counts neither the top page's report nor an embedded frame's.
+  const unchecked = siteWorker({ url: OTHER_URL, allSites: true, frames: [one], discoveryError: true });
+  const { report, card } = formReporter(unchecked);
+  assert.deepEqual(plain(await report(null, false)), detailReply('Cannot access an unapproved frame'));
+  assert.deepEqual(plain(await report(one, true)), detailReply('Cannot access an unapproved frame'));
+  assert.equal(card(), undefined, 'the top page is told nothing');
+  assert.deepEqual([...refused.native, ...unchecked.native], [], 'nothing reaches the desktop');
+});
+
 // #137: saved answers for a form embedded from another site are asked for in that site's name, the address Chrome
 // gives for the frame, and each site's answers are approved and filled apart.
 const EMBED_URL = `${FRAME_ORIGIN}/pantry-signup`;
@@ -2066,26 +2251,40 @@ test('answers go only to the document Chrome placed: an embedded form that moves
 });
 
 // The real site engine and content script on a page, as Chrome loads them for each registration that matches.
-const CHECK_WAIT = 800; // longer than the content script waits after a page change before it checks again
+// How long the content script waits after a page change before it checks again. A test that changes a page
+// mocks setTimeout: the change arms the check, and the test's clock runs it.
+const CHECK_MS = 500;
+const checkAfterChange = async t => { await tick(); t.mock.timers.tick(CHECK_MS); await tick(); };
 function livePage(t, html, { url = OTHER_URL, framesReply = { frames: false }, loads = 1, top = true } = {}) {
   const dom = new JSDOM(`<!doctype html><body>${html}</body>`, { url, runScripts: 'outside-only', pretendToBeVisual: true });
   t.after(() => dom.window.close());
   if (!top) dom.reconfigure({ windowTop: {} });
   const { window } = dom;
-  // jsdom has no layout: every element gets a visible box.
-  const box = { left: 20, top: 20, right: 220, bottom: 50, width: 200, height: 30 };
-  window.Element.prototype.getBoundingClientRect = () => box;
-  window.Element.prototype.getClientRects = () => [box];
+  layoutElements(window);
   const listeners = [], reports = [];
   window.chrome = { runtime: { id: extensionId, getURL: extensionURL, onMessage: { addListener: callback => { listeners.push(callback); } },
     sendMessage: async message => { reports.push(plain(message)); return structuredClone(framesReply); } } };
-  const load = () => { for (const file of SITE_SCRIPT.js) window.eval(source(file)); };
+  const load = () => { for (const file of SITE_SCRIPT.js) evalFile(window, `extension/${file}`); };
   for (let i = 0; i < loads; i++) load();
   return { window, listeners, reports, load,
     cards: () => window.document.querySelectorAll('[data-secondhand-assistant]').length,
     tell(message) { for (const listener of listeners) listener(message, { id: extensionId }, () => {}); } };
 }
-const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+// The errors Chrome would report as uncaught while `work` runs and the page settles. node:test fails a test on an
+// unhandled rejection, so its own listener steps aside meanwhile.
+async function uncaught(work) {
+  const runner = process.listeners('unhandledRejection');
+  const errors = [];
+  const heard = error => { errors.push(error); };
+  process.removeAllListeners('unhandledRejection');
+  process.on('unhandledRejection', heard);
+  try { await work(); await settle(); }
+  finally {
+    process.off('unhandledRejection', heard);
+    for (const listener of runner) process.on('unhandledRejection', listener);
+  }
+  return errors;
+}
 
 test('with all websites on, the card shows on a form page and stays hidden on a search-only page, a sign-in page, and a page without inputs', async t => {
   assert.equal(livePage(t, forms.plainPantry).cards(), 1);
@@ -2103,18 +2302,22 @@ test('with all websites on, the card shows on a form page and stays hidden on a 
 });
 
 test('a form that appears after the page loads brings the card, and the card goes when the form does', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const page = livePage(t, '<main id="app"><p>Loading…</p></main>');
-  assert.equal(page.cards(), 0);
+  await tick();
+  assert.equal(page.cards(), 0, 'the page has loaded without a form');
   page.window.document.getElementById('app').innerHTML = '<form><label for="fname">First name</label><input id="fname"><label for="zip">ZIP code</label><input id="zip"></form>';
-  await wait(CHECK_WAIT);
+  await tick();
+  assert.equal(page.cards(), 0, 'the check waits for the page to settle');
+  t.mock.timers.tick(CHECK_MS); await tick();
   assert.equal(page.cards(), 1);
   page.window.document.getElementById('fname').value = 'Typed by the applicant';
   page.window.document.getElementById('zip').value = '50309';
   page.window.document.getElementById('app').append(page.window.document.createElement('p'));
-  await wait(CHECK_WAIT);
+  await checkAfterChange(t);
   assert.equal(page.cards(), 1, 'a filled form keeps its card');
   page.window.document.getElementById('app').innerHTML = '<p>Thank you. We received your sign-up.</p>';
-  await wait(CHECK_WAIT);
+  await checkAfterChange(t);
   assert.equal(page.cards(), 0);
 });
 
@@ -2137,20 +2340,44 @@ test('the scripts run once when a site’s own registration and all websites bot
 });
 
 test('an embedded form reports whether it has a form and never makes a card of its own', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const frame = livePage(t, '<form><label for="fname">First name</label><input id="fname"></form>', { url: `${FRAME_ORIGIN}/form`, top: false });
   assert.equal(frame.cards(), 0);
-  assert.deepEqual(frame.reports, [{ type: 'secondhand:generic:form', helps: true }]);
+  await tick();
+  assert.deepEqual(frame.reports, [{ type: 'secondhand:generic:form', helps: true }], 'the frame has loaded with its form');
   frame.window.document.querySelector('form').remove();
-  await wait(CHECK_WAIT);
+  await checkAfterChange(t);
   assert.deepEqual(frame.reports.at(-1), { type: 'secondhand:generic:form', helps: false });
   const empty = livePage(t, '<p>Advertisement</p>', { url: 'https://ads.example.com/frame', top: false });
   assert.deepEqual(empty.reports, [], 'a frame without a form says nothing');
 });
 
+test('an embedded frame tells the worker whether its page has a form when the worker asks, with a yes or no only (#157)', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const ask = (page, sender = { id: extensionId }) => {
+    let reply;
+    for (const listener of page.listeners) listener({ type: 'secondhand:generic:helps' }, sender, value => { reply = value; });
+    return reply === undefined ? undefined : plain(reply);
+  };
+  const frame = livePage(t, '<form><label for="fname">First name</label><input id="fname" value="Synthetic typed answer"></form>', { url: `${FRAME_ORIGIN}/form`, top: false });
+  assert.deepEqual(ask(frame), { helps: true });
+  assert.equal(ask(frame, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
+  await tick();
+  assert.deepEqual(ask(frame), { helps: true }, 'the frame has loaded with its form');
+  frame.window.document.querySelector('form').remove();
+  await checkAfterChange(t);
+  assert.deepEqual(ask(frame), { helps: false });
+  assert.deepEqual(ask(livePage(t, '<p>Advertisement</p>', { url: 'https://ads.example.com/frame', top: false })), { helps: false });
+  assert.equal(ask(livePage(t, forms.plainPantry)), undefined, 'the top page places its own card');
+  const off = livePage(t, '<form><label for="fname">First name</label><input id="fname"></form>', { url: `${FRAME_ORIGIN}/form`, top: false });
+  off.tell({ type: 'secondhand:generic:off' });
+  assert.equal(ask(off), undefined, 'a frame SecondHand was turned off for answers nothing');
+});
+
 test('the top page shows the card for an embedded form the worker tells it about', async t => {
   const page = siteContent(t, { offers: () => false, framesReply: { frames: true } });
   assert.equal(page.host(), null);
-  await wait(0);
+  await tick();
   assert.ok(page.host(), 'a form embedded before the page loaded');
   page.request({ type: 'secondhand:generic:formFrames', helps: false });
   assert.equal(page.host(), null);
@@ -2161,7 +2388,24 @@ test('the top page shows the card for an embedded form the worker tells it about
   assert.ok(page.host(), 'another extension changes nothing');
 });
 
+test('a form report the worker answers with an error is reported as uncaught, on the top page and from an embedded frame (#178)', async t => {
+  const reported = errors => errors.map(item => ({ message: item.message, messageKey: item.messageKey, messageParams: plain(item.messageParams) }));
+  const thrown = reply => ({ message: reply.error, messageKey: reply.errorKey, messageParams: reply.errorParams });
+  // The top page's report: the worker couldn't check the tab's frames, as when one answers in a way it can't trust.
+  const unchecked = { ok: false, error: strings.english('worker.frameUnsafe'), errorKey: 'worker.frameUnsafe', errorParams: {} };
+  let page, frame;
+  assert.deepEqual(reported(await uncaught(() => { page = livePage(t, forms.plainPantry, { framesReply: unchecked }); })), [thrown(unchecked)]);
+  assert.equal(page.cards(), 1, 'the page’s own form keeps its card');
+  // An embedded frame's report: the top page failed the worker's message about its card.
+  const refused = detailReply(PORT_CLOSED);
+  const form = '<form><label for="fname">First name</label><input id="fname"></form>';
+  assert.deepEqual(reported(await uncaught(() => { frame = livePage(t, form, { url: `${FRAME_ORIGIN}/form`, top: false, framesReply: refused }); })), [thrown(refused)]);
+  assert.deepEqual(reported(await uncaught(() => { frame.window.dispatchEvent(new frame.window.Event('pagehide')); })), [thrown(refused)], 'and as the frame goes');
+  assert.deepEqual(frame.reports, [{ type: 'secondhand:generic:form', helps: true }, { type: 'secondhand:generic:form', helps: false }]);
+});
+
 test('when SecondHand is turned off for the page, its card goes and the page answers nothing more', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const page = siteContent(t);
   assert.ok(page.host());
   page.request({ type: 'secondhand:generic:off' }, { id: 'b'.repeat(32) });
@@ -2171,7 +2415,7 @@ test('when SecondHand is turned off for the page, its card goes and the page ans
   assert.equal(page.request({ type: 'secondhand:generic:plan' }), undefined);
   page.request({ type: 'secondhand:generic:formFrames', helps: true });
   page.window.document.body.append(page.window.document.createElement('p'));
-  await wait(CHECK_WAIT);
+  await checkAfterChange(t);
   assert.equal(page.host(), null, 'nothing brings it back');
   assert.deepEqual(page.calls, []);
 });
@@ -2577,4 +2821,242 @@ test('when the app refuses to save because of a saved date of birth, the side pa
   assert.deepEqual([refused.errorKey, refused.errorParams], ['detail', { detail: refusal }], 'the app’s own words, not a fixed error');
   assert.equal(strings.text('en', refused.errorKey, refused.errorParams), refusal);
   assert.ok((await savable(w)).some(item => item.id === size), 'the answer stays on the list to save once the date is fixed');
+});
+
+// #176: without Always allow, the app holds back the sensitive details that would need its own prompt. Autofill fills
+// everything else at once, and those questions wait under need-you and in the side panel's list for one Fill sensitive
+// details click, which asks the app for them alone.
+const SENSITIVE_SAVED = { firstName: 'Synthetic private first', lastName: 'Synthetic private last', birthDate: '1985-04-12', ssn: '123-45-6789' };
+const sensitiveForm = () => [{ name: 'name', key: 'fullName' }, { name: 'dob', key: 'birthDate', label: 'Date of birth' }, { name: 'ssn', key: 'ssn', label: 'Social Security number' }, { ...PICKUP }];
+const holding = (options = {}) => siteWorker({ enabled: true, fields: sensitiveForm(), ...options, desktop: { values: SENSITIVE_SAVED, holds: ['birthDate', 'ssn'], ...options.desktop } });
+const fillHeld = w => w.panel({ type: 'ui:fillHeld', confirmed: true });
+const heldList = async w => plain((await w.panel({ type: 'ui:pageState' })).data).held;
+const WAITING = 'Check your answers before you submit. 2 sensitive details wait until you click Fill sensitive details in the side panel.';
+
+test('without Always allow, Autofill fills everything else at once; the held questions count as need-you and wait in the side panel’s list (#176)', async () => {
+  const w = holding();
+  const result = plain((await autofill(w)).data);
+  assert.deepEqual(w.native.filter(call => call.type === 'getFields').map(({ fields, sensitive }) => ({ fields, sensitive })), [{ fields: ['firstName', 'lastName', 'birthDate', 'ssn'], sensitive: undefined }],
+    'one request, as before');
+  assert.deepEqual(w.page.answered(), ['name']);
+  const fills = w.content.filter(call => call.type === 'secondhand:generic:fill');
+  assert.deepEqual(fills.map(call => Object.keys(call.values)), [['fullName']], 'only the answers the app gave reach the page');
+  const [dob, ssn, pickup] = ['dob', 'ssn', 'pickup'].map(name => `f0:${w.page.idOf(name)}`);
+  assert.deepEqual(result, { state: 'done', filled: 1, guessed: 0, needYou: [pickup, dob, ssn], held: 2, pageKey: 'general',
+    message: `Filled 1 · 3 need you. ${WAITING}`, messageKey: 'result.withHeld',
+    messageParams: { summary: { key: 'result.siteFilledNeedYou', params: { count: 1, needYou: 3 } }, count: 2 } });
+  assert.doesNotMatch(JSON.stringify(result), /1985|123-45/);
+
+  // The side panel lists them by their own words. Date of birth is a saved field, but its answer was held back,
+  // not missing: it is never offered to Save to My information.
+  const state = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.deepEqual(state.held, [{ id: dob, label: 'Date of birth' }, { id: ssn, label: 'Social Security number' }]);
+  assert.equal(state.savable, undefined);
+  assert.equal(plain((await w.launcher({ type: 'ui:pageState' })).data).held, undefined, 'the on-page widget never gets the list');
+  assert.equal(w.contentTypes().includes('secondhand:generic:read'), false);
+
+  // Nothing waits when nothing was held: everything filled in one go.
+  const allowed = holding({ desktop: { holds: [] } });
+  const everything = plain((await autofill(allowed)).data);
+  assert.deepEqual([everything.filled, everything.held, everything.message], [3, undefined, 'Filled 3 · 1 need you. Check your answers before you submit.']);
+  assert.equal(await heldList(allowed), undefined);
+});
+
+test('a page whose only saved answers were held back says how many wait, not that nothing matched (#176)', async () => {
+  const w = holding({ fields: sensitiveForm().filter(field => field.name !== 'name') });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.filled, 0);
+  assert.equal(result.message, '3 need you. 2 sensitive details wait until you click Fill sensitive details in the side panel.');
+  assert.deepEqual(w.contentTypes().filter(type => type === 'secondhand:generic:fill'), [], 'nothing was filled');
+  const one = holding({ fields: [{ name: 'ssn', key: 'ssn', label: 'Social Security number' }] });
+  assert.equal(plain((await autofill(one)).data).message, '1 need you. 1 sensitive detail waits until you click Fill sensitive details in the side panel.');
+});
+
+test('Fill sensitive details asks the app for the held fields alone, in the site’s name, and fills only those questions (#176)', async () => {
+  const w = holding();
+  await autofill(w);
+  const [dob, ssn, pickup] = ['dob', 'ssn', 'pickup'].map(name => w.page.idOf(name));
+  // The plan the click's last pass made, which the page still holds.
+  const token = 'plan-2';
+  assert.equal(await w.panel({ type: 'ui:fillHeld' }), undefined, 'only a confirmed click');
+  assert.equal(await w.launcher({ type: 'ui:fillHeld', confirmed: true }), undefined, 'only the side panel');
+  const asked = w.native.length;
+  const response = await fillHeld(w);
+  assert.equal(response.ok, true, response.error);
+  assert.deepEqual(w.native.slice(asked).map(({ type, url, fields, sensitive }) => ({ type, url, fields, sensitive })),
+    [{ type: 'getFields', url: `${ORIGIN}/intake`, fields: ['birthDate', 'ssn'], sensitive: true }, { type: 'status', url: undefined, fields: undefined, sensitive: undefined }],
+    'the held fields alone, then the access check before the page is touched');
+  const fill = w.content.at(-1);
+  assert.deepEqual({ type: fill.type, frameId: fill.frameId, token: fill.token, assignments: fill.assignments, values: fill.values }, { type: 'secondhand:generic:fill', frameId: 0, token,
+    assignments: [{ id: dob, key: 'birthDate', guessed: false }, { id: ssn, key: 'ssn', guessed: false }], values: { birthDate: '1985-04-12', ssn: '123-45-6789' } });
+  assert.deepEqual(w.page.answered(), ['name', 'dob', 'ssn']);
+  const result = plain(response.data);
+  assert.deepEqual(result, { state: 'done', filled: 3, guessed: 0, needYou: [`f0:${pickup}`], pageKey: 'general',
+    message: 'Filled 3 · 1 need you. Check your answers before you submit.', messageKey: 'result.siteFilledNeedYou', messageParams: { count: 3, needYou: 1 } });
+  assert.deepEqual(plain((await w.panel({ type: 'ui:pageState' })).data).result, result, 'the tab’s result says so too');
+  assert.equal(await heldList(w), undefined, 'nothing waits now');
+  assert.equal((await fillHeld(w)).errorKey, 'worker.heldGone', 'and nothing is asked twice');
+  assert.equal(w.nativeTypes().filter(type => type === 'getFields').length, 2);
+});
+
+test('Cancel in the app’s sensitive prompt leaves everything filled in place and keeps the held questions listed (#176)', async () => {
+  const w = holding({ desktop: { sensitiveError: 'You cancelled this field request.' } });
+  const result = plain((await autofill(w)).data);
+  const list = await heldList(w);
+  const cancelled = plain(await fillHeld(w));
+  assert.deepEqual([cancelled.ok, cancelled.errorKey, cancelled.error], [false, 'worker.heldCancelled', 'Cancelled. The sensitive details weren’t filled, and they are still listed.']);
+  assert.deepEqual(w.page.answered(), ['name'], 'what was filled stays, and nothing more is');
+  assert.deepEqual(await heldList(w), list);
+  assert.deepEqual(plain((await w.panel({ type: 'ui:pageState' })).data).result, result);
+  // Any other refusal says what it was, and keeps them listed too.
+  w.vault.sensitiveError = 'Unlock SecondHand first.';
+  assert.deepEqual(plain(await fillHeld(w)).errorParams, { detail: 'Unlock SecondHand first.' });
+  w.vault.reachable = false;
+  assert.equal((await fillHeld(w)).errorKey, 'worker.desktopOffline');
+  assert.deepEqual(await heldList(w), list);
+  // Allow once, later, fills them.
+  w.vault.reachable = true; w.vault.sensitiveError = null;
+  assert.equal(plain((await fillHeld(w)).data).filled, 3);
+  assert.deepEqual(w.page.answered(), ['name', 'dob', 'ssn']);
+});
+
+test('a question worked out from a held detail waits for it, and fills from the same one request (#176)', async () => {
+  const fields = [{ name: 'name', key: 'fullName' }, { name: 'dob', key: 'birthDate', label: 'Date of birth' }, { name: 'age', key: 'ageRange', label: 'Age range' }];
+  const w = holding({ fields, desktop: { holds: ['birthDate'] } });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.held, 2);
+  assert.deepEqual((await heldList(w)).map(item => item.label), ['Date of birth', 'Age range']);
+  await fillHeld(w);
+  assert.deepEqual(w.native.filter(call => call.sensitive).map(call => call.fields), [['birthDate']]);
+  assert.deepEqual(w.content.at(-1).values, { birthDate: '1985-04-12', ageRange: '41' });
+  assert.deepEqual(w.page.answered(), ['name', 'dob', 'age']);
+});
+
+test('a held question with no saved answer stays with the applicant after Fill sensitive details (#176)', async () => {
+  const w = holding({ desktop: { values: { ...SENSITIVE_SAVED, ssn: '' } } });
+  await autofill(w);
+  const response = plain((await fillHeld(w)).data);
+  assert.deepEqual(w.page.answered(), ['name', 'dob']);
+  assert.deepEqual(response.needYou, ['pickup', 'ssn'].map(name => `f0:${w.page.idOf(name)}`));
+  assert.equal(response.held, undefined);
+  assert.equal(await heldList(w), undefined, 'the app answered: nothing waits for it');
+});
+
+test('the held list is forgotten when the page changes or its site goes, and a new Autofill makes it again (#176)', async () => {
+  const loaded = holding();
+  await autofill(loaded);
+  loaded.events.updated(7, { status: 'loading' });
+  assert.equal(await heldList(loaded), undefined);
+  assert.equal((await fillHeld(loaded)).errorKey, 'worker.heldGone');
+  const moved = holding();
+  await autofill(moved);
+  moved.tab.url = `${ORIGIN}/intake?step=2`;
+  assert.equal(await heldList(moved), undefined);
+  assert.equal((await fillHeld(moved)).errorKey, 'worker.heldGone');
+  const off = holding();
+  await autofill(off);
+  off.registered.clear(); off.permissions.clear();
+  assert.equal((await fillHeld(off)).ok, false);
+  const revoked = holding();
+  await autofill(revoked);
+  revoked.revoke([`${ORIGIN}/*`]); await settle();
+  assert.equal((await fillHeld(revoked)).errorKey, 'worker.heldGone', 'Chrome took the site back');
+  const turnedOff = holding();
+  await autofill(turnedOff);
+  assert.equal((await turnedOff.panel({ type: 'ui:disableSite', confirmed: true })).ok, true);
+  assert.equal((await fillHeld(turnedOff)).errorKey, 'worker.heldGone');
+  const closed = holding();
+  await autofill(closed);
+  closed.events.removed(7);
+  assert.equal((await fillHeld(closed)).errorKey, 'worker.heldGone');
+  const planned = holding();
+  await autofill(planned);
+  await plan(planned);
+  assert.equal(await heldList(planned), undefined, 'the widget’s next click plans the page again');
+  for (const each of [loaded, moved, off, revoked, turnedOff, closed, planned]) assert.equal(each.native.some(call => call.sensitive), false, 'the app is asked nothing');
+
+  const again = holding();
+  await autofill(again);
+  again.vault.holds = ['ssn'];
+  await autofill(again);
+  assert.deepEqual((await heldList(again)).map(item => item.label), ['Social Security number'], 'the new click’s list replaces the old one');
+  again.vault.holds = [];
+  again.vault.values = { ...SENSITIVE_SAVED };
+  await autofill(again);
+  assert.equal(await heldList(again), undefined);
+});
+
+test('an embedded form’s held details are asked for in that form’s own site’s name, and fill only that frame; a Cancel there keeps them (#176)', async () => {
+  const child = secondFrame({ enabled: true, fields: [{ name: 'ssn', key: 'ssn', label: 'Social Security number' }] });
+  const w = holding({ fields: [{ name: 'name', key: 'fullName' }, { name: 'dob', key: 'birthDate', label: 'Date of birth' }], frames: [child],
+    desktop: { sensitiveError: request => request.url.startsWith(FRAME_ORIGIN) ? 'You cancelled this field request.' : undefined } });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.held, 2);
+  const dob = `f0:${w.page.idOf('dob')}`, ssn = `f4:${child.page.idOf('ssn')}`;
+  assert.deepEqual(await heldList(w), [{ id: dob, label: 'Date of birth' }, { id: ssn, label: 'Social Security number' }]);
+  assert.equal((await fillHeld(w)).errorKey, 'worker.heldCancelled');
+  assert.deepEqual(w.native.filter(call => call.sensitive).map(({ url, fields }) => [url, fields]), [[`${ORIGIN}/intake`, ['birthDate']], [`${FRAME_ORIGIN}/form`, ['ssn']]],
+    'one request for each site, in its own name');
+  assert.deepEqual([w.page.answered(), child.page.answered()], [['name', 'dob'], []], 'the host page’s allowed detail filled; the form’s waits');
+  assert.deepEqual(await heldList(w), [{ id: ssn, label: 'Social Security number' }]);
+  const kept = plain((await w.panel({ type: 'ui:pageState' })).data).result;
+  assert.deepEqual([kept.filled, kept.held, kept.needYou], [2, 1, [ssn]], 'the tab’s result counts what filled, and what still waits');
+  w.vault.sensitiveError = null;
+  assert.equal(plain((await fillHeld(w)).data).filled, 3);
+  assert.deepEqual(w.content.filter(call => call.type === 'secondhand:generic:fill' && call.frameId === 4).map(call => [call.documentId, call.values]), [['doc-4', { ssn: '123-45-6789' }]]);
+  assert.deepEqual(child.page.answered(), ['ssn']);
+});
+
+test('an embedded form that moved on takes its held questions with it; nothing is asked for them (#176)', async () => {
+  const child = secondFrame({ enabled: true, fields: [{ name: 'ssn', key: 'ssn', label: 'Social Security number' }] });
+  const w = holding({ fields: [{ name: 'name', key: 'fullName' }], frames: [child] });
+  await autofill(w);
+  assert.equal((await heldList(w)).length, 1);
+  child.documentId = 'doc-4-next';
+  assert.equal(await heldList(w), undefined, 'the list forgets it');
+  const response = plain(await fillHeld(w));
+  assert.equal(response.errorKey, 'worker.heldGone');
+  assert.equal(w.native.some(call => call.sensitive), false);
+});
+
+test('Fill sensitive details fills under the access receipt the app gave it, on the page it was made for (#176)', async () => {
+  const w = holding({ duringStatus: (vault, count) => { if (count === 3) vault.accessRevision++; } });
+  await autofill(w);
+  const changed = plain(await fillHeld(w));
+  assert.equal(changed.errorKey, 'worker.accessChanged');
+  assert.deepEqual(w.page.answered(), ['name'], 'nothing reaches the page');
+  assert.equal((await heldList(w)).length, 2, 'they still wait');
+  const locked = holding();
+  await autofill(locked);
+  locked.vault.unlocked = false;
+  assert.equal((await fillHeld(locked)).errorKey, 'worker.unlockToAutofill');
+  assert.deepEqual(locked.page.answered(), ['name']);
+});
+
+test('a held list the desktop gets wrong fills nothing and shows a fixed error (#176)', async () => {
+  // A field it wasn't asked for, one named twice, one it also answered, an empty list, or not a list.
+  for (const holds of [() => ['zip'], () => ['ssn', 'ssn'], () => ['ssn'], () => [], () => 'ssn']) {
+    const w = holding({ desktop: { holds } });
+    const result = plain((await autofill(w)).data);
+    assert.deepEqual([result.state, result.messageKey], ['error', 'worker.desktopUnexpected'], holds.toString());
+    assert.deepEqual(w.page.answered(), [], holds.toString());
+    assert.equal(await heldList(w), undefined);
+  }
+  // The reply to Fill sensitive details never holds anything back.
+  const w = holding();
+  await autofill(w);
+  w.vault.holds = request => request.sensitive ? ['ssn'] : undefined;
+  assert.equal((await fillHeld(w)).errorKey, 'worker.desktopUnexpected');
+  assert.deepEqual(w.page.answered(), ['name']);
+  assert.equal((await heldList(w)).length, 2, 'they still wait');
+});
+
+test('the held list holds the reload, as the need-you list does (#176)', async () => {
+  const w = updating({ enabled: true, fields: sensitiveForm(), desktop: { values: SENSITIVE_SAVED, holds: ['birthDate', 'ssn'] } });
+  await autofill(w);
+  await statusRow(w);
+  assert.equal(w.reloads(), 0);
+  assert.equal(plain((await fillHeld(w)).data).filled, 3);
+  await statusRow(w);
+  assert.equal(w.reloads(), 0, 'the pickup day still needs the applicant');
 });

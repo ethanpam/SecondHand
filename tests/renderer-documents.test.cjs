@@ -5,8 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { JSDOM } = require('jsdom');
+const { loadRenderer } = require('./helpers/harness.cjs');
 const html = fs.readFileSync(path.join(__dirname, '../renderer/index.html'), 'utf8');
-const script = ['../shared/snap-information.js', '../renderer/snap-information.js', '../renderer/app.js'].map(file => fs.readFileSync(path.join(__dirname, file), 'utf8')).join('\n');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 const documentResult = () => ({ cancelled: false, document: {
@@ -50,7 +50,7 @@ async function renderer(t) {
     onDocumentProgress: callback => { const record = { callback, active: true }; subscriptions.push(record); return () => { record.active = false; }; },
     saveProfile: async value => { saves.push(structuredClone(value)); Object.assign(profile, value); return structuredClone(value); }
   };
-  window.eval(script);
+  loadRenderer(window);
   await tick();
   const get = id => window.document.getElementById(id);
   const navigate = view => window.document.querySelector(`.nav-item[data-view="${view}"]`).click();

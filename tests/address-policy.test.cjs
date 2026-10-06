@@ -1,9 +1,8 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const vm = require('node:vm');
 const policy = require('../extension/address-policy.js');
+const { runFile } = require('./helpers/harness.cjs');
 const request = (count = 1) => ({ scope: 'home', candidates: Array.from({ length: count }, (_, index) => ({ id: `homeAddressIndex${index}`, index, role: 'suggestion' })), hasWarnings: false, hasErrors: false, hasUnknownControls: false });
 
 test('first verified home suggestion is the explicit policy, including multiple suggestions', () => {
@@ -49,7 +48,7 @@ test('strict plain metadata rejects getters, prototype payloads, sparse arrays, 
 });
 
 test('policy has a browser export and immutable value-free results', () => {
-  const sandbox = {}; vm.runInNewContext(fs.readFileSync(require.resolve('../extension/address-policy.js'), 'utf8'), sandbox);
+  const sandbox = {}; runFile('extension/address-policy.js', sandbox);
   assert.equal(typeof sandbox.SecondHandAddressPolicy.decide, 'function');
   const result = policy.decide(request()); assert.equal(Object.isFrozen(result), true); assert.equal(Object.isFrozen(policy), true);
 });

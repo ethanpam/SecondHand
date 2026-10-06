@@ -574,18 +574,22 @@
   // the box may not be read; { empty } when it holds no answer; { unreadable } when its answer doesn't fit the field;
   // { repeated } when the page asks for the field in more than one box.
   const DATE_TYPED = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/;
-  // The order a typed date is in (#142): as its box asks for it ("MM/DD/YYYY", "dd/mm/aaaa", "jj/mm/aaaa") in its labels,
-  // placeholder, description or title, or as its numbers allow only one way. Null when it can't be told: never guessed.
-  const MONTH_FIRST = /\bmm? dd? (yyyy|yy|aaaa|aa)\b/;
-  const DAY_FIRST = /\b(dd?|jj?) mm? (yyyy|yy|aaaa|aa)\b/;
+  // The orders a date box asks for ("MM/DD/YYYY", "dd/mm/aaaa", "jj/mm/aaaa", "YYYY-MM-DD") in its labels, placeholder,
+  // description or title, each read on its own. Save reads a typed date in it (#142), and a fill writes the saved date in it (#156).
+  const DATE_ORDERS = Object.freeze({ month: /\bmm? dd? (yyyy|yy|aaaa|aa)\b/, day: /\b(dd?|jj?) mm? (yyyy|yy|aaaa|aa)\b/, year: /\b(yyyy|aaaa) mm? dd?\b/ });
+  function dateOrders(entry) {
+    const element = entry.elements[0];
+    const hints = [...entry.labels, idsText(element.ownerDocument, element.getAttribute('aria-describedby')), element.getAttribute('title') || ''].map(normal);
+    return new Set(Object.keys(DATE_ORDERS).filter(order => hints.some(hint => DATE_ORDERS[order].test(hint))));
+  }
+  // The order a typed date is in: as its box asks for it, or as its numbers allow only one way. Null when it can't be told: never guessed.
   function typedDate(text, entry) {
     if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
     const typed = DATE_TYPED.exec(text);
     if (!typed) return null;
-    const element = entry.elements[0];
-    const words = normal([...entry.labels, idsText(element.ownerDocument, element.getAttribute('aria-describedby')), element.getAttribute('title') || ''].join(' '));
+    const orders = dateOrders(entry);
     const [first, second] = [Number(typed[1]), Number(typed[2])];
-    const monthFirst = MONTH_FIRST.test(words), dayFirst = DAY_FIRST.test(words);
+    const monthFirst = orders.has('month'), dayFirst = orders.has('day');
     let leads = null;
     if (monthFirst !== dayFirst) leads = monthFirst ? 'month' : 'day';
     else if (first === second || (first <= 12 && second > 12)) leads = 'month';
@@ -719,11 +723,17 @@
     }
     return options.findIndex(option => normal(option) === wanted);
   }
-  function formatted(key, value, element) {
+  // A saved value as the box takes it. Null when the box asks for more than one date order: which it wants can't be told.
+  function formatted(key, value, entry) {
+    const element = entry.elements[0];
     const text = String(value);
     if (key === 'birthDate') {
+      if (element.type === 'date') return text;
       const [year, month, day] = text.split('-');
-      return element.type === 'date' ? text : `${month}/${day}/${year}`;
+      // In the order the box asks for (#156); month first when it doesn't say, as US forms write it.
+      const orders = dateOrders(entry);
+      if (orders.size > 1) return null;
+      return orders.has('year') ? `${year}-${month}-${day}` : orders.has('day') ? `${day}/${month}/${year}` : `${month}/${day}/${year}`;
     }
     if (key === 'phone') {
       const digits = text.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
@@ -735,8 +745,8 @@
   function fillEntry(entry, key, value) {
     const first = entry.elements[0];
     if (entry.kind === 'input' || entry.kind === 'textarea') {
-      const text = formatted(key, value, first);
-      if (first.maxLength > 0 && text.length > first.maxLength) return false;
+      const text = formatted(key, value, entry);
+      if (text === null || (first.maxLength > 0 && text.length > first.maxLength)) return false;
       return setValue(first, text);
     }
     if (entry.kind === 'select') {
@@ -793,11 +803,13 @@
     }
     return false;
   }
+  // A rule's answer has a solid green outline, a guess a dashed amber one, and Laya's best guess (#185) a dotted plum one.
   function ensureStyle(doc) {
     if (doc.getElementById('secondhand-filled-style')) return;
     const style = doc.createElement('style');
     style.id = 'secondhand-filled-style';
     style.textContent = '[data-secondhand-filled="rule"]{outline:2px solid #5f9b62!important;outline-offset:1px!important}[data-secondhand-filled="guess"]{outline:2px dashed #d99a2b!important;outline-offset:1px!important}' +
+      '[data-secondhand-filled="laya-guess"]{outline:3px dotted #9b3d8f!important;outline-offset:2px!important}' +
       '[data-secondhand-attention]{outline:3px solid #d99a2b!important;outline-offset:3px!important;box-shadow:0 0 0 7px #d99a2b40!important}';
     (doc.head || doc.documentElement).append(style);
   }
@@ -806,9 +818,19 @@
     return entry.elements.some(element => element.getAttribute('aria-invalid') === 'true') || container?.classList.contains('form-line-error') ||
       Boolean(container && Array.from(container.querySelectorAll('[role="alert"]')).some(rendered));
   }
-  function mark(doc, entry, guess) {
+  // Laya's best guess (#185) goes only to a single-choice question, never a checkbox group, and never on Iowa's portal.
+  const LAYA_GUESS_KINDS = Object.freeze(['radio', 'ariaRadio', 'select']);
+  const layaGuessable = (doc, entry) => LAYA_GUESS_KINDS.includes(entry.kind) && doc.location.origin !== 'https://hhsservices.iowa.gov';
+  // Laya's best guesses on this page, by the id each was filled under: answered questions leave the next plan, but the
+  // side panel lists each one for the applicant to find and check.
+  let layaGuessed = null;
+  // `kind` is 'rule', 'guess', or 'laya-guess'.
+  function mark(doc, entry, kind, id) {
     ensureStyle(doc);
-    entry.elements.forEach(element => element.setAttribute('data-secondhand-filled', guess ? 'guess' : 'rule'));
+    entry.elements.forEach(element => element.setAttribute('data-secondhand-filled', kind));
+    if (kind !== 'laya-guess') return;
+    if (layaGuessed?.doc !== doc) layaGuessed = { doc, map: new Map() };
+    layaGuessed.map.set(id, entry);
   }
   function fillFields(doc, token, assignments, values) {
     const ids = (Array.isArray(assignments) ? assignments : []).map(item => item?.id);
@@ -825,21 +847,22 @@
       // An option Laya picked from the saved profile is always a guess, and never for a question only the applicant answers.
       const option = assignment?.option;
       const answering = typeof option === 'string' && key === undefined;
+      const layaGuess = answering && assignment.layaGuess === true;
       // A key the rules did not choose for this question is a guess: never for a question only the applicant
       // answers, by any of its labels, and only a key a guess may offer.
       const allowed = entry && (match(entry).key === key || (!householdRulesOnly(doc) && !applicantOnly(entry) && canSuggest(key, { label: entry.labels[0] || '' })));
       const placed = !usable ? false
-        : answering ? !householdRulesOnly(doc) && !applicantOnly(entry) && !entry.labels.some(iowaRule) && fillOption(entry, option)
+        : answering ? !householdRulesOnly(doc) && !applicantOnly(entry) && !entry.labels.some(iowaRule) && (!layaGuess || layaGuessable(doc, entry)) && fillOption(entry, option)
         : option === undefined && (GENERIC_KEYS.includes(key) || COMPOSITE_KEYS.includes(key) || ruleOnlyKey(key)) && allowed && typeof value === 'string' && value && compatible(key, entry) && fillEntry(entry, key, value);
       if (!placed) { skipped.push(assignment?.id); continue; }
-      const guess = answering || assignment.guessed || GUESS_KEYS.includes(key);
-      if (placed.pending) { current.pending.set(assignment.id, { option: placed.pending, entry, guess }); pending.push(assignment.id); continue; }
+      const kind = layaGuess ? 'laya-guess' : answering || assignment.guessed || GUESS_KEYS.includes(key) ? 'guess' : 'rule';
+      if (placed.pending) { current.pending.set(assignment.id, { option: placed.pending, entry, kind }); pending.push(assignment.id); continue; }
       entry.elements[0].dispatchEvent(new entry.elements[0].ownerDocument.defaultView.Event('blur'));
       if (rejectedByPage(entry)) {
         if (entry.kind === 'input' || entry.kind === 'textarea' || entry.kind === 'select') setValue(entry.elements[0], '');
         rejected.push(assignment.id); continue;
       }
-      mark(doc, entry, guess);
+      mark(doc, entry, kind, assignment.id);
       filled.push(assignment.id);
     }
     return { ok: true, filled, skipped, rejected, pending };
@@ -863,7 +886,7 @@
       const item = live.get(id);
       if (!checked(id)) settled.skipped.push(id);
       else if (rejectedByPage(item.entry)) settled.rejected.push(id);
-      else { mark(doc, item.entry, item.guess); settled.filled.push(id); }
+      else { mark(doc, item.entry, item.kind, id); settled.filled.push(id); }
       live.delete(id);
     }
     return settled;
@@ -880,7 +903,7 @@
   // Scrolls a question into view and highlights it. Keyboard focus is never moved: focusing
   // and then leaving an empty field makes sites such as Google Forms flag it as required.
   function focusField(doc, id) {
-    const entry = (current?.doc === doc ? current.map.get(id) : null) || (listed?.doc === doc ? listed.map.get(id) : null);
+    const entry = (current?.doc === doc ? current.map.get(id) : null) || (listed?.doc === doc ? listed.map.get(id) : null) || (layaGuessed?.doc === doc ? layaGuessed.map.get(id) : null);
     const element = entry?.elements[0];
     if (!element || !element.isConnected || !rendered(element)) return false;
     clearAttention();

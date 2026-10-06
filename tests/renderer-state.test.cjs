@@ -5,11 +5,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { JSDOM } = require('jsdom');
+const { loadRenderer } = require('./helpers/harness.cjs');
 const { PROFILE_FIELDS, PROFILE_CHOICES, YES_NO_FIELDS, LIST_FIELDS, MEMBER_FIELDS, validateProfile } = require('../shared/schema.cjs');
 const fictionalProfile = require('./fixtures/applicant-profile.json');
 
 const html = fs.readFileSync(path.join(__dirname, '../renderer/index.html'), 'utf8');
-const script = ['../shared/snap-information.js', '../renderer/snap-information.js', '../renderer/app.js'].map(file => fs.readFileSync(path.join(__dirname, file), 'utf8')).join('\n');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 function deferred() {
@@ -50,7 +50,7 @@ async function renderer(t, { initialSetup = null, ...overrides } = {}) {
     onProfileChanged: callback => { onProfileChanged = callback; return () => {}; },
     ...overrides
   };
-  window.eval(script);
+  loadRenderer(window);
   await tick();
   const get = id => window.document.getElementById(id);
   // A profile field's control: its input or select, or its group of radio buttons.
@@ -743,6 +743,15 @@ test('Chrome extension view toggles autofill trust through the desktop API', asy
   assert.doesNotMatch(view.get('view-extension').textContent, /guided/i);
 });
 
+test('the trust setting says plainly that it fills sensitive details without asking too, on every site SecondHand is on (#175)', async t => {
+  const view = await renderer(t);
+  const hint = view.get('autofill-trust-hint');
+  assert.equal(view.get('autofill-trust').getAttribute('aria-describedby'), 'autofill-trust-hint', 'a screen reader reads it with the checkbox');
+  assert.equal(text(hint), 'When SecondHand is unlocked, Chrome can fill your saved answers without another pop-up, on every site SecondHand is on. ' +
+    'That includes your Social Security number, birth date, income, and citizenship and disability answers. ' +
+    'It also continues through verified Iowa applicant and home-address screens. Review the first suggested home address before submitting. Lock SecondHand to stop.');
+});
+
 test('a failed trust change restores the checkbox and shows the error', async t => {
   const view = await renderer(t, { setAutofillTrust: async () => { throw new Error('Unlock SecondHand first.'); } });
   view.get('autofill-trust').checked = true;
@@ -756,6 +765,11 @@ test('Privacy & backups names everything autofill fills or clicks today and keep
   const view = await renderer(t);
   view.window.document.querySelector('.nav-item[data-view="privacy"]').click();
   const card = text(view.window.document.querySelector('#view-privacy .autofill-card'));
+  // Always allow covers sensitive details too, on every site SecondHand is on (#175).
+  assert.equal(text(view.window.document.querySelector('#view-privacy .autofill-card p')), 'Autofill asks the first time. Choose Always allow to skip the pop-up while SecondHand is unlocked, ' +
+    'on every site SecondHand is on. That includes your Social Security number, birth date, income, and citizenship and disability answers. ' +
+    'When another site’s pop-up asks about those details, Always allow on this site skips it there alone. Only the saved answers a page needs leave SecondHand.');
+  assert.doesNotMatch(card, /every time/);
   for (const phrase of ['first applicant page', 'Household Application Information', 'Tell Us More', 'date of birth', 'Iowa’s questions about you',
     'first suggested home address', 'Information-only screens', 'Laya', 'guesses', 'Other sites you trust', 'Chrome’s built-in AI', 'on this computer',
     'never guesses on Iowa’s form', 'Iowa pages SecondHand doesn’t know', 'A complete live submission has not been validated.']) assert.ok(card.includes(phrase), phrase);
@@ -782,6 +796,17 @@ test('Privacy & backups names everything autofill fills or clicks today and keep
   const address = Array.from(view.window.document.querySelectorAll('#view-privacy .autofill-card p'), text).filter(paragraph => paragraph.includes('first suggested home address'));
   assert.equal(address.length, 1);
   assert.match(address[0], /^On the verified home-address page, .*\. Check that this address is yours before you submit\.$/);
+  // Tell Us More may fill the saved Social Security number, which Iowa may not keep, so it ends on checking that number (#192).
+  const ssn = paragraphs.filter(paragraph => paragraph.includes('Social Security number') && paragraph.includes('Tell Us More'));
+  assert.equal(ssn.length, 1);
+  assert.match(ssn[0], /^On the Tell Us More page, Autofill may fill .*About you.*More SNAP information.*check that number in Iowa’s form before you continue\.$/);
+  assert.ok(ssn[0].split(/\s+/).length <= 65, `${ssn[0].split(/\s+/).length} words: ${ssn[0]}`);
+  // The four household screening pages Autofill answers from More SNAP information (#192).
+  const screening = paragraphs.filter(paragraph => ['Job Information', 'Income Information', 'Expenses Information', 'Property Information', 'More SNAP information']
+    .every(phrase => paragraph.includes(phrase)));
+  assert.equal(screening.length, 1);
+  // On other sites, sensitive answers wait for Fill sensitive details unless Always allow covers the site (#192).
+  for (const phrase of ['Fill sensitive details', 'Social Security number', 'Always allow']) assert.ok(sites[0].includes(phrase), phrase);
 });
 
 test('the document review card opens with the file name as its heading, with no line above it', async t => {
@@ -857,14 +882,57 @@ test('trusted sites are listed with a Remove button that calls the desktop', asy
   assert.equal(view.get('trusted-sites-empty').hidden, false);
 });
 
-test('the Chrome extension view says whether all websites is on and turns it off through the desktop; sites trusted one by one stay', async t => {
-  const calls = [];
-  let status = { exists: true, unlocked: true, extensionId: '', bridgeRunning: true, trustedSites: ['https://pantry.example.org'], allSites: true };
+test('sites with Always allow on this site are listed under their own heading, each with a Remove button that calls the desktop (#175)', async t => {
+  const removed = [];
+  const [pantry, wic] = ['https://pantry.example.org', 'https://wic.example.gov'];
+  let status = { exists: true, unlocked: true, extensionId: '', bridgeRunning: true, trustedSites: [pantry, wic], alwaysAllowedSites: [pantry, wic] };
+  const without = (list, origin) => list.filter(site => site !== origin);
   const view = await renderer(t, {
     status: async () => status,
-    turnOffAllSites: async () => { calls.push('off'); status = { ...status, allSites: false }; return status; }
+    removeAlwaysAllowedSite: async origin => { removed.push(['Always allow', origin]); status = { ...status, alwaysAllowedSites: without(status.alwaysAllowedSites, origin) }; return status; },
+    // As the desktop does, removing a trusted site takes its Always allow too.
+    removeTrustedSite: async origin => {
+      removed.push(['trusted', origin]);
+      status = { ...status, trustedSites: without(status.trustedSites, origin), alwaysAllowedSites: without(status.alwaysAllowedSites, origin) };
+      return status;
+    }
   });
-  assert.equal(view.get('all-sites-status').textContent, 'All websites: on. SecondHand can fill forms on any website after you click Autofill there. Sensitive details still ask on each site.');
+  const sites = id => Array.from(view.get(id).querySelectorAll('code'), code => code.textContent);
+  assert.equal(text(view.get('always-allowed-heading')), 'Sites that fill sensitive details without asking');
+  assert.equal(view.get('always-allowed-sites').getAttribute('aria-labelledby'), 'always-allowed-heading');
+  assert.deepEqual(sites('always-allowed-sites'), [pantry, wic]);
+  assert.equal(view.get('always-allowed-sites-empty').hidden, true);
+  view.get('always-allowed-sites').querySelector('button').click();
+  await tick(); await tick();
+  assert.deepEqual(removed, [['Always allow', pantry]]);
+  assert.deepEqual(sites('always-allowed-sites'), [wic]);
+  assert.deepEqual(sites('trusted-sites'), [pantry, wic], 'the site stays trusted');
+  assert.equal(view.get('toast').textContent, 'Always allow on this site is off for https://pantry.example.org.');
+  view.get('trusted-sites').querySelectorAll('button')[1].click();
+  await tick(); await tick();
+  assert.deepEqual(removed.at(-1), ['trusted', wic]);
+  assert.deepEqual(sites('trusted-sites'), [pantry]);
+  assert.deepEqual(sites('always-allowed-sites'), [], 'turning a site off takes its Always allow too');
+  assert.equal(view.get('always-allowed-sites-empty').hidden, false);
+  assert.equal(text(view.get('always-allowed-sites-empty')), 'None yet. When SecondHand asks before filling sensitive details on a site, choose Always allow on this site to add it here.');
+
+  const failing = await renderer(t, { status: async () => ({ ...status, alwaysAllowedSites: [pantry] }), removeAlwaysAllowedSite: async () => { throw new Error('Unlock SecondHand first.'); } });
+  failing.get('always-allowed-sites').querySelector('button').click();
+  await tick(); await tick();
+  assert.match(failing.get('autofill-trust-error').textContent, /Unlock SecondHand first\./);
+  assert.deepEqual(Array.from(failing.get('always-allowed-sites').querySelectorAll('code'), code => code.textContent), [pantry]);
+});
+
+test('the Chrome extension view says whether all websites is on and turns it off through the desktop; sites trusted one by one stay', async t => {
+  const calls = [];
+  let status = { exists: true, unlocked: true, extensionId: '', bridgeRunning: true, trustedSites: ['https://pantry.example.org'], allSites: true,
+    alwaysAllowedSites: ['https://pantry.example.org', 'https://never.example.net'] };
+  const view = await renderer(t, {
+    status: async () => status,
+    // As the desktop does, Always allow stays only on sites trusted on their own.
+    turnOffAllSites: async () => { calls.push('off'); status = { ...status, allSites: false, alwaysAllowedSites: ['https://pantry.example.org'] }; return status; }
+  });
+  assert.equal(view.get('all-sites-status').textContent, 'All websites: on. SecondHand can fill forms on any website after you click Autofill there. It asks first unless you chose Always allow.');
   assert.equal(view.get('all-sites-off').hidden, false);
   assert.equal(view.get('all-sites-off').textContent, 'Turn off');
   view.get('all-sites-off').click();
@@ -874,6 +942,8 @@ test('the Chrome extension view says whether all websites is on and turns it off
   assert.equal(view.get('all-sites-off').hidden, true);
   assert.match(view.get('toast').textContent, /no longer fill forms on every website/);
   assert.deepEqual(Array.from(view.get('trusted-sites').querySelectorAll('code'), code => code.textContent), ['https://pantry.example.org']);
+  assert.deepEqual(Array.from(view.get('always-allowed-sites').querySelectorAll('code'), code => code.textContent), ['https://pantry.example.org'],
+    'Always allow goes with the sites all websites let in');
 
   const failing = await renderer(t, { status: async () => ({ ...status, allSites: true }), turnOffAllSites: async () => { throw new Error('Unlock SecondHand first.'); } });
   failing.get('all-sites-off').click();
@@ -1445,6 +1515,10 @@ test('a refused restore says why on the unlock screen, and declining the warning
 });
 
 const LAYA_BYTES = 428699034;
+// How often renderer/app.js asks for Laya's status while a download or update runs. A test that sees polls
+// mocks setTimeout and moves the clock this far for each one.
+const LAYA_POLL_MS = 500;
+const nextPoll = async t => { t.mock.timers.tick(LAYA_POLL_MS); await tick(); await tick(); };
 const layaView = view => ({
   checked: view.get('laya-toggle').checked, disabled: view.get('laya-toggle').disabled, text: view.get('laya-status').textContent,
   progress: view.get('laya-progress').hidden ? null : Number(view.get('laya-progress').value),
@@ -1452,6 +1526,7 @@ const layaView = view => ({
 });
 
 test('the Laya toggle shows the model size, and turning it on downloads with visible progress until ready', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const calls = [];
   let polled = 0;
   const view = await renderer(t, {
@@ -1466,11 +1541,12 @@ test('the Laya toggle shows the model size, and turning it on downloads with vis
   await tick(); await tick();
   assert.deepEqual(calls, [true]);
   assert.deepEqual(layaView(view), { checked: true, disabled: false, text: 'Downloading 25% of 429 MB…', progress: 25, buttons: ['Pause download'] });
-  await new Promise(resolve => setTimeout(resolve, 600));
+  assert.equal(polled, 0, 'the first poll waits its turn');
+  await nextPoll(t);
   assert.equal(layaView(view).text, 'Downloading 50% of 429 MB…');
-  await new Promise(resolve => setTimeout(resolve, 600));
+  await nextPoll(t);
   assert.deepEqual(layaView(view), { checked: true, disabled: false, text: 'Ready. The model (429 MB) is on this computer.', progress: null, buttons: ['Remove model'] });
-  await new Promise(resolve => setTimeout(resolve, 600));
+  await nextPoll(t);
   assert.equal(polled, 2, 'polling stops once the download is finished');
 });
 
@@ -1527,17 +1603,19 @@ test('a Laya error shows its message with a way to try again, and a failed toggl
 });
 
 test('a new install shows Laya on and downloading in the background, with its progress', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const view = await renderer(t, {
     status: async () => ({ exists: true, unlocked: true, extensionId: '', bridgeRunning: true, laya: { state: 'downloading', enabled: true, progress: 0, sizeBytes: LAYA_BYTES } }),
     layaStatus: async () => ({ state: 'downloading', enabled: true, progress: 0.1, sizeBytes: LAYA_BYTES })
   });
   assert.match(view.get('view-extension').textContent, /While it’s on, SecondHand downloads it in the background, checks for a newer version once a day, and runs it on this computer\./);
   assert.deepEqual(layaView(view), { checked: true, disabled: false, text: 'Downloading 0% of 429 MB…', progress: 0, buttons: ['Pause download'] });
-  await new Promise(resolve => setTimeout(resolve, 600));
+  await nextPoll(t);
   assert.equal(layaView(view).text, 'Downloading 10% of 429 MB…');
 });
 
 test('an update note shows beside the model’s status: a failed check, a model that needs a newer SecondHand, or an update downloading until it is installed', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const failed = await renderer(t, {
     status: async () => ({ exists: true, unlocked: true, extensionId: '', bridgeRunning: true,
       laya: { state: 'ready', enabled: true, sizeBytes: LAYA_BYTES, update: { state: 'error', message: 'Update check failed: the server answered 404.' } } })
@@ -1557,11 +1635,11 @@ test('an update note shows beside the model’s status: a failed check, a model 
       { state: 'ready', enabled: true, sizeBytes: 431e6 }
   });
   assert.deepEqual(layaView(updating), { checked: true, disabled: false, text: 'Ready. The model (429 MB) is on this computer. Downloading an update: 30% of 431 MB…', progress: null, buttons: ['Remove model'] });
-  await new Promise(resolve => setTimeout(resolve, 600));
+  await nextPoll(t);
   assert.equal(layaView(updating).text, 'Ready. The model (429 MB) is on this computer. Downloading an update: 90% of 431 MB…');
-  await new Promise(resolve => setTimeout(resolve, 600));
+  await nextPoll(t);
   assert.equal(layaView(updating).text, 'Ready. The model (431 MB) is on this computer.');
-  await new Promise(resolve => setTimeout(resolve, 600));
+  await nextPoll(t);
   assert.equal(polled, 2, 'polling stops once the update is installed');
 });
 
