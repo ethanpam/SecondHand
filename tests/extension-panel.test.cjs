@@ -2680,7 +2680,7 @@ test('#185: the side panel lists Laya’s guesses by their own words, and a trus
   assert.equal(view.get('guesses-section').hidden, false);
   assert.equal(view.get('guesses-title').textContent, 'Guessed by Laya, check them');
   assert.equal(view.get('guesses-section').querySelector('.save-hint').textContent,
-    'Laya wasn’t sure of these answers, so each has a dotted outline on the page. Click one to find it and check it.');
+    'Laya, SecondHand’s AI on this computer, wasn’t sure of these answers, so each has a dotted outline on the page. Click one to find it and check it.');
   const rows = [...view.window.document.querySelectorAll('[data-guess-id]')];
   assert.deepEqual(rows.map(row => [row.tagName, row.dataset.guessId, row.textContent, row.getAttribute('aria-label')]), [
     ['BUTTON', 'f0:sh-1-1', 'How many people live in your household?', 'Find Laya’s guess for “How many people live in your household?” on the page'],
