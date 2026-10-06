@@ -51,6 +51,7 @@ function content(t, url = `${adapter.PORTAL}/applicant`, { engine = true, matche
   if (engine) window.SecondHandGeneric = generalEngine(window, calls, { matched, settled });
   window.SecondHandIowa = {
     isSupportedUrl: adapter.isSupportedUrl,
+    NAVIGATION_PAGE_KEYS: adapter.NAVIGATION_PAGE_KEYS,
     scan: () => {
       const element = window.document.getElementById('firstName');
       const fields = element.value ? [] : [{ key: 'firstName', label: 'First name' }];
@@ -163,7 +164,7 @@ test('widget host is a full bar on fillable pages and a small pill elsewhere', t
 });
 
 test('the Iowa content script loads the general engine and the page reader before content.js', () => {
-  assert.deepEqual(JSON.parse(source('manifest.json')).content_scripts[0].js, ['address-policy.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js']);
+  assert.deepEqual(JSON.parse(source('manifest.json')).content_scripts[0].js, ['address-policy.js', 'iowa-later-adapter.js', 'iowa-record-adapter.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js']);
 });
 
 test('on Iowa pages the adapter has not verified, the general engine plans, fills, and focuses with metadata only', async t => {
@@ -1056,7 +1057,7 @@ test('Iowa widget and sidebar disclose first-address selection before Autofill; 
   assert.match(widget.get('autofill').title, /and continues/);
   const sidebar = await panel(t);
   assert.equal(sidebar.get('iowa-policy').hidden, false);
-  assert.match(sidebar.get('iowa-policy').textContent, /Review that address before submitting/);
+  assert.match(sidebar.get('iowa-policy').textContent, /Review all answers and that address before submitting/);
   const other = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true } });
   assert.equal(other.get('iowa-policy').hidden, true);
 });

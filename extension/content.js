@@ -6,6 +6,7 @@
   if (window !== window.top || !adapter?.isSupportedUrl(location.href) || globalThis.secondHandContentInstalled) return;
   globalThis.secondHandContentInstalled = true;
 
+  const pageInstance = crypto.randomUUID(); // Private document identity, never an applicant identifier.
   let pending = null;
   let navigation = null;
   let revision = 0;
@@ -87,10 +88,10 @@
       fields: scan.fields, ambiguous: scan.ambiguous, skipped: scan.skipped };
   }
 
-  function preview() {
+  function preview(pageKey) {
     const scan = adapter.scan(document, location.href);
     const reusable = pending && pending.url === location.href && pending.expires > Date.now() &&
-      pending.revision === revision && pending.bindings.length === scan.bindings.length &&
+      pending.revision === revision && (!adapter.recordRequest?.(pageKey) || adapter.recordContext(document, location.href, pending.bindings) !== null) && pending.bindings.length === scan.bindings.length &&
       scan.bindings.every((binding, index) => binding.key === pending.bindings[index].key &&
         binding.element === pending.bindings[index].element && binding.element.value === pending.values[index]);
     if (!reusable) {
@@ -101,12 +102,12 @@
   }
 
   function pageState(navigationPreview = true) {
-    const page = adapter.probePage(document, location.href), scan = preview();
+    const page = adapter.probePage(document, location.href), scan = preview(page.pageKey);
     if (navigationPreview) {
-      const snapshot = ['iowa-personal-information', 'iowa-select-address'].includes(page.pageKey) && page.canAdvance ? adapter.captureNavigation(document, location.href) : null;
-      navigation = snapshot ? { token: crypto.randomUUID(), snapshot, url: location.href, expires: Date.now() + 15000 } : null;
+      const snapshot = adapter.NAVIGATION_PAGE_KEYS.includes(page.pageKey) && page.canAdvance ? adapter.captureNavigation(document, location.href) : null;
+      navigation = snapshot ? { token: crypto.randomUUID(), snapshot, url: location.href, expires: Date.now() + 120000 } : null;
     }
-    return { page, scan, nextToken: navigationPreview ? navigation?.token || null : null };
+    return { page, scan, pageInstance, nextToken: navigationPreview ? navigation?.token || null : null };
   }
 
   // The general engine only runs where the Iowa adapter has neither a verified form nor an instruction.
@@ -194,12 +195,16 @@
     try {
       if (message.type === 'secondhand:pageState') {
         respond(withOwnPanelHidden(() => pageState(message.navigationPreview !== false)));
+      } else if (message.type === 'secondhand:recordContext') {
+        const valid = pending && pending.token === message.token && pending.url === location.href && pending.expires > Date.now() && message.pageInstance === pageInstance;
+        const context = valid ? withOwnPanelHidden(() => adapter.recordContext(document, location.href, pending.bindings)) : null;
+        respond(context ? { ok: true, ...context } : { ok: false });
       } else if (message.type === 'secondhand:continue') {
         pending = null; navigation = null;
         respond(withOwnPanelHidden(() => adapter.continuePage(document, location.href)));
       } else if (message.type === 'secondhand:next') {
         const original = navigation; navigation = null; pending = null;
-        if (message.authorized !== true || !original || original.token !== message.token || original.url !== location.href || original.expires < Date.now()) {
+        if (message.authorized !== true || (message.pageInstance !== undefined && message.pageInstance !== pageInstance) || !original || original.token !== message.token || original.url !== location.href || original.expires < Date.now()) {
           respond({ advanced: false, reason: 'The page changed or its navigation preview expired. Check it again.' }); return;
         }
         respond(withOwnPanelHidden(() => adapter.advance(document, location.href, original.snapshot)));
@@ -210,13 +215,13 @@
         const original = pending;
         pending = null; // One approval, one attempt. No automatic retry.
         navigation = null;
-        if (!original || original.token !== message.token || original.url !== location.href || original.expires < Date.now() || !Array.isArray(message.fields) || !message.values || typeof message.values !== 'object' || Array.isArray(message.values)) {
+        if ((message.pageInstance !== undefined && message.pageInstance !== pageInstance) || !original || original.token !== message.token || original.url !== location.href || original.expires < Date.now() || !Array.isArray(message.fields) || !message.values || typeof message.values !== 'object' || Array.isArray(message.values)) {
           respond({ ok: false, error: 'The page changed or the preview expired. Scan again.' });
           return;
         }
         const bindings = original.bindings.filter(binding => message.fields.includes(binding.key));
         const result = withOwnPanelHidden(() => adapter.fill(document, location.href, bindings, message.values));
-        respond({ ok: true, filledCount: result.filled.length, skippedCount: result.skipped.length });
+        respond({ ok: result.unsafe !== true, filledCount: result.filled.length, skippedCount: result.skipped.length });
       } else if (message.type === 'secondhand:generic:plan' || message.type === 'secondhand:generic:fill') {
         const answer = withOwnPanelHidden(() => general(message));
         ensurePanel();

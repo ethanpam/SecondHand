@@ -10,6 +10,7 @@ const os = require('node:os');
 const { pathToFileURL, URL } = require('node:url');
 const { Vault, atomicWrite, normalizeRecoveryKey, MAX_VAULT_BYTES } = require('./vault.cjs');
 const { startBridge, runNativeHost, nativeStreams, appLaunch, startApp, extensionFromOrigin, EXTENSION_ID, isIowaNavigationAuthorization } = require('./bridge.cjs');
+const recordFields = require('./record-fields.cjs');
 const { registerHost } = require('./registration.cjs');
 const { getExtensionSetup, prepareBundledExtension } = require('./extension-setup.cjs');
 const { testStoragePath } = require('./test-storage-path.cjs');
@@ -23,7 +24,7 @@ const { createDocumentReader } = require('./ocr-service.cjs');
 const { requestId: documentRequestId } = require('./ocr-limits.cjs');
 const { analyzeDocument } = require('../shared/document-parser.cjs');
 const { validateProfile, validateApplication, HOUSEHOLD_COUNT_FIELDS, YES_NO_FIELDS, PORTAL_URL, isPortalUrl, siteOrigin, isRequestField, fieldLabel, releasedValue,
-  blockedByBirthDate, savedBirthDateRefusal, SNAP_IOWA_ONLY_FIELDS } = require('../shared/schema.cjs');
+  blockedByBirthDate, savedBirthDateRefusal, SNAP_IOWA_ONLY_FIELDS, RECORD_FIELDS, validateInformationValue } = require('../shared/schema.cjs');
 const household = require('../shared/household.cjs');
 
 app.setName('SecondHand');
@@ -252,8 +253,8 @@ if (nativeOrigin) {
   // Laya picked from them. Without Always allow, or for another extension ID, it asks with Cancel,
   // Allow once, and Always allow; `sensitive` details always ask, with Cancel and Allow once.
   // `generation` is the access revision the information was read under. False when cancelled.
-  async function approveRelease({ context, iowa, origin, generation, message, items, sensitive = null }) {
-    if (autofillWithoutAsking && extensionId === context.extensionId && !sensitive) return true;
+  async function approveRelease({ context, iowa, origin, generation, message, items, sensitive = null, withReceipt = false }) {
+    if (autofillWithoutAsking && extensionId === context.extensionId && !sensitive) return withReceipt ? { accessRevision } : true;
     if (fieldRequestPending) throw publicError('Another field request is waiting for your approval.');
     fieldRequestPending = true;
     try {
@@ -263,7 +264,7 @@ if (nativeOrigin) {
         buttons: ['Cancel', 'Allow once'], defaultId: 0, cancelId: 0, noLink: true
       } : {
         type: 'question', title: 'Let Chrome fill this form?', message,
-        detail: `Website: ${iowa ? PORTAL_URL : origin}\n\n${items}\n\nChoose “Always allow” to let the SecondHand extension fill without asking whenever this app is unlocked. You can turn it off on the Chrome extension page. The website may save entered information. Review every answer before continuing.${iowa ? "\n\nOn the verified initial applicant page, SecondHand may click ordinary Save and Continue after checking completeness. On the supported home-address confirmation page, it will automatically select Iowa's first possible home-address suggestion and choose Save and Continue. This applies to home-address suggestions only. These actions send entered answers to Iowa, which may save them immediately. Review the chosen home address before final submission. Other question pages require manual Next. This approval does not authorize consent, signatures, or submitting your application." : ''}`,
+        detail: `Website: ${iowa ? PORTAL_URL : origin}\n\n${items}\n\nChoose “Always allow” to let the SecondHand extension fill without asking whenever this app is unlocked. You can turn it off on the Chrome extension page. The website may save entered information. Review every answer before continuing.${iowa ? "\n\nOn the verified initial applicant page, SecondHand may click ordinary Save and Continue after checking completeness. On the supported home-address confirmation page, it will automatically select Iowa's first possible home-address suggestion and choose Save and Continue. This applies to home-address suggestions only. These actions send entered answers to Iowa, which may save them immediately. Review the chosen home address before final submission. On a verified Tell Us More page, SecondHand may choose ordinary Save and Continue only after all visible questions are supported and answered, with no errors or unresolved controls. On supported emergency, background, household job/income/expense/property screening, and financial-record pages, SecondHand may choose ordinary Save and Continue only when every visible field is supported and complete and no page errors or unresolved controls remain. Summaries, add-another screens, and unsupported pages require manual Next. This approval does not authorize consent, signatures, or submitting your application." : ''}`,
         buttons: ['Cancel', 'Allow once', 'Always allow on this computer'], defaultId: 1, cancelId: 0, noLink: true
       });
       if (answer.response !== 1 && answer.response !== 2) return false;
@@ -276,8 +277,62 @@ if (nativeOrigin) {
         requireUnlocked();
         if (approvedRevision !== accessRevision || extensionId !== context.extensionId) throw publicError('SecondHand access changed. Click Autofill again.');
       }
-      return true;
+      return withReceipt ? { accessRevision } : true;
     } finally { fieldRequestPending = false; }
+  }
+  // One explicitly owned saved record, never the record list. Page scope is checked
+  // again here because main must remain safe even if called without the relay.
+  async function releaseRecord(request, context) {
+    let scope;
+    try { scope = recordFields.recordRequestScope(request); }
+    catch { throw publicError('This Iowa page asked for an unsupported record or field.'); }
+    requireUnlocked();
+    const check = generation => {
+      requireUnlocked();
+      if (generation !== accessRevision || extensionId !== context?.extensionId) throw publicError('SecondHand access changed. Click Autofill again.');
+    };
+    const generation = accessRevision;
+    check(generation);
+    if (fieldRequestPending) throw publicError('Another field request is waiting for your approval.');
+    const candidates = recordFields.candidatesFor(vault.getData().profile, request);
+    if (!candidates.length) { touch(); return { values: {}, reason: 'recordMissing', accessRevision }; }
+    const kind = scope.label;
+    let chosen = candidates[0];
+    if (candidates.length > 1) {
+      fieldRequestPending = true;
+      try {
+        mainWindow.show(); mainWindow.focus();
+        const labels = candidates.map((record, index) => recordFields.recordLabel(record, index, scope.recordType));
+        const answer = await dialog.showMessageBox(mainWindow, {
+          type: 'question', title: `Choose a saved ${kind} record`,
+          message: `Which saved ${kind} record belongs on this Iowa page?`,
+          detail: 'Only the selected record’s requested fields can be shared. Check the person and record; choosing a record does not save or change it.\n\n' + labels.join('\n'),
+          buttons: ['Cancel', ...labels.map(label => label.slice(0, 120))], defaultId: 0, cancelId: 0, noLink: true
+        });
+        check(generation);
+        if (!Number.isInteger(answer.response) || answer.response < 1 || answer.response > candidates.length) throw publicError(`You cancelled choosing a ${kind} record.`);
+        chosen = candidates[answer.response - 1];
+      } finally { fieldRequestPending = false; }
+    }
+    check(generation);
+    const recordId = chosen.id;
+    const receipt = await approveRelease({ context, iowa: true, origin: siteOrigin(request.url), generation, withReceipt: true,
+      message: `Fill this saved ${kind} record into Iowa’s application?`,
+      items: recordFields.recordLabel(chosen, 0, scope.recordType) + '\n\nFields: ' + request.fields.map(key => recordFields.fieldLabel(scope.recordType, key)).join(', ') });
+    if (!receipt) throw publicError('You cancelled this field request.');
+    check(receipt.accessRevision);
+    // Re-fetch by identity after every dialog; never release a stale record copy.
+    const current = recordFields.candidatesFor(vault.getData().profile, request).filter(record => record.id === recordId);
+    if (current.length !== 1) throw publicError('The saved record changed. Click Autofill again.');
+    const values = {};
+    for (const key of request.fields) {
+      const definition = RECORD_FIELDS[scope.recordType].find(field => field.key === key);
+      const value = validateInformationValue(definition, current[0][key]);
+      if (value) values[key] = value;
+    }
+    if (!values.person) throw publicError('Add the person’s name to this saved record first.');
+    touch();
+    return { recordId, values, accessRevision: receipt.accessRevision };
   }
   // warmLaya: when an Autofill click starts on a page with open questions, the model's first load
   // after idle (process start, checksum, load: seconds) happens here, not in the click's Laya
@@ -454,6 +509,7 @@ if (nativeOrigin) {
         return { allSites: true };
       } finally { fieldRequestPending = false; }
     }
+    if (request.type === 'getRecordFields') return releaseRecord(request, context);
     if (request.type === 'getFields') {
       const iowa = isPortalUrl(request.url);
       const navigationOnly = isIowaNavigationAuthorization(request);

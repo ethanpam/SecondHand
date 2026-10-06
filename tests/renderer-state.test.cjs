@@ -756,7 +756,8 @@ test('Privacy & backups names everything autofill fills or clicks today and keep
   const view = await renderer(t);
   view.window.document.querySelector('.nav-item[data-view="privacy"]').click();
   const card = text(view.window.document.querySelector('#view-privacy .autofill-card'));
-  for (const phrase of ['first applicant page', 'Household Application Information', 'Tell Us More', 'date of birth', 'Iowa’s questions about you',
+  for (const phrase of ['first applicant page', 'Household Application Information', 'Tell Us More', 'matching controls', 'Social Security card names',
+    'all visible questions are answered', 'submitted SSN matches', 'birth-date-only layout still needs manual Continue', 'supported and complete', 'person’s saved job', 'Cash/Uncashed Check asset', 'Other Information/legal/representative questions',
     'first suggested home address', 'Information-only screens', 'Laya', 'guesses', 'Other sites you trust', 'Chrome’s built-in AI', 'on this computer',
     'never guesses on Iowa’s form', 'Iowa pages SecondHand doesn’t know', 'A complete live submission has not been validated.']) assert.ok(card.includes(phrase), phrase);
   // Chrome's AI is named with where it runs, that its answers are marked, and that it stays off Iowa's form.

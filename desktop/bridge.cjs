@@ -11,6 +11,7 @@ const { EventEmitter } = require('node:events');
 const { atomicWrite } = require('./vault.cjs');
 const { REQUEST_FIELDS, SAVE_FIELDS, PORTAL_URL, isPortalUrl, isHttpsSiteUrl, isRequestField } = require('../shared/schema.cjs');
 const { isBandKey } = require('../shared/household.cjs');
+const { recordRequestScope } = require('./record-fields.cjs');
 const { TEXT_TYPES, CHOICE_TYPES } = require('../shared/laya-prompts.cjs');
 
 const HOST_NAME = 'org.secondhand.bridge';
@@ -19,7 +20,12 @@ const EXTENSION_ID = /^[a-p]{32}$/;
 // The native host sends each request to the desktop with the session token and the extension ID beside it,
 // all in one frame. A request must leave room for them.
 const ENVELOPE_BYTES = Buffer.byteLength(JSON.stringify({ token: '0'.repeat(64), extensionId: 'a'.repeat(32), request: {} })) - '{}'.length;
-const IOWA_NAVIGATION_URLS = new Set(['enterPersonalInfo', 'addressValidation'].map(page => `${PORTAL_URL}/applyForBenefits/${page}`));
+// These only authorize a navigation attempt, never a click by themselves. The
+// content adapter must separately verify its exact page, person, controls, and
+// one-use completeness snapshot. dynamicQuestions is shared by many screens;
+// admitting its URL here does not make those other screens navigable.
+const IOWA_NAVIGATION_URLS = new Set(['enterPersonalInfo', 'addressValidation', 'dynamicQuestions', 'dynamicQuestionsStart', 'ssaVerificationRender']
+  .map(page => `${PORTAL_URL}/applyForBenefits/${page}`));
 // Questions for Laya, the desktop's local AI: text boxes to match to a saved field (#39) and
 // choice questions to answer from the saved profile (#42). Labels, types, and options only.
 const LAYA_REQUESTS = Object.freeze({
@@ -163,6 +169,7 @@ function validateRequest(request) {
   let allowed;
   if (BARE_REQUESTS.includes(request.type)) allowed = ['id', 'type'];
   else if (request.type === 'getFields') allowed = ['id', 'type', 'url', 'fields'];
+  else if (request.type === 'getRecordFields') allowed = ['id', 'type', 'url', 'pageKey', 'recordType', 'fields', 'personName'];
   else if (request.type === 'saveFields') allowed = ['id', 'type', 'url', 'fields'];
   else if (request.type === 'trustSite' || request.type === 'untrustSite') allowed = ['id', 'type', 'url'];
   else if (request.type === 'recordProgress') allowed = ['id', 'type', 'url', 'filledCount'];
@@ -170,6 +177,7 @@ function validateRequest(request) {
   else throw new Error('Unsupported bridge request.');
   if (Object.keys(request).some(key => !allowed.includes(key))) throw new Error('Unexpected request field.');
   if (request.type === 'saveFields') return validateSave(request);
+  if (request.type === 'getRecordFields') recordRequestScope(request);
   // Field requests, site trust, and Laya may name any HTTPS site; the desktop decides whether it is trusted.
   if (request.type === 'getFields' || request.type === 'trustSite' || request.type === 'untrustSite' || Object.hasOwn(LAYA_REQUESTS, request.type)) {
     if (!isHttpsSiteUrl(request.url)) throw new Error('Only an https site without credentials or a custom port is allowed.');

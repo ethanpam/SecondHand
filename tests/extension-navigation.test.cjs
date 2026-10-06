@@ -19,7 +19,7 @@ const START_KEYS = ['gender', 'birthDate', 'hasSsn', 'usCitizen', 'maritalStatus
 function worker({ pageKey = 'iowa-personal-information', complete = false, todo, nativeHook } = {}) {
   const path = { 'iowa-select-address': 'addressValidation', 'iowa-self-details': 'dynamicQuestions', 'iowa-tell-us-more': 'dynamicQuestionsStart' }[pageKey] || 'enterPersonalInfo';
   const tab = { id: 7, active: true, url: `${adapter.PORTAL}/applyForBenefits/${path}` };
-  const model = { pageKey, complete, todo, revealed: [], filled: [], nextCount: 0, nextToken: null, preview: 0 };
+  const model = { pageKey, complete, todo, revealed: [], filled: [], nextCount: 0, nextToken: null, preview: 0, pageInstance: 'synthetic-document-1' };
   const vault = { unlocked: true, accessRevision: 872313042, values: { firstName: 'Synthetic private first', birthDate: '1985-04-12' } };
   const calls = { native: [], content: [] }, events = {};
   const event = key => ({ addListener: callback => { events[key] = callback; } });
@@ -30,9 +30,9 @@ function worker({ pageKey = 'iowa-personal-information', complete = false, todo,
     const unverified = /unverified/.test(model.pageKey);
     // On Tell Us More, Iowa shows the Social Security card name question after Yes to having a number.
     const keys = address || unverified ? [] : self ? ['birthDate'] : start ? [...START_KEYS, ...(model.filled.includes('hasSsn') ? ['ssnCardName'] : [])] : ['firstName', 'lastName', ...model.revealed];
-    const canAdvance = !self && !start && !unverified && (address || model.complete);
+    const canAdvance = !self && !unverified && (address || model.complete);
     if (message.navigationPreview !== false) model.nextToken = canAdvance ? `next-${++model.preview}` : null;
-    return { page: { kind: unverified ? 'manual' : 'fillable', pageKey: model.pageKey, canAdvance, todo: model.todo,
+    return { pageInstance: model.pageInstance, page: { kind: unverified ? 'manual' : 'fillable', pageKey: model.pageKey, canAdvance, todo: model.todo,
       checklist: keys.map(key => ({ key, label: key, required: true, status: model.complete || model.filled.includes(key) ? 'complete' : 'missing' })) },
       scan: { recognizedPage: !unverified, token: 'fill-preview', fields: keys.filter(key => (!model.complete || model.revealed.includes(key)) && !model.filled.includes(key)).map(key => ({ key, label: key })) },
       nextToken: message.navigationPreview === false ? null : model.nextToken };
@@ -47,7 +47,7 @@ function worker({ pageKey = 'iowa-personal-information', complete = false, todo,
           return { ok: true, filledCount: message.fields.length, skippedCount: 0 };
         }
         if (message.type === 'secondhand:next') {
-          if (!message.authorized || message.token !== model.nextToken) return { advanced: false, reason: 'Stale navigation preview.' };
+          if (!message.authorized || message.token !== model.nextToken || message.pageInstance !== model.pageInstance) return { advanced: false, reason: 'Stale navigation preview.' };
           model.nextToken = null; model.nextCount++;
           return { advanced: true };
         }
@@ -155,8 +155,8 @@ test('Tell Us More at dynamicQuestionsStart asks for the applicant’s answers a
   assert.equal(result.state, 'done');
   assert.equal(result.todoKey, 'iowa.startDetailsTodo');
   assert.deepEqual(requests(w).map(request => [request.url, request.fields]),
-    [[`${adapter.PORTAL}/applyForBenefits/dynamicQuestionsStart`, ['sex', 'birthDate', 'hasSsn', 'ssn', 'ssnCardNameMatches', 'ssnCardFirstName', 'ssnCardMiddleName', 'ssnCardLastName', 'usCitizen', 'householdAllCitizens',
-      'maritalStatus', 'militaryOrVeteran', 'disabled', 'householdDisability', 'blind', 'healthLimitation', 'medicare', 'householdMedicare']]]);
+    [[`${adapter.PORTAL}/applyForBenefits/dynamicQuestionsStart`, ['sex', 'birthDate', 'hasSsn', 'ssn', 'ssnCardNameMatches', 'ssnCardFirstName', 'ssnCardMiddleName', 'ssnCardLastName', 'usCitizen', 'householdAllCitizens', 'bornInUs',
+      'maritalStatus', 'militaryOrVeteran', 'eatsMealsWithHousehold', 'disabled', 'householdDisability', 'blind', 'healthLimitation', 'medicare', 'householdMedicare', 'pregnant', 'pregnancyDueDate', 'pregnancyExpectedBabies']]]);
   assert.deepEqual(w.calls.content.filter(message => message.type === 'secondhand:fill').map(message => message.values),
     [{ birthDate: '1985-04-12', hasSsn: 'yes', hasDisability: 'no' }]);
   assert.deepEqual(w.model.filled, ['birthDate', 'hasSsn', 'hasDisability']);
@@ -291,4 +291,59 @@ test('required manual completion fills newly revealed optional saved fields befo
   const fillIndex = w.calls.content.findIndex(message => message.type === 'secondhand:fill' && message.fields.includes('bestContactTime'));
   const nextIndex = w.calls.content.findIndex(message => message.type === 'secondhand:next');
   assert.ok(fillIndex >= 0 && nextIndex > fillIndex);
+});
+
+test('Tell Us More waits for explicit missing answers, then reauthorizes and continues once', async () => {
+  const w = worker({ pageKey: 'iowa-tell-us-more' });
+  await w.start();
+  assert.equal(w.model.nextCount, 0);
+  w.model.complete = true;
+  await w.poll(); await tick();
+  assert.equal(w.model.nextCount, 1);
+  assert.deepEqual(requests(w).at(-1).fields, []);
+  // Both a same-route reload and the legacy Tell Us More alias are the same consumed step.
+  w.model.pageInstance = 'synthetic-document-reloaded';
+  await w.poll(); await tick();
+  w.model.pageKey = 'iowa-self-details';
+  w.tab.url = `${adapter.PORTAL}/applyForBenefits/dynamicQuestions`;
+  await w.poll(); await tick();
+  assert.equal(w.model.nextCount, 1);
+  assert.equal(requests(w).length, 2);
+});
+
+test('same URL document replacement during Tell Us More authorization cannot fill or click', async () => {
+  const w = worker({ pageKey: 'iowa-tell-us-more', complete: true, nativeHook: request => {
+    if (request.type === 'getFields') w.model.pageInstance = 'replaced-document';
+  } });
+  assert.equal((await w.start()).data.state, 'error');
+  assert.equal(w.model.nextCount, 0);
+  assert.equal(w.model.filled.length, 0);
+});
+
+test('Next keeps its original preview during no-data approval, and changed controls invalidate it', async () => {
+  const w = worker({ pageKey: 'iowa-select-address', nativeHook: request => {
+    if (request.type === 'getFields') w.model.nextToken = 'invalidated-by-answer-change';
+  } });
+  assert.equal((await w.start()).data.state, 'waiting');
+  assert.equal(w.model.nextCount, 0);
+  for (let i = 0; i < 3; i++) { await w.poll(); await tick(); }
+  assert.equal(requests(w).length, 1, 'failed Next is consumed rather than automatically retried');
+  assert.equal(w.calls.content.filter(call => call.type === 'secondhand:next').length, 1);
+});
+
+test('lock while reauthorizing a manually completed Tell Us More page prevents Continue', async () => {
+  const w = worker({ pageKey: 'iowa-tell-us-more', nativeHook: request => {
+    if (request.type === 'getFields' && !request.fields.length) { w.vault.unlocked = false; w.vault.accessRevision++; }
+  } });
+  await w.start(); w.model.complete = true;
+  await w.poll(); await tick();
+  assert.equal(w.model.nextCount, 0);
+  assert.equal((await w.poll()).data.autopilot, false);
+});
+
+test('explicit new Autofill can retry the same completed semantic page', async () => {
+  const w = worker({ pageKey: 'iowa-tell-us-more', complete: true });
+  await w.start(); assert.equal(w.model.nextCount, 1);
+  await w.poll(); await tick(); assert.equal(w.model.nextCount, 1);
+  await w.start(); assert.equal(w.model.nextCount, 2);
 });

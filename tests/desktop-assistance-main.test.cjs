@@ -208,7 +208,7 @@ test('untrusted autofill asks once per click with Allow once, Always allow, and 
 });
 
 test('exact Iowa navigation authorization reads no saved profile values and follows existing trust or consent', async t => {
-  for (const page of ['enterPersonalInfo', 'addressValidation']) for (const trusted of [false, true]) {
+  for (const page of ['enterPersonalInfo', 'addressValidation', 'dynamicQuestions', 'dynamicQuestionsStart', 'ssaVerificationRender']) for (const trusted of [false, true]) {
     await t.test(`${page}, trusted=${trusted}`, async () => {
       const app = await desktop({ settings: { extensionId, autofillWithoutAsking: trusted } });
       const response = await app.request({ type: 'getFields', url: `${PORTAL_URL}/applyForBenefits/${page}`, fields: [] });
@@ -219,6 +219,7 @@ test('exact Iowa navigation authorization reads no saved profile values and foll
       assert.equal(app.prompts.length, trusted ? 0 : 1);
       if (!trusted) {
         assert.match(app.prompts[0].detail, /No saved profile fields will be read/);
+        assert.match(app.prompts[0].detail, /verified Tell Us More page/);
         assert.match(app.prompts[0].detail, /first possible home-address suggestion and choose Save and Continue/);
       }
       await app.invoke('lock');
@@ -1419,4 +1420,182 @@ test('Save to My information is refused while a saved birth date can’t be used
   const fresh = await desktop({ settings: trusted, profile: { firstName: 'Synthetic' } });
   await assert.rejects(fresh.request({ type: 'saveFields', url: PANTRY, fields: { birthDate: '2026-10-06' } }), error => error.publicMessage ===
     'Your date of birth can’t be after today (2026-10-05 on this computer).');
+});
+
+const jobId = number => `aaaaaaaa-bbbb-4ccc-8ddd-${String(number).padStart(12, '0')}`;
+const savedJob = (number, extra = {}) => ({ id: jobId(number), person: 'Avery Example', employer: `Fictional Employer ${number}`,
+  workOrTraining: 'Work', monthlyHours: '160', amount: '1200', frequency: 'Every Other Week', ...extra });
+const jobRequest = extra => ({ type: 'getRecordFields', url: `${PORTAL_URL}/applyForBenefits/dynamicQuestions`, pageKey: 'iowa-job-history',
+  recordType: 'jobs', fields: ['person', 'employer', 'monthlyHours'], ...extra });
+
+test('one explicitly owned job releases only requested fields after ordinary approval, without saving or exposing the list', async () => {
+  const app = await desktop({ profile: { jobs: [savedJob(1)], taxStatements: [{ annualIncome: '90000' }], ssn: '123456789' } });
+  const response = plain(await app.request(jobRequest({ personName: '  avery   EXAMPLE ' })));
+  assert.deepEqual(response.values, { person: 'Avery Example', employer: 'Fictional Employer 1', monthlyHours: '160' });
+  assert.equal(response.recordId, jobId(1)); assert.ok(Number.isSafeInteger(response.accessRevision));
+  assert.equal(app.prompts.length, 1); assert.match(app.prompts[0].message, /saved job record/);
+  assert.deepEqual(Object.keys(response).sort(), ['accessRevision', 'recordId', 'values']);
+  assert.equal(app.writes.length, 0); assert.equal(app.notifications.length, 0);
+});
+
+test('record scope and extension identity are checked before reading even for Always allow or all websites', async () => {
+  const app = await desktop({ profile: { jobs: [savedJob(1)] }, settings: { extensionId, autofillWithoutAsking: true, allSites: true } });
+  for (const change of [{ url: 'https://pantry.example.org/intake' }, { url: `${PORTAL_URL}/applyForBenefits/dynamicQuestions?x=1` },
+    { recordType: 'taxStatements' }, { pageKey: 'iowa-expenses' }, { pageKey: '__proto__' }, { fields: ['employer'] },
+    { fields: ['person', 'ssn'] }, { fields: ['person', 'jobs'] }, { recordId: jobId(1) }, { personName: 'Avery\u202EExample' }]) {
+    await assert.rejects(app.request(jobRequest(change)), /unsupported record or field/);
+  }
+  assert.equal(app.dataReads, 0); assert.equal(app.prompts.length, 0);
+  await app.invoke('connectExtension', 'b'.repeat(32));
+  await assert.rejects(app.request(jobRequest()), /access changed/);
+  assert.equal(app.dataReads, 0);
+});
+
+test('missing or blank-owner job records return only a generic missing result, without inference or candidate details', async () => {
+  for (const profile of [{ jobs: [] }, { jobs: [savedJob(1, { person: '  ' })] }, { jobs: [savedJob(1, { person: 'Avery Q. Example' })] },
+    { firstName: 'Avery', lastName: 'Example', jobs: [], taxStatements: [{ recipientName: 'Avery Example', sourceName: 'Tax payer', annualIncome: '20000' }] }]) {
+    const app = await desktop({ profile });
+    const response = plain(await app.request(jobRequest({ personName: 'Avery Example' })));
+    assert.deepEqual(response, { values: {}, reason: 'recordMissing', accessRevision: response.accessRevision });
+    assert.ok(Number.isSafeInteger(response.accessRevision)); assert.equal(app.prompts.length, 0); assert.equal(app.writes.length, 0);
+  }
+});
+
+test('multiple exact-owner jobs require a desktop record choice even with Always allow; other owners are not offered', async () => {
+  const app = await desktop({ profile: { jobs: [savedJob(1), savedJob(2), savedJob(3, { person: 'Different Person' })] },
+    settings: { extensionId, autofillWithoutAsking: true } });
+  app.answer(async () => ({ response: 2 }));
+  const response = plain(await app.request(jobRequest({ personName: 'Avery Example' })));
+  assert.equal(response.recordId, jobId(2)); assert.equal(response.values.employer, 'Fictional Employer 2');
+  assert.equal(app.prompts.length, 1); assert.equal(app.prompts[0].defaultId, 0);
+  assert.match(app.prompts[0].detail, /Fictional Employer 1/); assert.match(app.prompts[0].detail, /Fictional Employer 2/);
+  assert.doesNotMatch(JSON.stringify(app.prompts), /Different Person|Employer 3/);
+});
+
+test('an unselected portal person can choose one explicitly owned saved record; blank owners are never offered', async () => {
+  const app = await desktop({ profile: { jobs: [savedJob(1), savedJob(2, { person: 'Jordan Sample' }), savedJob(3, { person: '' })] } });
+  let prompt = 0; app.answer(async () => ({ response: ++prompt === 1 ? 2 : 1 }));
+  const response = plain(await app.request(jobRequest({ personName: '' })));
+  assert.equal(response.recordId, jobId(2)); assert.equal(response.values.person, 'Jordan Sample');
+  assert.equal(app.prompts.length, 2); assert.doesNotMatch(JSON.stringify(app.prompts), /Employer 3/);
+});
+
+test('record chooser and field approval cancellation release nothing, and overlapping requests cannot skip the chooser', async () => {
+  for (const choice of ['choose', 'approve']) {
+    const app = await desktop({ profile: { jobs: choice === 'choose' ? [savedJob(1), savedJob(2)] : [savedJob(1)] } });
+    let resolve; app.answer(() => new Promise(done => { resolve = done; }));
+    const pending = app.request(jobRequest());
+    await tick();
+    await assert.rejects(app.request(jobRequest()), /waiting for your approval/);
+    resolve({ response: 0 }); await assert.rejects(pending, /cancelled/);
+    assert.equal(app.prompts.length, 1); assert.equal(app.writes.length, 0);
+  }
+});
+
+for (const phase of ['chooser', 'approval']) for (const mutation of ['lock', 'profile', 'registration']) test(`record ${phase} invalidates after ${mutation}`, async () => {
+  const app = await desktop({ profile: { jobs: phase === 'chooser' ? [savedJob(1), savedJob(2)] : [savedJob(1)] } });
+  let resolve; app.answer(() => new Promise(done => { resolve = done; }));
+  const pending = app.request(jobRequest()); await tick();
+  if (mutation === 'lock') { await app.invoke('lock'); await app.invoke('unlock', 'synthetic'); }
+  if (mutation === 'profile') await app.invoke('saveProfile', { jobs: [savedJob(1, { employer: 'Changed employer' })] });
+  if (mutation === 'registration') { await app.invoke('connectExtension', 'b'.repeat(32)); await app.invoke('connectExtension', extensionId); }
+  resolve({ response: 1 }); await assert.rejects(pending, /access changed/);
+  assert.equal(app.prompts.length, 1);
+});
+
+test('Always allow returns the new receipt after saving trust while preserving the explicitly selected job', async () => {
+  const app = await desktop({ profile: { jobs: [savedJob(1)] } });
+  const before = (await app.request({ type: 'status' })).accessRevision;
+  app.answer(async () => ({ response: 2 }));
+  const response = await app.request(jobRequest({ fields: ['person', 'amount'] }));
+  assert.equal(response.accessRevision, before + 1);
+  assert.deepEqual(plain(response.values), { person: 'Avery Example', amount: '1200' });
+  assert.equal(response.accessRevision, (await app.request({ type: 'status' })).accessRevision);
+  assert.equal(app.writes.length, 1);
+});
+
+test('captured retirement form releases one explicitly owned Private Pension only, never sources, dates, taxes, or annual inference', async () => {
+  const app = await desktop({ profile: { monthlyOtherIncome: '9000', jobs: [savedJob(1)],
+    otherIncomeSources: [
+      { id: jobId(21), person: 'Avery Example', type: 'Railroad Retirement', amount: '999', frequency: 'Monthly' },
+      { id: jobId(22), person: 'Avery Example', type: 'Private Pension', amount: '1200.50', frequency: 'Monthly', source: 'Local-only payer', startDate: '2025-01-01', expectedChange: 'Local-only note' },
+      { id: jobId(23), person: 'Another Person', type: 'Private Pension', amount: '5000', frequency: 'Monthly' }
+    ], taxStatements: [{ annualIncome: '68450', documentType: 'ssa-1099' }] } });
+  const request = { type: 'getRecordFields', url: `${PORTAL_URL}/applyForBenefits/dynamicQuestions`, pageKey: 'iowa-retirement-income',
+    recordType: 'otherIncomeSources', personName: 'Avery Example', fields: ['person', 'type', 'amount', 'frequency'] };
+  const response = plain(await app.request(request));
+  assert.equal(response.recordId, jobId(22));
+  assert.deepEqual(response.values, { person: 'Avery Example', type: 'Private Pension', amount: '1200.50', frequency: 'Monthly' });
+  assert.deepEqual(Object.keys(response).sort(), ['accessRevision', 'recordId', 'values']);
+  assert.equal(app.prompts.length, 1); assert.match(app.prompts[0].message, /saved income record/);
+  assert.equal(app.writes.length, 0);
+  const missing = await desktop({ profile: { otherIncomeSources: [{ id: jobId(21), person: 'Avery Example', type: 'private pension', amount: '900' }] } });
+  const result = plain(await missing.request(request));
+  assert.deepEqual(result, { values: {}, reason: 'recordMissing', accessRevision: result.accessRevision });
+  assert.equal(missing.prompts.length, 0, 'unsupported or ambiguous income types are not guessed');
+});
+
+test('observed Social Security retirement uses the explicit current record, not an SSA-1099 amount', async () => {
+  const app = await desktop({ profile: { otherIncomeSources: [{ id: jobId(25), person: 'Avery Example', type: 'Social Security', amount: '250', frequency: 'Monthly' }],
+    taxStatements: [{ documentType: 'ssa-1099', annualIncome: '68450' }] } });
+  const response = plain(await app.request({ type: 'getRecordFields', url: `${PORTAL_URL}/applyForBenefits/dynamicQuestions`, pageKey: 'iowa-retirement-income',
+    recordType: 'otherIncomeSources', fields: ['person', 'type', 'amount', 'frequency'], personName: 'Avery Example' }));
+  assert.deepEqual(response.values, { person: 'Avery Example', type: 'Social Security', amount: '250', frequency: 'Monthly' });
+  assert.equal(response.recordId, jobId(25));
+});
+
+test('captured rent responsibility uses explicit owned Rent records and aliases, without the household rent total', async () => {
+  const request = { type: 'getRecordFields', url: `${PORTAL_URL}/applyForBenefits/dynamicQuestions`, pageKey: 'iowa-housing-expenses',
+    recordType: 'housingExpenses', fields: ['person', 'type', 'amount', 'frequency'], personName: 'Avery Example' };
+  for (const type of ['Rent', 'Rent(Amount you are responsible to pay)', ' Rent(Amount  you are responsible to pay) ']) {
+    const app = await desktop({ profile: { monthlyRent: '9999', housingExpenses: [{ id: jobId(31), person: 'Avery Example', type,
+      amount: '350', frequency: 'Monthly', paidTo: 'Local-only landlord', startDate: '2026-01-01' }] } });
+    const response = plain(await app.request(request));
+    assert.deepEqual(response.values, { person: 'Avery Example', type: type.trim(), amount: '350', frequency: 'Monthly' });
+    assert.deepEqual(Object.keys(response).sort(), ['accessRevision', 'recordId', 'values']);
+  }
+  for (const profile of [{ monthlyRent: '9999' }, { housingExpenses: [{ id: jobId(31), person: 'Avery Example', type: 'Mortgage', amount: '350' }] }]) {
+    const app = await desktop({ profile });
+    const response = plain(await app.request(request));
+    assert.deepEqual(response, { values: {}, reason: 'recordMissing', accessRevision: response.accessRevision });
+  }
+});
+
+test('utility release uses one explicit owner and never household utility answers or totals', async () => {
+  const request = { type: 'getRecordFields', url: `${PORTAL_URL}/applyForBenefits/dynamicQuestions`, pageKey: 'iowa-utility-expenses', recordType: 'utilityExpenses',
+    fields: ['person', 'gas', 'electricity', 'waterSewage', 'telephone', 'petFees', 'garageRent', 'landlordExtra', 'garbage', 'heatingCooling'], personName: 'Avery Example' };
+  const app = await desktop({ profile: { utilityGas: 'yes', utilityElectricity: 'no', monthlyUtilities: '9999', utilityExpenses: [
+    { id: jobId(41), person: 'Avery Example', gas: 'no', electricity: 'yes', waterSewage: 'no', telephone: 'yes', petFees: 'no', garageRent: 'no', landlordExtra: 'no', garbage: 'yes', heatingCooling: 'yes' },
+    { id: jobId(42), person: 'Another Person', gas: 'yes' }] } });
+  const response = plain(await app.request(request));
+  assert.equal(response.recordId, jobId(41));
+  assert.deepEqual(response.values, { person: 'Avery Example', gas: 'no', electricity: 'yes', waterSewage: 'no', telephone: 'yes', petFees: 'no', garageRent: 'no', landlordExtra: 'no', garbage: 'yes', heatingCooling: 'yes' });
+  const missing = await desktop({ profile: { utilityGas: 'yes', utilityElectricity: 'no', monthlyUtilities: '9999' } });
+  const result = plain(await missing.request(request));
+  assert.deepEqual(result, { values: {}, reason: 'recordMissing', accessRevision: result.accessRevision });
+  assert.equal(missing.prompts.length, 0);
+});
+
+const assetRequest = extra => ({ type: 'getRecordFields', url: `${PORTAL_URL}/applyForBenefits/dynamicQuestions`, pageKey: 'iowa-liquid-assets', recordType: 'assets',
+  fields: ['person', 'type', 'currentValue', 'amountOwed', 'accountOrPolicy', 'institution', 'acquiredDate'], personName: 'Avery Example', ...extra });
+
+test('captured cash asset releases explicit saved details without optional zero defaults, household cash, or shared-owner data', async () => {
+  const app = await desktop({ profile: { cashOnHand: '9999', assets: [
+    { id: jobId(51), person: 'Avery Example', type: 'Cash/Uncashed Check', currentValue: '50', description: 'Local only', sharedWith: 'Other Person', ownershipShare: 'Half' },
+    { id: jobId(52), person: 'Avery Example', type: 'Checking Account', currentValue: '1000' }] } });
+  const response = plain(await app.request(assetRequest()));
+  assert.deepEqual(response.values, { person: 'Avery Example', type: 'Cash/Uncashed Check', currentValue: '50' });
+  assert.equal(response.recordId, jobId(51)); assert.equal(app.prompts.length, 1); assert.equal(app.writes.length, 0);
+  const missing = await desktop({ profile: { cashOnHand: '9999', assets: [{ id: jobId(52), person: 'Avery Example', type: 'Checking Account', currentValue: '1000' }] } });
+  const result = plain(await missing.request(assetRequest()));
+  assert.deepEqual(result, { values: {}, reason: 'recordMissing', accessRevision: result.accessRevision });
+  assert.equal(missing.prompts.length, 0);
+});
+
+test('liquid asset approval cannot release stale values after a profile access-revision change', async () => {
+  const app = await desktop({ profile: { assets: [{ id: jobId(51), person: 'Avery Example', type: 'Cash/Uncashed Check', currentValue: '50' }] } });
+  let resolve; app.answer(() => new Promise(done => { resolve = done; }));
+  const pending = app.request(assetRequest()); await tick();
+  await app.invoke('saveProfile', { assets: [{ id: jobId(51), person: 'Avery Example', type: 'Cash/Uncashed Check', currentValue: '100' }] });
+  resolve({ response: 1 }); await assert.rejects(pending, /access changed/);
 });
