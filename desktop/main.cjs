@@ -91,9 +91,7 @@ if (nativeOrigin) {
   // Released only after a named confirmation on sites other than Iowa's portal.
   const SENSITIVE_FIELDS = ['ssn', 'hasSsn', 'hasSsnAnswer', 'birthDate', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'assetsOnHand', 'monthlyMedicalExpenses',
     'usCitizen', 'disabled', 'blind', 'healthLimitation', 'medicare'];
-  // Counts worked out from household members' birth dates reveal ages, as the birth date does: band counts
-  // always, and the profile's own age counts while the household list sets them.
-  const AGE_COUNT_FIELDS = Object.freeze(['householdAdults', 'householdChildren', 'householdSeniors']);
+  // Household counts aren't among them (#175), age-band counts and those worked out from members' birth dates included.
   const MAX_TRUSTED_SITES = 50;
   // A trusted site's host name is at most 253 characters, the longest DNS allows, so its origin is at most 261.
   const MAX_HOST_LENGTH = 253;
@@ -462,8 +460,7 @@ if (nativeOrigin) {
       if (!iowa && !siteAllowed(origin)) throw publicError('This site isn’t trusted. Turn on SecondHand for it first.');
       if (!request.fields.every(isRequestField)) throw publicError('This page asked for something SecondHand doesn’t share.');
       if (!iowa && request.fields.some(field => SNAP_IOWA_ONLY_FIELDS.includes(field))) throw publicError('These SNAP answers can only be shared with Iowa’s application.');
-      const byAge = !iowa && request.fields.some(field => AGE_COUNT_FIELDS.includes(field)) && household.listed(vault.getData().profile);
-      const sensitive = iowa ? [] : request.fields.filter(field => SENSITIVE_FIELDS.includes(field) || household.isBandKey(field) || (byAge && AGE_COUNT_FIELDS.includes(field)));
+      const sensitive = iowa ? [] : request.fields.filter(field => SENSITIVE_FIELDS.includes(field));
       const approved = await approveRelease({ context, iowa, origin, generation: accessRevision,
         message: navigationOnly ? 'Continue this verified Iowa step?' : `Fill these saved answers into ${iowa ? 'Iowa’s application' : origin}?`,
         items: navigationOnly ? 'No saved profile fields will be read for this step.' : request.fields.map(fieldLabel).join(', '),
