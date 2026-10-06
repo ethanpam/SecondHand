@@ -120,7 +120,6 @@
     "iowa.record.payment": "Current payment amount",
 
     "worker.recordMissing": "Add an explicitly owned matching record in SecondHand, then click Autofill again.",
-    'app.title': 'SecondHand · Iowa SNAP assistant',
     'brand.name': 'SecondHand',
     'language.label': 'Language',
     'language.en': 'English',
@@ -624,7 +623,6 @@
     "iowa.record.payment": "Monto del pago actual",
 
     "worker.recordMissing": "Añada en SecondHand un registro que coincida y que indique expresamente a qué persona corresponde. Después haga clic en Autocompletar otra vez.",
-    'app.title': 'SecondHand · Asistente de SNAP de Iowa',
     'brand.name': 'SecondHand',
     'language.label': 'Idioma',
     'language.en': 'English',
@@ -1121,7 +1119,6 @@
     "iowa.record.payment": "Số tiền chi trả hiện tại",
 
     "worker.recordMissing": "Thêm bản ghi phù hợp trong SecondHand, ghi rõ bản ghi thuộc về ai, rồi bấm Tự điền lần nữa.",
-    'app.title': 'SecondHand · Trợ lý SNAP Iowa',
     'brand.name': 'SecondHand',
     'language.label': 'Ngôn ngữ',
     'language.en': 'English',
@@ -1619,7 +1616,6 @@
     "iowa.record.payment": "当前付款金额",
 
     "worker.recordMissing": "在 SecondHand 中添加匹配的记录，并明确填写该记录属于谁，然后再次点击自动填写。",
-    'app.title': 'SecondHand · 爱荷华州 SNAP 助手',
     'brand.name': 'SecondHand',
     'language.label': '语言',
     'language.en': 'English',
@@ -2117,7 +2113,6 @@
     "iowa.record.payment": "Montant du versement actuel",
 
     "worker.recordMissing": "Ajoutez dans SecondHand une fiche correspondante en précisant la personne concernée, puis cliquez à nouveau sur Remplir.",
-    'app.title': 'SecondHand · Assistant SNAP de l’Iowa',
     'brand.name': 'SecondHand',
     'language.label': 'Langue',
     'language.en': 'English',
@@ -2615,7 +2610,6 @@
     "iowa.record.payment": "مبلغ الدفعة الحالية",
 
     "worker.recordMissing": "أضف في SecondHand سجلًا مطابقًا يحدد بوضوح الشخص المعني، ثم انقر على التعبئة التلقائية مرة أخرى.",
-    'app.title': 'SecondHand · مساعد SNAP في ولاية أيوا',
     'brand.name': 'SecondHand',
     'language.label': 'اللغة',
     'language.en': 'English',

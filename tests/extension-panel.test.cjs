@@ -1689,7 +1689,7 @@ const settle = async () => { for (let i = 0; i < 12; i++) await tick(); };
 test('with Spanish as the browser language, the side panel shows none of SecondHand’s English', async t => {
   const view = await panel(t, { language: 'es-ES', pageState: keyedChecklist });
   assert.equal(view.window.document.documentElement.lang, 'es');
-  assert.equal(view.window.document.title, spanish('app.title'));
+  assert.equal(view.window.document.title, 'SecondHand', 'the name alone, as Chrome lists the extension');
   assert.equal(view.get('panel-autofill').textContent, spanish('panel.autofillIowa'));
   // Ready to fill, with the app unlocked: there is nothing more to say.
   assert.equal(view.get('status').textContent, '');
