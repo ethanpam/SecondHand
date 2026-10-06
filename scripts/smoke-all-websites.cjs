@@ -25,6 +25,7 @@ const SEARCH = 'https://search.example.org/';
 const FORMS = 'https://forms.example.net/embed';
 const EMBEDDING = 'https://pantry.example.org/sign-up';
 const NEVER = 'https://never.example.net/apply';
+const CONTACT = 'https://contact.example.org/contact';
 // #176: one everyday question and one sensitive one (the date of birth, in SENSITIVE_FIELDS in desktop/main.cjs).
 const DETAILS = 'https://pantry.example.org/details';
 // #98: the household questions the live QA (#89) found on a pantry form, plus one the fictional profile has no answer for.
@@ -59,6 +60,7 @@ const pages = {
     '<label for="apt">Apartment number</label><input id="apt" name="apt"><button type="submit">Submit</button></form>'),
   [SEARCH]: formPage('Find a pantry', '<form role="search"><input type="search" name="q" aria-label="Search"><button>Search</button></form>'),
   [NEVER]: formPage('Never trusted', '<form><label for="first">First name</label><input id="first" name="first"><button type="submit">Submit</button></form>'),
+  [CONTACT]: formPage('Contact form', '<form><label for="detail">Signature</label><input id="detail"><button type="submit">Send</button></form>'),
   [DETAILS]: formPage('Pantry sign-up: your details', '<form><label for="first">First name</label><input id="first" name="first">' +
     '<label for="dob">Date of birth</label><input id="dob" name="dob" type="date"><button type="submit">Submit</button></form>'),
   [GUESS]: formPage('Pantry sign-up: service area', '<form><label for="first">First name</label><input id="first" name="first">' +
@@ -250,6 +252,27 @@ async function main() {
       [{ url: PANTRY, fields: ['firstName', 'lastName', 'zip', 'email', 'householdSize'] }], 'one desktop request for this page');
     await page.screenshot({ path: path.join(root, 'artifacts/all-websites/all-websites-filled.png') });
     console.log('All websites: a form on a site never turned on filled from the fictional profile with one click; nothing was submitted.');
+
+    // An ordinary contact form needs no benefits-specific site adapter. A framework may update only
+    // the label's text node, with no added element or changed attribute: that must reveal the card too.
+    since = await probe();
+    await page.goto(CONTACT, { waitUntil: 'domcontentloaded' });
+    await settled(since, { reportFrom: CONTACT });
+    assert.equal(await cards(), 0, 'a signature-only form offers no autofill');
+    await page.locator('label[for="detail"]').evaluate(label => { label.firstChild.data = 'First name'; });
+    await launcherFrame();
+    assert.equal(await page.locator('#detail').inputValue(), '', 'recognition alone releases no saved answer');
+    assert.deepEqual((await calls('getFields')).filter(call => call.url === CONTACT), []);
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+    await panel.click('#panel-autofill');
+    await expect(page.locator('#detail')).toHaveValue(syntheticProfile.firstName, { timeout: 20000 });
+    await settled();
+    assert.deepEqual((await calls('getFields')).filter(call => call.url === CONTACT).map(call => call.fields), [['firstName']]);
+    assert.equal(await page.evaluate(() => window.__submits), 0, 'the contact form was not sent');
+    assert.equal(page.url(), CONTACT);
+    await page.locator('label[for="detail"]').evaluate(label => { label.firstChild.data = 'Signature'; });
+    await expect.poll(cards, { timeout: 10000 }).toBe(0);
+    console.log('All websites: text-only label changes reveal and hide the card on an ordinary contact form; one click fills only the saved first name, without sending the form.');
 
     // #185: a radio question no rule knows gets Laya's best guess. It is filled with its own dotted outline, the side
     // panel says how many Laya guessed and lists the question, and its row finds it on the page.

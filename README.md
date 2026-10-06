@@ -39,7 +39,7 @@
 - **Answers the questions the rules miss.** Laya, a small AI model that runs inside the desktop app, picks an answer from your saved facts when it's confident, and marks it as a guess for you to check. On other sites' everyday single-choice questions it isn't sure of, it may fill its best guess with its own dotted outline and list it in the side panel for you to check. When your facts don't say, it leaves the question for you.
 - **Leaves the decisions to you.** The app asks before sharing anything, unless you choose **Always allow**. CAPTCHA, consent, signatures, and final submission are always yours.
 - **Speaks your language.** The side panel works in English, Spanish, Vietnamese, Chinese, French, and Arabic. It can show Iowa's questions in your language and sum up long pages, using Chrome's built-in translator and summarizer on your computer.
-- **Helps with other food-assistance forms.** Turn SecondHand on for a food pantry's form site, or for every site at once with **Use SecondHand on all websites** in Chrome's side panel. It fills what it recognizes, one click at a time, and never navigates or submits on those sites. With all websites on, its card shows only on pages with a form it can help with.
+- **Recognizes forms across websites.** Choose **Use SecondHand on all websites** in Chrome's side panel, or turn on individual sites. On HTTPS pages, its card appears when it recognizes questions it can help with, including common name, contact, and address fields outside benefits applications. Click **Autofill** to fill matching saved details. A recognized question may still need an answer from you; arbitrary custom fields are not yet supported. On these sites, Next and Submit stay yours.
 
 ## See it
 
