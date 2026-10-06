@@ -165,8 +165,7 @@
     'widget.offerTitle': 'Show this page’s questions in English in SecondHand’s side panel',
     'widget.languageCheckFailed': 'SecondHand couldn’t check this page’s language.',
     'widget.outdated': 'SecondHand was updated.',
-    'widget.outdatedLong': 'SecondHand was updated. Click Restart, then reload or go to the next page.',
-    'widget.restart': 'Restart',
+    'widget.outdatedLong': 'SecondHand was updated. Click Restart SecondHand, then go to the next page, or reload this one; reloading clears what you typed.',
     'widget.restartTitle': 'Restart SecondHand to finish its update. Then reload this page.',
 
     // Pages newer than the worker Chrome still runs. The widget can't ask an outdated worker for a larger frame,
@@ -669,8 +668,7 @@
     'widget.offerTitle': 'Mostrar las preguntas de esta página en español en el panel lateral de SecondHand',
     'widget.languageCheckFailed': 'SecondHand no pudo comprobar el idioma de esta página.',
     'widget.outdated': 'SecondHand se actualizó.',
-    'widget.outdatedLong': 'SecondHand se actualizó. Haga clic en “Reiniciar” y luego recargue o pase a la página siguiente.',
-    'widget.restart': 'Reiniciar',
+    'widget.outdatedLong': 'SecondHand se actualizó. Haga clic en “Reiniciar SecondHand” y luego pase a la página siguiente, o recargue esta; recargarla borra lo que escribió.',
     'widget.restartTitle': 'Reinicie SecondHand para terminar su actualización. Luego recargue esta página.',
 
     'panel.outdated': 'SecondHand se actualizó y necesita reiniciarse. Este panel lateral se cerrará. Para volver a usar SecondHand, pase a la página siguiente de su formulario o recargue la página; recargarla borra lo que escribió.',
@@ -1167,8 +1165,7 @@
     'widget.offerTitle': 'Hiển thị các câu hỏi của trang này bằng tiếng Việt trong bảng bên của SecondHand',
     'widget.languageCheckFailed': 'SecondHand không kiểm tra được ngôn ngữ của trang này.',
     'widget.outdated': 'SecondHand đã được cập nhật.',
-    'widget.outdatedLong': 'SecondHand đã được cập nhật. Bấm “Khởi động lại”, rồi tải lại hoặc sang trang kế tiếp.',
-    'widget.restart': 'Khởi động lại',
+    'widget.outdatedLong': 'SecondHand đã được cập nhật. Bấm “Khởi động lại SecondHand”, rồi sang trang kế tiếp, hoặc tải lại trang này; tải lại sẽ xóa những gì bạn đã nhập.',
     'widget.restartTitle': 'Khởi động lại SecondHand để hoàn tất cập nhật. Sau đó hãy tải lại trang này.',
 
     'panel.outdated': 'SecondHand đã được cập nhật và cần khởi động lại. Bảng bên này sẽ đóng. Để dùng lại SecondHand, hãy chuyển sang trang kế tiếp của biểu mẫu, hoặc tải lại trang đó; tải lại sẽ xóa những gì bạn đã nhập.',
@@ -1666,8 +1663,7 @@
     'widget.offerTitle': '在 SecondHand 侧边栏中用中文显示此页面的问题',
     'widget.languageCheckFailed': 'SecondHand 无法检查此页面的语言。',
     'widget.outdated': 'SecondHand 已更新。',
-    'widget.outdatedLong': 'SecondHand 已更新。请点击“重新启动”，然后重新加载或进入下一页。',
-    'widget.restart': '重新启动',
+    'widget.outdatedLong': 'SecondHand 已更新。请点击“重新启动 SecondHand”，然后进入下一页，或重新加载此页；重新加载会清除您输入的内容。',
     'widget.restartTitle': '重新启动 SecondHand 以完成更新，然后重新加载此页面。',
 
     'panel.outdated': 'SecondHand 已更新，需要重新启动。此侧边栏将会关闭。要继续使用 SecondHand，请进入表格的下一页，或重新加载该页面；重新加载会清除您输入的内容。',
@@ -2165,8 +2161,7 @@
     'widget.offerTitle': 'Afficher les questions de cette page en français dans le panneau latéral de SecondHand',
     'widget.languageCheckFailed': 'SecondHand n’a pas pu vérifier la langue de cette page.',
     'widget.outdated': 'SecondHand a été mis à jour.',
-    'widget.outdatedLong': 'SecondHand a été mis à jour. Cliquez sur « Redémarrer », puis rechargez ou passez à la page suivante.',
-    'widget.restart': 'Redémarrer',
+    'widget.outdatedLong': 'SecondHand a été mis à jour. Cliquez sur « Redémarrer SecondHand », puis passez à la page suivante, ou rechargez celle-ci ; recharger efface ce que vous avez saisi.',
     'widget.restartTitle': 'Redémarrez SecondHand pour terminer sa mise à jour. Rechargez ensuite cette page.',
 
     'panel.outdated': 'SecondHand a été mis à jour et doit redémarrer. Ce panneau latéral va se fermer. Pour utiliser de nouveau SecondHand, passez à la page suivante de votre formulaire, ou rechargez sa page ; recharger efface ce que vous avez saisi.',
@@ -2664,8 +2659,7 @@
     'widget.offerTitle': 'عرض أسئلة هذه الصفحة بالعربية في اللوحة الجانبية لـ SecondHand',
     'widget.languageCheckFailed': 'لم يتمكن SecondHand من معرفة لغة هذه الصفحة.',
     'widget.outdated': 'تم تحديث SecondHand.',
-    'widget.outdatedLong': 'تم تحديث SecondHand. انقر على “إعادة التشغيل”، ثم أعد التحميل أو انتقل إلى الصفحة التالية.',
-    'widget.restart': 'إعادة التشغيل',
+    'widget.outdatedLong': 'تم تحديث SecondHand. انقر على “إعادة تشغيل SecondHand”، ثم انتقل إلى الصفحة التالية، أو أعد تحميل هذه الصفحة؛ إعادة التحميل تمسح ما كتبته.',
     'widget.restartTitle': 'أعد تشغيل SecondHand لإكمال تحديثه، ثم أعد تحميل هذه الصفحة.',
 
     'panel.outdated': 'تم تحديث SecondHand ويحتاج إلى إعادة التشغيل. ستُغلق هذه اللوحة الجانبية. لاستخدام SecondHand من جديد، انتقل إلى الصفحة التالية من نموذجك، أو أعد تحميل صفحته؛ إعادة التحميل تمسح ما كتبته.',

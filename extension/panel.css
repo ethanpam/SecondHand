@@ -23,6 +23,9 @@ body.launcher-surface{background:none}#launcher{width:100%;height:100%;display:f
 .widget{display:flex;flex-direction:column;justify-content:center;gap:4px;padding:6px 8px;background:#fff;border:1px solid var(--border);border-radius:12px}.widget .brand{width:30px;height:30px}.widget-logo{display:flex;flex:none;margin-inline-end:auto;padding:0;border:0;border-radius:30%;background:none}
 .widget-row{display:flex;align-items:center;gap:8px;min-width:0}
 .widget-primary{flex:none;height:32px;padding:0 14px;border:0;border-radius:100px;background:var(--primary);color:#fff;font-weight:500;white-space:nowrap}.widget-primary:hover:enabled{background:var(--pressed)}
+/* The buttons that name SecondHand can be too long for the card beside Hide in some languages: their words wrap
+   onto a second line before Hide is pushed off the card. */
+#restart,#open-app{flex:0 1 auto;height:auto;min-height:32px;padding-block:6px;line-height:16px;white-space:normal;text-align:center}
 /* The card's text is the side panel's size. */
 .widget-link{padding:0;border:0;background:none;font-weight:500;line-height:16px;text-decoration:underline;text-underline-offset:3px;white-space:nowrap}#need-you{font-weight:600}#translate-offer{align-self:flex-start}
 #widget-text{line-height:16px;min-width:0;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:6}

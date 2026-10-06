@@ -15,7 +15,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 const BUILD = source('panel.js').match(/const BUILD = '([^']+)'/)[1];
 // An outdated worker: the widget's line beside its Restart button (the whole of it, or the short form when the
 // frame can't hold the whole), and the side panel's notice above its own.
-const OUTDATED = 'SecondHand was updated. Click Restart, then reload or go to the next page.';
+const OUTDATED = 'SecondHand was updated. Click Restart SecondHand, then go to the next page, or reload this one; reloading clears what you typed.';
 const OUTDATED_SHORT = 'SecondHand was updated.';
 const OUTDATED_PANEL = 'SecondHand was updated and needs to restart. This side panel will close. To use SecondHand again, go on to the next page of your form, or reload its page; reloading clears what you typed.';
 
@@ -1168,7 +1168,7 @@ test('a worker that never answers gets a plain notice and a Restart button in th
   assert.equal(widget.get('widget-text').classList.contains('visually-hidden'), false);
   assert.equal(widget.get('widget').classList.contains('outdated'), true);
   assert.equal(widget.get('restart').hidden, false);
-  assert.equal(widget.get('restart').textContent, 'Restart');
+  assert.equal(widget.get('restart').textContent, 'Restart SecondHand', 'what it restarts, as the side panel says it');
   assert.equal(widget.get('restart').title, EN['widget.restartTitle']);
   for (const id of ['autofill', 'stop', 'unlock', 'open-app', 'need-you', 'translate-offer', 'hide']) assert.equal(widget.get(id).hidden, true, `${id} is not offered`);
   const side = await panel(t, { silent: true });
