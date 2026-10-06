@@ -103,7 +103,7 @@ test('each English sentence has one key, so fixed English text maps back to exac
 test('text fills parameters, nests messages, picks plural forms, and refuses a missing key or parameter', () => {
   assert.equal(strings.text('en', 'worker.stoppedAfterSteps', { steps: 15 }), 'Stopped after 15 steps. Check this page, then click Autofill to keep going.');
   assert.equal(strings.text('en', 'result.thenTodo', { summary: { key: 'result.filled', params: { count: 3 } }, todo: { key: 'worker.checkThenContinue' } }),
-    'Filled 3. Check your answers, then click Continue.');
+    'Filled 3 answers. Check your answers, then click Continue.');
   assert.equal(strings.text('es', 'widget.needYou', { count: 1 }), 'Falta 1');
   assert.equal(strings.text('es', 'widget.needYou', { count: 2 }), 'Faltan 2');
   assert.equal(strings.text('en', 'widget.needYou', { count: 2 }), '2 questions left');

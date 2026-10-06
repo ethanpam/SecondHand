@@ -287,7 +287,7 @@ test('only the assistant overlay is hidden during portal checks and is restored 
 
 const plainRequests = requests => JSON.parse(JSON.stringify(requests));
 // Results as the worker sends them: its message, and the catalog key and parameters it was written from.
-const doneResult = { state: 'done', filled: 3, needYou: ['firstName', 'lastName'], message: 'Filled 3 · 2 left for you.', messageKey: 'result.filledNeedYou', messageParams: { count: 3, needYou: 2 }, pageKey: 'iowa-personal-information' };
+const doneResult = { state: 'done', filled: 3, needYou: ['firstName', 'lastName'], message: 'Filled 3 answers · 2 left for you.', messageKey: 'result.filledNeedYou', messageParams: { count: 3, needYou: 2 }, pageKey: 'iowa-personal-information' };
 
 async function panel(t, initial = {}) {
   const dom = new JSDOM(source('panel.html'), { runScripts: 'outside-only', url: extensionURL(`panel.html${initial.launcher ? '?surface=launcher' : ''}`), pretendToBeVisual: true });
@@ -440,7 +440,7 @@ test('trusted side-panel Autofill targets the active tab, shows the result, and 
   const view = await panel(t);
   await view.userClick('panel-autofill');
   assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:autofill')), { type: 'ui:autofill', confirmed: true, tabId: 7 });
-  assert.match(view.get('status').textContent, /Filled 3 · 2 left for you/);
+  assert.match(view.get('status').textContent, /Filled 3 answers · 2 left for you/);
   assert.equal(view.types().filter(type => type === 'ui:desktopStatus').length, 2);
 });
 
@@ -495,14 +495,14 @@ test('after Autofill, a link under the status goes to each question left in turn
   checklist.find(item => item.key === 'firstName').status = 'complete';
   view.window.document.dispatchEvent(new view.window.Event('visibilitychange')); await settle();
   assert.equal(view.get('panel-left').textContent, 'Go to the question left');
-  assert.equal(view.get('status').textContent, 'Filled 3 · 1 left for you.', 'the status line counts what is left now');
+  assert.equal(view.get('status').textContent, 'Filled 3 answers · 1 left for you.', 'the status line counts what is left now');
   await view.userClick('panel-left');
   assert.equal(focused().at(-1), 'unverified');
   checklist.find(item => item.key === 'unverified').status = 'complete';
   view.window.document.dispatchEvent(new view.window.Event('visibilitychange')); await settle();
   assert.equal(view.get('panel-left').hidden, true);
   assert.equal(view.get('checklist-summary').textContent, 'Nothing left for you');
-  assert.equal(view.get('status').textContent, 'Filled 3.');
+  assert.equal(view.get('status').textContent, 'Filled 3 answers.');
   // Another site has no checklist: what Autofill reported is listed by name instead, and each row is its own link.
   const site = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: siteDone });
   assert.equal(site.get('panel-left').hidden, true);
@@ -547,10 +547,10 @@ test('on a page with no checklist, the side panel names each question Autofill l
   assert.equal(apartment.querySelectorAll('.checklist-mark svg').length, 1);
   assert.equal(answering.get('left-list').children[1].classList.contains('missing'), true);
   assert.equal(answering.get('left-summary').textContent, '1 left');
-  assert.equal(answering.get('status').textContent, 'Filled 2 · 1 left for you. Check your answers before you submit.', 'the status line counts what is left now');
+  assert.equal(answering.get('status').textContent, 'Filled 2 answers · 1 left for you. Check them before you submit.', 'the status line counts what is left now');
   answering.state.savable = [{ id: 'f0:sh-4', label: 'Apartment number', answered: true }, { id: 'f4:sh-3', label: 'Guardian name', answered: true }];
   answering.window.document.dispatchEvent(new answering.window.Event('visibilitychange')); await settle();
-  assert.equal(answering.get('status').textContent, 'Filled 2. Check your answers before you submit.');
+  assert.equal(answering.get('status').textContent, 'Filled 2 answers. Check them before you submit.');
   assert.equal(answering.get('left-summary').textContent, 'Nothing left for you');
   // The page's words are shown as text, never as markup.
   const markup = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: { ...siteDone, left: [{ key: 'f0:sh-4', label: '<img src=x onerror=alert(1)>' }] } });
@@ -859,7 +859,7 @@ test('widget on a fillable page offers one-click Autofill and cycles through wha
   await view.userClick('autofill');
   assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:autofill')), { type: 'ui:autofill', confirmed: true });
   assert.equal(view.types().includes('ui:plan'), false, 'Iowa never asks the on-device AI');
-  assert.equal(view.get('widget-text').textContent, 'Filled 3. Stop erases nothing.', 'what it did, and what its Stop button would do');
+  assert.equal(view.get('widget-text').textContent, 'Filled 3 answers. Stop erases nothing.', 'what it did, and what its Stop button would do');
   assert.equal(view.get('need-you').hidden, false);
   assert.equal(view.get('need-you').textContent, '2 questions left');
   assert.equal(view.get('widget-text').classList.contains('visually-hidden'), false, 'what Autofill did is shown above the link to what is left');
@@ -1037,20 +1037,20 @@ test('widget offers Open SecondHand in Autofill’s place when the app is closed
   assert.equal(failing.get('open-app').hidden, true);
   assert.equal(failing.get('autofill').hidden, false);
   const restored = await panel(t, { launcher: true, result: doneResult });
-  assert.equal(restored.get('widget-text').textContent, 'Filled 3.');
+  assert.equal(restored.get('widget-text').textContent, 'Filled 3 answers.');
   assert.equal(restored.get('need-you').textContent, '2 questions left');
 });
 
 const waitingResult = { state: 'waiting', filled: 0, needYou: [], message: 'Type the characters shown in Iowa’s security check, then click Continue.', pageKey: 'iowa-personal-information' };
 
 test('while autofill is on, the widget shows Stop and the current instruction', async t => {
-  const checked = { ...doneResult, needYou: [], message: 'Filled 3. Check your answers, then click Continue.', messageKey: 'result.thenTodo',
+  const checked = { ...doneResult, needYou: [], message: 'Filled 3 answers. Check your answers, then click Continue.', messageKey: 'result.thenTodo',
     messageParams: { summary: { key: 'result.filled', params: { count: 3 } }, todo: { key: 'worker.checkThenContinue', params: {} } }, todo: 'Check your answers, then click Continue.', todoKey: 'worker.checkThenContinue', todoParams: {} };
   const view = await panel(t, { launcher: true, autofill: checked, autopilotAfterAutofill: true });
   await view.userClick('autofill');
   assert.equal(view.get('stop').hidden, false);
   assert.equal(view.get('autofill').hidden, true);
-  assert.equal(view.get('widget-text').textContent, 'Filled 3. Check your answers, then click Continue. Stop erases nothing.');
+  assert.equal(view.get('widget-text').textContent, 'Filled 3 answers. Check your answers, then click Continue. Stop erases nothing.');
   view.state.result = waitingResult;
   view.window.document.dispatchEvent(new view.window.Event('visibilitychange'));
   await tick(); await tick();
@@ -1233,7 +1233,7 @@ test('the pill is a fixed circle that cannot stretch into an oval', () => {
 // Sites other than Iowa, turned on one at a time.
 const SITE = { id: 7, url: 'https://pantry.example.org/intake?step=1' };
 const ORIGIN = 'https://pantry.example.org';
-const siteDone = { state: 'done', filled: 2, guessed: 0, needYou: ['f0:sh-4', 'f4:sh-3'], message: 'Filled 2 · 2 left for you. Check your answers before you submit.', messageKey: 'result.siteFilledNeedYou', messageParams: { count: 2, needYou: 2 }, pageKey: 'general' };
+const siteDone = { state: 'done', filled: 2, guessed: 0, needYou: ['f0:sh-4', 'f4:sh-3'], message: 'Filled 2 answers · 2 left for you. Check them before you submit.', messageKey: 'result.siteFilledNeedYou', messageParams: { count: 2, needYou: 2 }, pageKey: 'general' };
 // What the worker's ui:plan answers: the questions the rules left open, and the keys the AI may use.
 const openPlan = { unmatched: [
   { id: 'f4:sh-1-2', label: 'Where can we email you?', type: 'email', options: [], required: false },
@@ -1312,7 +1312,7 @@ test('on a site that is on, Autofill fills once without Stop, and Turn off asks 
 
 test('widget on a site asks the on-device AI about open questions and sends its guesses with Autofill', async t => {
   const ai = languageModel();
-  const guessed = { state: 'done', filled: 3, guessed: 1, needYou: ['sh-2-0'], message: 'Filled 3 · 1 guessed · 1 left for you. Check your answers before you submit.', messageKey: 'result.siteFilledGuessedNeedYou', messageParams: { count: 3, guessed: 1, needYou: 1 }, pageKey: 'general' };
+  const guessed = { state: 'done', filled: 3, guessed: 1, needYou: ['sh-2-0'], message: 'Filled 3 answers · 1 guessed · 1 left for you. Check them before you submit.', messageKey: 'result.siteFilledGuessedNeedYou', messageParams: { count: 3, guessed: 1, needYou: 1 }, pageKey: 'general' };
   const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: openPlan, LanguageModel: ai.LanguageModel, autofill: guessed });
   assert.equal(ai.calls.availability, 0, 'nothing is asked before a click');
   await view.userClick('autofill');
@@ -1325,7 +1325,7 @@ test('widget on a site asks the on-device AI about open questions and sends its 
   assert.match(system, /- phone:/);
   assert.doesNotMatch(system, /ssn|birthDate|Income|firstName/, 'the AI only learns the keys the worker allows');
   // The side panel's sentence, without the count the link beside it carries.
-  assert.equal(view.get('widget-text').textContent, 'Filled 3 · 1 guessed. Check your answers before you submit.');
+  assert.equal(view.get('widget-text').textContent, 'Filled 3 answers · 1 guessed. Check them before you submit.');
   assert.equal(view.get('need-you').textContent, '1 question left');
 });
 
@@ -1337,8 +1337,8 @@ test('without the on-device AI the widget fills with rule matches only and says 
     await view.userClick('autofill');
     assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'ui:autofill', confirmed: true }, JSON.stringify(setup));
     // Why Chrome's AI guessed nothing is in the tooltip; the line stays what was filled and what to do.
-    assert.equal(view.get('widget-text').textContent, 'Filled 2. Check your answers before you submit.', JSON.stringify(setup));
-    assert.match(view.get('widget-text').title, new RegExp(`^Filled 2 · 2 left for you\\. Check your answers before you submit\\. ${AI_UNAVAILABLE.replace(/[.’]/g, '\\$&')}`), JSON.stringify(setup));
+    assert.equal(view.get('widget-text').textContent, 'Filled 2 answers. Check them before you submit.', JSON.stringify(setup));
+    assert.match(view.get('widget-text').title, new RegExp(`^Filled 2 answers · 2 left for you\\. Check them before you submit\\. ${AI_UNAVAILABLE.replace(/[.’]/g, '\\$&')}`), JSON.stringify(setup));
   }
 });
 
@@ -1357,7 +1357,7 @@ test('the widget asks the on-device AI once per click, with a time limit, and on
   const answered = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { unmatched: [], allowedKeys: ['email'] }, LanguageModel: ai.LanguageModel, autofill: siteDone });
   await answered.userClick('autofill');
   assert.equal(ai.calls.availability, 1, 'no open questions, no AI');
-  assert.equal(answered.get('widget-text').textContent, 'Filled 2. Check your answers before you submit.');
+  assert.equal(answered.get('widget-text').textContent, 'Filled 2 answers. Check them before you submit.');
   assert.deepEqual(plainRequests(answered.requests.at(-1)), { type: 'ui:autofill', confirmed: true });
 });
 
@@ -1395,7 +1395,7 @@ test('widget on a site that is on autofills once, lists what needs you, and neve
   assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:autofill')), { type: 'ui:autofill', confirmed: true });
   assert.equal(view.get('stop').hidden, true);
   assert.equal(view.get('autofill').hidden, false);
-  assert.equal(view.get('widget-text').textContent, 'Filled 2. Check your answers before you submit.');
+  assert.equal(view.get('widget-text').textContent, 'Filled 2 answers. Check them before you submit.');
   assert.equal(view.get('need-you').textContent, '2 questions left');
   await view.userClick('need-you');
   assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:focusField')), { type: 'ui:focusField', key: 'f0:sh-4', confirmed: true });
@@ -1625,7 +1625,7 @@ test('with Spanish as the browser language, the widget shows none of SecondHand�
 
 test('results the worker names by key show in Spanish in the widget and the side panel; a bare message shows as sent', async t => {
   const iowa = { state: 'done', filled: 3, needYou: ['firstName', 'lastName'], pageKey: 'iowa-personal-information',
-    message: 'Filled 3 · 2 left for you. Check what was filled and answer what is left in Iowa’s form. Once nothing is left, SecondHand clicks Save and Continue.',
+    message: 'Filled 3 answers · 2 left for you. Check what was filled and answer what is left in Iowa’s form. Once nothing is left, SecondHand clicks Save and Continue.',
     messageKey: 'result.thenTodo', messageParams: { summary: { key: 'result.filledNeedYou', params: { count: 3, needYou: 2 } }, todo: { key: 'iowa.missingAnswers', params: {} } },
     todo: 'Check what was filled and answer what is left in Iowa’s form. Once nothing is left, SecondHand clicks Save and Continue.', todoKey: 'iowa.missingAnswers', todoParams: {} };
   const widget = await panel(t, { launcher: true, language: 'es-ES', autofill: iowa });
@@ -1841,7 +1841,7 @@ test('when the widget’s offer opened the side panel, the panel shows the list 
 
 // Laya, the desktop's local AI (#39, #42): when it is ready, Chrome's on-device AI stays off.
 const layaDone = { state: 'done', filled: 2, guessed: 1, laya: 1, needYou: ['f0:sh-1-1'], pageKey: 'general',
-  message: 'Filled 2 · 1 guessed · 1 left for you. Check your answers before you submit. Guesses were suggested by Laya on this computer.',
+  message: 'Filled 2 answers · 1 guessed · 1 left for you. Check them before you submit. Guesses were suggested by Laya on this computer.',
   messageKey: 'result.suggestedByLaya', messageParams: { summary: { key: 'result.siteFilledGuessedNeedYou', params: { count: 2, guessed: 1, needYou: 1 } } } };
 
 test('with Laya ready, the widget leaves Chrome’s on-device AI off, fills the plan Laya answers for, and says who suggested the guesses', async t => {
@@ -1850,7 +1850,7 @@ test('with Laya ready, the widget leaves Chrome’s on-device AI off, fills the 
   await view.userClick('autofill');
   assert.deepEqual(plainRequests(view.requests.slice(-2)), [{ type: 'ui:plan', confirmed: true }, { type: 'ui:autofill', confirmed: true, guesses: {} }]);
   assert.equal(ai.calls.availability, 0, 'Chrome’s on-device AI is never asked');
-  assert.equal(view.get('widget-text').textContent, 'Filled 2 · 1 guessed. Check your answers before you submit. Guesses were suggested by Laya on this computer.');
+  assert.equal(view.get('widget-text').textContent, 'Filled 2 answers · 1 guessed. Check them before you submit. Guesses were suggested by Laya on this computer.');
   assert.equal(view.get('widget-text').title, layaDone.message);
   assert.equal(view.get('need-you').textContent, '1 question left');
 
@@ -1866,7 +1866,7 @@ test('with Laya not ready, the widget asks Chrome’s on-device AI exactly as be
   await view.userClick('autofill');
   assert.deepEqual(plainRequests(view.requests.slice(-2)), [{ type: 'ui:plan', confirmed: true }, { type: 'ui:autofill', confirmed: true, guesses: { 'f4:sh-1-2': 'email' } }]);
   assert.equal(ai.calls.prompt.length, 1);
-  assert.equal(view.get('widget-text').textContent, 'Filled 2. Check your answers before you submit.');
+  assert.equal(view.get('widget-text').textContent, 'Filled 2 answers. Check them before you submit.');
 });
 
 test('on a site that is on, the side panel says why Laya isn’t guessing, in the applicant’s language; never when it is ready, on Iowa, or with the app closed', async t => {
@@ -2476,10 +2476,10 @@ test('the list shows only well-formed questions, in the applicant’s language, 
 
 // Fill sensitive details (#176): the questions whose saved answers the app held back until the applicant allows them.
 const HELD = [{ id: 'f0:sh-2-0', label: 'Date of birth' }, { id: 'f0:sh-2-1', label: 'Social Security number' }];
-const WAITING = 'Filled 1 · 3 left for you. Check your answers before you submit. 2 sensitive details wait until you click Fill sensitive details in the side panel.';
+const WAITING = 'Filled 1 answer · 3 left for you. Check it before you submit. 2 sensitive details wait until you click Fill sensitive details in the side panel.';
 const heldDone = { state: 'done', filled: 1, guessed: 0, needYou: ['f0:sh-2-2', 'f0:sh-2-0', 'f0:sh-2-1'], held: 2, message: WAITING, messageKey: 'result.withHeld',
   messageParams: { summary: { key: 'result.siteFilledNeedYou', params: { count: 1, needYou: 3 } }, count: 2 }, pageKey: 'general' };
-const heldFilled = { state: 'done', filled: 3, guessed: 0, needYou: ['f0:sh-2-2'], message: 'Filled 3 · 1 left for you. Check your answers before you submit.',
+const heldFilled = { state: 'done', filled: 3, guessed: 0, needYou: ['f0:sh-2-2'], message: 'Filled 3 answers · 1 left for you. Check them before you submit.',
   messageKey: 'result.siteFilledNeedYou', messageParams: { count: 3, needYou: 1 }, pageKey: 'general' };
 
 test('the side panel lists the held questions by their own words with one Fill sensitive details button, which asks the worker from a trusted click (#176)', async t => {
@@ -2534,18 +2534,18 @@ test('the widget counts held questions under need-you, says they wait in the sid
   const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: heldDone });
   await view.userClick('autofill');
   assert.equal(view.get('need-you').textContent, '3 questions left');
-  assert.equal(view.get('widget-text').textContent, 'Filled 1. Check your answers before you submit. 2 sensitive details wait until you click Fill sensitive details in the side panel.');
+  assert.equal(view.get('widget-text').textContent, 'Filled 1 answer. Check it before you submit. 2 sensitive details wait until you click Fill sensitive details in the side panel.');
   // Fill sensitive details in the side panel changes the tab's result: the widget takes it at its next look.
   view.state.result = structuredClone(heldFilled);
   view.window.document.dispatchEvent(new view.window.Event('visibilitychange'));
   await tick(); await tick();
   assert.equal(view.get('need-you').textContent, '1 question left');
-  assert.equal(view.get('widget-text').textContent, 'Filled 3. Check your answers before you submit.');
+  assert.equal(view.get('widget-text').textContent, 'Filled 3 answers. Check them before you submit.');
   // With nothing held any more, it keeps its own result again.
   view.state.result = { ...heldFilled, filled: 9 };
   view.window.document.dispatchEvent(new view.window.Event('visibilitychange'));
   await tick(); await tick();
-  assert.equal(view.get('widget-text').textContent, 'Filled 3. Check your answers before you submit.');
+  assert.equal(view.get('widget-text').textContent, 'Filled 3 answers. Check them before you submit.');
 
   // Nothing else filled: the held questions matched, so it never says that nothing matched.
   const onlyParams = { summary: { key: 'result.siteNeedYou', params: { count: 1 } }, count: 1 };
@@ -2556,7 +2556,7 @@ test('the widget counts held questions under need-you, says they wait in the sid
   assert.equal(alone.get('need-you').textContent, '1 question left');
   const spanish = await panel(t, { launcher: true, language: 'es', tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: heldDone });
   await spanish.userClick('autofill');
-  assert.equal(spanish.get('widget-text').textContent, 'Completadas: 1. Revise sus respuestas antes de enviar. 2 datos sensibles esperan hasta que usted haga clic en “Llenar datos sensibles” en el panel lateral.');
+  assert.equal(spanish.get('widget-text').textContent, 'Se llenó 1 respuesta. Revísela antes de enviar. 2 datos sensibles esperan hasta que usted haga clic en “Llenar datos sensibles” en el panel lateral.');
 });
 
 test('the buttons that the keyboard shortcuts work name them in their tooltips, in the applicant’s language, and say nothing of one that is unset', async t => {
@@ -2582,7 +2582,7 @@ test('the buttons that the keyboard shortcuts work name them in their tooltips, 
 
 // #185: Laya's best guesses, listed for the applicant to find and check.
 const GUESSES = [{ id: 'f0:sh-1-1', label: 'How many people live in your household?' }, { id: 'f4:sh-1-3', label: 'Preferred pickup day' }];
-const GUESSED = 'Filled 4 · 1 guessed. Check your answers before you submit. Guesses were suggested by Laya on this computer. 2 guessed by Laya, check them.';
+const GUESSED = 'Filled 4 answers · 1 guessed. Check them before you submit. Guesses were suggested by Laya on this computer. 2 guessed by Laya, check them.';
 const guessedDone = { state: 'done', filled: 4, guessed: 1, laya: 1, layaGuessed: 2, layaGuesses: GUESSES, needYou: [], pageKey: 'general', message: GUESSED, messageKey: 'result.layaGuessed',
   messageParams: { summary: { key: 'result.suggestedByLaya', params: { summary: { key: 'result.siteFilledGuessed', params: { count: 4, guessed: 1 } } } }, count: 2 } };
 
@@ -2625,10 +2625,10 @@ test('#185: the widget says how many Laya guessed, apart from its sure answers, 
   await view.userClick('autofill');
   assert.equal(view.get('widget-text').textContent, GUESSED);
   const one = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true },
-    autofill: { ...guessedDone, filled: 1, guessed: 0, laya: undefined, layaGuessed: 1, layaGuesses: GUESSES.slice(0, 1), message: 'Filled 1. Check your answers before you submit. 1 guessed by Laya, check it.',
+    autofill: { ...guessedDone, filled: 1, guessed: 0, laya: undefined, layaGuessed: 1, layaGuesses: GUESSES.slice(0, 1), message: 'Filled 1 answer. Check it before you submit. 1 guessed by Laya, check it.',
       messageParams: { summary: { key: 'result.siteFilled', params: { count: 1 } }, count: 1 } } });
   await one.userClick('autofill');
-  assert.equal(one.get('widget-text').textContent, 'Filled 1. Check your answers before you submit. 1 guessed by Laya, check it.');
+  assert.equal(one.get('widget-text').textContent, 'Filled 1 answer. Check it before you submit. 1 guessed by Laya, check it.');
   const spanishView = await panel(t, { launcher: true, language: 'es', tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true }, autofill: guessedDone });
   await spanishView.userClick('autofill');
   assert.equal(spanishView.get('widget-text').textContent, strings.text('es', guessedDone.messageKey, guessedDone.messageParams));
