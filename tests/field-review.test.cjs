@@ -225,3 +225,13 @@ test('all source objects are immutable and deterministic review never returns th
   assert.equal(JSON.stringify(profile), before);
   for (const value of ['Avery', 'Example', '1985-04-12', '123-45-6789', 'private@example.invalid', '987.65', self().id]) assert.ok(!JSON.stringify(first).includes(value));
 });
+
+test('the student status and the answers chosen from lists are the applicant’s own, to check against their records (#184)', () => {
+  const reviewed = rows({ studentLevel: 'undergraduate', incomeSources: 'job,pension', currentBenefits: 'none', helpWanted: 'food-pantry' });
+  for (const key of ['studentLevel', 'incomeSources', 'currentBenefits', 'helpWanted']) assert.equal(reviewed[key].status, 'check-source', key);
+  const rejected = rows({ studentLevel: 'college', incomeSources: 'job,none', currentBenefits: 'lottery', helpWanted: 'food-pantry,food-pantry' });
+  for (const key of ['studentLevel', 'incomeSources', 'currentBenefits', 'helpWanted']) {
+    assert.equal(rejected[key].status, 'needs-review', key);
+    assert.deepEqual(rejected[key].messages, [key === 'studentLevel' ? 'Choose one of the available answers, or leave the question unanswered.' : 'Choose only answers on the list, each once, or leave the question unanswered. None can’t be chosen with other answers.'], key);
+  }
+});
