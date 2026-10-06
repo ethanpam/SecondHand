@@ -19,7 +19,7 @@ async function renderer(t, { customFields = [answer()], save } = {}) {
   window.confirm = () => true;
   window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   window.HTMLDialogElement.prototype.close = function () { this.open = false; };
-  let locked;
+  let locked, profileChanged;
   let status = { exists: true, unlocked: true, lockRevision: 0, extensionId: '', bridgeRunning: true };
   const database = { profile: {
     firstName: 'Fictional', lastName: 'Applicant', email: 'saved@example.invalid', customFields,
@@ -30,7 +30,7 @@ async function renderer(t, { customFields = [answer()], save } = {}) {
   const saves = [], reviews = [];
   window.secondHand = {
     status: async () => status, getData: async () => structuredClone(database), setupProgress: async () => null,
-    onLocked: callback => { locked = callback; return () => {}; }, onUnlocked: () => () => {}, onProfileChanged: () => () => {},
+    onLocked: callback => { locked = callback; return () => {}; }, onUnlocked: () => () => {}, onProfileChanged: callback => { profileChanged = callback; return () => {}; },
     unlock: async () => { status = { ...status, unlocked: true }; return status; },
     saveProfile: async profile => {
       saves.push(plain(profile));
@@ -49,6 +49,8 @@ async function renderer(t, { customFields = [answer()], save } = {}) {
   return { window, get, rows, field, navigate, database, saves, reviews,
     edit(input, value) { input.value = value; input.dispatchEvent(new window.Event('input', { bubbles: true })); },
     submit() { get('profile-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); },
+    // Remember for next time in Chrome changed the saved custom answers (#186).
+    async changedElsewhere(fields) { profileChanged({ fields }); for (let i = 0; i < 4; i++) await tick(); },
     lock() { status = { ...status, unlocked: false, lockRevision: status.lockRevision + 1 }; locked({ lockRevision: status.lockRevision }); },
     async unlock() { get('passphrase').value = 'synthetic-passphrase'; get('auth-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); await tick(); }
   };
@@ -182,3 +184,55 @@ test('custom answers are text-only, stay out of review/model requests, and clear
   assert.equal(view.window.localStorage.length, 0);
   assert.equal(view.window.sessionStorage.length, 0);
 });
+
+// Remember for next time (#186): an answer saved from a page keeps its question's kind, its choices, and the site it came from.
+const fromPage = (number, changes = {}) => ({ id: id(number), label: 'How did you hear about us?', value: 'Church', aliases: [], type: 'radio', options: ['Friend', 'Church', 'Flyer'],
+  site: 'https://pantry.example.org', ...changes });
+
+test('an answer saved from a page shows the site it came from, offers only its own choices, and keeps its kind and choices when saved', async t => {
+  const emplid = fromPage(3, { label: 'EMPLID', value: 'SYN-4471', type: 'text', options: [], site: 'https://wic.example.org' });
+  const view = await renderer(t, { customFields: [answer(), fromPage(2), emplid] });
+  const site = index => view.rows()[index].querySelector('.custom-answer-site');
+  assert.equal(site(0), null, 'an answer typed here has no site');
+  assert.equal(site(1).textContent, 'Saved from pantry.example.org with Remember for next time.');
+  assert.equal(site(2).textContent, 'Saved from wic.example.org with Remember for next time.');
+  const choice = view.field('value', 1);
+  assert.equal(choice.tagName, 'SELECT');
+  assert.deepEqual([...choice.options].map(option => option.value), ['Friend', 'Church', 'Flyer']);
+  assert.equal(choice.value, 'Church');
+  assert.equal(view.field('value', 2).tagName, 'TEXTAREA');
+  choice.value = 'Flyer'; for (const type of ['input', 'change']) choice.dispatchEvent(new view.window.Event(type, { bubbles: true }));
+  view.edit(view.field('value', 2), 'SYN-9000');
+  assert.equal(view.get('profile-save-state').textContent, 'Unsaved changes');
+  view.submit(); await tick();
+  assert.deepEqual(view.saves[0].customFields, [answer(), fromPage(2, { value: 'Flyer' }), { ...emplid, value: 'SYN-9000' }]);
+});
+
+test('answers remembered in Chrome show in Custom answers at once, and join an unsaved draft without losing its edits', async t => {
+  const view = await renderer(t);
+  view.database.profile = { ...view.database.profile, customFields: [answer(), fromPage(2)] };
+  await view.changedElsewhere(['customFields']);
+  assert.deepEqual(view.rows().map(row => row.dataset.customId), [answer().id, id(2)]);
+  assert.equal(view.get('toast').textContent, 'An answer you chose to remember in Chrome is now in My information, under Custom answers.');
+  assert.equal(view.get('profile-save-state').hidden, true);
+
+  // With unsaved edits here, the new answer joins the draft and the edits stay.
+  view.edit(view.field('value'), 'My unsaved edit');
+  view.database.profile = { ...view.database.profile, customFields: [answer(), { ...fromPage(2), value: 'Flyer' }, fromPage(3, { label: 'EMPLID', value: 'SYN-4471', type: 'text', options: [] })] };
+  await view.changedElsewhere(['customFields']);
+  assert.deepEqual(view.rows().map(row => row.dataset.customId), [answer().id, id(2), id(3)]);
+  assert.equal(view.field('value').value, 'My unsaved edit');
+  assert.equal(view.field('value', 1).value, 'Flyer', 'an answer not edited here takes the one remembered in Chrome');
+  assert.equal(view.get('profile-save-state').hidden, false);
+  view.submit(); await tick();
+  assert.deepEqual(view.saves[0].customFields.map(item => item.value), ['My unsaved edit', 'Flyer', 'SYN-4471']);
+});
+
+test('Custom answers says which answers wait for approval, and how an answer saved from a form matches', async t => {
+  const view = await renderer(t);
+  const hints = [...view.get('custom-answers').querySelectorAll(':scope > .field-hint')].map(hint => hint.textContent).join(' ');
+  assert.match(hint(hints), /An answer you saved from a form with Remember for next time matches only the same question, in the same kind of box, with the same choices\./);
+  assert.match(hint(hints), /Answers about a sensitive subject, such as income, health, citizenship, or a date of birth, wait for Fill sensitive details in Chrome unless you chose Always allow\./);
+  assert.doesNotMatch(hints, /Custom answers are sensitive/);
+});
+const hint = text => text.replace(/\s+/g, ' ');

@@ -936,6 +936,51 @@
     if (typeof probe.checkValidity === 'function' && !probe.checkValidity()) return false;
     return setValue(first, value);
   }
+  // Remember for next time (#186): the questions the side panel may offer to keep the applicant's answer to, as a custom
+  // answer. Only one a custom answer may fill, in a box that holds one answer, within a custom answer's limits, and never a
+  // search box. A checkbox group can hold several answers and a lone checkbox is often consent, so neither is offered.
+  const REMEMBER_TYPES = Object.freeze(['text', 'textarea', 'number', 'date', 'email', 'tel', 'radio', 'select']);
+  const canRemember = field => canCustom(field) && REMEMBER_TYPES.includes(field.type) && field.label.length <= 120 && !SEARCH.test(normal(field.label)) &&
+    (['radio', 'select'].includes(field.type) ? field.options.length > 0 : field.options.length === 0);
+  // Answers that change over time start unchecked: a date box, and questions or choices about dates, times, days, pickups,
+  // appointments, deliveries, visits, and this week or month, in English and Spanish.
+  const TIME_BOUND = /\b(dates?|times?|when|today|tonight|tomorrow|yesterday|now|currently|days?|weekly|weeks?|weekends?|months?|monthly|years?|yearly|visits?|appointments?|pick ?ups?|deliver(y|ies)|schedul\w*|slots?|hours?|morning|afternoon|evening|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|june|july|august|september|october|november|december|fecha|hora|hoy|manana|semana|mes|cita|visita|recogida|lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b|\b\d{1,2}( \d{2})? ?(a ?m|p ?m)\b/;
+  const timeBound = field => field.type === 'date' || [field.label, ...field.options].some(text => TIME_BOUND.test(normal(text)));
+  // After the applicant's click, the answer in one question of the current plan the rules left open, as the page shows it: a
+  // box's words, or the chosen option's own text. Only a question canRemember offers, never a password, code, signature,
+  // consent, payment or another person's box. Null when it may not be read; { empty } when it holds no answer; { unreadable }
+  // when its answer can't be kept as it is; { repeated } when the page asks the same question in more than one box.
+  const REMEMBER_KINDS = Object.freeze(['input', 'textarea', 'editable', 'select', 'radio', 'ariaRadio', 'ariaListbox', 'ariaCombo']);
+  function chosenAnswer(entry) {
+    const first = entry.elements[0];
+    const chosen = entry.kind === 'select' ? Array.from(first.selectedOptions).find(option => option.value)
+      : entry.kind === 'radio' ? entry.elements.find(element => element.checked)
+        : entry.kind === 'ariaRadio' ? entry.elements.find(element => element.getAttribute('aria-checked') === 'true')
+          : ['ariaListbox', 'ariaCombo'].includes(entry.kind) ? listboxOptions(listboxFor(entry)).find(option => option.getAttribute('aria-selected') === 'true') : null;
+    if (entry.kind === 'editable') return first.textContent.trim();
+    if (entry.kind === 'select') return chosen ? clean(chosen.textContent) || chosen.value : '';
+    if (entry.kind === 'radio') return chosen ? optionText(chosen) : '';
+    if (['ariaRadio', 'ariaListbox', 'ariaCombo'].includes(entry.kind)) return chosen ? ariaOptionText(chosen) : '';
+    return String(first.value || '').trim();
+  }
+  function readOpen(doc, token, id) {
+    if (!current || current.token !== token || current.doc !== doc) return null;
+    const entry = current.map.get(id);
+    const fresh = entry && questionsOn(doc).find(candidate => sameElements(entry, candidate));
+    if (!fresh || !REMEMBER_KINDS.includes(fresh.kind) || !entryUsable(fresh) || fresh.invalidLabels || match(fresh).key) return null;
+    const field = fieldOf(fresh);
+    const identity = [...fresh.labels, ...fresh.elements.map(element => `${element.id} ${element.getAttribute('name') || ''} ${element.getAttribute('autocomplete') || ''}`)].join(' ');
+    if (!canRemember(field) || besideForm(fresh, doc) || protectedCustom({ label: identity, options: field.options })) return null;
+    const asked = question(field.label), choices = field.options.map(normal).sort().join('|');
+    const same = other => { const seen = fieldOf(other); return seen.type === field.type && question(seen.label) === asked && seen.options.map(normal).sort().join('|') === choices; };
+    if (questionsOn(doc).filter(same).length > 1) return { repeated: true };
+    if (!answered(fresh)) return { empty: true };
+    const value = chosenAnswer(fresh);
+    const multiline = field.type === 'textarea';
+    const keepable = value && value.length <= 1000 && !unsafeValue(value, multiline) && (multiline || !/[\r\n]/.test(value)) &&
+      (!field.options.length || field.options.filter(option => option === value).length === 1);
+    return keepable ? { value } : { unreadable: true };
+  }
   // An answer Laya picked from the saved profile (#42): the option with exactly this text, and
   // only where it is the only option with that text. Only ever picks or checks; never unchecks.
   function fillOption(entry, option) {
@@ -1098,7 +1143,7 @@
 
   const api = Object.freeze({ GENERIC_KEYS, PROFILE_KEYS, SAVE_KEYS, GUESS_KEYS, MEMBER_KEYS, IOWA_KEYS, answeredIds, readAnswer, UNSAFE_QUESTION, OTHER_PERSON_ROLE, MEMBER_DETAIL, CHILD_ROLE, PERSON_DETAIL,
     COMBINED_ADDRESS_QUESTION, PERSON_NOT_AMOUNT, blockedSuggestion, isBandKey, plan, offers, questions, requestKeys, deriveValues, fillFields, settle, focusField, elementFor,
-    canSuggest, canCustom, unsafeQuestion, layaQuestion, deepQueryAll, isRendered: rendered, navigationFields });
+    canSuggest, canCustom, canRemember, timeBound, readOpen, unsafeQuestion, layaQuestion, deepQueryAll, isRendered: rendered, navigationFields });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SecondHandGeneric = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

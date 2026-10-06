@@ -375,22 +375,31 @@
     $('add-custom-answer').disabled = rows.length >= MAX_CUSTOM_ANSWERS;
     $('custom-answers-limit').hidden = rows.length < MAX_CUSTOM_ANSWERS;
   }
+  // An answer saved from a page with Remember for next time (#186) also keeps its question's kind and choices, and the site
+  // it came from. They stay with it when it is edited here, and a choice question's answer is one of its own choices.
+  const CHOICE_TYPES = ['radio', 'select'];
   function customAnswerRow(answer) {
     const row = element('fieldset', 'custom-answer');
     row.dataset.customId = answer.id;
+    if (answer.type !== undefined) { row.dataset.customType = answer.type; row.dataset.customOptions = JSON.stringify(answer.options); }
+    if (answer.site !== undefined) row.dataset.customSite = answer.site;
     row.append(element('legend'));
     const controls = {};
     const field = (key, title, multiline, limit) => {
       const wrapper = element('div', 'field');
       const label = element('label', '', title);
-      const input = element(multiline ? 'textarea' : 'input');
+      const choices = key === 'value' && CHOICE_TYPES.includes(answer.type) ? answer.options : null;
+      const input = element(choices ? 'select' : multiline ? 'textarea' : 'input');
       input.id = `custom-${answer.id}-${key}`;
       input.dataset.customField = key;
-      input.maxLength = limit;
-      input.autocomplete = 'off';
-      input.spellcheck = false;
-      if (multiline) input.rows = key === 'value' ? 3 : 2;
-      else input.type = 'text';
+      if (choices) for (const choice of choices) { const option = element('option', '', choice); option.value = choice; input.append(option); }
+      else {
+        input.maxLength = limit;
+        input.autocomplete = 'off';
+        input.spellcheck = false;
+        if (multiline) input.rows = key === 'value' ? 3 : 2;
+        else input.type = 'text';
+      }
       label.htmlFor = input.id;
       input.value = key === 'aliases' ? (Array.isArray(answer.aliases) ? answer.aliases.join('\n') : '') : (answer[key] || '');
       if (key !== 'aliases') input.setAttribute('aria-required', 'true');
@@ -399,6 +408,10 @@
       return wrapper;
     };
     row.append(field('label', 'Question label', false, 120), field('value', 'Your answer', true, 1000));
+    if (answer.site !== undefined) {
+      const site = element('p', 'field-hint custom-answer-site', `Saved from ${new URL(answer.site).hostname} with Remember for next time.`);
+      row.append(site);
+    }
     const aliases = element('details', 'custom-answer-aliases');
     aliases.append(element('summary', '', 'Other wording for this question (optional)'));
     const aliasField = field('aliases', 'Aliases — one per line', true, 604);
@@ -425,13 +438,29 @@
     clearError('custom-answers-error');
     refreshCustomAnswers();
   }
-  function collectCustomAnswers() {
-    return customAnswerRows().map(row => ({
-      id: row.dataset.customId,
-      label: row.querySelector('[data-custom-field="label"]').value.trim(),
-      value: row.querySelector('[data-custom-field="value"]').value.trim(),
-      aliases: row.querySelector('[data-custom-field="aliases"]').value.split(/\r?\n/).map(value => value.trim()).filter(Boolean)
-    }));
+  // One custom answer as it is saved, from its row or as the desktop gave it.
+  const customAnswer = ({ id, label, value, aliases, type, options, site }) => ({ id, label, value, aliases,
+    ...(type === undefined ? {} : { type, options }), ...(site === undefined ? {} : { site }) });
+  const collectCustomAnswer = row => customAnswer({
+    id: row.dataset.customId,
+    label: row.querySelector('[data-custom-field="label"]').value.trim(),
+    value: row.querySelector('[data-custom-field="value"]').value.trim(),
+    aliases: row.querySelector('[data-custom-field="aliases"]').value.split(/\r?\n/).map(value => value.trim()).filter(Boolean),
+    type: row.dataset.customType, options: row.dataset.customType ? JSON.parse(row.dataset.customOptions) : undefined, site: row.dataset.customSite
+  });
+  const collectCustomAnswers = () => customAnswerRows().map(collectCustomAnswer);
+  // Custom answers remembered in Chrome while My information has unsaved edits (#186): a new one joins the draft, and one
+  // not edited here takes the remembered answer. One edited or removed here keeps the applicant's edit.
+  function mergeCustomAnswers(before, latest) {
+    const earlier = new Map((Array.isArray(before) ? before : []).map(answer => [answer.id, answer]));
+    const rows = new Map(customAnswerRows().map(row => [row.dataset.customId, row]));
+    const unchanged = (row, answer) => JSON.stringify(collectCustomAnswer(row)) === JSON.stringify(customAnswer({ ...answer, aliases: answer.aliases ?? [] }));
+    for (const answer of Array.isArray(latest) ? latest : []) {
+      const row = rows.get(answer.id);
+      if (!row) { if (!earlier.has(answer.id)) $('custom-answer-list').append(customAnswerRow(answer)); }
+      else if (earlier.has(answer.id) && unchanged(row, earlier.get(answer.id))) row.replaceWith(customAnswerRow(answer));
+    }
+    refreshCustomAnswers();
   }
   function customAnswersValid(answers) {
     for (const [index, answer] of answers.entries()) {
@@ -668,11 +697,14 @@
       const before = data.profile;
       data = { ...data, profile: latest.profile || {} };
       if (!profileDirty) fillProfile();
-      else for (const field of fields.filter(name => profileFields.includes(name))) {
-        if (String(profileControl(field).value) === String(before[field] ?? '')) profileControl(field).value = typeof data.profile[field] === 'string' ? data.profile[field] : '';
+      else {
+        for (const field of fields.filter(name => profileFields.includes(name))) {
+          if (String(profileControl(field).value) === String(before[field] ?? '')) profileControl(field).value = typeof data.profile[field] === 'string' ? data.profile[field] : '';
+        }
+        if (fields.includes('customFields')) mergeCustomAnswers(before.customFields, data.profile.customFields);
       }
       renderSummary();
-      toast('An answer you saved from Chrome is now in My information.');
+      toast(fields.includes('customFields') ? 'An answer you chose to remember in Chrome is now in My information, under Custom answers.' : 'An answer you saved from Chrome is now in My information.');
     } catch (error) { if (generation === vaultGeneration) toast(error.message || 'Unable to show the answer you saved from Chrome.', true); }
   }
 

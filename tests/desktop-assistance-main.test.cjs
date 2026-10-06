@@ -25,12 +25,14 @@ const customRecord = (n = 1, changes = {}) => ({ id: `00000000-0000-4000-a000-${
 const customRequest = changes => ({ type: 'getCustomFields', url: 'https://pantry.example.org/intake', fields: [{ id: 'field1', label: 'Pickup point', type: 'text' }], ...changes });
 const customSettings = changes => ({ extensionId, trustedSites: ['https://pantry.example.org'], ...changes });
 
-test('custom answers disclose only exact matched question IDs and values after one sensitive approval, never the saved catalog', async () => {
+// An everyday custom answer follows getFields' ordinary approval; only one about a sensitive subject waits for Fill
+// sensitive details (#186).
+test('custom answers disclose only exact matched question IDs and values after one approval, never the saved catalog', async () => {
   const app = await desktop({ settings: customSettings(), profile: { customFields: [customRecord(), customRecord(2, { label: 'Diet notes', aliases: [], value: 'Private unrelated answer' })] } });
   const response = plain(await app.request(customRequest()));
   assert.deepEqual(response.values, { field1: 'North entrance' });
   assert.deepEqual(Object.keys(response).sort(), ['accessRevision', 'values']);
-  assert.equal(app.prompts.length, 1); assert.equal(app.prompts[0].title, 'Share sensitive details?');
+  assert.equal(app.prompts.length, 1); assert.equal(app.prompts[0].title, 'Let Chrome fill this form?');
   assert.match(app.prompts[0].detail, /Pickup point: "North entrance"/);
   assert.doesNotMatch(app.prompts[0].detail, /Private unrelated answer|00000000/);
   assert.equal(app.writes.length, 0);
@@ -71,12 +73,15 @@ test('custom answer cancellation returns no values; existing per-site/global Alw
 });
 
 test('Always allow on this site returns the updated custom receipt and does not authorize another origin', async () => {
-  const app = await desktop({ settings: customSettings({ trustedSites: ['https://pantry.example.org', 'https://other.example.org'] }), profile: { customFields: [customRecord()] } });
+  // Always allow on this site comes with the sensitive prompt: a custom answer about a sensitive subject (#186).
+  const income = customRecord(1, { label: 'Monthly income', aliases: [], value: '1200' });
+  const incomeRequest = changes => customRequest({ fields: [{ id: 'field1', label: 'Monthly income', type: 'number' }], sensitive: true, ...changes });
+  const app = await desktop({ settings: customSettings({ trustedSites: ['https://pantry.example.org', 'https://other.example.org'] }), profile: { customFields: [income] } });
   const before = (await app.request({ type: 'status' })).accessRevision;
-  app.answer(async () => ({ response: 2 })); const result = await app.request(customRequest());
+  app.answer(async () => ({ response: 2 })); const result = await app.request(incomeRequest());
   assert.equal(result.accessRevision, before + 1);
-  await app.request(customRequest()); assert.equal(app.prompts.length, 1);
-  await app.request(customRequest({ url: 'https://other.example.org/form' })); assert.equal(app.prompts.length, 2);
+  await app.request(incomeRequest()); assert.equal(app.prompts.length, 1);
+  await app.request(incomeRequest({ url: 'https://other.example.org/form' })); assert.equal(app.prompts.length, 2);
 });
 
 for (const mutation of ['lock', 'profile', 'registration', 'trust']) test(`pending custom approval releases nothing after ${mutation}`, async () => {
@@ -1743,6 +1748,144 @@ test('a change while the confirmation is open cancels the save', async () => {
   resolve({ response: 1 });
   await assert.rejects(pending, /changed/);
   assert.equal(plain(await app.invoke('getData')).profile.county, '');
+});
+
+// Custom answers by subject (#186): only one about a sensitive subject waits for Fill sensitive details (#176); an everyday
+// one follows getFields' ordinary approval, so Let Chrome fill without asking fills it with no dialog.
+const PICKUP = customRecord(1);
+const INCOME = customRecord(2, { label: 'Monthly income', aliases: [], value: '1200' });
+const PICKUP_QUESTION = { id: 'field1', label: 'Pickup point', type: 'text' };
+const INCOME_QUESTION = { id: 'field2', label: 'Monthly income', type: 'number' };
+const customAsk = changes => ({ type: 'getCustomFields', url: PANTRY, fields: [PICKUP_QUESTION, INCOME_QUESTION], ...changes });
+
+test('a custom answer about a sensitive subject waits for Fill sensitive details; an everyday one follows the ordinary approval (#186)', async () => {
+  const app = await desktop({ settings: asking, profile: { customFields: [PICKUP, INCOME] } });
+  app.answer(async () => ({ response: 1 }));
+  const reply = plain(await app.request(customAsk()));
+  assert.deepEqual(reply, { values: { field1: 'North entrance' }, held: ['field2'], accessRevision: (await app.request({ type: 'status' })).accessRevision });
+  const [prompt] = app.prompts;
+  assert.equal(prompt.title, 'Let Chrome fill this form?');
+  assert.equal(prompt.message, 'Fill this custom answer into https://pantry.example.org?');
+  assert.match(prompt.detail, /^Website: https:\/\/pantry\.example\.org\n\nYour custom answers:\nPickup point: "North entrance"\n\n/);
+  assert.doesNotMatch(JSON.stringify(prompt), /1200|Monthly income/, 'a held answer is never shown');
+  // Only a sensitive answer matched: nothing is asked.
+  assert.deepEqual(plain(await app.request(customAsk({ fields: [INCOME_QUESTION] }))), { values: {}, held: ['field2'], accessRevision: reply.accessRevision });
+  assert.equal(app.prompts.length, 1);
+
+  // Fill sensitive details asks for it alone, with the sensitive prompt.
+  const sensitive = plain(await app.request(customAsk({ fields: [INCOME_QUESTION], sensitive: true })));
+  assert.deepEqual([sensitive.values, sensitive.held], [{ field2: '1200' }, undefined]);
+  const asked = app.prompts.at(-1);
+  assert.equal(asked.title, 'Share sensitive details?');
+  assert.equal(asked.message, 'Fill sensitive details on https://pantry.example.org?');
+  assert.equal(asked.detail, 'Your custom answers:\nMonthly income: "1200"\n\nOnly allow this if you meant to give these details to https://pantry.example.org.\n\n' +
+    'Choose “Always allow on this site” to fill on https://pantry.example.org without asking from now on, sensitive details included. You can remove it on the Chrome extension page.');
+  await assert.rejects(app.request(customAsk({ sensitive: true })), /Only sensitive details/, 'never an everyday answer this way');
+  app.answer(async () => ({ response: 0 }));
+  await assert.rejects(app.request(customAsk({ fields: [INCOME_QUESTION], sensitive: true })), /You cancelled this field request/);
+  assert.deepEqual(plain(await app.request(customAsk())).values, {}, 'Cancel on the ordinary prompt fills nothing, as before');
+
+  for (const settings of [{ ...asking, autofillWithoutAsking: true }, { ...asking, alwaysAllowedSites: [PANTRY_SITE] }]) {
+    const always = await desktop({ settings, profile: { customFields: [PICKUP, INCOME] } });
+    const released = plain(await always.request(customAsk()));
+    assert.deepEqual([released.values, released.held], [{ field1: 'North entrance', field2: '1200' }, undefined], JSON.stringify(settings));
+    assert.equal(always.prompts.length, 0);
+  }
+});
+
+// Remember for next time (#186): the applicant's answers from a page, kept as custom answers after the app's confirmation.
+const HEARD = { label: 'How did you hear about us?', type: 'radio', options: ['Friend', 'Church', 'Flyer'], answer: 'Church' };
+const EMPLID = { label: 'EMPLID', type: 'text', options: [], answer: 'SYN-4471' };
+const REMEMBER = { type: 'rememberAnswers', url: PANTRY };
+const customAnswers = async app => plain(await app.invoke('getData')).profile.customFields;
+
+test('Remember for next time keeps answers as custom answers only after the app’s confirmation naming each question and answer (#186)', async () => {
+  const app = await desktop({ settings: { ...trusted, trustedSites: [PANTRY_SITE, WIC] }, profile: { firstName: 'Synthetic', customFields: [PICKUP] } });
+  const before = (await app.request({ type: 'status' })).accessRevision;
+  app.answer(async () => ({ response: 1 }));
+  assert.deepEqual(plain(await app.request({ ...REMEMBER, answers: [HEARD, { ...EMPLID, answer: ' SYN-4471 ' }] })), { remembered: 2 });
+  const [prompt] = app.prompts;
+  assert.equal(prompt.type, 'question');
+  assert.equal(prompt.title, 'Remember these answers?');
+  assert.equal(prompt.message, 'Remember these answers from https://pantry.example.org for next time?');
+  assert.equal(prompt.detail, '“How did you hear about us?”: "Church"\n“EMPLID”: "SYN-4471"\n\nSecondHand keeps them in My information under Custom answers and fills them when a form asks ' +
+    'the same question with the same choices. You can change or remove them there.');
+  assert.deepEqual(plain(prompt.buttons), ['Cancel', 'Remember']);
+  assert.deepEqual([prompt.defaultId, prompt.cancelId], [1, 0]);
+  const list = await customAnswers(app);
+  assert.deepEqual(list[0], PICKUP, 'the answers already there stay as they were');
+  assert.deepEqual(list.slice(1).map(({ id, ...answer }) => answer), [
+    { label: 'How did you hear about us?', value: 'Church', aliases: [], type: 'radio', options: ['Friend', 'Church', 'Flyer'], site: PANTRY_SITE },
+    { label: 'EMPLID', value: 'SYN-4471', aliases: [], type: 'text', options: [], site: PANTRY_SITE }]);
+  assert.equal(plain(await app.invoke('getData')).profile.firstName, 'Synthetic', 'nothing else in My information changes');
+  assert.ok((await app.request({ type: 'status' })).accessRevision > before, 'a change outdates earlier fill approvals');
+  assert.deepEqual(app.notifications.filter(([channel]) => channel === 'secondhand:profile-changed').map(([, value]) => plain(value)), [{ fields: ['customFields'] }],
+    'My information hears that its custom answers changed, never what they are');
+
+  // The same question on another site takes the new answer; the site it was first saved from stays.
+  await app.request({ ...REMEMBER, url: `${WIC}/apply`, answers: [{ ...EMPLID, label: 'Emplid:', answer: 'SYN-9000' }] });
+  assert.equal(app.prompts.at(-1).title, 'Remember this answer?');
+  assert.equal(app.prompts.at(-1).message, 'Remember this answer from https://wic.example.gov for next time?');
+  assert.match(app.prompts.at(-1).detail, /^“Emplid:”: "SYN-9000"\n\nSecondHand keeps it in My information under Custom answers and fills it when a form asks /);
+  const again = await customAnswers(app);
+  assert.equal(again.length, 3);
+  assert.deepEqual([again[2].id, again[2].value, again[2].site], [list[2].id, 'SYN-9000', PANTRY_SITE]);
+
+  // The next Autofill fills it into the same question, and only that one.
+  const fill = plain(await app.request({ type: 'getCustomFields', url: `${WIC}/apply`, fields: [{ id: 'q1', label: '2. HOW DID YOU HEAR ABOUT US *', type: 'radio', options: ['flyer', 'friend', 'church'] },
+    { id: 'q2', label: 'How did you hear about us?', type: 'select', options: ['Friend', 'Church', 'Flyer'] }] }));
+  assert.deepEqual(fill.values, { q1: 'church' });
+});
+
+test('an answer about a sensitive subject gets the warning confirmation, with Cancel the default (#186)', async () => {
+  const app = await desktop({ settings: trusted });
+  app.answer(async () => ({ response: 1 }));
+  await app.request({ ...REMEMBER, answers: [{ label: 'Monthly income', type: 'number', options: [], answer: '1200' }, HEARD] });
+  const [prompt] = app.prompts;
+  assert.equal(prompt.type, 'warning');
+  assert.equal(prompt.title, 'Remember sensitive details?');
+  assert.equal(prompt.defaultId, 0);
+  assert.match(prompt.detail, /\n\nYour answer to “Monthly income” is sensitive: SecondHand fills it only after you allow it on each site\. SecondHand keeps them in My information/);
+  assert.equal((await customAnswers(app)).length, 2);
+});
+
+test('nothing is remembered without the confirmation, while locked, from a site that isn’t on, for a question only the applicant answers, or past 50 (#186)', async () => {
+  const cancelled = await desktop({ settings: trusted });
+  cancelled.answer(async () => ({ response: 0 }));
+  await assert.rejects(cancelled.request({ ...REMEMBER, answers: [HEARD] }), /You cancelled\. Nothing was remembered\./);
+  assert.deepEqual(await customAnswers(cancelled), undefined);
+  assert.equal(cancelled.notifications.some(([channel]) => channel === 'secondhand:profile-changed'), false);
+
+  const app = await desktop({ settings: trusted, profile: { customFields: [customRecord(1, { label: 'EMPLID', aliases: [] })] } });
+  app.answer(async () => ({ response: 1 }));
+  await assert.rejects(app.request({ ...REMEMBER, url: ANYWHERE, answers: [HEARD] }), /isn’t trusted/);
+  await assert.rejects(app.request({ ...REMEMBER, url: PORTAL_URL, answers: [HEARD] }), /other HTTPS sites/);
+  for (const answer of [{ ...EMPLID, label: 'Signature' }, { ...EMPLID, label: 'Routing number' }, { ...EMPLID, type: 'email', answer: 'not an email' }]) {
+    await assert.rejects(app.request({ ...REMEMBER, answers: [answer] }), error => Boolean(error.publicMessage), JSON.stringify(answer));
+  }
+  await assert.rejects(app.request({ ...REMEMBER, answers: [EMPLID] }), /You already have a custom answer for “EMPLID”\. Change it in My information\./);
+  const full = await desktop({ settings: trusted, profile: { customFields: Array.from({ length: 50 }, (_, n) => customRecord(n, { label: `Question ${n}`, aliases: [] })) } });
+  full.answer(async () => ({ response: 1 }));
+  await assert.rejects(full.request({ ...REMEMBER, answers: [HEARD] }), error => error.publicMessage ===
+    'You have 50 custom answers, the most SecondHand keeps. Remove one in My information, then remember this answer again.');
+  assert.equal(app.prompts.length + full.prompts.length, 0, 'a refused answer is never offered for confirmation');
+  await app.invoke('lock');
+  await assert.rejects(app.request({ ...REMEMBER, answers: [HEARD] }), /Unlock/);
+  assert.equal(app.prompts.length, 0);
+});
+
+test('a lock or the site turned off while “Remember these answers?” is open remembers nothing (#186)', async t => {
+  for (const [change, [apply, refusal]] of Object.entries(ACCESS_CHANGES)) await t.test(change, async () => {
+    const app = await desktop({ settings: { extensionId, autofillWithoutAsking: true, trustedSites: [WIC], allSites: true } });
+    const prompt = holdPrompt(app);
+    const pending = app.request({ ...REMEMBER, url: `${WIC}/apply`, answers: [HEARD] });
+    await prompt.shown();
+    await apply(app);
+    prompt.answer(1);
+    await assert.rejects(pending, refusal);
+    if (change === 'lock') await app.invoke('unlock', 'synthetic password');
+    assert.deepEqual(await customAnswers(app), undefined);
+  });
 });
 
 test('the guided setup remembers how many of its six steps are done until it is finished', async () => {

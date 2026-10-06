@@ -43,6 +43,10 @@ const HOUSEHOLD_QUESTIONS = { young: '# of people in your household 0 - 17 yrs o
 // What the desktop works out from the fictional household list, as the app does: band counts and the one student's name and grade.
 const listed = validateProfile(syntheticProfile);
 const desktopProfile = { ...syntheticProfile, customFields: customAnswers, ...Object.fromEntries(['householdCount:18-59', 'householdCount:60+', 'studentNameGrade'].map(key => [key, releasedValue(listed, key)])) };
+// #186: a pantry's own questions no saved field covers, asked again at every visit: an ID, how the applicant heard of it,
+// and a pickup day, whose answer changes. Remember for next time keeps the first two as custom answers.
+const VISIT = 'https://pantry.example.org/visit';
+const HEARD = 'How did you hear about us?';
 // #185: a radio question no rule knows, which the stub Laya can only guess at.
 const GUESS = 'https://pantry.example.org/service-area';
 const GUESS_QUESTION = 'Do you live in our service area?';
@@ -97,6 +101,10 @@ const pages = {
   [GUESS]: formPage('Pantry sign-up: service area', '<form><label for="first">First name</label><input id="first" name="first">' +
     `<fieldset><legend>${GUESS_QUESTION}</legend>${['Yes', 'No', 'Not sure'].map((option, index) => `<label><input type="radio" name="area" id="area-${index}" value="${option}">${option}</label>`).join('')}</fieldset>` +
     '<button type="submit">Submit</button></form>'),
+  [VISIT]: formPage('Pantry visit', '<form><label for="first">First name</label><input id="first" name="first"><label for="emplid">EMPLID</label><input id="emplid" name="emplid">' +
+    `<fieldset><legend>${HEARD}</legend>${['Friend', 'Church', 'Flyer'].map((option, index) => `<label><input type="radio" name="heard" id="heard-${index}" value="${option}">${option}</label>`).join('')}</fieldset>` +
+    '<label for="day">Preferred pickup day</label><select id="day" name="day"><option value="">Choose a day</option><option>Monday</option><option>Friday</option></select>' +
+    '<button type="submit">Submit</button></form>'),
   [HOUSEHOLD]: formPage('Pantry order: household', `<form>${Object.entries(HOUSEHOLD_QUESTIONS).map(([id, label]) => `<label for="${id}">${label}</label><input id="${id}" name="${id}">`).join('')}` +
     '<button type="submit">Submit</button></form>')
 };
@@ -107,10 +115,11 @@ const pages = {
 // app without Always allow (#176): Autofill's request gets those fields held back, and Fill sensitive details'
 // request (`sensitive: true`) gets the sensitive prompt, answered by the next of `answers` ('cancel' or 'allow').
 // Laya isn't ready unless a step makes it so (`laya`); then it is sure of nothing and guesses "Yes" for the
-// service-area question (#185), noting each question it is asked in `questions`.
+// service-area question (#185), noting each question it is asked in `questions`. Asked to remember answers (#186), it shows
+// the app's confirmation, as Remember, and keeps them as custom answers with their type, choices and site.
 async function installDesktop(worker, profile) {
   await worker.evaluate(profile => {
-    globalThis.__desktop = { allSites: false, calls: [], saves: [], prompts: [], profile, holds: [], answers: [], laya: 'unavailable', questions: [], customFieldsAvailable: false, holdNavigation: false };
+    globalThis.__desktop = { allSites: false, calls: [], saves: [], prompts: [], profile, holds: [], answers: [], laya: 'unavailable', questions: [], customFieldsAvailable: false, holdNavigation: false, remembered: [] };
     nativeRequest = async (type, payload = {}) => {
       const desktop = globalThis.__desktop;
       desktop.calls.push({ type, url: payload.url || '', fields: payload.fields || [], ...(payload.sensitive === true ? { sensitive: true } : {}) });
@@ -121,7 +130,9 @@ async function installDesktop(worker, profile) {
         if (!desktop.customFieldsAvailable) throw new Error('Custom answers were requested without the fixture capability.');
         const values = {};
         for (const field of payload.fields) {
-          const matches = desktop.profile.customFields.filter(row => [row.label, ...row.aliases].includes(field.label));
+          // An answer saved from a page matches only its own question, kind of box and choices (#186).
+          const same = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
+          const matches = desktop.profile.customFields.filter(row => [row.label, ...row.aliases].includes(field.label) && (!row.type || (row.type === field.type && same(row.options, field.options))));
           if (matches.length === 1 && (!field.options.length || field.options.includes(matches[0].value))) values[field.id] = matches[0].value;
         }
         return { values, accessRevision: 0 };
@@ -158,6 +169,15 @@ async function installDesktop(worker, profile) {
           ...(held.length ? { held } : {}) };
       }
       if (type === 'recordProgress') return { recorded: true };
+      if (type === 'rememberAnswers') {
+        desktop.prompts.push(`Remember ${payload.answers.length === 1 ? 'this answer' : 'these answers'} from ${new URL(payload.url).origin} for next time?`);
+        desktop.remembered.push({ url: payload.url, answers: payload.answers });
+        for (const { label, type, options, answer } of payload.answers) {
+          desktop.profile.customFields.push({ id: crypto.randomUUID(), label, value: answer, aliases: [], type, options, site: new URL(payload.url).origin });
+        }
+        desktop.customFieldsAvailable = true;
+        return { remembered: payload.answers.length };
+      }
       // Save to My information (#98): the app's confirmation and save, as Allow.
       if (type === 'saveFields') {
         desktop.prompts.push(`Save ${Object.keys(payload.fields).length === 1 ? 'this answer' : 'these answers'} from ${new URL(payload.url).origin} to My information?`);
@@ -496,6 +516,61 @@ async function main() {
     await page.screenshot({ path: path.join(root, 'artifacts/held/details-filled.png') });
     await worker.evaluate(() => { Object.assign(globalThis.__desktop, { holds: [], answers: [] }); globalThis.__desktop.prompts.length = 0; });
     console.log('#176: without Always allow, one click filled the first name and held the date of birth; Fill sensitive details asked for it alone: Cancel kept it listed with the first name filled, and Allow once filled it.');
+
+    // #186: Remember for next time. Autofill fills the first name and leaves the pantry's own questions open. The applicant
+    // answers them, and the side panel offers Remember for next time beside each, the pickup day unchecked because it changes.
+    // Remember checked answers reads only the checked boxes, after the click, and the app (stub) keeps them as custom answers
+    // after its confirmation. After a reload, the next Autofill fills them from the custom answers, and nothing else.
+    const answersAsked = async since => (await calls('getCustomFields')).slice(since).map(call => ({ url: call.url, fields: call.fields.map(field => field.label) }));
+    const askedBefore = (await calls('getCustomFields')).length;
+    await page.goto(VISIT, { waitUntil: 'domcontentloaded' });
+    await launcherFrame();
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+    await panel.click('#panel-autofill');
+    await expect(page.locator('#first')).toHaveValue(syntheticProfile.firstName, { timeout: 20000 });
+    await settled();
+    assert.equal(await page.locator('#emplid').inputValue(), '');
+    assert.equal(await panel.visible('#remember-section'), false, 'nothing is offered before the applicant answers');
+    await page.locator('#emplid').fill('SYN-4471');
+    await page.locator('#heard-1').check();
+    await page.locator('#day').selectOption('Friday');
+    const offered = () => panel.evaluate(() => [...document.querySelectorAll('[data-remember-id]')].map(row => [row.querySelector('.checklist-label').textContent, row.querySelector('input').checked]));
+    await expect.poll(offered, { timeout: 15000 }).toEqual([['EMPLID', true], [HEARD, true], ['Preferred pickup day', false]]);
+    assert.equal(await panel.text('#remember-save'), en('remember.button'));
+    assert.equal(await panel.evaluate(() => document.getElementById('remember-section').textContent.includes('SYN-4471')), false, 'the panel never shows the answers');
+    assert.deepEqual(await worker.evaluate(() => globalThis.__desktop.remembered), [], 'nothing is read or kept before the click');
+    await fs.mkdir(path.join(root, 'artifacts/remember'), { recursive: true });
+    await panel.screenshot(path.join(root, 'artifacts/remember/side-panel-remember.png'));
+    await panel.click('#remember-save');
+    await expect.poll(() => panel.text('#status'), { timeout: 15000 }).toBe(en('remember.saved', { count: 2 }));
+    assert.deepEqual(await worker.evaluate(() => globalThis.__desktop.remembered), [{ url: VISIT, answers: [{ label: 'EMPLID', type: 'text', options: [], answer: 'SYN-4471' },
+      { label: HEARD, type: 'radio', options: ['Friend', 'Church', 'Flyer'], answer: 'Church' }] }], 'only the checked answers, each with its question');
+    assert.deepEqual(await worker.evaluate(() => globalThis.__desktop.prompts.splice(0)), ['Remember these answers from https://pantry.example.org for next time?']);
+    await expect.poll(offered, { timeout: 15000 }).toEqual([['Preferred pickup day', false]]);
+    assert.deepEqual(await answersAsked(askedBefore), [], 'no custom answers were asked for before any were saved');
+    // The next visit: the page loads empty, and Autofill fills the remembered answers.
+    since = await probe();
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await settled(since, { reportFrom: VISIT });
+    const visitWidget = await launcherFrame();
+    assert.deepEqual([await page.locator('#emplid').inputValue(), await page.locator('#heard-1').isChecked()], ['', false], 'the reload cleared the page');
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+    await panel.click('#panel-autofill');
+    await expect(page.locator('#emplid')).toHaveValue('SYN-4471', { timeout: 20000 });
+    await expect(page.locator('#heard-1')).toBeChecked();
+    await expect(page.locator('#first')).toHaveValue(syntheticProfile.firstName);
+    assert.equal(await page.locator('#day').inputValue(), '', 'the pickup day was never remembered');
+    await settled();
+    const asked186 = await answersAsked(askedBefore);
+    assert.deepEqual(asked186[0], { url: VISIT, fields: ['EMPLID', HEARD, 'Preferred pickup day'] }, 'the open questions, never their answers');
+    assert.ok(asked186.slice(1).every(call => call.url === VISIT && !call.fields.includes('EMPLID')), 'a filled question isn’t asked about again');
+    await expect.poll(() => panel.text('#status'), { timeout: 15000 })
+      .toBe(en('result.fromCustom', { summary: { key: 'result.siteFilledNeedYou', params: { count: 3, needYou: 1 } }, count: 2 }));
+    await expect(visitWidget.locator('#widget-text')).toHaveText(`${en('widget.filled', { count: 3 })} · ${en('widget.fromCustom', { count: 2 })}`, { timeout: 15000 });
+    assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
+    await page.screenshot({ path: path.join(root, 'artifacts/remember/visit-filled.png') });
+    await worker.evaluate(() => { const desktop = globalThis.__desktop; desktop.customFieldsAvailable = false; desktop.profile.customFields = desktop.profile.customFields.filter(row => !row.site); });
+    console.log('#186: two open questions the applicant answered were remembered after the side-panel click and the app’s confirmation (the pickup day stayed unchecked); after a reload, Autofill filled them from custom answers and said so.');
 
     // A page whose only input is a search box gets no card.
     since = await probe();

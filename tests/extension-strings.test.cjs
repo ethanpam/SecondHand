@@ -488,8 +488,20 @@ test('French keeps « and » on the same line as the words they quote, with a no
     }
   }
   assert.deepEqual(unique(found), [], 'every « is followed and every » preceded by U+00A0');
-  assert.equal(opening, 51, 'French has 51 «');
-  assert.equal(closing, 51, 'French has 51 »');
+  assert.equal(opening, 55, 'French has 55 «');
+  assert.equal(closing, 55, 'French has 55 »');
+});
+
+test('Remember for next time, its refusals, and the custom answers summary speak all six languages (#186)', () => {
+  const keys = ['remember.title', 'remember.hint', 'remember.check', 'remember.checkLabel', 'remember.changes', 'remember.button', 'remember.saving', 'remember.saved',
+    'worker.rememberEmpty', 'worker.rememberUnreadable', 'worker.rememberRepeated', 'worker.rememberCancelled', 'result.fromCustom', 'widget.fromCustom'];
+  for (const code of strings.LANGUAGES) for (const key of keys) {
+    assert.ok(Object.hasOwn(strings.catalogs[code], key), `${code} ${key}`);
+    if (code !== 'en') assert.notDeepEqual(strings.catalogs[code][key], en[key], `${code} ${key} is translated`);
+  }
+  assert.equal(strings.english('result.fromCustom', { summary: { key: 'result.siteFilled', params: { count: 2 } }, count: 1 }),
+    'Filled 2. Check your answers before you submit. 1 from your custom answers.');
+  assert.equal(strings.english('remember.check'), 'Remember for next time');
 });
 
 test('every language is named in its own words in every catalog and offered in the picker', () => {

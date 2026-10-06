@@ -302,6 +302,10 @@
         // After the applicant's Save click in the side panel: one listed box's answer, in the profile's format.
         if (typeof message.token !== 'string' || typeof message.id !== 'string' || typeof message.key !== 'string') throw new Error('Invalid request.');
         respond(savedAnswer(engine.readAnswer(document, message.token, message.id, message.key)));
+      } else if (message.type === 'secondhand:generic:readOpen') {
+        // After the applicant's Remember for next time click in the side panel (#186): one open question's answer, as the page shows it.
+        if (typeof message.token !== 'string' || typeof message.id !== 'string') throw new Error('Invalid request.');
+        respond(savedAnswer(engine.readOpen(document, message.token, message.id)));
       } else if (message.type === 'secondhand:generic:focus' && typeof message.id === 'string') {
         respond({ focused: Boolean(withOwnPanelHidden(() => engine.focusField(document, message.id))) });
       }

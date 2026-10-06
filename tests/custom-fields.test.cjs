@@ -102,3 +102,81 @@ test('custom answers survive encrypted vault save, reopen and encrypted backup i
     await imported.lock(); await vault.lock();
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
+
+// Remember for next time (#186): an answer the applicant gave on a page becomes a custom answer that also keeps the question's
+// type, its choices and the site it was saved from. It matches only the same words, the same kind of question and the same choices.
+const PANTRY = 'https://pantry.example.org';
+const heard = (changes = {}) => ({ label: 'How did you hear about us?', type: 'radio', options: ['Friend', 'Church', 'Flyer'], answer: 'Church', ...changes });
+const fromPage = (n = 1, changes = {}) => record(n, { label: 'How did you hear about us?', value: 'Church', aliases: [], type: 'radio', options: ['Friend', 'Church', 'Flyer'], site: PANTRY, ...changes });
+const emplid = (n = 2, changes = {}) => record(n, { label: 'EMPLID', value: 'SYN-4471', aliases: [], type: 'text', options: [], site: PANTRY, ...changes });
+const values = (records, fields) => ({ ...custom.matchCustomFields(records, fields).values });
+
+test('an answer saved from a page keeps its type, choices and site; answers without them load exactly as before', () => {
+  assert.deepEqual(custom.validateCustomFields([fromPage(), emplid()]), [fromPage(), emplid()]);
+  assert.deepEqual(Object.keys(custom.validateCustomFields([record()])[0]).sort(), ['aliases', 'id', 'label', 'value'], 'nothing is added to an answer typed in My information');
+  assert.deepEqual(custom.validateCustomFields([fromPage(1, { site: undefined })])[0].site, undefined, 'the site is kept when known');
+  for (const changes of [{ options: undefined }, { type: undefined }, { type: 'checkbox' }, { type: 'password' }, { options: [] }, { type: 'text' },
+    { options: ['Friend', 'friend!'] }, { value: 'Neighbor' }, { site: 'http://pantry.example.org' }, { site: `${PANTRY}/intake` }, { site: 'https://user@pantry.example.org' },
+    { type: 'number', options: [], value: 'twelve' }, { type: 'date', options: [], value: '2026-02-30' }, { type: 'email', options: [], value: 'not an email' }]) {
+    assert.throws(() => custom.validateCustomFields([fromPage(1, changes)]), Error, JSON.stringify(changes));
+  }
+});
+
+test('an answer saved from a page matches only the same words, the same kind of question and the same choices', () => {
+  const records = [fromPage(), emplid()];
+  assert.deepEqual(values(records, [{ id: 'f1', label: '2. HOW DID YOU HEAR ABOUT US *', type: 'radio', options: ['flyer', 'FRIEND', 'Church!'] }, { id: 'f2', label: 'Emplid:', type: 'text' }]),
+    { f1: 'Church!', f2: 'SYN-4471' }, 'case, accents, punctuation, a question number and the order of the choices don’t matter; a choice is the page’s own');
+  for (const field of [{ label: 'How did you hear about us?', type: 'select', options: ['Friend', 'Church', 'Flyer'] }, { label: 'How did you hear about us?', type: 'radio', options: ['Friend', 'Church', 'Flyer', 'Other'] },
+    { label: 'How did you hear about us?', type: 'radio', options: ['Friend', 'Church'] }, { label: 'Where did you hear about us?', type: 'radio', options: ['Friend', 'Church', 'Flyer'] },
+    { label: 'EMPLID', type: 'textarea' }, { label: 'EMPLID number', type: 'text' }]) {
+    assert.deepEqual(values(records, [{ id: 'f1', ...field }]), {}, JSON.stringify(field));
+  }
+  assert.deepEqual(values(records, [{ id: 'f1', label: 'EMPLID', type: 'text' }, { id: 'f2', label: '3. Emplid', type: 'text' }]), {}, 'a question asked twice gets neither');
+  assert.deepEqual(values([emplid(), record(3, { label: 'Emplid', aliases: [], value: 'Typed in My information' })], [{ id: 'f1', label: 'EMPLID', type: 'text' }]), {},
+    'two answers for one question: neither is a guess worth making');
+  assert.deepEqual(values([fromPage(1, { aliases: ['Referral source'] })], [{ id: 'f1', label: 'Referral source', type: 'radio', options: ['Friend', 'Church', 'Flyer'] }]), { f1: 'Church' }, 'an alias works as the question’s words');
+  assert.deepEqual(values([record()], [{ id: 'f1', label: 'Pickup point', type: 'textarea' }]), { f1: 'North entrance' }, 'an answer typed in My information matches any kind of box, as before');
+});
+
+test('only a question about a sensitive subject is sensitive: identity numbers, birth and age, income and money, health and disability, citizenship, pregnancy', () => {
+  for (const label of ['What is your monthly income?', 'Total household earnings', 'How much cash do you have?', 'Do you have health insurance?', 'Are you disabled?',
+    'Is anyone in your household blind?', 'Are you a U.S. citizen?', 'Immigration status', 'Your age', 'Year you were born', 'Fecha de nacimiento', 'Ingresos mensuales',
+    '¿Tiene seguro médico?', 'Is anyone pregnant?', 'Medicare number', 'Savings']) assert.equal(custom.sensitiveCustomQuestion({ label, options: [] }), true, label);
+  for (const label of ['How did you hear about us?', 'EMPLID', 'Pickup location', 'Favorite foods', 'Do you have a pet?', 'Agency name', 'Which page are you on?']) {
+    assert.equal(custom.sensitiveCustomQuestion({ label, options: [] }), false, label);
+  }
+  assert.equal(custom.sensitiveCustomQuestion({ label: 'Which applies to you?', options: ['Veteran', 'Disabled', 'Neither'] }), true, 'a choice can name the subject');
+  const matched = custom.matchCustomFields([record(1, { label: 'Monthly income', aliases: [], value: '1200' }), record(2)],
+    [{ id: 'f1', label: 'Monthly income', type: 'number' }, { id: 'f2', label: 'Pickup point', type: 'text' }]);
+  assert.deepEqual(matched.matches.map(({ id, sensitive }) => ({ id, sensitive })), [{ id: 'f1', sensitive: true }, { id: 'f2', sensitive: false }]);
+});
+
+test('an answer to remember from a page is checked, and never one only the applicant answers', () => {
+  assert.deepEqual(custom.rememberedAnswer(heard({ label: ' How did you hear about us? ', answer: ' Church ' })),
+    { label: 'How did you hear about us?', type: 'radio', options: ['Friend', 'Church', 'Flyer'], value: 'Church' });
+  assert.equal(custom.rememberedAnswer(heard({ type: 'textarea', options: [], answer: 'First line\nSecond line' })).value, 'First line\nSecond line');
+  for (const [changes, message] of [[{ type: 'checkbox' }, /kind of question/], [{ options: [] }, /choices/], [{ type: 'text' }, /choices/], [{ options: ['Friend', 'friend'] }, /told apart/],
+    [{ answer: 'Neighbor' }, /one of its choices/], [{ answer: ' ' }, /answer/], [{ type: 'text', options: [], answer: 'x'.repeat(1001) }, /answer/],
+    [{ type: 'text', options: [], answer: 'First\nSecond' }, /answer/], [{ label: 'x'.repeat(121) }, /question/], [{ label: '?!' }, /question/],
+    [{ type: 'email', options: [], answer: 'not an email' }, /fit/], [{ label: 'Signature' }, /never remembers/], [{ label: 'Enter the code we texted you' }, /never remembers/],
+    [{ label: 'Password' }, /never remembers/], [{ label: 'Bank account number', type: 'text', options: [], answer: '123' }, /never remembers/],
+    [{ label: 'Spouse name', type: 'text', options: [], answer: 'Sam' }, /never remembers/]]) {
+    assert.throws(() => custom.rememberedAnswer(heard(changes)), message, JSON.stringify(changes));
+  }
+});
+
+test('remembering adds a custom answer for each question, or changes the one already saved from a page; at most 50 are kept', () => {
+  const entries = answers => answers.map(custom.rememberedAnswer);
+  const [added] = custom.rememberAnswers([record()], entries([heard()]), PANTRY).slice(1);
+  assert.match(added.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.deepEqual({ ...added, id: undefined }, { id: undefined, label: 'How did you hear about us?', value: 'Church', aliases: [], type: 'radio', options: ['Friend', 'Church', 'Flyer'], site: PANTRY });
+  const again = custom.rememberAnswers([record(), added], entries([heard({ label: '1. how did you hear about us', options: ['Flyer', 'Friend', 'Church'], answer: 'Flyer' })]), 'https://wic.example.org');
+  assert.deepEqual(again, [record(), { ...added, label: '1. how did you hear about us', options: ['Flyer', 'Friend', 'Church'], value: 'Flyer' }], 'the site it was first saved from stays');
+  assert.throws(() => custom.rememberAnswers([record(1, { label: 'How did you hear about us?', aliases: [] })], entries([heard()]), PANTRY), /already have a custom answer/,
+    'an answer typed in My information is never replaced from a page');
+  assert.throws(() => custom.rememberAnswers([], entries([heard(), heard({ label: 'how did you hear about us' })]), PANTRY), /more than once/);
+  assert.throws(() => custom.rememberAnswers([], entries([heard()]), 'http://pantry.example.org'), /site/);
+  const full = Array.from({ length: 50 }, (_, n) => record(n, { label: `Question ${n}`, aliases: [] }));
+  assert.throws(() => custom.rememberAnswers(full, entries([heard()]), PANTRY), /50 custom answers/);
+  assert.equal(custom.rememberAnswers([...full.slice(1), { ...added }], entries([heard({ answer: 'Friend' })]), PANTRY).at(-1).value, 'Friend', 'a full list still changes an answer it has');
+});
