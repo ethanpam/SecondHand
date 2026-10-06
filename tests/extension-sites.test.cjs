@@ -267,6 +267,8 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
           return typeof answer === 'string' ? fail(answer) : reply(answer);
         }
         if (request.type === 'showApp') return reply({ shown: true });
+        // Add your household (#180): the app opens My information at Your household, unless a test plays another answer.
+        if (request.type === 'openHousehold') return reply(vault.openHouseholdReply ?? { shown: true });
         if (request.type === 'trustSite') return (vault.trustError || request.url === vault.declineOrigin) ? fail(vault.trustError || 'Declined') : reply({ trusted: true, origin: new URL(request.url).origin });
         if (request.type === 'untrustSite') return vault.untrustSiteError ? fail(vault.untrustSiteError) : reply({ trusted: false, origin: new URL(request.url).origin });
         if (request.type === 'saveFields') {
@@ -290,9 +292,12 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
           // the request that gives the reply's `held` exactly, beside every saved answer asked for.
           const played = typeof vault.holds === 'function';
           const held = played ? vault.holds(plain(request)) : request.sensitive ? [] : request.fields.filter(key => (vault.holds || []).includes(key));
+          // `household`: what the household list lacks for the household questions the request left open (#180), or a
+          // function of the request that gives it.
+          const household = typeof vault.household === 'function' ? vault.household(plain(request)) : vault.household;
           return reply({ accessRevision: vault.accessRevision,
             values: Object.fromEntries(request.fields.filter(key => vault.values[key] && (played || !held.includes(key))).map(key => [key, vault.values[key]])),
-            ...((played ? held !== undefined : held.length) ? { held } : {}), ...(reason !== undefined ? { reason } : {}) });
+            ...((played ? held !== undefined : held.length) ? { held } : {}), ...(reason !== undefined ? { reason } : {}), ...(household !== undefined ? { household } : {}) });
         }
         // Remember for next time (#186): the app's confirmation and save, as Remember, unless the test gives its refusal.
         if (request.type === 'rememberAnswers') {
@@ -3489,4 +3494,85 @@ test('held income sources answered in part by Fill sensitive details count as fi
   const again = plain((await autofill(w)).data);
   assert.deepEqual([again.needYou, again.held], [[`f0:${w.page.idOf('income')}`], undefined], 'answered in part, it waits for the applicant, not for the sensitive prompt');
   assert.equal(w.native.filter(call => call.type === 'getFields').length, asked, 'and nothing is asked of the app for it');
+});
+
+// #180: household questions a pantry form asks stay open while no household list is saved, or while a birth date on it is
+// missing. The result lists them, with what the list lacks, for the side panel's Add your household.
+const householdForm = () => [{ name: 'name', key: 'fullName' }, { name: 'young', key: 'householdCount:0-5', label: '# of Children 0-5' },
+  { name: 'adults', key: 'householdAdults', label: '# of Adults' }, { name: 'size', key: 'householdSize', label: 'Household size' },
+  { name: 'student', key: 'studentNameGrade', label: 'Student name and grade' }, { ...PICKUP }];
+const withoutList = (options = {}) => siteWorker({ enabled: true, fields: householdForm(), ...options, desktop: { household: { need: 'list' }, ...options.desktop } });
+const openHousehold = w => w.panel({ type: 'ui:openHousehold', confirmed: true });
+
+test('household questions left open because no household list is saved are listed in the result with what the list lacks (#180)', async () => {
+  const w = withoutList();
+  const result = plain((await autofill(w)).data);
+  const [young, adults, size, student, pickup] = ['young', 'adults', 'size', 'student', 'pickup'].map(name => `f0:${w.page.idOf(name)}`);
+  assert.deepEqual(result.needYou, [pickup, young, adults, size, student]);
+  assert.deepEqual(result.household, { need: 'list', questions: [{ id: young, label: '# of Children 0-5' }, { id: adults, label: '# of Adults' },
+    { id: size, label: 'Household size' }, { id: student, label: 'Student name and grade' }] });
+  assert.equal(result.message, 'Filled 1 · 5 need you. Check your answers before you submit.', 'the summary is as before');
+  assert.deepEqual(w.native.filter(call => call.type === 'getFields').map(call => call.fields), [['firstName', 'lastName', 'householdCount:0-5', 'householdAdults', 'householdSize', 'studentNameGrade']]);
+  assert.deepEqual(plain((await w.panel({ type: 'ui:pageState' })).data).result, result, 'kept for the tab');
+  // A household question the app answered, or one the page refused, isn't the list's to explain.
+  const answered = withoutList({ desktop: { values: { firstName: 'Synthetic', lastName: 'Applicant', householdSize: '3' } } });
+  assert.deepEqual(plain((await autofill(answered)).data).household.questions.map(question => question.label), ['# of Children 0-5', '# of Adults', 'Student name and grade']);
+  const refusing = withoutList({ fields: householdForm().map(field => field.name === 'size' ? { ...field, rejects: true } : field), desktop: { values: { householdSize: '3' } } });
+  assert.equal(plain((await autofill(refusing)).data).household.questions.some(question => question.label === 'Household size'), false);
+  // Nothing said, nothing listed.
+  const listed = siteWorker({ enabled: true, fields: householdForm() });
+  assert.equal(plain((await autofill(listed)).data).household, undefined);
+});
+
+test('with a list saved but a birth date missing, only the counts by age are listed, with the person to finish (#180)', async () => {
+  for (const person of [3, 'you']) {
+    const w = withoutList({ desktop: { household: { need: 'birthDate', person }, values: { firstName: 'Synthetic', lastName: 'Applicant', householdSize: '4' } } });
+    const result = plain((await autofill(w)).data);
+    assert.deepEqual(result.household, { need: 'birthDate', person, questions: [{ id: `f0:${w.page.idOf('young')}`, label: '# of Children 0-5' }, { id: `f0:${w.page.idOf('adults')}`, label: '# of Adults' }] },
+      'the student’s name and grade needs no birth date');
+  }
+});
+
+test('what the desktop says the household list lacks is checked: anything else fills nothing and shows a fixed error (#180)', async () => {
+  for (const household of [{ need: 'members' }, { need: 'list', person: 3 }, { need: 'birthDate' }, { need: 'birthDate', person: 0 }, { need: 'birthDate', person: 21 },
+    { need: 'birthDate', person: '3' }, { need: 'birthDate', person: 2.5 }, 'list', null, ['list']]) {
+    const w = withoutList({ desktop: { household } });
+    const result = plain((await autofill(w)).data);
+    assert.deepEqual([result.state, result.messageKey], ['error', 'worker.desktopUnexpected'], JSON.stringify(household));
+    assert.deepEqual(w.page.answered(), [], JSON.stringify(household));
+  }
+  // Said of a request that left no household question open.
+  const none = siteWorker({ enabled: true, desktop: { household: { need: 'list' }, values: { firstName: 'Synthetic', lastName: 'Applicant', zip: '50309', householdSize: '3' } } });
+  assert.equal(plain((await autofill(none)).data).messageKey, 'worker.desktopUnexpected');
+  // A missing birth date is said only of counts by age.
+  const size = siteWorker({ enabled: true, fields: [{ name: 'size', key: 'householdSize' }], desktop: { household: { need: 'birthDate', person: 2 } } });
+  assert.equal(plain((await autofill(size)).data).messageKey, 'worker.desktopUnexpected');
+});
+
+test('Add your household asks the app to open Your household, from the side panel’s confirmed click only, carrying nothing (#180)', async () => {
+  const w = withoutList();
+  await autofill(w);
+  const asked = w.native.length;
+  assert.equal(await w.panel({ type: 'ui:openHousehold' }), undefined, 'only a confirmed click');
+  assert.equal(await w.launcher({ type: 'ui:openHousehold', confirmed: true }), undefined, 'only the side panel');
+  const response = await openHousehold(w);
+  assert.equal(response.ok, true, response.error);
+  assert.deepEqual(plain(response.data), { shown: true });
+  assert.deepEqual(w.native.slice(asked).map(call => Object.keys(call).sort()), [['id', 'type']]);
+  assert.equal(w.native.at(-1).type, 'openHousehold');
+  w.vault.openHouseholdReply = { shown: true, section: 'privacy' };
+  assert.equal((await openHousehold(w)).errorKey, 'worker.desktopUnexpected');
+  w.vault.reachable = false;
+  assert.equal((await openHousehold(w)).errorKey, 'worker.desktopOffline');
+});
+
+test('Fill sensitive details keeps the household questions listed in the tab’s result (#180)', async () => {
+  const w = withoutList({ fields: [...householdForm(), { name: 'dob', key: 'birthDate', label: 'Date of birth' }],
+    desktop: { holds: ['birthDate'], values: { firstName: 'Synthetic', lastName: 'Applicant', birthDate: '1985-04-12' } } });
+  const before = plain((await autofill(w)).data);
+  assert.equal(before.held, 1);
+  assert.equal(before.household.questions.length, 4);
+  const after = plain((await w.panel({ type: 'ui:fillHeld', confirmed: true })).data);
+  assert.equal(after.held, undefined);
+  assert.deepEqual(after.household, before.household);
 });
