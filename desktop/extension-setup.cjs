@@ -35,6 +35,23 @@ const BUILD_LINE = /^const BUILD = '(\d{4}-\d{2}-\d{2}\.\d+)';$/m;
 const buildOf = source => BUILD_LINE.exec(source)?.[1] ?? null;
 // background.js is written last, so its build marker also says every other file is from that build.
 const MARKER_FILE = 'background.js';
+// Dates, then the number after the dot, as numbers: 2026-10-03.10 is newer than 2026-10-03.9.
+function newerBuild(candidate, current) {
+  const [next, now] = [candidate, current].map(value => value.split(/[-.]/).map(Number));
+  const at = next.findIndex((part, index) => part !== now[index]);
+  return at >= 0 && next[at] > now[at];
+}
+// The build marker of the copy in the prepared folder, or null when there is no readable one.
+async function copiedBuild(directory) {
+  try {
+    const [folder, marker] = await Promise.all([fs.lstat(directory), fs.lstat(path.join(directory, MARKER_FILE))]);
+    if (!folder.isDirectory() || folder.isSymbolicLink() || !marker.isFile() || marker.isSymbolicLink()) return null;
+    return buildOf(await fs.readFile(path.join(directory, MARKER_FILE), 'utf8'));
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
 
 async function bundledExtension(app, resourcesPath) {
   const directory = bundledDirectory(app, resourcesPath);
@@ -45,23 +62,27 @@ async function bundledExtension(app, resourcesPath) {
   return { manifest, extensionId: extensionIdFromKey(manifest.key), build };
 }
 
-// `exists`: something is at the prepared folder's path. `prepared`: it is a copy of this bundle.
+// `exists`: something is at the prepared folder's path. `prepared`: it is a copy of this bundle. `newerCopy`: the
+// build of a whole copy a newer app prepared there, which this app never replaces with its older one (#142); else null.
 async function getExtensionSetup(app, resourcesPath) {
   const { manifest, extensionId, build } = await bundledExtension(app, resourcesPath);
   const directory = extensionDirectory(app);
   let exists = false;
   let prepared = false;
+  let newerCopy = null;
   try {
     const stat = await fs.lstat(directory);
     exists = true;
     if (stat.isDirectory() && !stat.isSymbolicLink()) {
       const installed = JSON.parse(await fs.readFile(path.join(directory, 'manifest.json'), 'utf8'));
       const files = await Promise.all(EXTENSION_FILES.map(file => fs.lstat(path.join(directory, file))));
-      prepared = installed.key === manifest.key && installed.version === manifest.version && files.every(file => file.isFile() && !file.isSymbolicLink()) &&
-        buildOf(await fs.readFile(path.join(directory, MARKER_FILE), 'utf8')) === build;
+      const whole = installed.key === manifest.key && files.every(file => file.isFile() && !file.isSymbolicLink());
+      const copied = buildOf(await fs.readFile(path.join(directory, MARKER_FILE), 'utf8'));
+      prepared = whole && installed.version === manifest.version && copied === build;
+      newerCopy = whole && copied && newerBuild(copied, build) ? copied : null;
     }
   } catch { /* Setup has not run yet, or its copied files need to be restored. */ }
-  return { directory, extensionId, version: manifest.version, build, exists, prepared };
+  return { directory, extensionId, version: manifest.version, build, exists, prepared, newerCopy };
 }
 
 async function prepareBundledExtension(app, resourcesPath) {
@@ -75,6 +96,12 @@ async function prepareBundledExtension(app, resourcesPath) {
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 2 * 1024 * 1024) throw new Error('The bundled extension files are invalid.');
     return { name, bytes: await fs.readFile(file) };
   }));
+  // A copy from a newer app stays as it is, whole or not: this older app's files would take Chrome back a build (#142).
+  const copied = await copiedBuild(directory);
+  if (copied && newerBuild(copied, build)) {
+    const message = `The Chrome extension folder has a newer build (${copied}) than this SecondHand app (${build}), so it was left as it is. Update SecondHand to refresh it.`;
+    throw Object.assign(new Error(message), { publicMessage: message });
+  }
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   const target = await fs.lstat(directory);
   if (!target.isDirectory() || target.isSymbolicLink()) throw new Error('The extension setup directory must be a local folder.');

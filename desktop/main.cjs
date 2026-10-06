@@ -365,6 +365,8 @@ if (nativeOrigin) {
     const setup = await getExtensionSetup(app);
     if (setup.prepared) return { build: setup.build, copy: 'ready' };
     if (!setup.exists) return { build: setup.build, copy: 'absent' };
+    // A newer app prepared the copy: it is never refreshed with this older build, and Chrome loads its build (#142).
+    if (setup.newerCopy) return { build: setup.newerCopy, copy: 'ready' };
     if (copyFailed) return { build: setup.build, copy: 'failed' };
     try { await refreshCopy(); }
     catch { return { build: setup.build, copy: 'failed' }; }
