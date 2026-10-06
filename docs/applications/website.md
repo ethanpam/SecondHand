@@ -48,7 +48,7 @@ There are also a custom 404, robots, sitemap, and social preview image. The publ
 
 ## Technology and runtime
 
-The website uses React and Vinext with the existing app-directory structure, then targets a Cloudflare Worker with an R2 bucket bound as `FILES`. The repository's `website/.openai/hosting.json` declares that bucket and project association; it does not declare a D1 database.
+The website uses React and Vinext with the existing app-directory structure, then targets a Cloudflare Worker with an R2 bucket bound as `FILES`. [`vite.config.ts`](../../website/vite.config.ts) names the Worker (`secondhand`) and the bucket (`secondhand-downloads`) and turns off Cloudflare's per-request logs. `npm run deploy` in `website/` builds the site and publishes it with Wrangler.
 
 A request for a page reaches the website runtime and renders the corresponding content. A file request is delegated to the download helper, which validates the release/file combination and streams the object. Neither route needs an applicant vault or a running Electron app.
 
@@ -153,7 +153,7 @@ Confirm the output set contains all expected installers, extension ZIP, and `SHA
 
 In `website/lib/downloads.ts`, add the new version to the recognized releases and set the upload target `RELEASE`. Keep `LATEST_RELEASE` and the visible `website/app/release.ts` version on the previous complete release during upload. This avoids offering a half-published set to visitors.
 
-The existing source permits maintenance upload only with a fresh `RELEASE_UPLOAD_TOKEN` of at least 32 characters. Provision it as a hosting secret, not a committed `.env` value or browser-bundled configuration. Use the intended Sites source checkout/deployment rather than assuming a GitHub merge automatically publishes it.
+The existing source permits maintenance upload only with a fresh `RELEASE_UPLOAD_TOKEN` of at least 32 characters. Provision it as a hosting secret, not a committed `.env` value or browser-bundled configuration. Set it with `npx wrangler secret put RELEASE_UPLOAD_TOKEN`, and deploy with `npm run deploy`; a GitHub merge does not publish the site by itself.
 
 ### 3. Upload and verify
 
@@ -163,7 +163,7 @@ With the same token available only to the upload process, run from `website/`:
 node scripts/publish-downloads.mjs https://your-site.example /absolute/path/to/release
 ```
 
-Replace the placeholder URL with the intended site. A private staging deployment can additionally require `SITES_ACCESS_TOKEN`. Credentials must not be put into the command's URL, committed files, screenshots, or PR text.
+Replace the placeholder URL with the intended site. Credentials must not be put into the command's URL, committed files, screenshots, or PR text.
 
 The publisher sends 8 MiB multipart pieces, then downloads each completed object and compares its SHA-256 with the local artifact. The server limits files to 512 MiB, validates sequential part manifests and final byte count, and refuses overwriting existing release keys. The bearer comparison uses hashed constant-time comparison. These checks do not replace the publisher's verification of actual bytes.
 
