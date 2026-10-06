@@ -362,6 +362,11 @@ async function panel(t, initial = {}) {
       data = structuredClone(state.result);
     }
     else if (payload.type === 'ui:showApp') data = { shown: true };
+    else if (payload.type === 'ui:openHousehold') {
+      // Add your household (#180): the app opens My information at Your household.
+      if (initial.openHouseholdError) return { ok: false, ...initial.openHouseholdError };
+      data = { shown: true };
+    }
     else if (payload.type === 'ui:unlockWithTouchId' && initial.unlockWithTouchId) {
       const reply = await initial.unlockWithTouchId(desktop);
       if (reply?.ok === false) return reply;
@@ -936,7 +941,7 @@ test('on a site that is on, Autofill fills once without Stop, and Turn off asks 
 
 test('widget on a site asks the on-device AI about open questions and sends its guesses with Autofill', async t => {
   const ai = languageModel();
-  const guessed = { state: 'done', filled: 3, guessed: 1, needYou: ['sh-2-0'], message: 'Filled 3 · 1 guessed · 1 need you. Check your answers before you submit.', pageKey: 'general' };
+  const guessed = { state: 'done', filled: 3, guessed: 1, needYou: ['sh-2-0'], message: 'Filled 3 · 1 suggested · 1 need you. Check your answers before you submit.', pageKey: 'general' };
   const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: openPlan, LanguageModel: ai.LanguageModel, autofill: guessed });
   assert.equal(ai.calls.availability, 0, 'nothing is asked before a click');
   await view.userClick('autofill');
@@ -948,7 +953,7 @@ test('widget on a site asks the on-device AI about open questions and sends its 
   assert.match(system, /- email:/);
   assert.match(system, /- phone:/);
   assert.doesNotMatch(system, /ssn|birthDate|Income|firstName/, 'the AI only learns the keys the worker allows');
-  assert.equal(view.get('widget-text').textContent, 'Filled 3 · 1 guessed');
+  assert.equal(view.get('widget-text').textContent, 'Filled 3 · 1 suggested');
   assert.equal(view.get('need-you').textContent, '1 need you');
 });
 
@@ -1410,8 +1415,8 @@ test('when the widget’s offer opened the side panel, the panel shows the list 
 
 // Laya, the desktop's local AI (#39, #42): when it is ready, Chrome's on-device AI stays off.
 const layaDone = { state: 'done', filled: 2, guessed: 1, laya: 1, needYou: ['f0:sh-1-1'], pageKey: 'general',
-  message: 'Filled 2 · 1 guessed · 1 need you. Check your answers before you submit. Guesses were suggested by Laya on this computer.',
-  messageKey: 'result.suggestedByLaya', messageParams: { summary: { key: 'result.siteFilledGuessedNeedYou', params: { count: 2, guessed: 1, needYou: 1 } } } };
+  message: 'Filled 2 · 1 suggested · 1 need you. Check your answers before you submit. Suggestions came from Laya on this computer.',
+  messageKey: 'result.suggestedByLaya', messageParams: { summary: { key: 'result.siteFilledSuggestedNeedYou', params: { count: 2, suggested: 1, needYou: 1 } } } };
 
 test('with Laya ready, the widget leaves Chrome’s on-device AI off, fills the plan Laya answers for, and says who suggested the guesses', async t => {
   const ai = languageModel();
@@ -1419,13 +1424,13 @@ test('with Laya ready, the widget leaves Chrome’s on-device AI off, fills the 
   await view.userClick('autofill');
   assert.deepEqual(plainRequests(view.requests.slice(-2)), [{ type: 'ui:plan', confirmed: true }, { type: 'ui:autofill', confirmed: true, guesses: {} }]);
   assert.equal(ai.calls.availability, 0, 'Chrome’s on-device AI is never asked');
-  assert.equal(view.get('widget-text').textContent, 'Filled 2 · 1 guessed · suggested by Laya');
+  assert.equal(view.get('widget-text').textContent, 'Filled 2 · 1 suggested · suggested by Laya');
   assert.equal(view.get('widget-text').title, layaDone.message);
   assert.equal(view.get('need-you').textContent, '1 need you');
 
   const spanishView = await panel(t, { launcher: true, language: 'es-ES', tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true }, autofill: layaDone });
   await spanishView.userClick('autofill');
-  assert.equal(spanishView.get('widget-text').textContent, `${strings.text('es', 'widget.filledGuessed', { count: 2, guessed: 1 })} · ${spanish('widget.suggestedByLaya')}`);
+  assert.equal(spanishView.get('widget-text').textContent, `${strings.text('es', 'widget.filledSuggested', { count: 2, suggested: 1 })} · ${spanish('widget.suggestedByLaya')}`);
   assert.deepEqual(shownText(spanishView).filter(text => englishOnly.has(text)), []);
 });
 
@@ -2025,9 +2030,9 @@ test('the widget counts held questions under need-you, says they wait in the sid
 
 // #185: Laya's best guesses, listed for the applicant to find and check.
 const GUESSES = [{ id: 'f0:sh-1-1', label: 'How many people live in your household?' }, { id: 'f4:sh-1-3', label: 'Preferred pickup day' }];
-const GUESSED = 'Filled 4 · 1 guessed. Check your answers before you submit. Guesses were suggested by Laya on this computer. 2 guessed by Laya, check them.';
+const GUESSED = 'Filled 4 · 1 suggested. Check your answers before you submit. Suggestions came from Laya on this computer. 2 guessed by Laya, check them.';
 const guessedDone = { state: 'done', filled: 4, guessed: 1, laya: 1, layaGuessed: 2, layaGuesses: GUESSES, needYou: [], pageKey: 'general', message: GUESSED, messageKey: 'result.layaGuessed',
-  messageParams: { summary: { key: 'result.suggestedByLaya', params: { summary: { key: 'result.siteFilledGuessed', params: { count: 4, guessed: 1 } } } }, count: 2 } };
+  messageParams: { summary: { key: 'result.suggestedByLaya', params: { summary: { key: 'result.siteFilledSuggested', params: { count: 4, suggested: 1 } } } }, count: 2 } };
 
 test('#185: the side panel lists Laya’s guesses by their own words, and a trusted row click finds each one on the page', async t => {
   const view = await panel(t, { tab: pantryTab, site: PANTRY_SITE, result: guessedDone });
@@ -2066,7 +2071,7 @@ test('#185: the guess list shows only well-formed questions, in the applicant’
 test('#185: the widget says how many Laya guessed, apart from its sure answers, in the applicant’s language', async t => {
   const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true }, autofill: guessedDone });
   await view.userClick('autofill');
-  assert.equal(view.get('widget-text').textContent, 'Filled 4 · 1 guessed · suggested by Laya · 2 guessed by Laya, check them');
+  assert.equal(view.get('widget-text').textContent, 'Filled 4 · 1 suggested · suggested by Laya · 2 guessed by Laya, check them');
   assert.equal(view.get('widget-text').title, GUESSED);
   const one = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true },
     autofill: { ...guessedDone, filled: 1, guessed: 0, laya: undefined, layaGuessed: 1, layaGuesses: GUESSES.slice(0, 1) } });
@@ -2075,7 +2080,7 @@ test('#185: the widget says how many Laya guessed, apart from its sure answers, 
   const spanishView = await panel(t, { launcher: true, language: 'es', tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true }, autofill: guessedDone });
   await spanishView.userClick('autofill');
   assert.equal(spanishView.get('widget-text').textContent,
-    `${strings.text('es', 'widget.filledGuessed', { count: 4, guessed: 1 })} · ${spanish('widget.suggestedByLaya')} · ${strings.text('es', 'widget.layaGuessed', { count: 2 })}`);
+    `${strings.text('es', 'widget.filledSuggested', { count: 4, suggested: 1 })} · ${spanish('widget.suggestedByLaya')} · ${strings.text('es', 'widget.layaGuessed', { count: 2 })}`);
   assert.deepEqual(shownText(spanishView).filter(text => englishOnly.has(text)), []);
 });
 
@@ -2193,4 +2198,68 @@ test('the widget says how many answers came from custom answers (#186)', async t
   const spanish = await panel(t, { launcher: true, language: 'es', tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: fromCustom });
   await spanish.userClick('autofill');
   assert.equal(spanish.get('widget-text').textContent, 'Completadas: 3 · 2 de sus respuestas personalizadas');
+});
+
+// #180: the household questions Autofill left open because of what the household list lacks, with Add your household.
+const HOUSEHOLD_QUESTIONS = [{ id: 'f0:sh-1-1', label: '# of Children 0-5' }, { id: 'f0:sh-1-2', label: '# of Adults' }];
+const householdDone = household => ({ state: 'done', filled: 1, guessed: 0, needYou: ['f0:sh-1-1', 'f0:sh-1-2'], pageKey: 'general', household,
+  message: 'Filled 1 · 2 need you. Check your answers before you submit.', messageKey: 'result.siteFilledNeedYou', messageParams: { count: 1, needYou: 2 } });
+const noList = householdDone({ need: 'list', questions: HOUSEHOLD_QUESTIONS });
+
+test('the side panel lists the household questions left open with no household list saved, and Add your household asks the app from a trusted click (#180)', async t => {
+  const view = await panel(t, { tab: pantryTab, site: PANTRY_SITE, result: noList });
+  assert.equal(view.get('household-section').hidden, false);
+  assert.equal(view.get('household-title').textContent, 'Household questions');
+  assert.equal(view.get('household-hint').textContent, strings.english('household.hintList'));
+  assert.deepEqual([...view.window.document.querySelectorAll('[data-household-id]')].map(row => [row.dataset.householdId, row.textContent]),
+    [['f0:sh-1-1', '# of Children 0-5'], ['f0:sh-1-2', '# of Adults']]);
+  assert.equal(view.get('household-open').textContent, 'Add your household');
+  view.get('household-open').click(); await tick();
+  assert.equal(view.types().includes('ui:openHousehold'), false, 'only a trusted click');
+  await view.userClick('household-open'); await tick(); await tick();
+  assert.deepEqual(plainRequests(view.requests.filter(request => request.type === 'ui:openHousehold')), [{ type: 'ui:openHousehold', confirmed: true, tabId: 7 }]);
+  assert.equal(view.get('status').textContent, strings.english('household.opened'));
+  assert.equal(view.get('household-section').hidden, false, 'the questions stay listed until the next Autofill');
+});
+
+test('with a list saved but a birth date missing, the side panel names the person to finish as My information does (#180)', async t => {
+  const person = await panel(t, { tab: pantryTab, site: PANTRY_SITE, result: householdDone({ need: 'birthDate', person: 3, questions: HOUSEHOLD_QUESTIONS }) });
+  assert.equal(person.get('household-hint').textContent, strings.text('en', 'household.hintPerson', { number: 3 }));
+  assert.match(person.get('household-hint').textContent, /Person 3/);
+  assert.equal(person.get('household-open').textContent, 'Open your household list');
+  const you = await panel(t, { tab: pantryTab, site: PANTRY_SITE, result: householdDone({ need: 'birthDate', person: 'you', questions: HOUSEHOLD_QUESTIONS }) });
+  assert.equal(you.get('household-hint').textContent, strings.english('household.hintYou'));
+});
+
+test('the household section speaks all six languages, shows only well-formed lists, and says why the app didn’t open (#180)', async t => {
+  for (const code of strings.LANGUAGES) {
+    for (const [result, hint, button] of [[noList, strings.text(code, 'household.hintList'), strings.text(code, 'household.add')],
+      [householdDone({ need: 'birthDate', person: 2, questions: HOUSEHOLD_QUESTIONS }), strings.text(code, 'household.hintPerson', { number: 2 }), strings.text(code, 'household.open')]]) {
+      const view = await panel(t, { tab: pantryTab, site: PANTRY_SITE, result, language: code });
+      assert.deepEqual([view.get('household-title').textContent, view.get('household-hint').textContent, view.get('household-open').textContent],
+        [strings.text(code, 'household.title'), hint, button], code);
+    }
+  }
+  for (const household of [{ need: 'members', questions: HOUSEHOLD_QUESTIONS }, { need: 'birthDate', person: 0, questions: HOUSEHOLD_QUESTIONS },
+    { need: 'birthDate', person: '3', questions: HOUSEHOLD_QUESTIONS }, { need: 'list', questions: [] }, { need: 'list', questions: [{ id: 'not an id!', label: 'Bad' }] },
+    { need: 'list', questions: [{ id: 'f0:sh-1-1', label: 7 }] }, { need: 'list' }, 'list']) {
+    const view = await panel(t, { tab: pantryTab, site: PANTRY_SITE, result: householdDone(household) });
+    assert.equal(view.get('household-section').hidden, true, JSON.stringify(household));
+  }
+  const offline = await panel(t, { tab: pantryTab, site: PANTRY_SITE, result: noList,
+    openHouseholdError: { error: strings.english('worker.desktopOffline'), errorKey: 'worker.desktopOffline', errorParams: {} } });
+  await offline.userClick('household-open'); await tick(); await tick();
+  assert.equal(offline.get('status').textContent, strings.english('worker.desktopOffline'));
+  assert.equal(offline.get('status').classList.contains('error'), true);
+});
+
+test('the widget says how many household questions wait in the side panel (#180)', async t => {
+  const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: noList });
+  await view.userClick('autofill');
+  assert.equal(view.get('need-you').textContent, '2 need you');
+  assert.equal(view.get('widget-text').textContent, 'Filled 1 · 2 household questions wait in the side panel');
+  const one = await panel(t, { launcher: true, language: 'es', tab: SITE, site: { origin: ORIGIN, enabled: true },
+    autofill: householdDone({ need: 'list', questions: HOUSEHOLD_QUESTIONS.slice(0, 1) }) });
+  await one.userClick('autofill');
+  assert.equal(one.get('widget-text').textContent, `${strings.text('es', 'widget.filled', { count: 1 })} · ${strings.text('es', 'widget.household', { count: 1 })}`);
 });

@@ -93,12 +93,14 @@ if (nativeOrigin) {
   let allSites = false;
   // Laya is on unless the person turned it off. Until they choose, this is undefined and not saved.
   let layaEnabled;
+  // Overview's note to add the household list (#180), once the person dismissed it. Saved only once dismissed.
+  let householdNoteDismissed = false;
   // What was reset because settings.json couldn't be read at startup, until a setting is saved (#139).
   let settingsNotice = null;
   // On sites other than Iowa's portal, these get their own named confirmation unless Always allow is on (#175).
   // Autofill holds them back and fills the rest; the side panel's Fill sensitive details asks for them (#176).
   const SENSITIVE_FIELDS = ['ssn', 'hasSsn', 'hasSsnAnswer', 'birthDate', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'assetsOnHand', 'monthlyMedicalExpenses',
-    'usCitizen', 'disabled', 'blind', 'healthLimitation', 'medicare'];
+    'usCitizen', 'disabled', 'blind', 'healthLimitation', 'medicare', 'incomeSources', 'currentBenefits'];
   // Household counts aren't among them (#175), age-band counts and those worked out from members' birth dates included.
   // At most 50 trusted sites, and at most 50 with Always allow on this site.
   const MAX_TRUSTED_SITES = 50;
@@ -183,7 +185,7 @@ if (nativeOrigin) {
     const details = await vault.inspect().catch(() => null);
     return { exists: await vault.exists(), unlocked: vault.unlocked, lockRevision, recoveryKey: Boolean(details?.recoveryKey),
       deviceReset: Boolean(details?.deviceReset) && await hasDeviceSecret(), deviceResetSupported, extensionId, autofillWithoutAsking, trustedSites: [...trustedSites], allSites,
-      alwaysAllowedSites: [...alwaysAllowedSites],
+      alwaysAllowedSites: [...alwaysAllowedSites], householdNoteDismissed,
       touchId: await touchIdUnlock.state(), touchIdSupported: touchIdUnlock.supported(), touchIdNotice: touchIdUnlock.notice, settingsNotice,
       bridgeRunning: Boolean(bridge), platform: process.platform, laya: await layaStatus(),
       extensionSetup: await getExtensionSetup(app).catch(() => ({ prepared: false, available: false })) };
@@ -207,7 +209,7 @@ if (nativeOrigin) {
   }
   async function saveSettings() {
     await atomicWrite(configPath, Buffer.from(JSON.stringify({ extensionId, autofillWithoutAsking, trustedSites, layaEnabled, ...(allSites && { allSites }),
-      ...(alwaysAllowedSites.length > 0 && { alwaysAllowedSites }) })));
+      ...(alwaysAllowedSites.length > 0 && { alwaysAllowedSites }), ...(householdNoteDismissed && { householdNoteDismissed }) })));
     settingsNotice = null;
   }
   // settings.json at startup. None is a new install. A file that can't be read, or isn't settings, leaves
@@ -230,13 +232,14 @@ if (nativeOrigin) {
     trustedSites = savedSites(config.trustedSites);
     if (typeof config.layaEnabled === 'boolean') layaEnabled = config.layaEnabled;
     allSites = config.allSites === true;
+    householdNoteDismissed = config.householdNoteDismissed === true;
     // Always allow on this site belongs to the saved extension ID, on sites SecondHand is still on.
     if (extensionId) alwaysAllowedSites = savedSites(config.alwaysAllowedSites).filter(siteAllowed);
   }
   // A site other than Iowa's portal may receive saved answers when the person trusted it, or every
   // https site while all websites is on. Always allow covers sensitive details there too (#175).
   const siteAllowed = origin => trustedSites.includes(origin) || (allSites && Boolean(origin));
-  const SITE_RULES = 'It asks before filling unless you chose Always allow. Always allow on this computer includes your Social Security number, date of birth, income, money on hand, medical expenses, and your answers about citizenship, disability, blindness, health, Medicare, and having a Social Security number';
+  const SITE_RULES = 'It asks before filling unless you chose Always allow. Always allow on this computer includes your Social Security number, date of birth, income and where it comes from, the benefits your household gets, money on hand, medical expenses, and your answers about citizenship, disability, blindness, health, Medicare, and having a Social Security number';
   async function turnOffAllSites() {
     if (!allSites) return;
     accessRevision++;
@@ -291,7 +294,7 @@ if (nativeOrigin) {
         buttons: ['Cancel', 'Allow once', 'Always allow on this site'], defaultId: 0, cancelId: 0, noLink: true
       } : {
         type: 'question', title: 'Let Chrome fill this form?', message,
-        detail: `Website: ${iowa ? PORTAL_URL : origin}\n\n${items}\n\nChoose “Always allow” to let the SecondHand extension fill without asking whenever this app is unlocked, on every site SecondHand is on. That includes your Social Security number, birth date, income, and citizenship and disability answers. You can turn it off on the Chrome extension page. The website may save entered information. Review every answer before continuing.${iowa ? "\n\nOn the verified initial applicant page, SecondHand may click ordinary Save and Continue after checking completeness. On the supported home-address confirmation page, it will automatically select Iowa's first possible home-address suggestion and choose Save and Continue. This applies to home-address suggestions only. These actions send entered answers to Iowa, which may save them immediately. Review the chosen home address before final submission. On a verified Tell Us More page, SecondHand may choose ordinary Save and Continue only after all visible questions are supported and answered, with no errors or unresolved controls. On supported emergency, background, household job/income/expense/property screening, and financial-record pages, SecondHand may choose ordinary Save and Continue only when every visible field is supported and complete and no page errors or unresolved controls remain. Summaries, add-another screens, and unsupported pages require manual Next. This approval does not authorize consent, signatures, or submitting your application." : ''}`,
+        detail: `Website: ${iowa ? PORTAL_URL : origin}\n\n${items}\n\nChoose “Always allow” to let the SecondHand extension fill without asking whenever this app is unlocked, on every site SecondHand is on. That includes your Social Security number, birth date, income, benefits, and citizenship and disability answers. You can turn it off on the Chrome extension page. The website may save entered information. Review every answer before continuing.${iowa ? "\n\nOn the verified initial applicant page, SecondHand may click ordinary Save and Continue after checking completeness. On the supported home-address confirmation page, it will automatically select Iowa's first possible home-address suggestion and choose Save and Continue. This applies to home-address suggestions only. These actions send entered answers to Iowa, which may save them immediately. Review the chosen home address before final submission. On a verified Tell Us More page, SecondHand may choose ordinary Save and Continue only after all visible questions are supported and answered, with no errors or unresolved controls. On supported emergency, background, household job/income/expense/property screening, and financial-record pages, SecondHand may choose ordinary Save and Continue only when every visible field is supported and complete and no page errors or unresolved controls remain. Summaries, add-another screens, and unsupported pages require manual Next. This approval does not authorize consent, signatures, or submitting your application." : ''}`,
         buttons: ['Cancel', 'Allow once', 'Always allow on this computer'], defaultId: 1, cancelId: 0, noLink: true
       });
       if (answer.response !== 1 && answer.response !== 2) return false;
@@ -471,46 +474,41 @@ if (nativeOrigin) {
       const generation = accessRevision;
       const now = today();
       const profile = vault.getData().profile;
-      // Laya guesses only off Iowa's portal (#185).
-      const { answers, guesses, sensitive, sensitiveFields } = await fieldAnswers.answer({ questions: request.questions, profile, budgetMs: request.budgetMs, today: now, guess: !iowa });
+      // Sure answers only: Laya's best guesses (#185) were mostly wrong on the final holdout, so it isn't asked for them (#189).
+      const { answers, sensitive, sensitiveFields } = await fieldAnswers.answer({ questions: request.questions, profile, budgetMs: request.budgetMs, today: now });
       requireUnlocked();
       if (generation !== accessRevision) throw publicError('SecondHand access changed. Click Autofill again.');
-      // Laya's sure answers and its best guesses, in page order.
-      const guessed = question => Object.hasOwn(guesses, question.id);
-      const chosen = request.questions.filter(question => Object.hasOwn(answers, question.id) || guessed(question));
+      const chosen = request.questions.filter(question => Object.hasOwn(answers, question.id));
       // Laya had no age from a saved birth date it can't use; the questions it left say why (#135).
       const reason = chosen.length < request.questions.length && household.hasUnusableBirthDate(profile, { today: now }) ? { reason: 'birthDate' } : {};
-      const release = list => ({ answers: Object.fromEntries(list.filter(question => !guessed(question)).map(question => [question.id, answers[question.id]])),
-        guesses: Object.fromEntries(list.filter(guessed).map(question => [question.id, guesses[question.id]])) });
-      if (!chosen.length) return { ...release([]), accessRevision, ...reason };
+      if (!chosen.length) return { answers: {}, accessRevision, ...reason };
       // Answers are profile information: they follow getFields' approval, each question listed
-      // with the option that would be filled, a guess marked as one. Iowa's portal keeps its rule of no sensitive prompt.
-      const lines = list => list.map(question => guessed(question) ? `“${question.label}”: ${guesses[question.id]} (a guess)` : `“${question.label}”: ${answers[question.id]}`).join('\n');
-      const guessNote = list => list.some(guessed) ? '\n\nLaya isn’t sure of the answers marked “a guess”. SecondHand marks them on the page for you to check.' : '';
+      // with the option that would be filled. Iowa's portal keeps its rule of no sensitive prompt.
+      const lines = list => list.map(question => `“${question.label}”: ${answers[question.id]}`).join('\n');
       const these = list => list.length === 1 ? 'this answer' : 'these answers';
       const approve = (list, sensitivePrompt = null) => approveRelease({ context, iowa, origin, generation,
         message: `Fill ${these(list)} into ${iowa ? 'Iowa’s application' : origin}?`,
-        items: `Laya, SecondHand’s AI on this computer, picked ${these(list)} from your saved information:\n${lines(list)}${guessNote(list)}`, sensitive: sensitivePrompt });
+        items: `Laya, SecondHand’s AI on this computer, picked ${these(list)} from your saved information:\n${lines(list)}`, sensitive: sensitivePrompt });
       const count = chosen.length;
       // Laya reads every sensitive fact at once, so the prompt names them all and says how many
-      // answers needed them; which fact decided an answer is not known. A guess never needs one.
+      // answers needed them; which fact decided an answer is not known.
       const needed = sensitive.length;
       const which = needed === count ? these(chosen) : `${needed} of these answers`;
       const uses = needed === count ? (count === 1 ? 'It uses' : 'They use') : `${needed} of them ${needed === 1 ? 'uses' : 'use'}`;
       const asksSensitive = !iowa && needed > 0;
       const approved = await approve(chosen, asksSensitive ? { message: `Fill ${count === 1 ? 'this answer' : `these ${count} answers`} on ${origin}? ${uses} sensitive details.`,
-        detail: `${sensitiveFields.map(fieldLabel).join(', ')}\n\nLaya, SecondHand’s AI on this computer, read these saved details to pick ${which}. The details stay on this computer. Only allow this if you meant to give these answers to ${origin}:\n${lines(chosen)}${guessNote(chosen)}` } : null);
+        detail: `${sensitiveFields.map(fieldLabel).join(', ')}\n\nLaya, SecondHand’s AI on this computer, read these saved details to pick ${which}. The details stay on this computer. Only allow this if you meant to give these answers to ${origin}:\n${lines(chosen)}` } : null);
       touch();
-      if (approved) return { ...release(chosen), accessRevision, ...reason };
+      if (approved) return { answers, accessRevision, ...reason };
       // Cancel on "Share sensitive details?" drops only the answers that needed sensitive details (#42).
       // That prompt shows only without Always allow, so the others then ask "Let Chrome fill this form?".
       const everyday = asksSensitive ? chosen.filter(question => !sensitive.includes(question.id)) : [];
-      if (!everyday.length) return { ...release([]), accessRevision, ...reason };
+      if (!everyday.length) return { answers: {}, accessRevision, ...reason };
       requireUnlocked();
       if (generation !== accessRevision) throw publicError('SecondHand access changed. Click Autofill again.');
       const kept = await approve(everyday);
       touch();
-      return { ...release(kept ? everyday : []), accessRevision, ...reason };
+      return { answers: kept ? Object.fromEntries(everyday.map(question => [question.id, answers[question.id]])) : {}, accessRevision, ...reason };
     } catch (error) {
       if (error.publicMessage) throw error;
       if (error.code === 'LAYA_NOT_READY') throw layaNotReady();
@@ -560,9 +558,11 @@ if (nativeOrigin) {
       return { unlocked: true };
     }
     // On Windows the native relay passes openApp on as it is; the app is running, so it comes forward.
-    if (request.type === 'showApp' || request.type === 'openApp') {
+    if (request.type === 'showApp' || request.type === 'openApp' || request.type === 'openHousehold') {
       if (mainWindow) { if (mainWindow.isMinimized?.()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); }
-      return request.type === 'showApp' ? { shown: true } : { opened: 'shown' };
+      // The side panel's Add your household (#180): the window opens My information at Your household, once unlocked.
+      if (request.type === 'openHousehold' && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('secondhand:open-household');
+      return request.type === 'openApp' ? { opened: 'shown' } : { shown: true };
     }
     if (request.type === 'warmLaya') return warmLaya();
     if (request.type === 'suggestFields' || request.type === 'answerFields') return layaRequest(request, context);
@@ -654,7 +654,7 @@ if (nativeOrigin) {
       }
       if (navigationOnly) { touch(); return { values: {}, accessRevision }; }
       const values = {};
-      let blocked = false;
+      let blocked = false, need = null;
       // Nothing is read when every field asked for was held back.
       if (fields.length) {
         const profile = vault.getData().profile;
@@ -665,9 +665,12 @@ if (nativeOrigin) {
         }
         // An answer left out because a saved birth date can't be used stays with the applicant, who is told why (#135).
         blocked = fields.some(field => !Object.hasOwn(values, field) && blockedByBirthDate(profile, field, { today: now }));
+        // A household question left open because no household list is saved, or because a birth date on it is missing, says
+        // which (#180), on sites other than Iowa's portal: the person by their row on the list, never by name.
+        if (!iowa) need = household.listNeed(profile, fields.filter(field => !Object.hasOwn(values, field)));
       }
       touch();
-      return { values, accessRevision, ...(held.length ? { held } : {}), ...(blocked ? { reason: 'birthDate' } : {}) };
+      return { values, accessRevision, ...(held.length ? { held } : {}), ...(blocked ? { reason: 'birthDate' } : {}), ...(need ? { household: need } : {}) };
     }
     if (request.type === 'saveFields') return saveAnswers(request, context);
     if (request.type === 'recordProgress') {
@@ -925,6 +928,13 @@ if (nativeOrigin) {
       if (typeof id !== 'string' || id.length > 64) throw publicError('Invalid application record.');
       await vault.update(data => { data.applications = data.applications.filter(item => item.id !== id); });
       touch(); return true;
+    },
+    // Overview's note to add the household list (#180) stays dismissed.
+    async dismissHouseholdNote() {
+      requireUnlocked();
+      householdNoteDismissed = true;
+      await saveSettings();
+      touch(); return status();
     },
     async setAutofillTrust(enabled) {
       requireUnlocked();

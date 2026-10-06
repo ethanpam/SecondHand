@@ -6,7 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { JSDOM } = require('jsdom');
 const { loadRenderer } = require('./helpers/harness.cjs');
-const { PROFILE_FIELDS, PROFILE_CHOICES, YES_NO_FIELDS, LIST_FIELDS, MEMBER_FIELDS, validateProfile } = require('../shared/schema.cjs');
+const { PROFILE_FIELDS, PROFILE_CHOICES, SEVERAL_CHOICES, YES_NO_FIELDS, LIST_FIELDS, MEMBER_FIELDS, validateProfile } = require('../shared/schema.cjs');
 const fictionalProfile = require('./fixtures/applicant-profile.json');
 
 const html = fs.readFileSync(path.join(__dirname, '../renderer/index.html'), 'utf8');
@@ -25,6 +25,7 @@ async function renderer(t, { initialSetup = null, ...overrides } = {}) {
   const window = dom.window;
   let onLocked;
   let onProfileChanged;
+  let onOpenHousehold;
   let status = { exists: true, unlocked: true, extensionId: '', bridgeRunning: true };
   const database = { profile: { firstName: 'Initial', lastName: 'Test' }, applications: [] };
   // The guided setup's progress as the desktop keeps it: null when none is under way.
@@ -48,28 +49,40 @@ async function renderer(t, { initialSetup = null, ...overrides } = {}) {
       return structuredClone(setup.progress);
     },
     onProfileChanged: callback => { onProfileChanged = callback; return () => {}; },
+    // Add your household in Chrome's side panel (#180), and Overview's note about it.
+    onOpenHousehold: callback => { onOpenHousehold = callback; return () => {}; },
+    dismissHouseholdNote: async () => { status = { ...status, householdNoteDismissed: true }; return status; },
     ...overrides
   };
   loadRenderer(window);
   await tick();
   const get = id => window.document.getElementById(id);
-  // A profile field's control: its input or select, or its group of radio buttons.
+  // A profile field's control: its input or select, or its group of radio buttons or checkboxes.
   const control = name => get('profile-form').elements.namedItem(name);
   const radios = name => control(name) instanceof window.RadioNodeList ? Array.from(control(name)) : null;
+  // A question answered with several choices (#184): its checked boxes' values, comma-separated.
+  const boxes = name => radios(name)?.[0].type === 'checkbox' ? radios(name) : null;
   return {
     window, get, database, control, radios, setup,
     // Save to My information in Chrome changed these saved fields.
     profileChanged: fields => onProfileChanged({ fields }),
-    value: name => control(name).value,
+    // The side panel's Add your household (#180).
+    openHousehold: () => onOpenHousehold(),
+    value: name => boxes(name) ? boxes(name).filter(box => box.checked).map(box => box.value).join(',') : control(name).value,
     choices: name => radios(name)?.map(radio => radio.value) ?? Array.from(control(name).options, option => option.value),
     edit(id, value) {
       get(id).value = value;
       get(id).dispatchEvent(new window.Event('input', { bubbles: true }));
     },
-    // Answers a profile field the way a person does: types, picks an option, or clicks a radio button.
+    // Answers a profile field the way a person does: types, picks an option, or clicks a radio button or each checkbox.
     answer(name, value) {
       const group = radios(name);
       if (!group) return this.edit(name, value);
+      if (boxes(name)) {
+        const chosen = value ? value.split(',') : [];
+        for (const box of group) if (box.checked !== chosen.includes(box.value)) box.click();
+        return;
+      }
       const radio = group.find(item => item.value === value);
       assert.ok(radio, `${name} has no ${JSON.stringify(value)} option`);
       radio.click();
@@ -748,7 +761,7 @@ test('the trust setting says plainly that it fills sensitive details without ask
   const hint = view.get('autofill-trust-hint');
   assert.equal(view.get('autofill-trust').getAttribute('aria-describedby'), 'autofill-trust-hint', 'a screen reader reads it with the checkbox');
   assert.equal(text(hint), 'When SecondHand is unlocked, Chrome can fill your saved answers without another pop-up, on every site SecondHand is on. ' +
-    'That includes your Social Security number, birth date, income, and citizenship and disability answers. ' +
+    'That includes your Social Security number, birth date, income, benefits, and citizenship and disability answers. ' +
     'It also continues through supported Iowa applicant, home-address, complete Tell Us More, screening, and financial record pages. ' +
     'It shares one person’s saved record at a time; you choose if several match. ' +
     'On other sites, optional Fill and continue uses saved answers only and may click an ordinary Next or Continue after supported questions are complete. ' +
@@ -770,7 +783,7 @@ test('Privacy & backups names everything autofill fills or clicks today and keep
   const card = text(view.window.document.querySelector('#view-privacy .autofill-card'));
   // Always allow covers sensitive details too, on every site SecondHand is on (#175).
   assert.equal(text(view.window.document.querySelector('#view-privacy .autofill-card p')), 'Autofill asks the first time. Choose Always allow to skip the pop-up while SecondHand is unlocked, ' +
-    'on every site SecondHand is on. That includes your Social Security number, birth date, income, and citizenship and disability answers. ' +
+    'on every site SecondHand is on. That includes your Social Security number, birth date, income, benefits, and citizenship and disability answers. ' +
     'When another site’s pop-up asks about those details, Always allow on this site skips it there alone. Only the saved answers a page needs leave SecondHand.');
   assert.doesNotMatch(card, /every time/);
   for (const phrase of ['first applicant page', 'Household Application Information', 'Tell Us More', 'date of birth', 'Iowa’s questions about you',
@@ -1759,7 +1772,7 @@ test('the household list starts with the applicant, who mirrors their own name a
   view.edit('birthDate', '1985-04-12');
   assert.equal(inRow(self, 'firstName').value, 'Avery');
   assert.equal(inRow(self, 'birthDate').value, '1985-04-12');
-  editRow(view, self, 'student', 'no');
+  view.edit('studentLevel', 'not-student');
   for (const [field, value] of [['firstName', 'Riley'], ['lastName', 'Example'], ['birthDate', '2015-09-03'], ['relationship', 'child']]) editRow(view, other, field, value);
   assert.equal(inRow(other, 'grade').closest('.field').hidden, true, 'a grade is asked only for a student');
   editRow(view, other, 'student', 'yes');
@@ -1992,4 +2005,167 @@ test('the day My information counts from is this computer’s own: born today co
   assert.deepEqual(COUNT_VALUES(view), ['4', '1', '2', '1'], 'exactly 130 years ago still counts');
   editRow(view, memberRows(view)[3], 'birthDate', '1896-10-04');
   assert.match(view.get('household-counts-note').textContent, /Person 4’s date of birth is more than 130 years ago/);
+});
+
+// #184: the student status, where the household's income comes from, the benefits it gets now, and the help wanted.
+const NEW_ANSWERS = ['studentLevel', 'incomeSources', 'currentBenefits', 'helpWanted'];
+const answersOf = profile => Object.fromEntries(NEW_ANSWERS.map(key => [key, profile[key]]));
+
+test('My information asks for the student status, income sources, current benefits and help wanted in their setup steps, each with help text', async t => {
+  const view = await renderer(t);
+  openProfile(view);
+  const first = key => view.radios(key)?.[0] ?? view.control(key);
+  assert.deepEqual(NEW_ANSWERS.map(key => first(key).closest('[data-setup-step]').dataset.setupStep), ['1', '4', '5', '5'], 'You, Income and money on hand, Programs');
+  assert.deepEqual(view.choices('studentLevel'), PROFILE_CHOICES.studentLevel);
+  assert.deepEqual(Array.from(view.get('studentLevel').options, option => option.textContent),
+    ['Not answered yet', 'Not a student', 'High school', 'Undergraduate (college)', 'Graduate school', 'Another kind of school']);
+  for (const [key, choices] of Object.entries(SEVERAL_CHOICES)) {
+    assert.deepEqual(view.choices(key), choices, key);
+    assert.ok(view.radios(key).every(box => box.type === 'checkbox' && box.labels.length === 1 && box.labels[0].textContent.trim()), `${key}: every choice is a labelled checkbox`);
+  }
+  // Each question names itself, and its help text is read with it.
+  const described = control => control.getAttribute('aria-describedby').split(' ').map(id => view.get(id).textContent.trim());
+  assert.match(described(view.get('studentLevel'))[0], /^Pick the school you go to now\. /);
+  const groups = Object.fromEntries(Object.keys(SEVERAL_CHOICES).map(key => [key, view.radios(key)[0].closest('fieldset')]));
+  assert.deepEqual(Object.fromEntries(Object.entries(groups).map(([key, group]) => [key, [group.querySelector('legend').textContent, described(group)[0]]])), {
+    incomeSources: ['Where does your household’s income come from now?', 'Check every source that applies, or None. Forms that ask are answered from this list, so leave none out.'],
+    currentBenefits: ['Which benefits do you or anyone in your household get now?', 'Check every one that applies, or None. When a form asks whether your household gets one of these, a benefit left unchecked is answered No.'],
+    helpWanted: ['What help are you looking for?', 'Check all that apply. Pantry sign-up forms often ask.']
+  });
+});
+
+test('the answers from lists save as the desktop keeps them, show again after a reload, and clear on lock; None stands alone', async t => {
+  const saved = [];
+  const view = await renderer(t, { saveProfile: async profile => { saved.push(structuredClone(profile)); return structuredClone(profile); } });
+  openProfile(view);
+  view.answer('studentLevel', 'graduate');
+  view.answer('incomeSources', 'pension,job');
+  view.answer('currentBenefits', 'snap,wic');
+  view.answer('helpWanted', 'food-pantry');
+  assert.equal(view.get('profile-save-state').hidden, false, 'checking a box is an unsaved change');
+  // None unchecks the rest, and any other answer unchecks None.
+  view.answer('currentBenefits', 'snap,wic,none');
+  assert.equal(view.value('currentBenefits'), 'none');
+  view.radios('currentBenefits').find(box => box.value === 'medicaid').click();
+  assert.equal(view.value('currentBenefits'), 'medicaid');
+  view.submit('profile-form');
+  await tick();
+  assert.deepEqual(answersOf(saved[0]), { studentLevel: 'graduate', incomeSources: 'job,pension', currentBenefits: 'medicaid', helpWanted: 'food-pantry' });
+  assert.doesNotThrow(() => validateProfile(saved[0]));
+  view.lock();
+  for (const key of NEW_ANSWERS) assert.equal(view.value(key), '', key);
+  view.database.profile = structuredClone(fictionalProfile);
+  await view.window.secondHand.unlock();
+  view.submit('auth-form');
+  await tick(); await tick();
+  openProfile(view);
+  assert.deepEqual(Object.fromEntries(NEW_ANSWERS.map(key => [key, view.value(key)])), answersOf(fictionalProfile));
+});
+
+test('the applicant’s own row on the household list follows the student status, read-only, and asks for a grade only for a student', async t => {
+  const saved = [];
+  const view = await renderer(t, { saveProfile: async profile => { saved.push(structuredClone(profile)); return structuredClone(profile); } });
+  openProfile(view);
+  view.edit('studentLevel', 'undergraduate');
+  view.get('add-household-member').click();
+  const [self, other] = memberRows(view);
+  editRow(view, other, 'firstName', 'Riley');
+  assert.equal(inRow(self, 'student').value, 'yes', 'a new list starts with the applicant as their student status says');
+  assert.equal(inRow(self, 'student').disabled, true, 'your student status is edited in About you');
+  assert.equal(self.querySelector('.field-hint').textContent, 'Your name, date of birth, and whether you’re a student come from About you.');
+  assert.equal(inRow(self, 'grade').closest('.field').hidden, false);
+  editRow(view, self, 'grade', 'Junior');
+  view.edit('studentLevel', 'not-student');
+  assert.deepEqual([inRow(self, 'student').value, inRow(self, 'grade').value, inRow(self, 'grade').closest('.field').hidden], ['no', '', true]);
+  view.edit('studentLevel', 'graduate');
+  assert.equal(inRow(self, 'student').value, 'yes');
+  view.edit('studentLevel', '');
+  assert.equal(inRow(self, 'student').value, '', 'unanswered again');
+  view.edit('studentLevel', 'high-school');
+  view.submit('profile-form');
+  await tick();
+  assert.deepEqual([saved[0].studentLevel, saved[0].householdMembers[0].student], ['high-school', 'yes']);
+  assert.doesNotThrow(() => validateProfile(saved[0]));
+});
+
+test('a row saved before the student status existed keeps its answer until the student status is chosen', async t => {
+  const saved = [];
+  const legacy = { ...fictionalProfile, studentLevel: '', householdMembers: fictionalProfile.householdMembers.map(member => member.relationship === 'self' ? { ...member, student: 'yes', grade: 'College' } : member) };
+  const view = await renderer(t, { getData: async () => structuredClone({ profile: legacy, applications: [] }),
+    saveProfile: async profile => { saved.push(structuredClone(profile)); return structuredClone(profile); } });
+  openProfile(view);
+  const [self] = memberRows(view);
+  assert.deepEqual([view.value('studentLevel'), inRow(self, 'student').value, inRow(self, 'grade').value], ['', 'yes', 'College']);
+  view.submit('profile-form');
+  await tick();
+  assert.deepEqual([saved[0].householdMembers[0].student, saved[0].householdMembers[0].grade], ['yes', 'College'], 'saving again keeps it');
+  view.edit('studentLevel', 'undergraduate');
+  assert.deepEqual([inRow(self, 'student').value, inRow(self, 'grade').value], ['yes', 'College']);
+});
+
+// #180: Overview says to add the household list until one is saved; the side panel's Add your household opens it too.
+const atHousehold = view => view.get('view-profile').hidden === false && view.window.document.activeElement === view.get('household-heading');
+test('Overview offers Add your household until a household list is saved, and the button opens My information at Your household (#180)', async t => {
+  const view = await renderer(t);
+  assert.equal(view.get('view-overview').hidden, false);
+  assert.equal(view.get('household-note').hidden, false);
+  assert.equal(view.get('household-note-text').textContent, 'Add your household: SecondHand can then answer questions like “# of children 0–5”.');
+  assert.equal(view.get('household-note-open').textContent.trim(), 'Add your household');
+  view.get('household-note-open').click();
+  assert.ok(atHousehold(view), 'My information opens at Your household, its heading read first');
+  view.get('add-household-member').click();
+  editRow(view, memberRows(view)[1], 'firstName', 'Riley');
+  view.submit('profile-form');
+  await tick(); await tick();
+  view.window.document.querySelector('.nav-item[data-view="overview"]').click();
+  assert.equal(view.get('household-note').hidden, true, 'a saved list ends it');
+  const listed = await renderer(t, { getData: async () => ({ profile: { firstName: 'Avery', householdMembers: [{ id: '0f2c8d4e-1a3b-4c5d-8e6f-7a8b9c0d1e2f', relationship: 'self' }] }, applications: [] }) });
+  assert.equal(listed.get('household-note').hidden, true, 'never shown with a list saved');
+});
+
+test('Dismiss keeps the household note away, after a lock too; a dismissal the app can’t keep says so and leaves it (#180)', async t => {
+  let dismissed = 0;
+  const view = await renderer(t);
+  const dismiss = view.window.secondHand.dismissHouseholdNote;
+  view.window.secondHand.dismissHouseholdNote = () => { dismissed++; return dismiss(); };
+  view.get('household-note-dismiss').click();
+  await tick(); await tick();
+  assert.equal(dismissed, 1);
+  assert.equal(view.get('household-note').hidden, true);
+  view.lock(1);
+  view.edit('passphrase', 'synthetic');
+  view.submit('auth-form');
+  await tick(); await tick();
+  assert.equal(view.get('workspace').hidden, false);
+  assert.equal(view.get('household-note').hidden, true, 'still dismissed after unlocking');
+  const refused = await renderer(t, { dismissHouseholdNote: async () => { throw new Error('Unlock SecondHand first.'); } });
+  refused.get('household-note-dismiss').click();
+  await tick(); await tick();
+  assert.equal(refused.get('household-note').hidden, false);
+  assert.equal(refused.get('toast').textContent, 'Unlock SecondHand first.');
+  assert.equal(refused.get('toast').classList.contains('error'), true);
+});
+
+test('Add your household in Chrome opens My information at Your household, leaving the guided setup, and after unlocking when locked (#180)', async t => {
+  const view = await renderer(t, { initialSetup: { step: 3, steps: 6 } });
+  view.get('setup-resume-button').click();
+  assert.equal(view.get('setup-step-title').textContent, 'Income and money on hand');
+  view.openHousehold();
+  assert.ok(atHousehold(view));
+  assert.equal(view.get('setup-bar').hidden, true, 'My information shows whole, its household part included');
+  assert.equal(view.get('household-heading').closest('[hidden]'), null);
+  view.window.document.querySelector('.nav-item[data-view="overview"]').click();
+  view.lock(1);
+  view.openHousehold();
+  assert.equal(view.get('workspace').hidden, true, 'nothing opens while locked');
+  view.edit('passphrase', 'synthetic');
+  view.submit('auth-form');
+  await tick(); await tick();
+  assert.ok(atHousehold(view), 'once unlocked, it opens there');
+  view.window.document.querySelector('.nav-item[data-view="overview"]').click();
+  view.lock(2);
+  view.edit('passphrase', 'synthetic');
+  view.submit('auth-form');
+  await tick(); await tick();
+  assert.equal(view.get('view-overview').hidden, false, 'only once');
 });

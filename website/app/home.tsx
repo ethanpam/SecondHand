@@ -110,8 +110,16 @@ export function Home() {
                 It answers Iowa’s Tell Us More questions only from answers you
                 saved in My information. If you turn on Laya, SecondHand’s AI on
                 this computer, it fills more questions and marks them as guesses
-                to check. It moves past information-only screens for you; on
-                every other page, you choose when to move on.
+                to check. It moves past information-only screens for you. It
+                also selects Save and Continue on Tell Us More, Background
+                Information, and Iowa’s questions about emergency SNAP, jobs,
+                income, expenses and property. It does the same on pages for one
+                person’s saved job, private pension, Social Security, rent,
+                utilities or cash. It does this only when it knows every
+                question on the page and every required answer is filled in. If
+                a required answer is missing, or Iowa shows an error or pop-up,
+                it stays on that page. Anywhere else, you move on yourself. You handle
+                consent, signatures and submission.
               </p>
               <p>
                 The side panel works in English, Spanish, Vietnamese, Chinese,
@@ -397,10 +405,9 @@ export function Home() {
                   app, or choose Always allow. SecondHand moves past
                   information-only screens and fills the pages it knows.
                   Anything missing is flagged so you can jump straight to it. On
-                  verified applicant and home-address screens, it can choose
-                  Save and Continue automatically. Review all answers and the
-                  first suggested home address before submitting; other Next
-                  buttons stay manual.
+                  some pages it knows, it selects Save and Continue, but only
+                  when every required answer is filled in. Review every answer
+                  and the first suggested home address before you submit.
                 </p>
               </div>
               <a

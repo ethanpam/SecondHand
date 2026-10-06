@@ -48,8 +48,9 @@ const MAX_BUDGET_MS = 3000;
 // Refusals the extension acts on. Only these codes travel back with an error.
 const PUBLIC_CODES = Object.freeze(['LAYA_NOT_READY', 'DESKTOP_UNREACHABLE']);
 // Requests that carry only their id and type. unlockWithTouchId asks the app to show its own
-// Touch ID prompt (#99); a password never comes from Chrome.
-const BARE_REQUESTS = Object.freeze(['status', 'showApp', 'openApp', 'warmLaya', 'trustAllSites', 'untrustAllSites', 'unlockWithTouchId']);
+// Touch ID prompt (#99); a password never comes from Chrome. openHousehold opens the app on My
+// information, at Your household (#180).
+const BARE_REQUESTS = Object.freeze(['status', 'showApp', 'openApp', 'warmLaya', 'trustAllSites', 'untrustAllSites', 'unlockWithTouchId', 'openHousehold']);
 // The native host's answer when the desktop app isn't running (or can't be reached).
 const UNREACHABLE = 'Open SecondHand, connect this extension, and unlock SecondHand.';
 

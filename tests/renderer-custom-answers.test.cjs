@@ -30,7 +30,7 @@ async function renderer(t, { customFields = [answer()], save } = {}) {
   const saves = [], reviews = [];
   window.secondHand = {
     status: async () => status, getData: async () => structuredClone(database), setupProgress: async () => null,
-    onLocked: callback => { locked = callback; return () => {}; }, onUnlocked: () => () => {}, onProfileChanged: callback => { profileChanged = callback; return () => {}; },
+    onLocked: callback => { locked = callback; return () => {}; }, onUnlocked: () => () => {}, onOpenHousehold: () => () => {}, onProfileChanged: callback => { profileChanged = callback; return () => {}; },
     unlock: async () => { status = { ...status, unlocked: true }; return status; },
     saveProfile: async profile => {
       saves.push(plain(profile));

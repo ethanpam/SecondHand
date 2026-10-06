@@ -13,7 +13,9 @@
     'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare',
     'monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand', 'monthlyMedicalExpenses',
     'sex', 'maritalStatus', 'hasSsnAnswer', 'ssnCardNameMatches', 'usCitizen', 'militaryOrVeteran', 'disabled', 'blind', 'healthLimitation', 'medicare',
-    ...snapCatalog.scalarFields.map(field => field.key)];
+    'studentLevel', 'incomeSources', 'currentBenefits', 'helpWanted', ...snapCatalog.scalarFields.map(field => field.key)];
+  // Questions answered with several of a list's choices (#184): checkboxes, saved as the checked values comma-separated.
+  const severalFields = ['incomeSources', 'currentBenefits', 'helpWanted'];
   const viewNames = { overview: 'Overview', profile: 'My information', documents: 'Documents', applications: 'Applications', extension: 'Chrome extension', privacy: 'Privacy & backups' };
   const statusNames = { draft: 'Draft', in_progress: 'In progress', submitted: 'Submitted', needs_action: 'Needs action', approved: 'Approved', denied: 'Denied' };
   let vaultStatus = { exists: false, unlocked: false, recoveryKey: false, deviceReset: false, deviceResetSupported: false, extensionId: '', bridgeRunning: false };
@@ -52,7 +54,7 @@
     { title: 'Your household', intro: 'Everyone who lives with you and shares food with you. SecondHand works out their ages from their birth dates.' },
     { title: 'Where you live', intro: 'Your home address and where you get mail.' },
     { title: 'Income and money on hand', intro: 'Monthly income, housing costs, money on hand, and medical costs. Leave blank anything you don’t know yet.' },
-    { title: 'Programs', intro: 'The programs you want to ask Iowa for.' },
+    { title: 'Programs', intro: 'The programs you want to ask Iowa for, the benefits your household gets now, and the help you’re looking for.' },
     { title: 'About you', intro: 'Iowa’s questions about you, so SecondHand can answer them on Iowa’s Tell Us More page.' }
   ];
   // How many steps the desktop says are done ({ step, steps }), or null when no setup is under way.
@@ -63,6 +65,8 @@
   let offerSetup = false;
   // The desktop's note that it reset its settings is shown once while the app is open.
   let settingsNoticeShown = false;
+  // Add your household in Chrome's side panel while SecondHand is locked (#180): My information opens at Your household once unlocked.
+  let householdWanted = false;
 
   function icon(name) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -170,6 +174,7 @@
     manualCounts = null;
     renderMembers([]);
     renderSetupResume();
+    $('household-note').hidden = true;
     $('application-form').reset();
     $('application-id').value = '';
     $('auth-form').reset();
@@ -345,6 +350,15 @@
 
   // A profile field's input or select, or its radio buttons: setting a group's value checks that answer.
   const profileControl = (field) => $('profile-form').elements.namedItem(field);
+  // A profile field's answer as it is saved, and showing a saved one. A question with several answers is its checked boxes.
+  function fieldValue(field) {
+    return severalFields.includes(field) ? Array.from(profileControl(field)).filter(box => box.checked).map(box => box.value).join(',') : profileControl(field).value;
+  }
+  function showValue(field, value) {
+    if (!severalFields.includes(field)) { profileControl(field).value = value; return; }
+    const chosen = value ? value.split(',') : [];
+    for (const box of profileControl(field)) box.checked = chosen.includes(box.value);
+  }
   const snapEditor = window.SecondHandSnapEditor.create($('snap-information-fields'), () => {
     clearFieldReviews(); profileRevision++; setProfileDirty(true);
   });
@@ -353,7 +367,7 @@
     clearFieldReviews();
     profileRevision++;
     manualCounts = null;
-    for (const key of profileFields) profileControl(key).value = typeof data.profile[key] === 'string' ? data.profile[key] : '';
+    for (const key of profileFields) showValue(key, typeof data.profile[key] === 'string' ? data.profile[key] : '');
     snapEditor.render(data.profile);
     renderCustomAnswers(data.profile.customFields);
     renderMembers(Array.isArray(data.profile.householdMembers) ? data.profile.householdMembers : []);
@@ -517,7 +531,7 @@
     select.value = value;
     return select;
   }
-  // One person's row. The applicant's own name and birth date come from About you and show here read-only.
+  // One person's row. The applicant's own name, birth date and whether they're a student come from About you and show here read-only.
   function memberRow(member) {
     const self = member.relationship === 'self';
     const row = element('fieldset', 'household-member');
@@ -537,17 +551,28 @@
     const student = memberField(member, 'student', 'A student?', choice([['', 'Not answered yet'], ['yes', 'Yes'], ['no', 'No']], member.student || ''));
     const grade = memberField(member, 'grade', 'Grade (for example 3rd, K, or College)', text('grade', 20));
     grade.hidden = member.student !== 'yes';
-    student.querySelector('select').addEventListener('change', () => {
-      const yes = student.querySelector('select').value === 'yes';
-      grade.hidden = !yes;
-      if (!yes) grade.querySelector('input').value = '';
-    });
+    student.querySelector('select').disabled = self;
+    student.querySelector('select').addEventListener('change', () => showGrade(row));
     grid.append(student, grade);
     row.append(element('legend'), grid);
     window.SecondHandSnapEditor.memberDetails(row, member);
-    if (self) row.append(element('p', 'field-hint', 'Your name and date of birth come from About you.'));
+    if (self) row.append(element('p', 'field-hint', 'Your name, date of birth, and whether you’re a student come from About you.'));
     row.querySelectorAll('[data-member-field="birthDate"]').forEach(input => input.addEventListener('input', renderCounts));
     return row;
+  }
+  // A row's grade is asked only for a student, and cleared for anyone else.
+  function showGrade(row) {
+    const yes = row.querySelector('[data-member-field="student"]').value === 'yes';
+    row.querySelector('[data-member-field="grade"]').closest('.field').hidden = !yes;
+    if (!yes) row.querySelector('[data-member-field="grade"]').value = '';
+  }
+  // The applicant's own row says whether they're a student as their student status does (#184).
+  const studentAnswer = level => level === 'not-student' ? 'no' : level ? 'yes' : '';
+  function syncStudent() {
+    const row = memberRows().find(item => item.dataset.self === 'true');
+    if (!row) return;
+    row.querySelector('[data-member-field="student"]').value = studentAnswer(profileControl('studentLevel').value);
+    showGrade(row);
   }
   // The list's rows, legends, remove buttons and Add button, and the counts worked out from it.
   function renderMembers(members) {
@@ -620,7 +645,7 @@
     if (rows.length >= MAX_MEMBERS) return;
     const blank = relationship => ({ id: window.crypto.randomUUID(), firstName: '', lastName: '', birthDate: '', relationship, student: '', grade: '' });
     // The list starts with the applicant.
-    if (!rows.length) $('household-members').append(memberRow(blank('self')));
+    if (!rows.length) $('household-members').append(memberRow({ ...blank('self'), student: studentAnswer(profileControl('studentLevel').value) }));
     const row = memberRow(blank(''));
     $('household-members').append(row);
     refreshMembers();
@@ -666,6 +691,17 @@
     setupStep = null;
     renderSetupStep();
   }
+  // Overview's note to add the household list (#180): shown until a list is saved, unless the applicant dismissed it.
+  function renderHouseholdNote() {
+    const listed = Array.isArray(data.profile.householdMembers) && data.profile.householdMembers.length > 0;
+    $('household-note').hidden = !vaultStatus.unlocked || listed || vaultStatus.householdNoteDismissed === true;
+  }
+  // My information at Your household, from Overview's note or Chrome's side panel (#180). Locked, it opens there once unlocked.
+  function openHousehold() {
+    if (!vaultStatus.unlocked) { householdWanted = true; return; }
+    closeSetup();
+    if (showView('profile')) $('household-heading').focus();
+  }
   // Overview's "Finish setting up" while a setup is under way.
   function renderSetupResume() {
     $('setup-resume').hidden = !setupProgress;
@@ -699,7 +735,7 @@
       if (!profileDirty) fillProfile();
       else {
         for (const field of fields.filter(name => profileFields.includes(name))) {
-          if (String(profileControl(field).value) === String(before[field] ?? '')) profileControl(field).value = typeof data.profile[field] === 'string' ? data.profile[field] : '';
+          if (String(fieldValue(field)) === String(before[field] ?? '')) showValue(field, typeof data.profile[field] === 'string' ? data.profile[field] : '');
         }
         if (fields.includes('customFields')) mergeCustomAnswers(before.customFields, data.profile.customFields);
       }
@@ -743,7 +779,7 @@
     }
   }
 
-  const reviewProfileDraft = () => ({ ...Object.fromEntries(profileFields.map(key => [key, String(profileControl(key).value || '')])), householdMembers: collectMembers(), ...snapEditor.read() });
+  const reviewProfileDraft = () => ({ ...Object.fromEntries(profileFields.map(key => [key, String(fieldValue(key) || '')])), householdMembers: collectMembers(), ...snapEditor.read() });
   const reviewDocumentCandidates = () => documentReviewFields.map(field => ({ ...field.metadata, value: field.input ? field.input.value : field.value }));
 
   function profileReviewTarget(key) {
@@ -1208,7 +1244,7 @@
   function renderSummary() {
     const hasProfile = profileFields.some((field) => Boolean(data.profile[field]));
     $('profile-step-label').replaceChildren(document.createTextNode(hasProfile ? 'Review my profile ' : 'Set up my profile '), icon('arrow'));
-    renderApplications(); renderSetup(); renderRecovery(); renderTouchId();
+    renderApplications(); renderSetup(); renderRecovery(); renderTouchId(); renderHouseholdNote();
   }
 
   async function loadUnlocked(status) {
@@ -1230,6 +1266,7 @@
     fillProfile(); renderSummary();
     showView('overview', { skipConfirmation: true });
     renderSetupResume();
+    if (householdWanted) { householdWanted = false; openHousehold(); }
     // Problems found while opening, in one toast so none hides another: setup progress that couldn't
     // be read, Touch ID turned off while unlocking (and why), and settings the desktop had to reset.
     const settingsNotice = !settingsNoticeShown && typeof status.settingsNotice === 'string' && status.settingsNotice;
@@ -1469,6 +1506,19 @@
   $('setup-back').addEventListener('click', () => { if (setupStep > 0) { setupStep--; renderSetupStep(); } });
   $('setup-later').addEventListener('click', () => { if (showView('overview')) renderSetupResume(); });
   $('add-household-member').addEventListener('click', addMember);
+  $('household-note-open').addEventListener('click', openHousehold);
+  $('household-note-dismiss').addEventListener('click', () => {
+    const generation = vaultGeneration;
+    pending($('household-note-dismiss'), async () => {
+      try {
+        const status = await api.dismissHouseholdNote();
+        if (generation !== vaultGeneration) return;
+        vaultStatus = { ...vaultStatus, ...status };
+        renderHouseholdNote();
+        $('main-content').focus();
+      } catch (error) { if (generation === vaultGeneration) toast(error.message || 'Unable to dismiss this note.', true); }
+    });
+  });
   for (const [buttonId, method, message] of [
     ['copy-recovery-key', 'copyRecoveryKey', 'Copied. It will be cleared from the clipboard in 1 minute.'],
     ['save-recovery-key', 'saveRecoveryKey', 'Saved. Print it or move it somewhere safe, away from this computer.']
@@ -1551,6 +1601,11 @@
     if (event.target.closest('#custom-answers')) clearError('custom-answers-error');
     profileRevision++; setProfileDirty(true);
     if (['firstName', 'lastName', 'birthDate'].includes(event.target.name)) syncSelf();
+    if (event.target.name === 'studentLevel') syncStudent();
+    // None stands alone among a question's answers.
+    if (severalFields.includes(event.target.name) && event.target.checked) {
+      for (const box of profileControl(event.target.name)) if (box !== event.target && (event.target.value === 'none' || box.value === 'none')) box.checked = false;
+    }
   });
   $('profile-form').addEventListener('change', () => clearFieldReviews());
   $('profile-form').addEventListener('submit', (event) => {
@@ -1778,6 +1833,7 @@
       refreshTouchIdUnlock();
     });
     api.onProfileChanged(change => profileChangedElsewhere(change.fields));
+    api.onOpenHousehold(openHousehold);
     // Unlocked from Chrome's side panel with Touch ID: show the saved information here too.
     api.onUnlocked(async () => {
       if (vaultStatus.unlocked) return;

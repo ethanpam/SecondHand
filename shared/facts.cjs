@@ -7,11 +7,11 @@
 const { localToday, ageOn, householdCounts, memberAges } = require('./household.cjs');
 
 // Saved fields whose facts need the applicant's permission before an answer based on them
-// reaches a website: identity, money, health, housing and immigration details. Facts worked out
+// reaches a website: identity, money, benefits, health, housing and immigration details. Facts worked out
 // from household members' birth dates name 'householdMembers.birthDate': they reveal ages, as the
 // applicant's own birth date does.
 const SENSITIVE_SOURCES = Object.freeze(['ssn', 'birthDate', 'householdMembers.birthDate', 'monthlyEarnedIncome', 'monthlyOtherIncome', 'assetsOnHand', 'monthlyMedicalExpenses',
-  'householdDisability', 'householdPregnant', 'householdMedicare', 'householdAllCitizens', 'householdLegalStatus', 'hasHomeAddress']);
+  'householdDisability', 'householdPregnant', 'householdMedicare', 'householdAllCitizens', 'householdLegalStatus', 'hasHomeAddress', 'incomeSources', 'currentBenefits']);
 const AGE_THRESHOLDS = Object.freeze([18, 55, 60, 62, 65]);
 const STATE_NAMES = Object.freeze({
   AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California', CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware',
@@ -22,6 +22,17 @@ const STATE_NAMES = Object.freeze({
   SC: 'South Carolina', SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont', VA: 'Virginia', WA: 'Washington',
   WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming'
 });
+
+// What each saved choice means (#184), in the facts' words.
+const STUDENT_LEVELS = Object.freeze({ 'not-student': 'The applicant is not a student.', 'high-school': 'The applicant is a high school student.',
+  undergraduate: 'The applicant is an undergraduate college student.', graduate: 'The applicant is a graduate student.',
+  other: 'The applicant is a student, not in high school, college or graduate school.' });
+const INCOME_SOURCES = Object.freeze({ job: 'a job', 'self-employment': 'self-employment', 'financial-aid': 'financial aid or student loans', 'family-support': 'family support',
+  unemployment: 'unemployment benefits', 'social-security': 'Social Security (including SSI and SSDI)', 'child-support': 'child support', pension: 'a pension', other: 'another source' });
+const BENEFITS = Object.freeze({ snap: 'SNAP', wic: 'WIC', 'cash-assistance': 'cash assistance (TANF, FIP or HRA)', medicaid: 'Medicaid', ssi: 'SSI',
+  housing: 'housing assistance', 'school-meals': 'free or reduced school meals' });
+const HELP = Object.freeze({ 'food-pantry': 'a food pantry', 'fresh-produce': 'fresh produce', 'food-vouchers': 'meals or food vouchers', 'gift-cards': 'grocery gift cards',
+  'snap-help': 'help applying for SNAP', 'social-services': 'social services', other: 'other help' });
 
 const present = value => typeof value === 'string' && value.trim() !== '';
 function count(profile, field) {
@@ -41,6 +52,14 @@ function yesNo(profile, field) {
   if (value !== 'yes' && value !== 'no') throw new Error(`${field} must be yes or no.`);
   return value === 'yes';
 }
+// A saved list of choices: its codes, or null when it's unanswered. `codes` are the ones the list may hold.
+function chosen(profile, field, codes) {
+  if (!present(profile[field])) return null;
+  const list = profile[field].trim().split(',');
+  if (list.some(code => !codes.includes(code))) throw new Error(`${field} must list known choices.`);
+  return list;
+}
+const joined = (items, word) => items.length === 1 ? items[0] : `${items.slice(0, -1).join(', ')} ${word} ${items.at(-1)}`;
 const dollars = amount => `$${Math.floor(amount / 100).toLocaleString('en-US')}${amount % 100 ? `.${String(amount % 100).padStart(2, '0')}` : ''}`;
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
@@ -64,6 +83,10 @@ function buildFacts(profile, { today } = {}) {
   if (age !== null) {
     add('applicant.age', `The applicant is ${age} years old.`, ['birthDate']);
     add('applicant.ageBand', ageBand(age), ['birthDate']);
+  }
+  if (present(profile.studentLevel)) {
+    if (!Object.hasOwn(STUDENT_LEVELS, profile.studentLevel.trim())) throw new Error('studentLevel must be a known student status.');
+    add('applicant.student', STUDENT_LEVELS[profile.studentLevel.trim()], ['studentLevel']);
   }
 
   // With a household list, its counts win over the manual ones: the size from its people, the age counts from their birth dates.
@@ -116,6 +139,9 @@ function buildFacts(profile, { today } = {}) {
     add('income.total', total ? `The household’s total income is ${dollars(total)} a month (${dollars(total * 12)} a year).` : 'The household has no income.',
       ['monthlyEarnedIncome', 'monthlyOtherIncome']);
   }
+  const sources = chosen(profile, 'incomeSources', [...Object.keys(INCOME_SOURCES), 'none']);
+  if (sources) add('income.sources', sources.includes('none') ? 'The household has no source of income.'
+    : `The household’s income comes from ${joined(sources.map(code => INCOME_SOURCES[code]), 'and')}.`, ['incomeSources']);
   const rent = cents(profile, 'monthlyRent');
   if (rent !== null) add('housing.rent', rent ? `Rent or mortgage costs ${dollars(rent)} a month.` : 'The household pays no rent or mortgage.', ['monthlyRent']);
   const utilities = cents(profile, 'monthlyUtilities');
@@ -128,6 +154,12 @@ function buildFacts(profile, { today } = {}) {
   said('programSnap', 'program.snap', 'The applicant is applying for SNAP food assistance.', 'The applicant is not applying for SNAP food assistance.');
   said('programFip', 'program.fip', 'The applicant is applying for FIP cash assistance.', 'The applicant is not applying for FIP cash assistance.');
   said('programMedicaid', 'program.medicaid', 'The applicant is applying for Medicaid health coverage.', 'The applicant is not applying for Medicaid health coverage.');
+  // The benefits the household gets now. The ones it doesn't get are left out, to keep the sheet short enough for the model.
+  const benefits = chosen(profile, 'currentBenefits', [...Object.keys(BENEFITS), 'none']);
+  if (benefits) add('benefits.current', benefits.includes('none') ? `The household gets none of these benefits now: ${joined(Object.values(BENEFITS), 'and')}.`
+    : `The household gets ${joined(benefits.map(code => BENEFITS[code]), 'and')} now.`, ['currentBenefits']);
+  const help = chosen(profile, 'helpWanted', Object.keys(HELP));
+  if (help) add('help.wanted', `The applicant is looking for ${joined(help.map(code => HELP[code]), 'and')}.`, ['helpWanted']);
   return facts;
 }
 

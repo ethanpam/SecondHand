@@ -40,6 +40,18 @@ const DETAILS = 'https://pantry.example.org/details';
 const HOUSEHOLD = 'https://pantry.example.org/household';
 const HOUSEHOLD_QUESTIONS = { young: '# of people in your household 0 - 17 yrs old', middle: '# of people in your household 18 - 59 yrs old', older: '# of people in your household 60 + yrs',
   student: 'Student name and grade. Order will be assigned to(first and Last)', guardian: 'Guardian first and last name', apt: 'Apartment number' };
+// #184: the four questions a student pantry's intake (Jotform) left open in live QA, drawn as Jotform draws them.
+const STUDENT_PANTRY = 'https://pantry.example.org/student';
+const STUDENT_QUESTIONS = [['radio', 3, 'Student Status', ['Undergraduate', 'Graduate', 'Feirstein Graduate']],
+  ['checkbox', 4, 'Assistance/Information Needed', ['Fresh Food', 'Vouchers', 'Food Pantry', 'Grocery Gift Cards', 'Social Services']],
+  ['checkbox', 5, 'Current Source of Income/Resources', ['Financial Aid', 'Family Support', 'On-Campus Job', 'Off-Campus Job', 'Other Support']],
+  ['radio', 6, 'Do you or anyone in your family receive Cash Assistance through NYC HRA?', ['Yes', 'No']]];
+const jotformQuestion = ([type, q, label, options]) => `<li class="form-line jf-required"><label class="form-label" id="label_${q}">${label}<span class="form-required">*</span></label>` +
+  `<div role="${type === 'radio' ? 'radiogroup' : 'group'}" aria-labelledby="label_${q}">${options.map((value, n) => `<span class="form-${type}-item"><input type="${type}" id="input_${q}_${n}" name="q${q}[]" value="${value}" required>` +
+  `<label for="input_${q}_${n}">${value}</label></span>`).join('')}</div></li>`;
+// #180: a Jotform's household questions from the live QA, asked while no household list is saved.
+const NO_LIST = 'https://pantry.example.org/household-order';
+const NO_LIST_QUESTIONS = { adults: '# of Adults', young: '# of Children 0-5', older: '# of Children 6-18' };
 // What the desktop works out from the fictional household list, as the app does: band counts and the one student's name and grade.
 const listed = validateProfile(syntheticProfile);
 const desktopProfile = { ...syntheticProfile, customFields: customAnswers, ...Object.fromEntries(['householdCount:18-59', 'householdCount:60+', 'studentNameGrade'].map(key => [key, releasedValue(listed, key)])) };
@@ -105,8 +117,11 @@ const pages = {
     `<fieldset><legend>${HEARD}</legend>${['Friend', 'Church', 'Flyer'].map((option, index) => `<label><input type="radio" name="heard" id="heard-${index}" value="${option}">${option}</label>`).join('')}</fieldset>` +
     '<label for="day">Preferred pickup day</label><select id="day" name="day"><option value="">Choose a day</option><option>Monday</option><option>Friday</option></select>' +
     '<button type="submit">Submit</button></form>'),
+  [NO_LIST]: formPage('Pantry order: who lives with you', `<form><label for="first">First name</label><input id="first" name="first">${Object.entries(NO_LIST_QUESTIONS)
+    .map(([id, label]) => `<label for="${id}">${label}</label><input id="${id}" name="${id}">`).join('')}<button type="submit">Submit</button></form>`),
   [HOUSEHOLD]: formPage('Pantry order: household', `<form>${Object.entries(HOUSEHOLD_QUESTIONS).map(([id, label]) => `<label for="${id}">${label}</label><input id="${id}" name="${id}">`).join('')}` +
-    '<button type="submit">Submit</button></form>')
+    '<button type="submit">Submit</button></form>'),
+  [STUDENT_PANTRY]: formPage('Student pantry intake', `<form><ul>${STUDENT_QUESTIONS.map(jotformQuestion).join('')}</ul><button type="submit">Submit</button></form>`)
 };
 
 // The desktop app as the worker sees it over native messaging, with Always allow on. It keeps its own
@@ -116,7 +131,8 @@ const pages = {
 // request (`sensitive: true`) gets the sensitive prompt, answered by the next of `answers` ('cancel' or 'allow').
 // Laya isn't ready unless a step makes it so (`laya`); then it is sure of nothing and guesses "Yes" for the
 // service-area question (#185), noting each question it is asked in `questions`. Asked to remember answers (#186), it shows
-// the app's confirmation, as Remember, and keeps them as custom answers with their type, choices and site.
+// the app's confirmation, as Remember, and keeps them as custom answers with their type, choices and site. With `noList` it
+// plays an app with no household list saved (#180): household questions get no answer, and the reply says the list is missing.
 async function installDesktop(worker, profile) {
   await worker.evaluate(profile => {
     globalThis.__desktop = { allSites: false, calls: [], saves: [], prompts: [], profile, holds: [], answers: [], laya: 'unavailable', questions: [], customFieldsAvailable: false, holdNavigation: false, remembered: [] };
@@ -165,9 +181,13 @@ async function installDesktop(worker, profile) {
       } else if (type === 'getFields' && payload.fields.includes('assetsOnHand')) desktop.prompts.push(`Fill sensitive details on ${new URL(payload.url).origin}?`);
       if (type === 'getFields') {
         const held = payload.sensitive === true ? [] : payload.fields.filter(field => desktop.holds.includes(field));
-        return { accessRevision: 0, values: Object.fromEntries(payload.fields.filter(field => desktop.profile[field] && !held.includes(field)).map(field => [field, desktop.profile[field]])),
-          ...(held.length ? { held } : {}) };
+        const fromList = field => /^householdCount:/.test(field) || ['householdSize', 'householdAdults', 'householdChildren', 'householdSeniors', 'studentNameGrade'].includes(field);
+        const answered = field => desktop.profile[field] && !held.includes(field) && !(desktop.noList && fromList(field));
+        return { accessRevision: 0, values: Object.fromEntries(payload.fields.filter(answered).map(field => [field, desktop.profile[field]])),
+          ...(held.length ? { held } : {}), ...(desktop.noList && payload.fields.some(fromList) ? { household: { need: 'list' } } : {}) };
       }
+      // Add your household (#180): the app opens My information at Your household.
+      if (type === 'openHousehold') return { shown: true };
       if (type === 'recordProgress') return { recorded: true };
       if (type === 'rememberAnswers') {
         desktop.prompts.push(`Remember ${payload.answers.length === 1 ? 'this answer' : 'these answers'} from ${new URL(payload.url).origin} for next time?`);
@@ -471,6 +491,34 @@ async function main() {
     assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
     console.log('#98: a pantry form’s household questions filled from the fictional household list (0-17, 18-59, 60+, and the student’s name and grade); the guardian stayed blank; the typed apartment was saved to My information after the Save click.');
 
+    // #180: with no household list saved, the Jotform's household questions (adults, and children by age) stay open. The widget
+    // says they wait in the side panel, which lists them with Add your household; its click asks the app to open Your household.
+    await worker.evaluate(() => { globalThis.__desktop.noList = true; });
+    await page.goto(NO_LIST, { waitUntil: 'domcontentloaded' });
+    const noListWidget = await launcherFrame();
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+    await panel.click('#panel-autofill');
+    await expect(page.locator('#first')).toHaveValue(syntheticProfile.firstName, { timeout: 20000 });
+    await settled();
+    for (const id of Object.keys(NO_LIST_QUESTIONS)) assert.equal(await page.locator(`#${id}`).inputValue(), '', `${id} stays open`);
+    assert.deepEqual((await calls('getFields')).filter(call => call.url === NO_LIST).map(call => call.fields), [['firstName', 'householdAdults', 'householdCount:0-5', 'householdCount:6-18']]);
+    await expect(noListWidget.locator('#need-you')).toHaveText(en('widget.needYou', { count: 3 }), { timeout: 15000 });
+    await expect(noListWidget.locator('#widget-text')).toHaveText(`${en('widget.filled', { count: 1 })} · ${en('widget.household', { count: 3 })}`);
+    await expect.poll(() => panel.visible('#household-section'), { timeout: 15000 }).toBe(true);
+    assert.equal(await panel.text('#household-hint'), en('household.hintList'));
+    assert.equal(await panel.text('#household-list'), Object.values(NO_LIST_QUESTIONS).join(''));
+    assert.equal(await panel.text('#household-open'), en('household.add'));
+    assert.deepEqual(await calls('openHousehold'), [], 'nothing opens before the click');
+    await panel.screenshot(path.join(root, 'artifacts/household/side-panel-add-household.png'));
+    await panel.click('#household-open');
+    await expect.poll(() => panel.text('#status'), { timeout: 15000 }).toBe(en('household.opened'));
+    assert.deepEqual(await calls('openHousehold'), [{ type: 'openHousehold', url: '', fields: [] }], 'one request, carrying nothing');
+    assert.equal(await panel.visible('#household-section'), true, 'the questions stay listed until the next Autofill');
+    await settled();
+    assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
+    await worker.evaluate(() => { globalThis.__desktop.noList = false; });
+    console.log('#180: with no household list saved, a Jotform’s adults and children-by-age questions stayed open; the widget said they wait in the side panel, which listed them with Add your household, and its click asked the app to open Your household.');
+
     // #176: without Always allow, the app holds the date of birth back. One click fills the first name at once; the date of
     // birth counts under need-you and waits in the side panel's list. Fill sensitive details asks the app for it alone:
     // Cancel leaves the first name filled and the date listed, and Allow once fills it.
@@ -571,6 +619,62 @@ async function main() {
     await page.screenshot({ path: path.join(root, 'artifacts/remember/visit-filled.png') });
     await worker.evaluate(() => { const desktop = globalThis.__desktop; desktop.customFieldsAvailable = false; desktop.profile.customFields = desktop.profile.customFields.filter(row => !row.site); });
     console.log('#186: two open questions the applicant answered were remembered after the side-panel click and the app’s confirmation (the pickup day stayed unchecked); after a reload, Autofill filled them from custom answers and said so.');
+
+    // #184: the student pantry's four questions, from the fictional profile. Without Always allow, the help wanted fills at once;
+    // where the income comes from and whether the family gets cash assistance are sensitive, so they wait for Fill sensitive details.
+    // The fictional applicant isn't a student and has no income, and the form offers neither answer: those two stay under need-you.
+    await worker.evaluate(() => { Object.assign(globalThis.__desktop, { holds: ['incomeSources', 'currentBenefits'], answers: ['allow'] }); globalThis.__desktop.prompts.length = 0; });
+    const since184 = (await calls('getFields')).length;
+    const ticked = name => page.locator(`input[name="${name}"]:checked`).evaluateAll(boxes => boxes.map(box => box.value));
+    await page.goto(STUDENT_PANTRY, { waitUntil: 'domcontentloaded' });
+    let studentWidget = await launcherFrame();
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+    await panel.click('#panel-autofill');
+    await expect(page.locator('#input_4_0')).toBeChecked({ timeout: 20000 });
+    await settled();
+    assert.deepEqual([syntheticProfile.studentLevel, syntheticProfile.helpWanted, syntheticProfile.incomeSources, syntheticProfile.currentBenefits],
+      ['not-student', 'food-pantry,fresh-produce', 'none', 'school-meals'], 'the fictional profile’s answers');
+    assert.deepEqual(await ticked('q3[]'), [], 'the fictional applicant isn’t a student');
+    assert.deepEqual(await ticked('q4[]'), ['Fresh Food', 'Food Pantry']);
+    assert.deepEqual([await ticked('q5[]'), await ticked('q6[]')], [[], []], 'income sources and benefits wait');
+    assert.deepEqual(await heldCalls(since184), [{ url: STUDENT_PANTRY, fields: ['studentLevel', 'helpWanted', 'incomeSources', 'currentBenefits'], sensitive: false }]);
+    await expect.poll(() => panel.visible('#held-section'), { timeout: 15000 }).toBe(true);
+    const heldList = await panel.text('#held-list');
+    assert.ok(heldList.includes('Current Source of Income/Resources') && heldList.includes('Cash Assistance through NYC HRA'), heldList);
+    await panel.click('#held-fill');
+    await expect(page.locator('#input_6_1')).toBeChecked({ timeout: 20000 });
+    await expect.poll(() => panel.visible('#held-section'), { timeout: 15000 }).toBe(false);
+    assert.deepEqual(await ticked('q6[]'), ['No'], 'free school meals are the household’s only benefit: no cash assistance');
+    assert.deepEqual(await ticked('q5[]'), [], 'no source of income, and the form has no None');
+    assert.deepEqual((await heldCalls(since184)).at(-1), { url: STUDENT_PANTRY, fields: ['incomeSources', 'currentBenefits'], sensitive: true });
+    assert.deepEqual(await worker.evaluate(() => globalThis.__desktop.prompts), ['Fill sensitive details on https://pantry.example.org?']);
+    await expect(studentWidget.locator('#need-you')).toHaveText(en('widget.needYou', { count: 2 }), { timeout: 15000 });
+    await settled();
+    assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
+    await page.screenshot({ path: path.join(root, 'artifacts/student-pantry/student-pantry-fictional.png'), fullPage: true });
+    console.log('#184: the student pantry’s form from the fictional profile: Fresh Food and Food Pantry at once, No to cash assistance after Fill sensitive details; the student status and the income, which the form has no answer for, stayed under need-you.');
+
+    // The same form for a copy of the fictional applicant who is an undergraduate with a job, financial aid and family support,
+    // with Always allow: Undergraduate, Financial Aid and Family Support are checked. On-Campus Job and Off-Campus Job are both
+    // a job, so neither is checked, and the question stays under need-you.
+    await worker.evaluate(() => {
+      Object.assign(globalThis.__desktop, { holds: [], answers: [], profile: { ...globalThis.__desktop.profile, studentLevel: 'undergraduate', incomeSources: 'job,financial-aid,family-support' } });
+      globalThis.__desktop.prompts.length = 0;
+    });
+    await page.goto(STUDENT_PANTRY, { waitUntil: 'domcontentloaded' });
+    studentWidget = await launcherFrame();
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+    await panel.click('#panel-autofill');
+    await expect(page.locator('#input_5_1')).toBeChecked({ timeout: 20000 });
+    await settled();
+    assert.deepEqual([await ticked('q3[]'), await ticked('q4[]'), await ticked('q5[]'), await ticked('q6[]')],
+      [['Undergraduate'], ['Fresh Food', 'Food Pantry'], ['Financial Aid', 'Family Support'], ['No']]);
+    await expect(studentWidget.locator('#need-you')).toHaveText(en('widget.needYou', { count: 1 }), { timeout: 15000 });
+    assert.equal(await panel.visible('#held-section'), false);
+    assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
+    await page.screenshot({ path: path.join(root, 'artifacts/student-pantry/student-pantry-student.png'), fullPage: true });
+    await worker.evaluate(profile => { globalThis.__desktop.profile = profile; }, desktopProfile);
+    console.log('#184: for a student with a job, financial aid and family support: Undergraduate, Financial Aid and Family Support checked; On-Campus Job and Off-Campus Job left unchecked, with the question under need-you.');
 
     // A page whose only input is a search box gets no card.
     since = await probe();

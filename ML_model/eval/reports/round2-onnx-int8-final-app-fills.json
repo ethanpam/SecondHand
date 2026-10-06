@@ -119,6 +119,37 @@
       }
     ]
   },
+  "guessing": {
+    "filled": 4,
+    "right": 0,
+    "wrongRate": 1,
+    "wrong": [
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Do you pay for utilities?",
+        "filled": "Yes",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Do you pay for utilities?",
+        "filled": "Yes",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Do you pay for utilities?",
+        "filled": "Yes",
+        "key": null
+      },
+      {
+        "form": "https://outside.vermont.gov/dept/DCF/Shared%20Documents/ESD/Forms/202-3SNP.pdf",
+        "question": "Do you pay for utilities?",
+        "filled": "Yes",
+        "key": null
+      }
+    ]
+  },
   "matching": {
     "decisions": 222,
     "filled": 61,

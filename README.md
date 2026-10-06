@@ -104,7 +104,7 @@ SecondHand was built for **Hack Away Hunger**, the DSMHack / CharityHack 2026 ha
 
 ## How you use it
 
-**1. Save your details once.** A short guided setup takes about five minutes: you, your household, where you live, income and money on hand, programs, and Iowa's questions about you. Skip any step and come back later.
+**1. Save your details once.** A short guided setup takes about five minutes: you (including whether you're a student), your household, where you live, income and where it comes from, the benefits you get now and the help you're looking for, and Iowa's questions about you. Skip any step and come back later.
 
 | Your saved details, in the desktop app | The overview |
 | --- | --- |
@@ -125,6 +125,7 @@ Version **0.5.0**, released October 6, 2026.
 - **Fills Iowa's SNAP application screen by screen.** It fills what it knows, moves past screens that only give information, and stops wherever you're needed. CAPTCHA, consent, signatures, and final submission are always yours.
 - **Speaks your language.** The side panel works in English, Spanish, Vietnamese, Chinese, French, and Arabic. It can show Iowa's questions in your language and sum up long pages in plain words, using Chrome's built-in translator and summarizer on your computer.
 - **Works on other forms too.** Turn SecondHand on for any secure website, such as a food pantry's sign-up form. It reads each question's label and fills only the ones it recognizes.
+- **Answers food pantry sign-up questions (coming in the next release).** Questions such as "Student status", "Assistance needed", "Source of income" and "Does anyone in your family receive cash assistance?" are answered from what you saved, but only when exactly one option matches. Otherwise the question stays with you.
 - **Remembers your own answers (new in 0.5.0).** When you answer a question SecondHand didn't know, it offers to remember it for next time, with your permission. Up to 50 custom answers, encrypted with your profile.
 - **Fill and continue (new in 0.5.0).** On recognized multi-page forms, it can fill and click ordinary **Next** buttons, and stops for anything missing, consent, signatures, payments, or submission.
 - **Reads your documents on your computer.** Open a PDF or photo of a tax form such as a W-2 or 1040, and SecondHand reads it with offline text recognition and suggests details for you to review. Nothing is uploaded.
@@ -191,7 +192,7 @@ The extension talks to the app through Chrome's native messaging, a direct conne
 
 - **Your details stay in the desktop app.** Chrome's extension storage and Chrome Sync never hold applicant information.
 - **Nothing is filled without your yes.** The app asks before filling unless you choose **Always allow on this computer**, which you can turn off. Locking the app, by hand or after 10 idle minutes, stops autofill.
-- **The extension stays in its lane.** It runs only on Iowa's secure portal and on sites you turn on. It fills nothing until you click **Autofill**, and never fills passwords, verification codes, or signatures. On sites other than Iowa's, sensitive details such as your Social Security number ask again unless you chose **Always allow**.
+- **The extension stays in its lane.** It runs only on Iowa's secure portal and on sites you turn on. It fills nothing until you click **Autofill**, and never fills passwords, verification codes, or signatures. On sites other than Iowa's, sensitive details such as your Social Security number, income, or the benefits your household gets ask again unless you chose **Always allow**.
 - **The website sees what's on its form.** A website can read or save answers as they're entered, just as if you typed them.
 - **Laya runs on your computer.** Its only network traffic is downloading the model from Hugging Face and checking for a newer one once a day. No profile data is sent anywhere.
 - **Backups are yours.** An encrypted backup opens only with the password or recovery key it was saved with.
