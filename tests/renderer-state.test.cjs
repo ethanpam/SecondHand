@@ -808,7 +808,13 @@ test('Privacy & backups names everything autofill fills or clicks today and keep
   assert.doesNotMatch(sites[0], /Laya|Chrome’s/);
   const guesses = paragraphs.filter(paragraph => paragraph.includes('Chrome’s built-in AI'));
   assert.equal(guesses.length, 1);
-  for (const phrase of ['Laya', 'Iowa pages SecondHand doesn’t know', 'never guesses on Iowa’s form']) assert.ok(guesses[0].includes(phrase), phrase);
+  for (const phrase of ['Laya', 'Iowa pages SecondHand doesn’t know']) assert.ok(guesses[0].includes(phrase), phrase);
+  // Chrome's AI staying off Iowa's form is its own short paragraph, right after the guesses (#166).
+  assert.doesNotMatch(guesses[0], /never guesses on Iowa’s form/);
+  const guessesParagraph = Array.from(view.window.document.querySelectorAll('#view-privacy .autofill-card p')).find(paragraph => text(paragraph) === guesses[0]);
+  assert.equal(guessesParagraph.nextElementSibling.tagName, 'P');
+  assert.equal(text(guessesParagraph.nextElementSibling), 'Chrome’s AI never guesses on Iowa’s form.');
+  assert.match(text(guessesParagraph.nextElementSibling.nextElementSibling), /^The page widget and sidebar show what still needs you\./);
   for (const paragraph of [sites[0], guesses[0]]) assert.ok(paragraph.split(/\s+/).length <= 75, `${paragraph.split(/\s+/).length} words: ${paragraph}`);
   // The one value SecondHand picks for the applicant gets its own paragraph, ending on the instruction to check it.
   const address = Array.from(view.window.document.querySelectorAll('#view-privacy .autofill-card p'), text).filter(paragraph => paragraph.includes('first suggested home address'));
