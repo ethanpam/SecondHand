@@ -23,7 +23,7 @@ const { createDocumentReader } = require('./ocr-service.cjs');
 const { requestId: documentRequestId } = require('./ocr-limits.cjs');
 const { analyzeDocument } = require('../shared/document-parser.cjs');
 const { validateProfile, validateApplication, HOUSEHOLD_COUNT_FIELDS, YES_NO_FIELDS, PORTAL_URL, isPortalUrl, siteOrigin, isRequestField, fieldLabel, releasedValue,
-  blockedByBirthDate, savedBirthDateRefusal } = require('../shared/schema.cjs');
+  blockedByBirthDate, savedBirthDateRefusal, SNAP_IOWA_ONLY_FIELDS } = require('../shared/schema.cjs');
 const household = require('../shared/household.cjs');
 
 app.setName('SecondHand');
@@ -461,6 +461,7 @@ if (nativeOrigin) {
       const origin = siteOrigin(request.url);
       if (!iowa && !siteAllowed(origin)) throw publicError('This site isn’t trusted. Turn on SecondHand for it first.');
       if (!request.fields.every(isRequestField)) throw publicError('This page asked for something SecondHand doesn’t share.');
+      if (!iowa && request.fields.some(field => SNAP_IOWA_ONLY_FIELDS.includes(field))) throw publicError('These SNAP answers can only be shared with Iowa’s application.');
       const byAge = !iowa && request.fields.some(field => AGE_COUNT_FIELDS.includes(field)) && household.listed(vault.getData().profile);
       const sensitive = iowa ? [] : request.fields.filter(field => SENSITIVE_FIELDS.includes(field) || household.isBandKey(field) || (byAge && AGE_COUNT_FIELDS.includes(field)));
       const approved = await approveRelease({ context, iowa, origin, generation: accessRevision,

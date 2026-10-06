@@ -7,7 +7,7 @@ const test = require('node:test');
 const { JSDOM } = require('jsdom');
 const { PROFILE_FIELDS, FIELD_LABELS } = require('../shared/schema.cjs');
 const html = fs.readFileSync(path.join(__dirname, '../renderer/index.html'), 'utf8');
-const script = fs.readFileSync(path.join(__dirname, '../renderer/app.js'), 'utf8');
+const script = ['../shared/snap-information.js', '../renderer/snap-information.js', '../renderer/app.js'].map(file => fs.readFileSync(path.join(__dirname, file), 'utf8')).join('\n');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 const fixture = () => ({ cancelled: false, document: {

@@ -299,7 +299,7 @@ function step(tabId) {
       if (page.kind === 'manual') {
         const plan = await planGeneral(tabId); currentPilot(tabId, pilot);
         const url = safeUrl(state.url);
-        if (plan.matched.length || generalPages.get(tabId) === url) {
+        if (plan.matched.length || generalPages.get(tabId) === url || page.pageKey === 'iowa-household-screening-rules') {
           generalPages.set(tabId, url);
           const result = await fillIowaGeneral(tabId, state, plan, () => currentPilot(tabId, pilot));
           currentPilot(tabId, pilot);
@@ -1154,6 +1154,7 @@ async function fillSiteOnce(tabId, url, guesses) {
 // One fill on an Iowa page the Iowa adapter hasn't verified. Iowa's portal needs no site approval.
 async function fillIowaGeneral(tabId, state, plan, guard, laya = null) {
   const { pageKey } = state.page;
+  if (pageKey === 'iowa-household-screening-rules') laya = false;
   try {
     const { filled, needYou, savable, laya: suggested, reason } = await fillPlan(tabId, state.url, [{ frameId: 0, plan }], { guard, laya });
     keepSavable(tabId, state.url, '', savable);

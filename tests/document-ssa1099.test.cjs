@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { detect, parse } = require('../shared/document-ssa1099.cjs');
+const { analyzeDocument } = require('../shared/document-parser.cjs');
 
 // Positioned, invented OCR words exercise printed-cell relationships. This is
 // not a transcription fixture or evidence of accuracy on an unobserved form.
@@ -126,7 +127,7 @@ test('filled sample values and observed OCR row artifacts preserve cell ownershi
   }
   page.words.push({ text: '~~', confidence: 31, bbox: { x0: 620, y0: 270, x1: 634, y1: 288 } });
   const result = parse(page), fields = byId(result);
-  assert.equal(result.fields.length, 11);
+  assert.equal(result.fields.length, 12);
   assert.equal(fields.ssaRecipientName.value, 'ALEXANDER J SAMPLE');
   assert.equal(fields.applicantSsn.value, '000-12-3456');
   assert.equal(fields.taxLineSsaBox3.value, '18600.00');
@@ -163,7 +164,7 @@ test('scale, translation, and changed fictional values preserve anchored extract
 
 test('blank primary cells never borrow claim number, description amount, or another box', () => {
   const result = parse(fixture({ name: '', ssn: '', paid: '', repaid: '', net: '', withheld: '', street: '', town: '' }));
-  assert.deepEqual(result.fields, []);
+  assert.deepEqual(result.fields.map(field => field.id), ['ssaIssuerName']);
   assert.match(result.warnings.join(' '), /No filled values/);
   assert.equal(result.taxYear, '2023');
 });
@@ -219,4 +220,19 @@ test('low confidence is disclosed and malformed OCR boxes cannot supply values',
   assert.match(parse(page).warnings.join(' '), /low OCR confidence/);
   const ssn = page.words.find(word => word.text === '000-12-3456'); ssn.bbox.x1 = Infinity;
   assert.equal(byId(parse(page)).applicantSsn, undefined);
+});
+
+test('SSA historical reference uses printed source and net-benefit label without benefit-status inference', () => {
+  const page = fixture(); page.alternative = { text: page.text, words: structuredClone(page.words) };
+  const result = analyzeDocument({ pages: [page] });
+  assert.deepEqual(result.statement, { documentType: 'ssa-1099', taxYear: '2023', sourceName: 'SOCIAL SECURITY', sourceRole: 'issuer',
+    recipientName: 'MORGAN LEE VAN EXAMPLE', annualIncome: '23400.78', annualIncomeLabel: 'Net benefits (Box 5) — 2023',
+    annualWithholding: '125.00', annualWithholdingLabel: 'Federal income tax withheld (Box 6)' });
+  assert.ok(!/000-12-3456|999-88-7777|Medicare|disability|monthly/i.test(JSON.stringify(result.statement)));
+  const conflicting = fixture({ year: '2019', box4Year: '2018', box5Year: '2018' });
+  conflicting.alternative = { text: conflicting.text, words: structuredClone(conflicting.words) };
+  const unknownYear = analyzeDocument({ pages: [conflicting] });
+  assert.equal(unknownYear.statement.taxYear, '');
+  assert.equal(unknownYear.statement.annualIncome, ''); assert.equal(unknownYear.statement.annualWithholding, '');
+  assert.equal(byId(unknownYear).taxLineSsaBox5.value, '23400.78', 'per-box evidence remains visible for manual review');
 });

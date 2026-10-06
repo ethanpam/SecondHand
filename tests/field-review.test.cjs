@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { reviewProfile, reviewDocumentFields } = require('../shared/field-review.cjs');
-const { PROFILE_FIELDS, FIELD_LABELS } = require('../shared/schema.cjs');
+const { PROFILE_FIELDS, FIELD_LABELS, MEMBER_FIELDS } = require('../shared/schema.cjs');
 const TODAY = { today: '2026-10-05' };
 const rows = profile => Object.fromEntries(reviewProfile(profile, TODAY).map(row => [row.key, row]));
 const self = (extra = {}) => ({ id: '00000000-0000-4000-8000-000000000001', firstName: 'Avery', lastName: 'Example', birthDate: '1985-04-12', relationship: 'self', student: 'no', grade: '', ...extra });
@@ -12,7 +12,7 @@ function freeze(value) { if (value && typeof value === 'object') { Object.values
 
 test('every scalar has a fixed key/label and blank answers remain unknown', () => {
   const result = reviewProfile({}, TODAY);
-  assert.deepEqual(result.map(row => row.key), PROFILE_FIELDS);
+  assert.deepEqual(result.map(row => row.key).sort(), [...PROFILE_FIELDS].sort());
   for (const row of result) {
     assert.deepEqual(Object.keys(row), ['key', 'label', 'status', 'messages']);
     assert.equal(row.label, FIELD_LABELS[row.key]);
@@ -120,7 +120,7 @@ test('malformed, oversized and accessor-backed profiles stay bounded without exe
   Object.defineProperty(profile, 'ssn', { get() { accessed = true; throw new Error('secret'); } });
   const result = reviewProfile(profile, TODAY);
   assert.equal(accessed, false);
-  assert.equal(result.length, PROFILE_FIELDS.length + 20 * 6);
+  assert.equal(result.length, PROFILE_FIELDS.length + 20 * (MEMBER_FIELDS.length - 1));
   for (const key of ['firstName', 'email', 'state', 'ssn', 'householdMembers']) assert.equal(result.find(row => row.key === key).status, 'needs-review');
   assert.ok(!JSON.stringify(result).includes('secret'));
 });

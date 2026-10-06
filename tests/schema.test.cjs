@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { validateProfile, validateStoredProfile, validateApplication, validateStoredApplication, isPortalUrl, YES_NO_FIELDS, PROFILE_FIELDS, PROFILE_CHOICES, REQUEST_FIELDS, DERIVED_FIELDS, FIELD_LABELS,
-  releasedValue, blockedByBirthDate } = require('../shared/schema.cjs');
+  releasedValue, blockedByBirthDate, LIST_FIELDS, MEMBER_FIELDS } = require('../shared/schema.cjs');
 const fictionalProfile = require('./fixtures/applicant-profile.json');
 
 test('only the exact HTTPS Iowa application origin and path can receive fields', () => {
@@ -42,7 +42,8 @@ test('first-page yes/no choices preserve unknown separately and never infer prog
 });
 test('mailing contact fields stay separate, use validated formats, and the full fictional fixture is valid', () => {
   const complete = validateProfile(fictionalProfile);
-  assert.deepEqual(Object.keys(fictionalProfile).sort(), [...PROFILE_FIELDS].sort());
+  assert.ok(Object.keys(fictionalProfile).every(key => PROFILE_FIELDS.includes(key)), 'legacy fixture fields remain supported');
+  assert.deepEqual(Object.keys(complete).sort(), [...PROFILE_FIELDS].sort(), 'new fields receive empty defaults');
   assert.equal(complete.mailingAddressLine1, 'PO Box 123');
   assert.equal(complete.addressLine1, fictionalProfile.addressLine1);
   assert.equal(validateProfile({ mailingState: 'ia' }).mailingState, 'IA');
@@ -151,22 +152,23 @@ const memberId = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const withMembers = (members, own = {}) => ({ firstName: 'Avery', lastName: 'Example', birthDate: '1985-04-12', ...own,
   householdMembers: [{ id: MEMBER_SELF, relationship: 'self' }, ...members] });
 const child = (extra = {}) => ({ id: MEMBER_CHILD, firstName: ' Riley ', lastName: 'Example', birthDate: '2015-09-03', relationship: 'child', student: 'yes', grade: '5th', ...extra });
+const completeMember = values => ({ ...Object.fromEntries(MEMBER_FIELDS.map(key => [key, ''])), ...values });
 
 test('the household list is a profile field that defaults to empty and is never a field a page may ask for', () => {
   assert.equal(FIELD_LABELS.householdMembers, 'Household members');
   assert.ok(PROFILE_FIELDS.includes('householdMembers'));
   assert.equal(REQUEST_FIELDS.includes('householdMembers'), false);
   assert.deepEqual(validateProfile({}).householdMembers, []);
-  assert.deepEqual(REQUEST_FIELDS, [...PROFILE_FIELDS.filter(field => field !== 'householdMembers'), 'hasSsn', 'studentNameGrade']);
+  assert.deepEqual(REQUEST_FIELDS, [...PROFILE_FIELDS.filter(field => !LIST_FIELDS.includes(field)), 'hasSsn', 'studentNameGrade']);
 });
 
 test('each household member is checked like the rest of the profile: trimmed, length-limited names and real past dates', () => {
   const saved = validateProfile(withMembers([child()]));
-  assert.deepEqual(saved.householdMembers[1], { id: MEMBER_CHILD, firstName: 'Riley', lastName: 'Example', birthDate: '2015-09-03', relationship: 'child', student: 'yes', grade: '5th' });
+  assert.deepEqual(saved.householdMembers[1], completeMember({ id: MEMBER_CHILD, firstName: 'Riley', lastName: 'Example', birthDate: '2015-09-03', relationship: 'child', student: 'yes', grade: '5th' }));
   assert.deepEqual(validateProfile(withMembers([child({ birthDate: undefined, student: undefined, grade: undefined, lastName: undefined })])).householdMembers[1],
-    { id: MEMBER_CHILD, firstName: 'Riley', lastName: '', birthDate: '', relationship: 'child', student: '', grade: '' }, 'blank is unknown');
+    completeMember({ id: MEMBER_CHILD, firstName: 'Riley', lastName: '', birthDate: '', relationship: 'child', student: '', grade: '' }), 'blank is unknown');
   const refused = {
-    'an unknown member field': child({ ssn: '123-45-6789' }),
+    'an unknown member field': child({ password: 'not-supported' }),
     'a future birth date': child({ birthDate: '2999-01-01' }),
     'an impossible birth date': child({ birthDate: '2015-02-30' }),
     'a birth date in another format': child({ birthDate: '09/03/2015' }),
@@ -196,7 +198,7 @@ test('the household list holds up to 20 people', () => {
 
 test('the applicant is the list’s one self row, kept in sync with their own name and birth date', () => {
   const saved = validateProfile(withMembers([child()], { firstName: ' Avery ', lastName: 'Example' }));
-  assert.deepEqual(saved.householdMembers[0], { id: MEMBER_SELF, firstName: 'Avery', lastName: 'Example', birthDate: '1985-04-12', relationship: 'self', student: '', grade: '' });
+  assert.deepEqual(saved.householdMembers[0], completeMember({ id: MEMBER_SELF, firstName: 'Avery', lastName: 'Example', birthDate: '1985-04-12', relationship: 'self', student: '', grade: '' }));
   // A self row saved with other details takes the applicant's own.
   const stale = validateProfile({ ...withMembers([child()]), householdMembers: [{ id: MEMBER_SELF, firstName: 'Old', lastName: 'Name', birthDate: '1990-01-01', relationship: 'self' }, child()] });
   assert.deepEqual([stale.householdMembers[0].firstName, stale.householdMembers[0].lastName, stale.householdMembers[0].birthDate], ['Avery', 'Example', '1985-04-12']);

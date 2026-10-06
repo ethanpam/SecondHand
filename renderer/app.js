@@ -3,6 +3,7 @@
 (() => {
   const api = window.secondHand;
   const $ = (id) => document.getElementById(id);
+  const snapCatalog = window.SecondHandSnapInformation;
   const profileFields = ['firstName', 'middleName', 'lastName', 'suffix', 'maidenName', 'isApplicant',
     'birthDate', 'ssn', 'email', 'phone', 'homePhone', 'mobilePhone', 'bestContactTime',
     'hasHomeAddress', 'mailingSameAsHome', 'addressLine1', 'addressLine2', 'city', 'state', 'zip', 'county',
@@ -11,7 +12,8 @@
     'householdAdults', 'householdChildren', 'householdSeniors', 'householdVeteran', 'householdDisability',
     'householdAllCitizens', 'householdLegalStatus', 'householdPregnant', 'householdMedicare',
     'monthlyEarnedIncome', 'monthlyOtherIncome', 'monthlyRent', 'monthlyUtilities', 'assetsOnHand', 'monthlyMedicalExpenses',
-    'sex', 'maritalStatus', 'hasSsnAnswer', 'ssnCardNameMatches', 'usCitizen', 'militaryOrVeteran', 'disabled', 'blind', 'healthLimitation', 'medicare'];
+    'sex', 'maritalStatus', 'hasSsnAnswer', 'ssnCardNameMatches', 'usCitizen', 'militaryOrVeteran', 'disabled', 'blind', 'healthLimitation', 'medicare',
+    ...snapCatalog.scalarFields.map(field => field.key)];
   const viewNames = { overview: 'Overview', profile: 'My information', documents: 'Documents', applications: 'Applications', extension: 'Chrome extension', privacy: 'Privacy & backups' };
   const statusNames = { draft: 'Draft', in_progress: 'In progress', submitted: 'Submitted', needs_action: 'Needs action', approved: 'Approved', denied: 'Denied' };
   let vaultStatus = { exists: false, unlocked: false, recoveryKey: false, deviceReset: false, deviceResetSupported: false, extensionId: '', bridgeRunning: false };
@@ -29,6 +31,7 @@
   let documentBusy = false;
   let documentFields = [];
   let documentReviewFields = [];
+  let documentStatement = null;
   let stopDocumentProgress = null;
   const documentProfileKeys = new Set(['firstName', 'middleName', 'lastName', 'ssn', 'addressLine1', 'addressLine2', 'city', 'state', 'zip']);
   const fieldReview = { profile: { revision: 0, busy: false, descriptions: [] }, document: { revision: 0, busy: false, descriptions: [] } };
@@ -161,6 +164,7 @@
     setApplicationBusy(false);
     data = { profile: {}, applications: [] };
     $('profile-form').reset();
+    snapEditor.render({});
     manualCounts = null;
     renderMembers([]);
     renderSetupResume();
@@ -336,12 +340,16 @@
 
   // A profile field's input or select, or its radio buttons: setting a group's value checks that answer.
   const profileControl = (field) => $('profile-form').elements.namedItem(field);
+  const snapEditor = window.SecondHandSnapEditor.create($('snap-information-fields'), () => {
+    clearFieldReviews(); profileRevision++; setProfileDirty(true);
+  });
 
   function fillProfile() {
     clearFieldReviews();
     profileRevision++;
     manualCounts = null;
     for (const key of profileFields) profileControl(key).value = typeof data.profile[key] === 'string' ? data.profile[key] : '';
+    snapEditor.render(data.profile);
     renderMembers(Array.isArray(data.profile.householdMembers) ? data.profile.householdMembers : []);
     setProfileDirty(false);
   }
@@ -412,6 +420,7 @@
     });
     grid.append(student, grade);
     row.append(element('legend'), grid);
+    window.SecondHandSnapEditor.memberDetails(row, member);
     if (self) row.append(element('p', 'field-hint', 'Your name and date of birth come from About you.'));
     row.querySelectorAll('[data-member-field="birthDate"]').forEach(input => input.addEventListener('input', renderCounts));
     return row;
@@ -451,7 +460,8 @@
       const self = row.dataset.self === 'true';
       const value = field => row.querySelector(`[data-member-field="${field}"]`)?.value.trim() ?? '';
       const student = value('student');
-      return { id: row.dataset.memberId, firstName: self ? profileControl('firstName').value.trim() : value('firstName'),
+      return { ...Object.fromEntries(snapCatalog.memberFields.map(field => [field.key, value(field.key)])),
+        id: row.dataset.memberId, firstName: self ? profileControl('firstName').value.trim() : value('firstName'),
         lastName: self ? profileControl('lastName').value.trim() : value('lastName'), birthDate: self ? profileControl('birthDate').value.trim() : value('birthDate'),
         relationship: self ? 'self' : value('relationship'), student, grade: student === 'yes' ? value('grade') : '' };
     });
@@ -606,7 +616,7 @@
     }
   }
 
-  const reviewProfileDraft = () => ({ ...Object.fromEntries(profileFields.map(key => [key, String(profileControl(key).value || '')])), householdMembers: collectMembers() });
+  const reviewProfileDraft = () => ({ ...Object.fromEntries(profileFields.map(key => [key, String(profileControl(key).value || '')])), householdMembers: collectMembers(), ...snapEditor.read() });
   const reviewDocumentCandidates = () => documentReviewFields.map(field => ({ ...field.metadata, value: field.input ? field.input.value : field.value }));
 
   function profileReviewTarget(key) {
@@ -617,19 +627,21 @@
       container = controls[0]?.closest('.choice-question, .field');
     } else if (key === 'householdMembers') container = $('household-members');
     else {
-      const match = /^householdMembers\.(\d+)\.(firstName|lastName|birthDate|relationship|student|grade)$/.exec(key);
-      if (match) {
+      const match = /^householdMembers\.(\d+)\.([a-zA-Z]+)$/.exec(key);
+      if (match && snapCatalog.memberFields.some(field => field.key === match[2])) {
         const row = memberRows()[Number(match[1])];
         const control = row?.querySelector(`[data-member-field="${match[2]}"]`);
         controls = control ? [control] : [];
         container = control?.closest('.field') || row;
       }
     }
-    return { container: container || $('profile-review-other'), controls };
+    return container ? { container, controls } : snapEditor.reviewTarget(key) || { container: $('profile-review-other'), controls };
   }
 
   function renderFieldReview(scope, response) {
-    const results = Array.isArray(response?.[scope]) ? response[scope].slice(0, 250) : [];
+    const profileResultLimit = profileFields.length + 1 + snapCatalog.records.length + snapCatalog.maxRecords *
+      (snapCatalog.memberFields.length + snapCatalog.records.reduce((sum, record) => sum + record.fields.length, 0));
+    const results = Array.isArray(response?.[scope]) ? response[scope].slice(0, scope === 'profile' ? profileResultLimit : 150) : [];
     let count = 0, needsReview = 0, checkSource = 0;
     for (const [index, result] of results.entries()) {
       if (!result || !Object.hasOwn(fieldReviewLabels, result.status) || typeof result.key !== 'string') continue;
@@ -695,6 +707,7 @@
     const selected = documentFields.filter(field => field.checkbox?.checked);
     $('document-selection-count').textContent = selected.length ? `${selected.length} ${selected.length === 1 ? 'detail' : 'details'} selected · profile draft only` : 'No details selected. Nothing will be changed.';
     $('apply-document-fields').disabled = documentBusy || !selected.length || !$('document-confirm-applicant').checked || !vaultStatus.unlocked;
+    $('add-document-statement').disabled = documentBusy || !documentStatement || !$('document-confirm-statement').checked || !vaultStatus.unlocked;
     fieldReviewControls();
   }
 
@@ -709,6 +722,10 @@
     stopDocumentProgress = null;
     documentFields = [];
     documentReviewFields = [];
+    documentStatement = null;
+    $('document-statement').hidden = true;
+    $('document-statement-summary').textContent = '';
+    $('document-confirm-statement').checked = false;
     for (const id of ['document-fields', 'document-pages', 'document-warning-list']) $(id).replaceChildren();
     for (const id of ['document-name', 'document-type', 'document-page-summary', 'document-status', 'document-progress-label']) $(id).textContent = '';
     $('document-review').hidden = true;
@@ -779,7 +796,7 @@
         metadata.sourceLabel = field.sourceLabel;
         label.append(element('span', 'document-field-source', `Document label: ${field.sourceLabel}`));
       }
-      if (['applicant', 'spouse', 'document'].includes(field.sourceRole)) metadata.sourceRole = field.sourceRole;
+      if (['applicant', 'spouse', 'document', 'employer', 'payer', 'issuer'].includes(field.sourceRole)) metadata.sourceRole = field.sourceRole;
       const reviewField = { metadata, row, value: documentText(field.value, 500), input: null };
       if (eligible) {
         const checkbox = element('input'); checkbox.type = 'checkbox'; checkbox.id = `document-select-${index}`;
@@ -806,12 +823,23 @@
         row.append(checkbox, label, values, current);
       } else {
         values.append(element('strong', '', documentText(field.value, 500)));
-        row.append(label, values, element('span', 'document-review-only', 'Review only · not added to profile'));
+        row.append(label, values, element('span', 'document-review-only', 'Review only · not used for applicant autofill'));
       }
       documentReviewFields.push(reviewField);
       $('document-fields').append(row);
     }
     $('document-no-fields').hidden = $('document-fields').childElementCount > 0;
+    const statementFields = snapCatalog.records.find(record => record.key === 'taxStatements').fields;
+    const statement = analysis.statement;
+    if (statement && statementFields.find(field => field.key === 'documentType').options.some(([value]) => value && value === statement.documentType)) {
+      documentStatement = Object.fromEntries(statementFields.map(field => [field.key, documentText(statement[field.key], 200)]));
+      $('document-statement-summary').replaceChildren();
+      for (const field of statementFields) {
+        const value = documentStatement[field.key];
+        if (value) $('document-statement-summary').append(element('dt', '', field.label), element('dd', '', value));
+      }
+      $('document-statement').hidden = false;
+    }
     $('document-empty').hidden = true;
     $('document-review').hidden = false;
     $('document-status').textContent = 'Read locally. No information has been saved or shared.';
@@ -1368,6 +1396,15 @@
   });
   $('document-confirm-applicant').addEventListener('change', documentControls);
   $('apply-document-fields').addEventListener('click', applyDocumentFields);
+  $('document-confirm-statement').addEventListener('change', documentControls);
+  $('add-document-statement').addEventListener('click', () => {
+    if (!vaultStatus.unlocked || currentView !== 'documents' || documentBusy || !documentStatement || !$('document-confirm-statement').checked) return;
+    if (!snapEditor.append('taxStatements', documentStatement, true)) { showError('document-error', 'You can save up to 20 tax-statement records. Remove an old record before adding another.'); return; }
+    showView('profile', { skipConfirmation: true });
+    $('snap-information').open = true;
+    document.querySelector('[data-record-section="taxStatements"]').open = true;
+    toast('Historical tax record added to your draft. Review and save your information.');
+  });
   for (const scope of ['profile', 'document']) {
     $(`check-${scope}-fields`).addEventListener('click', () => checkFields(scope));
     $(`${scope}-review-laya`)?.addEventListener('change', () => clearFieldReviews({ scopes: [scope] }));
@@ -1388,7 +1425,8 @@
     const revision = profileRevision;
     // In the guided setup, saving a step moves on to the next.
     const step = setupStep;
-    const profile = { ...Object.fromEntries(profileFields.map((field) => [field, profileControl(field).value.trim()])), householdMembers: collectMembers() };
+    const profile = reviewProfileDraft();
+    for (const field of profileFields) profile[field] = profile[field].trim();
     pending(step === null ? $('save-profile') : $('setup-next'), async () => {
       try {
         const saved = await api.saveProfile(profile);

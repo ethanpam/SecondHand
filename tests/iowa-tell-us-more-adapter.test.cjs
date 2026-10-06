@@ -66,11 +66,11 @@ test('Tell Us More at dynamicQuestionsStart offers every question, and never Sav
   assert.equal(clicked, 0);
 });
 
-test('each question maps to the applicant’s own saved answer, and the Social Security number itself is never asked for', () => {
-  assert.deepEqual(adapter.profileRequest(PAGE_KEY), ['sex', 'birthDate', 'hasSsn', 'ssnCardNameMatches', 'usCitizen', 'householdAllCitizens', 'maritalStatus',
+test('each question maps to its own explicit profile field without substituting ordinary names', () => {
+  assert.deepEqual(adapter.profileRequest(PAGE_KEY), ['sex', 'birthDate', 'hasSsn', 'ssn', 'ssnCardNameMatches', 'ssnCardFirstName', 'ssnCardMiddleName', 'ssnCardLastName', 'usCitizen', 'householdAllCitizens', 'maritalStatus',
     'militaryOrVeteran', 'disabled', 'householdDisability', 'blind', 'healthLimitation', 'medicare', 'householdMedicare']);
   assert.deepEqual(values({ ...saved, ssn: '999-99-9999', hasSsnAnswer: 'yes', householdVeteran: 'no', firstName: 'Avery' }),
-    { gender: 'Female', birthDate: '1985-04-12', hasSsn: 'yes', ssnCardName: 'yes', usCitizen: 'yes', maritalStatus: 'Never Married',
+    { gender: 'Female', birthDate: '1985-04-12', hasSsn: 'yes', ssn: '999-99-9999', ssnCardName: 'yes', usCitizen: 'yes', maritalStatus: 'Never Married',
       militaryOrVeteran: 'no', hasDisability: 'no', blind: 'no', healthLimits: 'no', hasMedicare: 'no' });
   // Every one of Iowa's options is an answer.
   assert.deepEqual(values({ sex: 'Male', hasSsn: 'no', ssnCardNameMatches: 'no', usCitizen: 'no', maritalStatus: 'Married (includes common-law)',
@@ -161,7 +161,7 @@ test('answers already on the page are never overwritten', () => {
   }
 });
 
-test('the Social Security card question Iowa shows after Yes fills from the saved answer on the next pass; the number and name boxes never do', () => {
+test('conditional Social Security fields require a fresh scan and never invent missing saved numbers or card names', () => {
   for (const [answer, option] of [['yes', 1], ['no', 2]]) {
     const doc = page();
     // Iowa's script shows the Social Security number box, the card name question and the name-on-card
@@ -171,15 +171,15 @@ test('the Social Security card question Iowa shows after Yes fills from the save
     const answers = values({ ...saved, ssnCardNameMatches: answer });
     assert.deepEqual(fillAll(doc, undefined, answers), { filled: FILLS, skipped: [] });
     // The next pass finds the question Iowa just showed, and nothing else.
-    assert.deepEqual(adapter.scan(doc, fixture.URL).fields, [{ key: 'ssnCardName', label: 'Is your first and last name the same as on your Social Security card?' }]);
+    assert.deepEqual(adapter.scan(doc, fixture.URL).fields, [{ key: 'ssn', label: 'Social Security number: review in Iowa’s form' }, { key: 'ssnCardName', label: 'Is your first and last name the same as on your Social Security card?' }]);
     const probe = adapter.probePage(doc, fixture.URL);
-    assert.deepEqual(probe.checklist.slice(2, 5).map(item => [item.key, item.status]), [['hasSsn', 'complete'], ['ssnCardName', 'missing'], ['usCitizen', 'complete']]);
+    assert.deepEqual(probe.checklist.slice(2, 5).map(item => [item.key, item.status]), [['hasSsn', 'complete'], ['ssn', 'missing'], ['ssnCardName', 'missing']]);
     assert.equal(probe.pageKey, PAGE_KEY);
-    assert.deepEqual(fillAll(doc, undefined, answers), { filled: ['ssnCardName'], skipped: [] });
+    assert.deepEqual(fillAll(doc, undefined, answers), { filled: ['ssnCardName'], skipped: ['ssn'] });
     assert.ok(radio(doc, 'ssnCardName', option).checked, answer);
     for (const id of SSN_BOXES) assert.equal(byId(doc, id).value, '', id);
     assert.equal(byId(doc, 'answerSets0.answers21.answerValue1').checked || byId(doc, 'answerSets0.answers21.answerValue2').checked, false);
-    assert.deepEqual(adapter.scan(doc, fixture.URL).fields, []);
+    assert.deepEqual(fieldKeys(doc), answer === 'no' ? ['ssn', 'ssnCardFirstName', 'ssnCardMiddleName', 'ssnCardLastName'] : ['ssn']);
     assert.equal(adapter.probePage(doc, fixture.URL).checklist.find(item => item.key === 'ssnCardName').status, 'complete');
   }
   // Not saved: the question stays open for the applicant.
@@ -187,9 +187,9 @@ test('the Social Security card question Iowa shows after Yes fills from the save
   radio(doc, 'hasSsn', 1).addEventListener('click', () => reveal(doc, fixture.SSN_REVEALS));
   const unsaved = values({ ...saved, ssnCardNameMatches: '' });
   assert.deepEqual(fillAll(doc, undefined, unsaved).filled, FILLS);
-  assert.deepEqual(fillAll(doc, undefined, unsaved), { filled: [], skipped: ['ssnCardName'] });
+  assert.deepEqual(fillAll(doc, undefined, unsaved), { filled: [], skipped: ['ssn', 'ssnCardName'] });
   assert.equal(radio(doc, 'ssnCardName', 1).checked || radio(doc, 'ssnCardName', 2).checked, false);
-  assert.deepEqual(fieldKeys(doc), ['ssnCardName']);
+  assert.deepEqual(fieldKeys(doc), ['ssn', 'ssnCardName']);
 });
 
 test('follow-up questions Iowa shows, even from a disabled template, leave the page and its answers verified', () => {

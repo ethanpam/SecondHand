@@ -1087,3 +1087,17 @@ test('on a verified Iowa page, an answer the app left out because of a saved dat
   assert.deepEqual(w.filled(), ['firstName', 'hasHomeAddress', 'mailingCity']);
   assert.match(result.message, /^Filled 3 · 1 need you\. .*SecondHand left the answers that need a date of birth for you: a date of birth in My information is after today or more than 130 years ago\. Check it in the SecondHand app\./);
 });
+
+test('observed household screening routes fill only rule matches, never ready or call Laya, and leave Next manual', async () => {
+  for (const matched of [[{ id: 'utilities', key: 'paysUtilities', confidence: 'high', label: 'Does your household pay utilities?' }], []]) {
+    const general = { token: 'screening', lang: 'en', matched, unmatched: [{ id: 'manual', label: 'Which situation applies?', type: 'radio', options: ['Yes', 'No'], required: true }] };
+    const w = worker({ kind: 'manual', engine: generalEngine, general, page: { pageKey: 'iowa-household-screening-rules' },
+      desktop: { layaState: 'ready', values: { paysUtilities: 'yes' }, laya: { answerFields: () => { throw new Error('Laya must not run'); } } } });
+    const response = await autofill(w);
+    assert.equal(response.ok, true); assert.equal(response.data.state, 'done'); assert.equal(response.data.filled, matched.length);
+    assert.deepEqual(plain(response.data.needYou), ['manual']);
+    assert.equal(w.calls.native.some(call => ['warmLaya', 'suggestFields', 'answerFields'].includes(call.type)), false);
+    assert.equal(w.calls.content.some(call => ['secondhand:next', 'secondhand:continue'].includes(call.type)), false);
+    assert.match(response.data.todo, /Check your answers/);
+  }
+});

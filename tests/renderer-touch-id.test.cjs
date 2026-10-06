@@ -7,7 +7,7 @@ const test = require('node:test');
 const { JSDOM } = require('jsdom');
 
 const html = fs.readFileSync(path.join(__dirname, '../renderer/index.html'), 'utf8');
-const script = fs.readFileSync(path.join(__dirname, '../renderer/app.js'), 'utf8');
+const script = ['../shared/snap-information.js', '../renderer/snap-information.js', '../renderer/app.js'].map(file => fs.readFileSync(path.join(__dirname, file), 'utf8')).join('\n');
 const tick = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve)); };
 const PASSWORD = 'synthetic touch password';
 

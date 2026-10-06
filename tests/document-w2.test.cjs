@@ -66,7 +66,7 @@ test('aligned employee cells produce distinct identity/address candidates and an
   for (const field of result.fields) {
     assert.equal(field.page, 3); assert.equal(field.confidence, 93); assert.ok(field.sourceLabel);
     if (field.kind === 'amount') { assert.equal(field.profileKey, undefined); assert.equal(field.sourceRole, 'document'); }
-    else assert.equal(field.sourceRole, 'applicant');
+    else assert.equal(field.sourceRole, field.id.startsWith('w2Employer') ? 'employer' : 'applicant');
   }
   assert.equal(result.fields.find(field => field.profileKey === 'ssn').kind, 'identifier');
   assert.match(result.warnings.join(' '), /not copied or converted into current monthly income/);
@@ -102,7 +102,8 @@ test('blank employee cells never fall back to employer identity, address, EIN, o
   const page = remove(fixture(), 'first', 'last', 'street', 'unit', 'city', 'ssn');
   const result = parse(page);
   assert.deepEqual(profile(result), {});
-  assert.ok(result.fields.every(field => !/EMPLOYER|ELSEWHERE|00-1234567|IA-TEST/.test(field.value)));
+  assert.ok(result.fields.filter(field => field.sourceRole !== 'employer').every(field => !/EMPLOYER|ELSEWHERE|00-1234567|IA-TEST/.test(field.value)));
+  assert.ok(result.fields.filter(field => field.sourceRole === 'employer').every(field => !field.profileKey));
   assert.equal(values(result).taxLineW2Box1, '23456.78');
 });
 
@@ -211,4 +212,47 @@ test('document integration rejects multiple W-2 forms and mixed W-2/tax-return p
     bbox: { ...word.bbox, y0: word.bbox.y0 + 1200, y1: word.bbox.y1 + 1200 } })));
   const result = analyzeDocument({ pages: [samePage] });
   assert.equal(result.type, 'unknown'); assert.deepEqual(result.fields, []);
+});
+
+test('employer name, address and EIN retain their own role without applicant mappings', () => {
+  const page = fixture(), result = parse(page), found = values(result);
+  assert.equal(found.w2EmployerName, 'FICTIONAL EMPLOYER LLC');
+  assert.equal(found.w2EmployerStreet, '99 EMPLOYER STREET');
+  assert.equal(found.w2EmployerCity, 'ELSEWHERE');
+  assert.equal(found.w2EmployerState, 'NY');
+  assert.equal(found.w2EmployerZip, '10001');
+  assert.equal(found.w2EmployerEin, '00-1234567');
+  for (const field of result.fields.filter(field => field.id.startsWith('w2Employer'))) {
+    assert.equal(field.sourceRole, 'employer'); assert.equal(field.profileKey, undefined);
+  }
+  assert.equal(result.fields.find(field => field.id === 'w2EmployerEin').kind, 'identifier');
+  assert.equal(profile(result).ssn, '000-34-5678');
+  for (const missing of ['employer-name', 'employer-address', 'control-label', 'employer-label']) {
+    assert.equal(values(parse(remove(fixture(), missing))).w2EmployerName, undefined, missing);
+  }
+  const bad = fixture(); bad.words.find(word => word.group === 'ein').text = 'OO-1234567';
+  assert.equal(values(parse(bad)).w2EmployerEin, undefined);
+});
+
+test('historical W-2 reference keeps labeled annual values separate from current profile and requires two-pass evidence', () => {
+  const page = fixture(), before = structuredClone(page);
+  assert.equal(analyzeDocument({ pages: [page] }).statement, undefined);
+  page.alternative = { text: page.text, words: structuredClone(page.words) };
+  const result = analyzeDocument({ pages: [page] });
+  assert.deepEqual(result.statement, { documentType: 'w2', taxYear: '2023', sourceName: 'FICTIONAL EMPLOYER LLC', sourceRole: 'employer',
+    recipientName: 'RIVER Q EXAMPLE', annualIncome: '23456.78', annualIncomeLabel: 'W-2 wages (box 1) — 2023',
+    annualWithholding: '1111.22', annualWithholdingLabel: 'Federal income tax withheld (W-2 box 2) — 2023' });
+  assert.equal(Object.hasOwn(result.statement, 'id'), false, 'a read does not create a saved record');
+  assert.ok(!JSON.stringify(result.statement).includes('000-34-5678'));
+  assert.ok(!JSON.stringify(result.statement).includes('00-1234567'));
+  assert.ok(!result.fields.some(field => /monthly|employed|job/i.test(field.profileKey || '')));
+  assert.deepEqual(page.words, before.words);
+  page.alternative.words.find(word => word.group === 'ein').text = '00-1234568';
+  page.alternative.words.find(word => word.group === 'employer-name').text = 'ANOTHER';
+  page.alternative.words.find(word => word.group === 'box1').text = '23,456.79';
+  const disputed = analyzeDocument({ pages: [page] });
+  assert.equal(values(disputed).w2EmployerEin, undefined);
+  assert.equal(disputed.statement.sourceName, '');
+  assert.equal(disputed.statement.annualIncome, ''); assert.equal(disputed.statement.annualIncomeLabel, '');
+  assert.equal(disputed.statement.annualWithholding, '1111.22');
 });

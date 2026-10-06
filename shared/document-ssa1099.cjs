@@ -47,6 +47,8 @@ function parse(page) {
     const years = source?.words.map(word => word.text).filter(text => /^(?:19|20)\d{2}$/.test(text)) || [];
     return years.length === 1 ? years[0] : '';
   };
+  const issuer = title && matches([title.row], 'SOCIAL SECURITY');
+  if (issuer?.length === 1) add('ssaIssuerName', 'Statement source (printed heading)', content(issuer[0].words), issuer[0].words, issuer[0], undefined, 'issuer');
   const amountSources = [
     sourceInColumn(a.paid, a.repaid?.x0 ?? 0),
     sourceInColumn(a.repaid, a.net?.x0 ?? 0),
@@ -132,7 +134,7 @@ function parse(page) {
   }
   warnings.push('Benefit and withholding amounts are historical statement values, not current monthly income. No disability, Medicare, or eligibility answers are inferred.');
   warnings.push('Confirm that the beneficiary and statement address belong to the applicant before selecting any profile fields. The address may be old.');
-  if (!fields.length) warnings.push('No filled values could be read reliably inside the labeled boxes. Check the original document and enter the information yourself.');
+  if (!fields.some(field => field.id !== 'ssaIssuerName')) warnings.push('No filled values could be read reliably inside the labeled boxes. Check the original document and enter the information yourself.');
   if (fields.some(field => field.confidence < 75)) warnings.push('Some detected values have low OCR confidence. Compare them with the original document.');
   return result;
 }
