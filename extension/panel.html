@@ -16,8 +16,10 @@
   <section id="launcher" hidden>
     <!-- A line, when there is one to read, above a row that keeps its place in the page's corner: the logo
          (which opens the side panel), a link to the answers still needed, one button, and a way to hide the card. -->
+    <!-- What the card says, read to screen readers as it changes: outside the card, so it is heard while the card is hidden. -->
+    <p id="widget-status" class="visually-hidden" role="status" aria-live="polite"></p>
     <div id="widget" class="widget">
-      <p id="widget-text" class="visually-hidden" role="status" aria-live="polite" data-i18n="widget.iowaReady"></p>
+      <p id="widget-text" class="visually-hidden" data-i18n="widget.iowaReady"></p>
       <button id="translate-offer" class="widget-link" type="button" data-i18n="widget.offer" data-i18n-title="widget.offerTitle" hidden></button>
       <div class="widget-row">
         <button id="details" class="widget-logo" type="button" data-i18n-title="widget.detailsTitle" data-i18n-aria-label="widget.detailsTitle"><img class="brand" src="icon-128.png" alt=""></button>

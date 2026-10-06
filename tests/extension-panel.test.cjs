@@ -975,6 +975,14 @@ test('the widget can be hidden to its logo and shown again from it, by the reade
   assert.equal(next.get('pill').classList.contains('waiting'), true, 'two questions are left for the reader');
   assert.equal(next.get('pill').title, 'Show SecondHand’s card: it needs you');
   assert.equal(next.get('pill').getAttribute('aria-label'), 'Show SecondHand’s card: it needs you');
+  // A screen reader still hears what the hidden card says, from the status region outside the card.
+  const status = next.get('widget-status');
+  assert.equal(status.getAttribute('role'), 'status');
+  assert.equal(status.getAttribute('aria-live'), 'polite');
+  assert.equal(next.get('widget').contains(status), false);
+  assert.equal(status.textContent, next.get('widget-text').textContent);
+  assert.match(status.textContent, /^Filled /);
+  assert.equal(next.get('widget-text').getAttribute('role'), null, 'one region speaks, not two');
   const quiet = await panel(t, { launcher: true, storage, session });
   assert.equal(quiet.get('pill').classList.contains('waiting'), false);
   assert.equal(quiet.get('pill').title, 'Show SecondHand’s card');

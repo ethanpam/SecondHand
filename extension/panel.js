@@ -218,6 +218,10 @@
       // When the frame can't hold the whole notice, the short form says what to do. Letters overhang
       // their line by a pixel or so; a line cut off is 14px more.
       if (outdated && $('widget-text').scrollHeight - $('widget-text').clientHeight > 7) $('widget-text').textContent = t((OUTDATED_LINES[outdatedKey] || OUTDATED_LINES['panel.outdated'])[1]);
+      // Screen readers hear the same words, from a region outside the card, so a card the reader hid still speaks.
+      // A page with nothing for SecondHand to do has no card, and says nothing.
+      const spoken = card ? $('widget-text').textContent : '';
+      if ($('widget-status').textContent !== spoken) $('widget-status').textContent = spoken;
       if (outdated && outdatedKey !== 'panel.reloadPage' && !roomAsked) {
         roomAsked = true;
         send({ type: 'ui:widgetSize', line: true }).catch(() => {});
