@@ -36,7 +36,7 @@
 - **Fills Iowa's application in one click.** Click **Autofill** in the corner of Iowa's portal. SecondHand fills the questions it knows, moves past screens that only give information, and stops wherever you're needed.
 - **Shows what still needs you.** A yellow **1 need you** link jumps to each missing answer. Click the SecondHand logo on the card to open Chrome's side panel, which marks every question on the page as **Done**, **Needs you**, **Optional**, or **Do it yourself**.
 - **Saves what you type for next time.** When Autofill finds a question it knows but you hadn't saved an answer for, answer it on the page and click **Save to My information** in the side panel. SecondHand reads that one answer only after your click, and the app asks before it saves it.
-- **Answers the questions the rules miss.** Laya, a small AI model that runs inside the desktop app, picks an answer from your saved facts when it's confident, and marks it as a guess for you to check. When your facts don't say, it leaves the question for you.
+- **Answers the questions the rules miss.** Laya, a small AI model that runs inside the desktop app, picks an answer from your saved facts when it's confident, and marks it as a guess for you to check. On other sites' everyday single-choice questions it isn't sure of, it may fill its best guess with its own dotted outline and list it in the side panel for you to check. When your facts don't say, it leaves the question for you.
 - **Leaves the decisions to you.** The app asks before sharing anything, unless you choose **Always allow**. CAPTCHA, consent, signatures, and final submission are always yours.
 - **Speaks your language.** The side panel works in English, Spanish, Vietnamese, Chinese, French, and Arabic. It can show Iowa's questions in your language and sum up long pages, using Chrome's built-in translator and summarizer on your computer.
 - **Helps with other food-assistance forms.** Turn SecondHand on for a food pantry's form site, or for every site at once with **Use SecondHand on all websites** in Chrome's side panel. It fills what it recognizes, one click at a time, and never navigates or submits on those sites. With all websites on, its card shows only on pages with a form it can help with.
@@ -91,7 +91,8 @@ Rules fill the questions SecondHand knows. For the rest, the desktop app asks La
 2. **The desktop app writes your saved profile as plain facts**, such as "The household has 1 person", on your computer.
 3. **Laya scores every option.** For each one it answers a single yes/no question: given the facts about the household, is this the correct answer to the form question? "None of these, or the facts don't say" is scored too.
 4. **It fills only a sure answer**, one that scores over 0.9 and beats "None of these". The answer gets a dashed amber outline and the summary says it was suggested by Laya, so you know to check it. On sites other than Iowa's portal, the app asks before it uses sensitive details such as your age, unless you chose **Always allow**.
-5. **Otherwise the question stays yours**, marked **Needs you** in the side panel.
+5. **Off Iowa's portal, it may fill its best guess.** On a radio-button, dropdown, or yes/no question with no sure answer, Laya fills its top-scoring option if that option beats "None of these". It guesses from your everyday facts only, never sensitive ones. It never guesses at a checkbox group, a question about a sensitive detail (Social Security number, birth date or age, income or work, money on hand, medical costs, citizenship, disability, health, Medicare), or anything on Iowa's portal. A guess gets a dotted plum outline, the summary says "1 guessed by Laya, check it", and the side panel lists each guessed question so you can find it and check it. The app lists guesses in the same approval as Laya's other answers, marked "(a guess)".
+6. **Otherwise the question stays yours**, marked **Needs you** in the side panel.
 
 Laya also matches text boxes the rules don't recognize to the saved detail they ask for, such as a differently worded name or phone field.
 
@@ -141,9 +142,10 @@ The Select Address and Tell Us More steps and Laya are in this code but not yet 
 - **Laya answers some of what the rules miss, as a guess.** Laya runs on this computer. When the rules don't know a question, Laya may pick an answer from your saved facts. SecondHand marks each of Laya's answers as a guess for you to check, because Laya is sometimes wrong. On 15 real forms collected after training, which nobody wrote code for ([Final holdout](docs/laya-model.md#final-holdout)):
   - Choosing answers: 5 of the 72 answers Laya filled were wrong. 57 matched the answer key, and 10 more were right by the saved facts.
   - Matching text boxes, the way the app asks: 8 of the 67 boxes Laya matched were wrong, and 59 were right. Laya matched 59 of the 81 boxes it could have.
+  - These counts are Laya's sure answers. Its best guesses on other sites are marked apart, with a dotted outline, and aren't counted here.
 - **With Laya off, the rules still work.** The rules always fill first, and Laya only gets what's left. Turn Laya off with its switch in the app's **Chrome extension** view, and SecondHand doesn't run it at all. See [Local AI with Laya](#local-ai-with-laya).
 
-On a form SecondHand has no map for, some questions stay with you. When the rules don't recognize a question and Laya isn't sure, SecondHand leaves it for you to answer.
+On a form SecondHand has no map for, some questions stay with you. When the rules don't recognize a question and Laya has neither a sure answer nor a best guess for it, SecondHand leaves it for you to answer.
 
 ## Privacy and safety
 
