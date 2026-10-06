@@ -1,7 +1,7 @@
 {
   "name": "secondhand",
   "productName": "SecondHand",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "A local benefits companion for Iowa SNAP",
   "author": "secondHand contributors",
@@ -61,7 +61,7 @@
     "win": {
       "target": "nsis",
       "executableName": "secondHand",
-      "files": ["!node_modules/onnxruntime-node/bin/napi-v6/{darwin,linux}/**", "!node_modules/onnxruntime-node/bin/napi-v6/win32/arm64/**"],
+      "files": ["desktop/**/*", "renderer/**/*", "shared/**/*", "package.json", "!node_modules/onnxruntime-node/bin/napi-v6/{darwin,linux}/**", "!node_modules/onnxruntime-node/bin/napi-v6/win32/arm64/**"],
       "extraFiles": [{ "from": "build/native/secondHand-native.exe", "to": "secondHand-native.exe" }]
     },
     "nsis": {
@@ -75,7 +75,7 @@
       "executableName": "SecondHand",
       "icon": "desktop/icon.icns",
       "category": "public.app-category.productivity",
-      "files": ["!node_modules/onnxruntime-node/bin/napi-v6/{linux,win32}/**", "!node_modules/onnxruntime-node/bin/napi-v6/darwin/!(${arch})/**"],
+      "files": ["desktop/**/*", "renderer/**/*", "shared/**/*", "package.json", "!node_modules/onnxruntime-node/bin/napi-v6/{linux,win32}/**", "!node_modules/onnxruntime-node/bin/napi-v6/darwin/!(${arch})/**"],
       "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }],
       "identity": null,
       "hardenedRuntime": false,
