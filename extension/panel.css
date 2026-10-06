@@ -89,3 +89,6 @@ details.filled>summary>span{display:flex;align-items:center;gap:10px}details.fil
 .save-hint{color:var(--muted-foreground);margin:0 0 8px}.save-row{flex-wrap:wrap;cursor:default}.save-row .checklist-copy{flex:1 1 120px}.save-row .button{min-height:36px;padding:6px 14px;font-size:13px}
 /* Laya's best guess (#185): the dotted outline it has on the page. */
 .guess-mark{border:2px dotted #9b3d8f}
+/* What Fill sensitive details will fill: a plain list above its button, not boxes that look like fields to type in. */
+#held-list{background:none;border:0;border-radius:0;margin:0 0 12px}#held-list .checklist-item{position:relative;padding:2px 0;padding-inline-start:16px}
+#held-list .checklist-item::before{content:"";position:absolute;inset-inline-start:3px;top:50%;width:5px;height:5px;margin-top:-2.5px;border-radius:50%;background:var(--foreground)}
