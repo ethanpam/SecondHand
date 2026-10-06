@@ -4,7 +4,7 @@ SecondHand runs on your computer. You do not need a developer account, command l
 
 ## Install the desktop app
 
-Download a Windows installer or Mac disk image from the [secondHand download website](https://secondhand-download.khoidoan00.chatgpt.site). No GitHub account or repository access is needed.
+Download a Windows installer or Mac disk image from the [secondHand download website](https://secondhand.ethanpam.workers.dev). No GitHub account or repository access is needed.
 
 - **Windows:** run the `.exe` installer and open SecondHand.
 - **MacBook:** choose the Apple silicon download for an M-series Mac, or Intel for an Intel Mac. Open the `.dmg`, drag SecondHand to Applications, eject the disk image, and open the app from Applications. Move it into Applications before preparing the extension so Chrome's local connection points to a permanent app location.

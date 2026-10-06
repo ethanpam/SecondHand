@@ -6,7 +6,13 @@ Public download site for the local-only SecondHand desktop application. This sit
 
 ## Develop
 
-Use Node24+, `npm ci`, then `npm run dev`. Validate using `npm test`, `npm run typecheck`, and `npm run build`. Sites provisions the FILES bucket declared in `.openai/hosting.json`.
+Use Node24+, `npm ci`, then `npm run dev`. Validate using `npm test`, `npm run typecheck`, and `npm run build`.
+
+## Hosting
+
+The site runs on a Cloudflare Worker named `secondhand`, with the installers in an R2 bucket named `secondhand-downloads` bound as `FILES`. Both names, and Cloudflare's per-request logging turned off, are set in `vite.config.ts`. Both fit Cloudflare's free tier, and R2 charges nothing for downloads.
+
+To deploy, log in once with `npx wrangler login`, then run `npm run deploy`. It builds the site and publishes it with `wrangler deploy`. A merge to GitHub doesn't deploy anything by itself. The first time on a new Cloudflare account, create the bucket with `npx wrangler r2 bucket create secondhand-downloads`.
 
 ## Pages
 
@@ -33,13 +39,21 @@ Page navigation uses ordinary anchors. This static download site does not need c
 
 ## Publish installers
 
+The simplest way to upload a release is straight to R2 with Wrangler, which needs no upload secret. From `website/`, for each file in the release folder:
+
+```sh
+npx wrangler r2 object put secondhand-downloads/releases/0.6.0/secondHand-0.6.0-win-x64.exe --file /absolute/path/to/release/secondHand-0.6.0-win-x64.exe --remote
+```
+
+Then download each file back from the live site, check it against `SHA256SUMS.txt`, and only then update `LATEST_RELEASE` and the displayed version and deploy. The steps below use the site's own publish route instead, which also verifies every byte.
+
 1. Build the reviewed desktop source for Windows x64 and Mac arm64/x64. Run its unit, UI, and packaged native-bridge tests. Generate `secondHand-extension.zip` and `SHA256SUMS.txt` with the desktop release scripts.
 2. Add the new version to `releases` and set `RELEASE` in `lib/downloads.ts`. Keep `LATEST_RELEASE` and the version displayed in `app/release.ts` on the previous release while uploading. Existing object keys cannot be overwritten.
-3. Set a fresh random `RELEASE_UPLOAD_TOKEN` of at least32 characters as a Sites **secret**, deploy the reviewed website, and retain the credential locally only for this upload session.
-4. Set the same token as an environment variable and run `node scripts/publish-downloads.mjs https://your-site.example /absolute/path/to/release`. For a private staging deployment, set `SITES_ACCESS_TOKEN` to the current Sites access bearer as well. The script uploads in8MiB parts then downloads each full file and verifies its SHA256 against the local artifact. Neither credential is sent to a redirect target or included in browser bundles.
+3. Set a fresh random `RELEASE_UPLOAD_TOKEN` of at least32 characters as a Worker secret (`npx wrangler secret put RELEASE_UPLOAD_TOKEN`), deploy the reviewed website, and retain the credential locally only for this upload session.
+4. Set the same token as an environment variable and run `node scripts/publish-downloads.mjs https://your-site.example /absolute/path/to/release`. The script uploads in8MiB parts then downloads each full file and verifies its SHA256 against the local artifact. Neither credential is sent to a redirect target or included in browser bundles.
 5. After verifying every new file, update `LATEST_RELEASE` and the displayed version, rebuild, and **remove the upload secret before deploying that final version**. With no secret, all publishing routes return404. Make the completed download site public when authorized. Verify anonymous downloads and byte-range resume responses.
 
-The website and publisher source are mirrored into `website/` in the requested GitHub repository. Sites has its own source checkout for publication. Do not commit build output, credentials, `.env` files, or installers. GitHub is private, so its release URLs must never be presented as public downloads.
+Do not commit build output, credentials, `.env` files, or installers.
 
 ## Release boundaries
 
