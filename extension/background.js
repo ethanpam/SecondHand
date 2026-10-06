@@ -628,9 +628,11 @@ async function noteUpdate(shipped) {
   selfUpdate = { build: shipped.build, state: shipped.copy === 'failed' ? 'failed' : await diskBuild() === shipped.build ? 'due' : 'elsewhere' };
 }
 // Nothing under way: no click, no Autofill left on, no site fill, and no plan waiting for its fill.
-// Approval prompts belong to a click or a fill.
+// Approval prompts belong to a click or a fill. Nor anything the applicant is still working through (#142):
+// a reload would wipe a tab's need-you list and Save offers, and they last until the tab moves on or closes.
+const showsNeedYou = result => ['done', 'waiting'].includes(result?.state) && Array.isArray(result.needYou) && result.needYou.length > 0;
 function reloadWhenIdle() {
-  if (selfUpdate?.state !== 'due' || clicksUnderway || autopilots.size || siteRuns.size || sitePlans.size) return;
+  if (selfUpdate?.state !== 'due' || clicksUnderway || autopilots.size || siteRuns.size || sitePlans.size || savables.size || [...results.values()].some(showsNeedYou)) return;
   selfUpdate = null;
   chrome.runtime.reload();
 }

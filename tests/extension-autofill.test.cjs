@@ -1020,8 +1020,9 @@ test('while Autofill is on, SecondHand waits; it reloads at the next message aft
 
 test('an approval prompt in a click holds the reload until the click is answered', async () => {
   let approve;
+  // Every matched question has a saved answer, so no Save offer holds the reload once Autofill stops (#142).
   const w = worker({ kind: 'manual', engine: generalEngine, general: financialPlan(), build: RUNNING, disk: '2026-10-04.1',
-    desktop: { values: financialValues, extension: { build: '2026-10-04.1', copy: 'ready' }, delay: { getFields: new Promise(resolve => { approve = resolve; }) } } });
+    desktop: { values: { ...financialValues, householdSeniors: '0' }, extension: { build: '2026-10-04.1', copy: 'ready' }, delay: { getFields: new Promise(resolve => { approve = resolve; }) } } });
   const click = autofill(w);
   await settle();
   await desktopRow(w);

@@ -2112,9 +2112,13 @@ const UPDATE = { build: '2026-10-04.1', copy: 'ready' };
 const updating = (options = {}) => siteWorker({ build: '2026-10-03.9', disk: UPDATE.build, ...options, desktop: { extension: UPDATE, ...options.desktop } });
 const statusRow = async w => { await w.panel({ type: 'ui:desktopStatus' }); await settle(); };
 
+// Pages whose click leaves nothing for the applicant: a need-you list or a Save offer holds the reload too (#142).
+const answeredByClick = () => [{ name: 'name', key: 'fullName' }, { name: 'zip', key: 'zip' }];
+const reachable = { firstName: 'Synthetic private first', lastName: 'Synthetic private last', email: 'synthetic@example.org', phone: '5155550100' };
+
 test('a site fill waiting on its approval holds the reload; it reloads once the fill is answered', async () => {
   let approve;
-  const w = updating({ enabled: true, desktop: { delay: { getFields: new Promise(resolve => { approve = resolve; }) } } });
+  const w = updating({ enabled: true, fields: answeredByClick(), desktop: { delay: { getFields: new Promise(resolve => { approve = resolve; }) } } });
   const click = autofill(w);
   await settle();
   await statusRow(w);
@@ -2126,11 +2130,11 @@ test('a site fill waiting on its approval holds the reload; it reloads once the 
 });
 
 test('a widget’s planned fill holds the reload between its plan and its Autofill', async () => {
-  const w = updating({ enabled: true, fields: openQuestions() });
-  await plan(w);
+  const w = updating({ enabled: true, fields: openQuestions().filter(field => field.name !== 'pickup'), desktop: { values: reachable } });
+  const [reach, call] = (await plan(w)).unmatched.map(field => field.id);
   await statusRow(w);
   assert.equal(w.reloads(), 0, 'Chrome’s AI is reading the plan in the widget');
-  assert.equal((await w.launcher({ type: 'ui:autofill', confirmed: true, guesses: {} })).ok, true);
+  assert.equal((await w.launcher({ type: 'ui:autofill', confirmed: true, guesses: { [reach]: 'email', [call]: 'phone' } })).ok, true);
   await settle();
   assert.equal(w.reloads(), 1);
 });
@@ -2163,6 +2167,8 @@ test('after a click, the need-you list and Save offers stay: the reload waits un
   await statusRow(w);
   assert.equal(w.reloads(), 0);
   assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).result.needYou.length, 2);
+  await settle();
+  assert.equal(w.reloads(), 0);
   // The tab moves on: nothing is left to keep, and the next message reloads.
   w.events.updated(7, { status: 'loading' });
   await statusRow(w);
