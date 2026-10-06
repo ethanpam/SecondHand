@@ -69,8 +69,8 @@ button.checklist-item::after{content:"";flex:none;width:7px;height:7px;margin-in
 .checklist-copy{flex:1;min-width:0}.checklist-label{display:block;font-size:14px;line-height:1.4}.checklist-detail{display:block;color:var(--muted-foreground);margin-top:2px}.checklist-item.complete .checklist-label,.checklist-item.optional .checklist-label{color:var(--muted-foreground)}.checklist-item.missing .checklist-label,.checklist-item.manual .checklist-label,.checklist-item.missing .checklist-detail,.checklist-item.manual .checklist-detail{color:var(--foreground);font-weight:500}
 /* A done row is one line: its check says it, and its name still says "Done" to a screen reader. */
 .checklist-item.complete .checklist-detail{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
-/* A narrow panel, as when zoomed in, gives the words the room the arrow and the margins took. */
-@media(max-width:260px){.checklist-item{gap:8px;padding:10px}button.checklist-item::after{display:none}}
+/* A narrow panel, as when zoomed in, gives the words the room the margins took; the arrow stays, so a row still looks like it goes somewhere. */
+@media(max-width:260px){.checklist-item{gap:8px;padding:10px}}
 .checklist-section>.note{margin:0 0 8px}
 /* What stays with the reader, in the panel's own dark print. */
 footer{border-top:1px solid var(--border);margin-top:12px;padding:12px 0 16px}footer>.note{margin:8px 0 0}
