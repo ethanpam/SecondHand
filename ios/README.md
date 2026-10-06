@@ -1,5 +1,7 @@
 # SecondHand
 
+For an end-to-end user and engineering walkthrough, see the [detailed iOS app and Safari extension guide](../docs/applications/ios-app.md).
+
 An offline-first iPhone app for keeping an Iowa SNAP profile, documents, and renewal tasks together. Its Safari extension provides a user-started application assistant: fill saved answers, review each step, and separately approve submission.
 
 This is an independent prototype, not an Iowa HHS product. It does not determine eligibility or synchronize with an agency case. Submission requires the user's review, signature on Iowa's website, and explicit approval. Confirmation numbers and application statuses are user-reported.
