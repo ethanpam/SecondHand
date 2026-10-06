@@ -993,6 +993,7 @@ test('the widget can be hidden to its logo and shown again from it, by the reade
   assert.equal(status.textContent, next.get('widget-text').textContent);
   assert.match(status.textContent, /^Filled /);
   assert.equal(next.get('widget-text').getAttribute('role'), null, 'one region speaks, not two');
+  assert.equal(next.get('widget-text').getAttribute('aria-hidden'), 'true', 'and the card’s own copy of the line is not read again');
   const quiet = await panel(t, { launcher: true, storage, session });
   assert.equal(quiet.get('pill').classList.contains('waiting'), false);
   assert.equal(quiet.get('pill').getAttribute('aria-label'), 'Show SecondHand’s card');
