@@ -956,7 +956,7 @@
       const next = navigationButton(doc, rawUrl);
       const canAdvance = Boolean(next && issues.requiredRemaining === 0 && issues.manualRemaining === 0 && scanResult.ambiguous.length === 0);
       return { ...result, ...issues, kind: 'fillable', pageKey: 'iowa-personal-information', heading: 'Enter Personal Information', fields: scanResult.fields, canAdvance,
-        todo: issues.requiredRemaining || issues.manualRemaining ? 'Answer what is left in Iowa’s form. When the page is complete, SecondHand goes to the next one.'
+        todo: issues.requiredRemaining || issues.manualRemaining ? 'Check what was filled and answer what is left in Iowa’s form. Once nothing is left, SecondHand clicks Save and Continue.'
           : canAdvance ? 'SecondHand can save this page and continue. Review every answer before final submission.' : 'Review your answers, then click Save and Continue in Iowa’s form.',
         reason: issues.manualRemaining ? 'Answer the remaining questions and correct any errors in Iowa’s form.' : issues.requiredRemaining ? 'Complete the required applicant fields in Iowa’s form.' : 'Review your answers, then click Save and Continue in Iowa’s form.' };
     }
