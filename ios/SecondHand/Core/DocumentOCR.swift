@@ -10,12 +10,15 @@ struct OCRWord: Codable, Sendable {
     let bbox: Bounds
 }
 
+struct OCRAlternative: Codable, Sendable { let text: String; let words: [OCRWord] }
+
 struct OCRPage: Codable, Sendable {
     var pageNumber = 1
     let width = 1000
     let height = 1000
     let text: String
     let words: [OCRWord]
+    var alternative: OCRAlternative?
 }
 
 struct RecognizedDocument: Identifiable, Sendable {
@@ -105,7 +108,7 @@ enum DocumentOCR {
         return RecognizedDocument(pages: pages, layoutPages: layouts)
     }
 
-    private static func recognize(image: CGImage, includeLayout: Bool) throws -> OCRPage {
+    private static func recognize(image: CGImage, includeLayout: Bool, verifyNumbers: Bool = true) throws -> OCRPage {
         try Task.checkCancellation()
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
@@ -129,6 +132,19 @@ enum DocumentOCR {
                 }
             }
         }
-        return OCRPage(text: candidates.map(\.string).joined(separator: "\n"), words: words)
+        var result = OCRPage(text: candidates.map(\.string).joined(separator: "\n"), words: words)
+        if includeLayout && verifyNumbers {
+            let width = Int(Double(image.width) * 0.8), height = Int(Double(image.height) * 0.8)
+            if let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) {
+                context.interpolationQuality = .high
+                context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+                if let secondImage = context.makeImage() {
+                    let second = try recognize(image: secondImage, includeLayout: true, verifyNumbers: false)
+                    result.alternative = OCRAlternative(text: second.text, words: second.words)
+                }
+            }
+        }
+        return result
     }
 }

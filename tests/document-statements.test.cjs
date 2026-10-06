@@ -43,3 +43,21 @@ test('foreign recipient country suppresses domestic 1099 address, not recipient 
 test('mixed statement types do not combine profiles', () => {
   assert.equal(analyzeDocument({ pages: [layouts.w2, layouts['1099-nec']] }).fields.length, 0);
 });
+
+for (const [type, sample] of Object.entries(layouts)) {
+  test(`${type} requires matching second readings for SSN and annual income`, () => {
+    const page = structuredClone(sample);
+    page.alternative = structuredClone(sample);
+    const result = analyzeDocument({ pages: [page] });
+    assert.equal(profile(result).ssn, '000-12-3456');
+    assert.equal(result.fields.find(f => f.id.startsWith('annual')).value, type === 'ssa-1099' ? '18600.00' : '68450.00');
+    assert.equal(result.taxYear, type === 'ssa-1099' ? '2019' : type === 'w2' ? '2025' : '2026');
+    for (const word of page.alternative.words) {
+      word.text = word.text.replace('000-12-3456', '000-12-3457').replace(/68,?450/, '68451').replace('18,600', '18,601');
+    }
+    const mismatch = analyzeDocument({ pages: [page] });
+    assert.equal(profile(mismatch).ssn, undefined);
+    assert.equal(mismatch.fields.some(f => f.id.startsWith('annual')), false);
+    assert.equal(profile(mismatch).firstName, 'ALEXANDER');
+  });
+}

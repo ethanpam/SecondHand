@@ -365,6 +365,36 @@ final class CoreTests: XCTestCase {
     }
 
     @MainActor
+    func testSSNAndAnnualIncomeMigrationValidationAndSharing() throws {
+        var profile = PersonalProfile()
+        profile.ssn = "000-12-3456"
+        profile.annualIncome = [AnnualIncomeEntry(amount: "68450.00", year: "2025", source: "W-2", category: "Wages")]
+        XCTAssertNoThrow(try AppStore.validate(profile))
+        let encoded = try JSONEncoder().encode(profile)
+        XCTAssertEqual(try JSONDecoder().decode(PersonalProfile.self, from: encoded), profile)
+        var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        legacy.removeValue(forKey: "ssn")
+        legacy.removeValue(forKey: "annualIncome")
+        let migrated = try JSONDecoder().decode(PersonalProfile.self, from: JSONSerialization.data(withJSONObject: legacy))
+        XCTAssertEqual(migrated.ssn, "")
+        XCTAssertTrue(migrated.annualIncome.isEmpty)
+        XCTAssertFalse(String(describing: profile.applicationFields).contains("000-12-3456"))
+        XCTAssertFalse(String(describing: profile.applicationFields).contains("68450"))
+        let shared = profile.applicationFields(sharingSSN: true, annualIncomeID: profile.annualIncome[0].id)
+        XCTAssertEqual(shared["ssn"], "000-12-3456")
+        XCTAssertEqual(shared["annualIncome"], "68450.00")
+        XCTAssertEqual(shared["annualIncomeYear"], "2025")
+        XCTAssertNil(profile.applicationFields(sharingSSN: false, annualIncomeID: UUID())["annualIncome"])
+        XCTAssertNil(profile.applicationFields(sharingSSN: false, annualIncomeID: nil)["ssn"])
+        XCTAssertTrue(Set(shared.keys).isSubset(of: IowaApplicationBridge.allowedFieldKeys))
+        profile.ssn = "123"
+        XCTAssertThrowsError(try AppStore.validate(profile))
+        profile.ssn = "000-12-3456"
+        profile.annualIncome[0].year = "25"
+        XCTAssertThrowsError(try AppStore.validate(profile))
+    }
+
+    @MainActor
     func testProfileValidationRejectsMalformedMoneyAndZip() throws {
         var profile = PersonalProfile()
         profile.monthlyIncome = "-1"

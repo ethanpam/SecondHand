@@ -15,7 +15,7 @@ The iOS extension now supports a user-started application session, explicit fiel
 
 `activeTab`, `scripting`, `nativeMessaging`, and `storage` support the workflow. Optional host access to `https://hhsservices.iowa.gov/*` is requested only when the user starts assistance. All runtime operations additionally require the exact HTTPS origin and a clean `/apspssp/ssp.portal/applyForBenefits/` route. Query strings, fragments, account routes, subframes, and external form targets are unsupported. There are no network fetches, cookie access, external message endpoints, backend, or cloud synchronization.
 
-The native app shares only first/middle/last name, email, explicit home/mobile phone numbers, home address, the saved Yes/No home-address answer (when one is saved), monthly income, and monthly housing cost after explicit authorization. The extension requests only fields selected for the current operation. Generic phone, household members, documents, notes, SSNs, birth dates, passwords, signatures, and consent are never supplied.
+The native app shares only first/middle/last name, email, explicit home/mobile phone numbers, home address, the saved Yes/No home-address answer (when one is saved), monthly income, and monthly housing cost after explicit authorization. The extension requests only fields selected for the current operation. Generic phone, household members, documents, notes, birth dates, passwords, signatures, and consent are never supplied.
 
 The worker persists only tab ID, expiration, phase, page count, and filled count. Answers, page URLs, field labels, mappings, snapshots, and approval tokens are not written to extension storage or logs. The isolated page script keeps its private review snapshot in memory. JavaScript does not guarantee immediate memory zeroization.
 
@@ -49,3 +49,6 @@ node --test ios/Tests/*.test.js
 ```
 
 The suites cover strict known-field matching, explicit mappings, multiple synthetic application pages, changed terms/answers, expiry, cancellation, one-use approvals, worker recovery, stale popups, native boundaries, receipt reporting, and no replay of submission. All form submits in tests are local synthetic events. Signed Safari native messaging and the complete live Iowa workflow still need device validation.
+
+
+SSN and annual-income sharing: Settings offers an unchecked SSN inclusion switch and a picker for one annual record (type, amount, year, source). These choices apply to a new ten-minute Iowa-only session; revoke an active session before changing them. Safari offers SSN only for an explicitly labeled applicant/self SSN field and annual amounts/years only for corresponding annual questions. The user selects each mapping and clicks Fill; these are not verified live-page automatic mappings. No annual totals or monthly conversions are calculated. Generic ambiguous SSN fields, other-person fields, and unsupported layouts remain manual. Values are not stored in extension browser storage or displayed in popup previews. Later live Iowa pages still require verification; local synthetic tests do not establish complete portal coverage.

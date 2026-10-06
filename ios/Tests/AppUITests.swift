@@ -29,6 +29,48 @@ final class AppUITests: XCTestCase {
     }
 
     @MainActor
+    func testProfileOffersMaskedSSNAndAnnualIncome() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Profile"].waitForExistence(timeout: 20))
+        app.tabBars.buttons["Profile"].tap()
+        app.buttons["profile.edit"].tap()
+        let ssn = app.secureTextFields["profile.ssn"]
+        for _ in 0..<5 where !ssn.isHittable { app.swipeUp() }
+        XCTAssertTrue(ssn.isHittable)
+        attachScreenshot(app, name: "Masked SSN profile field")
+        let addIncome = app.buttons["profile.addAnnualIncome"]
+        for _ in 0..<8 where !addIncome.isHittable { app.swipeUp() }
+        XCTAssertTrue(addIncome.isHittable)
+        addIncome.tap()
+        let amount = app.textFields["Annual amount ($)"]
+        for _ in 0..<3 where !amount.isHittable { app.swipeUp() }
+        XCTAssertTrue(amount.isHittable)
+        XCTAssertTrue(app.textFields["Tax year"].exists)
+        XCTAssertTrue(app.textFields["Document or income source"].exists)
+        attachScreenshot(app, name: "Annual income profile fields")
+        app.buttons["Cancel"].tap()
+    }
+
+    @MainActor
+    func testIowaSharingOffersExplicitSSNAndAnnualChoices() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Settings"].waitForExistence(timeout: 20))
+        app.tabBars.buttons["Settings"].tap()
+        let ssn = app.switches["Include my SSN for this Iowa session"]
+        for _ in 0..<8 where !ssn.isHittable { app.swipeUp() }
+        XCTAssertTrue(ssn.isHittable)
+        XCTAssertEqual(ssn.value as? String, "0")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Annual income to share")).firstMatch.exists)
+        attachScreenshot(app, name: "Iowa SSN and annual income sharing choices")
+    }
+
+    @MainActor
     func testPINKeypadLimitsInputAndSupportsDeletion() throws {
         continueAfterFailure = false
         let app = XCUIApplication()

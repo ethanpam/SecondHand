@@ -225,7 +225,7 @@ function parseTaxPage(page, type) {
   return { type, title: type === '1040-sr' ? 'Form 1040-SR tax return' : 'Form 1040 tax return', taxYear, fields, warnings };
 }
 
-// Name/address candidates only. Statement amounts never become current monthly income.
+// Identity and labeled annual amounts. Statement amounts never become current monthly income.
 function parseStatementPage(page, type) {
   const rows = wordRows(page), fields = [];
   const unique = list => list.length === 1 ? list[0] : null;
@@ -315,8 +315,41 @@ function parseStatementPage(page, type) {
       if (values.length === 2) { street(values[0]); cityStateZip(values[1]); }
     }
   }
+  const addSSN = (start, end, left, right) => {
+    const values = cellRows(start, end, left, right).flat().filter(word => /^\d{3}-?\d{2}-?\d{4}$/.test(word.text));
+    if (values.length === 1) add('ssn', 'Social Security number', values[0].text, values);
+  };
+  const addAmount = (id, label, start, end, left, right) => {
+    const values = cellRows(start, end, left, right);
+    if (values.length !== 1) return;
+    const words = values[0].filter(word => word.text !== '$');
+    if (words.length !== 1) return;
+    const value = money(words[0].text);
+    if (value !== null) fields.push({id, label, value, page: page.pageNumber || 1, confidence: meanConfidence(words)});
+  };
+  if (type === '1099-nec') {
+    const social = one("RECIPIENT'S TIN"), name = one("RECIPIENT'S name");
+    const amount = one('Nonemployee compensation'), next = one('Cash tips') || one('Payer made direct sales');
+    if (social && name && amount) addSSN(social, name, social.x0, amount.x0);
+    const right = one('For Recipient');
+    if (amount && next && right) addAmount('annualCompensation', 'Nonemployee compensation (box 1)', amount, next, amount.x0, right.x0);
+  } else if (type === 'w2') {
+    const social = one("Employee's social security number"), end = one('Employer identification number');
+    const omb = one('OMB No');
+    if (social && end && omb) addSSN(social, end, social.x0, omb.x0);
+    const amount = one('Wages tips other compensation'), next = one('Social security wages'), right = one('Federal income tax withheld');
+    if (amount && next && right) addAmount('annualWages', 'Wages, tips, other compensation (box 1)', amount, next, amount.x0, right.x0);
+  } else if (type === 'ssa-1099') {
+    const social = one('Box 2'), end = one('Box 3 Benefits Paid');
+    if (social && end) addSSN(social, end, social.x0, page.width);
+    const amount = end, next = one('DESCRIPTION OF AMOUNT IN BOX 3'), right = one('Box 4 Benefits Repaid');
+    if (amount && next && right) addAmount('annualBenefits', 'Social Security benefits paid (box 3)', amount, next, amount.x0, right.x0);
+  }
+  const header = type === 'ssa-1099' ? one('Box 1 Name') : null;
+  const years = [...new Set(page.words.filter(word => /^(19|20)\d{2}$/.test(word.text) && (!header || word.bbox.y1 < header.y0)).map(word => word.text))];
+  const taxYear = years.length === 1 ? years[0] : '';
   return { type, title: ({ w2: 'Form W-2 wage statement', '1099-nec': 'Form 1099-NEC compensation statement', 'ssa-1099': 'Form SSA-1099 benefit statement' })[type],
-    taxYear: '', fields, warnings: ['Check every selected value against the original, including the recipient’s name and current address.',
+    taxYear, fields, warnings: ['Check every selected value against the original, including the recipient’s name and current address.',
       'Statement amounts are historical. They are not copied into current monthly income.',
       ...(!fields.length ? ['The recipient details could not be read reliably; enter them manually.'] : [])] };
 }
@@ -331,7 +364,16 @@ function analyzeDocument(document) {
   });
   if (found.length === 1) {
     const { page, type } = found[0];
-    if (['1099-nec', 'ssa-1099', 'w2'].includes(type)) return parseStatementPage(page, type);
+    if (['1099-nec', 'ssa-1099', 'w2'].includes(type)) {
+      const result = parseStatementPage(page, type);
+      const alternate = page.alternative && Array.isArray(page.alternative.words)
+        ? parseStatementPage({...page, ...page.alternative, alternative: undefined}, type) : null;
+      result.fields = result.fields.filter(field => !(field.id === 'ssn' || field.id.startsWith('annual')) ||
+        alternate?.fields.some(other => other.id === field.id && other.value === field.value));
+      if (!alternate || alternate.taxYear !== result.taxYear) result.taxYear = '';
+      result.warnings.push('SSNs and annual amounts are proposed only when two readings agree. Check the original; unreadable values stay manual.');
+      return result;
+    }
     const result = parseTaxPage(page, type);
     const alternate = page.alternative && Array.isArray(page.alternative.words)
       ? parseTaxPage({ ...page, ...page.alternative, alternative: undefined }, type) : null;

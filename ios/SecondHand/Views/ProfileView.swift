@@ -3,6 +3,7 @@ import SwiftUI
 struct ProfileView: View {
     @EnvironmentObject private var store: AppStore
     @State private var isEditing = false
+    @State private var showingSSN = false
     private var profile: PersonalProfile { store.data.profile }
 
     var body: some View {
@@ -54,6 +55,31 @@ struct ProfileView: View {
                     }
 
                     AppCard {
+                        SectionLabel(title: "Social Security number")
+                        if profile.ssn.isEmpty {
+                            Text("Not added").foregroundStyle(.secondary)
+                        } else {
+                            Text(showingSSN ? profile.ssn : "•••-••-" + String(profile.ssn.suffix(4)))
+                                .privacySensitive()
+                            Button(showingSSN ? "Hide SSN" : "Show SSN") { showingSSN.toggle() }
+                        }
+                    }
+                    if !profile.annualIncome.isEmpty {
+                        AppCard {
+                            SectionLabel(title: "Annual income")
+                            ForEach(profile.annualIncome) { entry in
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(entry.category).font(.subheadline.weight(.semibold))
+                                    Text("$\(entry.amount) • \(entry.year.isEmpty ? "Year not specified" : entry.year)")
+                                    Text(entry.source).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            Text("Historical document amounts. Kept separate from monthly income; overlapping amounts are not totaled.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+
+                    AppCard {
                         SectionLabel(title: "Household", subtitle: "Saved for your reference. Not shared with Safari autofill.")
                         if profile.household.isEmpty {
                             Label("No household members added", systemImage: "person.2")
@@ -85,6 +111,7 @@ struct ProfileView: View {
             .background(AppTheme.canvas)
             .navigationTitle("Your profile")
             .sheet(isPresented: $isEditing) { ProfileEditor() }
+            .onDisappear { showingSSN = false }
         }
     }
 }
@@ -96,6 +123,7 @@ struct ProfileEditor: View {
     @State private var confirmedCurrent = false
     @State private var importingDocument = false
     @State private var loadedDraft = false
+    @State private var showingSSN = false
     @State private var error: String?
 
     var body: some View {
@@ -130,6 +158,19 @@ struct ProfileEditor: View {
                 }
 
                 Section {
+                    if showingSSN {
+                        TextField("Social Security number", text: $draft.ssn).keyboardType(.numbersAndPunctuation)
+                            .accessibilityIdentifier("profile.ssn")
+                    } else {
+                        SecureField("Social Security number", text: $draft.ssn).keyboardType(.numbersAndPunctuation)
+                            .accessibilityIdentifier("profile.ssn")
+                    }
+                    Button(showingSSN ? "Hide SSN" : "Show SSN") { showingSSN.toggle() }
+                } header: { Text("Social Security number") } footer: {
+                    Text("Saved in your encrypted profile for reference when completing the application. You can include it in a temporary Iowa sharing session in Settings.")
+                }
+
+                Section {
                     Picker("Do you have a home address?", selection: $draft.hasHomeAddress) {
                         ForEach(HomeAddressAnswer.allCases) { Text($0.title).tag($0) }
                     }
@@ -158,6 +199,22 @@ struct ProfileEditor: View {
                     } label: { Label("Add household member", systemImage: "plus.circle") }
                 } header: { Text("Household notes") } footer: {
                     Text("Add people relevant to your application. Swipe left to remove a member. This list is for your reference and doesn’t determine your SNAP household.")
+                }
+
+                Section {
+                    ForEach($draft.annualIncome) { $entry in
+                        VStack(alignment: .leading, spacing: 10) {
+                            TextField("Income type or document line", text: $entry.category)
+                            TextField("Annual amount ($)", text: $entry.amount).keyboardType(.decimalPad)
+                            TextField("Tax year", text: $entry.year).keyboardType(.numberPad)
+                            TextField("Document or income source", text: $entry.source)
+                        }
+                    }
+                    .onDelete { draft.annualIncome.remove(atOffsets: $0) }
+                    Button("Add annual income") { draft.annualIncome.append(AnnualIncomeEntry()) }
+                        .accessibilityIdentifier("profile.addAnnualIncome")
+                } header: { Text("Annual income") } footer: {
+                    Text("Keep the year and source with each amount. These entries do not change monthly income. Choose one in Settings to share with Iowa for a matching annual-income question.")
                 }
 
                 Section {

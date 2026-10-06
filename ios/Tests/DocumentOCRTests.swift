@@ -21,6 +21,7 @@ final class DocumentOCRTests: XCTestCase {
         add(attachment)
     }
 
+    @MainActor
     func test1040ProfileImportUsesPrimaryIdentityAndPreservesOtherDetails() throws {
         let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "synthetic_1040sr_realistic_scan", withExtension: "pdf"))
         let result = try DocumentOCR.recognize(data: Data(contentsOf: url), isPDF: true, includeLayout: true)
@@ -32,6 +33,10 @@ final class DocumentOCRTests: XCTestCase {
         XCTAssertEqual(values["city"], "DES MOINES")
         XCTAssertEqual(values["state"], "IA")
         XCTAssertEqual(values["zip"], "50309")
+        XCTAssertEqual(values["ssn"], "000-12-3456")
+        XCTAssertEqual(analysis.taxYear, "2024")
+        XCTAssertTrue(analysis.fields.contains { $0.isAnnualIncome && $0.value == "68450" })
+        try checkReviewedIncome(analysis)
         var profile = PersonalProfile()
         profile.email = "saved@example.com"
         profile.monthlyIncome = "1000"
@@ -53,6 +58,7 @@ final class DocumentOCRTests: XCTestCase {
         XCTAssertTrue(try ProfileDocumentParser.analyze(unknown).fields.isEmpty)
     }
 
+    @MainActor
     func testAdditionalSyntheticFormsProvideRecipientDetails() throws {
         for (name, type) in [("synthetic_1099nec_copyb_2026", "1099-nec"), ("synthetic_ssa1099_filled", "ssa-1099"), ("synthetic_w2_page3_2025", "w2")] {
             let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: name, withExtension: "pdf"))
@@ -70,7 +76,33 @@ final class DocumentOCRTests: XCTestCase {
             XCTAssertEqual(values["city"], "DES MOINES", name)
             XCTAssertEqual(values["state"], "IA", name)
             XCTAssertEqual(values["zip"], "50309", name)
+            XCTAssertEqual(values["ssn"], "000-12-3456", name)
+            // The alternate 1099-NEC scan reads the calendar year as "202€"; leave it for user confirmation.
+            XCTAssertEqual(analysis.taxYear, type == "ssa-1099" ? "2019" : type == "w2" ? "2025" : "", name)
+            XCTAssertEqual(analysis.fields.first(where: { $0.isAnnualIncome })?.value, type == "ssa-1099" ? "18600.00" : "68450.00", name)
+            try checkReviewedIncome(analysis)
         }
+    }
+
+
+    @MainActor
+    private func checkReviewedIncome(_ original: ProfileDocumentAnalysis) throws {
+        var profile = PersonalProfile()
+        profile.ssn = "111-22-3333"
+        profile.monthlyIncome = "1000"
+        let unselected = original.applying(to: profile)
+        XCTAssertEqual(unselected.ssn, profile.ssn)
+        XCTAssertTrue(unselected.annualIncome.isEmpty)
+        var selected = original
+        for index in selected.fields.indices { selected.fields[index].selected = selected.fields[index].isAnnualIncome || selected.fields[index].profileKey == "ssn" }
+        let documentID = UUID()
+        let draft = selected.applying(to: profile, documentID: documentID, documentName: "Synthetic form")
+        XCTAssertEqual(draft.ssn, "000-12-3456")
+        XCTAssertEqual(draft.monthlyIncome, "1000")
+        XCTAssertFalse(draft.annualIncome.isEmpty)
+        XCTAssertTrue(draft.annualIncome.allSatisfy { $0.year == original.taxYear && $0.source == "Synthetic form" })
+        XCTAssertEqual(selected.applying(to: draft, documentID: documentID).annualIncome.count, draft.annualIncome.count)
+        XCTAssertNoThrow(try AppStore.validate(draft))
     }
 
     func testImageRecognitionAndNoTextFailure() throws {
