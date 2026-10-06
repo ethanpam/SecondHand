@@ -151,6 +151,11 @@
       placeCard();
       return;
     }
+    // A restarted worker asks an embedded frame what it reported before (#157): yes or no only.
+    if (message.type === 'secondhand:generic:helps' && !topFrame) {
+      respond({ helps });
+      return;
+    }
     try {
       if (message.type === 'secondhand:generic:frames' && topFrame) {
         const origins = new Set();
