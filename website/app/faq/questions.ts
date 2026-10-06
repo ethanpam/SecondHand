@@ -18,6 +18,6 @@ export const faq = [
   },
   {
     question: 'Which computers and browsers does it work with?',
-    answer: 'Windows 10 or later (64-bit) and macOS 13 or later on Apple silicon or Intel Macs, with Google Chrome 116 or newer. The desktop app does not run on phones or tablets.',
+    answer: 'Windows 10 or later (64-bit) and macOS 13 or later on Apple silicon or Intel Macs, with Google Chrome 116 or newer. OCR and autofill work on both Mac types; the optional Laya model requires Apple silicon on Mac. The desktop app does not run on phones or tablets.',
   },
 ] as const;

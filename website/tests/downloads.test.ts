@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { authorized, download, publish, filenames, LATEST_RELEASE } from '../lib/downloads.ts';
+import { authorized, download, publish, filenames, LATEST_RELEASE, RELEASE } from '../lib/downloads.ts';
+import { release as displayedRelease, downloads } from '../app/release.ts';
 const secret = 'test-secret-that-is-at-least-32-characters';
 const request = (path: string = filenames[0], headers = {}, method='GET') => new Request(`https://example.test/download/${path}`, {method, headers});
 const object = {size:10,httpEtag:'"etag"',customMetadata:{sha256:'a'.repeat(64)}};
@@ -55,6 +56,9 @@ void test('versioned downloads preserve older releases and reject mismatched or 
   ['secondHand-0.2.0-win-x64.exe','','0.2.0'],
   ['secondHand-0.3.0-mac-arm64.dmg','','0.3.0'],
   ['secondHand-0.4.0-mac-arm64.dmg','','0.4.0'],
+  ['secondHand-0.5.0-win-x64.exe','','0.5.0'],
+  ['secondHand-0.5.0-mac-arm64.dmg','','0.5.0'],
+  ['secondHand-0.5.0-mac-x64.dmg','','0.5.0'],
   ['secondHand-extension.zip','?release=0.3.0','0.3.0'],
   ['SHA256SUMS.txt','',LATEST_RELEASE],
  ]) {
@@ -69,4 +73,23 @@ void test('versioned downloads preserve older releases and reject mismatched or 
  ]) assert.equal((await download(request(file+query),file,files)).status,404);
  const req=new Request('https://example.test/api/publish/file?action=create',{method:'POST',headers:{authorization:`Bearer ${secret}`}});
  assert.equal((await publish(req,'secondHand-0.2.0-win-x64.exe',files,secret)).status,400);
+});
+
+void test('public links and unversioned downloads stay on the verified release independently of the upload target', async()=>{
+ assert.equal(displayedRelease,LATEST_RELEASE);
+ assert.equal(filenames[0],`secondHand-${RELEASE}-win-x64.exe`);
+ const keys: string[]=[];
+ const files={head:async(key: string)=>{keys.push(key);return object;},get:async()=>({body:'data'})} as unknown as R2Bucket;
+ for(const link of Object.values(downloads)) {
+  const url=new URL(link,'https://example.test');
+  const file=url.pathname.split('/').at(-1)!;
+  assert.equal((await download(new Request(url),file,files)).status,200);
+  assert.equal(keys.at(-1),`releases/${LATEST_RELEASE}/${file}`);
+ }
+ for(const file of ['secondHand-extension.zip','SHA256SUMS.txt']) {
+  assert.equal((await download(request(file),file,files)).status,200);
+  assert.equal(keys.at(-1),`releases/${LATEST_RELEASE}/${file}`);
+  assert.equal((await download(request(`${file}?release=${RELEASE}`),file,files)).status,200);
+  assert.equal(keys.at(-1),`releases/${RELEASE}/${file}`);
+ }
 });
