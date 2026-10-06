@@ -19,6 +19,12 @@ const DAY = 24 * 60 * 60 * 1000;
 const START = Date.UTC(2026, 9, 3, 12);
 // Values created inside the vm context have foreign prototypes.
 const plain = value => JSON.parse(JSON.stringify(value));
+// Waits up to 5 seconds, a turn of the event loop at a time: reaching the prompt reads the disk, which a busy machine slows.
+async function waitFor(condition, what) {
+  const end = performance.now() + 5000;
+  while (!condition() && performance.now() < end) await new Promise(resolve => setImmediate(resolve));
+  assert.ok(condition(), what);
+}
 
 async function folder(t) {
   const userData = await fsp.mkdtemp(path.join(os.tmpdir(), 'secondhand-touch-id-main-'));
@@ -247,7 +253,7 @@ test('a cancelled prompt shared by the app and Chrome refuses both, asks once, a
   app.answer(() => cancel ? Promise.reject(new Error('Canceled by user.')) : new Promise((_resolve, reject) => { cancel = () => reject(new Error('Canceled by user.')); }));
   const fromApp = app.invoke('unlockWithTouchId').then(() => assert.fail('unlocked'), error => error.message);
   const fromChrome = app.request('unlockWithTouchId');
-  for (let tries = 0; !cancel && tries < 100; tries++) await new Promise(resolve => setImmediate(resolve));
+  await waitFor(() => Boolean(cancel), 'the prompt is up');
   cancel();
   assert.equal(await fromApp, 'Touch ID didn’t unlock SecondHand (Canceled by user.). Enter your password.');
   assert.deepEqual(plain(await fromChrome), { unlocked: false, reason: 'cancelled' });
@@ -264,7 +270,7 @@ test('a password unlock while the Touch ID prompt is up wins: Touch ID answers u
   let approve;
   app.answer(() => new Promise(resolve => { approve = resolve; }));
   const attempt = app.invoke('unlockWithTouchId');
-  for (let tries = 0; !approve && tries < 100; tries++) await new Promise(resolve => setImmediate(resolve));
+  await waitFor(() => Boolean(approve), 'the prompt is up');
   assert.equal((await app.invoke('unlock', PASSWORD)).unlocked, true);
   let reads = 0;
   app.unsealing(() => { reads++; });
@@ -494,8 +500,7 @@ test('a backup restored while the Touch ID prompt is up isn’t opened by it: To
   let approve;
   app.answer(() => new Promise(resolve => { approve = resolve; }));
   const asking = app.request('unlockWithTouchId');
-  for (let tries = 0; !approve && tries < 100; tries++) await new Promise(resolve => setImmediate(resolve));
-  assert.ok(approve, 'the prompt is up');
+  await waitFor(() => Boolean(approve), 'the prompt is up');
   let answered;
   duringRestore(app, async () => { approve(); answered = plain(await asking); });
   assert.deepEqual(plain(await app.invoke('importBackup')), { cancelled: false });

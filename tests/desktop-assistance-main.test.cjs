@@ -297,7 +297,7 @@ function holdPrompt(app) {
   let respond;
   app.answer(() => respond ? Promise.resolve({ response: 0 }) : new Promise(resolve => { respond = response => resolve({ response }); }));
   return {
-    async shown() { for (let i = 0; i < 50 && !respond; i++) await tick(); assert.equal(typeof respond, 'function', 'the prompt is showing'); },
+    async shown() { await until(() => Boolean(respond)); },
     answer: response => respond(response)
   };
 }
@@ -897,8 +897,7 @@ test('a lock while the "Share sensitive details?" prompt is open releases nothin
     let cancel;
     app.answer(() => cancel ? Promise.resolve({ response: 1 }) : new Promise(done => { cancel = () => done({ response: 0 }); }));
     const pending = app.request(answerRequest([sixty, veteran]));
-    for (let i = 0; i < 50 && !cancel; i++) await tick();
-    assert.equal(typeof cancel, 'function', 'the prompt is showing');
+    await until(() => Boolean(cancel));
     await app.invoke('lock');
     if (change === 'lock and unlock') await app.invoke('unlock', 'synthetic password');
     cancel();
@@ -957,8 +956,7 @@ test('a lock or the site turned off while Laya is choosing answers releases none
     const app = await desktop({ laya, settings: { extensionId, autofillWithoutAsking: true, trustedSites: [WIC], allSites: true } });
     await app.invoke('saveProfile', household);
     const pending = app.request(answerRequest([veteran], { url: `${WIC}/apply` }));
-    for (let i = 0; i < 50 && !scoring; i++) await tick();
-    assert.ok(scoring, 'Laya is choosing');
+    await until(() => scoring);
     await apply(app);
     finish();
     await assert.rejects(pending, refusal);
