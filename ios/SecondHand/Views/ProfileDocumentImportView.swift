@@ -105,7 +105,6 @@ private struct ProfileDocumentReviewView: View {
     @State private var incomeYear = ""
     @State private var showingSSN = false
     @State private var analysis: ProfileDocumentAnalysis?
-    @State private var recognized: RecognizedDocument?
     @State private var confirmed = false
     @State private var loading = true
     @State private var error: String?
@@ -181,11 +180,6 @@ private struct ProfileDocumentReviewView: View {
                     Text("Tax-return amounts may be from a past year or include another person’s income. Enter current monthly income yourself.")
                 }
             }
-            if let recognized {
-                DisclosureGroup("Extracted text") {
-                    Text(recognized.text).font(.caption).textSelection(.enabled)
-                }
-            }
         }
         .navigationTitle("Review document details")
         .navigationBarTitleDisplayMode(.inline)
@@ -199,7 +193,6 @@ private struct ProfileDocumentReviewView: View {
                 let text = try await store.recognizeDocument(document, includeLayout: true)
                 try Task.checkCancellation()
                 let result = try ProfileDocumentParser.analyze(text)
-                recognized = text
                 analysis = result
                 fields = result.fields
                 incomeYear = result.taxYear
