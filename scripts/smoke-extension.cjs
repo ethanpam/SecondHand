@@ -1265,8 +1265,9 @@ async function main() {
       await (await launcherFrame()).evaluate(code => { globalThis.SecondHandStrings.setLanguage(code); localStorage.removeItem('secondhand.autofillStarted'); }, code);
       await resetTo(jobFixture.URL);
       widget = await launcherFrame();
-      await expect(widget.locator('#autofill')).toBeVisible({ timeout: 20000 });
-      await widget.locator('#autofill').click();
+      // The side panel is open by now and, headless, covers the card's corner: Autofill is started from the panel.
+      await expect.poll(() => panel.text('#panel-autofill')).toBe(strings.text(code, 'panel.autofillIowa'));
+      await panel.click('#panel-autofill');
       await expect.poll(async () => (await calls('getRecordFields')).length, { timeout: 20000 }).toBe(1);
       const step = strings.text(code, 'worker.recordMissing');
       await expect.poll(() => lineProblems(widget, `${step} ${stopNote(code)}`, code), { timeout: 10000, message: `${code} no saved record` }).toEqual([]);
