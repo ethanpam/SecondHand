@@ -1557,12 +1557,13 @@ test('Iowa widget and sidebar say what Autofill will do before it is clicked, in
   // The side panel's line says what Autofill does on Iowa (#167), on every page until Autofill has run there.
   assert.equal(sidebar.get('iowa-policy').textContent, EN['panel.iowaPolicy']);
   const policy = sidebar.get('iowa-policy').textContent;
-  assert.match(policy, /Social Security number; check it in Iowa’s form/);
-  assert.match(policy, /first suggested home address/);
-  assert.match(policy, /Review all answers and that address before submitting/);
-  assert.match(policy, /one person’s record at a time/);
-  assert.match(policy, /saves supported pages when complete/);
-  assert.match(policy, /You handle summaries, unmatched questions, consent, signatures, submission/);
+  assert.match(policy, /Social Security number; check it\./);
+  assert.match(policy, /first suggested home address; check that and every answer before you send/);
+  assert.match(policy, /On job, income and expense pages it fills one person at a time/);
+  assert.match(policy, /clicks Save and Continue on pages it knows once they are complete/);
+  assert.match(policy, /On other pages, you click Continue/);
+  assert.match(policy, /an AI program on this computer \(not a person\)/);
+  assert.match(policy, /Consent, signatures and sending are yours/);
   assert.equal(sidebar.get('iowa-policy').classList.contains('note'), false, 'it is not small print');
   assert.equal(sidebar.get('panel-autofill').textContent, 'Start Autofill', 'on Iowa the button starts something that goes on by itself');
   // Once Autofill has run, the status line says what it did and the note is not repeated under it.
