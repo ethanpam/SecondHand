@@ -343,6 +343,24 @@ async function main() {
     await expect(page.locator('#autofill-trust-hint')).toContainText('on every site SecondHand is on. That includes your Social Security number, birth date, income, benefits, and citizenship and disability answers.');
     await expect(page.locator('#always-allowed-sites-empty')).toBeVisible();
     await expect(page.locator('#always-allowed-sites li')).toHaveCount(0);
+    // Connect Chrome is readable (#199): the sensitive-details warning, the setup steps, their hints and both switches
+    // are at least 13px (hints 12px) and 4.5:1, at 100% and at 200% zoom.
+    for (const hint of ['#extension-folder-help', '#autofill-trust-hint', '#all-sites-status', '#trusted-sites-empty', '#always-allowed-sites-empty']) await expect(page.locator(hint)).toBeVisible();
+    const toggles = page.locator('#view-extension .trust-toggle>span');
+    await expect(toggles).toHaveText(['Let Chrome autofill without asking', 'Find more fields with Laya (runs on this computer)']);
+    for (const toggle of await toggles.all()) await expect(toggle).toBeVisible();
+    const extensionText = '#view-extension :is(p, h3, .trust-toggle>span)';
+    const extension = await unreadableText(page, extensionText, 13);
+    assert.equal(extension.length, 0, `Text too small or faint on Connect Chrome:\n${extension.join('\n')}`);
+    const extensionWidth = await page.evaluate(() => window.innerWidth);
+    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(2));
+    await expect.poll(() => page.evaluate(() => window.innerWidth)).toBeLessThanOrEqual(Math.ceil(extensionWidth / 2));
+    const extensionZoomed = await unreadableText(page, extensionText, 13);
+    assert.equal(extensionZoomed.length, 0, `Text too small or faint on Connect Chrome at 200% zoom:\n${extensionZoomed.join('\n')}`);
+    const drawnExtension = await application.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString('base64'));
+    await fs.writeFile(path.join(root, 'artifacts/extension-zoom-200.png'), Buffer.from(drawnExtension, 'base64'));
+    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1));
+    await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(extensionWidth);
     // Turning it off is saved, and stays off after a restart (checked below).
     await page.locator('#laya-toggle').uncheck();
     await expect(page.locator('#toast')).toHaveText('Laya is off.');
@@ -650,7 +668,7 @@ async function main() {
     assert.equal(JSON.parse(await fs.readFile(path.join(userData, 'settings.json'), 'utf8')).householdNoteDismissed, true);
     console.log('#180: with no household list saved, Overview offered Add your household; openHousehold through the bridge opened My information at Your household; Dismiss kept the note away and was saved.');
     assert.deepEqual(errors, []);
-    console.log('Electron UI smoke passed: guided setup offered after the recovery key, saved step by step with a household list, the student status and the answers from lists, finished later from Overview and readable at 200% zoom; Laya downloads on its own on a new install and stays off once turned off, create, save full applicant choices, Iowa’s questions about you and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence, readable hints and Privacy & backups text (also at 200% zoom), Touch ID on (test hook) with a lock-screen lock, a Touch ID unlock, and Touch ID ready at once after a restart, recovery key password reset that keeps Touch ID, clear Iowa’s questions, start over (which removes Touch ID) and its setup offer.');
+    console.log('Electron UI smoke passed: guided setup offered after the recovery key, saved step by step with a household list, the student status and the answers from lists, finished later from Overview and readable at 200% zoom; Laya downloads on its own on a new install and stays off once turned off, create, save full applicant choices, Iowa’s questions about you and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence, readable hints, Connect Chrome text and Privacy & backups text (both also at 200% zoom), Touch ID on (test hook) with a lock-screen lock, a Touch ID unlock, and Touch ID ready at once after a restart, recovery key password reset that keeps Touch ID, clear Iowa’s questions, start over (which removes Touch ID) and its setup offer.');
   } catch (error) {
     if (page && !page.isClosed()) {
       const auth = await page.evaluate(() => ({
