@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useVisibleMotion } from './site-motion';
+import { useVisibleMotion } from '../../lib/site-motion';
 
 type TextTypeProps = {
   text: string;

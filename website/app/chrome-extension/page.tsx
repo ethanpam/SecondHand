@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
-import { SiteFooter, SiteHeader } from '../site-chrome';
+import { SiteFooter, SiteHeader } from '../_components/site-chrome';
 import { GuideVideo } from './guide-video';
 
 export const metadata: Metadata = {
@@ -20,7 +20,7 @@ export default function ChromeExtensionGuide() {
         <p className="doc-lead">
           Do this once, after you install the SecondHand app. It takes about two
           minutes. You need Google Chrome 116 or newer. Don’t have the app yet?{' '}
-          <Link href="/#downloads">Download SecondHand</Link>.
+          <Link href="/downloads">Download SecondHand</Link>.
         </p>
 
         <section aria-labelledby="step-prepare">
@@ -143,6 +143,9 @@ export default function ChromeExtensionGuide() {
             your Iowa tab. Later updates are automatic.
           </p>
         </section>
+        <p className="guide-back-link">
+          <Link href="/setup">Back to the full setup guide</Link>
+        </p>
       </main>
       <SiteFooter />
     </>

@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { SiteFooter, SiteHeader } from '../site-chrome';
+import { SiteFooter, SiteHeader } from '../_components/site-chrome';
 
 export const metadata: Metadata = {
   title: 'Privacy policy',

@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { SiteFooter, SiteHeader } from './site-chrome';
+import { SiteFooter, SiteHeader } from './_components/site-chrome';
 
 export const metadata: Metadata = {
   title: 'Page not found',
@@ -20,10 +20,10 @@ export default function NotFound() {
         </p>
         <ul className="not-found-links">
           <li>
-            <a href="/">Download SecondHand for Windows or Mac</a>
+            <a href="/downloads">Download SecondHand for Windows or Mac</a>
           </li>
           <li>
-            <a href="/#setup">Setup guide</a>
+            <a href="/setup">Setup guide</a>
           </li>
           <li>
             <a href="/faq">Common questions</a>
