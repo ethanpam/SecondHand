@@ -15,9 +15,9 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 const BUILD = source('panel.js').match(/const BUILD = '([^']+)'/)[1];
 // An outdated worker: the widget's line beside its Restart button (the whole of it, or the short form when the
 // frame can't hold the whole), and the side panel's notice above its own.
-const OUTDATED = 'SecondHand was updated. Click Restart SecondHand, then go to the next page, or reload this one; reloading clears what you typed.';
+const OUTDATED = 'SecondHand was updated. Click Restart SecondHand, then go to the next page, or reload this one with the round arrow by the address bar. That clears what you typed on this page; your saved details stay in the app.';
 const OUTDATED_SHORT = 'SecondHand was updated.';
-const OUTDATED_PANEL = 'SecondHand was updated and needs to restart. This side panel will close. To use SecondHand again, go on to the next page of your form, or reload its page; reloading clears what you typed.';
+const OUTDATED_PANEL = 'SecondHand was updated and needs to restart. This side panel will close. To use SecondHand again, go on to the next page of your form, or reload its page with the round arrow by the address bar. That clears what you typed on that page; your saved details stay in the SecondHand app.';
 
 
 // Stand-in for generic-adapter.js; the real engine has its own tests. Plans carry
@@ -2516,7 +2516,7 @@ test('a widget left on a page when SecondHand reloaded asks for the page to be r
   runtime.sendMessage = async () => { throw new Error('Extension context invalidated.'); };
   await widget.userClick('autofill');
   assert.equal(widget.get('widget-text').textContent, strings.english('panel.reloadPage'));
-  assert.equal(widget.get('widget-text').textContent, 'SecondHand works again on the next page. To use it here, reload (the round arrow by the address bar); that clears what you typed.');
+  assert.equal(widget.get('widget-text').textContent, 'SecondHand works again on the next page. To use it here, reload (the round arrow by the address bar); that clears only what you typed on this page.');
   assert.equal(widget.get('widget').classList.contains('outdated'), true);
   assert.equal(widget.get('restart').hidden, true, 'SecondHand already restarted: only the page is left to reload');
   // A frame too small for both sentences keeps the one that says what to do; the tooltip has both.
