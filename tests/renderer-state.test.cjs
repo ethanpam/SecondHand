@@ -789,33 +789,35 @@ test('Privacy & backups names everything autofill fills or clicks today and keep
   for (const phrase of ['first applicant page', 'Household Application Information', 'Tell Us More', 'date of birth', 'Iowa’s questions about you',
     'all visible questions are answered', 'submitted SSN matches', 'birth-date-only layout still needs manual Continue',
     'supported and complete', 'person’s saved job', 'Cash/Uncashed Check asset', 'Other Information/legal/representative questions',
-    'first suggested home address', 'Information-only screens', 'Laya', 'guesses', 'Other sites you trust', 'Chrome’s built-in AI', 'on this computer',
-    'never guesses on Iowa’s form', 'Iowa pages SecondHand doesn’t know', 'A complete live submission has not been validated.']) assert.ok(card.includes(phrase), phrase);
+    'first suggested home address', 'Information-only screens', 'Laya', 'suggested by Laya', 'only when it is sure', 'Other sites you trust', 'Chrome’s built-in AI',
+    'on this computer', 'never fills Iowa’s form', 'Iowa pages SecondHand doesn’t know', 'A complete live submission has not been validated.']) assert.ok(card.includes(phrase), phrase);
+  // Laya fills only the answers it is sure of, which the side panel calls suggested (#189).
+  assert.doesNotMatch(card, /guess/i);
   // Chrome's AI is named with where it runs, that its answers are marked, and that it stays off Iowa's form.
   const chrome = card.split(/(?<=\.)\s+/).find(sentence => sentence.includes('Chrome’s built-in AI'));
   assert.match(chrome, /only/);
   assert.match(chrome, /on this computer/);
   assert.match(chrome, /marked to check/);
-  // It says both times Chrome's AI may guess, and never that it takes what Laya skipped: with Laya ready, it stays off for the whole click.
+  // It says both times Chrome's AI may suggest answers, and never that it takes what Laya skipped: with Laya ready, it stays off for the whole click.
   assert.match(chrome, /Laya isn’t ready/);
   assert.match(chrome, /can’t take any of/);
   assert.doesNotMatch(chrome, /the rest|questions Laya can’t take/);
   assert.doesNotMatch(card, /—|passphrase|vault|the rules/i);
-  // The sites you turned on get one short paragraph for saved answers and another for Laya's and Chrome's guesses.
+  // The sites you turned on get one short paragraph for saved answers and another for Laya's and Chrome's suggestions.
   const paragraphs = Array.from(view.window.document.querySelectorAll('#view-privacy .autofill-card p'), text);
   const sites = paragraphs.filter(paragraph => paragraph.includes('Other sites you trust'));
   assert.equal(sites.length, 1);
   assert.doesNotMatch(sites[0], /Laya|Chrome’s/);
-  const guesses = paragraphs.filter(paragraph => paragraph.includes('Chrome’s built-in AI'));
-  assert.equal(guesses.length, 1);
-  for (const phrase of ['Laya', 'Iowa pages SecondHand doesn’t know']) assert.ok(guesses[0].includes(phrase), phrase);
-  // Chrome's AI staying off Iowa's form is its own short paragraph, right after the guesses (#166).
-  assert.doesNotMatch(guesses[0], /never guesses on Iowa’s form/);
-  const guessesParagraph = Array.from(view.window.document.querySelectorAll('#view-privacy .autofill-card p')).find(paragraph => text(paragraph) === guesses[0]);
-  assert.equal(guessesParagraph.nextElementSibling.tagName, 'P');
-  assert.equal(text(guessesParagraph.nextElementSibling), 'Chrome’s AI never guesses on Iowa’s form.');
-  assert.match(text(guessesParagraph.nextElementSibling.nextElementSibling), /^The page widget and sidebar show what still needs you\./);
-  for (const paragraph of [sites[0], guesses[0]]) assert.ok(paragraph.split(/\s+/).length <= 75, `${paragraph.split(/\s+/).length} words: ${paragraph}`);
+  const suggestions = paragraphs.filter(paragraph => paragraph.includes('Chrome’s built-in AI'));
+  assert.equal(suggestions.length, 1);
+  for (const phrase of ['Laya', 'Iowa pages SecondHand doesn’t know']) assert.ok(suggestions[0].includes(phrase), phrase);
+  // Chrome's AI staying off Iowa's form is its own short paragraph, right after the suggestions (#166).
+  assert.doesNotMatch(suggestions[0], /never fills Iowa’s form/);
+  const suggestionsParagraph = Array.from(view.window.document.querySelectorAll('#view-privacy .autofill-card p')).find(paragraph => text(paragraph) === suggestions[0]);
+  assert.equal(suggestionsParagraph.nextElementSibling.tagName, 'P');
+  assert.equal(text(suggestionsParagraph.nextElementSibling), 'Chrome’s AI never fills Iowa’s form.');
+  assert.match(text(suggestionsParagraph.nextElementSibling.nextElementSibling), /^The page widget and sidebar show what still needs you\./);
+  for (const paragraph of [sites[0], suggestions[0]]) assert.ok(paragraph.split(/\s+/).length <= 75, `${paragraph.split(/\s+/).length} words: ${paragraph}`);
   // The one value SecondHand picks for the applicant gets its own paragraph, ending on the instruction to check it.
   const address = Array.from(view.window.document.querySelectorAll('#view-privacy .autofill-card p'), text).filter(paragraph => paragraph.includes('first suggested home address'));
   assert.equal(address.length, 1);
