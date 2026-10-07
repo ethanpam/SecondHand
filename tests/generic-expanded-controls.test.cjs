@@ -44,6 +44,21 @@ test('closed roots, hidden hosts, wrong-root references and ambiguous ids do not
   assert.deepEqual(engine.plan(doc).matched, []);
 });
 
+test('a label id no open root defines is skipped, but one defined only in another root, or twice, still blocks the box', t => {
+  const doc = page(t, '<input aria-labelledby="inside" placeholder="Phone">');
+  const root = shadow(doc, '<span id="first">First name</span><input aria-labelledby="first error">');
+  shadow(doc, '<span id="inside">Emergency contact phone</span><span id="other">Partner</span>');
+  shadow(doc, '<span id="last">Last name</span><input aria-labelledby="last other">');
+  shadow(doc, '<span id="mail">Email</span><span id="mail">Guardian email</span><input aria-labelledby="mail error" placeholder="Email">');
+  shadow(doc, '<span id="zipq">ZIP code</span><input id="zip" aria-labelledby="zipq error"><span id="zip"></span>');
+  const plan = engine.plan(doc);
+  assert.deepEqual(plan.matched.map(({ key, label }) => [key, label]), [['firstName', 'First name']]);
+  assert.equal(fill(doc, plan, { firstName: 'Avery' }).filled.length, 1); assert.equal(root.querySelector('input').value, 'Avery');
+  assert.equal(plan.unmatched.length, 4);
+  const refused = engine.fillFields(doc, plan.token, plan.unmatched.map(({ id }) => ({ id, custom: true })), Object.fromEntries(plan.unmatched.map(({ id }) => [id, 'Blue'])));
+  assert.deepEqual(refused.filled, []);
+});
+
 test('other-person scope above a shadow host blocks rules and explicit custom assignments', t => {
   const doc = page(t, '<fieldset><legend>Emergency contact</legend><div id="host"></div></fieldset>');
   const root = shadow(doc, '<label for="n">First name</label><input id="n"><label for="p">Favorite color</label><input id="p">', doc.getElementById('host'));

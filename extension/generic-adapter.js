@@ -344,7 +344,8 @@
   const parentOf = element => element.parentElement || element.getRootNode()?.host || null;
   function closestAcross(element, selector) { for (let node = element; node; node = parentOf(node)) if (node.matches?.(selector)) return node; return null; }
   const rootOf = element => element.getRootNode();
-  function rootId(element, id) { const matches = Array.from(rootOf(element).querySelectorAll('[id]')).filter(node => node.id === id); return matches.length === 1 ? matches[0] : null; }
+  const idsIn = (scope, id) => Array.from(scope.querySelectorAll('[id]')).filter(node => node.id === id);
+  function rootId(element, id) { const matches = idsIn(rootOf(element), id); return matches.length === 1 ? matches[0] : null; }
 
   // A label's own aria-hidden only hides it from screen readers (Jotform marks every choice
   // label that way), so a choice label is checked with `labelOnly`; an aria-hidden ancestor still hides it.
@@ -626,12 +627,21 @@
         groups.set(groupKey, entry); entries.push(entry);
       } else entries.push({ kind, elements: [element] });
     }
+    // A label id no open root defines is skipped, as a browser skips it: Google Forms labels each question with its error
+    // message's id before that message exists. An id defined only in another root, or twice in this one, leaves the label unknown.
+    let pageIds = null;
+    function badReference(element, id) {
+      const here = idsIn(rootOf(element), id).length;
+      if (here) return here > 1;
+      if (!pageIds) pageIds = new Set(deepQueryAll(doc, '[id]').map(node => node.id));
+      return pageIds.has(id);
+    }
     for (const entry of entries) {
       const grouped = entry.kind === 'radio' || (entry.kind === 'checkbox' && entry.elements.length > 1);
       entry.labels = ARIA_TYPES[entry.kind] ? ariaLabels(entry, doc) : grouped ? groupQuestion(entry.elements, doc) : labelsFor(entry.elements[0], doc);
       if (ARIA_TYPES[entry.kind]) entry.required = ariaRequired(entry, doc);
       entry.invalidLabels = [entry.group, ...entry.elements].filter(Boolean).some(element =>
-        (element.id && rootId(element, element.id) !== element) || String(element.getAttribute('aria-labelledby') || '').trim().split(/\s+/).filter(Boolean).some(id => !rootId(element, id)));
+        (element.id && rootId(element, element.id) !== element) || String(element.getAttribute('aria-labelledby') || '').trim().split(/\s+/).filter(Boolean).some(id => badReference(element, id)));
     }
     return entries;
   }

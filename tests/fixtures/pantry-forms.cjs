@@ -77,6 +77,19 @@ const googleChoices = `<form><div role="list">
 <div role="listbox" aria-labelledby="c6" tabindex="0"><div role="option" data-value="" aria-selected="true">Choose</div><div role="option" data-value="Polk" aria-selected="false">Polk</div><div role="option" data-value="Story" aria-selected="false">Story</div></div></div>
 </div><div role="button">Submit</div></form>`;
 
+// Google Forms as served: each question is also labelled by its error message's id (i4, i26), and that
+// element is only added once Google refuses an answer.
+const servedBox = (n, question) => `<div role="listitem"><div id="i${n}" role="heading"><span>${question}</span>${required}</div><div id="i${n + 1}"></div>
+<input type="text" autocomplete="off" aria-labelledby="i${n} i${n + 3}" aria-describedby="i${n + 1} i${n + 2}" dir="auto"><div id="i${n + 2}" role="alert"></div></div>`;
+const googleServed = `<form><div role="list">
+<div role="listitem"><div id="i1" role="heading"><span>Number of Family / Household Members</span>${required}</div><div id="i2"></div>
+<div role="radiogroup" aria-labelledby="i1 i4" aria-describedby="i2 i3">${['One (Myself)', 'Two', 'Three'].map(radio).join('')}</div><div id="i3" role="alert"></div></div>
+${servedBox(23, '# of people in your household 0 - 17 yrs old')}
+${servedBox(48, '3.Email Address:')}
+${servedBox(53, '4.PhoneNumber:')}
+${servedBox(58, 'Anything else we should know?')}
+</div><div role="button">Submit</div></form>`;
+
 // Iowa HHS "Financial Information" eligibility page, reconstructed from its question wording:
 // native count selects ("1" … "8 or More") and native Yes/No radios. No real answers.
 const iowaCount = (id, question, from) => `<label for="${id}">${question}*</label><select id="${id}" name="${id}"><option value="">Select One</option>${
@@ -124,4 +137,4 @@ const pantryInstructions = `<header><nav><a href="/">Home</a> <a href="/donate">
 </main>
 <footer><p>© Riverbend Community Pantry · Privacy</p></footer>`;
 
-module.exports = { plainPantry, googleStyle, jotformStyle, numberedGoogle, googleDates, googleChoices, iowaFinancial, pantryInstructions };
+module.exports = { plainPantry, googleStyle, jotformStyle, numberedGoogle, googleDates, googleChoices, googleServed, iowaFinancial, pantryInstructions };
