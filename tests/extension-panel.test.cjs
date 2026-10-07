@@ -1140,14 +1140,15 @@ test('while Autofill waits for the app, both surfaces say where its window is on
   }
 });
 
-test('once Autofill has been started again from this Chrome, both surfaces say the short form of what it waits for, without Stop’s note', async t => {
+test('once Autofill has been started again from this Chrome, both surfaces say the short form of what it waits for: check first, and Stop erases nothing', async t => {
   const storage = new Map([['secondhand.autofillStarted', '2']]);
   const card = await panel(t, { launcher: true, storage, autopilot: true, result: missingResult });
-  assert.equal(card.get('widget-text').textContent, 'Filled 3 answers. SecondHand moves on once nothing is left and you leave the box.');
+  assert.equal(card.get('widget-text').textContent, 'Filled 3 answers. Check first: SecondHand moves on once nothing is left and you leave the box. Stop erases nothing.');
   assert.equal(card.get('widget-text').title, missingResult.message, 'all of it stays in the tooltip');
   const side = await panel(t, { storage, autopilot: true, result: missingResult });
-  assert.match(side.get('status').textContent, /^Filled 3 answers · \d left for you\. SecondHand moves on once nothing is left and you leave the box\.$/);
-  assert.equal(side.get('stop-note').hidden, true);
+  assert.match(side.get('status').textContent, /^Filled 3 answers · \d left for you\. Check first: SecondHand moves on once nothing is left and you leave the box\.$/);
+  assert.equal(side.get('stop-note').hidden, false);
+  assert.equal(side.get('stop-note').textContent, 'Stop ends Autofill and erases nothing.');
   // Anywhere else the line is as it was, without Stop's note.
   const message = await panel(t, { launcher: true, storage, kind: 'blocked', autopilot: true, result: waitingResult });
   assert.equal(message.get('widget-text').textContent, 'Type the characters shown in Iowa’s security check, then click Continue.');

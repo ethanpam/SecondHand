@@ -207,14 +207,16 @@
       // it carries that. While Autofill is on, what Stop would do goes after it: on a page that waits for answers,
       // where SecondHand clicks Save and Continue once nothing is left and the reader leaves the box they typed
       // in, that Stop lets the reader check and continue themselves. A reader who has seen a whole run gets the
-      // short form, without Stop's note. Why Chrome's AI guessed nothing stays in the tooltip. Household
-      // questions the household list left open (#180) wait in the side panel, which lists them with Add your
-      // household: the card says so after the rest.
+      // short form: on that page, still that Stop erases nothing; anywhere else, no note. Why Chrome's AI
+      // guessed nothing stays in the tooltip. Household questions the household list left open (#180) wait in
+      // the side panel, which lists them with Add your household: the card says so after the rest.
       const household = Array.isArray(result.household?.questions) ? result.household.questions.length : 0;
       const said = words(briefly(withLeft(fromResult(result), 0)), 240);
       const text = household ? `${said} ${t('widget.household', { count: household })}` : said;
-      if (!autopilot || usedBefore()) return text;
-      const stop = t(result.todoKey === CHECK_FIRST ? 'widget.stopToCheck' : 'widget.stopNote');
+      if (!autopilot) return text;
+      const checking = result.todoKey === CHECK_FIRST;
+      if (usedBefore() && !checking) return text;
+      const stop = t(checking && !usedBefore() ? 'widget.stopToCheck' : 'widget.stopNote');
       return `${/[.!?…。]$/.test(text) ? text : `${text}.`} ${stop}`;
     }
     function render() {
@@ -659,9 +661,10 @@
       // Where the questions left are listed by name, each row goes to its own.
       $('panel-left').hidden = !target || !left.length || named.length > 0;
       // While Autofill is on, what its button does now: on a page that waits for answers, that it lets the reader
-      // check and continue themselves. A reader who has seen a whole run knows.
-      $('stop-note').hidden = !target || !autopilot || usedBefore();
-      $('stop-note').textContent = t(checkFirst ? 'panel.stopToCheck' : 'panel.stopNote');
+      // check and continue themselves. A reader who has seen a whole run knows, but on that page still reads
+      // that Stop erases nothing.
+      $('stop-note').hidden = !target || !autopilot || (usedBefore() && !checkFirst);
+      $('stop-note').textContent = t(checkFirst && !usedBefore() ? 'panel.stopToCheck' : 'panel.stopNote');
       $('panel-left').disabled = working;
       $('open-iowa').hidden = Boolean(target) || !away || halted;
       $('panel-left').textContent = t('panel.goToLeft', { count: left.length || 1 });
