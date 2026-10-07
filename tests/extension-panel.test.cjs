@@ -318,9 +318,11 @@ async function panel(t, initial = {}) {
     autopilot: Boolean(initial.autopilot)
   };
   const desktop = { connected: true, unlocked: true, ...initial.desktop };
+  // `os`: the platform Chrome's getPlatformInfo names, or the error it fails to name one with.
   window.chrome = {
-    // `shortcuts`: the keys Chrome lists for SecondHand's commands, as chrome://extensions/shortcuts sets them.
-    ...(initial.shortcuts ? { commands: { getAll: async () => structuredClone(initial.shortcuts) } } : {}),
+    // `shortcuts`: the keys Chrome lists for SecondHand's commands, as chrome://extensions/shortcuts sets them,
+    // or the error Chrome fails to list them with.
+    ...(initial.shortcuts ? { commands: { getAll: async () => { if (initial.shortcuts instanceof Error) throw initial.shortcuts; return structuredClone(initial.shortcuts); } } } : {}),
     tabs: {
     query: async () => [tabs.current],
     onActivated: { addListener: callback => { listeners.activated = callback; } },
@@ -328,7 +330,7 @@ async function panel(t, initial = {}) {
   }, permissions: { request: async permissions => {
     requests.push({ type: 'permissions.request', ...structuredClone(permissions) });
     return initial.grant ?? true;
-  } }, runtime: { id: extensionId, getPlatformInfo: async () => ({ os: initial.os ?? 'mac' }), sendMessage: async payload => {
+  } }, runtime: { id: extensionId, getPlatformInfo: async () => { if (initial.os instanceof Error) throw initial.os; return { os: initial.os ?? 'mac' }; }, sendMessage: async payload => {
     requests.push(structuredClone(payload));
     // An outdated worker ignores messages it doesn't know: Chrome resolves with no response.
     if (initial.silent === true || initial.silent?.includes(payload.type)) return undefined;
@@ -402,6 +404,8 @@ async function panel(t, initial = {}) {
   if (initial.Translator) window.Translator = initial.Translator;
   if (initial.LanguageDetector) window.LanguageDetector = initial.LanguageDetector;
   if (initial.Summarizer) window.Summarizer = initial.Summarizer;
+  // jsdom lays nothing out, so it has no ResizeObserver: a test that measures the side panel's strip provides one.
+  if (initial.ResizeObserver) window.ResizeObserver = initial.ResizeObserver;
   // Chrome gives extension pages localStorage; jsdom has none for this origin. A shared map is one browser profile.
   const storage = initial.storage || new Map();
   const mapStorage = map => ({ getItem: key => map.has(key) ? map.get(key) : null, setItem: (key, value) => { map.set(key, String(value)); }, removeItem: key => { map.delete(key); } });
@@ -1119,20 +1123,21 @@ test('while Autofill waits for answers it would save and continue after, both su
 });
 
 test('while Autofill waits for the app, both surfaces say where its window is on this computer', async t => {
+  // A computer Chrome can't name, or one it fails to, gets the line that fits any of them.
   for (const [os, where] of [['mac', 'Can’t see that window? Click the SecondHand bear in the Dock.'], ['win', 'Can’t see that window? Click the SecondHand bear at the bottom of your screen.'],
-    ['linux', 'Can’t see that window? It may be behind Chrome.']]) {
+    ['linux', 'Can’t see that window? It may be behind Chrome.'], [new Error('Synthetic platform failure'), 'Can’t see that window? It may be behind Chrome.']]) {
     const waiting = `Waiting for the SecondHand app. If its window asks for your OK, nothing is filled until you allow it. ${where}`;
     let release;
     const autofillHeld = new Promise(done => { release = done; });
     const card = await panel(t, { launcher: true, os, autofillHeld });
     const cardClick = card.userClick('autofill');
     await settle();
-    assert.equal(card.get('widget-text').textContent, waiting, os);
+    assert.equal(card.get('widget-text').textContent, waiting, String(os));
     assert.equal(card.get('autofill').disabled, true);
     const side = await panel(t, { os, autofillHeld });
     const sideClick = side.userClick('panel-autofill');
     await settle();
-    assert.equal(side.get('status').textContent, waiting, os);
+    assert.equal(side.get('status').textContent, waiting, String(os));
     release();
     await Promise.all([cardClick, sideClick]);
     await settle();
@@ -2701,6 +2706,35 @@ test('the buttons that the keyboard shortcuts work name them in their tooltips, 
   await settle();
   assert.equal(none.get('shortcuts-line').hidden, true);
   assert.equal(none.get('panel-autofill').title, '');
+  // Nor when Chrome fails to list them: the buttons say what they do, without a shortcut that may be wrong.
+  const unread = await panel(t, { shortcuts: new Error('Synthetic commands failure') });
+  await settle();
+  assert.equal(unread.get('shortcuts-line').hidden, true);
+  assert.equal(unread.get('panel-autofill').title, '');
+  const unreadWidget = await panel(t, { launcher: true, shortcuts: new Error('Synthetic commands failure') });
+  await settle();
+  assert.equal(unreadWidget.get('autofill').title, EN['widget.autofillIowaTitle']);
+});
+
+test('the side panel keeps the row the keyboard moves to clear of the pinned Autofill strip, by the strip’s own height, and needs no room once the strip scrolls away', async t => {
+  const watched = [];
+  class ResizeObserver { constructor(callback) { this.callback = callback; } observe(target) { watched.push({ callback: this.callback, target }); } }
+  const view = await panel(t, { ResizeObserver });
+  const strip = view.window.document.querySelector('.actions');
+  assert.deepEqual(watched.map(entry => entry.target), [strip], 'the strip that holds Autofill and its status is measured');
+  const resized = height => {
+    Object.defineProperty(strip, 'offsetHeight', { configurable: true, get: () => height });
+    watched[0].callback([{ target: strip }]);
+    return view.get('sidepanel').style.scrollPaddingTop;
+  };
+  // Pinned, as panel.css keeps it: a row scrolled into view lands under the strip, with 12px to spare.
+  strip.style.position = 'sticky';
+  assert.equal(resized(120), '132px');
+  // A longer status line makes the strip taller, and the room under it follows.
+  assert.equal(resized(168), '180px');
+  // On a short panel, as when zoomed in, panel.css lets the strip scroll away with the rest: nothing to clear.
+  strip.style.position = 'static';
+  assert.equal(resized(168), '');
 });
 
 // #185: Laya's best guesses, listed for the applicant to find and check.
