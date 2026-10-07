@@ -97,3 +97,17 @@ the screen or upload files. Review the finished clip and crop unrelated windows
 with a video editor before sharing. Keep manual actions and pauses visible, and
 describe any cuts or speed changes; the recording is evidence only of the steps
 it actually shows.
+
+## Screenshots of every surface
+
+`npm run capture:ui -- <label>` loads the extension in the same isolated Chromium and saves each state of
+the card and the side panel as `docs/pr-media/<shot>-<label>.png`: ready, working, filled, hidden to its
+logo, locked, the app closed, another website, sensitive details held for Fill sensitive details, Laya's
+guesses, Spanish, Arabic, and an outdated build. Shots that end in `-again` show a Chrome that has started
+Autofill before, where the card and the side panel say the short form. Run it with `before` on main and `after` on a
+branch to compare them in a pull request. Shot names after the label limit the run to those shots; a name
+that ends in a hyphen takes every shot that starts with it, as in `npm run capture:ui -- after card- panel-iowa`.
+
+The side panel is captured at Chrome's own 360 by 765 pixels and the card as a 330 by 190 corner of the
+page, both at twice that size. `card-autofill` is a short recording and needs `ffmpeg` on the PATH. Every
+run fails if the extension logged an error in any of its pages or its worker.

@@ -69,7 +69,7 @@ Chrome site permission and desktop trust are separate checks. Loading the extens
 
 Open the official portal in Chrome, not merely whichever browser your OS uses by default. Complete the portal's sign-in, verification, program decisions, and consent yourself.
 
-Choose **Autofill** when you are ready. The widget and side panel show filled fields and questions that still need you. Review every answer. SecondHand preserves already-entered values rather than treating its profile as permission to overwrite the page.
+Choose **Autofill** when you are ready. The card and side panel show what was filled and the questions left for you. Review every answer. SecondHand preserves already-entered values rather than treating its profile as permission to overwrite the page.
 
 Verified Iowa adapters can continue certain complete screens: the applicant page, the captured home-address selection, supported Tell Us More layouts, and specific screening/financial record forms. They verify page structure, allowed controls, required answers, and blockers. A recognized page that no longer matches its guard can refuse filling instead of falling back to a looser rule.
 

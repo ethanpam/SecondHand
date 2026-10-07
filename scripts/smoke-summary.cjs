@@ -1,7 +1,7 @@
 'use strict';
 
 // Real Chromium for "What this page says". Headless Chromium has no summary model, so the side panel
-// hides the section behind its one-line reason. The page reader still runs for real: Iowa's
+// hides the section and says nothing about it. The page reader still runs for real: Iowa's
 // information screens are read through the content script and worker, kept across autofill until the
 // tab leaves Iowa, and a pantry form with long instructions reads as its words without any typed
 // answer. Fixtures are synthetic, DNS is disabled, every request is recorded to show that nothing
@@ -79,15 +79,18 @@ async function main() {
     await expect(widget.locator('#details')).toBeVisible({ timeout: 20000 });
     await widget.locator('#details').click();
     panel = await smoke.attachNativePanel(context, page, extensionId);
-    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofillIowa'));
     const chrome = await panel.evaluate(async options => typeof Summarizer === 'undefined' ? 'missing' : Summarizer.availability(options), OPTIONS);
-    const reason = { missing: 'summary.missing', unavailable: 'summary.unavailable', downloadable: 'summary.needsDownload', downloading: 'summary.needsDownload' }[chrome];
-    assert.ok(reason, `Chrome’s Summarizer here is ${chrome}; this smoke covers a Chrome without a ready model`);
-    await expect.poll(() => panel.text('#summary-note'), { timeout: 15000 }).toBe(en(reason));
-    assert.equal(await panel.visible('#summary-note'), true);
+    // A Chrome that can't summarize is not the applicant's concern: nothing is said. One that can download its model offers to.
+    const note = { missing: '', unavailable: '', downloadable: en('summary.needsDownload'), downloading: en('summary.needsDownload') }[chrome];
+    assert.notEqual(note, undefined, `Chrome’s Summarizer here is ${chrome}; this smoke covers a Chrome without a ready model`);
+    // Long enough for the panel to have asked Chrome and settled.
+    await page.waitForTimeout(2000);
+    await expect.poll(() => panel.text('#summary-note'), { timeout: 15000 }).toBe(note);
+    assert.equal(await panel.visible('#summary-note'), Boolean(note));
     assert.equal(await panel.visible('#summary'), false, 'the section is hidden');
-    assert.equal(await panel.visible('#summary-get'), reason === 'summary.needsDownload', 'a download is offered only when Chrome can get the model');
-    console.log(`Side panel: Chrome’s Summarizer here is ${chrome}, so the section is hidden with one line: ${await panel.text('#summary-note')}`);
+    assert.equal(await panel.visible('#summary-get'), Boolean(note), 'a download is offered only when Chrome can get the model');
+    console.log(`Side panel: Chrome’s Summarizer here is ${chrome}, so the section is hidden ${note ? `with one line: ${note}` : 'and nothing is said'}`);
 
     // The content script and worker read the screen's own words, and nothing else.
     const important = await pageText();
@@ -112,7 +115,7 @@ async function main() {
     for (const value of [smoke.syntheticProfile.firstName, smoke.syntheticProfile.lastName, smoke.syntheticProfile.addressLine1, smoke.syntheticProfile.homePhone]) {
       assert.equal(applicantReply.includes(value), false, `A filled answer is never page text: ${value}`);
     }
-    await expect.poll(() => panel.text('#summary-note'), { timeout: 15000 }).toBe(en(reason));
+    await expect.poll(() => panel.text('#summary-note'), { timeout: 15000 }).toBe(note);
     assert.equal(await panel.visible('#summary'), false);
     console.log('Autofill: Before You Start, Important Information, and Instructions were each read before Continue and kept; the filled applicant page was never read.');
 

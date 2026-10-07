@@ -13,7 +13,11 @@ const extensionURL = file => `chrome-extension://${extensionId}/${file}`;
 const source = file => fs.readFileSync(path.join(__dirname, '../extension', file), 'utf8');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const BUILD = source('panel.js').match(/const BUILD = '([^']+)'/)[1];
-const OUTDATED = 'SecondHand was updated. Open chrome://extensions and click the reload arrow on SecondHand, then reload this page.';
+// An outdated worker: the widget's line beside its Restart button (the whole of it, or the short form when the
+// frame can't hold the whole), and the side panel's notice above its own.
+const OUTDATED = 'SecondHand was updated. Click Restart SecondHand, then go to the next page, or reload this one with the round arrow by the address bar. That clears what you typed on this page; your saved details stay in the app.';
+const OUTDATED_SHORT = 'SecondHand was updated.';
+const OUTDATED_PANEL = 'SecondHand was updated and needs to restart. This side panel will close. To use SecondHand again, go on to the next page of your form, or reload its page with the round arrow by the address bar. That clears what you typed on that page; your saved details stay in the SecondHand app.';
 
 
 // Stand-in for generic-adapter.js; the real engine has its own tests. Plans carry
@@ -141,7 +145,7 @@ test('continue runs the adapter once for our extension only', t => {
 test('widget stays full size on info screens and steps that need the applicant', t => {
   const page = content(t);
   const host = page.window.document.querySelector('[data-secondhand-assistant]');
-  for (const [kind, todo, size] of [['info', undefined, 'full'], ['blocked', 'Solve the CAPTCHA, then click Continue.', 'full'], ['manual', 'Pick the correct address, then click Continue.', 'full'], ['manual', undefined, 'pill'], ['unsupported', undefined, 'pill']]) {
+  for (const [kind, todo, size] of [['info', undefined, 'full'], ['blocked', 'Type the characters shown in Iowa’s security check, then click Continue.', 'full'], ['manual', 'Pick the correct address, then click Continue.', 'full'], ['manual', undefined, 'pill'], ['unsupported', undefined, 'pill']]) {
     page.setKind(kind, todo);
     page.window.dispatchEvent(new page.window.Event('popstate'));
     assert.equal(host.getAttribute('data-secondhand-size'), size, `${kind} ${todo}`);
@@ -195,7 +199,7 @@ test('on Iowa pages a general fill the page interrupted by changing answers that
 
 test('verified Iowa pages and pages with Iowa instructions never reach the general engine', t => {
   const page = content(t);
-  for (const [kind, todo] of [['fillable'], ['info'], ['blocked', 'Solve the CAPTCHA, then click Continue.'], ['manual', 'Pick the correct address, then click Continue.'], ['unsupported']]) {
+  for (const [kind, todo] of [['fillable'], ['info'], ['blocked', 'Type the characters shown in Iowa’s security check, then click Continue.'], ['manual', 'Pick the correct address, then click Continue.'], ['unsupported']]) {
     page.setKind(kind, todo);
     assert.equal(page.request({ type: 'secondhand:generic:plan' }).ok, false, kind);
     assert.equal(page.request({ type: 'secondhand:generic:fill', token: 'plan-1', assignments: [{ id: 'sh-1-0', key: 'householdAdults', guessed: false }], values: { householdAdults: '2' } }).ok, false, kind);
@@ -283,7 +287,8 @@ test('only the assistant overlay is hidden during portal checks and is restored 
 });
 
 const plainRequests = requests => JSON.parse(JSON.stringify(requests));
-const doneResult = { state: 'done', filled: 3, needYou: ['firstName', 'lastName'], message: 'Filled 3 · 2 need you. Review, then click Continue in Iowa’s form.', pageKey: 'iowa-personal-information' };
+// Results as the worker sends them: its message, and the catalog key and parameters it was written from.
+const doneResult = { state: 'done', filled: 3, needYou: ['firstName', 'lastName'], message: 'Filled 3 answers · 2 left for you.', messageKey: 'result.filledNeedYou', messageParams: { count: 3, needYou: 2 }, pageKey: 'iowa-personal-information' };
 
 async function panel(t, initial = {}) {
   const dom = new JSDOM(source('panel.html'), { runScripts: 'outside-only', url: extensionURL(`panel.html${initial.launcher ? '?surface=launcher' : ''}`), pretendToBeVisual: true });
@@ -313,7 +318,10 @@ async function panel(t, initial = {}) {
     autopilot: Boolean(initial.autopilot)
   };
   const desktop = { connected: true, unlocked: true, ...initial.desktop };
-  window.chrome = { tabs: {
+  window.chrome = {
+    // `shortcuts`: the keys Chrome lists for SecondHand's commands, as chrome://extensions/shortcuts sets them.
+    ...(initial.shortcuts ? { commands: { getAll: async () => structuredClone(initial.shortcuts) } } : {}),
+    tabs: {
     query: async () => [tabs.current],
     onActivated: { addListener: callback => { listeners.activated = callback; } },
     onUpdated: { addListener: callback => { listeners.updated = callback; } }
@@ -335,9 +343,10 @@ async function panel(t, initial = {}) {
     else if (payload.type === 'ui:pageText') data = structuredClone(initial.pageText ?? { pages: [] });
     else if (payload.type === 'ui:keepSummary') data = { kept: true };
     else if (payload.type === 'ui:widgetSize') data = { sized: true };
-    else if (payload.type === 'ui:autofill') { state.result = initial.autofill || doneResult; state.autopilot = Boolean(initial.autopilotAfterAutofill); data = structuredClone(state.result); }
+    // `autofillHeld`: a promise the app's answer waits for, as while its window asks for permission.
+    else if (payload.type === 'ui:autofill') { await initial.autofillHeld; state.result = initial.autofill || doneResult; state.autopilot = Boolean(initial.autopilotAfterAutofill); data = structuredClone(state.result); }
     else if (payload.type === 'ui:fillAndContinue') { state.result = initial.fillAndContinue || { state: 'continuing', pageKey: 'general', autoContinue: true, filled: 2, messageKey: 'worker.siteContinuing' }; state.autopilot = state.result.autoContinue === true; data = structuredClone(state.result); }
-    else if (payload.type === 'ui:stop') { state.autopilot = false; state.result = { state: 'stopped', filled: 0, needYou: [], message: 'Autofill stopped.', pageKey: 'iowa-personal-information' }; data = structuredClone(state.result); }
+    else if (payload.type === 'ui:stop') { state.autopilot = false; state.result = { state: 'stopped', filled: 0, needYou: [], message: 'Autofill stopped. Nothing was erased.', pageKey: 'iowa-personal-information' }; data = structuredClone(state.result); }
     else if (payload.type === 'ui:desktopStatus') data = { ...desktop };
     else if (payload.type === 'ui:focusField') data = { focused: true };
     else if (payload.type === 'ui:saveAnswer') {
@@ -395,8 +404,11 @@ async function panel(t, initial = {}) {
   if (initial.Summarizer) window.Summarizer = initial.Summarizer;
   // Chrome gives extension pages localStorage; jsdom has none for this origin. A shared map is one browser profile.
   const storage = initial.storage || new Map();
-  Object.defineProperty(window, 'localStorage', { configurable: true, value: {
-    getItem: key => storage.has(key) ? storage.get(key) : null, setItem: (key, value) => { storage.set(key, String(value)); }, removeItem: key => { storage.delete(key); } } });
+  const mapStorage = map => ({ getItem: key => map.has(key) ? map.get(key) : null, setItem: (key, value) => { map.set(key, String(value)); }, removeItem: key => { map.delete(key); } });
+  Object.defineProperty(window, 'localStorage', { configurable: true, value: mapStorage(storage) });
+  // And session storage, which a widget's frame keeps for its tab.
+  const session = initial.session || new Map();
+  Object.defineProperty(window, 'sessionStorage', { configurable: true, value: mapStorage(session) });
   if (initial.language) Object.defineProperty(window.navigator, 'language', { configurable: true, get: () => initial.language });
   // Opening SecondHand checks the desktop once a second; `hurry` lets those seconds pass at once.
   if (initial.hurry) {
@@ -434,7 +446,9 @@ test('side panel reads page and desktop state, has no guided or field-picker con
   view.window.postMessage({ type: 'ui:autofill', confirmed: true }, '*');
   await tick();
   assert.equal(view.types().includes('ui:autofill'), false);
-  assert.match(view.get('desktop-status').textContent, /unlocked/);
+  // An unlocked app needs nothing from the reader: its row stays out of the way and says nothing.
+  assert.equal(view.get('desktop-status').parentElement.hidden, true);
+  assert.equal(view.get('desktop-status').textContent, '');
   assert.equal(view.get('desktop-action').hidden, true);
 });
 
@@ -442,61 +456,215 @@ test('trusted side-panel Autofill targets the active tab, shows the result, and 
   const view = await panel(t);
   await view.userClick('panel-autofill');
   assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:autofill')), { type: 'ui:autofill', confirmed: true, tabId: 7 });
-  assert.match(view.get('status').textContent, /Filled 3 · 2 need you/);
+  assert.match(view.get('status').textContent, /Filled 3 answers · 2 left for you/);
   assert.equal(view.types().filter(type => type === 'ui:desktopStatus').length, 2);
 });
 
 test('checklist uses plain labels and a trusted row click finds the field', async t => {
   const view = await panel(t);
-  assert.match(view.row('firstName').textContent, /First name.*Needs you/);
-  assert.match(view.row('lastName').textContent, /✓.*Done/);
+  // Before Autofill has run on this page, a required question is only not filled yet.
+  assert.equal(view.row('firstName').textContent, 'First nameNot filled yet');
+  assert.equal(view.row('firstName').classList.contains('pending'), true);
+  assert.equal(view.row('firstName').classList.contains('missing'), false);
+  assert.equal(view.row('lastName').textContent, 'Last nameDone');
+  // A finished row carries the drawn check mark; the others an empty ring.
+  assert.equal(view.row('lastName').querySelectorAll('.checklist-mark svg path').length, 1);
+  for (const key of ['firstName', 'middleName', 'unverified']) assert.equal(view.row(key).querySelector('.checklist-mark').childNodes.length, 0, key);
   assert.match(view.row('middleName').textContent, /Optional/);
   assert.match(view.row('unverified').textContent, /Do it yourself/);
-  assert.equal(view.get('checklist-summary').textContent, '1 of 4 done');
+  assert.equal(view.get('checklist-summary').textContent, '', 'no count until Autofill has run');
+  assert.equal(view.get('checklist-note').hidden, true);
   view.row('firstName').click(); await tick();
   assert.equal(view.types().includes('ui:focusField'), false);
   await view.userClick(view.row('firstName'));
   assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:focusField')), { type: 'ui:focusField', key: 'firstName', tabId: 7 });
+  // After Autofill, what it left waits for the reader, and the count is what the status line and the widget say:
+  // required questions without an answer, and steps SecondHand never does. Optional ones are not counted.
+  await view.userClick('panel-autofill');
+  assert.equal(view.row('firstName').textContent, 'First nameNeeds your answer');
+  assert.equal(view.row('firstName').classList.contains('missing'), true);
+  assert.equal(view.get('checklist-summary').textContent, '2 left');
+  // A result from another page of Iowa's says nothing about this one.
+  const earlier = await panel(t, { result: { ...doneResult, pageKey: 'iowa-program-intent' } });
+  assert.equal(earlier.row('firstName').textContent, 'First nameNot filled yet');
+  assert.equal(earlier.get('checklist-summary').textContent, '');
+  const complete = await panel(t, { result: { ...doneResult, needYou: [] }, pageState: state => { const next = structuredClone(state); for (const item of next.page.checklist) if (item.status !== 'optional') item.status = 'complete'; return next; } });
+  assert.equal(complete.get('checklist-summary').textContent, 'Nothing left for you');
 });
 
-test('after Autofill, a question whose answer isn’t saved says so and points to My information', async t => {
+test('after Autofill, a link under the status goes to each question left in turn, as the widget’s does', async t => {
+  let checklist = null;
+  const view = await panel(t, { pageState: state => { const next = structuredClone(state); if (checklist) next.page.checklist = structuredClone(checklist); return next; } });
+  const focused = () => view.requests.filter(request => request.type === 'ui:focusField').map(request => request.key);
+  assert.equal(view.get('panel-left').hidden, true, 'nothing is left before Autofill has run');
+  await view.userClick('panel-autofill');
+  // The required question without an answer and the step SecondHand never does; not the optional one.
+  assert.equal(view.get('panel-left').hidden, false);
+  assert.equal(view.get('panel-left').textContent, 'Go to the next of the 2 questions left');
+  view.get('panel-left').click(); await tick();
+  assert.deepEqual(focused(), [], 'a click the page made up goes nowhere');
+  for (let i = 0; i < 3; i++) await view.userClick('panel-left');
+  assert.deepEqual(focused(), ['firstName', 'unverified', 'firstName']);
+  assert.deepEqual(plainRequests(view.requests.findLast(request => request.type === 'ui:focusField')), { type: 'ui:focusField', key: 'firstName', tabId: 7 });
+  // The link follows the page: an answer typed since is no longer left.
+  checklist = structuredClone(view.state.page.checklist);
+  checklist.find(item => item.key === 'firstName').status = 'complete';
+  view.window.document.dispatchEvent(new view.window.Event('visibilitychange')); await settle();
+  assert.equal(view.get('panel-left').textContent, 'Go to the question left');
+  assert.equal(view.get('status').textContent, 'Filled 3 answers · 1 left for you.', 'the status line counts what is left now');
+  await view.userClick('panel-left');
+  assert.equal(focused().at(-1), 'unverified');
+  checklist.find(item => item.key === 'unverified').status = 'complete';
+  view.window.document.dispatchEvent(new view.window.Event('visibilitychange')); await settle();
+  assert.equal(view.get('panel-left').hidden, true);
+  assert.equal(view.get('checklist-summary').textContent, 'Nothing left for you');
+  assert.equal(view.get('status').textContent, 'Filled 3 answers.');
+  // Another site has no checklist: what Autofill reported is listed by name instead, and each row is its own link.
+  const site = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: siteDone });
+  assert.equal(site.get('panel-left').hidden, true);
+  await site.userClick('panel-autofill');
+  assert.equal(site.get('panel-left').hidden, true);
+  assert.equal(site.get('left-list').children.length, 2);
+  const spanish = await panel(t, { language: 'es-ES' });
+  await spanish.userClick('panel-autofill');
+  assert.equal(spanish.get('panel-left').textContent, strings.text('es', 'panel.goToLeft', { count: 2 }));
+});
+
+test('on a page with no checklist, the side panel names each question Autofill left, and a row finds it', async t => {
+  const left = [{ key: 'f0:sh-4', label: '  Do you have a pet?  ' }, { key: 'f4:sh-3', label: '' }, { key: 'f9:sh-9', label: 'Not in needYou' }, { key: 'f0:sh-4' }, 'f0:sh-4'];
+  const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: { ...siteDone, left } });
+  assert.equal(view.get('left-section').hidden, true);
+  await view.userClick('panel-autofill');
+  assert.equal(view.get('left-section').hidden, false);
+  assert.equal(view.get('left-title').textContent, 'Left for you');
+  assert.equal(view.get('left-summary').textContent, '2 left');
+  const rows = [...view.get('left-list').children];
+  // One row per key the result lists as left, in its order; a name for a key it doesn't list is ignored.
+  assert.deepEqual(rows.map(row => row.dataset.leftKey), ['f0:sh-4', 'f4:sh-3']);
+  assert.equal(rows[0].querySelector('.checklist-label').textContent, 'Do you have a pet?');
+  assert.equal(rows[0].querySelector('.checklist-detail').textContent, 'Needs your answer');
+  assert.equal(rows[0].getAttribute('aria-label'), 'Do you have a pet?: Needs your answer. Go to this question.');
+  assert.equal(rows[1].querySelector('.checklist-label').textContent, 'A question with no label');
+  assert.equal(view.get('panel-left').hidden, true, 'the rows are the way to each question');
+  rows[0].click(); await tick();
+  assert.equal(view.types().includes('ui:focusField'), false);
+  await view.userClick(rows[1]);
+  assert.deepEqual(plainRequests(view.requests.findLast(request => request.type === 'ui:focusField')), { type: 'ui:focusField', key: 'f4:sh-3', tabId: SITE.id });
+  // A question the page reports as answered since (one it may save) turns to done, and both counts follow.
+  const answering = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: { ...siteDone, left: [{ key: 'f0:sh-4', label: 'Apartment number' }, { key: 'f4:sh-3', label: 'Guardian name' }] },
+    savable: [{ id: 'f0:sh-4', label: 'Apartment number', answered: false }] });
+  await answering.userClick('panel-autofill');
+  assert.equal(answering.get('left-summary').textContent, '2 left');
+  answering.state.savable[0].answered = true;
+  answering.window.document.dispatchEvent(new answering.window.Event('visibilitychange')); await settle();
+  const apartment = answering.get('left-list').children[0];
+  assert.equal(apartment.classList.contains('complete'), true);
+  assert.equal(apartment.querySelector('.checklist-detail').textContent, 'Done');
+  assert.equal(apartment.querySelectorAll('.checklist-mark svg').length, 1);
+  assert.equal(answering.get('left-list').children[1].classList.contains('missing'), true);
+  assert.equal(answering.get('left-summary').textContent, '1 left');
+  assert.equal(answering.get('status').textContent, 'Filled 2 answers · 1 left for you. Check them before you submit.', 'the status line counts what is left now');
+  answering.state.savable = [{ id: 'f0:sh-4', label: 'Apartment number', answered: true }, { id: 'f4:sh-3', label: 'Guardian name', answered: true }];
+  answering.window.document.dispatchEvent(new answering.window.Event('visibilitychange')); await settle();
+  assert.equal(answering.get('status').textContent, 'Filled 2 answers. Check them before you submit.');
+  assert.equal(answering.get('left-summary').textContent, 'Nothing left for you');
+  // The page's words are shown as text, never as markup.
+  const markup = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: { ...siteDone, left: [{ key: 'f0:sh-4', label: '<img src=x onerror=alert(1)>' }] } });
+  await markup.userClick('panel-autofill');
+  assert.equal(markup.get('left-list').querySelector('img'), null);
+  assert.equal(markup.get('left-list').children[0].querySelector('.checklist-label').textContent, '<img src=x onerror=alert(1)>');
+  // The list follows the language picker, and leaves with the tab.
+  view.get('language').value = 'es';
+  view.get('language').dispatchEvent(new view.window.Event('change'));
+  await settle();
+  assert.equal(view.get('left-title').textContent, strings.text('es', 'left.title'));
+  assert.equal(view.get('left-list').children[0].querySelector('.checklist-detail').textContent, spanish('checklist.missing'));
+  view.tabs.current = { id: 8, url: 'http://example.invalid/' };
+  view.listeners.activated({ tabId: 8 }); await settle();
+  assert.equal(view.get('left-section').hidden, true);
+  assert.equal(view.get('left-list').children.length, 0);
+  // Iowa's checklist already names its questions: no second list there.
+  const iowa = await panel(t, { autofill: { ...doneResult, left: [{ key: 'firstName', label: 'First name' }] } });
+  await iowa.userClick('panel-autofill');
+  assert.equal(iowa.get('left-section').hidden, true);
+  assert.equal(iowa.get('panel-left').hidden, false);
+});
+
+test('on a page with no checklist, the side panel names what Autofill filled, folded away, with guesses marked', async t => {
+  const filledQuestions = [{ label: ' First name ', guessed: false }, { label: 'Email', guessed: true }, { label: '', guessed: false }, { label: 7 }, 'ZIP'];
+  const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: { ...siteDone, filled: 3, filledQuestions } });
+  assert.equal(view.get('filled-section').hidden, true);
+  await view.userClick('panel-autofill');
+  assert.equal(view.get('filled-section').hidden, false);
+  assert.equal(view.get('filled-section').open, false, 'folded until the reader wants the names');
+  assert.equal(view.get('filled-title').textContent, 'Filled by SecondHand');
+  assert.equal(view.get('filled-summary').textContent, '3 questions');
+  const rows = [...view.get('filled-list').children];
+  assert.deepEqual(rows.map(row => [row.tagName, row.querySelector('.checklist-label').textContent, row.querySelector('.checklist-detail').textContent]), [
+    ['DIV', 'First name', 'Done'], ['DIV', 'Email', 'Guessed, check it'], ['DIV', 'A question with no label', 'Done']]);
+  assert.equal(rows.every(row => row.querySelectorAll('.checklist-mark svg').length === 1), true, 'each is marked done');
+  assert.equal(view.get('filled-list').querySelector('button'), null, 'rows are names, not links');
+  // The list leaves with the tab, and Iowa's own checklist never gets one.
+  view.tabs.current = { id: 8, url: 'http://example.invalid/' };
+  view.listeners.activated({ tabId: 8 }); await settle();
+  assert.equal(view.get('filled-section').hidden, true);
+  const iowa = await panel(t, { autofill: { ...doneResult, filledQuestions: [{ label: 'First name', guessed: false }] } });
+  await iowa.userClick('panel-autofill');
+  assert.equal(iowa.get('filled-section').hidden, true);
+});
+
+test('after Autofill, a question whose answer isn’t saved says to type it in Iowa’s form, and one note points to My information', async t => {
   const autofill = { ...doneResult, needYou: ['firstName', 'middleName', 'unverified'], notSaved: ['firstName', 'middleName', 'lastName'] };
   const view = await panel(t, { autofill });
   const detail = key => view.row(key).querySelector('.checklist-detail').textContent;
-  assert.equal(detail('firstName'), 'Needs you');
+  assert.equal(detail('firstName'), 'Not filled yet');
+  assert.equal(view.get('checklist-note').hidden, true);
   await view.userClick('panel-autofill');
-  assert.equal(detail('firstName'), 'Not saved in SecondHand: add it in My information');
-  assert.equal(detail('middleName'), 'Not saved in SecondHand: add it in My information');
-  assert.equal(view.row('firstName').getAttribute('aria-label'), 'First name: Not saved in SecondHand: add it in My information. Find it in Iowa’s form.');
+  assert.equal(detail('firstName'), 'No saved answer: type it in Iowa’s form');
+  assert.equal(detail('middleName'), 'Optional, no saved answer');
+  assert.equal(view.row('firstName').getAttribute('aria-label'), 'First name: No saved answer: type it in Iowa’s form. Go to this question.');
+  // Where the answer goes now is on the row; where to save it for next time is said once, above the list.
+  assert.equal(view.get('checklist-note').hidden, false);
+  assert.equal(view.get('checklist-note').textContent, 'To have an answer filled next time, add it in the SecondHand app, under My information.');
   // A question answered since shows as done; one SecondHand can't fill still says to do it yourself.
   assert.equal(detail('lastName'), 'Done');
   assert.equal(detail('unverified'), 'Do it yourself');
   const spanish = await panel(t, { language: 'es', autofill });
   await spanish.userClick('panel-autofill');
-  assert.equal(spanish.row('firstName').querySelector('.checklist-detail').textContent, 'No está guardado en SecondHand: agréguelo en “My information”');
+  assert.equal(spanish.row('firstName').querySelector('.checklist-detail').textContent, 'Sin respuesta guardada: escríbala en el formulario de Iowa');
+  assert.match(spanish.get('checklist-note').textContent, /en la aplicación SecondHand, en “My information”/);
   // Only a list of question keys is read from the worker's result.
   const malformed = await panel(t, { autofill: { ...doneResult, notSaved: 'firstName' } });
   await malformed.userClick('panel-autofill');
-  assert.equal(malformed.row('firstName').querySelector('.checklist-detail').textContent, 'Needs you');
+  assert.equal(malformed.row('firstName').querySelector('.checklist-detail').textContent, 'Needs your answer');
+  assert.equal(malformed.get('checklist-note').hidden, true);
 });
 
 test('desktop line shows locked with Unlock, and not running with Open SecondHand', async t => {
   const locked = await panel(t, { desktop: { unlocked: false } });
-  assert.match(locked.get('desktop-status').textContent, /locked/);
+  assert.equal(locked.get('desktop-status').textContent, 'The SecondHand app on this computer is locked.');
   assert.equal(locked.get('desktop-action').hidden, false);
   assert.equal(locked.get('desktop-action').textContent, 'Unlock');
+  // Unlock is the button to press: Autofill is still there, drawn as an outline.
+  const filled = button => [button.classList.contains('primary'), button.classList.contains('secondary')];
+  assert.deepEqual(filled(locked.get('desktop-action')), [true, false]);
+  assert.deepEqual(filled(locked.get('panel-autofill')), [false, true]);
+  assert.equal(locked.get('panel-autofill').disabled, false);
+  const open = await panel(t);
+  assert.deepEqual(filled(open.get('panel-autofill')), [true, false], 'with the app open and unlocked, Autofill is the filled button');
   await locked.userClick('desktop-action');
   assert.deepEqual(plainRequests(locked.requests.find(request => request.type === 'ui:showApp')), { type: 'ui:showApp', confirmed: true });
   const offline = await panel(t, { desktop: { connected: false, unlocked: false } });
-  assert.equal(offline.get('desktop-status').textContent, 'SecondHand isn’t running. Open the app on this computer.');
+  assert.equal(offline.get('desktop-status').textContent, 'The SecondHand app on this computer is closed.');
   assert.equal(offline.get('desktop-action').hidden, false);
   assert.equal(offline.get('desktop-action').textContent, 'Open SecondHand');
+  assert.deepEqual(filled(offline.get('panel-autofill')), [false, true]);
 });
 
 // Unlock with Touch ID (#99): the side panel asks the app to show its own Touch ID prompt when the
 // app's status says it's ready. Otherwise, or when Touch ID doesn't unlock, Unlock brings SecondHand
 // forward as before.
-test('when the app says Touch ID is ready, Unlock asks the app for Touch ID and the line then says unlocked', async t => {
+test('when the app says Touch ID is ready, Unlock asks the app for Touch ID and the row then goes, as an unlocked app needs nothing', async t => {
   let answer;
   const view = await panel(t, { desktop: { unlocked: false, touchId: 'ready' },
     unlockWithTouchId: desktop => new Promise(resolve => { answer = () => { desktop.unlocked = true; resolve({ unlocked: true }); }; }) });
@@ -509,14 +677,14 @@ test('when the app says Touch ID is ready, Unlock asks the app for Touch ID and 
   assert.equal(view.get('desktop-status').textContent, 'Use Touch ID to unlock SecondHand.');
   assert.equal(view.get('desktop-action').hidden, true, 'no second click while Touch ID asks');
   answer(); await tick(); await tick(); await tick();
-  assert.match(view.get('desktop-status').textContent, /unlocked/);
+  assert.equal(view.get('desktop-status').parentElement.hidden, true, 'an unlocked app needs nothing from the applicant');
   assert.equal(view.get('desktop-action').hidden, true);
   assert.equal(view.types().includes('ui:showApp'), false, 'the app stays where it is');
 });
 
 test('when Touch ID doesn’t unlock, Unlock does what it does today: brings SecondHand forward, and says why', async t => {
-  const lines = { cancelled: 'Touch ID didn’t unlock SecondHand. Enter your password in SecondHand, then click Autofill.',
-    off: 'Unlock SecondHand, then click Autofill.' };
+  const lines = { cancelled: 'Touch ID didn’t unlock SecondHand. Enter your password in SecondHand, then start Autofill again.',
+    off: 'Unlock SecondHand, then start Autofill again.' };
   for (const [reason, line] of Object.entries(lines)) {
     const view = await panel(t, { desktop: { unlocked: false, touchId: 'ready' }, unlockWithTouchId: () => ({ unlocked: false, reason }) });
     await view.userClick('desktop-action'); await tick();
@@ -538,7 +706,7 @@ test('when Touch ID is off, or the app says nothing about it, Unlock only brings
     await view.userClick('desktop-action');
     assert.equal(view.types().includes('ui:unlockWithTouchId'), false, String(touchId));
     assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:showApp')), { type: 'ui:showApp', confirmed: true }, String(touchId));
-    assert.equal(view.get('desktop-status').textContent, 'Unlock SecondHand, then click Autofill.', String(touchId));
+    assert.equal(view.get('desktop-status').textContent, 'Unlock SecondHand, then start Autofill again.', String(touchId));
   }
 });
 
@@ -558,7 +726,7 @@ async function until(check, ms = 4000) {
   }
 }
 const CLOSED = { connected: false, unlocked: false, laya: 'unavailable' };
-const offlineResult = { state: 'offline', filled: 0, needYou: [], message: 'Open the SecondHand app, then click Autofill again.', messageKey: 'worker.openAppThenAutofill', messageParams: {}, pageKey: 'iowa-personal-information' };
+const offlineResult = { state: 'offline', filled: 0, needYou: [], message: 'Open the SecondHand app, then start Autofill again.', messageKey: 'worker.openAppThenAutofill', messageParams: {}, pageKey: 'iowa-personal-information' };
 
 test('Open SecondHand asks the worker to open the app, waits for it, then shows it locked with Unlock', async t => {
   const view = await panel(t, { desktop: CLOSED });
@@ -570,12 +738,12 @@ test('Open SecondHand asks the worker to open the app, waits for it, then shows 
   assert.equal(view.get('desktop-action').hidden, true, 'no second click while it opens');
   // The app starts locked; the panel's next check finds it.
   Object.assign(view.desktop, { connected: true, unlocked: false });
-  await until(() => view.get('desktop-status').textContent === 'SecondHand is locked.');
+  await until(() => view.get('desktop-status').textContent === 'The SecondHand app on this computer is locked.');
   assert.equal(view.get('desktop-action').hidden, false);
   assert.equal(view.get('desktop-action').textContent, 'Unlock');
   await view.userClick('desktop-action');
   assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'ui:showApp', confirmed: true });
-  assert.match(view.get('desktop-status').textContent, /Unlock SecondHand, then click Autofill/);
+  assert.match(view.get('desktop-status').textContent, /Unlock SecondHand, then start Autofill again/);
   assert.equal(view.types().filter(type => type === 'ui:openApp').length, 1);
 });
 
@@ -606,14 +774,14 @@ test('with SecondHand closed, Autofill leaves the one desktop line and its butto
   const view = await panel(t, { desktop: CLOSED, autofill: offlineResult });
   await view.userClick('panel-autofill');
   await settle();
-  assert.equal(view.get('status').textContent, 'Click Autofill. SecondHand fills what it can and tells you what it needs.');
+  assert.equal(view.get('status').textContent, '');
   assert.equal(view.get('status').classList.contains('error'), false);
-  assert.equal(view.get('desktop-status').textContent, 'SecondHand isn’t running. Open the app on this computer.');
+  assert.equal(view.get('desktop-status').textContent, 'The SecondHand app on this computer is closed.');
   assert.equal(view.get('desktop-action').textContent, 'Open SecondHand');
   // The worker's remembered result isn't repeated when the panel opens again either.
   const reopened = await panel(t, { desktop: CLOSED, result: offlineResult });
-  assert.equal(reopened.get('status').textContent, 'Click Autofill. SecondHand fills what it can and tells you what it needs.');
-  assert.equal(shownText(reopened).filter(text => /Open the SecondHand app|isn’t running/.test(text)).length, 1);
+  assert.equal(reopened.get('status').textContent, '');
+  assert.equal(shownText(reopened).filter(text => /Open the SecondHand app|is closed/.test(text)).length, 1);
 });
 
 test('opening SecondHand speaks the applicant’s language', async t => {
@@ -633,12 +801,14 @@ test('pages with nothing to fill disable Autofill and explain the step', async t
 
 test('tab activation clears a stale checklist without sending data to an unsupported tab', async t => {
   const view = await panel(t);
+  assert.equal(view.get('panel-autofill').hidden, false);
   // Plain http, and an https tab whose address Chrome hides until the user invokes SecondHand.
   for (const [id, url] of [[8, 'http://example.invalid/'], [9, undefined]]) {
     view.tabs.current = { id, url };
     view.listeners.activated({ tabId: id }); await tick(); await tick();
     assert.equal(view.get('page-checklist').children.length, 0);
     assert.equal(view.get('panel-autofill').disabled, true);
+    assert.equal(view.get('panel-autofill').hidden, true, 'no Autofill button where there is nothing to read');
     assert.equal(view.get('site-enable').hidden, true);
     assert.match(view.get('status').textContent, /Open Iowa/);
   }
@@ -668,30 +838,49 @@ test('a late old-tab response cannot restore a checklist', async t => {
   view.listeners.activated({ tabId: 8 });
   resolve(structuredClone(view.state)); await tick(); await tick();
   assert.equal(view.get('page-checklist').children.length, 0);
+  assert.equal(view.get('panel-autofill').hidden, true);
   assert.match(view.get('status').textContent, /Open Iowa/);
+});
+
+test('Autofill keeps its place, disabled, while a tab SecondHand reads is checked again', async t => {
+  let hold;
+  const view = await panel(t, { pageState: state => hold ? hold.then(() => structuredClone(state)) : structuredClone(state) });
+  assert.equal(view.get('panel-autofill').hidden, false);
+  assert.equal(view.get('panel-autofill').disabled, false);
+  // The tab loads its next page: until that page is read, the button waits where it was instead of blinking out.
+  let release;
+  hold = new Promise(done => { release = done; });
+  view.listeners.updated(7, { status: 'loading' }); await tick();
+  assert.equal(view.get('panel-autofill').hidden, false);
+  assert.equal(view.get('panel-autofill').disabled, true);
+  release(); await settle();
+  assert.equal(view.get('panel-autofill').hidden, false);
+  assert.equal(view.get('panel-autofill').disabled, false);
 });
 
 test('widget on a fillable page offers one-click Autofill and cycles through what needs you', async t => {
   const view = await panel(t, { launcher: true });
   assert.equal(view.get('sidepanel').hidden, true);
-  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:ping' }, { type: 'ui:pageState' }]);
+  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:ping' }, { type: 'ui:pageState' }, { type: 'ui:widgetSize', line: true }]);
   assert.equal(view.get('widget').hidden, false);
   assert.equal(view.get('pill').hidden, true);
   assert.equal(view.get('need-you').hidden, true);
   assert.equal(view.get('summary-line'), null, 'the key-points line is gone');
   assert.equal(view.get('details').textContent.trim(), '', 'the logo is the details button and has no words');
-  assert.equal(view.get('details').getAttribute('aria-label'), EN['widget.detailsTitle']);
-  assert.equal(view.get('widget-text').classList.contains('visually-hidden'), true, 'the ready line is read to screen readers, not shown');
+  assert.equal(view.get('details').title, EN['widget.detailsTitle']);
+  assert.equal(view.get('details').getAttribute('aria-label'), null, 'its tooltip is its name, said once');
+  assert.equal(view.get('widget-text').textContent, EN['widget.iowaReady']);
+  assert.equal(view.get('widget-text').classList.contains('visually-hidden'), false, 'what Autofill will do is shown before it is clicked');
   view.get('autofill').click(); await tick();
   assert.equal(view.types().includes('ui:autofill'), false);
   await view.userClick('autofill');
   assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:autofill')), { type: 'ui:autofill', confirmed: true });
   assert.equal(view.types().includes('ui:plan'), false, 'Iowa never asks the on-device AI');
-  assert.equal(view.get('widget-text').textContent, 'Filled 3');
+  assert.equal(view.get('widget-text').textContent, 'Filled 3 answers. Stop erases nothing.', 'what it did, and what its Stop button would do');
   assert.equal(view.get('need-you').hidden, false);
-  assert.equal(view.get('need-you').textContent, '2 need you');
-  assert.equal(view.get('widget-text').classList.contains('visually-hidden'), true, 'the yellow link says what is left; no line is added');
-  assert.equal(view.types().includes('ui:widgetSize'), false, 'the widget stays one row');
+  assert.equal(view.get('need-you').textContent, '2 questions left');
+  assert.equal(view.get('widget-text').classList.contains('visually-hidden'), false, 'what Autofill did is shown above the link to what is left');
+  assert.ok(view.requests.filter(request => request.type === 'ui:widgetSize').every(request => request.line === true), 'the widget keeps its line');
   for (let i = 0; i < 3; i++) await view.userClick('need-you');
   assert.deepEqual(view.requests.filter(request => request.type === 'ui:focusField').map(request => request.key), ['firstName', 'lastName', 'firstName']);
   assert.ok(view.requests.filter(request => request.type === 'ui:focusField').every(request => request.confirmed === true && !('tabId' in request)));
@@ -701,42 +890,138 @@ test('widget on a fillable page offers one-click Autofill and cycles through wha
 
 test('widget frame fits the logo and its buttons, grows for the yellow link, and asks again only when that changes', async t => {
   const view = await panel(t, { launcher: true });
-  // jsdom lays nothing out, so the widget reports the width Chrome would.
-  view.get('widget').getBoundingClientRect = () => ({ width: view.get('need-you').hidden ? 151.2 : 214.6 });
+  // jsdom lays nothing out, so the widget reports the width Chrome would: its line fills the card, and
+  // without the line it is as wide as its buttons.
+  view.get('widget').getBoundingClientRect = () => ({ width: view.get('widget-text').classList.contains('visually-hidden') ? view.get('need-you').hidden ? 151.2 : 214.6 : 272 });
   const sizes = () => plainRequests(view.requests.filter(request => request.type === 'ui:widgetSize'));
   await view.userClick('autofill');
-  assert.deepEqual(sizes(), [{ type: 'ui:widgetSize', line: false, width: 152 }, { type: 'ui:widgetSize', line: false, width: 215 }]);
+  // The first request was sent before this test could say how wide the widget is.
+  assert.deepEqual(sizes(), [{ type: 'ui:widgetSize', line: true }, { type: 'ui:widgetSize', line: true, width: 272, narrowWidth: 152 }, { type: 'ui:widgetSize', line: true, width: 272, narrowWidth: 215 }]);
   await view.userClick('autofill');
-  assert.equal(sizes().length, 2, 'the same width is not asked for again');
+  assert.equal(sizes().length, 3, 'the same width is not asked for again');
 });
 
+// A Chrome that has started Autofill before, on an Iowa page where the card has nothing to say before Autofill.
+const quietCard = { launcher: true, pageState: state => ({ ...structuredClone(state), page: { ...structuredClone(state.page), pageKey: 'iowa-tell-us-more' } }),
+  autofill: { state: 'locked', filled: 0, needYou: [], message: 'Unlock SecondHand to autofill.', pageKey: 'iowa-tell-us-more' } };
+
 test('widget frame is taller for a line and stays as wide as the widget with it', async t => {
-  const view = await panel(t, { launcher: true, autofill: { state: 'locked', filled: 0, needYou: [], message: 'Unlock SecondHand to autofill.', pageKey: 'iowa-personal-information' } });
-  // jsdom lays nothing out: as Chrome would, the widget is as wide as its buttons without the line,
-  // and when its height is let go, the line takes more rows the narrower the widget is.
+  const view = await panel(t, { ...quietCard, storage: new Map([['secondhand.autofillStarted', '1']]) });
+  // jsdom lays nothing out: as Chrome would, the widget is as wide as its buttons without the line, its
+  // row alone is 46px tall, and the line takes more rows the narrower the widget is.
   const card = view.get('widget');
   card.getBoundingClientRect = () => {
-    const width = card.style.width ? parseFloat(card.style.width) : view.get('widget-text').classList.contains('visually-hidden') ? 180.4 : 231.8;
-    return { width, height: card.style.height === 'auto' ? (width < 200 ? 97.3 : 71.6) : 86 };
+    const hidden = view.get('widget-text').classList.contains('visually-hidden');
+    const width = card.style.width ? parseFloat(card.style.width) : hidden ? 180.4 : 231.8;
+    return { width, height: hidden ? 46 : width < 200 ? 97.3 : 71.6 };
   };
   const sizes = () => plainRequests(view.requests.filter(request => request.type === 'ui:widgetSize'));
+  // Before the click the widget's row alone, the frame it starts with; then a locked app, said in a line beside Unlock.
   await view.userClick('autofill');
-  assert.deepEqual(sizes(), [{ type: 'ui:widgetSize', line: false, width: 181 }]);
-  await view.userClick('unlock');
-  assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: true, width: 232, height: 72, narrowWidth: 181, narrowHeight: 98 },
+  assert.deepEqual(sizes(), [{ type: 'ui:widgetSize', line: true, width: 232, height: 72, narrowWidth: 181, narrowHeight: 98 }],
     'how tall the line makes it at its own width, and at its buttons’ width');
   assert.equal(card.getAttribute('style'), '', 'measuring leaves nothing behind');
   assert.equal(view.get('widget-text').classList.contains('visually-hidden'), false);
+});
+
+test('widget frame is as tall as the widget measured itself, and is asked for again when its lines change', async t => {
+  const view = await panel(t, { ...quietCard, storage: new Map([['secondhand.autofillStarted', '1']]) });
+  // The row alone, then the row under two lines of 16px with the 4px between them, or three for the longer
+  // line while Autofill waits for the app; three lines at the row's width.
+  const card = view.get('widget');
+  card.getBoundingClientRect = () => {
+    const text = view.get('widget-text');
+    if (text.classList.contains('visually-hidden')) return { width: 180.4, height: 46 };
+    return card.style.width ? { width: parseFloat(card.style.width), height: 95.6 } : { width: 253.1, height: text.textContent.startsWith('Waiting') ? 95.6 : 79.6 };
+  };
+  const sizes = () => plainRequests(view.requests.filter(request => request.type === 'ui:widgetSize'));
+  const withLine = { type: 'ui:widgetSize', line: true, width: 254, height: 80, narrowWidth: 181, narrowHeight: 96 };
+  const longer = { ...withLine, height: 96 };
   await view.userClick('autofill');
-  assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: false, width: 181 });
+  assert.deepEqual(sizes(), [longer, withLine], 'the row alone is the frame it starts with; a line makes the frame as tall as the widget with it');
+  await view.userClick('unlock');
+  assert.equal(sizes().length, 2, 'the same size is not asked for again');
+  await view.userClick('autofill');
+  assert.deepEqual(sizes().slice(-2), [longer, withLine]);
+  await view.userClick('unlock');
+  await view.userClick('unlock');
+  assert.equal(sizes().length, 4);
 });
 
 test('widget is a pill off the applicant page and opens the side panel from it', async t => {
   const view = await panel(t, { launcher: true, kind: 'manual' });
   assert.equal(view.get('widget').hidden, true);
   assert.equal(view.get('pill').hidden, false);
+  assert.equal(view.get('pill').title, EN['widget.pillTitle']);
   await view.userClick('pill');
   assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'ui:openPanel', confirmed: true });
+});
+
+test('the widget can be hidden to its logo and shown again from it, by the reader only, and the choice holds for the tab', async t => {
+  const storage = new Map();
+  const session = new Map();
+  const view = await panel(t, { launcher: true, storage, session });
+  const sizes = () => plainRequests(view.requests.filter(request => request.type === 'ui:widgetSize'));
+  assert.equal(view.get('hide').textContent, 'Hide', 'a word, not a sign');
+  assert.equal(view.get('hide').title, 'Hide this card. Hiding doesn’t stop Autofill.');
+  view.get('hide').click(); await tick();
+  assert.equal(view.get('widget').hidden, false, 'a click the page made up hides nothing');
+  await view.userClick('hide');
+  assert.equal(view.get('widget').hidden, true);
+  assert.equal(view.get('pill').hidden, false);
+  assert.equal(view.get('pill').getAttribute('aria-label'), EN['widget.showTitle']);
+  assert.equal(view.get('pill').hasAttribute('title'), false, 'no tooltip repeats its name');
+  assert.equal(view.get('pill-label').hidden, false);
+  assert.equal(view.get('pill-label').textContent, 'Show', 'the logo says the word that shows the card again');
+  assert.equal(view.get('pill').classList.contains('labeled'), true);
+  assert.equal(view.window.document.activeElement, view.get('pill'), 'the keyboard stays on the control that brings it back');
+  assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: true, pill: true }, 'the frame is asked to be the logo alone');
+  // It stays hidden while the page is checked again, and while Autofill runs elsewhere.
+  const asked = sizes().length;
+  view.window.document.dispatchEvent(new view.window.Event('visibilitychange'));
+  await tick(); await tick();
+  assert.equal(view.get('widget').hidden, true);
+  assert.equal(sizes().length, asked);
+  await view.userClick('pill');
+  assert.equal(view.types().includes('ui:openPanel'), false, 'the logo of a hidden card shows the card; it does not open the side panel');
+  assert.equal(view.get('widget').hidden, false);
+  assert.equal(view.get('pill').hidden, true);
+  assert.equal(view.window.document.activeElement, view.get('hide'));
+  assert.deepEqual(sizes().at(-1), { type: 'ui:widgetSize', line: true });
+  assert.deepEqual([...storage.keys()], [], 'nothing goes in the extension’s own storage');
+  assert.equal(session.get('secondhand.cardHidden'), undefined, 'shown again, the tab forgets the hiding');
+  // Hidden, the choice holds for the next page in this tab, and the logo says when the hidden card needs the reader.
+  await view.userClick('hide');
+  assert.equal(session.get('secondhand.cardHidden'), '1');
+  const next = await panel(t, { launcher: true, storage, session, result: doneResult });
+  assert.equal(next.get('widget').hidden, true, 'the next page keeps the card hidden');
+  assert.equal(next.get('pill').hidden, false);
+  assert.equal(next.get('pill').classList.contains('waiting'), true, 'two questions are left for the reader');
+  assert.equal(next.get('pill-label').textContent, 'Show · needs you', 'in words, not only the dot');
+  assert.equal(next.get('pill').getAttribute('aria-label'), 'Show · needs you: SecondHand’s card');
+  // A screen reader still hears what the hidden card says, from the status region outside the card.
+  const status = next.get('widget-status');
+  assert.equal(status.getAttribute('role'), 'status');
+  assert.equal(status.getAttribute('aria-live'), 'polite');
+  assert.equal(next.get('widget').contains(status), false);
+  assert.equal(status.textContent, next.get('widget-text').textContent);
+  assert.match(status.textContent, /^Filled /);
+  assert.equal(next.get('widget-text').getAttribute('role'), null, 'one region speaks, not two');
+  assert.equal(next.get('widget-text').getAttribute('aria-hidden'), 'true', 'and the card’s own copy of the line is not read again');
+  const quiet = await panel(t, { launcher: true, storage, session });
+  assert.equal(quiet.get('pill').classList.contains('waiting'), false);
+  assert.equal(quiet.get('pill').getAttribute('aria-label'), 'Show SecondHand’s card');
+  await quiet.userClick('pill');
+  assert.equal(session.has('secondhand.cardHidden'), false);
+  // The link to what is left says what it does.
+  assert.equal(next.get('need-you').title, 'Go to the next question left, in the form.');
+  assert.equal(next.get('details').title, 'Open SecondHand’s side panel');
+  assert.equal(next.get('hide').textContent, 'Hide');
+  // Another site's widget hides the same way.
+  const site = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true } });
+  await site.userClick('hide');
+  assert.equal(site.get('pill').getAttribute('aria-label'), EN['widget.showTitle']);
+  assert.deepEqual(plainRequests(site.requests.at(-1)), { type: 'ui:widgetSize', line: false, pill: true });
 });
 
 test('widget shows Unlock when the vault is locked and returns to Autofill after bringing the app forward', async t => {
@@ -744,11 +1029,13 @@ test('widget shows Unlock when the vault is locked and returns to Autofill after
   await view.userClick('autofill');
   assert.equal(view.get('unlock').hidden, false);
   assert.equal(view.get('autofill').hidden, true);
-  assert.equal(view.get('widget-text').classList.contains('visually-hidden'), true, 'the Unlock button says it all');
+  assert.equal(view.get('widget-text').textContent, 'The SecondHand app on this computer is locked.', 'as the side panel says it');
+  assert.equal(view.get('widget-text').classList.contains('visually-hidden'), false);
+  assert.equal(view.get('unlock').textContent, 'Unlock', 'the side panel’s button');
   await view.userClick('unlock');
-  assert.deepEqual(plainRequests(view.requests.slice(-2)), [{ type: 'ui:showApp', confirmed: true }, { type: 'ui:widgetSize', line: true }]);
+  assert.deepEqual(plainRequests(view.requests.findLast(request => request.type !== 'ui:widgetSize')), { type: 'ui:showApp', confirmed: true });
   assert.equal(view.get('autofill').hidden, false);
-  assert.match(view.get('widget-text').textContent, /Unlock SecondHand, then click Autofill/);
+  assert.match(view.get('widget-text').textContent, /Unlock SecondHand, then start Autofill again/);
   assert.equal(view.get('widget-text').classList.contains('visually-hidden'), false);
 });
 
@@ -759,15 +1046,15 @@ test('widget offers Open SecondHand in Autofill’s place when the app is closed
   assert.equal(offline.get('unlock').hidden, true);
   assert.equal(offline.get('open-app').hidden, false);
   assert.equal(offline.get('open-app').textContent, 'Open SecondHand');
-  assert.match(offline.get('widget-text').textContent, /Open the SecondHand app/, 'screen readers still hear why');
-  assert.equal(offline.get('widget-text').classList.contains('visually-hidden'), true, 'the button says it all: the card grows no row');
+  assert.equal(offline.get('widget-text').textContent, 'The SecondHand app on this computer is closed.', 'as the side panel says it');
+  assert.equal(offline.get('widget-text').classList.contains('visually-hidden'), false);
   offline.get('open-app').click(); await tick();
   assert.equal(offline.types().includes('ui:openApp'), false, 'an untrusted click does nothing');
   await offline.userClick('open-app');
   assert.deepEqual(plainRequests(offline.requests.find(request => request.type === 'ui:openApp')), { type: 'ui:openApp', confirmed: true });
   assert.equal(offline.get('open-app').hidden, true);
   assert.equal(offline.get('autofill').hidden, false);
-  assert.match(offline.get('widget-text').textContent, /Unlock SecondHand, then click Autofill/);
+  assert.match(offline.get('widget-text').textContent, /Unlock SecondHand, then start Autofill again/);
   // An open that fails says so in one line that stays, and Autofill is back to check again.
   const failing = await panel(t, { launcher: true, os: 'win', autofill: offlineResult, openApp: () => ({ ok: false, error: 'SecondHand could not be started (Windows error 2).' }) });
   await failing.userClick('autofill');
@@ -777,59 +1064,156 @@ test('widget offers Open SecondHand in Autofill’s place when the app is closed
   assert.equal(failing.get('open-app').hidden, true);
   assert.equal(failing.get('autofill').hidden, false);
   const restored = await panel(t, { launcher: true, result: doneResult });
-  assert.equal(restored.get('widget-text').textContent, 'Filled 3');
-  assert.equal(restored.get('need-you').textContent, '2 need you');
+  assert.equal(restored.get('widget-text').textContent, 'Filled 3 answers.');
+  assert.equal(restored.get('need-you').textContent, '2 questions left');
 });
 
-const waitingResult = { state: 'waiting', filled: 0, needYou: [], message: 'Solve the CAPTCHA, then click Continue.', pageKey: 'iowa-personal-information' };
+const waitingResult = { state: 'waiting', filled: 0, needYou: [], message: 'Type the characters shown in Iowa’s security check, then click Continue.', pageKey: 'iowa-personal-information' };
 
 test('while autofill is on, the widget shows Stop and the current instruction', async t => {
-  const view = await panel(t, { launcher: true, autofill: { ...doneResult, needYou: [], todo: 'Check your answers, then click Save and Continue.' }, autopilotAfterAutofill: true });
+  const checked = { ...doneResult, needYou: [], message: 'Filled 3 answers. Check your answers, then click Continue.', messageKey: 'result.thenTodo',
+    messageParams: { summary: { key: 'result.filled', params: { count: 3 } }, todo: { key: 'worker.checkThenContinue', params: {} } }, todo: 'Check your answers, then click Continue.', todoKey: 'worker.checkThenContinue', todoParams: {} };
+  const view = await panel(t, { launcher: true, autofill: checked, autopilotAfterAutofill: true });
   await view.userClick('autofill');
   assert.equal(view.get('stop').hidden, false);
   assert.equal(view.get('autofill').hidden, true);
-  assert.equal(view.get('widget-text').textContent, 'Filled 3 · Check your answers, then click Save and Continue.');
+  assert.equal(view.get('widget-text').textContent, 'Filled 3 answers. Check your answers, then click Continue. Stop erases nothing.');
   view.state.result = waitingResult;
   view.window.document.dispatchEvent(new view.window.Event('visibilitychange'));
   await tick(); await tick();
-  assert.equal(view.get('widget-text').textContent, 'Solve the CAPTCHA, then click Continue.', 'polls follow the worker while autofill is on');
+  assert.equal(view.get('widget-text').textContent, 'Type the characters shown in Iowa’s security check, then click Continue. Stop erases nothing.', 'polls follow the worker while autofill is on');
   view.get('stop').click(); await tick();
   assert.equal(view.types().includes('ui:stop'), false);
   await view.userClick('stop');
   assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:stop')), { type: 'ui:stop', confirmed: true });
   assert.equal(view.get('stop').hidden, true);
   assert.equal(view.get('autofill').hidden, false);
-  assert.equal(view.get('widget-text').textContent, 'Autofill stopped.');
+  assert.equal(view.get('widget-text').textContent, 'Autofill stopped. Nothing was erased.', 'and no longer what Stop would do');
+  assert.equal(view.get('widget-text').classList.contains('visually-hidden'), false, 'what Stop did is shown');
+  assert.equal(view.get('stop').title, EN['widget.stopTitle']);
 });
 
 test('a widget that loads mid-run picks up the running autofill', async t => {
   const view = await panel(t, { launcher: true, kind: 'blocked', autopilot: true, result: waitingResult });
   assert.equal(view.get('widget').hidden, false, 'instructions stay readable on steps that need you');
   assert.equal(view.get('stop').hidden, false);
-  assert.equal(view.get('widget-text').textContent, 'Solve the CAPTCHA, then click Continue.');
+  assert.equal(view.get('widget-text').textContent, 'Type the characters shown in Iowa’s security check, then click Continue. Stop erases nothing.');
+});
+
+// Autofill on Iowa's applicant page, waiting for one answer: once nothing is left and the reader leaves the box, it clicks Save and Continue.
+const missingResult = { state: 'done', filled: 3, needYou: ['firstName'], pageKey: 'iowa-personal-information',
+  message: 'Filled 3 answers · 1 left for you. Check what was filled before you answer what is left. Once nothing is left and you leave the box, SecondHand clicks Save and Continue.',
+  messageKey: 'result.thenTodo', messageParams: { summary: { key: 'result.filledNeedYou', params: { count: 3, needYou: 1 } }, todo: { key: 'iowa.missingAnswers', params: {} } },
+  todo: 'Check what was filled before you answer what is left. Once nothing is left and you leave the box, SecondHand clicks Save and Continue.', todoKey: 'iowa.missingAnswers', todoParams: {} };
+
+test('while Autofill waits for answers it would save and continue after, both surfaces say Stop lets the reader check first', async t => {
+  const missing = missingResult;
+  const side = await panel(t, { autopilot: true, result: missing });
+  assert.ok(side.get('status').textContent.endsWith(missing.todo));
+  assert.equal(side.get('stop-note').textContent, 'To check and continue yourself, click Stop Autofill. It erases nothing.');
+  const card = await panel(t, { launcher: true, autopilot: true, result: missing });
+  assert.equal(card.get('widget-text').textContent, 'Filled 3 answers. Check what was filled before you answer what is left. Once nothing is left and you leave the box, SecondHand clicks Save and Continue. To check and continue yourself, click Stop. It erases nothing.');
+  // Anywhere else, Stop only ends Autofill.
+  const waiting = await panel(t, { autopilot: true, result: waitingResult });
+  assert.equal(waiting.get('stop-note').textContent, 'Stop ends Autofill and erases nothing.');
+});
+
+test('while Autofill waits for the app, both surfaces say where its window is on this computer', async t => {
+  for (const [os, where] of [['mac', 'Can’t see that window? Click the SecondHand bear in the Dock.'], ['win', 'Can’t see that window? Click the SecondHand bear at the bottom of your screen.'],
+    ['linux', 'Can’t see that window? It may be behind Chrome.']]) {
+    const waiting = `Waiting for the SecondHand app. If its window asks for your OK, nothing is filled until you allow it. ${where}`;
+    let release;
+    const autofillHeld = new Promise(done => { release = done; });
+    const card = await panel(t, { launcher: true, os, autofillHeld });
+    const cardClick = card.userClick('autofill');
+    await settle();
+    assert.equal(card.get('widget-text').textContent, waiting, os);
+    assert.equal(card.get('autofill').disabled, true);
+    const side = await panel(t, { os, autofillHeld });
+    const sideClick = side.userClick('panel-autofill');
+    await settle();
+    assert.equal(side.get('status').textContent, waiting, os);
+    release();
+    await Promise.all([cardClick, sideClick]);
+    await settle();
+    assert.match(card.get('widget-text').textContent, /^Filled 3 answers/);
+  }
+});
+
+test('once Autofill has been started again from this Chrome, both surfaces say the short form of what it waits for: check first, and Stop erases nothing', async t => {
+  const storage = new Map([['secondhand.autofillStarted', '2']]);
+  const card = await panel(t, { launcher: true, storage, autopilot: true, result: missingResult });
+  assert.equal(card.get('widget-text').textContent, 'Filled 3 answers. Check first: SecondHand moves on once nothing is left and you leave the box. Stop erases nothing.');
+  assert.equal(card.get('widget-text').title, missingResult.message, 'all of it stays in the tooltip');
+  const side = await panel(t, { storage, autopilot: true, result: missingResult });
+  assert.match(side.get('status').textContent, /^Filled 3 answers · \d left for you\. Check first: SecondHand moves on once nothing is left and you leave the box\.$/);
+  assert.equal(side.get('stop-note').hidden, false);
+  assert.equal(side.get('stop-note').textContent, 'Stop ends Autofill and erases nothing.');
+  // Anywhere else the line is as it was, without Stop's note.
+  const message = await panel(t, { launcher: true, storage, kind: 'blocked', autopilot: true, result: waitingResult });
+  assert.equal(message.get('widget-text').textContent, 'Type the characters shown in Iowa’s security check, then click Continue.');
+  // Through the first run, all of it.
+  const first = await panel(t, { launcher: true, storage: new Map([['secondhand.autofillStarted', '1']]), autopilot: true, result: missingResult });
+  assert.match(first.get('widget-text').textContent, /Once nothing is left and you leave the box, SecondHand clicks Save and Continue\. To check and continue yourself, click Stop\. It erases nothing\.$/);
+});
+
+test('each language in the menu is marked as that language, for a screen reader’s voice', async t => {
+  const view = await panel(t, {});
+  assert.deepEqual([...view.get('language').options].map(option => [option.value, option.lang]), ['en', 'es', 'vi', 'zh', 'fr', 'ar'].map(code => [code, code]));
+});
+
+test('the side panel’s name is its first heading, so a screen reader’s list of headings starts there', async t => {
+  const view = await panel(t, {});
+  const headings = [...view.window.document.querySelectorAll('#sidepanel h1, #sidepanel h2, #sidepanel h3')];
+  assert.equal(headings[0].tagName, 'H1');
+  assert.equal(headings[0].textContent.includes('SecondHand'), true);
+  assert.equal(view.window.document.querySelectorAll('#sidepanel h1').length, 1);
 });
 
 test('side panel turns its button into Stop while autofill is on', async t => {
   const view = await panel(t, { autopilot: true, result: waitingResult });
-  assert.equal(view.get('panel-autofill').textContent, 'Stop autofill');
+  assert.equal(view.get('panel-autofill').textContent, 'Stop Autofill');
+  assert.equal(view.get('stop-note').hidden, false);
+  assert.equal(view.get('stop-note').textContent, 'Stop ends Autofill and erases nothing.');
   await view.userClick('panel-autofill');
   assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:stop')), { type: 'ui:stop', confirmed: true, tabId: 7 });
-  assert.equal(view.get('panel-autofill').textContent, 'Autofill this page');
+  assert.equal(view.get('panel-autofill').textContent, 'Start Autofill');
+  assert.equal(view.get('stop-note').hidden, true);
 });
 
-test('a worker that never answers gets exact reload steps in the widget and the side panel', async t => {
+test('a worker that never answers gets a plain notice and a Restart button in the widget and the side panel', async t => {
   const widget = await panel(t, { launcher: true, silent: true });
-  assert.equal(widget.get('widget').hidden, false, 'the steps stay readable instead of a pill');
+  assert.equal(widget.get('widget').hidden, false, 'the notice stays readable instead of a pill');
   assert.equal(widget.get('pill').hidden, true);
   assert.equal(widget.get('widget-text').textContent, OUTDATED);
+  assert.equal(widget.get('widget-text').classList.contains('visually-hidden'), false);
   assert.equal(widget.get('widget').classList.contains('outdated'), true);
+  assert.equal(widget.get('restart').hidden, false);
+  assert.equal(widget.get('restart').textContent, 'Restart SecondHand', 'what it restarts, as the side panel says it');
+  assert.equal(widget.get('restart').title, EN['widget.restartTitle']);
+  for (const id of ['autofill', 'stop', 'unlock', 'open-app', 'need-you', 'translate-offer', 'hide']) assert.equal(widget.get(id).hidden, true, `${id} is not offered`);
   const side = await panel(t, { silent: true });
-  assert.equal(side.get('status').textContent, OUTDATED);
+  assert.equal(side.get('desktop-status').textContent, OUTDATED_PANEL);
+  assert.equal(side.get('desktop-status').parentElement.hidden, false);
+  assert.equal(side.get('desktop-status').parentElement.classList.contains('error'), false, 'an update is not an error');
+  assert.equal(side.get('desktop-action').hidden, false);
+  assert.equal(side.get('desktop-action').textContent, 'Restart SecondHand');
+  assert.equal(side.get('status').textContent, '');
   assert.equal(side.get('panel-autofill').disabled, true);
+  assert.equal(side.get('panel-autofill').hidden, true, 'only the restart is offered');
+  assert.doesNotMatch(`${OUTDATED} ${OUTDATED_SHORT} ${OUTDATED_PANEL} ${EN['widget.restartTitle']}`, /chrome:\/\/|reload arrow/, 'no address to type and no arrow to find');
+  assert.equal(widget.get('widget').classList.contains('restartable'), true);
+  // The outdated worker is asked once, in the oldest form of the request, for a frame with room for a line.
+  assert.deepEqual(plainRequests(widget.requests).filter(request => request.type === 'ui:widgetSize'), [{ type: 'ui:widgetSize', line: true }]);
+  // A frame too small for the whole notice gets the short form beside the button.
+  const small = await panel(t, { launcher: true, silent: true });
+  Object.defineProperties(small.get('widget-text'), { scrollHeight: { get() { return this.textContent === OUTDATED ? 56 : 28; } }, clientHeight: { get: () => 42 } });
+  small.window.dispatchEvent(new small.window.Event('resize'));
+  assert.equal(small.get('widget-text').textContent, OUTDATED_SHORT);
 
   // A worker that answers page state but not a newer message is outdated too.
   const partial = await panel(t, { launcher: true, silent: ['ui:autofill'], build: BUILD });
-  assert.equal(partial.get('widget-text').textContent, 'Iowa · uses first home address suggestion');
+  assert.equal(partial.get('widget-text').textContent, EN['widget.iowaReady']);
   await partial.userClick('autofill');
   assert.equal(partial.get('widget-text').textContent, OUTDATED);
   const before = partial.requests.length;
@@ -838,21 +1222,105 @@ test('a worker that never answers gets exact reload steps in the widget and the 
   assert.equal(partial.requests.length, before, 'an outdated worker is not polled again');
 });
 
-test('a worker from another build gets the same reload steps even though it answers', async t => {
+test('an outdated card the page can size directly is drawn whole, can be hidden, and asks the page, not the worker', async t => {
+  const widget = await panel(t, { launcher: true, silent: true });
+  assert.equal(widget.get('hide').hidden, true, 'without the page’s word, hiding would leave an empty frame over the page');
+  assert.equal(widget.get('widget').classList.contains('outdated'), true, 'and the notice keeps to the frame it has');
+  const posted = [];
+  widget.window.postMessage = (data, origin) => posted.push([data, origin]);
+  // The greeting counts only from the page around the card.
+  widget.window.dispatchEvent(new widget.window.MessageEvent('message', { data: { type: 'secondhand:cardHello' }, source: null }));
+  assert.equal(widget.get('hide').hidden, true);
+  widget.window.dispatchEvent(new widget.window.MessageEvent('message', { data: { type: 'secondhand:cardHello' }, source: widget.window.parent }));
+  assert.equal(widget.get('hide').hidden, false);
+  // The page sizes the frame, so the notice is drawn as any card is: the whole of it, Restart, and the way to hide it.
+  assert.equal(widget.get('widget').classList.contains('outdated'), false);
+  assert.equal(widget.get('widget-text').textContent, OUTDATED);
+  assert.equal(widget.get('restart').hidden, false);
+  assert.deepEqual(plain(posted.map(([data]) => data)), [{ type: 'secondhand:cardSize', line: true }], 'asked of the page, as the worker would be');
+  assert.equal(posted[0][1], '*', 'jsdom knows no page around the card');
+  const sizes = widget.requests.filter(request => request.type === 'ui:widgetSize').length;
+  await widget.userClick('hide');
+  assert.equal(widget.get('widget').hidden, true);
+  assert.equal(widget.get('pill').hidden, false);
+  assert.equal(widget.get('pill').getAttribute('aria-label'), EN['widget.showWaitingTitle'], 'the hidden notice still needs the reader');
+  assert.deepEqual(plain(posted.map(([data]) => data)).at(-1), { type: 'secondhand:cardSize', line: true, pill: true });
+  assert.equal(widget.requests.filter(request => request.type === 'ui:widgetSize').length, sizes, 'the outdated worker is not asked');
+  await widget.userClick('pill');
+  assert.equal(widget.get('widget').hidden, false);
+  assert.equal(widget.get('widget-text').textContent, OUTDATED);
+  assert.deepEqual(plain(posted.map(([data]) => data)).at(-1), { type: 'secondhand:cardSize', line: true });
+  // A card left behind when SecondHand restarted can be hidden the same way.
+  const left = await panel(t, { launcher: true });
+  const leftPosted = [];
+  left.window.postMessage = data => leftPosted.push(data);
+  left.window.dispatchEvent(new left.window.MessageEvent('message', { data: { type: 'secondhand:cardHello' }, source: left.window.parent }));
+  delete left.window.chrome.runtime.id;
+  left.window.chrome.runtime.sendMessage = async () => { throw new Error('Extension context invalidated.'); };
+  await left.userClick('autofill');
+  assert.equal(left.get('widget-text').textContent, EN['panel.reloadPage']);
+  assert.equal(left.get('widget').classList.contains('outdated'), false);
+  await left.userClick('hide');
+  assert.deepEqual(plain(leftPosted).at(-1), { type: 'secondhand:cardSize', line: true, pill: true });
+});
+
+test('a worker from another build gets the same notice even though it answers, and Restart reloads SecondHand', async t => {
   const widget = await panel(t, { launcher: true, build: 'older-build' });
-  assert.deepEqual(plainRequests(widget.requests), [{ type: 'ui:ping' }]);
+  let reloads = 0;
+  widget.window.chrome.runtime.reload = () => { reloads++; };
+  assert.deepEqual(plainRequests(widget.requests), [{ type: 'ui:ping' }, { type: 'ui:widgetSize', line: true }]);
   assert.equal(widget.get('widget-text').textContent, OUTDATED);
   assert.equal(widget.get('widget-text').title, OUTDATED);
   await widget.userClick('autofill');
   assert.equal(widget.types().includes('ui:autofill'), false);
+  widget.get('restart').click(); await tick();
+  assert.equal(reloads, 0, 'a click the page made up restarts nothing');
+  await widget.userClick('restart');
+  assert.equal(reloads, 1);
+  // The frame is now left behind by the reload: it says how to get SecondHand back on this page.
+  assert.equal(widget.get('widget-text').textContent, EN['panel.reloadPage']);
+  assert.equal(widget.get('restart').hidden, true);
+  assert.equal(widget.get('widget').classList.contains('restartable'), false);
+  assert.deepEqual(plainRequests(widget.requests), [{ type: 'ui:ping' }, { type: 'ui:widgetSize', line: true }], 'the outdated worker is asked nothing more');
+
   const side = await panel(t, { build: 'older-build' });
+  let restarts = 0;
+  side.window.chrome.runtime.reload = () => { restarts++; };
   assert.deepEqual(plainRequests(side.requests), [{ type: 'ui:ping' }]);
-  assert.equal(side.get('status').textContent, OUTDATED);
-  assert.equal(side.get('status').classList.contains('error'), true);
+  assert.equal(side.get('desktop-status').textContent, OUTDATED_PANEL);
+  assert.equal(side.get('status').textContent, '');
+  assert.equal(side.get('status').classList.contains('error'), false);
   assert.equal(side.get('panel-autofill').disabled, true);
   side.listeners.activated({ tabId: 7 }); await tick(); await tick();
-  assert.equal(side.get('status').textContent, OUTDATED, 'switching tabs keeps the reload steps');
+  assert.equal(side.get('desktop-status').textContent, OUTDATED_PANEL, 'switching tabs keeps the notice');
+  assert.equal(side.get('desktop-action').textContent, 'Restart SecondHand');
   assert.equal(side.types().includes('ui:pageState'), false);
+  side.get('desktop-action').click(); await tick();
+  assert.equal(restarts, 0);
+  await side.userClick('desktop-action');
+  assert.equal(restarts, 1);
+  assert.deepEqual(plainRequests(side.requests), [{ type: 'ui:ping' }], 'restarting asks the outdated worker nothing');
+});
+
+test('a worker that stops answering while the side panel is open leaves only the notice and Restart', async t => {
+  const view = await panel(t, { silent: ['ui:autofill'], build: BUILD });
+  assert.ok(view.get('page-checklist').children.length > 0);
+  await view.userClick('panel-autofill'); await settle();
+  assert.equal(view.get('desktop-status').textContent, OUTDATED_PANEL);
+  assert.equal(view.get('desktop-action').textContent, 'Restart SecondHand');
+  assert.equal(view.get('status').textContent, '', 'the notice is said once, not again as an error');
+  assert.equal(view.get('panel-autofill').hidden, true);
+  assert.equal(view.get('page-checklist').children.length, 0);
+  const asked = view.requests.length;
+  view.window.document.dispatchEvent(new view.window.Event('visibilitychange'));
+  await settle();
+  assert.equal(view.requests.length, asked, 'an outdated worker is not asked again');
+  // The notice follows the language picker like everything else.
+  view.get('language').value = 'es';
+  view.get('language').dispatchEvent(new view.window.Event('change'));
+  await settle();
+  assert.equal(view.get('desktop-status').textContent, strings.text('es', 'panel.outdated'));
+  assert.equal(view.get('desktop-action').textContent, strings.text('es', 'panel.restart'));
 });
 
 test('the pill is a fixed circle that cannot stretch into an oval', () => {
@@ -862,7 +1330,7 @@ test('the pill is a fixed circle that cannot stretch into an oval', () => {
 // Sites other than Iowa, turned on one at a time.
 const SITE = { id: 7, url: 'https://pantry.example.org/intake?step=1' };
 const ORIGIN = 'https://pantry.example.org';
-const siteDone = { state: 'done', filled: 2, guessed: 0, needYou: ['f0:sh-4', 'f4:sh-3'], message: 'Filled 2 · 2 need you. Check your answers before you submit.', pageKey: 'general' };
+const siteDone = { state: 'done', filled: 2, guessed: 0, needYou: ['f0:sh-4', 'f4:sh-3'], message: 'Filled 2 answers · 2 left for you. Check them before you submit.', messageKey: 'result.siteFilledNeedYou', messageParams: { count: 2, needYou: 2 }, pageKey: 'general' };
 // What the worker's ui:plan answers: the questions the rules left open, and the keys the AI may use.
 const openPlan = { unmatched: [
   { id: 'f4:sh-1-2', label: 'Where can we email you?', type: 'email', options: [], required: false },
@@ -881,7 +1349,7 @@ function languageModel({ availability = 'available', answer = JSON.stringify({ '
   };
   return { LanguageModel, calls };
 }
-const AI_UNAVAILABLE = 'On-device AI unavailable. Rule matches only.';
+const AI_UNAVAILABLE = 'Chrome’s AI isn’t available, so nothing was guessed.';
 
 test('side panel offers to turn SecondHand on for an https tab that is not Iowa, and ignores untrusted clicks', async t => {
   const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: false } });
@@ -941,7 +1409,7 @@ test('on a site that is on, Autofill fills once without Stop, and Turn off asks 
 
 test('widget on a site asks the on-device AI about open questions and sends its guesses with Autofill', async t => {
   const ai = languageModel();
-  const guessed = { state: 'done', filled: 3, guessed: 1, needYou: ['sh-2-0'], message: 'Filled 3 · 1 suggested · 1 need you. Check your answers before you submit.', pageKey: 'general' };
+  const guessed = { state: 'done', filled: 3, guessed: 1, needYou: ['sh-2-0'], message: 'Filled 3 answers · 1 suggested · 1 left for you. Check them before you submit.', messageKey: 'result.siteFilledSuggestedNeedYou', messageParams: { count: 3, suggested: 1, needYou: 1 }, pageKey: 'general' };
   const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: openPlan, LanguageModel: ai.LanguageModel, autofill: guessed });
   assert.equal(ai.calls.availability, 0, 'nothing is asked before a click');
   await view.userClick('autofill');
@@ -953,8 +1421,9 @@ test('widget on a site asks the on-device AI about open questions and sends its 
   assert.match(system, /- email:/);
   assert.match(system, /- phone:/);
   assert.doesNotMatch(system, /ssn|birthDate|Income|firstName/, 'the AI only learns the keys the worker allows');
-  assert.equal(view.get('widget-text').textContent, 'Filled 3 · 1 suggested');
-  assert.equal(view.get('need-you').textContent, '1 need you');
+  // The side panel's sentence, without the count the link beside it carries.
+  assert.equal(view.get('widget-text').textContent, 'Filled 3 answers · 1 suggested. Check them before you submit.');
+  assert.equal(view.get('need-you').textContent, '1 question left');
 });
 
 test('without the on-device AI the widget fills with rule matches only and says so', async t => {
@@ -964,8 +1433,9 @@ test('without the on-device AI the widget fills with rule matches only and says 
     const view = await panel(t, Object.keys(setup).length ? { ...options, LanguageModel: languageModel(setup).LanguageModel } : options);
     await view.userClick('autofill');
     assert.deepEqual(plainRequests(view.requests.at(-1)), { type: 'ui:autofill', confirmed: true }, JSON.stringify(setup));
-    assert.equal(view.get('widget-text').textContent, `Filled 2 · ${AI_UNAVAILABLE}`, JSON.stringify(setup));
-    assert.match(view.get('widget-text').title, /On-device AI unavailable/);
+    // Why Chrome's AI guessed nothing is in the tooltip; the line stays what was filled and what to do.
+    assert.equal(view.get('widget-text').textContent, 'Filled 2 answers. Check them before you submit.', JSON.stringify(setup));
+    assert.match(view.get('widget-text').title, new RegExp(`^Filled 2 answers · 2 left for you\\. Check them before you submit\\. ${AI_UNAVAILABLE.replace(/[.’]/g, '\\$&')}`), JSON.stringify(setup));
   }
 });
 
@@ -984,11 +1454,11 @@ test('the widget asks the on-device AI once per click, with a time limit, and on
   const answered = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { unmatched: [], allowedKeys: ['email'] }, LanguageModel: ai.LanguageModel, autofill: siteDone });
   await answered.userClick('autofill');
   assert.equal(ai.calls.availability, 1, 'no open questions, no AI');
-  assert.equal(answered.get('widget-text').textContent, 'Filled 2');
+  assert.equal(answered.get('widget-text').textContent, 'Filled 2 answers. Check them before you submit.');
   assert.deepEqual(plainRequests(answered.requests.at(-1)), { type: 'ui:autofill', confirmed: true });
 });
 
-test('a worker too old to plan for the AI gets the reload steps, not a fill', async t => {
+test('a worker too old to plan for the AI gets the update notice, not a fill', async t => {
   const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, silent: ['ui:plan'], LanguageModel: languageModel().LanguageModel });
   await view.userClick('autofill');
   assert.equal(view.get('widget-text').textContent, OUTDATED);
@@ -996,17 +1466,17 @@ test('a worker too old to plan for the AI gets the reload steps, not a fill', as
 });
 
 test('widget and side panel say when nothing on a site matches the saved profile instead of Filled 0', async t => {
-  const nothing = { state: 'done', filled: 0, guessed: [], needYou: ['sh-1-0', 'f4:sh-1-1'], message: 'Nothing here matches your saved profile. 2 need you.', pageKey: 'general' };
+  const nothing = { state: 'done', filled: 0, guessed: [], needYou: ['sh-1-0', 'f4:sh-1-1'], message: 'No question here matches your answers in My information. 2 left for you.', messageKey: 'result.nothingMatchesNeedYou', messageParams: { count: 2 }, pageKey: 'general' };
   const widget = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: nothing });
   await widget.userClick('autofill');
-  assert.equal(widget.get('widget-text').textContent, 'Nothing here matches your saved profile.');
+  assert.equal(widget.get('widget-text').textContent, 'No question here matches your answers in My information.');
   assert.equal(widget.get('widget-text').title, nothing.message);
-  assert.equal(widget.get('need-you').textContent, '2 need you');
+  assert.equal(widget.get('need-you').textContent, '2 questions left');
   const side = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: nothing });
   await side.userClick('panel-autofill');
   assert.equal(side.get('status').textContent, nothing.message);
 
-  const next = { ...nothing, needYou: [], message: 'Nothing to fill here. Click Next, then Autofill again.' };
+  const next = { ...nothing, needYou: [], message: 'Nothing to fill here. Click Next, then Autofill again.', messageKey: 'result.nothingToFillNext', messageParams: {} };
   const paged = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: next });
   await paged.userClick('autofill');
   assert.equal(paged.get('widget-text').textContent, next.message);
@@ -1022,8 +1492,8 @@ test('widget on a site that is on autofills once, lists what needs you, and neve
   assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:autofill')), { type: 'ui:autofill', confirmed: true });
   assert.equal(view.get('stop').hidden, true);
   assert.equal(view.get('autofill').hidden, false);
-  assert.equal(view.get('widget-text').textContent, 'Filled 2');
-  assert.equal(view.get('need-you').textContent, '2 need you');
+  assert.equal(view.get('widget-text').textContent, 'Filled 2 answers. Check them before you submit.');
+  assert.equal(view.get('need-you').textContent, '2 questions left');
   await view.userClick('need-you');
   assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:focusField')), { type: 'ui:focusField', key: 'f0:sh-4', confirmed: true });
   view.window.document.dispatchEvent(new view.window.Event('visibilitychange'));
@@ -1073,22 +1543,71 @@ for (const loading of [false, true]) {
 }
 
 
-test('Iowa widget and sidebar disclose first-address selection before Autofill; other sites do not', async t => {
-  const widget = await panel(t, { launcher: true });
-  assert.match(widget.get('widget-text').textContent, /first home address suggestion/);
+test('Iowa widget and sidebar say what Autofill will do before it is clicked, in full the first time; other sites do not', async t => {
+  const storage = new Map();
+  const widget = await panel(t, { launcher: true, storage });
+  const FIRST = 'The SecondHand app asks you first. Then SecondHand fills each page and moves on. If Iowa suggests addresses, SecondHand picks the first: make sure it is yours. It never signs or sends your application.';
+  assert.equal(widget.get('widget-text').textContent, FIRST);
+  assert.equal(widget.get('widget-text').classList.contains('visually-hidden'), false, 'the widget shows it, not only its tooltip');
+  assert.equal(widget.get('autofill').title, EN['widget.autofillIowaTitle']);
   assert.match(widget.get('autofill').title, /continues where SecondHand can/);
   assert.match(widget.get('autofill').title, /Check every answer, your Social Security number, and the home address/);
-  const sidebar = await panel(t);
+  const sidebar = await panel(t, { storage });
   assert.equal(sidebar.get('iowa-policy').hidden, false);
+  // The side panel's line says what Autofill does on Iowa (#167), on every page until Autofill has run there.
+  assert.equal(sidebar.get('iowa-policy').textContent, EN['panel.iowaPolicy']);
   const policy = sidebar.get('iowa-policy').textContent;
-  assert.match(policy, /Social Security number; check it in Iowa’s form/);
-  assert.match(policy, /first suggested home address/);
-  assert.match(policy, /Review all answers and that address before submitting/);
-  assert.match(policy, /one person’s record at a time/);
-  assert.match(policy, /saves supported pages when complete/);
-  assert.match(policy, /You handle summaries, unmatched questions, consent, signatures, submission/);
+  assert.match(policy, /Social Security number; check it\./);
+  assert.match(policy, /first suggested home address; check that and every answer before you send/);
+  assert.match(policy, /On job, income and expense pages it fills one person at a time/);
+  assert.match(policy, /clicks Save and Continue on pages it knows once they are complete/);
+  assert.match(policy, /On other pages, you click Continue/);
+  assert.match(policy, /an AI program on this computer \(not a person\)/);
+  assert.match(policy, /Consent, signatures and sending are yours/);
+  assert.equal(sidebar.get('iowa-policy').classList.contains('note'), false, 'it is not small print');
+  assert.equal(sidebar.get('panel-autofill').textContent, 'Start Autofill', 'on Iowa the button starts something that goes on by itself');
+  // Once Autofill has run, the status line says what it did and the note is not repeated under it.
+  await sidebar.userClick('panel-autofill');
+  assert.equal(sidebar.get('iowa-policy').hidden, true);
+  assert.match(sidebar.get('status').textContent, /^Filled 3/);
+  // Started once from this Chrome, the card says only what matters where it matters: on the applicant page, that
+  // Iowa's address page comes next.
+  assert.equal(storage.get('secondhand.autofillStarted'), '1');
+  widget.window.dispatchEvent(Object.assign(new widget.window.Event('storage'), { key: 'secondhand.autofillStarted' }));
+  await settle();
+  assert.equal(widget.get('widget-text').textContent, 'On the next page, if Iowa suggests addresses, SecondHand picks the first: make sure it is yours.');
+  assert.equal(widget.get('widget-status').textContent, widget.get('widget-text').textContent);
+  // Elsewhere on Iowa's form the card is only its buttons, and says nothing.
+  const elsewhere = await panel(t, { launcher: true, storage, pageState: state => ({ ...structuredClone(state), page: { ...structuredClone(state.page), pageKey: 'iowa-tell-us-more' } }) });
+  assert.equal(elsewhere.get('widget-text').classList.contains('visually-hidden'), true);
+  assert.equal(elsewhere.get('widget-status').textContent, '');
+  assert.equal(elsewhere.get('autofill').hidden, false);
+  const later = await panel(t, { storage });
+  assert.equal(later.get('iowa-policy').textContent, EN['panel.iowaPolicy'], 'the side panel says all of it every time');
+  const laterWidget = await panel(t, { launcher: true, storage });
+  await laterWidget.userClick('autofill');
+  assert.deepEqual([...storage.keys()].sort(), ['secondhand.autofillStarted', 'secondhand.build'], 'the widget notes a start too; the side panel had noted its build');
+  assert.equal(storage.get('secondhand.autofillStarted'), '2', 'counted up to two: started again');
+  const third = await panel(t, { launcher: true, storage });
+  await third.userClick('autofill');
+  assert.equal(storage.get('secondhand.autofillStarted'), '2');
+  // Another site's Autofill fills once and notes nothing.
+  const siteStorage = new Map();
+  const siteWidget = await panel(t, { launcher: true, storage: siteStorage, tab: SITE, site: { origin: ORIGIN, enabled: true } });
+  await siteWidget.userClick('autofill');
+  assert.equal(siteStorage.size, 0);
+  const running = await panel(t, { autopilot: true, result: waitingResult });
+  assert.equal(running.get('iowa-policy').hidden, true);
+  // An information-only page says there is nothing to fill before Autofill is clicked, above the note.
+  const info = await panel(t, { pageState: state => ({ ...structuredClone(state), page: { kind: 'info', pageKey: 'iowa-instructions', reason: 'Nothing to fill on this page. Click Continue in Iowa’s form, or let Autofill go on for you.', reasonKey: 'iowa.infoOnly', reasonParams: {}, checklist: [] } }) });
+  assert.equal(info.get('status').textContent, 'Nothing to fill on this page. Click Continue in Iowa’s form, or let Autofill go on for you.');
+  assert.equal(info.get('iowa-policy').hidden, false);
+  assert.equal(info.get('panel-autofill').disabled, false);
   const other = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true } });
   assert.equal(other.get('iowa-policy').hidden, true);
+  const otherWidget = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true } });
+  assert.doesNotMatch(otherWidget.get('widget-text').textContent, /address|next/);
+  assert.equal(otherWidget.get('widget-text').classList.contains('visually-hidden'), true, 'another site’s widget is its row alone until Autofill has something to say');
 });
 
 test('manual-only Tell Us More instruction is preserved without invented required-answer or automatic-Next text', async t => {
@@ -1150,7 +1669,7 @@ test('verified navigation keeps its private snapshot local and consumes one auth
 const { en: EN, es: ES } = strings.catalogs;
 const englishOnly = new Set(Object.keys(EN).filter(key => typeof EN[key] === 'string' && EN[key] !== ES[key]).map(key => EN[key]));
 // Every word of SecondHand's the applicant can see or hear: visible text, tooltips, and screen-reader
-// labels. The page's own words, kept under their translation in the question list, are the page's.
+// labels. The words kept under each question in the question list are the form's, there to match it with.
 function shownText(view) {
   const found = [view.window.document.title];
   for (const element of view.window.document.body.querySelectorAll('*')) {
@@ -1192,12 +1711,14 @@ const settle = async () => { for (let i = 0; i < 12; i++) await tick(); };
 test('with Spanish as the browser language, the side panel shows none of SecondHand’s English', async t => {
   const view = await panel(t, { language: 'es-ES', pageState: keyedChecklist });
   assert.equal(view.window.document.documentElement.lang, 'es');
-  assert.equal(view.window.document.title, spanish('app.title'));
-  assert.equal(view.get('panel-autofill').textContent, spanish('panel.autofill'));
-  assert.equal(view.get('status').textContent, spanish('panel.iowaHint'));
-  assert.equal(view.get('desktop-status').textContent, spanish('desktop.unlocked'));
-  assert.match(view.row('firstName').textContent, new RegExp(`${spanish('iowa.firstName')}.*${spanish('checklist.missing')}`));
-  assert.equal(view.get('checklist-summary').textContent, strings.text('es', 'checklist.summary', { done: 1, total: 3 }));
+  assert.equal(view.window.document.title, 'SecondHand', 'the name alone, as Chrome lists the extension');
+  assert.equal(view.get('panel-autofill').textContent, spanish('panel.autofillIowa'));
+  // Ready to fill, with the app unlocked: there is nothing more to say.
+  assert.equal(view.get('status').textContent, '');
+  assert.equal(view.get('desktop-status').parentElement.hidden, true);
+  assert.equal(view.get('iowa-policy').textContent, spanish('panel.iowaPolicy'));
+  assert.match(view.row('firstName').textContent, new RegExp(`${spanish('iowa.firstName')}.*${spanish('checklist.pending')}`));
+  assert.equal(view.get('checklist-summary').textContent, '');
   assert.equal(view.get('language').value, 'es');
   assert.deepEqual(shownText(view).filter(text => englishOnly.has(text)), []);
   // Nothing about the language changes what the panel asks the worker.
@@ -1210,17 +1731,17 @@ test('with Spanish as the browser language, the widget shows none of SecondHand�
   assert.equal(view.get('widget-text').textContent, spanish('widget.iowaReady'));
   assert.equal(view.get('autofill').title, spanish('widget.autofillIowaTitle'));
   assert.deepEqual(shownText(view).filter(text => englishOnly.has(text)), []);
-  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:ping' }, { type: 'ui:pageState' }], 'without Chrome’s translator the widget asks nothing more');
+  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:ping' }, { type: 'ui:pageState' }, { type: 'ui:widgetSize', line: true }], 'without Chrome’s translator the widget asks nothing about the page’s language');
 });
 
 test('results the worker names by key show in Spanish in the widget and the side panel; a bare message shows as sent', async t => {
   const iowa = { state: 'done', filled: 3, needYou: ['firstName', 'lastName'], pageKey: 'iowa-personal-information',
-    message: 'Filled 3 · 2 need you. Complete the missing answers in Iowa’s form. SecondHand will check again before continuing.',
+    message: 'Filled 3 answers · 2 left for you. Check what was filled before you answer what is left. Once nothing is left and you leave the box, SecondHand clicks Save and Continue.',
     messageKey: 'result.thenTodo', messageParams: { summary: { key: 'result.filledNeedYou', params: { count: 3, needYou: 2 } }, todo: { key: 'iowa.missingAnswers', params: {} } },
-    todo: 'Complete the missing answers in Iowa’s form. SecondHand will check again before continuing.', todoKey: 'iowa.missingAnswers', todoParams: {} };
+    todo: 'Check what was filled before you answer what is left. Once nothing is left and you leave the box, SecondHand clicks Save and Continue.', todoKey: 'iowa.missingAnswers', todoParams: {} };
   const widget = await panel(t, { launcher: true, language: 'es-ES', autofill: iowa });
   await widget.userClick('autofill');
-  assert.equal(widget.get('widget-text').textContent, `${strings.text('es', 'widget.filled', { count: 3 })} · ${spanish('iowa.missingAnswers')}`);
+  assert.equal(widget.get('widget-text').textContent, `${strings.text('es', 'result.thenTodo', { summary: { key: 'result.filled', params: { count: 3 } }, todo: { key: 'iowa.missingAnswers', params: {} } })} ${spanish('widget.stopToCheck')}`, 'SecondHand clicks Save and Continue once nothing is left: Stop lets the reader check first');
   assert.equal(widget.get('need-you').textContent, 'Faltan 2');
   assert.equal(widget.get('widget-text').title, strings.text('es', iowa.messageKey, iowa.messageParams));
   const side = await panel(t, { language: 'es-ES', autofill: iowa });
@@ -1231,9 +1752,10 @@ test('results the worker names by key show in Spanish in the widget and the side
     autofill: { ...siteDone, messageKey: 'result.siteFilledNeedYou', messageParams: { count: 2, needYou: 2 } } });
   assert.equal(site.get('widget-text').textContent, strings.text('es', 'widget.siteReady', { host: 'pantry.example.org' }));
   await site.userClick('autofill');
-  assert.equal(site.get('widget-text').textContent, `${strings.text('es', 'widget.filled', { count: 2 })} · ${spanish('widget.aiUnavailable')}`);
+  assert.equal(site.get('widget-text').textContent, strings.text('es', 'result.siteFilled', { count: 2 }));
+  assert.match(site.get('widget-text').title, new RegExp(spanish('widget.aiUnavailable').replace(/[.’()]/g, '\\$&')));
   // A result without a key (an older worker) is shown exactly as it arrived.
-  const bare = await panel(t, { language: 'es-ES', autofill: { ...siteDone, message: 'Synthetic bare message.' }, tab: SITE, site: { origin: ORIGIN, enabled: true } });
+  const bare = await panel(t, { language: 'es-ES', autofill: { ...siteDone, message: 'Synthetic bare message.', messageKey: undefined, messageParams: undefined }, tab: SITE, site: { origin: ORIGIN, enabled: true } });
   await bare.userClick('panel-autofill');
   assert.equal(bare.get('status').textContent, 'Synthetic bare message.');
 });
@@ -1257,19 +1779,19 @@ test('the language picker saves the choice in the extension’s storage, changes
   const storage = new Map();
   const view = await panel(t, { storage, pageState: keyedChecklist });
   assert.equal(view.get('language').value, 'en');
-  assert.equal(view.get('panel-autofill').textContent, 'Autofill this page');
+  assert.equal(view.get('panel-autofill').textContent, 'Start Autofill');
   view.get('language').value = 'es';
   view.get('language').dispatchEvent(new view.window.Event('change'));
   await settle();
   assert.equal(storage.get('secondhand.language'), 'es');
-  assert.equal(view.get('panel-autofill').textContent, spanish('panel.autofill'));
-  assert.equal(view.get('status').textContent, spanish('panel.iowaHint'));
+  assert.equal(view.get('panel-autofill').textContent, spanish('panel.autofillIowa'));
+  assert.equal(view.get('checklist-summary').textContent, '');
   assert.equal(view.get('iowa-policy').textContent, spanish('panel.iowaPolicy'));
   assert.deepEqual(shownText(view).filter(text => englishOnly.has(text)), []);
 
   const reloaded = await panel(t, { storage });
   assert.equal(reloaded.get('language').value, 'es', 'the saved choice wins over the English browser');
-  assert.equal(reloaded.get('panel-autofill').textContent, spanish('panel.autofill'));
+  assert.equal(reloaded.get('panel-autofill').textContent, spanish('panel.autofillIowa'));
   const widget = await panel(t, { launcher: true, storage });
   assert.equal(widget.get('autofill').textContent, spanish('widget.autofill'));
   // A choice made while the widget is open reaches it through the storage event.
@@ -1277,7 +1799,7 @@ test('the language picker saves the choice in the extension’s storage, changes
   widget.window.dispatchEvent(Object.assign(new widget.window.Event('storage'), { key: 'secondhand.language' }));
   await settle();
   assert.equal(widget.get('autofill').textContent, 'Autofill');
-  assert.equal(widget.get('widget-text').textContent, 'Iowa · uses first home address suggestion');
+  assert.equal(widget.get('widget-text').textContent, EN['widget.iowaReady']);
 });
 
 test('the side panel lists every question in Spanish; a row click finds it through the existing focus route; nothing is written to the page', async t => {
@@ -1296,8 +1818,12 @@ test('the side panel lists every question in Spanish; a row click finds it throu
   const rows = [...view.get('questions-list').children];
   assert.deepEqual(rows.map(row => [row.tagName, row.querySelector('.checklist-label').textContent, row.querySelector('.checklist-detail').textContent]), [
     ['DIV', '[es] Have these ready before you start your application.', 'Have these ready before you start your application.'],
-    ['BUTTON', spanish('iowa.firstName'), ''],
+    // SecondHand's own label is in Spanish from its catalog, with the English it stands for under it.
+    ['BUTTON', spanish('iowa.firstName'), 'First name'],
     ['BUTTON', '[es] Preferred pickup day', 'Preferred pickup day']]);
+  assert.equal(rows[1].querySelector('.checklist-detail').hidden, false);
+  assert.equal(rows[1].querySelector('.checklist-detail').getAttribute('lang'), 'en', 'the English under SecondHand’s own label is marked as English');
+  assert.equal(rows[2].querySelector('.checklist-detail').getAttribute('lang'), 'en', 'a page’s own words carry the language Chrome translated them from');
   assert.equal(view.get('questions').hidden, false);
   assert.equal(view.get('questions-summary').textContent, strings.text('es', 'questions.count', { count: 2 }));
   assert.equal(view.get('questions-note').textContent, spanish('translate.done'));
@@ -1368,8 +1894,9 @@ test('the widget offers the Spanish view when the page is in English, and the of
   const detector = detectorStub();
   const view = await panel(t, { launcher: true, language: 'es-ES', Translator: translatorStub().Translator, LanguageDetector: detector.LanguageDetector, questions: pageQuestions });
   await settle();
-  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:ping' }, { type: 'ui:pageState' }, { type: 'ui:questions' }, { type: 'ui:widgetSize', line: true }], 'the offer gets a row');
+  assert.deepEqual(plainRequests(view.requests), [{ type: 'ui:ping' }, { type: 'ui:pageState' }, { type: 'ui:widgetSize', line: true }, { type: 'ui:questions' }]);
   assert.equal(view.get('translate-offer').hidden, false);
+  assert.equal(view.get('widget-text').classList.contains('visually-hidden'), false, 'the offer sits under what Autofill will do');
   assert.equal(view.get('translate-offer').textContent, spanish('widget.offer'));
   assert.equal(view.get('translate-offer').title, spanish('widget.offerTitle'));
   view.get('translate-offer').click(); await tick();
@@ -1391,7 +1918,17 @@ test('the widget offers the Spanish view when the page is in English, and the of
   const failing = await panel(t, { launcher: true, language: 'es-ES', Translator: translatorStub().Translator, LanguageDetector: detectorStub({ failure: new Error('Synthetic detector failure') }).LanguageDetector, questions: pageQuestions });
   await settle();
   assert.equal(failing.get('translate-offer').hidden, true);
-  assert.equal(failing.get('widget-text').textContent, spanish('widget.languageCheckFailed'));
+  // On Iowa the line keeps saying what Autofill will do; the failure is in its tooltip. Another site's line says it.
+  assert.equal(failing.get('widget-text').textContent, spanish('widget.iowaReady'));
+  assert.match(failing.get('widget-text').title, /Synthetic detector failure/);
+  const elsewhere = await panel(t, { launcher: true, language: 'es-ES', tab: SITE, site: { origin: ORIGIN, enabled: true }, Translator: translatorStub().Translator, LanguageDetector: detectorStub({ failure: new Error('Synthetic detector failure') }).LanguageDetector, questions: pageQuestions });
+  await settle();
+  assert.equal(elsewhere.get('widget-text').textContent, spanish('widget.languageCheckFailed'));
+  // The offer stays once Autofill has something to report: the reader still needs the questions in their language.
+  await view.userClick('autofill');
+  assert.equal(view.get('translate-offer').hidden, false);
+  assert.equal(view.get('widget-text').classList.contains('visually-hidden'), false);
+  assert.equal(view.get('need-you').hidden, false);
 });
 
 test('when the widget’s offer opened the side panel, the panel shows the list by itself and asks for a click only to download', async t => {
@@ -1415,7 +1952,7 @@ test('when the widget’s offer opened the side panel, the panel shows the list 
 
 // Laya, the desktop's local AI (#39, #42): when it is ready, Chrome's on-device AI stays off.
 const layaDone = { state: 'done', filled: 2, guessed: 1, laya: 1, needYou: ['f0:sh-1-1'], pageKey: 'general',
-  message: 'Filled 2 · 1 suggested · 1 need you. Check your answers before you submit. Suggestions came from Laya on this computer.',
+  message: 'Filled 2 answers · 1 suggested · 1 left for you. Check them before you submit. Suggestions came from Laya on this computer.',
   messageKey: 'result.suggestedByLaya', messageParams: { summary: { key: 'result.siteFilledSuggestedNeedYou', params: { count: 2, suggested: 1, needYou: 1 } } } };
 
 test('with Laya ready, the widget leaves Chrome’s on-device AI off, fills the plan Laya answers for, and says who suggested the guesses', async t => {
@@ -1424,13 +1961,13 @@ test('with Laya ready, the widget leaves Chrome’s on-device AI off, fills the 
   await view.userClick('autofill');
   assert.deepEqual(plainRequests(view.requests.slice(-2)), [{ type: 'ui:plan', confirmed: true }, { type: 'ui:autofill', confirmed: true, guesses: {} }]);
   assert.equal(ai.calls.availability, 0, 'Chrome’s on-device AI is never asked');
-  assert.equal(view.get('widget-text').textContent, 'Filled 2 · 1 suggested · suggested by Laya');
+  assert.equal(view.get('widget-text').textContent, 'Filled 2 answers · 1 suggested. Check them before you submit. Suggestions came from Laya on this computer.');
   assert.equal(view.get('widget-text').title, layaDone.message);
-  assert.equal(view.get('need-you').textContent, '1 need you');
+  assert.equal(view.get('need-you').textContent, '1 question left');
 
   const spanishView = await panel(t, { launcher: true, language: 'es-ES', tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true }, autofill: layaDone });
   await spanishView.userClick('autofill');
-  assert.equal(spanishView.get('widget-text').textContent, `${strings.text('es', 'widget.filledSuggested', { count: 2, suggested: 1 })} · ${spanish('widget.suggestedByLaya')}`);
+  assert.equal(spanishView.get('widget-text').textContent, strings.text('es', 'result.suggestedByLaya', { summary: { key: 'result.siteFilledSuggested', params: { count: 2, suggested: 1 } } }));
   assert.deepEqual(shownText(spanishView).filter(text => englishOnly.has(text)), []);
 });
 
@@ -1440,22 +1977,33 @@ test('with Laya not ready, the widget asks Chrome’s on-device AI exactly as be
   await view.userClick('autofill');
   assert.deepEqual(plainRequests(view.requests.slice(-2)), [{ type: 'ui:plan', confirmed: true }, { type: 'ui:autofill', confirmed: true, guesses: { 'f4:sh-1-2': 'email' } }]);
   assert.equal(ai.calls.prompt.length, 1);
-  assert.equal(view.get('widget-text').textContent, 'Filled 2');
+  assert.equal(view.get('widget-text').textContent, 'Filled 2 answers. Check them before you submit.');
 });
 
-test('the side panel shows whether Laya is ready, in the applicant’s language, and nothing when the app is closed', async t => {
-  const lines = { ready: 'desktop.layaReady', off: 'desktop.layaOff', downloading: 'desktop.layaDownloading', 'not-downloaded': 'desktop.layaNotReady', error: 'desktop.layaNotReady', unavailable: 'desktop.layaNotReady' };
+test('on a site that is on, the side panel says why Laya isn’t guessing, in the applicant’s language; never when it is ready, on Iowa, or with the app closed', async t => {
+  const site = { tab: SITE, site: { origin: ORIGIN, enabled: true } };
+  const lines = { off: 'desktop.layaOff', downloading: 'desktop.layaDownloading', 'not-downloaded': 'desktop.layaNotReady', error: 'desktop.layaNotReady', unavailable: 'desktop.layaNotReady' };
   for (const [laya, key] of Object.entries(lines)) {
-    const view = await panel(t, { desktop: { laya } });
+    const view = await panel(t, { ...site, desktop: { laya } });
     assert.equal(view.get('laya-status').hidden, false, laya);
     assert.equal(view.get('laya-status').textContent, strings.text('en', key), laya);
+    // Iowa's form is filled by its own rules, so Laya isn't mentioned there.
+    const iowa = await panel(t, { desktop: { laya } });
+    assert.equal(iowa.get('laya-status').hidden, true, `${laya} on Iowa`);
+    assert.equal(iowa.get('laya-status').textContent, '', `${laya} on Iowa`);
   }
-  const closed = await panel(t, { desktop: { connected: false, unlocked: false, laya: 'unavailable' } });
+  // A Laya that is ready needs no line: each fill's result names its guesses.
+  const ready = await panel(t, { ...site, desktop: { laya: 'ready' } });
+  assert.equal(ready.get('laya-status').hidden, true);
+  assert.equal(ready.get('laya-status').textContent, '');
+  const off = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: false }, desktop: { laya: 'off' } });
+  assert.equal(off.get('laya-status').hidden, true, 'nothing about Laya on a site that is off');
+  const closed = await panel(t, { ...site, desktop: { connected: false, unlocked: false, laya: 'unavailable' } });
   assert.equal(closed.get('laya-status').hidden, true);
-  const older = await panel(t);
+  const older = await panel(t, site);
   assert.equal(older.get('laya-status').hidden, true, 'a worker that reports no Laya state shows no line');
-  const spanishView = await panel(t, { language: 'es-ES', pageState: keyedChecklist, desktop: { laya: 'ready' } });
-  assert.equal(spanishView.get('laya-status').textContent, spanish('desktop.layaReady'));
+  const spanishView = await panel(t, { ...site, language: 'es-ES', desktop: { laya: 'off' } });
+  assert.equal(spanishView.get('laya-status').textContent, spanish('desktop.layaOff'));
   assert.deepEqual(shownText(spanishView).filter(text => englishOnly.has(text)), []);
 });
 
@@ -1477,14 +2025,14 @@ const points = view => [...view.get('summary-list').querySelectorAll('li')].map(
 const groups = view => [...view.get('summary-list').children].map(group => [group.querySelector('h3')?.textContent || '', [...group.querySelectorAll('li, p')].map(node => node.textContent)]);
 const kept = view => plainRequests(view.requests.filter(request => request.type === 'ui:keepSummary'));
 
-test('without the Summarizer API the side panel says so in one line, hides the section, and never reads the page', async t => {
+test('without the Summarizer API the side panel says nothing about it, hides the section, and never reads the page', async t => {
   const view = await panel(t, { pageText: { pages: [summaryPage] } });
   assert.equal(view.get('summary').hidden, true);
   assert.equal(view.get('summary-get').hidden, true);
-  assert.equal(view.get('summary-note').hidden, false);
-  assert.equal(view.get('summary-note').textContent, EN['summary.missing']);
+  assert.equal(view.get('summary-note').hidden, true);
+  assert.equal(view.get('summary-note').textContent, '');
   assert.equal(view.types().includes('ui:pageText'), false);
-  assert.equal((await panel(t, { language: 'es-ES' })).get('summary-note').textContent, spanish('summary.missing'));
+  assert.equal((await panel(t, { language: 'es-ES' })).get('summary-note').hidden, true);
   const elsewhere = await panel(t, { tab: { id: 7, url: 'chrome://newtab/' } });
   assert.equal(elsewhere.get('summary-note').hidden, true, 'nothing is said where there is no page to read');
 });
@@ -1515,13 +2063,15 @@ test('with Chrome’s model ready, the side panel lists the page’s key points 
   assert.equal(off.get('summary-note').hidden, true);
 });
 
-test('when Chrome can’t summarize here, the section is hidden behind one plain line; a page without words says nothing', async t => {
+test('when Chrome can’t summarize here, the section stays hidden and nothing is said; a page without words says nothing', async t => {
   const ai = summarizerStub({ availability: 'unavailable' });
   const view = await panel(t, { Summarizer: ai.Summarizer, pageText: { pages: [summaryPage] } });
   await settle();
+  assert.equal(ai.calls.availability.length, 1, 'Chrome was asked');
   assert.equal(view.get('summary').hidden, true);
-  assert.equal(view.get('summary-note').textContent, EN['summary.unavailable']);
-  assert.equal(view.get('summary-note').classList.contains('error'), false);
+  assert.equal(view.get('summary-get').hidden, true);
+  assert.equal(view.get('summary-note').hidden, true);
+  assert.equal(view.get('summary-note').textContent, '');
   assert.deepEqual(ai.calls.create, []);
   const empty = await panel(t, { Summarizer: summarizerStub().Summarizer, pageText: { pages: [] } });
   await settle();
@@ -1670,19 +2220,83 @@ test('the Iowa widget frame is as wide as the widget measured itself, never past
   assert.match(host.style.width, /^min\(272px/, 'a widget that could not measure itself gets the full card');
   for (const width of [0, 1.5, '152', 5000]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: false, width }), undefined, `width ${width}`);
   assert.match(host.style.width, /^min\(272px/);
+  // The frame is as tall as the widget measured itself: its row alone, or up to four lines above it.
+  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 95 })), { sized: true });
+  assert.equal(host.style.height, '95px');
+  page.window.dispatchEvent(new page.window.Event('popstate'));
+  assert.equal(host.style.height, '95px', 'the height stays across page changes');
+  page.setKind('manual');
+  page.window.dispatchEvent(new page.window.Event('popstate'));
+  assert.equal(host.style.height, '46px', 'a pill is never taller');
+  page.setKind('fillable');
+  page.window.dispatchEvent(new page.window.Event('popstate'));
+  assert.equal(host.style.height, '95px', 'and the widget gets its height back');
+  for (const height of [0, 45, 167, 80.5, '80', null]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height }), undefined, `height ${height}`);
+  assert.equal(host.style.height, '95px');
+  page.request({ type: 'secondhand:widgetSize', line: true });
+  assert.equal(host.style.height, '86px', 'a widget that could not measure itself gets a row for its line');
 });
 
-test('the Iowa widget frame is as tall as its line needs, up to 110px, and narrow on a narrow page', t => {
+test('an outdated card asks the Iowa page’s content script directly for its frame, and only its own frame is heard', t => {
+  const page = content(t);
+  const host = page.host();
+  const [frame] = page.frames;
+  assert.ok(frame.contentWindow, 'the card’s frame has a window');
+  // Once the card loads, the script tells it that it can be asked directly.
+  const greeted = [];
+  frame.contentWindow.postMessage = (data, origin) => greeted.push([data, origin]);
+  frame.dispatchEvent(new page.window.Event('load'));
+  assert.deepEqual(plain(greeted), [[{ type: 'secondhand:cardHello' }, `chrome-extension://${extensionId}`]]);
+  const post = (data, { source = frame.contentWindow, origin = `chrome-extension://${extensionId}` } = {}) =>
+    page.window.dispatchEvent(new page.window.MessageEvent('message', { data, source, origin }));
+  page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 95 });
+  const hidden = { type: 'secondhand:cardSize', line: true, width: 92, pill: true };
+  // The page's own scripts, another origin, and a size the worker would refuse change nothing.
+  post(hidden, { source: page.window });
+  post(hidden, { origin: 'https://hhsservices.iowa.gov' });
+  for (const pill of ['true', 1, null, false]) post({ ...hidden, pill });
+  for (const height of [45, 167, '95']) post({ type: 'secondhand:cardSize', line: true, width: 254, height });
+  post({ ...hidden, type: 'secondhand:widgetSize' });
+  assert.deepEqual([host.style.height, host.getAttribute('data-secondhand-size')], ['95px', 'full']);
+  post(hidden);
+  assert.match(host.style.width, /^min\(92px/, 'as wide as the logo and the word beside it');
+  assert.deepEqual([host.style.height, host.style.borderRadius, host.getAttribute('data-secondhand-size')], ['46px', '23px', 'pill']);
+  // The card shown again, as tall as its notice needs.
+  post({ type: 'secondhand:cardSize', line: true, width: 254, height: 118 });
+  assert.deepEqual([host.style.height, host.getAttribute('data-secondhand-size')], ['118px', 'full']);
+});
+
+test('the Iowa widget the reader hid is its logo and the word that shows it again, until the widget asks for its card back', t => {
+  const page = content(t);
+  const host = page.host();
+  page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 95 });
+  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: true, width: 92, pill: true })), { sized: true });
+  assert.match(host.style.width, /^min\(92px/);
+  assert.deepEqual([host.style.height, host.style.borderRadius, host.getAttribute('data-secondhand-size')], ['46px', '23px', 'pill']);
+  page.window.dispatchEvent(new page.window.Event('popstate'));
+  assert.match(host.style.width, /^min\(92px/, 'it stays hidden while this page stays');
+  // A widget that gives no width is the round logo alone.
+  page.request({ type: 'secondhand:widgetSize', line: true, pill: true });
+  assert.deepEqual([host.style.width, host.style.height, host.style.borderRadius], ['46px', '46px', '50%']);
+  page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 95 });
+  assert.match(host.style.width, /^min\(254px/);
+  assert.deepEqual([host.style.height, host.style.borderRadius, host.getAttribute('data-secondhand-size')], ['95px', '12px', 'full']);
+  for (const pill of [false, 'true', 1, null]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: true, pill }), undefined, `pill ${pill}`);
+  assert.equal(page.request({ type: 'secondhand:widgetSize', line: true, pill: true }, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
+  assert.equal(host.getAttribute('data-secondhand-size'), 'full');
+});
+
+test('the Iowa widget frame is as tall as its line needs, up to 166px, and narrow on a narrow page', t => {
   const page = content(t);
   const host = page.host();
   const size = { type: 'secondhand:widgetSize', line: true, width: 272, height: 72, narrowWidth: 133, narrowHeight: 97 };
   assert.deepEqual(plain(page.request(size)), { sized: true });
   assert.match(host.style.width, /^min\(272px/);
-  assert.equal(host.style.height, '86px', 'never shorter than one row taller');
+  assert.equal(host.style.height, '72px');
   page.request({ ...size, height: 108 });
   assert.equal(host.style.height, '108px');
-  page.request({ ...size, height: 140 });
-  assert.equal(host.style.height, '110px', 'never taller than 110px');
+  page.request({ ...size, height: 166 });
+  assert.equal(host.style.height, '166px', 'six lines and the translation offer');
   // Under 640px wide, the frame keeps the widget's buttons' width and the line's rows, as the page resizes.
   page.request(size);
   Object.defineProperty(page.window, 'innerWidth', { value: 639, configurable: true });
@@ -1690,7 +2304,7 @@ test('the Iowa widget frame is as tall as its line needs, up to 110px, and narro
   assert.match(host.style.width, /^min\(133px, 272px/);
   assert.equal(host.style.height, '97px');
   page.request({ ...size, narrowHeight: 140 });
-  assert.equal(host.style.height, '110px');
+  assert.equal(host.style.height, '140px');
   page.request({ type: 'secondhand:widgetSize', line: false, width: 133 });
   assert.equal(host.style.height, '46px', 'no line, the size at rest');
   page.request({ type: 'secondhand:widgetSize', line: true, width: 179 });
@@ -1700,10 +2314,11 @@ test('the Iowa widget frame is as tall as its line needs, up to 110px, and narro
   Object.defineProperty(page.window, 'innerWidth', { value: 640, configurable: true });
   page.window.dispatchEvent(new page.window.Event('resize'));
   assert.match(host.style.width, /^min\(272px/);
-  assert.equal(host.style.height, '86px');
+  assert.equal(host.style.height, '72px', 'at 640px and wider, the widget’s own size');
   for (const key of ['height', 'narrowWidth', 'narrowHeight']) {
     for (const value of [0, 1.5, '97', 5000, null]) assert.equal(page.request({ ...size, [key]: value }), undefined, `${key} ${value}`);
   }
+  for (const value of [45, 167]) assert.equal(page.request({ ...size, narrowHeight: value }), undefined, `narrowHeight ${value}`);
   page.setKind('manual');
   page.window.dispatchEvent(new page.window.Event('popstate'));
   assert.equal(host.style.height, '46px', 'a pill');
@@ -1717,8 +2332,20 @@ test('the side panel offers all websites on a tab it can’t read, with the Iowa
   const view = await panel(t, { tab: { id: 9, url: undefined }, desktop: { allSites: false } });
   assert.equal(view.get('all-sites-enable').hidden, false);
   assert.equal(view.get('all-sites-enable').textContent, 'Use SecondHand on all websites');
+  // Under the link, what it is for and that it fills nothing by itself.
+  assert.equal(view.get('all-sites-note').hidden, false);
+  assert.equal(view.get('all-sites-note').textContent, 'For food-assistance forms on other websites. SecondHand fills one only when you click Autofill there.');
   assert.equal(view.get('all-sites-disable').hidden, true);
-  assert.match(view.get('status').textContent, /^Open Iowa’s SNAP application in this tab/);
+  assert.match(view.get('status').textContent, /^Open Iowa’s SNAP application and your checklist appears here/);
+  // Under it, a link to the one address SecondHand's Iowa script runs on. It opens beside the page the reader has.
+  const link = view.get('open-iowa');
+  assert.equal(link.hidden, false);
+  assert.equal(link.textContent, 'Open Iowa’s SNAP application');
+  assert.equal(link.getAttribute('href'), adapter.PORTAL);
+  assert.equal(link.getAttribute('target'), '_blank');
+  assert.equal(link.getAttribute('rel'), 'noopener noreferrer');
+  assert.equal((await panel(t)).get('open-iowa').hidden, true, 'not on Iowa’s own form');
+  assert.equal((await panel(t, { build: 'older-build' })).get('open-iowa').hidden, true, 'nor under the update notice');
   view.get('all-sites-enable').click(); await tick();
   assert.equal(view.types().includes('permissions.request'), false);
   assert.equal(view.types().includes('ui:enableAllSites'), false);
@@ -1745,6 +2372,7 @@ test('a trusted click asks Chrome for every https site inside the click, then as
   assert.deepEqual(plainRequests(view.requests.find(request => request.type === 'ui:enableAllSites')), { type: 'ui:enableAllSites', confirmed: true, tabId: 9 });
   assert.equal(view.get('all-sites-enable').hidden, true);
   assert.equal(view.get('all-sites-disable').hidden, false);
+  assert.equal(view.get('all-sites-note').hidden, true, 'the note goes with the link it explains');
   assert.equal(view.get('status').textContent, ALL_ON);
 });
 
@@ -1779,7 +2407,7 @@ test('when all websites is on, its off button shows, the per-site buttons step a
 test('the off message, with how to remove Chrome’s kept grant, stays on screen until the tab changes', async t => {
   // The side panel checks the page every 1.5 seconds; the test runs that clock itself.
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  const taken = 'SecondHand is off on other websites. Sites you turned on one at a time stay on. Chrome still lists SecondHand’s access to all websites, but nothing uses it. To remove it, open chrome://extensions, then SecondHand, then Details, then Site access.';
+  const taken = 'SecondHand is off on other websites. Sites you turned on one at a time stay on. Chrome may still show SecondHand as allowed on all websites, but SecondHand doesn’t use that while this is off. To remove it, open Details for SecondHand on Chrome’s Extensions page and set Site access to On click.';
   const params = { first: { key: 'worker.allSitesOff', params: {} }, second: { key: 'worker.chromeStillAllows', params: {} } };
   const view = await panel(t, { tab: SITE, site: { origin: ORIGIN, enabled: true }, desktop: { allSites: true },
     allSitesOff: { message: taken, messageKey: 'joined', messageParams: params } });
@@ -1809,6 +2437,7 @@ test('an error turning all websites on or off is shown in the applicant’s lang
 test('with all websites on, a tab SecondHand can’t read asks for a form', async t => {
   const on = await panel(t, { tab: { id: 9, url: 'chrome://newtab/' }, desktop: { allSites: true } });
   assert.equal(on.get('status').textContent, 'Open Iowa’s SNAP application or another food-assistance form in this tab.');
+  assert.equal(on.get('panel-autofill').hidden, true);
   assert.equal(on.get('all-sites-disable').hidden, false);
 });
 
@@ -1880,14 +2509,31 @@ test('when SecondHand can’t update itself, the side panel shows the steps to d
 
 test('a widget left on a page when SecondHand reloaded asks for the page to be reloaded, and stops asking the worker', async t => {
   const widget = await panel(t, { launcher: true });
-  assert.equal(widget.get('widget-text').textContent, 'Iowa · uses first home address suggestion');
+  assert.equal(widget.get('widget-text').textContent, EN['widget.iowaReady']);
   // As Chrome leaves an extension frame whose extension reloaded: no id, and every message refused.
   const runtime = widget.window.chrome.runtime;
   delete runtime.id;
   runtime.sendMessage = async () => { throw new Error('Extension context invalidated.'); };
   await widget.userClick('autofill');
   assert.equal(widget.get('widget-text').textContent, strings.english('panel.reloadPage'));
+  assert.equal(widget.get('widget-text').textContent, 'SecondHand works again on the next page. To use it here, reload (the round arrow by the address bar); that clears only what you typed on this page.');
   assert.equal(widget.get('widget').classList.contains('outdated'), true);
+  assert.equal(widget.get('restart').hidden, true, 'SecondHand already restarted: only the page is left to reload');
+  // A frame too small for both sentences keeps the one that says what to do; the tooltip has both.
+  const small = await panel(t, { launcher: true });
+  delete small.window.chrome.runtime.id;
+  small.window.chrome.runtime.sendMessage = async () => { throw new Error('Extension context invalidated.'); };
+  Object.defineProperties(small.get('widget-text'), { scrollHeight: { get() { return this.textContent === EN['panel.reloadPage'] ? 56 : 28; } }, clientHeight: { get: () => 42 } });
+  await small.userClick('autofill');
+  assert.equal(small.get('widget-text').textContent, 'Reload this page to use SecondHand, or go on to the next page.');
+  assert.equal(small.get('widget-text').title, EN['panel.reloadPage']);
+  // Letters that overhang their line by a pixel are not a line cut off.
+  const snug = await panel(t, { launcher: true });
+  delete snug.window.chrome.runtime.id;
+  snug.window.chrome.runtime.sendMessage = async () => { throw new Error('Extension context invalidated.'); };
+  Object.defineProperties(snug.get('widget-text'), { scrollHeight: { get: () => 43 }, clientHeight: { get: () => 42 } });
+  await snug.userClick('autofill');
+  assert.equal(snug.get('widget-text').textContent, EN['panel.reloadPage']);
   const spanish = await panel(t, { launcher: true, language: 'es-ES' });
   delete spanish.window.chrome.runtime.id;
   spanish.window.chrome.runtime.sendMessage = async () => { throw new Error('Extension context invalidated.'); };
@@ -1938,7 +2584,7 @@ test('the list shows only well-formed questions, in the applicant’s language, 
   const odd = [...SAVABLE, { id: 'not an id!', label: 'Bad id', answered: true }, { id: 'f0:sh-2-3', label: 42, answered: true }, { id: 'f0:sh-2-4', label: 'No flag' }];
   const view = await panel(t, { tab: pantryTab, site: PANTRY_SITE, savable: odd, language: 'es' });
   assert.deepEqual([...view.window.document.querySelectorAll('[data-save-id]')].map(row => row.dataset.saveId), ['f0:sh-2-1', 'f0:sh-2-2']);
-  assert.equal(view.get('save-title').textContent, 'No está guardado en SecondHand');
+  assert.equal(view.get('save-title').textContent, 'Respuestas sin guardar en SecondHand');
   assert.equal(view.window.document.querySelector('[data-save-id="f0:sh-2-2"] button').textContent, 'Guardar en “My information”');
   const none = await panel(t, { tab: pantryTab, site: PANTRY_SITE });
   assert.equal(none.get('save-section').hidden, true);
@@ -1946,10 +2592,10 @@ test('the list shows only well-formed questions, in the applicant’s language, 
 
 // Fill sensitive details (#176): the questions whose saved answers the app held back until the applicant allows them.
 const HELD = [{ id: 'f0:sh-2-0', label: 'Date of birth' }, { id: 'f0:sh-2-1', label: 'Social Security number' }];
-const WAITING = 'Filled 1 · 3 need you. Check your answers before you submit. 2 sensitive details wait until you click Fill sensitive details in the side panel.';
+const WAITING = 'Filled 1 answer · 3 left for you. Check it before you submit. 2 sensitive details wait until you click Fill sensitive details in the side panel.';
 const heldDone = { state: 'done', filled: 1, guessed: 0, needYou: ['f0:sh-2-2', 'f0:sh-2-0', 'f0:sh-2-1'], held: 2, message: WAITING, messageKey: 'result.withHeld',
   messageParams: { summary: { key: 'result.siteFilledNeedYou', params: { count: 1, needYou: 3 } }, count: 2 }, pageKey: 'general' };
-const heldFilled = { state: 'done', filled: 3, guessed: 0, needYou: ['f0:sh-2-2'], message: 'Filled 3 · 1 need you. Check your answers before you submit.',
+const heldFilled = { state: 'done', filled: 3, guessed: 0, needYou: ['f0:sh-2-2'], message: 'Filled 3 answers · 1 left for you. Check them before you submit.',
   messageKey: 'result.siteFilledNeedYou', messageParams: { count: 3, needYou: 1 }, pageKey: 'general' };
 
 test('the side panel lists the held questions by their own words with one Fill sensitive details button, which asks the worker from a trusted click (#176)', async t => {
@@ -1962,7 +2608,7 @@ test('the side panel lists the held questions by their own words with one Fill s
     [['f0:sh-2-0', 'Date of birth'], ['f0:sh-2-1', 'Social Security number']]);
   assert.equal(view.get('held-fill').textContent, 'Fill sensitive details');
   assert.equal(view.get('held-section').querySelectorAll('button').length, 1, 'one button for them all');
-  assert.equal(view.get('status').textContent, WAITING);
+  assert.equal(view.get('status').textContent, WAITING.replace('in the side panel', 'below'), 'the side panel’s own button is below the line');
   view.get('held-fill').click(); await tick();
   assert.equal(view.types().includes('ui:fillHeld'), false, 'only a trusted click');
   view.clickNow('held-fill');
@@ -2003,34 +2649,63 @@ test('the held list shows only well-formed questions, in the applicant’s langu
 test('the widget counts held questions under need-you, says they wait in the side panel, and follows the worker once they fill (#176)', async t => {
   const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: heldDone });
   await view.userClick('autofill');
-  assert.equal(view.get('need-you').textContent, '3 need you');
-  assert.equal(view.get('widget-text').textContent, 'Filled 1 · 2 sensitive details wait in the side panel');
+  assert.equal(view.get('need-you').textContent, '3 questions left');
+  assert.equal(view.get('widget-text').textContent, 'Filled 1 answer. Check it before you submit. 2 sensitive details wait until you click Fill sensitive details in the side panel.');
   // Fill sensitive details in the side panel changes the tab's result: the widget takes it at its next look.
   view.state.result = structuredClone(heldFilled);
   view.window.document.dispatchEvent(new view.window.Event('visibilitychange'));
   await tick(); await tick();
-  assert.equal(view.get('need-you').textContent, '1 need you');
-  assert.equal(view.get('widget-text').textContent, 'Filled 3');
+  assert.equal(view.get('need-you').textContent, '1 question left');
+  assert.equal(view.get('widget-text').textContent, 'Filled 3 answers. Check them before you submit.');
   // With nothing held any more, it keeps its own result again.
   view.state.result = { ...heldFilled, filled: 9 };
   view.window.document.dispatchEvent(new view.window.Event('visibilitychange'));
   await tick(); await tick();
-  assert.equal(view.get('widget-text').textContent, 'Filled 3');
+  assert.equal(view.get('widget-text').textContent, 'Filled 3 answers. Check them before you submit.');
 
   // Nothing else filled: the held questions matched, so it never says that nothing matched.
-  const only = { ...heldDone, filled: 0, held: 1, needYou: ['f0:sh-2-1'], message: strings.text('en', 'result.withHeld', { summary: { key: 'result.siteNeedYou', params: { count: 1 } }, count: 1 }) };
+  const onlyParams = { summary: { key: 'result.siteNeedYou', params: { count: 1 } }, count: 1 };
+  const only = { ...heldDone, filled: 0, held: 1, needYou: ['f0:sh-2-1'], message: strings.text('en', 'result.withHeld', onlyParams), messageParams: onlyParams };
   const alone = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: only });
   await alone.userClick('autofill');
-  assert.equal(alone.get('widget-text').textContent, '1 sensitive detail waits in the side panel');
-  assert.equal(alone.get('need-you').textContent, '1 need you');
+  assert.equal(alone.get('widget-text').textContent, '1 sensitive detail waits until you click Fill sensitive details in the side panel.');
+  assert.equal(alone.get('need-you').textContent, '1 question left');
   const spanish = await panel(t, { launcher: true, language: 'es', tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: heldDone });
   await spanish.userClick('autofill');
-  assert.equal(spanish.get('widget-text').textContent, 'Completadas: 1 · 2 datos sensibles esperan en el panel lateral');
+  assert.equal(spanish.get('widget-text').textContent, 'Se llenó 1 respuesta. Revísela antes de enviar. 2 datos sensibles esperan hasta que usted haga clic en “Llenar datos sensibles” en el panel lateral.');
+});
+
+test('the buttons that the keyboard shortcuts work name them in their tooltips, in the applicant’s language, and say nothing of one that is unset', async t => {
+  const shortcuts = [{ name: 'autofill', shortcut: '⌥⇧F', description: 'Start Autofill on this page, or stop it' }, { name: 'next-question', shortcut: '', description: 'Go to the next question left' },
+    { name: '_execute_action', shortcut: '' }];
+  const widget = await panel(t, { launcher: true, shortcuts });
+  await settle();
+  assert.equal(widget.get('autofill').title, `${EN['widget.autofillIowaTitle']} Keyboard shortcut: ⌥⇧F.`);
+  assert.equal(widget.get('stop').title, `${EN['widget.stopTitle']} Keyboard shortcut: ⌥⇧F.`);
+  assert.equal(widget.get('need-you').title, EN['widget.needYouTitle'], 'no shortcut is set for the next question');
+  const both = await panel(t, { launcher: true, result: doneResult, shortcuts: [...shortcuts.slice(0, 1), { name: 'next-question', shortcut: '⌥⇧N' }] });
+  await settle();
+  assert.equal(both.get('need-you').title, 'Go to the next question left, in the form. Keyboard shortcut: ⌥⇧N.', 'a sentence, then the shortcut');
+  const side = await panel(t, { shortcuts: [...shortcuts.slice(0, 1), { name: 'next-question', shortcut: '⌥⇧N' }] });
+  await settle();
+  assert.equal(side.get('panel-autofill').title, 'Keyboard shortcut: ⌥⇧F.');
+  assert.equal(side.get('panel-left').title, 'Keyboard shortcut: ⌥⇧N.');
+  // In words too, under the side panel's last line: a tooltip shows only to a pointer.
+  assert.equal(side.get('shortcuts-line').hidden, false);
+  assert.equal(side.get('shortcuts-line').textContent, 'Keyboard: ⌥⇧F starts Autofill, or stops it. ⌥⇧N goes to the next question left.');
+  const spanish = await panel(t, { language: 'es', shortcuts });
+  await settle();
+  assert.equal(spanish.get('panel-autofill').title, 'Atajo de teclado: ⌥⇧F.');
+  // Without the commands API (an older Chrome, or none set), no tooltip names one.
+  const none = await panel(t, {});
+  await settle();
+  assert.equal(none.get('shortcuts-line').hidden, true);
+  assert.equal(none.get('panel-autofill').title, '');
 });
 
 // #185: Laya's best guesses, listed for the applicant to find and check.
 const GUESSES = [{ id: 'f0:sh-1-1', label: 'How many people live in your household?' }, { id: 'f4:sh-1-3', label: 'Preferred pickup day' }];
-const GUESSED = 'Filled 4 · 1 suggested. Check your answers before you submit. Suggestions came from Laya on this computer. 2 guessed by Laya, check them.';
+const GUESSED = 'Filled 4 answers · 1 suggested. Check them before you submit. Suggestions came from Laya on this computer. 2 guessed by Laya, check them.';
 const guessedDone = { state: 'done', filled: 4, guessed: 1, laya: 1, layaGuessed: 2, layaGuesses: GUESSES, needYou: [], pageKey: 'general', message: GUESSED, messageKey: 'result.layaGuessed',
   messageParams: { summary: { key: 'result.suggestedByLaya', params: { summary: { key: 'result.siteFilledSuggested', params: { count: 4, suggested: 1 } } } }, count: 2 } };
 
@@ -2039,7 +2714,7 @@ test('#185: the side panel lists Laya’s guesses by their own words, and a trus
   assert.equal(view.get('guesses-section').hidden, false);
   assert.equal(view.get('guesses-title').textContent, 'Guessed by Laya, check them');
   assert.equal(view.get('guesses-section').querySelector('.save-hint').textContent,
-    'Laya wasn’t sure of these answers, so each has a dotted outline on the page. Click one to find it and check it.');
+    'Laya, SecondHand’s AI on this computer, wasn’t sure of these answers, so each has a dotted outline on the page. Click one to find it and check it.');
   const rows = [...view.window.document.querySelectorAll('[data-guess-id]')];
   assert.deepEqual(rows.map(row => [row.tagName, row.dataset.guessId, row.textContent, row.getAttribute('aria-label')]), [
     ['BUTTON', 'f0:sh-1-1', 'How many people live in your household?', 'Find Laya’s guess for “How many people live in your household?” on the page'],
@@ -2050,6 +2725,30 @@ test('#185: the side panel lists Laya’s guesses by their own words, and a trus
   await view.userClick(rows[1]);
   assert.deepEqual(plainRequests(view.requests.filter(request => request.type === 'ui:focusField')), [{ type: 'ui:focusField', key: 'f4:sh-1-3', tabId: 7 }]);
   assert.equal(view.get('status').textContent, GUESSED, 'found: nothing more to say');
+});
+
+test('in another language, a site’s question lists point to the translated view, then show each question translated over the form’s words', async t => {
+  const ai = translatorStub();
+  const questions = { lang: 'en', pending: 0, questions: GUESSES.map(({ id, label }) => ({ id, label })) };
+  const view = await panel(t, { tab: pantryTab, site: PANTRY_SITE, result: guessedDone, language: 'es-ES', Translator: ai.Translator, LanguageDetector: detectorStub().LanguageDetector, questions });
+  assert.equal(view.get('words-hint').hidden, false);
+  assert.equal(view.get('words-hint-text').textContent, 'Las preguntas de abajo están en el idioma del formulario.');
+  assert.equal(view.get('words-translate').textContent, 'Ver las preguntas en español', 'the question list’s button, under the line');
+  assert.equal(view.get('questions-show').hidden, true, 'one button for it, the one nearer what it is for');
+  view.get('words-translate').click(); await settle();
+  assert.equal(ai.calls.translate.length, 0, 'only a trusted click');
+  await view.userClick('words-translate'); await settle();
+  const row = view.window.document.querySelector('[data-guess-id="f0:sh-1-1"]');
+  assert.deepEqual([...row.querySelectorAll('.checklist-label, .checklist-detail')].map(element => element.textContent),
+    ['[es] How many people live in your household?', 'How many people live in your household?'], 'the reader’s language on top, the form’s words under it');
+  assert.equal(row.getAttribute('aria-label'), strings.text('es', 'guesses.rowLabel', { label: '[es] How many people live in your household?' }));
+  assert.equal(row.querySelector('.checklist-detail').lang, 'en', 'the form’s words, in the language they came from, for a screen reader’s voice');
+  assert.equal(view.get('words-hint').hidden, true, 'translated, the line has nothing left to say');
+  assert.equal(view.get('questions-show').textContent, spanish('questions.refresh'));
+  assert.equal(view.get('questions-show').hidden, false);
+  // In English there is nothing to point to.
+  const english = await panel(t, { tab: pantryTab, site: PANTRY_SITE, result: guessedDone, Translator: ai.Translator });
+  assert.equal(english.get('words-hint').hidden, true);
 });
 
 test('#185: the guess list shows only well-formed questions, in the applicant’s language, and is gone with no guesses', async t => {
@@ -2071,16 +2770,15 @@ test('#185: the guess list shows only well-formed questions, in the applicant’
 test('#185: the widget says how many Laya guessed, apart from its sure answers, in the applicant’s language', async t => {
   const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true }, autofill: guessedDone });
   await view.userClick('autofill');
-  assert.equal(view.get('widget-text').textContent, 'Filled 4 · 1 suggested · suggested by Laya · 2 guessed by Laya, check them');
-  assert.equal(view.get('widget-text').title, GUESSED);
+  assert.equal(view.get('widget-text').textContent, GUESSED);
   const one = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true },
-    autofill: { ...guessedDone, filled: 1, guessed: 0, laya: undefined, layaGuessed: 1, layaGuesses: GUESSES.slice(0, 1) } });
+    autofill: { ...guessedDone, filled: 1, guessed: 0, laya: undefined, layaGuessed: 1, layaGuesses: GUESSES.slice(0, 1), message: 'Filled 1 answer. Check it before you submit. 1 guessed by Laya, check it.',
+      messageParams: { summary: { key: 'result.siteFilled', params: { count: 1 } }, count: 1 } } });
   await one.userClick('autofill');
-  assert.equal(one.get('widget-text').textContent, 'Filled 1 · 1 guessed by Laya, check it');
+  assert.equal(one.get('widget-text').textContent, 'Filled 1 answer. Check it before you submit. 1 guessed by Laya, check it.');
   const spanishView = await panel(t, { launcher: true, language: 'es', tab: SITE, site: { origin: ORIGIN, enabled: true }, plan: { ...openPlan, laya: true }, autofill: guessedDone });
   await spanishView.userClick('autofill');
-  assert.equal(spanishView.get('widget-text').textContent,
-    `${strings.text('es', 'widget.filledSuggested', { count: 4, suggested: 1 })} · ${spanish('widget.suggestedByLaya')} · ${strings.text('es', 'widget.layaGuessed', { count: 2 })}`);
+  assert.equal(spanishView.get('widget-text').textContent, strings.text('es', guessedDone.messageKey, guessedDone.messageParams));
   assert.deepEqual(shownText(spanishView).filter(text => englishOnly.has(text)), []);
 });
 
@@ -2098,7 +2796,7 @@ test('Fill and continue is a trusted, explicit side-panel action with an ordinar
   assert.deepEqual(plainRequests(view.requests.filter(r => r.type === 'ui:fillAndContinue')), [{ type: 'ui:fillAndContinue', confirmed: true, tabId: 7 }]);
   assert.equal(view.types().includes('ui:plan'), false, 'this mode never asks Chrome AI for guesses');
   assert.equal(view.get('site-continue').hidden, true);
-  assert.equal(view.get('panel-autofill').textContent, 'Stop autofill');
+  assert.equal(view.get('panel-autofill').textContent, 'Stop Autofill');
   await view.userClick('panel-autofill');
   assert.equal(view.types().includes('ui:stop'), true);
   assert.equal(view.get('site-continue').hidden, false);
@@ -2190,20 +2888,20 @@ test('the remember list shows only well-formed rows, in the applicant’s langua
 });
 
 test('the widget says how many answers came from custom answers (#186)', async t => {
-  const fromCustom = { state: 'done', filled: 3, guessed: 0, needYou: [], custom: 2, pageKey: 'general', message: 'Filled 3. Check your answers before you submit. 2 from your custom answers.',
+  const fromCustom = { state: 'done', filled: 3, guessed: 0, needYou: [], custom: 2, pageKey: 'general', message: 'Filled 3 answers. Check them before you submit. 2 from your custom answers.',
     messageKey: 'result.fromCustom', messageParams: { summary: { key: 'result.siteFilled', params: { count: 3 } }, count: 2 } };
   const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: fromCustom });
   await view.userClick('autofill');
-  assert.equal(view.get('widget-text').textContent, 'Filled 3 · 2 from your custom answers');
+  assert.equal(view.get('widget-text').textContent, 'Filled 3 answers. Check them before you submit. 2 from your custom answers.', 'the side panel’s sentence');
   const spanish = await panel(t, { launcher: true, language: 'es', tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: fromCustom });
   await spanish.userClick('autofill');
-  assert.equal(spanish.get('widget-text').textContent, 'Completadas: 3 · 2 de sus respuestas personalizadas');
+  assert.equal(spanish.get('widget-text').textContent, strings.text('es', fromCustom.messageKey, fromCustom.messageParams));
 });
 
 // #180: the household questions Autofill left open because of what the household list lacks, with Add your household.
 const HOUSEHOLD_QUESTIONS = [{ id: 'f0:sh-1-1', label: '# of Children 0-5' }, { id: 'f0:sh-1-2', label: '# of Adults' }];
 const householdDone = household => ({ state: 'done', filled: 1, guessed: 0, needYou: ['f0:sh-1-1', 'f0:sh-1-2'], pageKey: 'general', household,
-  message: 'Filled 1 · 2 need you. Check your answers before you submit.', messageKey: 'result.siteFilledNeedYou', messageParams: { count: 1, needYou: 2 } });
+  message: 'Filled 1 answer · 2 left for you. Check it before you submit.', messageKey: 'result.siteFilledNeedYou', messageParams: { count: 1, needYou: 2 } });
 const noList = householdDone({ need: 'list', questions: HOUSEHOLD_QUESTIONS });
 
 test('the side panel lists the household questions left open with no household list saved, and Add your household asks the app from a trusted click (#180)', async t => {
@@ -2256,10 +2954,10 @@ test('the household section speaks all six languages, shows only well-formed lis
 test('the widget says how many household questions wait in the side panel (#180)', async t => {
   const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: noList });
   await view.userClick('autofill');
-  assert.equal(view.get('need-you').textContent, '2 need you');
-  assert.equal(view.get('widget-text').textContent, 'Filled 1 · 2 household questions wait in the side panel');
+  assert.equal(view.get('need-you').textContent, '2 questions left');
+  assert.equal(view.get('widget-text').textContent, 'Filled 1 answer. Check it before you submit. 2 household questions wait in the side panel.', 'the side panel’s sentence, then where the household questions wait');
   const one = await panel(t, { launcher: true, language: 'es', tab: SITE, site: { origin: ORIGIN, enabled: true },
     autofill: householdDone({ need: 'list', questions: HOUSEHOLD_QUESTIONS.slice(0, 1) }) });
   await one.userClick('autofill');
-  assert.equal(one.get('widget-text').textContent, `${strings.text('es', 'widget.filled', { count: 1 })} · ${strings.text('es', 'widget.household', { count: 1 })}`);
+  assert.equal(one.get('widget-text').textContent, `${strings.text('es', 'result.siteFilled', { count: 1 })} ${strings.text('es', 'widget.household', { count: 1 })}`);
 });
