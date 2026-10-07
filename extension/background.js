@@ -323,6 +323,8 @@ async function advanceVerified(tabId, state, pilot, filledResult, authorize = fa
   return { ...filledResult, state: 'continuing', ...say(pageKey === 'iowa-select-address' ? 'worker.pickedAddress' : 'worker.selectedSaveContinue'), pageKey };
 }
 
+// A complete page is ready to continue once the person has left the text box they were typing in.
+const readyToContinue = state => state.page.canAdvance === true && state.typing !== true;
 function step(tabId) {
   const pilot = autopilots.get(tabId);
   if (!pilot) return Promise.resolve(results.get(tabId) || null);
@@ -337,13 +339,13 @@ function step(tabId) {
     if (pilot.currentStep && pilot.currentStep !== signature) results.delete(tabId);
     pilot.currentStep = signature;
     if (pilot.navigationAttempts.has(signature)) return results.get(tabId) || null;
-    if (pilot.handled.has(signature) && !(pilot.waiting === signature && (page.canAdvance || state.scan.fields.some(field => !pilot.attempted.has(field.key))))) return results.get(tabId) || null;
+    if (pilot.handled.has(signature) && !(pilot.waiting === signature && (readyToContinue(state) || state.scan.fields.some(field => !pilot.attempted.has(field.key))))) return results.get(tabId) || null;
     const resuming = pilot.handled.has(signature);
     if (!resuming) pilot.attempted = new Set();
     pilot.handled.add(signature);
     if (!resuming && ++pilot.steps > MAX_STEPS) return stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], ...say('worker.stoppedAfterSteps', { steps: MAX_STEPS }), pageKey: page.pageKey }, pilot);
     try {
-      if (resuming && page.canAdvance && !state.scan.fields.some(field => !pilot.attempted.has(field.key))) {
+      if (resuming && readyToContinue(state) && !state.scan.fields.some(field => !pilot.attempted.has(field.key))) {
         const result = await advanceVerified(tabId, state, pilot, results.get(tabId) || { filled: 0, needYou: [] }, true);
         currentPilot(tabId, pilot);
         return remember(tabId, result);
@@ -368,7 +370,7 @@ function step(tabId) {
           if (result.state === 'done' && NAVIGATION_PAGES.has(page.pageKey)) {
             const fresh = await readPage(tabId); currentPilot(tabId, pilot);
             if (fresh.pageInstance !== state.pageInstance || fresh.page.pageKey !== page.pageKey) throw fault('worker.pageChangedReview');
-            if (fresh.page.canAdvance) result = await advanceVerified(tabId, fresh, pilot, result);
+            if (readyToContinue(fresh)) result = await advanceVerified(tabId, fresh, pilot, result);
             else pilot.waiting = signature;
           }
         }

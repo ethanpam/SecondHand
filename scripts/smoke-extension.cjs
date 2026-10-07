@@ -486,11 +486,16 @@ async function main() {
     await expect.poll(() => page.evaluate(() => document.activeElement.id)).toBe('firstName');
     assert.equal(await page.evaluate(() => window.__nextClicks), 0, 'Missing required profile data cannot trigger Next.');
     const beforeManual = (await calls('getFields')).length;
-    await page.locator('#firstName').fill(syntheticProfile.firstName);
+    // Typed one key at a time, as a person types. While the cursor is still in the box the answer may not be
+    // finished, so Autofill waits, through more than two of the card's 1.5-second checks, until the person leaves it.
+    await page.locator('#firstName').pressSequentially(syntheticProfile.firstName, { delay: 60 });
+    await page.waitForTimeout(4000);
+    assert.equal(await page.evaluate(() => window.__nextClicks), 0, 'No Save and Continue while the person is still in the box they typed in.');
+    await page.keyboard.press('Tab');
     await expect.poll(() => page.evaluate(() => window.__nextClicks), { timeout: 20000 }).toBe(1);
     assert.equal((await calls('getFields')).filter(call => call.fields.length).length, beforeManual, 'Manual completion requests no additional saved profile values.');
     assert.deepEqual((await calls('getFields')).at(-1).fields, [], 'Manual completion obtains fresh no-data navigation authorization.');
-    console.log('Widget: missing profile data blocks Next; field focus and manual completion allow one later Next.');
+    console.log('Widget: missing profile data blocks Next; field focus and manual completion allow one later Next, once the person leaves the box.');
 
     const branches = [
       { name: 'home address with same mailing; optional blanks', profile: { mailingSameAsHome: 'yes', middleName: '', suffix: '', maidenName: '', addressLine2: '', bestContactTime: '' }, check: answers => { assert.equal(answers.sameAddress1, true); assert.equal(answers.mailingAddressLine1, ''); } },

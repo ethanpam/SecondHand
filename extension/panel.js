@@ -205,10 +205,11 @@
       if (result.state === 'offline') return t('desktop.notRunning');
       // What the worker reported, in the side panel's words, without the count of what is left: the link beside
       // it carries that. While Autofill is on, what Stop would do goes after it: on a page that waits for answers,
-      // where SecondHand clicks Save and Continue once nothing is left, that Stop lets the reader check and
-      // continue themselves. A reader who has seen a whole run gets the short form, without Stop's note. Why
-      // Chrome's AI guessed nothing stays in the tooltip. Household questions the household list left open (#180)
-      // wait in the side panel, which lists them with Add your household: the card says so after the rest.
+      // where SecondHand clicks Save and Continue once nothing is left and the reader leaves the box they typed
+      // in, that Stop lets the reader check and continue themselves. A reader who has seen a whole run gets the
+      // short form, without Stop's note. Why Chrome's AI guessed nothing stays in the tooltip. Household
+      // questions the household list left open (#180) wait in the side panel, which lists them with Add your
+      // household: the card says so after the rest.
       const household = Array.isArray(result.household?.questions) ? result.household.questions.length : 0;
       const said = words(briefly(withLeft(fromResult(result), 0)), 240);
       const text = household ? `${said} ${t('widget.household', { count: household })}` : said;
@@ -479,7 +480,7 @@
     let told = false;
     // Autofill has run on the page on screen: until then a required question is only not filled yet.
     let ran = false;
-    // That run waits for answers, and clicks Save and Continue once nothing is left (see CHECK_FIRST).
+    // That run waits for answers, and clicks Save and Continue once nothing is left and the reader leaves the box (see CHECK_FIRST).
     let checkFirst = false;
     // The questions Autofill left for the reader, and which of them the link under the status goes to next.
     let left = [];

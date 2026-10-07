@@ -28,7 +28,7 @@ function worker({ pageKey = 'iowa-personal-information', complete = false, todo,
     return { pageInstance: model.pageInstance, page: { kind: unverified ? 'manual' : 'fillable', pageKey: model.pageKey, canAdvance, todo: model.todo,
       checklist: keys.map(key => ({ key, label: key, required: true, status: model.complete || model.filled.includes(key) ? 'complete' : 'missing' })) },
       scan: { recognizedPage: !unverified, token: 'fill-preview', fields: keys.filter(key => (!model.complete || model.revealed.includes(key)) && !model.filled.includes(key)).map(key => ({ key, label: key })) },
-      nextToken: message.navigationPreview === false ? null : model.nextToken };
+      nextToken: message.navigationPreview === false ? null : model.nextToken, typing: model.typing === true };
   }
   const chrome = {
     tabs: { get: async () => ({ ...tab }), onActivated: w.event('activated'), onUpdated: w.event('updated'), onRemoved: w.event('removed'),
@@ -96,6 +96,31 @@ test('missing required answers wait, then manual completion authorizes Next with
   assert.deepEqual(requests(w)[1].fields, []);
   await w.poll();
   assert.equal(requests(w).length, 2);
+  assert.equal(w.model.nextCount, 1);
+});
+
+test('while the person is still in the box they typed the last answer in, Autofill waits, then continues once they leave it', async () => {
+  const w = worker();
+  assert.equal((await w.start()).data.state, 'done');
+  // The page is complete, but the cursor is still in the box the person typed in: they may not have finished.
+  w.model.complete = true; w.model.typing = true;
+  for (let poll = 0; poll < 3; poll++) { await w.poll(); await tick(); }
+  assert.equal(w.model.nextCount, 0, 'no Save and Continue while the person may still be typing');
+  w.model.typing = false;
+  await w.poll(); await tick();
+  assert.equal((await w.poll()).data.result.state, 'continuing');
+  assert.equal(w.model.nextCount, 1);
+});
+
+test('a page Autofill completes while the person is in a box they typed in waits for them to leave it', async () => {
+  const w = worker({ complete: true });
+  w.model.typing = true;
+  assert.equal((await w.start()).data.state, 'done');
+  await w.poll(); await tick();
+  assert.equal(w.model.nextCount, 0);
+  w.model.typing = false;
+  await w.poll(); await tick();
+  assert.equal((await w.poll()).data.result.state, 'continuing');
   assert.equal(w.model.nextCount, 1);
 });
 

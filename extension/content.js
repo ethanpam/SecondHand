@@ -10,6 +10,9 @@
   let pending = null;
   let navigation = null;
   let revision = 0;
+  // The text box the person last typed in, until they leave it. While they are in it they may still be typing,
+  // so Autofill waits to click Save and Continue. SecondHand's own fills send untrusted events and never count.
+  let typedIn = null;
   let panelHost = null;
   let panelFrame = null;
   let generalUrl = ''; // the unverified page where the general engine found fields
@@ -129,13 +132,21 @@
     return scanMetadata(scan, pending.token);
   }
 
+  const TEXT_TYPES = new Set(['text', 'search', 'tel', 'url', 'email', 'number', 'password', 'date', 'datetime-local', 'month', 'week', 'time']);
+  const textBox = element => element?.tagName === 'TEXTAREA' || (element?.tagName === 'INPUT' && TEXT_TYPES.has(element.type));
+  function typing() {
+    let active = document.activeElement;
+    while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+    return Boolean(typedIn) && active === typedIn;
+  }
+
   function pageState(navigationPreview = true) {
     const page = adapter.probePage(document, location.href), scan = preview(page.pageKey);
     if (navigationPreview) {
       const snapshot = adapter.NAVIGATION_PAGE_KEYS.includes(page.pageKey) && page.canAdvance ? adapter.captureNavigation(document, location.href) : null;
       navigation = snapshot ? { token: crypto.randomUUID(), snapshot, url: location.href, expires: Date.now() + 120000 } : null;
     }
-    return { page, scan, pageInstance, nextToken: navigationPreview ? navigation?.token || null : null };
+    return { page, scan, pageInstance, nextToken: navigationPreview ? navigation?.token || null : null, typing: typing() };
   }
 
   // The general engine only runs where the Iowa adapter has neither a verified form nor an instruction.
@@ -211,7 +222,12 @@
     if (records.some(record => record.target !== panelHost && !panelHost?.contains(record.target))) revision++;
   });
   observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
-  document.addEventListener('input', () => { revision++; }, true);
+  document.addEventListener('input', event => {
+    revision++;
+    const box = event.composedPath()[0];
+    if (event.isTrusted && textBox(box)) typedIn = box;
+  }, true);
+  document.addEventListener('focusout', event => { if (event.composedPath()[0] === typedIn) typedIn = null; }, true);
   document.addEventListener('change', () => { revision++; }, true);
   window.addEventListener('popstate', ensurePanel);
   window.addEventListener('resize', () => { if (panelHost) fitHost(); });

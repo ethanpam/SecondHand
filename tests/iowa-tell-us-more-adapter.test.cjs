@@ -53,7 +53,7 @@ test('Tell Us More at dynamicQuestionsStart offers every known question, and pau
   assert.deepEqual(probe.checklist.map(item => [item.key, item.status]), [...FILLS.map(key => [key, 'missing']), ['startDetailsReview', 'manual']]);
   assert.deepEqual(probe.checklist.filter(item => item.fillable).map(item => item.key), FILLS);
   assert.equal(probe.requiredRemaining, 10); assert.equal(probe.manualRemaining, 0);
-  assert.equal(probe.todo, 'Check what was filled before you answer what is left: once nothing is left, SecondHand clicks Save and Continue.');
+  assert.equal(probe.todo, 'Check what was filled before you answer what is left. Once nothing is left and you leave the box, SecondHand clicks Save and Continue.');
   assert.equal(probe.reason, 'SecondHand continues only when the supported questions are complete and this page has no errors or unsupported questions.');
   assert.doesNotMatch(JSON.stringify(probe), /Avery|Example|answerSets|question0/);
   assert.equal(adapter.captureNavigation(doc, fixture.URL), null);

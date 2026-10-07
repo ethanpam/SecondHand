@@ -1100,11 +1100,11 @@ test('a widget that loads mid-run picks up the running autofill', async t => {
   assert.equal(view.get('widget-text').textContent, 'Type the characters shown in Iowa’s security check, then click Continue. Stop erases nothing.');
 });
 
-// Autofill on Iowa's applicant page, waiting for one answer: once nothing is left, it clicks Save and Continue.
+// Autofill on Iowa's applicant page, waiting for one answer: once nothing is left and the reader leaves the box, it clicks Save and Continue.
 const missingResult = { state: 'done', filled: 3, needYou: ['firstName'], pageKey: 'iowa-personal-information',
-  message: 'Filled 3 answers · 1 left for you. Check what was filled before you answer what is left: once nothing is left, SecondHand clicks Save and Continue.',
+  message: 'Filled 3 answers · 1 left for you. Check what was filled before you answer what is left. Once nothing is left and you leave the box, SecondHand clicks Save and Continue.',
   messageKey: 'result.thenTodo', messageParams: { summary: { key: 'result.filledNeedYou', params: { count: 3, needYou: 1 } }, todo: { key: 'iowa.missingAnswers', params: {} } },
-  todo: 'Check what was filled before you answer what is left: once nothing is left, SecondHand clicks Save and Continue.', todoKey: 'iowa.missingAnswers', todoParams: {} };
+  todo: 'Check what was filled before you answer what is left. Once nothing is left and you leave the box, SecondHand clicks Save and Continue.', todoKey: 'iowa.missingAnswers', todoParams: {} };
 
 test('while Autofill waits for answers it would save and continue after, both surfaces say Stop lets the reader check first', async t => {
   const missing = missingResult;
@@ -1112,7 +1112,7 @@ test('while Autofill waits for answers it would save and continue after, both su
   assert.ok(side.get('status').textContent.endsWith(missing.todo));
   assert.equal(side.get('stop-note').textContent, 'To check and continue yourself, click Stop Autofill. It erases nothing.');
   const card = await panel(t, { launcher: true, autopilot: true, result: missing });
-  assert.equal(card.get('widget-text').textContent, 'Filled 3 answers. Check what was filled before you answer what is left: once nothing is left, SecondHand clicks Save and Continue. To check and continue yourself, click Stop. It erases nothing.');
+  assert.equal(card.get('widget-text').textContent, 'Filled 3 answers. Check what was filled before you answer what is left. Once nothing is left and you leave the box, SecondHand clicks Save and Continue. To check and continue yourself, click Stop. It erases nothing.');
   // Anywhere else, Stop only ends Autofill.
   const waiting = await panel(t, { autopilot: true, result: waitingResult });
   assert.equal(waiting.get('stop-note').textContent, 'Stop ends Autofill and erases nothing.');
@@ -1143,17 +1143,17 @@ test('while Autofill waits for the app, both surfaces say where its window is on
 test('once Autofill has been started again from this Chrome, both surfaces say the short form of what it waits for, without Stop’s note', async t => {
   const storage = new Map([['secondhand.autofillStarted', '2']]);
   const card = await panel(t, { launcher: true, storage, autopilot: true, result: missingResult });
-  assert.equal(card.get('widget-text').textContent, 'Filled 3 answers. SecondHand moves on once nothing is left.');
+  assert.equal(card.get('widget-text').textContent, 'Filled 3 answers. SecondHand moves on once nothing is left and you leave the box.');
   assert.equal(card.get('widget-text').title, missingResult.message, 'all of it stays in the tooltip');
   const side = await panel(t, { storage, autopilot: true, result: missingResult });
-  assert.match(side.get('status').textContent, /^Filled 3 answers · \d left for you\. SecondHand moves on once nothing is left\.$/);
+  assert.match(side.get('status').textContent, /^Filled 3 answers · \d left for you\. SecondHand moves on once nothing is left and you leave the box\.$/);
   assert.equal(side.get('stop-note').hidden, true);
   // Anywhere else the line is as it was, without Stop's note.
   const message = await panel(t, { launcher: true, storage, kind: 'blocked', autopilot: true, result: waitingResult });
   assert.equal(message.get('widget-text').textContent, 'Type the characters shown in Iowa’s security check, then click Continue.');
   // Through the first run, all of it.
   const first = await panel(t, { launcher: true, storage: new Map([['secondhand.autofillStarted', '1']]), autopilot: true, result: missingResult });
-  assert.match(first.get('widget-text').textContent, /once nothing is left, SecondHand clicks Save and Continue\. To check and continue yourself, click Stop\. It erases nothing\.$/);
+  assert.match(first.get('widget-text').textContent, /Once nothing is left and you leave the box, SecondHand clicks Save and Continue\. To check and continue yourself, click Stop\. It erases nothing\.$/);
 });
 
 test('each language in the menu is marked as that language, for a screen reader’s voice', async t => {
@@ -1734,9 +1734,9 @@ test('with Spanish as the browser language, the widget shows none of SecondHand�
 
 test('results the worker names by key show in Spanish in the widget and the side panel; a bare message shows as sent', async t => {
   const iowa = { state: 'done', filled: 3, needYou: ['firstName', 'lastName'], pageKey: 'iowa-personal-information',
-    message: 'Filled 3 answers · 2 left for you. Check what was filled before you answer what is left: once nothing is left, SecondHand clicks Save and Continue.',
+    message: 'Filled 3 answers · 2 left for you. Check what was filled before you answer what is left. Once nothing is left and you leave the box, SecondHand clicks Save and Continue.',
     messageKey: 'result.thenTodo', messageParams: { summary: { key: 'result.filledNeedYou', params: { count: 3, needYou: 2 } }, todo: { key: 'iowa.missingAnswers', params: {} } },
-    todo: 'Check what was filled before you answer what is left: once nothing is left, SecondHand clicks Save and Continue.', todoKey: 'iowa.missingAnswers', todoParams: {} };
+    todo: 'Check what was filled before you answer what is left. Once nothing is left and you leave the box, SecondHand clicks Save and Continue.', todoKey: 'iowa.missingAnswers', todoParams: {} };
   const widget = await panel(t, { launcher: true, language: 'es-ES', autofill: iowa });
   await widget.userClick('autofill');
   assert.equal(widget.get('widget-text').textContent, `${strings.text('es', 'result.thenTodo', { summary: { key: 'result.filled', params: { count: 3 } }, todo: { key: 'iowa.missingAnswers', params: {} } })} ${spanish('widget.stopToCheck')}`, 'SecondHand clicks Save and Continue once nothing is left: Stop lets the reader check first');

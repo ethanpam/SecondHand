@@ -1027,7 +1027,7 @@
       const canAdvance = issues.requiredRemaining === 0 && issues.manualRemaining === 0 && Boolean(tellNavigation(doc, rawUrl));
       return { ...result, ...issues, kind: 'fillable', pageKey: 'iowa-tell-us-more', heading: 'Tell Us More', fields, canAdvance,
         todo: canAdvance ? 'SecondHand can save this page and continue. Review every answer before final submission.'
-          : 'Check what was filled before you answer what is left: once nothing is left, SecondHand clicks Save and Continue.',
+          : 'Check what was filled before you answer what is left. Once nothing is left and you leave the box, SecondHand clicks Save and Continue.',
         reason: 'SecondHand continues only when the supported questions are complete and this page has no errors or unsupported questions.' };
     }
     // dynamicQuestions is reused later. Only these independently observed household-screening
@@ -1060,7 +1060,7 @@
       const next = navigationButton(doc, rawUrl);
       const canAdvance = Boolean(next && issues.requiredRemaining === 0 && issues.manualRemaining === 0 && scanResult.ambiguous.length === 0);
       return { ...result, ...issues, kind: 'fillable', pageKey: 'iowa-personal-information', heading: 'Enter Personal Information', fields: scanResult.fields, canAdvance,
-        todo: issues.requiredRemaining || issues.manualRemaining ? 'Check what was filled before you answer what is left: once nothing is left, SecondHand clicks Save and Continue.'
+        todo: issues.requiredRemaining || issues.manualRemaining ? 'Check what was filled before you answer what is left. Once nothing is left and you leave the box, SecondHand clicks Save and Continue.'
           : canAdvance ? 'SecondHand can save this page and continue. Review every answer before final submission.' : 'Review your answers, then click Save and Continue in Iowa’s form.',
         reason: issues.manualRemaining ? 'Answer the remaining questions and correct any errors in Iowa’s form.' : issues.requiredRemaining ? 'Complete the required applicant fields in Iowa’s form.' : 'Review your answers, then click Save and Continue in Iowa’s form.' };
     }
