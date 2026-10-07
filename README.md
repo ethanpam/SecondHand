@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/media/readme-banner.png" width="100%" alt="SecondHand. A little help. A lot less typing. Save your details once, on your own computer. SecondHand fills in benefit applications, like Iowa SNAP, when you say yes. Beside the words, a form called Enter Personal Information has its first name, last name, and phone filled in green, and the SecondHand card under it shows Autofill and 1 need you.">
+  <img src="docs/media/readme-banner.png" width="100%" alt="SecondHand. A little help. A lot less typing. Save your details once, on your own computer. SecondHand fills in benefit applications, like Iowa SNAP, when you say yes. Beside the words, a form called Enter Personal Information has Avery Example's first name, last name, and phone filled in green and the middle name empty, and the SecondHand card in its corner says Filled 3 answers. Check them before you submit., above a 1 question left link, an Autofill button, and Hide.">
 </p>
 
 <h1 align="center">SecondHand</h1>
@@ -54,7 +54,7 @@ It comes in two parts that work together:
 Think of it like a password manager, but for the questions every assistance form asks. Nothing goes to a SecondHand server, because there isn't one. You stay in charge: the app asks before it shares anything, and you always review, sign, and submit yourself.
 
 <p align="center">
-  <img src="docs/media/autofill.gif" width="880" alt="The SecondHand card in the corner of Iowa's application. A click on Autofill fills the saved answers, a yellow '1 need you' link appears, and clicking it jumps to the empty First Name field, where Daniel is typed.">
+  <img src="docs/media/autofill.gif" width="880" alt="The SecondHand card in the corner of Iowa's application. A click on Autofill fills the saved answers, a '1 question left' link appears, and clicking it jumps to the empty First Name field, where Avery is typed. Once the cursor leaves that box, SecondHand clicks Save and Continue.">
   <br>
   <sub>A fictional applicant on a synthetic copy of Iowa's form. Nothing is sent anywhere.</sub>
 </p>
@@ -112,9 +112,9 @@ SecondHand was built for **Hack Away Hunger**, the DSMHack / CharityHack 2026 ha
 
 **2. Click Autofill on the application.** Open Iowa's SNAP application in Chrome and click **Autofill** in the SecondHand card. The app asks first: **Allow once**, or **Always allow on this computer**.
 
-**3. Finish what's left, then submit it yourself.** A yellow **need you** link jumps to each missing answer. Chrome's side panel lists every question on the page as **Done**, **Needs you**, **Optional**, or **Do it yourself**.
+**3. Finish what's left, then submit it yourself.** The card says what Autofill did, and a **1 question left** link jumps to each missing answer. Once nothing is left and you leave the box you typed in, SecondHand clicks **Save and Continue**. Chrome's side panel lists every question on the page as **Done**, **Needs your answer**, **Optional**, or **Do it yourself**.
 
-<img src="docs/media/side-panel.png" alt="Iowa's Enter Personal Information page with Last Name filled and First Name empty, the SecondHand card showing Stop and 1 need you, and the side panel checklist marking First name as Needs you and Last name as Done" width="100%">
+<img src="docs/media/side-panel.png" alt="Iowa's Enter Personal Information page with First Name empty and the rest filled for the fictional applicant Avery Example, the SecondHand card showing Stop and 1 question left, and the side panel saying Filled 20 answers, 1 left for you, with First name marked No saved answer: type it in Iowa's form, and Middle name, Last name, Suffix, and Maiden name marked Done" width="100%">
 
 ## What it does today
 
@@ -122,7 +122,7 @@ Version **0.5.0**, released October 6, 2026.
 
 - **Keeps your details on your computer.** Your profile and application notes are in an encrypted file that only your password or recovery key opens. There is no account, no cloud copy, and no analytics.
 - **Knows your household.** List the people you live with once. SecondHand works out the counts forms ask for, such as "How many people 0 to 17?", and never guesses a guardian's name.
-- **Fills Iowa's SNAP application screen by screen.** It fills what it knows, moves past screens that only give information, and stops wherever you're needed. CAPTCHA, consent, signatures, and final submission are always yours.
+- **Fills Iowa's SNAP application screen by screen.** It fills what it knows, moves past screens that only give information, and stops wherever you're needed. Iowa's security check (the CAPTCHA), consent, signatures, and final submission are always yours.
 - **Speaks your language.** The side panel works in English, Spanish, Vietnamese, Chinese, French, and Arabic. It can show Iowa's questions in your language and sum up long pages in plain words, using Chrome's built-in translator and summarizer on your computer.
 - **Works on other forms too.** Turn SecondHand on for any secure website, such as a food pantry's sign-up form. It reads each question's label and fills only the ones it recognizes.
 - **Answers food pantry sign-up questions (coming in the next release).** Questions such as "Student status", "Assistance needed", "Source of income" and "Does anyone in your family receive cash assistance?" are answered from what you saved, but only when exactly one option matches. Otherwise the question stays with you.
@@ -138,7 +138,7 @@ Autofill stays on for the tab until you click **Stop**, lock SecondHand, leave I
 
 | Iowa screen | What SecondHand does |
 | --- | --- |
-| Household Application Information | Picks **Yes** when one of your saved programs is a clear yes. You solve the CAPTCHA and continue. |
+| Household Application Information | Picks **Yes** when one of your saved programs is a clear yes. You type the characters in Iowa's security check and continue. |
 | Before You Start, Important Information, Instructions | Clicks Continue for you. These screens send no answers. |
 | Let's get started, About you | Waits for you to accept Iowa's consent or click Continue. |
 | **Enter Personal Information** | Fills your saved names, phones, home and mailing addresses, and program choices. Waits for missing required answers, then clicks Save and Continue. |
@@ -147,7 +147,7 @@ Autofill stays on for the tab until you click **Stop**, lock SecondHand, leave I
 | Captured screening pages | Emergency, Background, Job, Income, Expenses, and Property Information use saved answers and continue only when every visible question is supported and complete. |
 | Captured financial records | One job, Private Pension/Social Security income, rent, a utility record, or a Cash/Uncashed Check asset. You choose among matching saved records. |
 | Other Iowa pages | May fill matching saved answers after you approve, and Laya's answers marked as guesses. You continue. |
-| CAPTCHA, consent, signatures, final Submit | Never touched. |
+| Security check (CAPTCHA), consent, signatures, final Submit | Never touched. |
 
 [Portal coverage](docs/iowa-portal.md) has the exact field list, and [SNAP preparation](docs/snap-information.md) covers jobs, expenses, property, and tax references.
 
@@ -233,7 +233,7 @@ Because SecondHand runs on each person's own computer, there are no servers to p
 1. **Install.** [Download SecondHand](https://secondhand.ethanpam.workers.dev) for Windows, or the Mac version for your chip. On a Mac, drag SecondHand into Applications and open it from there. These pilot builds are unsigned, so your computer may show a warning first.
 2. **Create a password.** Save the recovery key the app shows you somewhere safe, away from the computer.
 3. **Add the extension to Chrome.** In the app, open **Chrome extension** and click **Prepare Chrome extension**. In Chrome, go to `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and choose the folder the app prepared. You only do this once. The website has [a picture guide](https://secondhand.ethanpam.workers.dev/chrome-extension).
-4. **Apply.** Keep SecondHand unlocked, open [Iowa's portal](https://hhsservices.iowa.gov/apspssp/ssp.portal) in Chrome 116 or newer, and click **Autofill**.
+4. **Apply.** Keep SecondHand unlocked, open [Iowa's portal](https://hhsservices.iowa.gov/apspssp/ssp.portal) in Chrome 116 or newer, and click **Autofill**. From the keyboard, **Alt+Shift+F** starts or stops Autofill and **Alt+Shift+N** goes to the next question left (on a Mac, Option for Alt).
 5. **Finish it yourself.** Review every answer, do the consent, signatures, and submission, and save Iowa's confirmation number under **Applications** in the app.
 
 The [setup guide](docs/setup.md) covers each step in detail, including what to do when something goes wrong.
@@ -241,7 +241,7 @@ The [setup guide](docs/setup.md) covers each step in detail, including what to d
 <details>
 <summary><strong>Updating from an earlier version</strong></summary>
 
-Install the new app and open it. The next time you use the extension, SecondHand refreshes its files and reloads itself in Chrome, once nothing is filling. Reload any form page that was open after you save or finish it. Keep **Developer mode** on at `chrome://extensions`, or Chrome turns SecondHand off.
+Install the new app and open it. The next time you use the extension, SecondHand refreshes its files and reloads itself in Chrome, once nothing is filling. On a form page that was open, the card says SecondHand is back on the next page: reload that page after you save or finish it, or go on to the next one. If the card instead offers **Restart**, click it first. Keep **Developer mode** on at `chrome://extensions`, or Chrome turns SecondHand off.
 
 Coming from a version without automatic updates, such as 0.4, do it by hand once: open **Chrome extension** in the app and click **Refresh extension files**, then click **Reload** for SecondHand at `chrome://extensions` and reload your Iowa tab.
 
@@ -311,6 +311,7 @@ For live reloading, run `npm run dev` (run `npx playwright install chromium` onc
 | `npm run test:coverage` | Unit tests with coverage floors from `scripts/coverage.cjs`. |
 | `npm run test:ui` | Drives the real Electron app end to end. Needs a desktop session. |
 | `npm run test:extension` | Runs the extension in an isolated Chromium against synthetic Iowa pages and a made-up pantry form. |
+| `npm run capture:ui -- after` | Screenshots every state of the card and side panel into `docs/pr-media/`, and fails if the extension logs an error. Run it with `before` on main for a pull request's before pictures. |
 | `npm run test:translation` | Checks the language picker, translated questions, and right-to-left Arabic. |
 | `npm run test:summary` | Checks the side panel's "What this page says". |
 | `npm run test:laya` | Checks Laya's fills on a synthetic pantry form, with the desktop app stubbed. |

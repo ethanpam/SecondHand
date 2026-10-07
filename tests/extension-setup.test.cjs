@@ -239,7 +239,14 @@ test('every file the extension loads ships with the prepared extension', () => {
   for (const [, list] of read('background.js').matchAll(/importScripts\(([^)]*)\)/g)) for (const [, file] of list.matchAll(/'([^']+)'/g)) loaded.add(file);
   for (const [, list] of read('background.js').matchAll(/js: \[([^\]]*)\]/g)) for (const [, file] of list.matchAll(/'([^']+)'/g)) loaded.add(file);
   for (const [, list] of read('background.js').matchAll(/files: \[([^\]]*)\]/g)) for (const [, file] of list.matchAll(/'([^']+)'/g)) loaded.add(file);
+  // The fonts panel.css names, which must ship beside their license.
+  const fonts = [...read('panel.css').matchAll(/url\(([^)]+)\)/g)].map(([, file]) => file);
+  assert.ok(fonts.length > 0 && fonts.every(file => file.endsWith('.woff2')), 'panel.css loads only its fonts');
+  for (const file of fonts) loaded.add(file);
+  loaded.add('font-licenses.txt');
   loaded.delete(undefined);
   const missing = [...loaded].filter(file => !EXTENSION_FILES.includes(file.split('?')[0]));
   assert.deepEqual(missing, [], 'a file the extension loads is missing from EXTENSION_FILES, so prepared extensions would break');
+  // And nothing is copied that the extension folder doesn't hold, or left behind in it uncopied.
+  assert.deepEqual(fs.readdirSync(dir).filter(name => !name.startsWith('.')).sort(), [...EXTENSION_FILES].sort());
 });

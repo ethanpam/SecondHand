@@ -1,0 +1,644 @@
+'use strict';
+
+// Screenshots of every SecondHand extension surface, for before-and-after comparisons in a pull request.
+// Real Chromium loads the unpacked extension. Pages are synthetic fixtures at their real addresses, the
+// desktop app is a DevTools stub, DNS is disabled, and every answer is fictional.
+//
+//   node scripts/capture-ui.cjs before                  every shot, as docs/pr-media/<shot>-before.png
+//   node scripts/capture-ui.cjs after card- panel-iowa  only panel-iowa and the shots that start with card-
+//
+// The side panel is Chrome's own, 360 by 765 CSS pixels in this window. The card is a 330 by 140 crop of
+// the page's corner. Both are captured at twice that size. The card-autofill recording needs ffmpeg on the
+// PATH. Each browser session ends by asking Chrome for the extension's error list, and fails if it has one.
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
+const { execFile } = require('node:child_process');
+const { promisify } = require('node:util');
+const { chromium, expect } = require('@playwright/test');
+const smoke = require('./smoke-extension.cjs');
+const preApplicant = require('../tests/fixtures/iowa-pre-applicant.cjs');
+
+const root = path.join(__dirname, '..');
+const output = path.join(root, 'docs/pr-media');
+const [label, ...only] = process.argv.slice(2);
+const VIEW = { width: 1200, height: 900 };
+// Tall enough for the card at its largest, 166px, with its 16px margin.
+const CARD = { x: VIEW.width - 330, y: VIEW.height - 190, width: 330, height: 190 };
+const FILM = { width: 800, height: 600 };
+const applicant = `${smoke.applicant}?next=stay`;
+const screen = name => `${smoke.portal}${preApplicant.screens[name].path}`;
+const UNKNOWN = `${smoke.portal}/applyForBenefits/householdMembers`;
+const PANTRY = 'https://pantry.example.org/intake';
+const HOUSEHOLD = 'https://pantry.example.org/household';
+const DETAILS = 'https://pantry.example.org/details';
+const SERVICE = 'https://pantry.example.org/service-area';
+const SERVICE_QUESTION = 'Do you live in our service area?';
+const DESPENSA = 'https://despensa.example.org/registro';
+// #180: household questions asked while no household list is saved. #186: a pantry's own questions no saved field covers.
+const NO_LIST = 'https://pantry.example.org/household-order';
+const NO_LIST_QUESTIONS = { adults: '# of Adults', young: '# of Children 0-5', older: '# of Children 6-18' };
+const VISIT = 'https://pantry.example.org/visit';
+// A shot is asked for by its name, or by the start of its name ending in a hyphen.
+const wanted = name => !only.length || only.some(asked => asked.endsWith('-') ? name.startsWith(asked) : name === asked);
+
+function formPage(title, form, lang = 'en') {
+  return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><title>${title} · synthetic test only</title>
+    <style>body{font:16px system-ui;background:#fff;color:#222;margin:0;padding:30px}main{max-width:640px}label{display:block;margin:12px 0 4px}input{display:block;width:300px;height:32px}button{margin-top:16px}</style></head>
+    <body><main><p>SYNTHETIC FIXTURE. No real organization or applicant data.</p><h1>${title}</h1>${form}</main></body></html>`;
+}
+const field = (id, text, type = 'text') => `<label for="${id}">${text}</label><input id="${id}" name="${id}" type="${type}">`;
+const pages = {
+  [PANTRY]: formPage('Pantry sign-up', `<form>${field('fname', 'First name')}${field('lname', 'Last name')}${field('zip', 'ZIP code')}${field('email', 'Email', 'email')}` +
+    `${field('hh', 'Household size', 'number')}${field('pet', 'Do you have a pet?')}<button type="submit">Submit</button></form>`),
+  [HOUSEHOLD]: formPage('Pantry order: household', `<form>${field('young', '# of people in your household 0 - 17 yrs old')}${field('apt', 'Apartment number')}` +
+    `${field('guardian', 'Guardian first and last name')}<button type="submit">Submit</button></form>`),
+  [DETAILS]: formPage('Pantry sign-up: your details', `<form>${field('first', 'First name')}${field('dob', 'Date of birth', 'date')}<button type="submit">Submit</button></form>`),
+  [SERVICE]: formPage('Pantry sign-up: service area', `<form>${field('first', 'First name')}<fieldset><legend>${SERVICE_QUESTION}</legend>` +
+    `${['Yes', 'No', 'Not sure'].map((option, index) => `<label><input type="radio" name="area" id="area-${index}" value="${option}">${option}</label>`).join('')}</fieldset>` +
+    '<button type="submit">Submit</button></form>'),
+  [NO_LIST]: formPage('Pantry order: who lives with you', `<form>${field('first', 'First name')}${Object.entries(NO_LIST_QUESTIONS).map(([id, label]) => field(id, label)).join('')}` +
+    '<button type="submit">Submit</button></form>'),
+  [VISIT]: formPage('Pantry visit', `<form>${field('first', 'First name')}${field('emplid', 'EMPLID')}<fieldset><legend>How did you hear about us?</legend>` +
+    `${['Friend', 'Church', 'Flyer'].map((option, index) => `<label><input type="radio" name="heard" id="heard-${index}" value="${option}">${option}</label>`).join('')}</fieldset>` +
+    '<label for="day">Preferred pickup day</label><select id="day" name="day"><option value="">Choose a day</option><option>Monday</option><option>Friday</option></select>' +
+    '<button type="submit">Submit</button></form>'),
+  [DESPENSA]: formPage('Registro de la despensa', `<form>${field('nombre', 'Nombre')}${field('apellido', 'Apellido')}${field('cp', 'Código postal')}` +
+    `${field('correo', 'Correo electrónico', 'email')}<button type="submit">Enviar</button></form>`, 'es')
+};
+
+// The desktop app as the worker sees it over native messaging, with Always allow on. A session changes
+// locked, closed, or laya on globalThis.__desktop to show the app in that state. With `holds`, it plays the app
+// without Always allow, holding those fields back for Fill sensitive details (#176). With `guess` and Laya
+// ready, Laya is sure of nothing and guesses "Yes" for the service-area question (#185). With `noList`, no household
+// list is saved (#180); with `customFields`, the app has custom answers, none of them saved yet (#186).
+async function installDesktop(worker) {
+  await worker.evaluate(({ profile, serviceQuestion }) => {
+    globalThis.__desktop = { profile, locked: false, closed: false, laya: 'unavailable', allSites: false, holds: [], guess: false, noList: false, customFields: false };
+    nativeRequest = async (type, payload = {}) => {
+      const desktop = globalThis.__desktop;
+      if (type === 'openApp') return { opened: 'shown' };
+      if (desktop.closed) throw Object.assign(fault('worker.desktopOffline'), { code: 'offline' });
+      if (type === 'status') return { unlocked: !desktop.locked, applicationCount: 0, accessRevision: 0, allSites: desktop.allSites, laya: { state: desktop.laya }, customFieldsAvailable: desktop.customFields };
+      if (type === 'getCustomFields') return { values: {}, accessRevision: 0 };
+      if (type === 'showApp') return { shown: true };
+      if (type === 'trustAllSites' || type === 'untrustAllSites') { desktop.allSites = type === 'trustAllSites'; return { allSites: desktop.allSites }; }
+      if (type === 'trustSite' || type === 'untrustSite') return { trusted: type === 'trustSite', origin: new URL(payload.url).origin };
+      if (type === 'warmLaya') return { state: desktop.laya };
+      if (type === 'suggestFields' && desktop.guess && desktop.laya === 'ready') return { suggestions: {}, accessRevision: 0 };
+      if (type === 'answerFields' && desktop.guess && desktop.laya === 'ready') {
+        const area = payload.questions.find(question => question.label === serviceQuestion);
+        return { answers: {}, guesses: area ? { [area.id]: 'Yes' } : {}, accessRevision: 0 };
+      }
+      if (type === 'suggestFields' || type === 'answerFields') throw Object.assign(new Error('Laya isn’t ready on this computer.'), { code: 'LAYA_NOT_READY' });
+      if (type === 'getFields') {
+        if (desktop.locked) throw new Error('Unlock your local vault first.');
+        // The app is asking the person: the request waits until the capture lets it go.
+        if (desktop.hold) await new Promise(resolve => { globalThis.__release = resolve; });
+        const held = payload.sensitive === true ? [] : payload.fields.filter(name => desktop.holds.includes(name));
+        const fromList = name => /^householdCount:/.test(name) || ['householdSize', 'householdAdults', 'householdChildren', 'householdSeniors', 'studentNameGrade'].includes(name);
+        const answered = name => desktop.profile[name] && !held.includes(name) && !(desktop.noList && fromList(name));
+        return { accessRevision: 0, values: Object.fromEntries(payload.fields.filter(answered).map(name => [name, desktop.profile[name]])),
+          ...(held.length ? { held } : {}), ...(desktop.noList && payload.fields.some(fromList) ? { household: { need: 'list' } } : {}) };
+      }
+      if (type === 'recordProgress') return { recorded: true };
+      if (type === 'saveFields') return { saved: Object.keys(payload.fields) };
+      throw new Error(`Unexpected native request in the UI capture: ${type}`);
+    };
+  }, { profile: smoke.syntheticProfile, serviceQuestion: SERVICE_QUESTION });
+}
+
+async function launch(userData, extensionDirectory, { viewport = VIEW, scale = 2, video } = {}) {
+  const context = await chromium.launchPersistentContext(userData, {
+    channel: 'chromium', headless: true, viewport, deviceScaleFactor: scale, ...(video ? { recordVideo: { dir: video, size: viewport } } : {}),
+    args: [`--disable-extensions-except=${extensionDirectory}`, `--load-extension=${extensionDirectory}`, '--host-resolver-rules=MAP * ~NOTFOUND', '--window-size=1440,1050', `--force-device-scale-factor=${scale}`]
+  });
+  await context.route('**/*', route => {
+    const request = route.request(); const url = new URL(request.url());
+    const fulfill = body => route.fulfill({ status: 200, contentType: 'text/html', body });
+    if (url.protocol === 'chrome-extension:') return route.continue();
+    if (!request.isNavigationRequest()) return route.abort('blockedbyclient');
+    if (Object.hasOwn(pages, request.url())) return fulfill(pages[request.url()]);
+    if (url.origin !== 'https://hhsservices.iowa.gov') return route.abort('blockedbyclient');
+    if (url.pathname === '/apspssp/ssp.portal/applyForBenefits/enterPersonalInfo') return fulfill(smoke.fixture(url.searchParams.get('next')));
+    const name = Object.keys(preApplicant.screens).find(name => request.url() === screen(name));
+    if (name) return fulfill(smoke.preApplicantPage(name));
+    if (request.url() === UNKNOWN) return fulfill('<!doctype html><html lang="en"><title>Synthetic unknown screen · test only</title><main><h1>Household Members</h1><p>SYNTHETIC TEST FIXTURE.</p></main></html>');
+    return route.abort('blockedbyclient');
+  });
+  let [worker] = context.serviceWorkers();
+  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 20000 });
+  const extensionId = new URL(worker.url()).hostname;
+  // Chrome keeps what an extension logs or throws only in developer mode, and only once asked to.
+  // Reloading the extension then starts its worker again, so the worker's own start is kept too.
+  const setup = await context.newPage();
+  await setup.goto('chrome://extensions');
+  await setup.evaluate(id => new Promise(resolve => chrome.developerPrivate.updateProfileConfiguration({ inDeveloperMode: true },
+    () => chrome.developerPrivate.updateExtensionConfiguration({ extensionId: id, errorCollection: true }, resolve))), extensionId);
+  const restarted = context.waitForEvent('serviceworker', { timeout: 20000 });
+  await setup.evaluate(id => new Promise(resolve => chrome.developerPrivate.reload(id, { failQuietly: true }, resolve)), extensionId);
+  worker = await restarted;
+  await setup.close();
+  await installDesktop(worker);
+  const page = context.pages()[0] || await context.newPage();
+  const launcherUrl = `chrome-extension://${extensionId}/panel.html?surface=launcher`;
+  const card = async () => {
+    await expect.poll(() => page.frames().some(frame => frame.url() === launcherUrl), { timeout: 15000 }).toBe(true);
+    return page.frames().find(frame => frame.url() === launcherUrl);
+  };
+  // Leaving the page turns a running autofill off, so every state starts clean.
+  async function open(url, desktop = {}) {
+    await page.goto('about:blank');
+    await worker.evaluate(desktop => Object.assign(globalThis.__desktop, desktop), { locked: false, closed: false, laya: 'unavailable', holds: [], guess: false, noList: false, customFields: false, profile: smoke.syntheticProfile, ...desktop });
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await page.bringToFront();
+  }
+  return { context, worker, extensionId, page, card, open };
+}
+
+async function save(name, extension, write) {
+  if (!wanted(name)) return;
+  const file = path.join(output, `${name}-${label}.${extension}`);
+  await fs.mkdir(output, { recursive: true });
+  await write(file);
+  console.log(path.relative(root, file));
+}
+
+// The card asks the worker to size its frame a moment after its state changes: wait until the frame holds still.
+async function cardShot(session, name) {
+  const { page } = session;
+  const frame = await session.card();
+  await frame.evaluate(() => document.fonts.ready.then(() => {}));
+  let last;
+  await expect.poll(async () => {
+    const now = await page.evaluate(() => document.querySelector('[data-secondhand-assistant]')?.getAttribute('style') || '');
+    const still = now === last; last = now;
+    return still;
+  }, { intervals: [700], timeout: 15000 }).toBe(true);
+  // The pointer leaves the card by way of its logo, so no button is drawn hovered.
+  const box = await page.locator('[data-secondhand-assistant]').boundingBox();
+  await page.mouse.move(box.x + 23, box.y + box.height / 2);
+  await page.mouse.move(10, 10);
+  await page.waitForTimeout(200);
+  await save(name, 'png', file => page.screenshot({ path: file, clip: CARD }));
+}
+
+async function openPanel(session) {
+  await (await session.card()).locator('#details').click();
+  const panel = await smoke.attachNativePanel(session.context, session.page, session.extensionId);
+  // Chrome lays the panel out a moment after it opens.
+  await expect.poll(() => panel.evaluate(() => innerWidth), { timeout: 15000 }).toBeGreaterThan(0);
+  const size = await panel.evaluate(() => ({ width: innerWidth, height: innerHeight, scale: devicePixelRatio }));
+  assert.deepEqual(size, { width: 360, height: 765, scale: 2 }, 'the side panel is captured at one size');
+  return panel;
+}
+// How far to scroll the side panel to show a section just under the button strip that stays in view.
+const sectionTop = (panel, id) => panel.evaluate(id => {
+  const body = document.getElementById('panel-body'), section = document.getElementById(id), strip = document.querySelector('.actions');
+  return Math.max(0, Math.round(section.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop - strip.offsetHeight - 16));
+}, id);
+// The side panel checks the tab every second and a half; `ready` says when it shows the state to capture.
+async function panelShot(session, panel, name, ready, { scroll = 0, clip } = {}) {
+  await expect.poll(() => panel.evaluate(ready), { timeout: 20000 }).toBe(true);
+  await panel.evaluate(scroll => document.fonts.ready.then(() => { document.getElementById('sidepanel').scrollTop = scroll; }), scroll);
+  // The pointer rests in the panel's top corner, clear of every control, so nothing is drawn hovered.
+  await panel.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 });
+  await session.page.waitForTimeout(400);
+  await save(name, 'png', async file => {
+    if (!clip) return panel.screenshot(file);
+    const { data } = await panel.send('Page.captureScreenshot', { format: 'png', clip: { ...clip, scale: 1 } });
+    await fs.writeFile(file, Buffer.from(data, 'base64'));
+  });
+}
+// The panel reads the desktop's status when it opens, after an Autofill, and when its window is shown again.
+const recheck = panel => panel.evaluate(() => { document.dispatchEvent(new Event('visibilitychange')); });
+const chooseLanguage = (panel, code) => panel.evaluate(code => { const select = document.getElementById('language'); select.value = code; select.dispatchEvent(new Event('change')); }, code);
+const text = (panel, selector) => panel.evaluate(selector => document.querySelector(selector)?.textContent || '', selector);
+
+// Headless Chromium has no on-device models. Chrome itself logs these two lines when a page asks for one;
+// SecondHand catches both failures and carries on.
+const NO_MODEL = ['Unable to create a text session because the service is not running.', 'The language detection model was required but not available.'];
+// Every error and warning the extension logged or threw in this session, in any of its pages or its worker.
+async function expectNoErrors(session) {
+  const page = await session.context.newPage();
+  try {
+    await page.goto('chrome://extensions');
+    const info = await page.evaluate(id => new Promise(resolve => chrome.developerPrivate.getExtensionInfo(id, resolve)), session.extensionId);
+    assert.deepEqual(info.errorCollection, { isActive: true, isEnabled: true }, 'Chrome is keeping the extension’s errors');
+    const errors = [...info.manifestErrors, ...info.runtimeErrors].filter(error => !NO_MODEL.includes(error.message)).map(error => `${error.source}: ${error.message}`);
+    assert.deepEqual(errors, [], 'the extension logged errors');
+  } finally { await page.close(); }
+}
+
+async function withSession(extensionDirectory, options, work) {
+  const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-capture-'));
+  let session;
+  try {
+    session = await launch(userData, extensionDirectory, options);
+    await work(session);
+    await expectNoErrors(session);
+  } finally {
+    if (session) await session.context.close().catch(() => {});
+    await fs.rm(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+}
+// A temporary copy of the extension, changed by `edit` before Chrome loads it.
+async function withCopy(edit, work) {
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-capture-copy-'));
+  const copy = path.join(temporary, 'extension');
+  try {
+    await fs.cp(smoke.extensionDirectory, copy, { recursive: true });
+    await edit(copy);
+    await work(copy);
+  } finally { await fs.rm(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+}
+
+// The card on Iowa's application, with the side panel closed: an open panel covers the page's corner.
+async function iowaCard() {
+  await withSession(smoke.extensionDirectory, {}, async session => {
+    const { page, worker, open, card } = session;
+    await open(applicant);
+    await expect((await card()).locator('#autofill')).toBeVisible();
+    await cardShot(session, 'card-ready');
+    // Tab from the logo, so the button shows the ring a keyboard gives it.
+    await (await card()).locator('#details').focus();
+    await page.keyboard.press('Tab');
+    await expect((await card()).locator('#autofill:focus-visible')).toBeVisible();
+    await cardShot(session, 'card-focus');
+    // The reader hid the card: its logo stays in the corner, to bring the card back.
+    await (await card()).locator('#hide').click();
+    await expect((await card()).locator('#pill')).toBeVisible();
+    await cardShot(session, 'card-hidden');
+    // Hidden from the keyboard, the logo keeps the focus, with its ring inside the circle.
+    await (await card()).locator('#pill').click();
+    await (await card()).locator('#hide').focus();
+    await page.keyboard.press('Enter');
+    await expect((await card()).locator('#pill:focus-visible')).toBeVisible();
+    await cardShot(session, 'card-hidden-focus');
+    // Hiding holds for the tab, so the card is brought back before the next pages.
+    await page.keyboard.press('Enter');
+    await expect((await card()).locator('#autofill')).toBeVisible();
+
+    // While the app asks the person for permission.
+    await open(applicant, { profile: { ...smoke.syntheticProfile, firstName: '' }, hold: true });
+    await (await card()).locator('#autofill').click();
+    await expect((await card()).locator('#autofill')).toBeDisabled();
+    await cardShot(session, 'card-working');
+    await worker.evaluate(() => { globalThis.__desktop.hold = false; globalThis.__release?.(); });
+    await expect((await card()).locator('#need-you')).toBeVisible({ timeout: 20000 });
+    await cardShot(session, 'card-need-you');
+    // Hidden while a question is left, the logo carries a dot.
+    await (await card()).locator('#hide').click();
+    await expect((await card()).locator('#pill')).toHaveClass(/waiting/);
+    await cardShot(session, 'card-hidden-waiting');
+    await (await card()).locator('#pill').click();
+    // Autofill has been started once from this Chrome: the next form page gets the short line.
+    await open(applicant);
+    await expect((await card()).locator('#autofill')).toBeVisible();
+    await cardShot(session, 'card-ready-again');
+
+    // As on a first run: the count of starts is set back, so this click is the first.
+    await open(screen('household'));
+    await (await card()).evaluate(() => localStorage.removeItem('secondhand.autofillStarted'));
+    await (await card()).locator('#autofill').click();
+    // The fill revealed the security check: the card settles on what the applicant must do.
+    await expect((await card()).locator('#widget-text')).toHaveText(/^Type the characters shown/, { timeout: 20000 });
+    await cardShot(session, 'card-message');
+
+    // Started again from this Chrome: the card says the short form of what Autofill waits for.
+    await open(applicant, { profile: { ...smoke.syntheticProfile, firstName: '' } });
+    await (await card()).locator('#autofill').click();
+    await expect((await card()).locator('#need-you')).toBeVisible({ timeout: 20000 });
+    await cardShot(session, 'card-need-you-again');
+
+    // In Spanish, the first time, on Iowa's English page: the line Autofill waits with, under the offer of the
+    // questions in Spanish, which leaves the line less room.
+    await (await card()).locator('#stop').click();
+    await (await card()).evaluate(() => globalThis.SecondHandStrings.setLanguage('es'));
+    await open(applicant, { profile: { ...smoke.syntheticProfile, firstName: '' } });
+    await (await card()).evaluate(() => localStorage.removeItem('secondhand.autofillStarted'));
+    await (await card()).locator('#autofill').click();
+    await expect((await card()).locator('#need-you')).toBeVisible({ timeout: 20000 });
+    await expect((await card()).locator('#translate-offer')).toBeVisible();
+    await cardShot(session, 'card-need-you-es');
+    await (await card()).locator('#stop').click();
+    await (await card()).evaluate(() => globalThis.SecondHandStrings.setLanguage('en'));
+
+    await open(applicant, { locked: true });
+    await (await card()).locator('#autofill').click();
+    await expect((await card()).locator('#unlock')).toBeVisible({ timeout: 20000 });
+    await cardShot(session, 'card-locked');
+
+    await open(applicant, { closed: true });
+    await (await card()).locator('#autofill').click();
+    await expect((await card()).locator('#open-app')).toBeVisible({ timeout: 20000 });
+    await cardShot(session, 'card-closed');
+
+    await open(UNKNOWN);
+    await expect((await card()).locator('#pill')).toBeVisible();
+    await cardShot(session, 'card-pill');
+  });
+}
+
+// The side panel on Iowa's application, in English, Spanish, and Arabic.
+async function iowaPanel() {
+  await withSession(smoke.extensionDirectory, {}, async session => {
+    const { page, worker, open } = session;
+    const missingName = { profile: { ...smoke.syntheticProfile, firstName: '' } };
+    const listed = () => document.querySelectorAll('#page-checklist .checklist-item').length > 0;
+    await open(applicant, missingName);
+    const panel = await openPanel(session);
+    await panelShot(session, panel, 'panel-iowa', listed);
+    await panelShot(session, panel, 'panel-header', listed, { clip: { x: 0, y: 0, width: 360, height: 72 } });
+    // Tab to Autofill from the control before it, so the button shows the ring a keyboard gives it.
+    await panel.evaluate(() => {
+      const controls = [...document.querySelectorAll('button, select')].filter(control => !control.disabled && control.getClientRects().length);
+      controls[controls.indexOf(document.getElementById('panel-autofill')) - 1].focus();
+    });
+    for (const type of ['keyDown', 'keyUp']) await panel.send('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+    await panelShot(session, panel, 'panel-focus', () => document.activeElement?.id === 'panel-autofill');
+    await panel.evaluate(() => document.activeElement.blur());
+
+    // While the app asks the person for permission, then the result.
+    await worker.evaluate(() => { globalThis.__desktop.hold = true; });
+    await panel.click('#panel-autofill');
+    await panelShot(session, panel, 'panel-working', () => document.getElementById('panel-autofill').disabled);
+    await worker.evaluate(() => { globalThis.__desktop.hold = false; globalThis.__release?.(); });
+    const filled = () => document.querySelector('[data-key="lastName"]')?.classList.contains('complete') === true;
+    await panelShot(session, panel, 'panel-iowa-filled', filled);
+    await panelShot(session, panel, 'panel-checklist', filled, { scroll: 100000 });
+    // Autofill has been started once from this Chrome: the next form page gets the short note.
+    await open(applicant, missingName);
+    await recheck(panel);
+    await panelShot(session, panel, 'panel-iowa-again', listed);
+    // Started again: the status says the short form of what Autofill waits for.
+    await panel.click('#panel-autofill');
+    await panelShot(session, panel, 'panel-iowa-filled-again', filled);
+
+    await open(applicant, { locked: true });
+    await recheck(panel);
+    await panelShot(session, panel, 'panel-locked', () => !document.getElementById('desktop-action').hidden && document.querySelectorAll('.checklist-item').length > 0);
+    await open(applicant, { closed: true });
+    await recheck(panel);
+    await panelShot(session, panel, 'panel-closed', () => !document.getElementById('desktop-action').hidden && document.querySelectorAll('.checklist-item').length > 0);
+
+    // An information-only screen: nothing to fill, and Chrome here has no summary model.
+    await open(screen('instructions'));
+    await recheck(panel);
+    await page.waitForTimeout(2500);
+    await panelShot(session, panel, 'panel-info', () => !document.getElementById('panel-autofill').disabled);
+    // A tab SecondHand can't read.
+    await page.goto('about:blank');
+    await panelShot(session, panel, 'panel-elsewhere', () => document.getElementById('panel-autofill').disabled && Boolean(document.getElementById('status').textContent));
+    await chooseLanguage(panel, 'es');
+    await panelShot(session, panel, 'panel-elsewhere-es', () => document.getElementById('all-sites-note').textContent.startsWith('Para'));
+    await chooseLanguage(panel, 'en');
+
+    // Arabic reads right to left. Spanish lists the page's questions in Spanish.
+    await open(applicant);
+    await recheck(panel);
+    await expect.poll(() => panel.evaluate(listed), { timeout: 20000 }).toBe(true);
+    await chooseLanguage(panel, 'ar');
+    await panelShot(session, panel, 'panel-arabic', () => document.documentElement.dir === 'rtl' && document.querySelectorAll('.checklist-item').length > 0);
+    await chooseLanguage(panel, 'es');
+    await expect.poll(() => panel.visible('#questions-show'), { timeout: 20000 }).toBe(true);
+    await panel.click('#questions-show');
+    await expect.poll(() => panel.evaluate(() => document.querySelectorAll('#questions-list > *').length > 0), { timeout: 20000 }).toBe(true);
+    const top = await panel.evaluate(() => document.getElementById('questions-show').getBoundingClientRect().top + document.getElementById('sidepanel').scrollTop - document.querySelector('.actions').offsetHeight - 12);
+    await panelShot(session, panel, 'panel-questions', () => !document.getElementById('questions').hidden, { scroll: top });
+    await chooseLanguage(panel, 'en');
+    assert.equal(await worker.evaluate(() => globalThis.__desktop.closed), false);
+    await panel.close();
+  });
+}
+
+// Other websites. Chrome can't show its permission prompt to a script, so a first launch of a copy of the
+// extension lists these sites as required host permissions, which Chrome grants at load. The second launch,
+// on the same profile, uses the shipped manifest: the panel's own request then resolves without a prompt.
+async function granted(work) {
+  await withCopy(async () => {}, async copy => {
+    const manifestPath = path.join(copy, 'manifest.json');
+    const shipped = await fs.readFile(manifestPath, 'utf8');
+    const granting = JSON.parse(shipped);
+    granting.host_permissions = [...granting.host_permissions, 'https://*/*', ...[PANTRY, DESPENSA].map(url => `${new URL(url).origin}/*`)];
+    const session = async work => {
+      const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-capture-'));
+      let running;
+      try {
+        await fs.writeFile(manifestPath, JSON.stringify(granting));
+        await (await launch(userData, copy)).context.close();
+        await fs.writeFile(manifestPath, shipped);
+        running = await launch(userData, copy);
+        await work(running);
+        await expectNoErrors(running);
+      } finally {
+        if (running) await running.context.close().catch(() => {});
+        await fs.rm(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      }
+    };
+    await work(session);
+  });
+}
+const turnOn = session => session.worker.evaluate(async () => { const [tab] = await chrome.tabs.query({ active: true, currentWindow: true }); return enableSite(tab.id); });
+
+async function sites() {
+  await granted(async session => {
+    await session(async running => {
+      const { page, worker, open } = running;
+      await open(applicant);
+      const panel = await openPanel(running);
+      const shown = id => panel.evaluate(id => !document.getElementById(id).hidden, id);
+      // A site that is off, with Laya ready.
+      await open(PANTRY, { laya: 'ready' });
+      await recheck(panel);
+      await panelShot(running, panel, 'panel-site-off', () => !document.getElementById('site-enable').hidden);
+      await panel.click('#site-enable');
+      await expect.poll(() => shown('site-disable'), { timeout: 20000 }).toBe(true);
+      await panel.click('#panel-autofill');
+      await expect(page.locator('#fname')).toHaveValue(smoke.syntheticProfile.firstName, { timeout: 20000 });
+      await page.waitForTimeout(2000);
+      await panelShot(running, panel, 'panel-site-filled', () => !document.getElementById('panel-autofill').disabled && /\d/.test(document.getElementById('status').textContent));
+      // The names of what was filled, opened.
+      await panel.click('#filled-section > summary');
+      await panelShot(running, panel, 'panel-site-filled-open', () => document.getElementById('filled-section').open);
+      await panel.evaluate(() => { document.getElementById('filled-section').open = false; });
+      // The same site with Laya turned off in the app.
+      await open(PANTRY, { laya: 'off' });
+      await recheck(panel);
+      await page.waitForTimeout(2000);
+      await panelShot(running, panel, 'panel-laya-off', () => !document.getElementById('panel-autofill').disabled);
+      // An answer the profile lacks, typed on the page: Save to My information.
+      await open(HOUSEHOLD, { laya: 'ready' });
+      await recheck(panel);
+      await expect.poll(() => panel.evaluate(() => !document.getElementById('panel-autofill').disabled), { timeout: 20000 }).toBe(true);
+      await panel.click('#panel-autofill');
+      await expect.poll(() => shown('save-section'), { timeout: 20000 }).toBe(true);
+      await page.locator('#apt').fill('Unit 5');
+      await panelShot(running, panel, 'panel-save', () => Boolean(document.querySelector('[data-save-id] button')));
+      // All websites on, then off: the notice says how to remove the access Chrome keeps.
+      await panel.click('#all-sites-enable');
+      await expect.poll(() => shown('all-sites-disable'), { timeout: 20000 }).toBe(true);
+      await panel.click('#all-sites-disable');
+      await panelShot(running, panel, 'panel-all-sites-off', () => !document.getElementById('all-sites-enable').hidden && !document.getElementById('all-sites-enable').disabled);
+      assert.equal(await worker.evaluate(() => allSitesOn()), false);
+      // Without Always allow, the app holds the date of birth back for Fill sensitive details (#176).
+      await open(DETAILS, { holds: ['birthDate'], laya: 'ready', guess: true });
+      await recheck(panel);
+      await expect.poll(() => panel.evaluate(() => !document.getElementById('panel-autofill').disabled), { timeout: 20000 }).toBe(true);
+      await panel.click('#panel-autofill');
+      await panelShot(running, panel, 'panel-site-held', () => !document.getElementById('held-section').hidden);
+      // Laya isn't sure, so it fills its best guess with its own outline and the side panel lists it (#185).
+      await open(SERVICE, { laya: 'ready', guess: true });
+      await recheck(panel);
+      await expect.poll(() => panel.evaluate(() => !document.getElementById('panel-autofill').disabled), { timeout: 20000 }).toBe(true);
+      await panel.click('#panel-autofill');
+      await panelShot(running, panel, 'panel-site-guessed', () => !document.getElementById('guesses-section').hidden);
+      // The same in Spanish: what Laya guessed, in the words the panel uses for it there.
+      await chooseLanguage(panel, 'es');
+      await panelShot(running, panel, 'panel-site-guessed-es', () => document.getElementById('language').value === 'es' && !document.getElementById('guesses-section').hidden && !/Guessed/.test(document.getElementById('guesses-title').textContent));
+      await chooseLanguage(panel, 'en');
+      // With no household list saved, the household questions stay open and wait for Add your household (#180).
+      await open(NO_LIST, { noList: true });
+      await recheck(panel);
+      await expect.poll(() => panel.evaluate(() => !document.getElementById('panel-autofill').disabled), { timeout: 20000 }).toBe(true);
+      await panel.click('#panel-autofill');
+      await expect.poll(() => panel.evaluate(() => !document.getElementById('household-section').hidden), { timeout: 20000 }).toBe(true);
+      await panelShot(running, panel, 'panel-site-household', () => true, { scroll: await sectionTop(panel, 'household-section') });
+      // The pantry's own questions, answered on the page, offered to Remember for next time (#186).
+      await open(VISIT, { customFields: true });
+      await recheck(panel);
+      await expect.poll(() => panel.evaluate(() => !document.getElementById('panel-autofill').disabled), { timeout: 20000 }).toBe(true);
+      await panel.click('#panel-autofill');
+      await expect(page.locator('#first')).toHaveValue(smoke.syntheticProfile.firstName, { timeout: 20000 });
+      await page.locator('#emplid').fill('SYN-4471');
+      await page.locator('#heard-1').check();
+      await page.locator('#day').selectOption('Friday');
+      await expect.poll(() => panel.evaluate(() => document.querySelectorAll('[data-remember-id]').length === 3), { timeout: 20000 }).toBe(true);
+      await panelShot(running, panel, 'panel-site-remember', () => true, { scroll: await sectionTop(panel, 'remember-section') });
+      await panel.close();
+    });
+    // The card on other sites, with the side panel closed.
+    await session(async running => {
+      const { page, open, card } = running;
+      await open(PANTRY);
+      await turnOn(running);
+      await open(PANTRY);
+      await (await card()).locator('#autofill').click();
+      await expect(page.locator('#fname')).toHaveValue(smoke.syntheticProfile.firstName, { timeout: 20000 });
+      await expect((await card()).locator('#need-you')).toBeVisible({ timeout: 20000 });
+      await cardShot(running, 'card-site');
+      // A page in Spanish for an English reader: the card offers its questions in English.
+      await open(DESPENSA);
+      await turnOn(running);
+      await open(DESPENSA);
+      await expect((await card()).locator('#translate-offer')).toBeVisible({ timeout: 20000 });
+      await cardShot(running, 'card-offer');
+      // After Autofill, the offer stays beside what it reports.
+      await (await card()).locator('#autofill').click();
+      await expect((await card()).locator('#need-you')).toBeVisible({ timeout: 20000 });
+      await cardShot(running, 'card-offer-filled');
+    });
+  });
+}
+
+// Pages from a newer build than the worker Chrome still runs: both surfaces say so and offer to restart SecondHand.
+// Restart then leaves the card behind on the page, as any update does: it asks for the page to be reloaded.
+async function outdated() {
+  await withCopy(async copy => {
+    const file = path.join(copy, 'panel.js');
+    await fs.writeFile(file, (await fs.readFile(file, 'utf8')).replace(/const BUILD = '[^']+'/, 'const BUILD = \'2099-01-01.1\''));
+  }, copy => withSession(copy, {}, async session => {
+    const { open, card } = session;
+    await open(applicant);
+    const frame = await card();
+    await expect(frame.locator('#restart')).toBeVisible({ timeout: 20000 });
+    await cardShot(session, 'card-outdated');
+    const panel = await openPanel(session);
+    await panelShot(session, panel, 'panel-outdated', () => !document.getElementById('desktop-action').hidden);
+    await panel.close();
+    if (!wanted('card-reload')) return;
+    // The side panel still covers the page's corner here, so the keyboard presses Restart.
+    await frame.locator('#restart').focus();
+    await session.page.keyboard.press('Enter');
+    // The frame has lost its extension once SecondHand reloaded.
+    await expect.poll(() => frame.evaluate(() => chrome.runtime?.id), { timeout: 20000 }).toBe(undefined);
+    await cardShot(session, 'card-reload');
+  }));
+}
+
+// Chrome's own list of SecondHand's keyboard shortcuts (chrome://extensions/shortcuts).
+async function shortcutsPage() {
+  await withSession(smoke.extensionDirectory, {}, async session => {
+    const page = await session.context.newPage();
+    await page.goto('chrome://extensions/shortcuts');
+    await expect.poll(() => page.evaluate(() => document.querySelector('extensions-manager')?.shadowRoot?.querySelector('extensions-keyboard-shortcuts') !== null), { timeout: 15000 }).toBe(true);
+    await page.waitForTimeout(800);
+    await save('chrome-shortcuts', 'png', file => page.screenshot({ path: file, clip: { x: 0, y: 0, width: VIEW.width, height: 420 } }));
+    await page.close();
+  });
+}
+
+// A short recording of the card at work: Autofill, then the link to the answer that is missing.
+async function recording() {
+  const run = promisify(execFile);
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-capture-film-'));
+  try {
+    let video, begins;
+    const started = Date.now();
+    await withSession(smoke.extensionDirectory, { viewport: FILM, scale: 1, video: temporary }, async session => {
+      const { page, open, card } = session;
+      await open(applicant, { profile: { ...smoke.syntheticProfile, firstName: '' } });
+      await expect((await card()).locator('#autofill')).toBeVisible();
+      // Chrome records no pointer, so the page draws one that follows each move.
+      await page.evaluate(() => {
+        const pointer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        pointer.id = 'capture-pointer';
+        pointer.setAttribute('viewBox', '0 0 28 34');
+        pointer.innerHTML = '<path d="M3 2v24l6-6 5 11 5-2-5-11h10L3 2Z" fill="#163a2c" stroke="#fff" stroke-width="2.5" stroke-linejoin="round"/>';
+        pointer.style.cssText = 'position:fixed;left:0;top:0;width:22px;height:27px;z-index:2147483647;pointer-events:none;transform:translate(300px,260px);transition:transform 700ms ease';
+        document.documentElement.append(pointer);
+      });
+      const clickOn = async selector => {
+        const box = await (await card()).locator(selector).boundingBox();
+        const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+        await page.evaluate(point => { document.getElementById('capture-pointer').style.transform = `translate(${point.x}px,${point.y}px)`; }, point);
+        await page.waitForTimeout(900);
+        await page.mouse.click(point.x, point.y);
+      };
+      await page.waitForTimeout(600);
+      begins = Date.now() - started;
+      await page.waitForTimeout(800);
+      await clickOn('#autofill');
+      await expect((await card()).locator('#need-you')).toBeVisible({ timeout: 20000 });
+      await page.waitForTimeout(1600);
+      await clickOn('#need-you');
+      await expect.poll(() => page.evaluate(() => document.activeElement.id), { timeout: 20000 }).toBe('firstName');
+      await page.waitForTimeout(1800);
+      video = await page.video().path();
+    });
+    await save('card-autofill', 'gif', async file => {
+      // The recording starts when Chrome does; the film starts once the page and its card are ready.
+      const filter = 'fps=10,split[a][b];[a]palettegen=max_colors=96[p];[b][p]paletteuse=dither=bayer:bayer_scale=4';
+      await run('ffmpeg', ['-y', '-loglevel', 'error', '-ss', (begins / 1000).toFixed(2), '-i', video, '-vf', filter, file]);
+    });
+  } finally { await fs.rm(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+}
+
+const sessions = [
+  [iowaCard, ['card-ready', 'card-focus', 'card-hidden', 'card-hidden-focus', 'card-working', 'card-need-you', 'card-hidden-waiting', 'card-ready-again', 'card-message', 'card-need-you-again', 'card-need-you-es', 'card-locked', 'card-closed', 'card-pill']],
+  [iowaPanel, ['panel-iowa', 'panel-header', 'panel-focus', 'panel-working', 'panel-iowa-filled', 'panel-checklist', 'panel-iowa-again', 'panel-iowa-filled-again', 'panel-locked', 'panel-closed', 'panel-info', 'panel-elsewhere', 'panel-elsewhere-es', 'panel-arabic', 'panel-questions']],
+  [sites, ['panel-site-off', 'panel-site-filled', 'panel-site-filled-open', 'panel-laya-off', 'panel-save', 'panel-site-held', 'panel-site-guessed', 'panel-site-household', 'panel-site-remember', 'panel-site-guessed-es', 'panel-all-sites-off', 'card-site', 'card-offer', 'card-offer-filled']],
+  [outdated, ['card-outdated', 'panel-outdated', 'card-reload']],
+  [shortcutsPage, ['chrome-shortcuts']],
+  [recording, ['card-autofill']]
+];
+
+async function main() {
+  if (!/^[a-z0-9-]+$/.test(label || '')) throw new Error('Usage: node scripts/capture-ui.cjs <label> [shot name, or the start of one ending in a hyphen...]');
+  const names = sessions.flatMap(([, names]) => names);
+  const unknown = only.filter(asked => !names.some(name => asked.endsWith('-') ? name.startsWith(asked) : name === asked));
+  if (unknown.length) throw new Error(`No shot is named ${unknown.join(' or ')}. The shots are ${names.join(', ')}.`);
+  for (const [session, names] of sessions) if (names.some(wanted)) await session();
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -197,6 +197,12 @@ function fixture(nextStep) {
 
 // Pre-applicant screens with stand-ins for Iowa's page functions. About you is not
 // recorded yet, so Instructions' Continue leads straight to the applicant page.
+// Iowa's applicant heading over a form SecondHand doesn't know: a page it fills nothing on.
+const anotherApplicantForm = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Synthetic unknown applicant form · test only</title>
+  <style>body{font:16px system-ui;background:#f7f8f2;color:#294035;margin:0;padding:30px}label{display:block;margin:12px 0 4px}</style></head>
+  <body><main><p class="test-only">SYNTHETIC TEST FIXTURE. No government connection or real applicant data.</p><h1>Enter Personal Information</h1>
+  <form id="qa-another-form"><label for="qa-nickname">Preferred name (QA only)</label><input id="qa-nickname" name="qaNickname"><button type="button">Save and Continue</button></form></main></body></html>`;
+
 function preApplicantPage(name) {
   const targets = { letsGetStarted: '/applyForBenefits/letsGetStarted', instructions: '/applyForBenefits/instructions', aboutYou: '/applyForBenefits/enterPersonalInfo?next=stay', welcome: '/applyForBenefits/welcome', importantInfo: '/applyForBenefits/importantInfo' };
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Synthetic Iowa screen · test only</title></head><body>
@@ -329,7 +335,7 @@ async function attachNativePanel(context, page, extensionId) {
     await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
     await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
   };
-  return { evaluate, text, visible, click,
+  return { send, evaluate, text, visible, click,
     // Like Playwright's page.screenshot, it creates the file's folder.
     async screenshot(file) {
       const result = await send('Page.captureScreenshot', { format: 'png' });
@@ -355,7 +361,7 @@ async function main() {
     await context.route('**/*', route => {
       const request = route.request(); const url = new URL(request.url());
       if (request.isNavigationRequest() && url.origin === 'https://hhsservices.iowa.gov' && url.pathname === '/apspssp/ssp.portal/applyForBenefits/enterPersonalInfo') {
-        return route.fulfill({ status: 200, contentType: 'text/html', body: fixture(url.searchParams.get('next')) });
+        return route.fulfill({ status: 200, contentType: 'text/html', body: url.searchParams.get('next') === 'another-form' ? anotherApplicantForm : fixture(url.searchParams.get('next')) });
       }
       if (request.isNavigationRequest() && request.url() === addressUrl) {
         verifiedAddressLoads++;
@@ -474,17 +480,22 @@ async function main() {
     // Missing saved answers become "need you" links that jump to the field.
     widget = await startFixture({ profile: { firstName: '' } });
     await widget.locator('#autofill').click();
-    await expect(widget.locator('#need-you')).toHaveText('1 need you', { timeout: 20000 });
+    await expect(widget.locator('#need-you')).toHaveText('1 question left', { timeout: 20000 });
     await expect(page.locator('#lastName')).toHaveValue(syntheticProfile.lastName);
     await widget.locator('#need-you').click();
     await expect.poll(() => page.evaluate(() => document.activeElement.id)).toBe('firstName');
     assert.equal(await page.evaluate(() => window.__nextClicks), 0, 'Missing required profile data cannot trigger Next.');
     const beforeManual = (await calls('getFields')).length;
-    await page.locator('#firstName').fill(syntheticProfile.firstName);
+    // Typed one key at a time, as a person types. While the cursor is still in the box the answer may not be
+    // finished, so Autofill waits, through more than two of the card's 1.5-second checks, until the person leaves it.
+    await page.locator('#firstName').pressSequentially(syntheticProfile.firstName, { delay: 60 });
+    await page.waitForTimeout(4000);
+    assert.equal(await page.evaluate(() => window.__nextClicks), 0, 'No Save and Continue while the person is still in the box they typed in.');
+    await page.keyboard.press('Tab');
     await expect.poll(() => page.evaluate(() => window.__nextClicks), { timeout: 20000 }).toBe(1);
     assert.equal((await calls('getFields')).filter(call => call.fields.length).length, beforeManual, 'Manual completion requests no additional saved profile values.');
     assert.deepEqual((await calls('getFields')).at(-1).fields, [], 'Manual completion obtains fresh no-data navigation authorization.');
-    console.log('Widget: missing profile data blocks Next; field focus and manual completion allow one later Next.');
+    console.log('Widget: missing profile data blocks Next; field focus and manual completion allow one later Next, once the person leaves the box.');
 
     const branches = [
       { name: 'home address with same mailing; optional blanks', profile: { mailingSameAsHome: 'yes', middleName: '', suffix: '', maidenName: '', addressLine2: '', bestContactTime: '' }, check: answers => { assert.equal(answers.sameAddress1, true); assert.equal(answers.mailingAddressLine1, ''); } },
@@ -503,7 +514,7 @@ async function main() {
 
     widget = await startFixture({ profile: { programSnap: 'no', programFip: 'no', programMedicaid: 'no' } });
     await widget.locator('#autofill').click();
-    await expect(widget.locator('#need-you')).toHaveText('1 need you', { timeout: 20000 });
+    await expect(widget.locator('#need-you')).toHaveText('1 question left', { timeout: 20000 });
     console.log('Widget: an unanswered required program choice is flagged for the applicant.');
 
     // Manual completion can reveal a saved optional field. Fill that new field
@@ -533,10 +544,12 @@ async function main() {
     // consent for the applicant, then continues again and fills the applicant page.
     await resetTo(`${portal}/applyForBenefits/welcome`);
     widget = await launcherFrame();
+    // As on a first run, the card says what Stop would do; a Chrome that started Autofill again gets the short form.
+    await widget.evaluate(() => localStorage.removeItem('secondhand.autofillStarted'));
     await widget.locator('#autofill').click();
     await expect.poll(() => page.url(), { timeout: 20000 }).toBe(`${portal}/applyForBenefits/letsGetStarted`);
     widget = await launcherFrame();
-    await expect(widget.locator('#widget-text')).toHaveText('Read and accept Iowa’s consent, then click Continue.', { timeout: 20000 });
+    await expect(widget.locator('#widget-text')).toHaveText('Read and accept Iowa’s consent, then click Continue. Stop erases nothing.', { timeout: 20000 });
     await expect(widget.locator('#stop')).toBeVisible();
     await page.locator('#termChkbox').check();
     await page.locator('button.saveButton').click();
@@ -552,73 +565,159 @@ async function main() {
     // The household question is answered from saved program choices; the CAPTCHA stays with the applicant.
     await resetTo(`${portal}/applyForBenefits/guestLogin`);
     widget = await launcherFrame();
+    await widget.evaluate(() => localStorage.removeItem('secondhand.autofillStarted'));
     await widget.locator('#autofill').click();
     await expect(page.locator('#householdApplyProgYes')).toBeChecked({ timeout: 20000 });
-    await expect(widget.locator('#widget-text')).toHaveText('Filled 1 · Solve the CAPTCHA, then click Continue.', { timeout: 20000 });
+    // The fill revealed the security check, so the step after it leaves the applicant's next move on the card.
+    await expect(widget.locator('#widget-text')).toHaveText('Type the characters shown in Iowa’s security check, then click Continue. Stop erases nothing.', { timeout: 20000 });
     assert.deepEqual((await calls('getFields'))[0].fields, ['programSnap', 'programFip', 'programMedicaid']);
     assert.equal(await page.evaluate(() => window.__continues), 0);
     console.log('Autopilot: the household question is answered from saved programs and the CAPTCHA is left to the applicant.');
 
-    // After Autofill, the widget draws the whole next step inside its frame, in every language.
+    // On an Iowa page SecondHand doesn't fill, the widget says what Autofill will do, then the whole next step,
+    // every word of it on screen, in each language SecondHand speaks, in a frame never past 272 by 166 (#110).
     // The language is chosen as the side panel saves it, in the extension's own storage.
-    const frameBox = () => page.locator('[data-secondhand-assistant]').boundingBox();
+    const host = page.locator('[data-secondhand-assistant]');
+    const frameBox = () => host.boundingBox();
     const widgetLine = frame => frame.evaluate(() => {
       const text = document.getElementById('widget-text'), box = text.getBoundingClientRect(), card = document.getElementById('widget').getBoundingClientRect();
       const inside = rect => rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight;
+      // Letters overhang their line by a pixel or so; a line cut off is 16px more.
       return { text: text.textContent, shown: !text.classList.contains('visually-hidden') && box.width > 0 && box.height > 0,
-        clipped: text.scrollHeight > text.clientHeight, inFrame: inside(box) && inside(card), dir: document.documentElement.dir };
+        clipped: text.scrollHeight - text.clientHeight > 7, inFrame: inside(box) && inside(card), dir: document.documentElement.dir };
     });
     const lineProblems = async (frame, expected, code) => {
       const line = await widgetLine(frame), box = await frameBox();
       return [line.text !== expected && `text "${line.text}"`, !line.shown && 'line hidden', line.clipped && 'line clipped',
-        !line.inFrame && 'line past the frame', box.width > 272 && `frame ${box.width}px wide`, box.height > 110 && `frame ${box.height}px tall`,
+        !line.inFrame && 'line past the frame', box.width > 272 && `frame ${box.width}px wide`, box.height > 166 && `frame ${box.height}px tall`,
         line.dir !== strings.direction(code) && `dir ${line.dir}`].filter(Boolean);
     };
+    const stopNote = code => strings.text(code, 'widget.stopNote');
     const wholeSteps = [
-      { name: 'Job Information', url: selfDetailsUrl, pageKey: 'iowa-job-screening-unverified', line: code => strings.text(code, 'iowa.laterManualTodo') },
-      { name: 'unexpected Enter Personal Information', url: `${applicant}?next=unexpected`, pageKey: 'iowa-personal-unverified', line: code => strings.text(code, 'iowa.personalUnverifiedTodo') },
+      { name: 'Job Information', url: selfDetailsUrl, pageKey: 'iowa-job-screening-unverified', line: code => `${strings.text(code, 'iowa.laterManualTodo')} ${stopNote(code)}` },
+      { name: 'unexpected Enter Personal Information', url: `${applicant}?next=unexpected`, pageKey: 'iowa-personal-unverified', line: code => `${strings.text(code, 'iowa.personalUnverifiedTodo')} ${stopNote(code)}` },
       // Save and Continue disabled: SecondHand fills the page and does not continue.
       { name: 'Enter Personal Information, Save and Continue disabled', url: `${applicant}?next=stay`, pageKey: 'iowa-personal-information', disabled: true,
-        line: (code, filled) => `${strings.text(code, 'widget.filled', { count: filled })} · ${strings.text(code, 'iowa.reviewSaveContinue')}` }
+        line: (code, filled) => `${strings.text(code, 'result.thenTodo', { summary: { key: 'result.filled', params: { count: filled } }, todo: { key: 'iowa.reviewSaveContinue' } })} ${stopNote(code)}` },
+      // A question left: Autofill fills the rest and waits, with its longest line, beside the offer of the
+      // questions in the reader's language where there is one.
+      { name: 'Enter Personal Information, a question left', url: `${applicant}?next=stay`, pageKey: 'iowa-personal-information', profile: { firstName: '' },
+        line: (code, filled) => `${strings.text(code, 'result.thenTodo', { summary: { key: 'result.filled', params: { count: filled } }, todo: { key: 'iowa.missingAnswers' } })} ${strings.text(code, 'widget.stopToCheck')}` }
     ];
-    // Before Autofill there is no line, so the frame is 46px tall. On these English pages the
-    // widget may offer the page in the applicant's language instead, and that offer gets the row.
-    const beforeProblems = async (frame, code) => {
-      const state = await frame.evaluate(() => ({ line: !document.getElementById('widget-text').classList.contains('visually-hidden'), offer: !document.getElementById('translate-offer').hidden }));
-      const box = await frameBox();
-      return [state.line && 'line shown before Autofill', code === 'en' && state.offer && 'offer on an English page',
-        !state.offer && box.height !== 46 && `frame ${box.height}px tall without a line`, box.width > 272 && `frame ${box.width}px wide`, box.height > 110 && `frame ${box.height}px tall`].filter(Boolean);
+    // Before Autofill: Autofill has been started from this profile above, so the card speaks only where it matters.
+    // On the applicant page it says what the address page after it may bring; elsewhere it is its buttons. On these
+    // English pages the widget may offer the page in the applicant's language too.
+    const beforeProblems = async (frame, code, pageKey) => {
+      const offer = await frame.evaluate(() => !document.getElementById('translate-offer').hidden);
+      const english = code === 'en' && offer && 'offer on an English page';
+      if (pageKey !== 'iowa-personal-information') {
+        const shown = await frame.evaluate(() => !document.getElementById('widget-text').classList.contains('visually-hidden'));
+        return [shown && 'a line where there is nothing to say', english].filter(Boolean);
+      }
+      return [...await lineProblems(frame, strings.text(code, 'widget.addressNext'), code), english].filter(Boolean);
     };
+    // On a narrow page the widget is as wide as its buttons alone, or the least wider that shows its whole line:
+    // a frame 24px narrower would be narrower than the buttons, or would cut the line.
+    const narrowest = frame => frame.evaluate(() => {
+      const card = document.getElementById('widget'), text = document.getElementById('widget-text');
+      const width = Math.ceil(card.getBoundingClientRect().width);
+      card.style.maxWidth = '272px'; text.classList.add('visually-hidden');
+      const buttons = Math.ceil(card.getBoundingClientRect().width);
+      text.classList.remove('visually-hidden');
+      card.style.width = `${width - 24}px`;
+      const cut = text.scrollHeight - text.clientHeight > 7;
+      const detail = `${width}px wide, buttons ${buttons}px, at ${width - 24}px the line ${cut ? 'is cut' : 'shows whole'} (${text.scrollHeight} of ${text.clientHeight}), frame ${innerWidth}px`;
+      for (const property of ['max-width', 'width']) card.style.removeProperty(property);
+      return width - 24 < buttons || cut ? '' : detail;
+    });
     const measured = [];
     currentSelfVariant = 'job';
     for (const code of strings.LANGUAGES) {
       await resetTo(wholeSteps[0].url);
       await (await launcherFrame()).evaluate(code => globalThis.SecondHandStrings.setLanguage(code), code);
+      // Until Autofill is first started from this Chrome, the line says all of what it does, and all of it shows.
+      await (await launcherFrame()).evaluate(() => localStorage.removeItem('secondhand.autofillStarted'));
+      await resetTo(wholeSteps[0].url);
+      widget = await launcherFrame();
+      await expect(widget.locator('#autofill')).toBeVisible({ timeout: 20000 });
+      await expect.poll(() => lineProblems(widget, strings.text(code, 'widget.iowaReady'), code), { timeout: 10000, message: `${code} before the first Autofill` }).toEqual([]);
+      const first = await frameBox();
+      measured.push(`${code} before the first Autofill: ${first.width}x${first.height}`);
+      await widget.evaluate(() => localStorage.setItem('secondhand.autofillStarted', '1'));
       for (const step of wholeSteps) {
-        await resetTo(step.url);
+        await resetTo(step.url, { profile: step.profile });
         widget = await launcherFrame();
-        await expect(widget.locator('#autofill')).toBeVisible();
+        await expect(widget.locator('#autofill')).toBeVisible({ timeout: 20000 });
         if (step.disabled) await page.locator('.saveAndContinueButton').evaluate(button => button.setAttribute('disabled', ''));
-        await expect.poll(() => beforeProblems(widget, code), { timeout: 10000, message: `${code} ${step.name} before Autofill` }).toEqual([]);
+        await expect.poll(() => beforeProblems(widget, code, step.pageKey), { timeout: 10000, message: `${code} ${step.name} before Autofill` }).toEqual([]);
         const before = await frameBox();
         const offered = await widget.locator('#translate-offer').isVisible();
+        if (step.pageKey === 'iowa-personal-information' || offered) assert.ok(before.height > 46, `${code} ${step.name} before Autofill: the frame holds the line (${before.width} by ${before.height})`);
+        else assert.equal(before.height, 46, `${code} ${step.name} before Autofill: the card is its buttons`);
+        // As on a first run, so the line after the click is its longest: it ends with what Stop would do.
+        await widget.evaluate(() => localStorage.removeItem('secondhand.autofillStarted'));
         await widget.locator('#autofill').click();
         await expect.poll(async () => (await widget.evaluate(() => chrome.runtime.sendMessage({ type: 'ui:pageState' })))?.data?.result?.state, { timeout: 20000 }).toMatch(/^(waiting|done)$/);
         const { page: probed, result } = (await widget.evaluate(() => chrome.runtime.sendMessage({ type: 'ui:pageState' }))).data;
         assert.equal(probed.pageKey, step.pageKey, `${step.name} is classified as ${step.pageKey}`);
-        if (step.disabled) assert.ok(result.filled > 0, 'SecondHand fills the applicant page');
+        if (step.disabled || step.profile) assert.ok(result.filled > 0, 'SecondHand fills the applicant page');
         // A disabled button fires no click, so the worker's own result says it never tried to continue
         // (it would say it is continuing, or waiting after a try).
         if (step.disabled) assert.equal(result.state, 'done', 'SecondHand does not try to continue');
+        // Autofill is still on, waiting for the applicant: the line ends with what Stop would do.
         const expected = step.line(code, result.filled);
         await expect.poll(() => lineProblems(widget, expected, code), { timeout: 10000, message: `${code} ${step.name}` }).toEqual([]);
         assert.equal(await page.evaluate(() => window.__nextClicks || 0), 0, 'SecondHand does not continue');
+        if (!step.disabled && !step.profile) assert.deepEqual(await calls('getFields'), [], 'nothing is asked of the desktop for a page SecondHand does not fill');
         const after = await frameBox();
         measured.push(`${code} ${step.name}: ${before.width}x${before.height} before${offered ? ' (language offer)' : ''}, ${after.width}x${after.height} after`);
       }
     }
     for (const line of measured) console.log(`Widget frame, ${line}.`);
-    console.log('Widget: after Autofill, the whole next step shows inside the frame in all six languages, and Arabic reads right to left.');
+    console.log(`Widget: on Iowa pages SecondHand doesn’t fill, what Autofill will do and then the whole next step show in ${strings.LANGUAGES.join(', ')}, in a frame no larger than 272 by 166, and Arabic reads right to left.`);
+    await (await launcherFrame()).evaluate(() => globalThis.SecondHandStrings.setLanguage('en'));
+
+    // The keyboard can hide the widget, down to its logo and the word Show in the page's corner, and bring it back from there.
+    widget = await startFixture();
+    await widget.locator('#autofill').focus();
+    await page.keyboard.press('Tab');
+    await expect(widget.locator('#hide')).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(widget.locator('#pill')).toBeFocused();
+    await expect(widget.locator('#autofill')).toBeHidden();
+    await expect.poll(async () => { const box = await host.boundingBox(); return box.height === 46 && box.width > 46 && box.width < 140; }, { timeout: 10000 }).toBe(true);
+    assert.equal(await host.evaluate(element => element.style.borderRadius), '23px');
+    await expect(widget.locator('#pill-label')).toHaveText('Show');
+    // The logo fills its round frame, so the keyboard's ring is drawn inside the circle, where it shows.
+    await expect(widget.locator('#pill:focus-visible')).toBeVisible();
+    const ring = await widget.evaluate(() => { const style = getComputedStyle(document.getElementById('pill')); return [style.outlineStyle, style.outlineWidth, style.outlineOffset]; });
+    assert.deepEqual(ring, ['solid', '3px', '-5px'], 'a 3px ring, 5px inside the logo’s edge');
+    await page.keyboard.press('Enter');
+    await expect(widget.locator('#autofill')).toBeVisible();
+    await expect(widget.locator('#hide')).toBeFocused();
+    await expect.poll(async () => (await host.boundingBox()).height, { timeout: 10000 }).toBeGreaterThan(46);
+    assert.equal(await host.evaluate(element => element.style.borderRadius), '12px');
+    assert.deepEqual(await calls('getFields'), [], 'hiding and showing the widget asks nothing of the desktop');
+    // Hidden, the card stays hidden on the tab's next page, and its logo says when the hidden card needs the reader.
+    await widget.locator('#hide').click();
+    await expect(widget.locator('#pill')).toBeVisible();
+    await page.goto(`${portal}/applyForBenefits/guestLogin`, { waitUntil: 'domcontentloaded' });
+    widget = await launcherFrame();
+    await expect(widget.locator('#pill')).toBeVisible({ timeout: 15000 });
+    await expect(widget.locator('#widget')).toBeHidden();
+    await expect.poll(async () => { const box = await host.boundingBox(); return box.height === 46 && box.width > 46 && box.width < 140; }, { timeout: 10000 }).toBe(true);
+    await expect(widget.locator('#pill-label')).toHaveText('Show');
+    await expect(widget.locator('#pill')).toHaveAttribute('aria-label', 'Show SecondHand’s card');
+    await widget.locator('#pill').click();
+    await expect(widget.locator('#autofill')).toBeVisible();
+    await widget.locator('#autofill').click();
+    await expect(page.locator('#householdApplyProgYes')).toBeChecked({ timeout: 20000 });
+    await widget.locator('#hide').click();
+    await expect(widget.locator('#pill')).toHaveClass(/waiting/);
+    await expect(widget.locator('#pill')).toHaveAttribute('aria-label', 'Show · needs you: SecondHand’s card');
+    await widget.locator('#pill').click();
+    await expect(widget.locator('#stop')).toBeVisible();
+    console.log('Widget: Tab reaches its hide control; Enter leaves the round logo, and Enter on the logo brings the widget back. Hidden, it stays hidden on the next page, and the logo says when it needs the reader.');
 
     // A narrow page (an old laptop at high zoom with the side panel open leaves about 260px): the
     // widget keeps its buttons' width and its line takes more rows, all of it inside the frame.
@@ -627,26 +726,30 @@ async function main() {
       const { result } = (await widget.evaluate(() => chrome.runtime.sendMessage({ type: 'ui:pageState' }))).data;
       await expect.poll(() => lineProblems(widget, expected(result.filled), code), { timeout: 10000, message: `${code} at ${page.viewportSize().width}px` }).toEqual([]);
     };
-    const narrow = [];
     await page.setViewportSize({ width: 260, height: 900 });
     for (const code of strings.LANGUAGES) {
       await (await launcherFrame()).evaluate(code => globalThis.SecondHandStrings.setLanguage(code), code);
       await resetTo(selfDetailsUrl);
       widget = await launcherFrame();
-      await expect.poll(() => beforeProblems(widget, code), { timeout: 10000, message: `${code} at 260px before Autofill` }).toEqual([]);
+      await expect.poll(() => beforeProblems(widget, code, 'iowa-self-details-unverified'), { timeout: 10000, message: `${code} at 260px before Autofill` }).toEqual([]);
       const before = await frameBox();
+      await expect.poll(() => narrowest(widget), { timeout: 10000, message: `${code} at 260px before Autofill: the widget is as narrow as its line lets it be` }).toBe('');
+      // As on a first run, so the line is its longest (see above).
+      await widget.evaluate(() => localStorage.removeItem('secondhand.autofillStarted'));
       await widget.locator('#autofill').click();
       await settledLine(code, () => wholeSteps[0].line(code));
+      await expect.poll(() => narrowest(widget), { timeout: 10000, message: `${code} at 260px: the widget is as narrow as its line lets it be` }).toBe('');
       const after = await frameBox();
-      assert.ok(after.width <= before.width, `${code} at 260px: the line makes the widget no wider`);
-      narrow.push(`${code} Job Information at 260px: ${before.width}x${before.height} before, ${after.width}x${after.height} after`);
+      console.log(`Widget frame, ${code} Job Information at 260px: ${before.width}x${before.height} before, ${after.width}x${after.height} after.`);
     }
     currentSelfVariant = 'verified';
 
-    // Save and Continue stays as clear of the widget as main left it, on Enter Personal Information
-    // scrolled to the bottom. At 390px main's widget already covers its right edge. Under 640px the
+    // Save and Continue stays clear of the widget, on Enter Personal Information scrolled to the bottom:
+    // its left at every width, and all of it from 512px. The widget's buttons, its hide control and the
+    // offer of the questions in the reader's language make it wider than the compact widget before it, so
+    // under 512px it covers more of the button's right side (the reader can hide it). Under 640px the
     // widget's width doesn't depend on the page's, so 390px also shows each language's line fits.
-    const clearOf = { 390: ['left', 'center'], 427: ['left', 'center', 'right'], 455: ['left', 'center', 'right'], 512: ['left', 'center', 'right'], 640: ['left', 'center', 'right'] };
+    const clearOf = { 390: ['left'], 427: ['left', 'center'], 455: ['left', 'center'], 512: ['left', 'center', 'right'], 640: ['left', 'center', 'right'] };
     for (const code of strings.LANGUAGES) {
       await (await launcherFrame()).evaluate(code => globalThis.SecondHandStrings.setLanguage(code), code);
       for (const [width, points] of Object.entries(clearOf).filter(([width]) => ['en', 'es'].includes(code) || width === '390')) {
@@ -655,26 +758,26 @@ async function main() {
         widget = await launcherFrame();
         await expect(widget.locator('#autofill')).toBeVisible();
         await page.locator('.saveAndContinueButton').evaluate(button => button.setAttribute('disabled', ''));
-        await expect.poll(() => beforeProblems(widget, code), { timeout: 10000, message: `${code} at ${width}px before Autofill` }).toEqual([]);
+        await expect.poll(() => beforeProblems(widget, code, 'iowa-personal-information'), { timeout: 10000, message: `${code} at ${width}px before Autofill` }).toEqual([]);
         const before = await frameBox();
+        await widget.evaluate(() => localStorage.removeItem('secondhand.autofillStarted'));
         await widget.locator('#autofill').click();
         await settledLine(code, filled => wholeSteps[2].line(code, filled));
+        if (Number(width) < 640) await expect.poll(() => narrowest(widget), { timeout: 10000, message: `${code} at ${width}px: the widget is as narrow as its line lets it be` }).toBe('');
         const after = await frameBox();
-        if (Number(width) < 640) assert.ok(after.width <= before.width, `${code} at ${width}px: the line makes the widget no wider`);
         await page.evaluate(() => window.scrollTo(0, document.scrollingElement.scrollHeight));
-        const clear = await page.evaluate(() => {
+        const { clear, button } = await page.evaluate(() => {
           const button = document.querySelector('.saveAndContinueButton'), box = button.getBoundingClientRect(), y = box.top + box.height / 2;
-          return [['left', box.left + 2], ['center', box.left + box.width / 2], ['right', box.right - 2]]
-            .filter(([, x]) => button.contains(document.elementFromPoint(x, y))).map(([point]) => point);
+          return { clear: [['left', box.left + 2], ['center', box.left + box.width / 2], ['right', box.right - 2]]
+            .filter(([, x]) => button.contains(document.elementFromPoint(x, y))).map(([point]) => point), button: `${Math.round(box.left)}..${Math.round(box.right)} by ${Math.round(box.top)}..${Math.round(box.bottom)}` };
         });
+        console.log(`Widget frame, ${code} Save and Continue disabled at ${width}px: ${before.width}x${before.height} before, ${after.width}x${after.height} after (${Math.round(after.x)}..${Math.round(after.x + after.width)} by ${Math.round(after.y)}..${Math.round(after.y + after.height)}); button at ${button}, clear at ${clear.join(', ') || 'no point'}.`);
         for (const point of points) assert.ok(clear.includes(point), `${code} at ${width}px: Save and Continue's ${point} is clear of the widget (clear: ${clear.join(', ') || 'none'})`);
-        narrow.push(`${code} Save and Continue disabled at ${width}px: ${before.width}x${before.height} before, ${after.width}x${after.height} after; button clear at ${clear.join(', ') || 'no point'}`);
       }
     }
     await page.setViewportSize({ width: 1200, height: 900 });
     await widget.evaluate(key => localStorage.removeItem(key), strings.STORAGE_KEY);
-    for (const line of narrow) console.log(`Widget frame, ${line}.`);
-    console.log('Widget: on narrow pages it stays inside its frame, keeps its buttons\' width, and leaves Save and Continue as clear as before.');
+    console.log('Widget: on narrow pages it stays inside its frame, is as narrow as its line lets it be, and leaves Save and Continue\'s left clear.');
 
     // Other portal pages show only a small pill and never contact the desktop.
     await resetTo(`${portal}/applyForBenefits/householdMembers`);
@@ -691,7 +794,10 @@ async function main() {
     await widget.locator('#details').click();
     panel = await attachNativePanel(context, page, extensionId);
     await expect.poll(() => panel.text('[data-key="lastName"]'), { timeout: 15000 }).toContain('Done');
-    await expect.poll(() => panel.text('#desktop-status')).toContain('unlocked');
+    // An unlocked app needs nothing from the applicant, so the panel's desktop row stays out of the way.
+    assert.deepEqual(await panel.evaluate(async () => { const { data } = await chrome.runtime.sendMessage({ type: 'ui:desktopStatus' }); return [data.connected, data.unlocked]; }), [true, true]);
+    assert.equal(await panel.visible('#desktop-status'), false);
+    assert.equal(await panel.text('#desktop-status'), '');
     const sidebarText = await panel.evaluate(() => document.body.innerText);
     const sidebarMessage = await panel.evaluate(async () => {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -703,22 +809,36 @@ async function main() {
     }
     await panel.screenshot(path.join(root, 'artifacts/extension-native-sidebar.png'));
     console.log('Side panel: checklist and desktop status without profile values.');
+    // Autofill's button and status stay in view while the checklist scrolls, and never cover the row the
+    // keyboard is on: from the end of the list, focus on the first row brings it into view below them.
+    const pinned = await panel.evaluate(async () => {
+      const scroller = document.getElementById('sidepanel'), strip = document.querySelector('.actions'), row = document.querySelector('#page-checklist .checklist-item');
+      scroller.scrollTop = scroller.scrollHeight;
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const scrolled = scroller.scrollTop > 200, held = Math.round(strip.getBoundingClientRect().top) === 0 && document.getElementById('panel-autofill').getClientRects().length > 0;
+      row.focus();
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      return { scrolled, held, clear: row.getBoundingClientRect().top >= strip.getBoundingClientRect().bottom };
+    });
+    assert.deepEqual(pinned, { scrolled: true, held: true, clear: true });
+    await panel.evaluate(() => { document.activeElement.blur(); document.getElementById('sidepanel').scrollTop = 0; });
+    console.log('Side panel: Autofill and its status stay in view over the scrolled checklist, clear of the row in focus.');
 
     // With SecondHand closed, Autofill fills nothing and the one desktop line and its Open SecondHand
     // button say so, not a red repeat under Autofill. Opening it waits for the app, then offers Unlock.
     await resetTo(`${applicant}?next=stay`);
     await worker.evaluate(() => { globalThis.__nativeSmoke.closed = true; });
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await panel.click('#panel-autofill');
-    await expect.poll(() => panel.text('#desktop-status'), { timeout: 15000 }).toBe('SecondHand isn’t running. Open the app on this computer.');
+    await expect.poll(() => panel.text('#desktop-status'), { timeout: 15000 }).toBe('The SecondHand app on this computer is closed.');
     await expect.poll(() => panel.text('#desktop-action')).toBe('Open SecondHand');
     assert.equal(await panel.visible('#desktop-action'), true);
-    await expect.poll(() => panel.text('#status')).toBe('Click Autofill. SecondHand fills what it can and tells you what it needs.');
+    await expect.poll(() => panel.text('#status')).toBe('');
     assert.equal(await panel.evaluate(() => document.getElementById('status').classList.contains('error')), false);
     await expect(page.locator('#firstName')).toHaveValue('');
     await expect((await launcherFrame()).locator('#open-app')).toBeVisible({ timeout: 15000 });
     await panel.click('#desktop-action');
-    await expect.poll(() => panel.text('#desktop-status'), { timeout: 10000 }).toBe('SecondHand is locked.');
+    await expect.poll(() => panel.text('#desktop-status'), { timeout: 10000 }).toBe('The SecondHand app on this computer is locked.');
     await expect.poll(() => panel.text('#desktop-action')).toBe('Unlock');
     assert.equal((await calls('openApp')).length, 1);
     await panel.click('#desktop-action');
@@ -733,7 +853,7 @@ async function main() {
     await page.locator('#sameAddress2').check();
     await page.locator('#mailingAddressLine1').fill('Preserved fictional mailing');
     await page.locator('#sameAddress2').evaluate(element => { element.checked = false; });
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await panel.click('#panel-autofill');
     await expect(page.locator('#lastName')).toHaveValue(syntheticProfile.lastName, { timeout: 20000 });
     await expect(page.locator('#firstName')).toHaveValue('Preserved fictional name');
@@ -749,7 +869,7 @@ async function main() {
       verifiedApplicantClicks = 0; verifiedAddressLoads = 0; documentManualLoads = 0; verifiedAddressNext.length = 0;
       await resetTo(`${applicant}?next=verified-address-${variant}`, { profile: { mailingSameAsHome: 'yes' } });
       await worker.evaluate(() => { globalThis.__nativeSmoke.holdAddressNavigation = true; });
-      await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+      await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
       await panel.click('#panel-autofill');
       await expect.poll(() => page.url(), { timeout: 20000 }).toBe(addressUrl);
       await expect.poll(() => worker.evaluate(() => globalThis.__nativeSmoke.addressAuthorizationWaiting), { timeout: 20000 }).toBe(true);
@@ -781,7 +901,7 @@ async function main() {
     for (const variant of ['error', 'modal', 'mailing']) {
       currentAddressVariant = variant; verifiedAddressNext.length = 0;
       await resetTo(addressUrl);
-      await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+      await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
       const before = await page.evaluate(() => JSON.stringify(document.__addressQa));
       const requests = (await calls('getFields')).length;
       await autofillSettled();
@@ -799,8 +919,8 @@ async function main() {
     await resetTo(addressUrl);
     await expect(page.locator('#homeAddressIndex1')).toBeChecked();
     await expect(enteredCounty).toBeVisible();
-    await expect.poll(() => panel.text('[data-key="addressReview"]')).toContain('Needs you');
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('[data-key="addressReview"]')).toContain('Not filled yet');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await panel.click('#panel-autofill');
     await expect.poll(() => page.url(), { timeout: 20000 }).toBe(documentManualUrl);
     await expect.poll(() => verifiedAddressNext.length).toBe(1);
@@ -814,7 +934,7 @@ async function main() {
     await resetTo(addressUrl);
     await expect(enteredCounty).toBeVisible();
     const countyBefore = await enteredCounty.inputValue();
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await panel.click('#panel-autofill');
     await expect.poll(() => page.evaluate(() => document.__addressQa.selectionClicks.length), { timeout: 20000 }).toBe(1);
     await expect.poll(() => panel.text('[data-key="addressReview"]')).toContain('Do it yourself');
@@ -827,7 +947,7 @@ async function main() {
     console.log('Address county stays visible: stays manual; Save and Continue not pressed and the county untouched.');
 
     await resetTo(`${applicant}?next=address-review`, { profile: { mailingSameAsHome: 'yes' } });
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await panel.click('#panel-autofill');
     await expect(page.locator('[data-qa-only]')).toBeVisible({ timeout: 20000 });
     await expect.poll(() => panel.text('[data-key="addressReview"]')).toContain('address');
@@ -842,7 +962,7 @@ async function main() {
     currentAddressVariant = 'original'; verifiedAddressNext.length = 0;
     await resetTo(addressUrl);
     await worker.evaluate(() => { globalThis.__nativeSmoke.lockAfterFields = true; });
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await panel.click('#panel-autofill');
     await expect.poll(() => panel.text('#status')).toMatch(/lock|unlock|changed/i);
     await expect(page.locator('#homeAddressIndex1')).toBeChecked();
@@ -856,7 +976,7 @@ async function main() {
     await resetTo(selfDetailsUrl);
     const untouched = await selfControls();
     await expect.poll(() => panel.text('[data-key="birthDate"]')).toContain('Date of birth');
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await panel.click('#panel-autofill');
     await expect(page.locator(`[id="${selfFixture.DOB_ID}"]`)).toHaveValue('04/12/1985', { timeout: 20000 });
     await expect.poll(() => panel.text('[data-key="birthDate"]')).toContain('Done');
@@ -876,7 +996,7 @@ async function main() {
     for (const variant of ['people', 'form', 'heading']) {
       currentSelfVariant = variant;
       await resetTo(selfDetailsUrl);
-      await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+      await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
       await autofillSettled();
       await expect(page.locator(`[id="${selfFixture.DOB_ID}"]`)).toHaveValue('');
       assert.deepEqual(await calls('getFields'), []);
@@ -898,7 +1018,7 @@ async function main() {
     const answered = [['gender', 2], ['hasSsn', 1], ['ssnCardName', 1], ['usCitizen', 1], ['militaryOrVeteran', 2], ['hasDisability', 2], ['blind', 2], ['healthLimits', 2], ['hasMedicare', 2]]
       .map(([key, option]) => tellUsMore.radioId(tellUsMore.ANSWERS[key], option));
     await expect.poll(() => panel.text('[data-key="gender"]')).toContain('Are you male or female?');
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await panel.click('#panel-autofill');
     await expect(page.locator(`[id="${tellUsMore.DOB_ID}"]`)).toHaveValue('04/12/1985', { timeout: 20000 });
     await expect.poll(startChecked, { timeout: 20000 }).toEqual(answered);
@@ -929,7 +1049,7 @@ async function main() {
     await resetTo(startDetailsUrl, { profile: sensitiveProfile });
     await expect(page.locator(`[id="${tellUsMore.SSN_BOX_ID}"]`)).toBeHidden();
     for (const id of cardIds) await expect(page.locator(`[id="${id}"]`)).toBeHidden();
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await panel.click('#panel-autofill');
     await expect.poll(startBoxes, { timeout: 20000 }).toEqual(['123-45-6789', 'Alex', 'Quinn', 'Sample']);
     await expect(page.locator(`[id="${tellUsMore.radioId(11, 2)}"]`)).toBeChecked();
@@ -956,7 +1076,7 @@ async function main() {
     await page.locator(`[id="${tellUsMore.radioId(11, 2)}"]`).check();
     await page.locator(`[id="${tellUsMore.SSN_BOX_ID}"]`).fill('321-54-9876');
     await page.locator(`[id="${cardIds[0]}"]`).fill('Existing card name');
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await panel.click('#panel-autofill');
     await expect.poll(startBoxes, { timeout: 20000 }).toEqual(['321-54-9876', 'Existing card name', 'Quinn', 'Sample']);
     await expect(ssnMirror()).toHaveValue('');
@@ -965,7 +1085,7 @@ async function main() {
 
     currentStartVariant = 'people';
     await resetTo(startDetailsUrl, { profile: sensitiveProfile });
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await autofillSettled();
     assert.deepEqual(await calls('getFields'), []);
     assert.deepEqual(await startBoxes(), ['', '', '', '']);
@@ -982,7 +1102,7 @@ async function main() {
     async function startCompleteCase(variant = 'verified', profile = {}) {
       currentStartVariant = variant;
       await resetTo(startDetailsUrl, { profile: { ...completeStartProfile, ...profile } });
-      await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+      await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
       const since = await workerState();
       await panel.click('#panel-autofill');
       await settled(since);
@@ -1060,13 +1180,16 @@ async function main() {
     }
     currentStartVariant = 'verified';
 
-    // With nothing saved, nothing is filled and each row points to My information.
+    // With nothing saved, nothing is filled; each row says to type the answer in Iowa's form, and one note above
+    // the list says where to save answers for next time.
     await resetTo(startDetailsUrl, { profile: Object.fromEntries(startFields.map(field => [field, ''])) });
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await panel.click('#panel-autofill');
     for (const key of startRows.filter(key => key !== 'ssnCardName')) {
-      await expect.poll(() => panel.text(`[data-key="${key}"]`), { timeout: 20000 }).toContain('Not saved in SecondHand: add it in My information');
+      await expect.poll(() => panel.text(`[data-key="${key}"]`), { timeout: 20000 }).toContain('No saved answer: type it in Iowa’s form');
     }
+    assert.equal(await panel.visible('#checklist-note'), true);
+    assert.match(await panel.text('#checklist-note'), /add it in the SecondHand app, under My information/);
     await settled();
     assert.deepEqual(await startChecked(), []);
     await expect(page.locator(`[id="${tellUsMore.DOB_ID}"]`)).toHaveValue('');
@@ -1074,14 +1197,14 @@ async function main() {
     assert.deepEqual(await startBoxes(), ['', '', '', '']);
     assert.deepEqual(await page.evaluate(() => window.__startQa), { nextClicks: 0, shown: [] });
     assert.deepEqual((await calls('getFields')).map(call => call.fields), [startFields]);
-    console.log('Tell Us More (dynamicQuestionsStart), nothing saved: nothing filled; every row says it is not saved and points to My information.');
+    console.log('Tell Us More (dynamicQuestionsStart), nothing saved: nothing filled; every row says to type the answer in Iowa’s form, and a note points to My information.');
 
     // Captured later scalar form through the actual extension. The origin,
     // document injection, UI gesture and one-use Next are real; Iowa handlers
     // and desktop answers remain the explicit isolated QA stubs above.
     await resetTo(backgroundUrl, { profile: { iowaResident: 'yes', migrantSeasonalFarmworker: 'no', preferredLanguage: 'English',
       naturalizedCitizen: 'no', birthState: 'IA', race: '' } });
-    await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+    await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     await panel.click('#panel-autofill');
     await expect(page.locator('[id="answerSets0.answers187.answerValue"]')).toHaveValue('Iowa', { timeout: 20000 });
     await expect.poll(() => page.evaluate(() => window.__backgroundQa.nextClicks), { timeout: 20000 }).toBe(1);
@@ -1099,7 +1222,7 @@ async function main() {
     async function resetJob({ record = fictionalJob, lockAfterRecord = false, holdRecord = false } = {}) {
       await resetTo(jobFixture.URL);
       await worker.evaluate(options => Object.assign(globalThis.__nativeSmoke, options), { record, lockAfterRecord, holdRecord });
-      await expect.poll(() => panel.text('#panel-autofill')).toBe('Autofill this page');
+      await expect.poll(() => panel.text('#panel-autofill')).toBe('Start Autofill');
     }
     await resetJob();
     await panel.click('#panel-autofill');

@@ -115,10 +115,10 @@ test('each English sentence has one key, so fixed English text maps back to exac
 test('text fills parameters, nests messages, picks plural forms, and refuses a missing key or parameter', () => {
   assert.equal(strings.text('en', 'worker.stoppedAfterSteps', { steps: 15 }), 'Stopped after 15 steps. Check this page, then click Autofill to keep going.');
   assert.equal(strings.text('en', 'result.thenTodo', { summary: { key: 'result.filled', params: { count: 3 } }, todo: { key: 'worker.checkThenContinue' } }),
-    'Filled 3. Check your answers, then click Continue.');
+    'Filled 3 answers. Check your answers, then click Continue.');
   assert.equal(strings.text('es', 'widget.needYou', { count: 1 }), 'Falta 1');
   assert.equal(strings.text('es', 'widget.needYou', { count: 2 }), 'Faltan 2');
-  assert.equal(strings.text('en', 'widget.needYou', { count: 2 }), '2 need you');
+  assert.equal(strings.text('en', 'widget.needYou', { count: 2 }), '2 questions left');
   assert.throws(() => strings.text('es', 'no.such.key'), /no\.such\.key/);
   assert.throws(() => strings.text('en', 'worker.stoppedAfterSteps', {}), /steps/);
   assert.throws(() => strings.text('de', 'widget.autofill'), /de/);
@@ -141,7 +141,7 @@ test('the language is the saved choice, otherwise the browser language, and a ch
 });
 
 test('fixed English from the Iowa adapter maps to its key; anything else is passed through as a detail', () => {
-  assert.deepEqual(strings.describeEnglish('Solve the CAPTCHA, then click Continue.'), { key: 'iowa.solveCaptcha', params: {} });
+  assert.deepEqual(strings.describeEnglish('Type the characters shown in Iowa’s security check, then click Continue.'), { key: 'iowa.solveCaptcha', params: {} });
   assert.deepEqual(strings.describeEnglish('First name: review existing dependent answers'),
     { key: 'iowa.reviewDependent', params: { label: { key: 'iowa.firstName', params: {} } } });
   assert.deepEqual(strings.describeEnglish('Receiving end does not exist.'), { key: 'detail', params: { detail: 'Receiving end does not exist.' } });
@@ -375,6 +375,14 @@ test('on Enter Personal Information, SecondHand says plainly what needs the appl
   assert.equal(en['iowa.manualReview'], 'Check the questions and any Iowa error messages on this page, because something here isn’t what SecondHand expects');
 });
 
+test('Iowa’s security check is named in plain words: no catalog says "CAPTCHA"', () => {
+  for (const code of strings.LANGUAGES) {
+    const found = Object.entries(strings.catalogs[code]).filter(([, value]) => /captcha/i.test(typeof value === 'string' ? value : `${value.one} ${value.other}`)).map(([key]) => key);
+    assert.deepEqual(found, [], code);
+  }
+  assert.equal(en['iowa.solveCaptcha'], 'Type the characters shown in Iowa’s security check, then click Continue.');
+});
+
 test('on Enter Personal Information, when SecondHand will not save and continue, it does not say it will', () => {
   const url = `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo`;
   const filled = () => {
@@ -438,9 +446,9 @@ test('#189: in every language, the summary’s count of suggested answers never 
     for (const key of ['widget.layaGuessed', 'result.layaGuessed']) for (const text of [catalog[key].one, catalog[key].other]) assert.match(text, pattern, `${code} ${key} says guess`);
     assert.match(catalog['guesses.title'], pattern, `${code} guesses.title says guess`);
     // The fills an AI suggested (or a rule left to check), outlined in dashed amber, and the line that says Laya suggested them.
+    // The counts say "1 answer" or "2 answers", so a count can be one form or two; neither says guess.
     for (const key of ['widget.filledSuggested', 'result.siteFilledSuggested', 'result.siteFilledSuggestedNeedYou', 'result.suggestedByLaya']) {
-      assert.equal(typeof catalog[key], 'string', `${code} ${key}`);
-      assert.doesNotMatch(catalog[key], pattern, `${code} ${key}`);
+      for (const text of typeof catalog[key] === 'string' ? [catalog[key]] : [catalog[key].one, catalog[key].other]) assert.doesNotMatch(text, pattern, `${code} ${key}`);
     }
   }
   for (const key of ['widget.filledGuessed', 'result.siteFilledGuessed', 'result.siteFilledGuessedNeedYou']) assert.equal(Object.hasOwn(en, key), false, `${key} is gone`);
@@ -484,7 +492,7 @@ test('the completeness check itself catches English passed to the screen', () =>
     $('status').textContent = ready ? 'Ready' : \`\${count} need you\`;
     button.title = 'Open details';
     row.setAttribute('aria-label', \`\${label}: Done\`);
-    show({ key: 'panel.filling' }); mark.textContent = '✓'; // show('commented out')`));
+    show({ key: 'panel.stopping' }); mark.textContent = '✓'; // show('commented out')`));
   assert.deepEqual(found.map(item => item.text), ['That field isn’t on screen right now.', 'Ready', ' need you', 'Open details', ': Done']);
 });
 
@@ -545,8 +553,8 @@ test('French keeps « and » on the same line as the words they quote, with a no
     }
   }
   assert.deepEqual(unique(found), [], 'every « is followed and every » preceded by U+00A0');
-  assert.equal(opening, 61, 'French has 61 «');
-  assert.equal(closing, 61, 'French has 61 »');
+  assert.equal(opening, 76, 'French has 76 «');
+  assert.equal(closing, 76, 'French has 76 »');
 });
 
 test('Remember for next time, its refusals, and the custom answers summary speak all six languages (#186)', () => {
@@ -557,7 +565,7 @@ test('Remember for next time, its refusals, and the custom answers summary speak
     if (code !== 'en') assert.notDeepEqual(strings.catalogs[code][key], en[key], `${code} ${key} is translated`);
   }
   assert.equal(strings.english('result.fromCustom', { summary: { key: 'result.siteFilled', params: { count: 2 } }, count: 1 }),
-    'Filled 2. Check your answers before you submit. 1 from your custom answers.');
+    'Filled 2 answers. Check them before you submit. 1 from your custom answers.');
   assert.equal(strings.english('remember.check'), 'Remember for next time');
 });
 
@@ -565,7 +573,8 @@ test('every language is named in its own words in every catalog and offered in t
   const natives = { en: 'English', es: 'Español', vi: 'Tiếng Việt', zh: '中文（简体）', fr: 'Français', ar: 'العربية' };
   for (const code of strings.LANGUAGES) for (const [name, native] of Object.entries(natives)) assert.equal(strings.catalogs[code][`language.${name}`], native, `${code} language.${name}`);
   const html = source('panel.html');
-  for (const code of strings.LANGUAGES) assert.match(html, new RegExp(`<option value="${code}" data-i18n="language\\.${code}"></option>`));
+  // Each one marked as its language, for a screen reader's voice.
+  for (const code of strings.LANGUAGES) assert.match(html, new RegExp(`<option value="${code}" lang="${code}" data-i18n="language\\.${code}"></option>`));
 });
 
 test('Arabic reads right to left; the others left to right', () => {
@@ -593,4 +602,12 @@ test('Add your household and its hints speak all six languages, and name the app
   assert.equal(strings.english('household.add'), 'Add your household');
   // The app stays in English: every language names its row as My information does.
   for (const code of strings.LANGUAGES) assert.match(strings.text(code, 'household.hintPerson', { number: 3 }), /Person 3/, code);
+});
+
+test('the hidden card’s name begins with the words it shows, in every language, so it can be said to be clicked (WCAG 2.5.3)', () => {
+  for (const code of strings.LANGUAGES) {
+    const catalog = strings.catalogs[code];
+    assert.ok(catalog['widget.showTitle'].startsWith(catalog['widget.show']), `${code} widget.showTitle`);
+    assert.ok(catalog['widget.showWaitingTitle'].startsWith(catalog['widget.showWaiting']), `${code} widget.showWaitingTitle`);
+  }
 });

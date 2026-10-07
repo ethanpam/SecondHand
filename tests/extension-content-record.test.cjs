@@ -37,6 +37,19 @@ test('record context is private to a current extension request, while ordinary p
   assert.equal(page.request({ type: 'secondhand:recordContext', token: selected.scan.token, pageInstance: selected.pageInstance }, { id: 'untrusted-extension' }), undefined);
 });
 
+test('page state never takes a script’s input for the person typing, so SecondHand’s own fills cannot hold Autofill back', async t => {
+  const page = tab(t); await tick();
+  assert.equal(page.state().typing, false);
+  // The person's own keystrokes are trusted events, which only a real browser sends: the extension smoke types them.
+  page.selectOwner('1'); await tick();
+  const box = [...page.document.querySelectorAll('input[type="text"]')].find(input => !input.disabled);
+  box.focus();
+  box.value = 'Set by a script';
+  box.dispatchEvent(new page.window.Event('input', { bubbles: true }));
+  assert.equal(page.document.activeElement, box);
+  assert.equal(page.state().typing, false);
+});
+
 test('record context rejects a stale token, another document, a changed URL, expiry, and a consumed fill preview', async t => {
   const page = tab(t), other = tab(t); await tick();
   const state = page.state(), otherState = other.state();

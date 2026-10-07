@@ -10,15 +10,20 @@
   let pending = null;
   let navigation = null;
   let revision = 0;
+  // The text box the person last typed in, until they leave it. While they are in it they may still be typing,
+  // so Autofill waits to click Save and Continue. SecondHand's own fills send untrusted events and never count.
+  let typedIn = null;
   let panelHost = null;
   let panelFrame = null;
   let generalUrl = ''; // the unverified page where the general engine found fields
-  let messageRow = false; // the widget shows a line the reader must act on, taller
+  let messageRow = false; // the widget shows a line to read above its row
   let card = {}; // the widget's measured size; empty until it measures
   let full = false; // the page gets the full widget, not the pill
+  let cardHidden = false; // the reader hid the widget: its frame is the logo and the word that shows it again
   const strings = value => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
   // The widget's frame is as wide as the widget measured itself, never past 272px or the screen.
   const fits = width => Number.isInteger(width) && width > 0 && width <= 1000;
+  const tall = height => Number.isInteger(height) && height >= 46 && height <= 166;
   const frameWidth = width => `min(${width || 272}px, 272px, calc(100vw - 24px))`;
   const SIZES = ['width', 'height', 'narrowWidth', 'narrowHeight'];
 
@@ -40,17 +45,41 @@
       const page = withOwnPanelHidden(() => adapter.probePage(document, location.href));
       full = page.kind === 'fillable' || page.kind === 'info' || Boolean(page.todo) || generalUrl === location.href;
     } catch { full = false; }
+    full = full && !cardHidden;
     panelHost.setAttribute('data-secondhand-size', full ? 'full' : 'pill');
     fitHost();
   }
-  // With a line, the frame is as tall as the widget measured itself, from 86px up to 110px. A page
-  // under 640px wide keeps the widget as narrow as its buttons and gives the line more rows instead,
-  // so the widget covers no more of the page than it does without a line.
+  // The frame is as wide and as tall as the widget measured itself: 46px for its row alone, up to 166px with
+  // all it can hold. A page under 640px wide keeps the widget as narrow as its buttons, or the least wider
+  // that shows its whole line, and gives the line more rows instead, so the widget covers little more of the
+  // page than it does without a line.
   function fitHost() {
     const size = messageRow && card.narrowWidth && innerWidth < 640 ? { width: card.narrowWidth, height: card.narrowHeight } : card;
-    panelHost.style.setProperty('width', full ? frameWidth(size.width) : '46px', 'important');
-    panelHost.style.setProperty('height', full && messageRow ? `${Math.min(110, Math.max(86, size.height || 0))}px` : '46px', 'important');
+    // A card the reader hid is its logo and the word that shows it again, as wide as the card measured them.
+    const labeled = !full && cardHidden && fits(card.width);
+    panelHost.style.setProperty('border-radius', full ? '12px' : labeled ? '23px' : '50%', 'important');
+    panelHost.style.setProperty('width', full ? frameWidth(size.width) : labeled ? frameWidth(card.width) : '46px', 'important');
+    panelHost.style.setProperty('height', full ? `${size.height || (messageRow ? 86 : 46)}px` : '46px', 'important');
   }
+
+  // A card whose worker can't size its frame (an older build than the card, or none after SecondHand restarted)
+  // asks this script directly, in the same terms. Only the card's own frame is heard: a page's script can post a
+  // message too, but never as that frame.
+  const cardOrigin = chrome.runtime.getURL('').replace(/\/$/, '');
+  // The widget's own size for its frame, from the worker or from the card itself: whether it shows a line, its
+  // measured width and height (and those a narrow page keeps), and whether the reader hid it to its logo.
+  const sizeAsked = message => typeof message?.line === 'boolean' && SIZES.every(key => message[key] === undefined || (/height$/i.test(key) ? tall : fits)(message[key])) &&
+    (message.pill === undefined || message.pill === true);
+  function fitCard(message) {
+    messageRow = message.line;
+    card = Object.fromEntries(SIZES.filter(key => message[key] !== undefined).map(key => [key, message[key]]));
+    cardHidden = message.pill === true;
+    if (panelHost) sizePanel();
+  }
+  window.addEventListener('message', event => {
+    if (!panelHost || !panelFrame || event.source !== panelFrame.contentWindow || event.origin !== cardOrigin) return;
+    if (event.data?.type === 'secondhand:cardSize' && sizeAsked(event.data)) fitCard(event.data);
+  });
 
   function ensurePanel() {
     if (!adapter.isSupportedUrl(location.href)) {
@@ -66,7 +95,7 @@
       for (const [property, value] of Object.entries({
         all: 'initial', position: 'fixed', right: '12px', bottom: '16px', display: 'block',
         'z-index': '2147483647', margin: '0', padding: '0', border: '0',
-        'border-radius': '14px', 'box-shadow': '0 12px 42px #17342235',
+        'border-radius': '12px', 'box-shadow': '0 2px 3px #202c2010, 0 8px 24px -8px #202c2030',
         'color-scheme': 'light', isolation: 'isolate'
       })) panelHost.style.setProperty(property, value, 'important');
       const shadow = panelHost.attachShadow({ mode: 'closed' });
@@ -76,7 +105,9 @@
       panelFrame.setAttribute('sandbox', 'allow-scripts allow-same-origin');
       panelFrame.setAttribute('allow', 'language-detector'); // lets the widget check the page's language on this computer
       panelFrame.referrerPolicy = 'no-referrer';
-      for (const [property, value] of Object.entries({ width: '100%', height: '100%', display: 'block', border: '0', margin: '0', padding: '0', 'border-radius': '14px', background: 'transparent' })) panelFrame.style.setProperty(property, value, 'important');
+      // Tells the card it can ask this script to hide it, should its worker be unable to.
+      panelFrame.addEventListener('load', () => panelFrame.contentWindow?.postMessage({ type: 'secondhand:cardHello' }, cardOrigin));
+      for (const [property, value] of Object.entries({ width: '100%', height: '100%', display: 'block', border: '0', margin: '0', padding: '0', 'border-radius': 'inherit', background: 'transparent' })) panelFrame.style.setProperty(property, value, 'important');
       shadow.append(panelFrame);
     }
     sizePanel();
@@ -101,13 +132,21 @@
     return scanMetadata(scan, pending.token);
   }
 
+  const TEXT_TYPES = new Set(['text', 'search', 'tel', 'url', 'email', 'number', 'password', 'date', 'datetime-local', 'month', 'week', 'time']);
+  const textBox = element => element?.tagName === 'TEXTAREA' || (element?.tagName === 'INPUT' && TEXT_TYPES.has(element.type));
+  function typing() {
+    let active = document.activeElement;
+    while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+    return Boolean(typedIn) && active === typedIn;
+  }
+
   function pageState(navigationPreview = true) {
     const page = adapter.probePage(document, location.href), scan = preview(page.pageKey);
     if (navigationPreview) {
       const snapshot = adapter.NAVIGATION_PAGE_KEYS.includes(page.pageKey) && page.canAdvance ? adapter.captureNavigation(document, location.href) : null;
       navigation = snapshot ? { token: crypto.randomUUID(), snapshot, url: location.href, expires: Date.now() + 120000 } : null;
     }
-    return { page, scan, pageInstance, nextToken: navigationPreview ? navigation?.token || null : null };
+    return { page, scan, pageInstance, nextToken: navigationPreview ? navigation?.token || null : null, typing: typing() };
   }
 
   // The general engine only runs where the Iowa adapter has neither a verified form nor an instruction.
@@ -183,7 +222,12 @@
     if (records.some(record => record.target !== panelHost && !panelHost?.contains(record.target))) revision++;
   });
   observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
-  document.addEventListener('input', () => { revision++; }, true);
+  document.addEventListener('input', event => {
+    revision++;
+    const box = event.composedPath()[0];
+    if (event.isTrusted && textBox(box)) typedIn = box;
+  }, true);
+  document.addEventListener('focusout', event => { if (event.composedPath()[0] === typedIn) typedIn = null; }, true);
   document.addEventListener('change', () => { revision++; }, true);
   window.addEventListener('popstate', ensurePanel);
   window.addEventListener('resize', () => { if (panelHost) fitHost(); });
@@ -234,10 +278,8 @@
         respond(withOwnPanelHidden(questions));
       } else if (message.type === 'secondhand:pageText') {
         respond(withOwnPanelHidden(pageText));
-      } else if (message.type === 'secondhand:widgetSize' && typeof message.line === 'boolean' && SIZES.every(key => message[key] === undefined || fits(message[key]))) {
-        messageRow = message.line;
-        card = Object.fromEntries(SIZES.filter(key => message[key] !== undefined).map(key => [key, message[key]]));
-        if (panelHost) sizePanel();
+      } else if (message.type === 'secondhand:widgetSize' && sizeAsked(message)) {
+        fitCard(message);
         respond({ sized: Boolean(panelHost) });
       } else if (message.type === 'secondhand:generic:focus' && typeof message.id === 'string' && engine) {
         respond({ focused: Boolean(withOwnPanelHidden(() => engine.focusField(document, message.id))) });

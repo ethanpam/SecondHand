@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
-  <title data-i18n="app.title"></title>
+  <title data-i18n="brand.name"></title>
   <link rel="stylesheet" href="panel.css">
   <script src="strings.js" defer></script>
   <script src="translation.js" defer></script>
@@ -14,49 +14,62 @@
 </head>
 <body>
   <section id="launcher" hidden>
-    <!-- The logo (which opens the side panel), one button, and a yellow need-you link when answers remain.
-         A line appears below only when the reader must act. -->
+    <!-- A line, when there is one to read, above a row that keeps its place in the page's corner: the logo
+         (which opens the side panel), a link to the answers still needed, one button, and a way to hide the card. -->
+    <!-- What the card says, read to screen readers as it changes: outside the card, so it is heard while the card is hidden. -->
+    <p id="widget-status" class="visually-hidden" role="status" aria-live="polite"></p>
     <div id="widget" class="widget">
-      <div class="widget-row">
-        <button id="details" class="widget-logo" type="button" data-i18n-title="widget.detailsTitle" data-i18n-aria-label="widget.detailsTitle"><img class="brand" src="icon-128.png" alt=""></button>
-        <button id="autofill" class="widget-primary" type="button" data-i18n="widget.autofill" data-i18n-title="widget.autofillIowaTitle"></button>
-        <button id="unlock" class="widget-primary" type="button" data-i18n="widget.unlock" hidden></button>
-        <button id="open-app" class="widget-primary" type="button" data-i18n="desktop.open" hidden></button>
-        <button id="stop" class="widget-primary" type="button" data-i18n="widget.stop" hidden></button>
-        <button id="need-you" class="widget-link" type="button" hidden></button>
-      </div>
-      <p id="widget-text" class="visually-hidden" role="status" aria-live="polite" data-i18n="widget.iowaReady"></p>
+      <!-- Screen readers hear the line from #widget-status above, once, whether or not the card is hidden. -->
+      <p id="widget-text" class="visually-hidden" data-i18n="widget.iowaReady" aria-hidden="true"></p>
       <button id="translate-offer" class="widget-link" type="button" data-i18n="widget.offer" data-i18n-title="widget.offerTitle" hidden></button>
+      <div class="widget-row">
+        <button id="details" class="widget-logo" type="button" data-i18n-title="widget.detailsTitle"><img class="brand" src="icon-128.png" alt=""></button>
+        <button id="need-you" class="widget-link" type="button" hidden></button>
+        <button id="autofill" class="widget-primary" type="button" data-i18n="widget.autofill" data-i18n-title="widget.autofillIowaTitle"></button>
+        <button id="unlock" class="widget-primary" type="button" data-i18n="panel.unlock" hidden></button>
+        <button id="open-app" class="widget-primary" type="button" data-i18n="desktop.open" hidden></button>
+        <button id="stop" class="widget-primary" type="button" data-i18n="widget.stop" data-i18n-title="widget.stopTitle" hidden></button>
+        <button id="restart" class="widget-primary" type="button" data-i18n="panel.restart" data-i18n-title="widget.restartTitle" hidden></button>
+        <button id="hide" class="widget-hide" type="button" data-i18n="widget.hide" data-i18n-title="widget.hideTitle"></button>
+      </div>
     </div>
-    <button id="pill" class="pill" type="button" data-i18n-title="widget.pillTitle" hidden><img class="brand" src="icon-128.png" alt=""></button>
+    <button id="pill" class="pill" type="button" data-i18n-title="widget.pillTitle" hidden><img class="brand" src="icon-128.png" alt=""><span id="pill-label" data-i18n="widget.show" hidden></span></button>
   </section>
   <div id="sidepanel" hidden>
     <header class="panel-header">
       <img class="brand" src="icon-128.png" alt="">
-      <div class="header-copy"><strong data-i18n="brand.name"></strong><span data-i18n="brand.region"></span></div>
+      <h1 class="wordmark"><span class="visually-hidden" data-i18n="brand.name"></span><span aria-hidden="true">Second<span>Hand</span></span></h1>
       <select id="language" class="language-picker" data-i18n-aria-label="language.label">
-        <option value="en" data-i18n="language.en"></option>
-        <option value="es" data-i18n="language.es"></option>
-        <option value="vi" data-i18n="language.vi"></option>
-        <option value="zh" data-i18n="language.zh"></option>
-        <option value="fr" data-i18n="language.fr"></option>
-        <option value="ar" data-i18n="language.ar"></option>
+        <option value="en" lang="en" data-i18n="language.en"></option>
+        <option value="es" lang="es" data-i18n="language.es"></option>
+        <option value="vi" lang="vi" data-i18n="language.vi"></option>
+        <option value="zh" lang="zh" data-i18n="language.zh"></option>
+        <option value="fr" lang="fr" data-i18n="language.fr"></option>
+        <option value="ar" lang="ar" data-i18n="language.ar"></option>
       </select>
     </header>
     <main id="panel-body">
-      <div class="desktop-row"><span id="desktop-status" data-i18n="panel.checkingDesktop"></span><button id="desktop-action" class="text-button" type="button" hidden></button></div>
+      <div class="desktop-row" hidden><span id="desktop-status"></span><button id="desktop-action" class="button primary" type="button" hidden></button></div>
       <p id="update-note" class="status" role="status" aria-live="polite" hidden></p>
-      <p id="laya-status" class="status" hidden></p>
-      <button id="frames-enable" class="button primary full" type="button" data-i18n="panel.framesEnable" hidden></button>
-      <button id="site-enable" class="button primary full" type="button" data-i18n="panel.siteEnable" hidden></button>
-      <button id="all-sites-enable" class="button secondary full" type="button" data-i18n="panel.allSitesEnable" hidden></button>
-      <p id="iowa-policy" class="status" data-i18n="panel.iowaPolicy"></p>
-      <button id="panel-autofill" class="button primary full" type="button" data-i18n="panel.autofill" disabled></button>
-      <button id="site-continue" class="button secondary full" type="button" data-i18n="panel.fillAndContinue" aria-describedby="site-continue-hint" hidden></button>
-      <p id="site-continue-hint" class="status" data-i18n="panel.fillAndContinueHint" hidden></p>
-      <div id="status" class="status" role="status" aria-live="polite" data-i18n="panel.checkingTab"></div>
-      <button id="site-disable" class="text-button site-off" type="button" data-i18n="panel.siteDisable" hidden></button>
-      <button id="all-sites-disable" class="text-button site-off" type="button" data-i18n="panel.allSitesDisable" hidden></button>
+      <!-- The button and what it last said stay in view while the lists under them scroll. -->
+      <div class="actions">
+        <button id="frames-enable" class="button primary full" type="button" data-i18n="panel.framesEnable" hidden></button>
+        <button id="site-enable" class="button primary full" type="button" data-i18n="panel.siteEnable" hidden></button>
+        <button id="panel-autofill" class="button primary full" type="button" data-i18n="panel.autofill" disabled hidden></button>
+        <button id="site-continue" class="button secondary full" type="button" data-i18n="panel.fillAndContinue" aria-describedby="site-continue-hint" hidden></button>
+        <p id="site-continue-hint" class="note" data-i18n="panel.fillAndContinueHint" hidden></p>
+        <div id="status" class="status" role="status" aria-live="polite" data-i18n="panel.checkingTab"></div>
+        <button id="panel-left" class="text-button" type="button" hidden></button>
+        <p id="stop-note" class="note" data-i18n="panel.stopNote" hidden></p>
+        <a id="open-iowa" class="text-button" href="https://hhsservices.iowa.gov/apspssp/ssp.portal" target="_blank" rel="noopener noreferrer" data-i18n="panel.openIowaLink" hidden></a>
+        <p id="iowa-policy" class="status" data-i18n="panel.iowaPolicy" hidden></p>
+      </div>
+      <p id="laya-status" class="note" hidden></p>
+      <div id="words-hint" class="words-hint" hidden><p id="words-hint-text" class="note" data-i18n="questions.listHint"></p><button id="words-translate" class="text-button" type="button" data-i18n="questions.show"></button></div>
+      <section id="left-section" class="checklist-section" hidden aria-labelledby="left-title">
+        <div class="fields-heading"><h2 id="left-title" data-i18n="left.title"></h2><span id="left-summary"></span></div>
+        <div id="left-list" class="page-checklist"></div>
+      </section>
       <section id="held-section" class="checklist-section" hidden aria-labelledby="held-title">
         <div class="fields-heading"><h2 id="held-title" data-i18n="held.title"></h2></div>
         <p class="save-hint" data-i18n="held.hint"></p>
@@ -74,6 +87,11 @@
         <p class="save-hint" data-i18n="guesses.hint"></p>
         <div id="guesses-list" class="page-checklist"></div>
       </section>
+      <!-- What Autofill filled on a page with no checklist, folded away until the reader wants to check the names. -->
+      <details id="filled-section" class="checklist-section filled" hidden>
+        <summary class="fields-heading"><h2 id="filled-title" data-i18n="filled.title"></h2><span id="filled-summary"></span></summary>
+        <div id="filled-list" class="page-checklist"></div>
+      </details>
       <section id="save-section" class="checklist-section" hidden aria-labelledby="save-title">
         <div class="fields-heading"><h2 id="save-title" data-i18n="save.title"></h2></div>
         <p class="save-hint" data-i18n="save.hint"></p>
@@ -102,9 +120,14 @@
       </section>
       <section id="checklist-section" class="checklist-section" hidden aria-labelledby="checklist-title">
         <div class="fields-heading"><h2 id="checklist-title" data-i18n="panel.onThisPage"></h2><span id="checklist-summary"></span></div>
+        <p id="checklist-note" class="note" data-i18n="checklist.notSavedNote" hidden></p>
         <div id="page-checklist" class="page-checklist"></div>
       </section>
-      <footer><p data-i18n="panel.footer"></p></footer>
+      <button id="all-sites-enable" class="text-button" type="button" data-i18n="panel.allSitesEnable" hidden></button>
+      <p id="all-sites-note" class="note" data-i18n="panel.allSitesNote" hidden></p>
+      <button id="site-disable" class="text-button" type="button" data-i18n="panel.siteDisable" hidden></button>
+      <button id="all-sites-disable" class="text-button" type="button" data-i18n="panel.allSitesDisable" hidden></button>
+      <footer><p data-i18n="panel.footer"></p><p id="shortcuts-line" class="note" hidden></p></footer>
     </main>
   </div>
 </body>
