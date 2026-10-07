@@ -236,12 +236,68 @@ test('all five record pages localize owner, money, utility, and asset labels wit
 });
 
 test('a missing record gives a translated action to save an explicit owner and restart Autofill', () => {
-  assert.equal(strings.english('worker.recordMissing'), 'Add an explicitly owned matching record in SecondHand, then click Autofill again.');
+  assert.equal(strings.english('worker.recordMissing'), 'No saved record fits this page. In the SecondHand app, add one under My information, then More SNAP information, with “Person this belongs to” set to the name chosen here. Then stop Autofill and start it again.');
   assert.deepEqual(strings.describeEnglish(strings.english('worker.recordMissing')), { key: 'worker.recordMissing', params: {} });
   for (const code of strings.LANGUAGES) {
     const value = strings.text(code, 'worker.recordMissing');
     assert.match(value, /SecondHand/);
     if (code !== 'en') assert.notEqual(value, strings.english('worker.recordMissing'));
+  }
+});
+
+// What the side panel says on Iowa's screening and financial record pages, and when no saved record fits (#207).
+test('on Iowa’s screening and financial pages, the reasons and the missing-record step say what happens in plain words', () => {
+  const keys = ['iowa.laterUnverified', 'iowa.laterReason', 'iowa.jobRecordReason', 'iowa.recordReason', 'worker.recordMissing'];
+  // The old word for "observed" in each translation.
+  const observed = { es: /observad/i, vi: /quan sát/i, zh: /观察/, fr: /observé/i, ar: /ملاحظ/ };
+  for (const key of keys) {
+    assert.doesNotMatch(en[key], /observed|ordinary|explicitly|owned|supported|continuation|dialogs?\b/i, key);
+    for (const code of strings.LANGUAGES) {
+      const value = strings.text(code, key);
+      assert.doesNotMatch(value, /—/, `${code}: ${key}`);
+      if (observed[code]) assert.doesNotMatch(value, observed[code], `${code}: ${key}`);
+    }
+  }
+  const plain = text => text.replace(/\u00a0/g, ' ');
+  // The card on Iowa's page shows this message too, then what Stop does, cut after 7 lines, or 6 beside the offer of the
+  // questions in the reader's language (scripts/smoke-extension.cjs measures that). Its tooltip is cut at a fixed length.
+  const tooltip = Number(/\$\('widget-text'\)\.title = [^\n]*fixedText\(details\.filter\(Boolean\)\.join\(' '\), (\d+)\)/.exec(source('panel.js'))?.[1]);
+  assert.ok(tooltip > 0, 'the card’s tooltip length is found in panel.js');
+  // Autofill is still on when no record fits. The step comes last and says to stop Autofill and start it again, which
+  // is Stop Autofill, then Start Autofill in the side panel, and Stop, then Autofill on the card.
+  const restart = { en: 'Then stop Autofill and start it again.', es: 'Luego detenga y reinicie el autocompletado.', vi: 'Rồi dừng Tự\u00a0điền và bắt đầu lại.',
+    zh: '然后停止自动填写，再重新开始。', fr: 'Puis arrêtez et relancez le remplissage.', ar: 'ثم أوقف التعبئة التلقائية وابدأها من جديد.' };
+  for (const code of strings.LANGUAGES) {
+    // The desktop app's names stay in English, quoted as each language quotes “My information”.
+    const [, open = '', close = ''] = /([“«]\u00a0?)My information(\u00a0?[”»])/.exec(strings.text(code, 'save.button')) || [];
+    if (code !== 'en') assert.ok(open && close, code);
+    const value = strings.text(code, 'worker.recordMissing');
+    for (const name of ['My information', 'More SNAP information', 'Person this belongs to']) assert.ok(plain(value).includes(code === 'en' ? name : plain(`${open}${name}${close}`)), `${code}: ${name}`);
+    assert.ok([...value].length <= tooltip, `${code}: ${[...value].length} characters, more than the card’s tooltip shows (${tooltip})`);
+    assert.ok(value.endsWith(restart[code]), `${code}: ends with “${restart[code]}”`);
+  }
+  assert.doesNotMatch(en['worker.recordMissing'], /Autofill again/);
+  // Right to left, a quoted English name split over two lines reads from the far left of one line to the far right of the next.
+  for (const name of ['My information', 'More SNAP information', 'Person this belongs to']) {
+    assert.ok(strings.text('ar', 'worker.recordMissing').includes(`“${name.replace(/ /g, '\u00a0')}”`), `ar: ${name} kept on one line`);
+  }
+  // Each adapter's English reason is the one these keys translate.
+  const later = require('../extension/iowa-later-adapter.js'), laterPages = require('./fixtures/iowa-later-pages.cjs');
+  const records = require('../extension/iowa-record-adapter.js'), job = require('./fixtures/iowa-job-history.cjs'), financial = require('./fixtures/iowa-financial-records.cjs');
+  const reasonKey = page => strings.describeEnglish(page.reason).key;
+  const doc = onScreen(laterPages.makeHtml('expenses'), laterPages.url('expenses'));
+  try {
+    assert.equal(reasonKey(later.probePage(doc, laterPages.url('expenses'))), 'iowa.laterReason');
+    doc.querySelector('form').setAttribute('action', 'changed');
+    const changed = later.probePage(doc, laterPages.url('expenses'));
+    assert.equal(changed.kind, 'manual');
+    assert.equal(reasonKey(changed), 'iowa.laterUnverified');
+  } finally { doc.defaultView.close(); }
+  const jobDoc = onScreen(job.makeHtml(), job.URL);
+  try { assert.equal(reasonKey(records.probePage(jobDoc, job.URL)), 'iowa.jobRecordReason'); } finally { jobDoc.defaultView.close(); }
+  for (const kind of ['retirement', 'rent', 'utilities', 'assets']) {
+    const recordDoc = onScreen(financial.makeHtml(kind), financial.URL);
+    try { assert.equal(reasonKey(records.probePage(recordDoc, financial.URL)), 'iowa.recordReason', kind); } finally { recordDoc.defaultView.close(); }
   }
 });
 
@@ -513,8 +569,8 @@ test('French keeps « and » on the same line as the words they quote, with a no
     }
   }
   assert.deepEqual(unique(found), [], 'every « is followed and every » preceded by U+00A0');
-  assert.equal(opening, 73, 'French has 73 «');
-  assert.equal(closing, 73, 'French has 73 »');
+  assert.equal(opening, 76, 'French has 76 «');
+  assert.equal(closing, 76, 'French has 76 »');
 });
 
 test('Remember for next time, its refusals, and the custom answers summary speak all six languages (#186)', () => {

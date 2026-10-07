@@ -296,13 +296,13 @@
     const page = scope(doc, url);
     if (!page) return null;
     const result = { kind: 'manual', pageKey: `${page.pageKey}-unverified`, heading: page.heading,
-      fields: [], checklist: [], requiredRemaining: 0, manualRemaining: 1, canAdvance: false, todo: 'Review this page and continue in Iowa’s form yourself.', reason: 'This page does not match the observed form.' };
+      fields: [], checklist: [], requiredRemaining: 0, manualRemaining: 1, canAdvance: false, todo: 'Review this page and continue in Iowa’s form yourself.', reason: 'SecondHand doesn’t recognize this page as it looks now, so it fills nothing here.' };
     const current = context(doc, url);
     if (!current) return result;
     const review = issues(doc, current), canAdvance = !review.requiredRemaining && !review.manualRemaining && Boolean(nextButton(doc, current));
     return { ...result, ...review, kind: 'fillable', pageKey: page.pageKey, fields: scan(doc, url).fields, canAdvance,
       todo: canAdvance ? 'SecondHand can save this page and continue. Review every answer before final submission.' : 'Complete the missing answers in Iowa’s form. Unsupported follow-up questions need your review.',
-      reason: 'Only the observed questions and ordinary Save and Continue are supported. Unknown questions, errors, and dialogs pause continuation.' };
+      reason: 'SecondHand clicks Save and Continue only when every question on this page that needs an answer has one and Iowa shows no errors or pop-ups. A question SecondHand doesn’t know stops it too.' };
   }
   function captureNavigation(doc, url) {
     if (!probePage(doc, url)?.canAdvance) return null;
