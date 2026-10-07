@@ -236,7 +236,7 @@ test('all five record pages localize owner, money, utility, and asset labels wit
 });
 
 test('a missing record gives a translated action to save an explicit owner and restart Autofill', () => {
-  assert.equal(strings.english('worker.recordMissing'), 'No saved record matches this page and the person chosen on it (if someone is chosen). In the SecondHand app, open My information, then More SNAP information. Add a record there and set “Person this belongs to” to the person’s name exactly as this page shows it. When it is saved, click Stop Autofill, then Start Autofill.');
+  assert.equal(strings.english('worker.recordMissing'), 'No saved record fits this page. In the SecondHand app, add one under My information, then More SNAP information, with “Person this belongs to” set to the name chosen here. Then stop Autofill and start it again.');
   assert.deepEqual(strings.describeEnglish(strings.english('worker.recordMissing')), { key: 'worker.recordMissing', params: {} });
   for (const code of strings.LANGUAGES) {
     const value = strings.text(code, 'worker.recordMissing');
@@ -258,26 +258,28 @@ test('on Iowa’s screening and financial pages, the reasons and the missing-rec
       if (observed[code]) assert.doesNotMatch(value, observed[code], `${code}: ${key}`);
     }
   }
-  const plain = text => text.replace(/ /g, ' ');
+  const plain = text => text.replace(/\u00a0/g, ' ');
+  // The card on Iowa's page shows this message too, then what Stop does, cut after 7 lines, or 6 beside the offer of the
+  // questions in the reader's language (scripts/smoke-extension.cjs measures that). Its tooltip is cut at a fixed length.
+  const tooltip = Number(/\$\('widget-text'\)\.title = [^\n]*fixedText\(details\.filter\(Boolean\)\.join\(' '\), (\d+)\)/.exec(source('panel.js'))?.[1]);
+  assert.ok(tooltip > 0, 'the card’s tooltip length is found in panel.js');
+  // Autofill is still on when no record fits. The step comes last and says to stop Autofill and start it again, which
+  // is Stop Autofill, then Start Autofill in the side panel, and Stop, then Autofill on the card.
+  const restart = { en: 'Then stop Autofill and start it again.', es: 'Luego detenga y reinicie el autocompletado.', vi: 'Rồi dừng Tự\u00a0điền và bắt đầu lại.',
+    zh: '然后停止自动填写，再重新开始。', fr: 'Puis arrêtez et relancez le remplissage.', ar: 'ثم أوقف التعبئة التلقائية وابدأها من جديد.' };
   for (const code of strings.LANGUAGES) {
     // The desktop app's names stay in English, quoted as each language quotes “My information”.
-    const [, open = '', close = ''] = /([“«] ?)My information( ?[”»])/.exec(strings.text(code, 'save.button')) || [];
+    const [, open = '', close = ''] = /([“«]\u00a0?)My information(\u00a0?[”»])/.exec(strings.text(code, 'save.button')) || [];
     if (code !== 'en') assert.ok(open && close, code);
     const value = strings.text(code, 'worker.recordMissing');
     for (const name of ['My information', 'More SNAP information', 'Person this belongs to']) assert.ok(plain(value).includes(code === 'en' ? name : plain(`${open}${name}${close}`)), `${code}: ${name}`);
-    // Autofill is still running when no record fits, so the panel's button reads Stop Autofill. Stopping it
-    // turns the button into Start Autofill, and only that click asks the app for the record again.
-    const stop = strings.text(code, 'panel.stopAutofill'), begin = strings.text(code, 'panel.autofillIowa');
-    assert.ok(plain(value).indexOf(stop) >= 0 && plain(value).lastIndexOf(begin) > plain(value).indexOf(stop), `${code}: names ${stop}, then ${begin}`);
+    assert.ok([...value].length <= tooltip, `${code}: ${[...value].length} characters, more than the card’s tooltip shows (${tooltip})`);
+    assert.ok(value.endsWith(restart[code]), `${code}: ends with “${restart[code]}”`);
   }
   assert.doesNotMatch(en['worker.recordMissing'], /Autofill again/);
   // Right to left, a quoted English name split over two lines reads from the far left of one line to the far right of the next.
   for (const name of ['My information', 'More SNAP information', 'Person this belongs to']) {
-    assert.ok(strings.text('ar', 'worker.recordMissing').includes(`“${name.replace(/ /g, ' ')}”`), `ar: ${name} kept on one line`);
-  }
-  // The Vietnamese button names keep their words on one line.
-  for (const key of ['panel.stopAutofill', 'panel.autofillIowa']) {
-    assert.ok(strings.text('vi', 'worker.recordMissing').includes(strings.text('vi', key).replace(/ /g, ' ')), `vi: ${key} kept on one line`);
+    assert.ok(strings.text('ar', 'worker.recordMissing').includes(`“${name.replace(/ /g, '\u00a0')}”`), `ar: ${name} kept on one line`);
   }
   // Each adapter's English reason is the one these keys translate.
   const later = require('../extension/iowa-later-adapter.js'), laterPages = require('./fixtures/iowa-later-pages.cjs');

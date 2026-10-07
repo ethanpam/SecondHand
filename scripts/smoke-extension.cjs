@@ -137,7 +137,8 @@ function backgroundBrowserFixture() {
 }
 
 function jobBrowserFixture() {
-  return jobFixture.html.replace('</body>', `<script>(${jobFixture.attachHandlers.toString()})(document);</script></body>`);
+  // In English, as Iowa's pages are, so the card offers the questions in the reader's language.
+  return jobFixture.html.replace('<html>', '<html lang="en">').replace('</body>', `<script>(${jobFixture.attachHandlers.toString()})(document);</script></body>`);
 }
 
 function fixture(nextStep) {
@@ -1257,6 +1258,24 @@ async function main() {
       assert.deepEqual(await calls('getFields'), []);
       console.log(`Job record ${variant}: no financial fill and no Next.`);
     }
+    // No saved record, on a first run: the card shows the whole step and what Stop does in each language, 6 lines at
+    // most beside the offer of the questions in the reader's language, and its tooltip holds the whole step (#207).
+    for (const code of strings.LANGUAGES) {
+      await resetTo(jobFixture.URL);
+      await (await launcherFrame()).evaluate(code => { globalThis.SecondHandStrings.setLanguage(code); localStorage.removeItem('secondhand.autofillStarted'); }, code);
+      await resetTo(jobFixture.URL);
+      widget = await launcherFrame();
+      await expect(widget.locator('#autofill')).toBeVisible({ timeout: 20000 });
+      await widget.locator('#autofill').click();
+      await expect.poll(async () => (await calls('getRecordFields')).length, { timeout: 20000 }).toBe(1);
+      const step = strings.text(code, 'worker.recordMissing');
+      await expect.poll(() => lineProblems(widget, `${step} ${stopNote(code)}`, code), { timeout: 10000, message: `${code} no saved record` }).toEqual([]);
+      assert.equal(await widget.locator('#translate-offer').isVisible(), code !== 'en', `${code}: the offer of the questions in the reader's language`);
+      assert.equal(await widget.evaluate(() => document.getElementById('widget-text').title), step, `${code}: the tooltip holds the whole step`);
+      assert.equal(await page.evaluate(() => document.__jobQa.nextClicks), 0);
+    }
+    await (await launcherFrame()).evaluate(() => globalThis.SecondHandStrings.setLanguage('en'));
+    console.log(`Job record missing: the card shows the whole step and what Stop does in ${strings.LANGUAGES.join(', ')}, and its tooltip holds the step.`);
     currentSharedPage = 'self';
 
     assert.deepEqual(errors, []);
