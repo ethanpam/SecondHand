@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/media/readme-banner.png" width="100%" alt="SecondHand. A little help. A lot less typing. Save your details once, on your own computer. SecondHand fills in benefit applications, like Iowa SNAP, when you say yes. Beside the words, a form called Enter Personal Information has its first name, last name, and phone filled in green, and the SecondHand card under it shows Autofill and 1 need you.">
+  <img src="docs/media/readme-banner.png" width="100%" alt="SecondHand. A little help. A lot less typing. Save your details once, on your own computer. SecondHand fills in benefit applications, like Iowa SNAP, when you say yes. Beside the words, a form called Enter Personal Information has Avery Example's first name, last name, and phone filled in green and the middle name empty, and the SecondHand card in its corner says Filled 3 answers. Check them before you submit., above a 1 question left link, an Autofill button, and Hide.">
 </p>
 
 <h1 align="center">SecondHand</h1>
@@ -54,7 +54,7 @@ It comes in two parts that work together:
 Think of it like a password manager, but for the questions every assistance form asks. Nothing goes to a SecondHand server, because there isn't one. You stay in charge: the app asks before it shares anything, and you always review, sign, and submit yourself.
 
 <p align="center">
-  <img src="docs/media/autofill.gif" width="880" alt="The SecondHand card in the corner of Iowa's application. A click on Autofill fills the saved answers, a '1 question left' link appears, and clicking it jumps to the empty First Name field, where Daniel is typed. The page is then complete, so SecondHand clicks Save and Continue.">
+  <img src="docs/media/autofill.gif" width="880" alt="The SecondHand card in the corner of Iowa's application. A click on Autofill fills the saved answers, a '1 question left' link appears, and clicking it jumps to the empty First Name field, where Avery is typed. Once the cursor leaves that box, SecondHand clicks Save and Continue.">
   <br>
   <sub>A fictional applicant on a synthetic copy of Iowa's form. Nothing is sent anywhere.</sub>
 </p>
@@ -112,9 +112,9 @@ SecondHand was built for **Hack Away Hunger**, the DSMHack / CharityHack 2026 ha
 
 **2. Click Autofill on the application.** Open Iowa's SNAP application in Chrome and click **Autofill** in the SecondHand card. The app asks first: **Allow once**, or **Always allow on this computer**.
 
-**3. Finish what's left, then submit it yourself.** The card says what Autofill did, and a **1 question left** link jumps to each missing answer. Chrome's side panel lists every question on the page as **Done**, **Needs your answer**, **Optional**, or **Do it yourself**.
+**3. Finish what's left, then submit it yourself.** The card says what Autofill did, and a **1 question left** link jumps to each missing answer. Once nothing is left and you leave the box you typed in, SecondHand clicks **Save and Continue**. Chrome's side panel lists every question on the page as **Done**, **Needs your answer**, **Optional**, or **Do it yourself**.
 
-<img src="docs/media/side-panel.png" alt="Iowa's Enter Personal Information page with Last Name filled and First Name empty, the SecondHand card showing Stop and 1 question left, and the side panel checklist marking First name as having no saved answer to type in Iowa's form, and Last name as Done" width="100%">
+<img src="docs/media/side-panel.png" alt="Iowa's Enter Personal Information page with First Name empty and the rest filled for the fictional applicant Avery Example, the SecondHand card showing Stop and 1 question left, and the side panel saying Filled 20 answers, 1 left for you, with First name marked No saved answer: type it in Iowa's form, and Middle name, Last name, Suffix, and Maiden name marked Done" width="100%">
 
 ## What it does today
 
