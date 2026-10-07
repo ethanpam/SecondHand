@@ -669,7 +669,9 @@ async function main() {
     await page.locator('#passphrase').fill(startOverPassword);
     await page.locator('#confirm-passphrase').fill(startOverPassword);
     if (await page.locator('#device-reset-field').isVisible()) await page.locator('#allow-device-reset').uncheck();
-    await page.locator('#auth-submit').click();
+    // The setup is offered only if its start is saved while the key is on screen (renderer/app.js): wait for the
+    // attempt, setup save included, to settle before Continue.
+    await submitAuthForm(page);
     await page.locator('#recovery-saved').check();
     await page.locator('#recovery-done').click();
     await expect(page.locator('#workspace')).toBeVisible();
