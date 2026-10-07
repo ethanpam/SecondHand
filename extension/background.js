@@ -1519,9 +1519,9 @@ function sitePilotStep(tabId) {
   if (pilot.running) return pilot.running;
   const guard = () => currentSitePilot(tabId, pilot);
   pilot.running = (async () => {
-    let prior = results.get(tabId) || siteResult('waiting', say('worker.siteContinuing'));
+    let prior = results.get(tabId) || siteResult('waiting', say('worker.siteContinuing')), url = null;
     try {
-      const { tab, origin } = await activeSite(tabId); guard();
+      const { tab, origin } = await activeSite(tabId); guard(); url = tab.url;
       if (origin !== pilot.origin) return stopSitePilot(tabId, pilot, siteResult('stopped', say('worker.siteOriginChanged')));
       await requireSite(origin); guard();
       const before = await siteNavigation(tabId); guard();
@@ -1564,7 +1564,14 @@ function sitePilotStep(tabId) {
       return prior;
     } catch (error) {
       if (sitePilots.get(tabId) !== pilot) return results.get(tabId) || prior;
-      if (error.code === 'site-not-ready' && pilot.awaiting && Date.now() - pilot.awaiting < 15000) return prior;
+      if (pilot.awaiting && Date.now() - pilot.awaiting < 15000) {
+        if (error.code === 'site-not-ready') return prior;
+        // The page this step asked may be the one this run's Next is replacing: Chrome ends a message to a page torn
+        // down mid-reply empty. The new page's own load event steps it.
+        const moved = await chrome.tabs.get(tabId);
+        if (sitePilots.get(tabId) !== pilot) return results.get(tabId) || prior;
+        if (moved.status === 'loading' || (url && moved.url !== url)) return prior;
+      }
       return stopSitePilot(tabId, pilot, siteResult(failed(error).state, failed(error)));
     }
   })().finally(() => {
