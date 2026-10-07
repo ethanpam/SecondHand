@@ -236,12 +236,52 @@ test('all five record pages localize owner, money, utility, and asset labels wit
 });
 
 test('a missing record gives a translated action to save an explicit owner and restart Autofill', () => {
-  assert.equal(strings.english('worker.recordMissing'), 'Add an explicitly owned matching record in SecondHand, then click Autofill again.');
+  assert.equal(strings.english('worker.recordMissing'), 'No saved record matches this page and the person chosen on it. In the SecondHand app, open My information, then More SNAP information. Add a record there and set “Person this belongs to” to that person’s name as this page shows it. Then click Autofill again.');
   assert.deepEqual(strings.describeEnglish(strings.english('worker.recordMissing')), { key: 'worker.recordMissing', params: {} });
   for (const code of strings.LANGUAGES) {
     const value = strings.text(code, 'worker.recordMissing');
     assert.match(value, /SecondHand/);
     if (code !== 'en') assert.notEqual(value, strings.english('worker.recordMissing'));
+  }
+});
+
+// What the side panel says on Iowa's screening and financial record pages, and when no saved record fits (#207).
+test('on Iowa’s screening and financial pages, the reasons and the missing-record step say what happens in plain words', () => {
+  const keys = ['iowa.laterUnverified', 'iowa.laterReason', 'iowa.jobRecordReason', 'iowa.recordReason', 'worker.recordMissing'];
+  // The old word for "observed" in each translation.
+  const observed = { es: /observad/i, vi: /quan sát/i, zh: /观察/, fr: /observé/i, ar: /ملاحظ/ };
+  for (const key of keys) {
+    assert.doesNotMatch(en[key], /observed|ordinary|explicitly|owned|supported|continuation|dialogs?\b/i, key);
+    for (const code of strings.LANGUAGES) {
+      const value = strings.text(code, key);
+      assert.doesNotMatch(value, /—/, `${code}: ${key}`);
+      if (observed[code]) assert.doesNotMatch(value, observed[code], `${code}: ${key}`);
+    }
+  }
+  for (const code of strings.LANGUAGES) {
+    // The desktop app's names stay in English, quoted as each language quotes “My information”.
+    const [, open = '', close = ''] = /([“«] ?)My information( ?[”»])/.exec(strings.text(code, 'save.button')) || [];
+    if (code !== 'en') assert.ok(open && close, code);
+    const value = strings.text(code, 'worker.recordMissing');
+    for (const name of ['My information', 'More SNAP information', 'Person this belongs to']) assert.ok(value.includes(code === 'en' ? name : `${open}${name}${close}`), `${code}: ${name}`);
+  }
+  // Each adapter's English reason is the one these keys translate.
+  const later = require('../extension/iowa-later-adapter.js'), laterPages = require('./fixtures/iowa-later-pages.cjs');
+  const records = require('../extension/iowa-record-adapter.js'), job = require('./fixtures/iowa-job-history.cjs'), financial = require('./fixtures/iowa-financial-records.cjs');
+  const reasonKey = page => strings.describeEnglish(page.reason).key;
+  const doc = onScreen(laterPages.makeHtml('expenses'), laterPages.url('expenses'));
+  try {
+    assert.equal(reasonKey(later.probePage(doc, laterPages.url('expenses'))), 'iowa.laterReason');
+    doc.querySelector('form').setAttribute('action', 'changed');
+    const changed = later.probePage(doc, laterPages.url('expenses'));
+    assert.equal(changed.kind, 'manual');
+    assert.equal(reasonKey(changed), 'iowa.laterUnverified');
+  } finally { doc.defaultView.close(); }
+  const jobDoc = onScreen(job.makeHtml(), job.URL);
+  try { assert.equal(reasonKey(records.probePage(jobDoc, job.URL)), 'iowa.jobRecordReason'); } finally { jobDoc.defaultView.close(); }
+  for (const kind of ['retirement', 'rent', 'utilities', 'assets']) {
+    const recordDoc = onScreen(financial.makeHtml(kind), financial.URL);
+    try { assert.equal(reasonKey(records.probePage(recordDoc, financial.URL)), 'iowa.recordReason', kind); } finally { recordDoc.defaultView.close(); }
   }
 });
 
