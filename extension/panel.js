@@ -41,6 +41,10 @@
   const problem = (error, fallback = 'panel.assistantUnavailable') => error?.messageKey ? { key: error.messageKey, params: error.messageParams }
     : fixedText(error?.message) ? { key: 'detail', params: { detail: fixedText(error.message) } } : { key: fallback };
   const keyedError = (key, params = {}) => Object.assign(new Error(strings.english(key, params)), { messageKey: key, messageParams: params });
+  // A lookup the reader didn't ask for, whose fallback is right on any computer (its system, the keyboard shortcuts),
+  // reports its failure where Chrome records SecondHand's errors (chrome://extensions, Errors), not on screen: there
+  // it would push aside what the reader needs, with nothing for them to do about it.
+  const unshown = what => error => console.error(what, error);
   const trusted = callback => event => { if (event.isTrusted) return callback(event); };
   const outdatedError = (key = 'panel.outdated') => Object.assign(keyedError(key), { outdated: true });
   const ask = async payload => {
@@ -85,7 +89,8 @@
   // behind Chrome, on this computer.
   const FIND_WINDOW = { mac: 'widget.findWindowMac', win: 'widget.findWindowWindows' };
   let findWindow = 'widget.findWindow';
-  chrome.runtime.getPlatformInfo?.().then(info => { findWindow = FIND_WINDOW[info?.os] || findWindow; }).catch(() => {});
+  chrome.runtime.getPlatformInfo?.().then(info => { findWindow = FIND_WINDOW[info?.os] || findWindow; },
+    unshown('Chrome couldn’t name this computer’s system. Autofill’s waiting line says where the app’s window may be on any computer.'));
   const waitingForApp = () => ({ key: 'joined', params: { first: { key: 'widget.working' }, second: { key: findWindow } } });
 
   // Every fixed word on either surface comes from the catalog.
@@ -126,7 +131,7 @@
     reading.then(list => {
       shortcuts = Object.fromEntries(list.filter(command => command.shortcut).map(command => [command.name, command.shortcut]));
       rerender();
-    }).catch(() => {});
+    }, unshown('Chrome couldn’t list SecondHand’s keyboard shortcuts. No button names one.'));
   }
   // What Iowa's applicant page asks while answers are left: SecondHand clicks Save and Continue once nothing is.
   const CHECK_FIRST = 'iowa.missingAnswers';
