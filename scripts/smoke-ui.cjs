@@ -237,6 +237,18 @@ async function unreadableText(page, selector, min) {
   }, { selector, min });
 }
 
+// #200: every element each selector in `texts` matches is visible, and none falls short of unreadableText at the
+// size it maps to. Problems name the selector, so a failure says which rule to fix.
+async function assertReadable(page, texts, where) {
+  const problems = [];
+  for (const [selector, min] of Object.entries(texts)) {
+    await expect(page.locator(selector)).not.toHaveCount(0);
+    for (const element of await page.locator(selector).all()) await expect(element).toBeVisible();
+    problems.push(...(await unreadableText(page, selector, min)).map(problem => `${selector} ${problem}`));
+  }
+  assert.equal(problems.length, 0, `Text too small or faint on ${where}:\n${problems.join('\n')}`);
+}
+
 // #186: one answer remembered from https://pantry.example.org through the bridge, shown, changed and removed in My information.
 async function remembered(page, application, userData, pantry) {
   await application.evaluate(({ dialog }) => {
@@ -313,6 +325,7 @@ async function main() {
     await captureDiagnostic(page, 'vault-setup.png');
     const authHints = await unreadableText(page, '.field-hint', 12);
     assert.equal(authHints.length, 0, `Hints too small or faint on the create-password screen:\n${authHints.join('\n')}`);
+    await assertReadable(page, { '#auth-description': 13, '#recovery-note': 12, '.auth-footnote': 12 }, 'the create-password screen');
     await page.locator('#passphrase').fill(passphrase);
     await page.locator('#confirm-passphrase').fill(passphrase);
     // Keep automated runs away from the real Keychain or Windows protected storage;
@@ -412,8 +425,17 @@ async function main() {
     await expect(page.locator('#application-list')).toContainText('Synthetic follow-up task');
     await page.locator('.nav-item[data-view="overview"]').click();
     await captureDiagnostic(page, 'desktop-overview.png', { fullPage: true });
+    // The sidebar's menu and "Not a government service." are readable (#200), and fit the sidebar without sideways scrolling.
+    await expect(page.locator('.nav-item')).toHaveCount(6);
+    await assertReadable(page, { '.nav-item': 12, '.sidebar-disclaimer': 12 }, 'Overview’s sidebar');
+    const sidebarOverflow = await page.locator('.sidebar').evaluate(sidebar => sidebar.scrollWidth - sidebar.clientWidth);
+    assert.ok(sidebarOverflow <= 1, `no sideways scrolling in the sidebar (${sidebarOverflow}px)`);
     await page.locator('#lock-button').click();
     await expect(page.locator('#auth-view')).toBeVisible();
+    // #201 hides the create-password description on the unlock screen; the note under the form is readable (#200).
+    await expect(page.locator('#auth-description')).toBeHidden();
+    await expect(page.locator('#recovery-note')).toHaveText('Your password never leaves this computer.');
+    await assertReadable(page, { '#recovery-note': 12 }, 'the unlock screen');
     const cleared = await page.evaluate(() => ({
       firstName: document.querySelector('#firstName').value,
       notes: document.querySelector('#application-notes').value,
@@ -668,7 +690,7 @@ async function main() {
     assert.equal(JSON.parse(await fs.readFile(path.join(userData, 'settings.json'), 'utf8')).householdNoteDismissed, true);
     console.log('#180: with no household list saved, Overview offered Add your household; openHousehold through the bridge opened My information at Your household; Dismiss kept the note away and was saved.');
     assert.deepEqual(errors, []);
-    console.log('Electron UI smoke passed: guided setup offered after the recovery key, saved step by step with a household list, the student status and the answers from lists, finished later from Overview and readable at 200% zoom; Laya downloads on its own on a new install and stays off once turned off, create, save full applicant choices, Iowa’s questions about you and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence, readable hints, Connect Chrome text and Privacy & backups text (both also at 200% zoom), Touch ID on (test hook) with a lock-screen lock, a Touch ID unlock, and Touch ID ready at once after a restart, recovery key password reset that keeps Touch ID, clear Iowa’s questions, start over (which removes Touch ID) and its setup offer.');
+    console.log('Electron UI smoke passed: guided setup offered after the recovery key, saved step by step with a household list, the student status and the answers from lists, finished later from Overview and readable at 200% zoom; Laya downloads on its own on a new install and stays off once turned off, create, save full applicant choices, Iowa’s questions about you and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence, readable hints, password screen notes and sidebar text, Connect Chrome text and Privacy & backups text (both also at 200% zoom), Touch ID on (test hook) with a lock-screen lock, a Touch ID unlock, and Touch ID ready at once after a restart, recovery key password reset that keeps Touch ID, clear Iowa’s questions, start over (which removes Touch ID) and its setup offer.');
   } catch (error) {
     if (page && !page.isClosed()) {
       const auth = await page.evaluate(() => ({
