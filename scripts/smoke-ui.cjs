@@ -198,6 +198,45 @@ async function guidedSetup(page, application, userData) {
   console.log('Guided setup: offered after the recovery key, six steps saved as the applicant moved on, finished later from Overview; the household step listed four people and counted their ages.');
 }
 
+// Readable text (#166): every visible element `selector` matches that has text is at least `min` px (a `.field-hint`
+// at least 12px), has 4.5:1 contrast with the nearest background that isn't transparent, and an h3 is at least as
+// large as the paragraphs under it. Returns one line per element that falls short, naming its text, size and ratio.
+async function unreadableText(page, selector, min) {
+  return page.evaluate(({ selector, min }) => {
+    const rgba = value => { const [r, g, b, a = 1] = value.match(/[\d.]+/g).map(Number); return [r, g, b, a]; };
+    const over = ([r, g, b, a], below) => [r, g, b].map((channel, index) => channel * a + below[index] * (1 - a));
+    const luminance = rgb => {
+      const [r, g, b] = rgb.map(channel => { const c = channel / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const background = element => {
+      const layers = [];
+      for (let node = element; node; node = node.parentElement) {
+        const color = rgba(getComputedStyle(node).backgroundColor);
+        if (color[3] > 0) layers.push(color);
+        if (color[3] === 1) break;
+      }
+      return layers.reduceRight((below, color) => over(color, below), [255, 255, 255]);
+    };
+    const visible = element => element.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && element.textContent.trim();
+    const size = element => parseFloat(getComputedStyle(element).fontSize);
+    const name = element => `“${element.textContent.replace(/\s+/g, ' ').trim().slice(0, 70)}”`;
+    const problems = [];
+    for (const element of Array.from(document.querySelectorAll(selector)).filter(visible)) {
+      const fill = background(element);
+      const [l1, l2] = [luminance(over(rgba(getComputedStyle(element).color), fill)), luminance(fill)].sort((a, b) => b - a);
+      const ratio = (l1 + 0.05) / (l2 + 0.05);
+      const least = element.matches('.field-hint') ? 12 : min;
+      if (size(element) < least || ratio < 4.5) problems.push(`${name(element)}: ${size(element)}px (needs ${least}px), ${ratio.toFixed(2)}:1 (needs 4.5:1)`);
+      if (element.tagName !== 'H3') continue;
+      for (let next = element.nextElementSibling; next && next.tagName !== 'H3'; next = next.nextElementSibling) {
+        if (next.tagName === 'P' && visible(next) && size(next) > size(element)) problems.push(`${name(element)}: ${size(element)}px heading over a ${size(next)}px paragraph`);
+      }
+    }
+    return problems;
+  }, { selector, min });
+}
+
 // #186: one answer remembered from https://pantry.example.org through the bridge, shown, changed and removed in My information.
 async function remembered(page, application, userData, pantry) {
   await application.evaluate(({ dialog }) => {
@@ -272,6 +311,8 @@ async function main() {
     await fs.mkdir(path.join(root, 'artifacts'), { recursive: true });
     page = await launch();
     await captureDiagnostic(page, 'vault-setup.png');
+    const authHints = await unreadableText(page, '.field-hint', 12);
+    assert.equal(authHints.length, 0, `Hints too small or faint on the create-password screen:\n${authHints.join('\n')}`);
     await page.locator('#passphrase').fill(passphrase);
     await page.locator('#confirm-passphrase').fill(passphrase);
     // Keep automated runs away from the real Keychain or Windows protected storage;
@@ -308,6 +349,9 @@ async function main() {
     await expect(page.locator('#laya-status')).toHaveText(/^Off\. /);
     assert.equal(JSON.parse(await fs.readFile(path.join(userData, 'settings.json'), 'utf8')).layaEnabled, false);
     await page.locator('.nav-item[data-view="profile"]').click();
+    await expect(page.locator('#view-profile .field-hint').first()).toBeVisible();
+    const profileHints = await unreadableText(page, '.field-hint', 12);
+    assert.equal(profileHints.length, 0, `Hints too small or faint on My information:\n${profileHints.join('\n')}`);
     // What My information shows for every saved field, read the way the form submits it.
     const shownProfile = () => page.locator('#profile-form').evaluate((form, fields) => Object.fromEntries(fields.map(field => {
       const control = form.elements.namedItem(field);
@@ -467,6 +511,22 @@ async function main() {
     await page.locator('.nav-item[data-view="privacy"]').click();
     await expect(page.locator('#touch-id-setting')).toBeVisible();
     await expect(page.locator('#touch-id-toggle')).not.toBeChecked();
+    // Privacy & backups is readable (#166): its text at least 13px, hints 12px, all at 4.5:1, at 100% and at 200% zoom.
+    const privacyText = '#view-privacy :is(p, h3, strong, label), .field-hint';
+    const privacy = await unreadableText(page, privacyText, 13);
+    assert.equal(privacy.length, 0, `Text too small or faint on Privacy & backups:\n${privacy.join('\n')}`);
+    await captureDiagnostic(page, 'desktop-privacy.png', { fullPage: true });
+    const privacyWidth = await page.evaluate(() => window.innerWidth);
+    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(2));
+    await expect.poll(() => page.evaluate(() => window.innerWidth)).toBeLessThanOrEqual(Math.ceil(privacyWidth / 2));
+    const privacyOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    assert.ok(privacyOverflow <= 1, `no sideways scrolling on Privacy & backups at 200% (${privacyOverflow}px)`);
+    const privacyZoomed = await unreadableText(page, privacyText, 13);
+    assert.equal(privacyZoomed.length, 0, `Text too small or faint on Privacy & backups at 200% zoom:\n${privacyZoomed.join('\n')}`);
+    const drawnPrivacy = await application.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString('base64'));
+    await fs.writeFile(path.join(root, 'artifacts/privacy-zoom-200.png'), Buffer.from(drawnPrivacy, 'base64'));
+    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1));
+    await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(privacyWidth);
     // Turning it on opens the password dialog; the box stays clear until the password is checked.
     await page.locator('#touch-id-toggle').click();
     await expect(page.locator('#touch-id-dialog')).toBeVisible();
@@ -590,7 +650,7 @@ async function main() {
     assert.equal(JSON.parse(await fs.readFile(path.join(userData, 'settings.json'), 'utf8')).householdNoteDismissed, true);
     console.log('#180: with no household list saved, Overview offered Add your household; openHousehold through the bridge opened My information at Your household; Dismiss kept the note away and was saved.');
     assert.deepEqual(errors, []);
-    console.log('Electron UI smoke passed: guided setup offered after the recovery key, saved step by step with a household list, the student status and the answers from lists, finished later from Overview and readable at 200% zoom; Laya downloads on its own on a new install and stays off once turned off, create, save full applicant choices, Iowa’s questions about you and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence, Touch ID on (test hook) with a lock-screen lock, a Touch ID unlock, and Touch ID ready at once after a restart, recovery key password reset that keeps Touch ID, clear Iowa’s questions, start over (which removes Touch ID) and its setup offer.');
+    console.log('Electron UI smoke passed: guided setup offered after the recovery key, saved step by step with a household list, the student status and the answers from lists, finished later from Overview and readable at 200% zoom; Laya downloads on its own on a new install and stays off once turned off, create, save full applicant choices, Iowa’s questions about you and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence, readable hints and Privacy & backups text (also at 200% zoom), Touch ID on (test hook) with a lock-screen lock, a Touch ID unlock, and Touch ID ready at once after a restart, recovery key password reset that keeps Touch ID, clear Iowa’s questions, start over (which removes Touch ID) and its setup offer.');
   } catch (error) {
     if (page && !page.isClosed()) {
       const auth = await page.evaluate(() => ({
