@@ -5,7 +5,8 @@
 // A format whose variable isn't set is skipped, and says so.
 // Not a .test.cjs file, so npm test leaves it out: npm test runs its files at once, and their work on the same
 // cores slowed a batch of 20 that takes 1,771 ms alone to 2,547 ms, over its budget. It runs alone instead:
-//   npm run test:laya, after the pantry smoke; or node --test tests/laya-speed.cjs
+//   npm run test:laya, before the pantry smoke (right after it, a first decision took 1,103 ms); or
+//   node --test tests/laya-speed.cjs
 // The budgets are what a person waits for after a click, so they are clock time. CPU time would not do: the model
 // runs on several threads, and on one thread noul-v1's batch of 20 took three times as long (5.4 s) for a third of
 // the CPU time.
