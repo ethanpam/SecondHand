@@ -265,9 +265,10 @@ async function inspectDemoMotion(page) {
 async function inspectWhatItDoes(page) {
   await page.goto(site, { waitUntil: 'networkidle' });
   const scope = await page.locator('.scope-note').innerText();
-  for (const phrase of ['first suggested home address', 'guesses', 'Vietnamese', 'Arabic', 'on this computer']) {
+  for (const phrase of ['first suggested home address', 'suggested by Laya', 'only when it is sure', 'Vietnamese', 'Arabic', 'on this computer']) {
     assert.ok(scope.includes(phrase), `What it does today must mention "${phrase}"`);
   }
+  assert.doesNotMatch(scope, /guess|turn on Laya/i, 'What it does today must not call Laya\'s answers guesses or say Laya starts off (#189)');
   // The address the applicant must review ends the first paragraph, where a skimming reader sees it.
   await expect(page.locator('.scope-note p')).toHaveCount(3);
   await expect(page.locator('.scope-note p').first()).toContainText(/review that address before you submit\.$/);
