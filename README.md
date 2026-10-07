@@ -311,6 +311,7 @@ For live reloading, run `npm run dev` (run `npx playwright install chromium` onc
 | `npm run test:coverage` | Unit tests with coverage floors from `scripts/coverage.cjs`. |
 | `npm run test:ui` | Drives the real Electron app end to end. Needs a desktop session. |
 | `npm run test:extension` | Runs the extension in an isolated Chromium against synthetic Iowa pages and a made-up pantry form. |
+| `npm run capture:ui -- after` | Screenshots every state of the card and side panel into `docs/pr-media/`, and fails if the extension logs an error. Run it with `before` on main for a pull request's before pictures. |
 | `npm run test:translation` | Checks the language picker, translated questions, and right-to-left Arabic. |
 | `npm run test:summary` | Checks the side panel's "What this page says". |
 | `npm run test:laya` | Checks Laya's fills on a synthetic pantry form, with the desktop app stubbed. |
