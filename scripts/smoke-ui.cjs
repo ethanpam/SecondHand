@@ -337,6 +337,11 @@ async function main() {
     assert.match(recoveryKey, /^[0-9A-Z]{4}(?:-[0-9A-Z]{4}){7}$/);
     await expect(page.locator('#recovery-done')).toBeDisabled();
     await page.locator('#recovery-saved').check();
+    // Only the box's change event enables Continue (renderer/app.js), and showing a key, closing the dialog or locking
+    // disables it again. Click once the app has seen the box checked for this key, so a miss names its step.
+    await expect(page.locator('#recovery-saved')).toBeChecked();
+    await expect(page.locator('#recovery-key-value')).toHaveText(recoveryKey);
+    await expect(page.locator('#recovery-done')).toBeEnabled();
     await page.locator('#recovery-done').click();
     await expect(page.locator('#recovery-dialog')).not.toBeVisible();
     await expect(page.locator('#workspace')).toBeVisible();
@@ -700,7 +705,12 @@ async function main() {
         errorHidden: document.querySelector('#auth-error').hidden,
         submitDisabled: document.querySelector('#auth-submit').disabled,
         submitBusy: document.querySelector('#auth-submit').getAttribute('aria-busy'),
-        workspaceHidden: document.querySelector('#workspace').hidden
+        workspaceHidden: document.querySelector('#workspace').hidden,
+        // The recovery key dialog: whether it is open, its box checked, Continue disabled, and a key shown (never the key).
+        recoveryOpen: document.querySelector('#recovery-dialog').open,
+        recoverySaved: document.querySelector('#recovery-saved').checked,
+        recoveryDoneDisabled: document.querySelector('#recovery-done').disabled,
+        recoveryKeyShown: Boolean(document.querySelector('#recovery-key-value').textContent)
       })).catch(() => ({ unavailable: true }));
       console.error('Sanitized auth failure diagnostics:', JSON.stringify(auth));
       // Record what the window showed when a step failed; CI uploads artifacts/.
