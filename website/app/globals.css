@@ -272,7 +272,8 @@ nav a:hover {
   align-items: center;
   padding: var(--space-section) 0 72px;
 }
-.intro h2 {
+.intro h2,
+.intro h1 {
   margin-bottom: 26px;
 }
 .lead {
@@ -1227,4 +1228,25 @@ footer p {
     transition: none !important;
     animation: none !important;
   }
+}
+
+.downloads-page h1,
+.setup-page h1 {
+  font-size: clamp(36px, 4.5vw, 64px);
+  line-height: 1.08;
+  letter-spacing: -0.045em;
+}
+.downloads-page .intro {
+  padding-top: 72px;
+}
+.setup-download-note {
+  margin: 48px 0 0;
+  color: var(--muted-foreground);
+}
+.setup-download-note a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.setup-page .setup-section {
+  padding-top: 48px;
 }

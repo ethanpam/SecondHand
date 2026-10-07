@@ -4,7 +4,7 @@ import '@fontsource/geist/latin-500.css';
 import '@fontsource/geist/latin-600.css';
 import '@fontsource-variable/bricolage-grotesque';
 import './globals.css';
-import { siteUrl } from './site';
+import { siteUrl } from '../lib/site';
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {

@@ -1,6 +1,5 @@
 import Image from 'next/image';
-import { ArrowIcon, ExternalIcon } from './icons';
-import { downloads } from './release';
+import { ArrowIcon } from './icons';
 import { VariableWordmark } from './variable-wordmark';
 
 function Brand({ className = 'brand' }: { className?: string }) {
@@ -28,11 +27,11 @@ export function SiteHeader() {
       <header className="site-header wrap">
         <Brand />
         <nav aria-label="Main navigation">
-          <a href="/#setup">Setup guide</a>
+          <a href="/setup">Setup guide</a>
           <a href="/faq">Questions</a>
           <a href="/privacy">Privacy</a>
         </nav>
-        <a className="header-download" href="/#downloads">
+        <a className="header-download" href="/downloads">
           Get SecondHand <ArrowIcon size={15} />
         </a>
       </header>
@@ -53,13 +52,10 @@ export function SiteFooter() {
           </p>
         </div>
         <nav aria-label="Footer" className="footer-links">
-          <a href="/">Download</a>
-          <a href="/#setup">Setup guide</a>
+          <a href="/downloads">Download</a>
+          <a href="/setup">Setup guide</a>
           <a href="/faq">Common questions</a>
           <a href="/privacy">Privacy policy</a>
-          <a href={downloads.checksums}>
-            Download checksums <ExternalIcon size={14} />
-          </a>
         </nav>
       </div>
       <VariableWordmark />

@@ -1,9 +1,9 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ExternalIcon } from '../../icons';
-import { downloads } from '../../release';
-import { SiteFooter, SiteHeader } from '../../site-chrome';
+import { ExternalIcon } from '../../_components/icons';
+import { downloads } from '../../../lib/release';
+import { SiteFooter, SiteHeader } from '../../_components/site-chrome';
 import { StartDownload } from '../start-download';
 
 const platforms = {
@@ -89,7 +89,7 @@ export default async function ThankYou({ params }: Props) {
           </p>
         )}
         <p>
-          Need more detail? Read the <a href="/#setup">full setup guide</a>, the{' '}
+          Need more detail? Read the <a href="/setup">full setup guide</a>, the{' '}
           <a href="/faq">common questions</a>, or our{' '}
           <a href="/privacy">privacy policy</a>.
         </p>

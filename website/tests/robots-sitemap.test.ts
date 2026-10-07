@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import './support/app-modules.ts';
 import { handlers, pages } from './support/pages.ts';
-import { siteUrl } from '../app/site.ts';
+import { siteUrl } from '../lib/site.ts';
 
 // Loaded after the hooks above, which resolve their extensionless imports.
 const { default: robots } = await import('../app/robots.ts');

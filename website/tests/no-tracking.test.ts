@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { app, pages } from './support/pages.ts';
-import { siteUrl } from '../app/site.ts';
+import { siteUrl } from '../lib/site.ts';
 
 // Every page is built only from the site's own files: no analytics, no tracking
 // and nothing loaded from another site. This reads each page's own code and

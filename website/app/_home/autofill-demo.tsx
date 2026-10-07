@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { CheckIcon } from './icons';
-import { useVisibleMotion } from './site-motion';
+import { CheckIcon } from '../_components/icons';
+import { useVisibleMotion } from '../../lib/site-motion';
 
 const stages = [
   { name: 'approach', duration: 1100, filled: 0 },
