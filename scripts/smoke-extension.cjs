@@ -598,7 +598,11 @@ async function main() {
       { name: 'unexpected Enter Personal Information', url: `${applicant}?next=unexpected`, pageKey: 'iowa-personal-unverified', line: code => `${strings.text(code, 'iowa.personalUnverifiedTodo')} ${stopNote(code)}` },
       // Save and Continue disabled: SecondHand fills the page and does not continue.
       { name: 'Enter Personal Information, Save and Continue disabled', url: `${applicant}?next=stay`, pageKey: 'iowa-personal-information', disabled: true,
-        line: (code, filled) => `${strings.text(code, 'result.thenTodo', { summary: { key: 'result.filled', params: { count: filled } }, todo: { key: 'iowa.reviewSaveContinue' } })} ${stopNote(code)}` }
+        line: (code, filled) => `${strings.text(code, 'result.thenTodo', { summary: { key: 'result.filled', params: { count: filled } }, todo: { key: 'iowa.reviewSaveContinue' } })} ${stopNote(code)}` },
+      // A question left: Autofill fills the rest and waits, with its longest line, beside the offer of the
+      // questions in the reader's language where there is one.
+      { name: 'Enter Personal Information, a question left', url: `${applicant}?next=stay`, pageKey: 'iowa-personal-information', profile: { firstName: '' },
+        line: (code, filled) => `${strings.text(code, 'result.thenTodo', { summary: { key: 'result.filled', params: { count: filled } }, todo: { key: 'iowa.missingAnswers' } })} ${strings.text(code, 'widget.stopToCheck')}` }
     ];
     // Before Autofill: Autofill has been started from this profile above, so the card speaks only where it matters.
     // On the applicant page it says what the address page after it may bring; elsewhere it is its buttons. On these
@@ -641,7 +645,7 @@ async function main() {
       measured.push(`${code} before the first Autofill: ${first.width}x${first.height}`);
       await widget.evaluate(() => localStorage.setItem('secondhand.autofillStarted', '1'));
       for (const step of wholeSteps) {
-        await resetTo(step.url);
+        await resetTo(step.url, { profile: step.profile });
         widget = await launcherFrame();
         await expect(widget.locator('#autofill')).toBeVisible({ timeout: 20000 });
         if (step.disabled) await page.locator('.saveAndContinueButton').evaluate(button => button.setAttribute('disabled', ''));
@@ -656,7 +660,7 @@ async function main() {
         await expect.poll(async () => (await widget.evaluate(() => chrome.runtime.sendMessage({ type: 'ui:pageState' })))?.data?.result?.state, { timeout: 20000 }).toMatch(/^(waiting|done)$/);
         const { page: probed, result } = (await widget.evaluate(() => chrome.runtime.sendMessage({ type: 'ui:pageState' }))).data;
         assert.equal(probed.pageKey, step.pageKey, `${step.name} is classified as ${step.pageKey}`);
-        if (step.disabled) assert.ok(result.filled > 0, 'SecondHand fills the applicant page');
+        if (step.disabled || step.profile) assert.ok(result.filled > 0, 'SecondHand fills the applicant page');
         // A disabled button fires no click, so the worker's own result says it never tried to continue
         // (it would say it is continuing, or waiting after a try).
         if (step.disabled) assert.equal(result.state, 'done', 'SecondHand does not try to continue');
@@ -664,7 +668,7 @@ async function main() {
         const expected = step.line(code, result.filled);
         await expect.poll(() => lineProblems(widget, expected, code), { timeout: 10000, message: `${code} ${step.name}` }).toEqual([]);
         assert.equal(await page.evaluate(() => window.__nextClicks || 0), 0, 'SecondHand does not continue');
-        if (!step.disabled) assert.deepEqual(await calls('getFields'), [], 'nothing is asked of the desktop for a page SecondHand does not fill');
+        if (!step.disabled && !step.profile) assert.deepEqual(await calls('getFields'), [], 'nothing is asked of the desktop for a page SecondHand does not fill');
         const after = await frameBox();
         measured.push(`${code} ${step.name}: ${before.width}x${before.height} before${offered ? ' (language offer)' : ''}, ${after.width}x${after.height} after`);
       }
