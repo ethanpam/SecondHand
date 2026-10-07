@@ -312,6 +312,19 @@ async function iowaCard() {
     await expect((await card()).locator('#need-you')).toBeVisible({ timeout: 20000 });
     await cardShot(session, 'card-need-you-again');
 
+    // In Spanish, the first time, on Iowa's English page: the line Autofill waits with, under the offer of the
+    // questions in Spanish, which leaves the line less room.
+    await (await card()).locator('#stop').click();
+    await (await card()).evaluate(() => globalThis.SecondHandStrings.setLanguage('es'));
+    await open(applicant, { profile: { ...smoke.syntheticProfile, firstName: '' } });
+    await (await card()).evaluate(() => localStorage.removeItem('secondhand.autofillStarted'));
+    await (await card()).locator('#autofill').click();
+    await expect((await card()).locator('#need-you')).toBeVisible({ timeout: 20000 });
+    await expect((await card()).locator('#translate-offer')).toBeVisible();
+    await cardShot(session, 'card-need-you-es');
+    await (await card()).locator('#stop').click();
+    await (await card()).evaluate(() => globalThis.SecondHandStrings.setLanguage('en'));
+
     await open(applicant, { locked: true });
     await (await card()).locator('#autofill').click();
     await expect((await card()).locator('#unlock')).toBeVisible({ timeout: 20000 });
@@ -613,7 +626,7 @@ async function recording() {
 }
 
 const sessions = [
-  [iowaCard, ['card-ready', 'card-focus', 'card-hidden', 'card-hidden-focus', 'card-working', 'card-need-you', 'card-hidden-waiting', 'card-ready-again', 'card-message', 'card-need-you-again', 'card-locked', 'card-closed', 'card-pill']],
+  [iowaCard, ['card-ready', 'card-focus', 'card-hidden', 'card-hidden-focus', 'card-working', 'card-need-you', 'card-hidden-waiting', 'card-ready-again', 'card-message', 'card-need-you-again', 'card-need-you-es', 'card-locked', 'card-closed', 'card-pill']],
   [iowaPanel, ['panel-iowa', 'panel-header', 'panel-focus', 'panel-working', 'panel-iowa-filled', 'panel-checklist', 'panel-iowa-again', 'panel-iowa-filled-again', 'panel-locked', 'panel-closed', 'panel-info', 'panel-elsewhere', 'panel-elsewhere-es', 'panel-arabic', 'panel-questions']],
   [sites, ['panel-site-off', 'panel-site-filled', 'panel-site-filled-open', 'panel-laya-off', 'panel-save', 'panel-site-held', 'panel-site-guessed', 'panel-site-household', 'panel-site-remember', 'panel-site-guessed-es', 'panel-all-sites-off', 'card-site', 'card-offer', 'card-offer-filled']],
   [outdated, ['card-outdated', 'panel-outdated', 'card-reload']],
