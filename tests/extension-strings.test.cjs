@@ -236,7 +236,7 @@ test('all five record pages localize owner, money, utility, and asset labels wit
 });
 
 test('a missing record gives a translated action to save an explicit owner and restart Autofill', () => {
-  assert.equal(strings.english('worker.recordMissing'), 'No saved record matches this page and the person chosen on it. In the SecondHand app, open My information, then More SNAP information. Add a record there and set “Person this belongs to” to that person’s name as this page shows it. Then click Autofill again.');
+  assert.equal(strings.english('worker.recordMissing'), 'No saved record matches this page and the person chosen on it (if someone is chosen). In the SecondHand app, open My information, then More SNAP information. Add a record there and set “Person this belongs to” to the person’s name exactly as this page shows it. When it is saved, click Stop Autofill, then Start Autofill.');
   assert.deepEqual(strings.describeEnglish(strings.english('worker.recordMissing')), { key: 'worker.recordMissing', params: {} });
   for (const code of strings.LANGUAGES) {
     const value = strings.text(code, 'worker.recordMissing');
@@ -258,12 +258,26 @@ test('on Iowa’s screening and financial pages, the reasons and the missing-rec
       if (observed[code]) assert.doesNotMatch(value, observed[code], `${code}: ${key}`);
     }
   }
+  const plain = text => text.replace(/ /g, ' ');
   for (const code of strings.LANGUAGES) {
     // The desktop app's names stay in English, quoted as each language quotes “My information”.
     const [, open = '', close = ''] = /([“«] ?)My information( ?[”»])/.exec(strings.text(code, 'save.button')) || [];
     if (code !== 'en') assert.ok(open && close, code);
     const value = strings.text(code, 'worker.recordMissing');
-    for (const name of ['My information', 'More SNAP information', 'Person this belongs to']) assert.ok(value.includes(code === 'en' ? name : `${open}${name}${close}`), `${code}: ${name}`);
+    for (const name of ['My information', 'More SNAP information', 'Person this belongs to']) assert.ok(plain(value).includes(code === 'en' ? name : plain(`${open}${name}${close}`)), `${code}: ${name}`);
+    // Autofill is still running when no record fits, so the panel's button reads Stop Autofill. Stopping it
+    // turns the button into Start Autofill, and only that click asks the app for the record again.
+    const stop = strings.text(code, 'panel.stopAutofill'), begin = strings.text(code, 'panel.autofillIowa');
+    assert.ok(plain(value).indexOf(stop) >= 0 && plain(value).lastIndexOf(begin) > plain(value).indexOf(stop), `${code}: names ${stop}, then ${begin}`);
+  }
+  assert.doesNotMatch(en['worker.recordMissing'], /Autofill again/);
+  // Right to left, a quoted English name split over two lines reads from the far left of one line to the far right of the next.
+  for (const name of ['My information', 'More SNAP information', 'Person this belongs to']) {
+    assert.ok(strings.text('ar', 'worker.recordMissing').includes(`“${name.replace(/ /g, ' ')}”`), `ar: ${name} kept on one line`);
+  }
+  // The Vietnamese button names keep their words on one line.
+  for (const key of ['panel.stopAutofill', 'panel.autofillIowa']) {
+    assert.ok(strings.text('vi', 'worker.recordMissing').includes(strings.text('vi', key).replace(/ /g, ' ')), `vi: ${key} kept on one line`);
   }
   // Each adapter's English reason is the one these keys translate.
   const later = require('../extension/iowa-later-adapter.js'), laterPages = require('./fixtures/iowa-later-pages.cjs');
