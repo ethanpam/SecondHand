@@ -314,7 +314,7 @@ For live reloading, run `npm run dev` (run `npx playwright install chromium` onc
 | `npm run capture:ui -- after` | Screenshots every state of the card and side panel into `docs/pr-media/`, and fails if the extension logs an error. Run it with `before` on main for a pull request's before pictures. |
 | `npm run test:translation` | Checks the language picker, translated questions, and right-to-left Arabic. |
 | `npm run test:summary` | Checks the side panel's "What this page says". |
-| `npm run test:laya` | Checks Laya's fills on a synthetic pantry form, with the desktop app stubbed. |
+| `npm run test:laya` | Checks Laya's fills on a synthetic pantry form, with the desktop app stubbed, then how fast the real models decide, alone, when `SECONDHAND_LAYA_NOUL_MODEL_DIR` and `SECONDHAND_LAYA_CHOICE_MODEL_DIR` name their export folders. |
 | `npm run test:ocr` / `test:ocr:ui` | Exercises offline OCR, and reads a synthetic tax form in the desktop app. |
 | `npm run test:native` | Tests the native messaging protocol. |
 | `npm run extension:zip` | Packages the extension. |

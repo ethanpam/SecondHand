@@ -8,46 +8,27 @@
 // e.g. SECONDHAND_LAYA_NOUL_MODEL_DIR=~/Projects/LayaStudio/workspace/exports/<name> node --test tests/laya-parity.test.cjs
 // A set whose variable isn't set is skipped, and says so. With SECONDHAND_LAYA_ACCURACY=1 as well, each set also
 // fills the final holdout through the app's own code (ML_model/eval/app_accuracy.cjs): minutes of model time.
+// How fast each model decides is checked apart from these, alone: tests/laya-speed.cjs, by npm run test:laya.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
-const { createLaya, processRunner, forkWorker } = require('../desktop/laya.cjs');
+const { createLaya } = require('../desktop/laya.cjs');
 const { MODEL_FORMATS } = require('../desktop/laya-model.cjs');
 const { loadTokenizer } = require('../desktop/laya-tokenizer.cjs');
 const { toQuestion, encodeDecision } = require('../desktop/laya-prompt.cjs');
-const { BUDGET_MS } = require('../desktop/laya-decisions.cjs');
 const { appAccuracy, overBudget, finalHoldout, WRONG_FILL_BUDGETS } = require('../ML_model/eval/app_accuracy.cjs');
+const { SETS, NO_MODEL, load, only } = require('./helpers/laya-exports.cjs');
 
-const SETS = [
-  { format: 'noul-v1', fixture: 'parity-noul.json', env: 'SECONDHAND_LAYA_NOUL_MODEL_DIR' },
-  { format: 'choice-v2', fixture: 'parity-choice.json', env: 'SECONDHAND_LAYA_CHOICE_MODEL_DIR' }
-];
-const NO_MODEL = { version: 1, model: null };
 const TOLERANCE = 1e-3;
-// How fast each model must decide: a little over the slowest of four runs on 2026-10-06, on an Apple M4 Max
-// (14 cores) with the 1-minute load at 6 to 33. noul-v1 took 659–731 ms for the first decision (process start,
-// checksum, load), 132–137 ms one decision at a time at p95, and 1,753–2,064 ms for a batch of 20; choice-v2
-// 623–916 ms, 146–158 ms and 2,073–2,653 ms. A click gives Laya BUDGET_MS (3 s) for a whole page, so a batch of
-// 20 never gets more than that.
-const LATENCY = Object.freeze({
-  'noul-v1': Object.freeze({ firstMs: 1000, p95Ms: 200, batchOf20Ms: 2500 }),
-  'choice-v2': Object.freeze({ firstMs: 1200, p95Ms: 200, batchOf20Ms: BUDGET_MS })
-});
 // Probabilities in option order: a choice answer is keyed by label, and JavaScript lists number-like keys first.
 const values = (answer, definition) => answer.type === 'noul' ? [1 - answer.noul, answer.noul] : definition.criteria.map(label => answer.probabilities[label]);
-const only = decision => Object.values(decision.questions)[0];
 const maxGap = (rows, key) => Math.max(...rows.map(({ js, decision }) => Math.max(...js.map((value, index) => Math.abs(value - decision[key][index])))));
-const percentile = (sorted, share) => sorted[Math.min(sorted.length - 1, Math.ceil(share * sorted.length) - 1)];
-const megabytes = bytes => `${Math.round(bytes / 1e6)} MB`;
-const load = fixture => JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/laya', fixture), 'utf8'));
 
 test('every model format the app runs has its own reference outputs, made from a model of that format', () => {
   assert.deepEqual(SETS.map(set => set.format), [...MODEL_FORMATS]);
   assert.deepEqual(Object.keys(WRONG_FILL_BUDGETS), [...MODEL_FORMATS], 'and its own wrong-fill budget');
-  assert.deepEqual(Object.keys(LATENCY), [...MODEL_FORMATS], 'and its own latency budget');
   for (const { format, fixture } of SETS) assert.equal(load(fixture).format, format, fixture);
   assert.equal(new Set(SETS.map(set => set.env)).size, SETS.length, 'each export has its own variable');
 });
@@ -92,49 +73,6 @@ for (const { format, fixture, env } of SETS) {
     assert.ok(gaps.single < TOLERANCE, `one-by-one gap ${gaps.single}`);
     assert.ok(gaps.batched < TOLERANCE, `batched gap ${gaps.batched}`);
     for (const { js, decision } of single) assert.equal(js.indexOf(Math.max(...js)), decision.onnx.indexOf(Math.max(...decision.onnx)));
-  });
-
-  test(`${format}: 20 decisions: latency, memory, and the model process ended after the idle timeout`, { skip, timeout: 10 * 60 * 1000 }, async t => {
-    const children = [];
-    const runner = processRunner({ fork: script => {
-      const child = forkWorker(script);
-      children.push({ child, exited: new Promise(resolve => child.once('exit', resolve)) });
-      return child;
-    } });
-    const laya = createLaya({ modelDir, modelFormat: format, manifest: NO_MODEL, runner, enabled: true, timeoutMs: 5 * 60 * 1000, idleMs: 2000 });
-    t.after(() => laya.close());
-    // Resident memory of a process, in bytes (ps reports kilobytes).
-    const rss = pid => Number(execFileSync('ps', ['-o', 'rss=', '-p', String(pid)], { encoding: 'utf8' }).trim()) * 1024;
-    const desktopBefore = process.memoryUsage().rss;
-    const rows = parity.decisions.slice(0, 20);
-    const started = performance.now();
-    await laya.decide(rows[0].state, rows[0].questions);
-    const firstMs = performance.now() - started;
-    const { pid } = children[0].child;
-    const loaded = rss(pid);
-    const times = [];
-    for (const row of rows) {
-      const start = performance.now();
-      await laya.decide(row.state, row.questions);
-      times.push(performance.now() - start);
-    }
-    const batchStart = performance.now();
-    await laya.decideBatch(rows.map(({ state, questions }) => ({ state, questions })));
-    const batchMs = performance.now() - batchStart;
-    const busy = rss(pid);
-    const desktopAfter = process.memoryUsage().rss;
-    times.sort((a, b) => a - b);
-    t.diagnostic(`First decision (process start, model load, inference): ${Math.round(firstMs)} ms. One decision at a time: p50 ${Math.round(percentile(times, 0.5))} ms, p95 ${Math.round(percentile(times, 0.95))} ms (mean ${Math.round(rows.reduce((sum, row) => sum + row.length, 0) / rows.length)} tokens). decideBatch of the same 20: ${Math.round(batchMs)} ms.`);
-    t.diagnostic(`Model process RSS: ${megabytes(loaded)} loaded, ${megabytes(busy)} after the decisions. Desktop process RSS: ${megabytes(desktopBefore)} before, ${megabytes(desktopAfter)} after.`);
-    const budget = LATENCY[format];
-    assert.ok(firstMs <= budget.firstMs, `the first decision took ${Math.round(firstMs)} ms; its budget is ${budget.firstMs} ms`);
-    assert.ok(percentile(times, 0.95) <= budget.p95Ms, `one decision took ${Math.round(percentile(times, 0.95))} ms at p95; its budget is ${budget.p95Ms} ms`);
-    assert.ok(batchMs <= budget.batchOf20Ms, `decideBatch of 20 took ${Math.round(batchMs)} ms; its budget is ${budget.batchOf20Ms} ms`);
-    await children[0].exited;
-    t.diagnostic('The model process ended after the idle timeout, returning all of its memory.');
-    const again = await laya.decide(rows[0].state, rows[0].questions);
-    assert.equal(Object.values(again.answers)[0].type, only(rows[0]).type);
-    assert.equal(children.length, 2, 'the next decision started a new model process');
   });
 
   const accuracy = skip || (process.env.SECONDHAND_LAYA_ACCURACY === '1' ? false : `SECONDHAND_LAYA_ACCURACY is not 1, so the ${format} wrong-fill check on the final holdout is skipped.`);
