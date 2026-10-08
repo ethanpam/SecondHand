@@ -313,6 +313,40 @@ test('the missing-record step never tells the person to click Stop, in any langu
   }
 });
 
+// The record pages' person row says who the record belongs to, in the app's words, and a screening page that can't
+// continue yet says what to do (#237).
+test('Iowa’s record checklist names who the record belongs to, and a screening page that can’t continue says what to do', () => {
+  for (const key of ['iowa.record.person', 'iowa.record.owner']) {
+    assert.match(en[key], /belongs to/, key);
+    assert.doesNotMatch(en[key], /\bowns?\b|explicit/i, key);
+    for (const code of strings.LANGUAGES) if (code !== 'en') assert.notEqual(strings.text(code, key), en[key], `${code}: ${key}`);
+  }
+  assert.doesNotMatch(en['iowa.laterMissing'], /supported|observed|ordinary|explicit|follow-up/i);
+  // The old word for "supported" in each translation.
+  const supported = { es: /compatibles/i, vi: /hỗ trợ/i, zh: /支持/, fr: /prises? en charge/i, ar: /مدعوم/ };
+  for (const [code, word] of Object.entries(supported)) assert.doesNotMatch(strings.text(code, 'iowa.laterMissing'), word, code);
+  // Each adapter's person row and instruction is the English these keys translate.
+  const records = require('../extension/iowa-record-adapter.js'), job = require('./fixtures/iowa-job-history.cjs'), financial = require('./fixtures/iowa-financial-records.cjs');
+  for (const kind of ['job', 'retirement', 'rent', 'utilities', 'assets']) {
+    const fixture = kind === 'job' ? job : financial;
+    const doc = onScreen(kind === 'job' ? fixture.makeHtml() : fixture.makeHtml(kind), fixture.URL);
+    fixture.attachHandlers(doc);
+    try {
+      const person = records.probePage(doc, fixture.URL).checklist.find(item => item.key === 'person');
+      assert.equal(person?.label, en[kind === 'job' ? 'iowa.record.person' : 'iowa.record.owner'], kind);
+    } finally { doc.defaultView.close(); }
+  }
+  const later = require('../extension/iowa-later-adapter.js'), laterPages = require('./fixtures/iowa-later-pages.cjs');
+  for (const kind of ['emergency', 'background', 'jobs', 'income', 'expenses', 'property']) {
+    const url = laterPages.url(kind), doc = onScreen(laterPages.makeHtml(kind), url);
+    try {
+      const page = later.probePage(doc, url);
+      assert.equal(page.canAdvance, false, kind);
+      assert.equal(page.todo, en['iowa.laterMissing'], kind);
+    } finally { doc.defaultView.close(); }
+  }
+});
+
 // An Iowa portal page as the adapter sees it, with every element on screen.
 function portalPage(path, html) {
   const doc = new JSDOM(`<!doctype html><main>${html}</main>`, { url: `${adapter.PORTAL}${path}`, pretendToBeVisual: true }).window.document;

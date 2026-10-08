@@ -301,7 +301,7 @@
     if (!current) return result;
     const review = issues(doc, current), canAdvance = !review.requiredRemaining && !review.manualRemaining && Boolean(nextButton(doc, current));
     return { ...result, ...review, kind: 'fillable', pageKey: page.pageKey, fields: scan(doc, url).fields, canAdvance,
-      todo: canAdvance ? 'SecondHand can save this page and continue. Review every answer before final submission.' : 'Complete the missing answers in Iowa’s form. Unsupported follow-up questions need your review.',
+      todo: canAdvance ? 'SecondHand can save this page and continue. Review every answer before final submission.' : 'Answer the empty questions in Iowa’s form. If SecondHand doesn’t know a question on this page, answer it and click Save and Continue yourself.',
       reason: 'SecondHand clicks Save and Continue only when every question on this page that needs an answer has one and Iowa shows no errors or pop-ups. A question SecondHand doesn’t know stops it too.' };
   }
   function captureNavigation(doc, url) {

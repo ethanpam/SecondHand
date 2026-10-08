@@ -31,7 +31,7 @@
     { key: 'stoppedWorking30Days', text: 'Stop working', index: 2 },
     { key: 'fewerHours30Days', text: 'Start working fewer hours', index: 3 }
   ];
-  const LABELS = { person: 'Person who owns this job record', workOrTraining: 'Work or training', startDate: 'Job start date', selfEmployed: 'Self-employment', employer: 'Employer name', jobTitle: 'Job title', monthlyHours: 'Monthly hours', amount: 'Gross income per pay period', selfEmploymentMonthlyNet: 'Monthly net self-employment income', hasBusinessExpenses: 'Business expenses for self-employment', frequency: 'Pay period frequency', tipsOrCommissions: 'Tips or commissions', incomeExpectedSame: 'Income expected to stay the same', changedJobs30Days: 'Changed jobs in the last 30 days', stoppedWorking30Days: 'Stopped working in the last 30 days', fewerHours30Days: 'Started working fewer hours in the last 30 days' };
+  const LABELS = { person: 'Person this job record belongs to', workOrTraining: 'Work or training', startDate: 'Job start date', selfEmployed: 'Self-employment', employer: 'Employer name', jobTitle: 'Job title', monthlyHours: 'Monthly hours', amount: 'Gross income per pay period', selfEmploymentMonthlyNet: 'Monthly net self-employment income', hasBusinessExpenses: 'Business expenses for self-employment', frequency: 'Pay period frequency', tipsOrCommissions: 'Tips or commissions', incomeExpectedSame: 'Income expected to stay the same', changedJobs30Days: 'Changed jobs in the last 30 days', stoppedWorking30Days: 'Stopped working in the last 30 days', fewerHours30Days: 'Started working fewer hours in the last 30 days' };
   const REQUEST = Object.freeze({ recordType: 'jobs', fields: Object.freeze(Object.keys(LABELS)) });
   const previews = new WeakMap(), navigation = new WeakMap(), proofs = new WeakMap();
   function rendered(element, doc) {
@@ -320,7 +320,7 @@
     }
     return { page, form, active: active[0], owner, options, controls, specs, type, entry, selectedType, knownQuestions };
   }
-  function typedLabel(current, key) { if (current.page.direct && key !== 'person') return current.page.direct.find(spec => spec.key === key)?.text || key; return key === 'person' ? 'Person who owns this record' : key === 'type' ? 'Type of income or housing cost' : key === 'amount' ? current.page.recordType === 'housingExpenses' ? 'Your share of rent' : 'Current payment amount' : key === 'frequency' ? LABELS.frequency : current.page.checkbox.options.find(([name]) => name === key)?.[1] || key; }
+  function typedLabel(current, key) { if (current.page.direct && key !== 'person') return current.page.direct.find(spec => spec.key === key)?.text || key; return key === 'person' ? 'Person this record belongs to' : key === 'type' ? 'Type of income or housing cost' : key === 'amount' ? current.page.recordType === 'housingExpenses' ? 'Your share of rent' : 'Current payment amount' : key === 'frequency' ? LABELS.frequency : current.page.checkbox.options.find(([name]) => name === key)?.[1] || key; }
   function typedScan(doc, url) {
     const result = { supported: url === URL, recognizedPage: false, fields: [], bindings: [], ambiguous: [], skipped: 0 }, current = typedContext(doc, url);
     if (!current) return result; result.recognizedPage = true; const saved = state(current), proof = proofs.get(current.form);
