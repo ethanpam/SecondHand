@@ -191,6 +191,27 @@ test('a mark split off inside a value word is not read into that value', () => {
   assert.equal(values.middleName, 'Q');
 });
 
+test('a misread word in one foreign-address label does not hide the address', () => {
+  const doc = fixture();
+  // OCR can misread one word of a printed label, here "Foreign" of "Foreign
+  // country name". The other labels on that line still mark it.
+  doc.pages[0].words.find(word => word.text === 'Foreign').text = 'Foreigm';
+  const values = profile(analyzeDocument(doc));
+  assert.deepEqual([values.addressLine1, values.addressLine2, values.city, values.state, values.zip],
+    ['42 FICTIONAL ROAD', '7C', 'CEDAR RAPIDS', 'IA', '52401-1234']);
+  assert.deepEqual(values, profile(analyzeDocument(fixture())));
+});
+
+test('a foreign country still suppresses the domestic address when its label is misread', () => {
+  const doc = fixture();
+  doc.pages[0].words.find(word => word.text === 'Foreign').text = 'Foreigm';
+  doc.pages[0].words.push({ text: 'NORWAY', confidence: 95, bbox: { x0: 100, x1: 190, y0: 392, y1: 410 } });
+  const result = analyzeDocument(doc);
+  assert.equal(profile(result).addressLine1, undefined);
+  assert.equal(profile(result).zip, undefined);
+  assert.match(result.warnings.join(' '), /Foreign-address information needs manual review/);
+});
+
 test('multiple tax returns do not combine applicant identities', () => {
   const doc = fixture(); doc.pages.push(structuredClone(doc.pages[0]));
   const result = analyzeDocument(doc);
