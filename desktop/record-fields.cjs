@@ -59,16 +59,16 @@ const fieldLabel = (type, key) => RECORD_FIELDS[type]?.find(field => field.key =
 // never use the altered display string for owner matching or returned values.
 const displayText = value => String(value || '').replace(new RegExp(UNSEEN.source, 'gv'), ' ').replace(/\s+/gu, ' ').trim().slice(0, 200);
 function recordLabel(record, index, recordType = 'jobs') {
-  if (recordType === 'assets') return `${index + 1}. ${displayText(record.person)} — ${displayText(record.type)}${record.institution ? ` — ${displayText(record.institution)}` : ''}${record.currentValue ? ` — Value ${displayText(record.currentValue)}` : ''}`;
+  if (recordType === 'assets') return `${index + 1}. ${displayText(record.person)} · ${displayText(record.type)}${record.institution ? ` · ${displayText(record.institution)}` : ''}${record.currentValue ? ` · Value ${displayText(record.currentValue)}` : ''}`;
   if (recordType === 'utilityExpenses') {
     const yes = REGISTRY['iowa-utility-expenses'].fields.filter(key => key !== 'person' && record[key] === 'yes').map(key => fieldLabel(recordType, key));
-    return `${index + 1}. ${displayText(record.person)} — ${yes.length ? yes.join(', ') : 'Utilities: review explicit answers'}`;
+    return `${index + 1}. ${displayText(record.person)} · ${yes.length ? yes.join(', ') : 'No utilities marked Yes'}`;
   }
   if (recordType === 'otherIncomeSources' || recordType === 'housingExpenses') {
     const source = recordType === 'housingExpenses' ? record.paidTo : record.source;
-    return `${index + 1}. ${displayText(record.person)} — ${displayText(record.type)}${source ? ` — ${displayText(source)}` : ''}${record.amount ? ` — ${displayText(record.amount)}${record.frequency ? ` / ${displayText(record.frequency)}` : ''}` : ''}`;
+    return `${index + 1}. ${displayText(record.person)} · ${displayText(record.type)}${source ? ` · ${displayText(source)}` : ''}${record.amount ? ` · ${displayText(record.amount)}${record.frequency ? ` / ${displayText(record.frequency)}` : ''}` : ''}`;
   }
-  return `${index + 1}. ${displayText(record.person)} — ${displayText(record.employer) || 'Employer not recorded'} — ${displayText(record.jobTitle) || displayText(record.workOrTraining) || 'Job details not recorded'}${record.startDate ? ` (${displayText(record.startDate)})` : ''}${record.amount ? ` — Gross pay ${displayText(record.amount)}${record.frequency ? ` / ${displayText(record.frequency)}` : ''}` : ''}`;
+  return `${index + 1}. ${displayText(record.person)} · ${displayText(record.employer) || 'Employer not recorded'} · ${displayText(record.jobTitle) || displayText(record.workOrTraining) || 'Job details not recorded'}${record.startDate ? ` (${displayText(record.startDate)})` : ''}${record.amount ? ` · Gross pay ${displayText(record.amount)}${record.frequency ? ` / ${displayText(record.frequency)}` : ''}` : ''}`;
 }
 
 module.exports = { REGISTRY, recordRequestScope, candidatesFor, normalizePerson, fieldLabel, recordLabel, displayText };

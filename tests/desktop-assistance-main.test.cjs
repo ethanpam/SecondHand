@@ -8,6 +8,7 @@ const path = require('node:path');
 const schema = require('../shared/schema.cjs');
 const { PORTAL_URL, FIELD_LABELS } = schema;
 const realLaya = require('../desktop/laya.cjs');
+const { recordLabel } = require('../desktop/record-fields.cjs');
 const { plain, tick, startMain } = require('./helpers/harness.cjs');
 
 const extensionId = 'a'.repeat(32);
@@ -2078,6 +2079,30 @@ test('multiple exact-owner jobs require a desktop record choice even with Always
   assert.equal(app.prompts.length, 1); assert.equal(app.prompts[0].defaultId, 0);
   assert.match(app.prompts[0].detail, /Fictional Employer 1/); assert.match(app.prompts[0].detail, /Fictional Employer 2/);
   assert.doesNotMatch(JSON.stringify(app.prompts), /Different Person|Employer 3/);
+  assert.doesNotMatch(app.prompts[0].detail, /—/);
+  for (const button of app.prompts[0].buttons) assert.doesNotMatch(button, /—/);
+});
+
+// #208: the chooser and its approval name each record's parts joined by " · ", never a dash, in the order they're shown.
+test('record labels join each saved record’s parts with a middle dot, and a utilities record with no Yes says so', () => {
+  const labels = {
+    jobs: [savedJob(1, { jobTitle: 'Cook', startDate: '2025-01-15' }),
+      '1. Avery Example · Fictional Employer 1 · Cook (2025-01-15) · Gross pay 1200 / Every Other Week'],
+    otherIncomeSources: [{ person: 'Avery Example', type: 'Private Pension', source: 'Local payer', amount: '1200.50', frequency: 'Monthly' },
+      '1. Avery Example · Private Pension · Local payer · 1200.50 / Monthly'],
+    housingExpenses: [{ person: 'Avery Example', type: 'Rent', paidTo: 'Synthetic Landlord', amount: '650', frequency: 'Monthly' },
+      '1. Avery Example · Rent · Synthetic Landlord · 650 / Monthly'],
+    utilityExpenses: [{ person: 'Avery Example', gas: 'yes', electricity: 'yes', waterSewage: 'no' },
+      '1. Avery Example · Gas, Electricity or lights'],
+    assets: [{ person: 'Avery Example', type: 'Cash/Uncashed Check', institution: 'Synthetic Bank', currentValue: '40' },
+      '1. Avery Example · Cash/Uncashed Check · Synthetic Bank · Value 40']
+  };
+  for (const [recordType, [record, expected]] of Object.entries(labels)) {
+    const label = recordLabel(record, 0, recordType);
+    assert.doesNotMatch(label, /[—–]/, recordType);
+    assert.equal(label, expected, recordType);
+  }
+  assert.equal(recordLabel({ person: 'Avery Example', gas: 'no', electricity: '' }, 1, 'utilityExpenses'), '2. Avery Example · No utilities marked Yes');
 });
 
 test('an unselected portal person can choose one explicitly owned saved record; blank owners are never offered', async () => {
