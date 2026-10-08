@@ -15,12 +15,13 @@ Never submit this fixture, its details, or derivatives as an application or tax 
 npm run test:ocr -- --input tests/fixtures/ocr/synthetic-1040sr.pdf
 ```
 
-This uses the bundled PDF.js/Tesseract runtime in an isolated Electron worker and parses the result. The separate default `npm run test:ocr` command generates a simple synthetic PNG and also checks actual cancellation and the PDF page limit.
+This uses the bundled PDF.js/Tesseract runtime in an isolated Electron worker and parses the result. The separate default `npm run test:ocr` command generates a simple synthetic PNG and also checks actual cancellation and the PDF page limit. It then reads every PDF here at display scales 1 and 2 and fails unless both readings have the same words, in the same places, and the same suggestions.
 
-The PDF is intentionally useful for imperfect-recognition tests. Table borders and nearby columns cause different segmentation passes to read some values differently even at high confidence. In the current verified run:
+The PDF is intentionally useful for imperfect-recognition tests. Table borders and nearby columns cause different segmentation passes to read some values differently even at high confidence. In the current verified run, which is the same on every display:
 
-- Seven primary-profile suggestions remain: first name, last name, street, apartment, city, state, and ZIP.
-- The middle initial and SSN are omitted instead of guessed.
+- Eight primary-profile suggestions remain: first name, last name, SSN, street, apartment, city, state, and ZIP. The SSN is an impossible test number, which field review flags.
+- The spouse's name and SSN are shown for review only.
+- The middle initial is omitted instead of guessed.
 - Only line 1a **68,450** and line 2b **460** remain as historical, review-only amounts; other amounts are omitted when the two passes disagree or do not both find them.
 - No spouse/dependent details, filing status, age marks, annual-to-monthly income conversion, or eligibility answers are applied to the applicant's profile.
 

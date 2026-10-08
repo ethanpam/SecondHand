@@ -38,13 +38,13 @@ This guide explains the local document reader and its later statement-parsing ad
 
 [ocr-preload.cjs](../desktop/ocr-preload.cjs#L1-L15) is the tiny worker bridge: one `start` callback receives the input; `progress`, `complete`, and `fail` send results back. [ocr.html](../desktop/ocr.html) loads the bundled Tesseract script and runtime module without inline code or document content.
 
-[ocr-runtime.mjs](../desktop/ocr-runtime.mjs#L1-L111) performs the actual work:
+[ocr-runtime.mjs](../desktop/ocr-runtime.mjs#L1-L118) performs the actual work:
 
 | Function/block | Purpose |
 | --- | --- |
 | `dimensions`, `canvasOf` | Calculate a bounded raster size and create a white canvas. PDFs target 300 DPI or a 2,600-pixel long edge, subject to the pixel cap. |
 | `wordsFrom` | Flatten Tesseract's block/paragraph/line hierarchy into bounded words with confidence and coordinates for the parser. |
-| `api.start`: input setup | Open PDFs with PDF.js, disabling evaluation/XFA and annotations during rendering; reject excessive page counts. Decode PNG/JPEG locally. |
+| `api.start`: input setup | Open PDFs with PDF.js, disabling evaluation/XFA and annotations during rendering; reject excessive page counts. Fix the window's device pixel ratio at 1 first: PDF.js decides whether to smooth an enlarged scan from that ratio, so pages render the same on every display. Decode PNG/JPEG locally. |
 | `Tesseract.createWorker` | Use bundled English data, worker code, and WASM, with its recognition cache disabled. There is no runtime model download. |
 | Page loop / `recognize` | Render one page at a time, report progress, and run automatic and sparse-text segmentation (PSM 3 and 11). Store both readings and enforce total output limits. |
 | `catch` / `finally` | Map errors to safe codes, release canvas/bitmap/PDF resources, and terminate the worker. Main's window destruction also stops a worker stuck during initialization. |
@@ -87,7 +87,7 @@ The document functions in [renderer/app.js](../renderer/app.js#L274-L455) implem
 | [document-cross-pass.test.cjs](../tests/document-cross-pass.test.cjs) | Conflicting form identity across pages/passes, alternate-only additional forms, and disagreements about printed statement years. |
 | [document-parser.test.cjs](../tests/document-parser.test.cjs) | Primary/spouse confusion, blank-cell fallback, conflicting amounts/SSNs, shifted geometry, foreign addresses, multiple returns, and fabricated fields on unknown documents. Values/layouts vary instead of hardcoding the sample's answers. |
 | [renderer-documents.test.cjs](../tests/renderer-documents.test.cjs) | Auto-saving, silent draft replacement, missing confirmation, stale async results, unsafe HTML, and text surviving discard/navigation/lock. Mock promises deliberately control race order. |
-| [`npm run test:ocr`](../scripts/smoke-ocr.cjs) | Runs the real Electron/PDF.js/Tesseract engine on generated synthetic data, including real recognition cancellation, 13-page rejection, and missing/corrupt assets in a temporary copy. `--input tests/fixtures/ocr/synthetic-1040sr.pdf` checks the supplied scan. |
+| [`npm run test:ocr`](../scripts/smoke-ocr.cjs) | Runs the real Electron/PDF.js/Tesseract engine on generated synthetic data, including real recognition cancellation, 13-page rejection, and missing/corrupt assets in a temporary copy. It then reads every synthetic PDF at display scales 1 and 2 and fails unless the readings match ([smoke-checks.cjs](../scripts/smoke-checks.cjs) `checkSameReading`). `--input tests/fixtures/ocr/synthetic-1040sr.pdf` checks the supplied scan. |
 | [`npm run test:ocr:ui`](../scripts/smoke-document-ui.cjs) | Runs real OCR through the desktop review, draft merge, encrypted Save, and lock/unlock. Only the native picker result is stubbed. A temporary vault and disabled Laya avoid touching normal data or starting model downloads. Use `--case w2`, `--case ssa1099`, or `--case 1099nec` for the additional synthetic PDFs. Screenshots/reports default to ignored `artifacts/ocr/<case>`. |
 
 The UI smoke also accepts `--executable /absolute/path/to/app` to launch an already built application and `--artifacts directory` to separate its screenshots/report. It asserts the requested packaged/development mode and isolated user-data path before the test. Packaged mode uses the existing explicit test-storage environment variables; it does not bypass vault or OCR validation. This tests the packaged runtime/resources rather than substituting source assets. Platform execution results are recorded separately in the [QA scope](document-ocr.md#development-and-qa).

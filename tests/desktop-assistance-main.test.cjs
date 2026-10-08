@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -146,6 +147,7 @@ async function desktop(options = {}) {
   const prompts = [];
   const opened = [];
   let registrations = 0;
+  let receipts = 0;
   class Vault {
     // `options.profile`: information saved earlier, as the vault reads it back, without today's checks.
     // `options.applications`: application records saved earlier.
@@ -166,6 +168,12 @@ async function desktop(options = {}) {
     dialog: { async showMessageBox(_parent, options) { prompts.push(options); return answer(); } },
     electron: { shell: { async openPath(folder) { opened.push(folder); return ''; } } },
     modules: {
+      // `options.receipt`: the access receipt the desktop starts at, in place of its random six bytes.
+      ...options.receipt === undefined ? {} : { 'node:crypto': { ...crypto, randomBytes: size => {
+        const bytes = crypto.randomBytes(size);
+        if (size === 6) { bytes.writeUIntBE(options.receipt, 0, 6); receipts++; }
+        return bytes;
+      } } },
       // settings.json from `options.settings`; the guided setup's progress file from `options.setup` (none by default), as written since.
       'node:fs/promises': { mkdir: async () => {}, stat: async () => ({ size: 10 }), rm: async file => { removed.push(file); if (file.endsWith('setup-progress.json')) setupFile = null; },
         readFile: async file => {
@@ -189,6 +197,7 @@ async function desktop(options = {}) {
       './laya.cjs': { ...realLaya, createLaya: runtimeOptions => options.laya ?? { ...realLaya.createLaya(runtimeOptions), startUpdates() {}, update() {} } }
     }
   });
+  if (options.receipt !== undefined) assert.equal(receipts, 1, 'the desktop starts its access receipt at options.receipt');
   // The idle lock's timers now armed: set, and not cleared or run.
   const armed = () => main.timers.filter(timer => timer.ms === IDLE_MS && !timer.cleared);
   return {
@@ -1582,6 +1591,10 @@ const listedHousehold = (changes = {}) => ({ firstName: 'Synthetic', lastName: '
     { id: memberId(3), firstName: 'Morgan', lastName: 'Sample', birthDate: '1958-11-20', relationship: 'parent', student: 'no' }
   ].map((member, n) => ({ ...member, ...changes[n] })) });
 const BANDS = ['householdCount:0-17', 'householdCount:18-59', 'householdCount:60+'];
+// An access receipt holding Morgan's and Sam's birth years. The desktop's own receipt is random and may hold any digits (#262),
+// so a check that nothing of the list is sent looks at a reply without its receipt.
+const BIRTH_YEAR_RECEIPT = 1958_2021_0000;
+const withoutReceipt = ({ accessRevision: _, ...reply }) => reply;
 
 test('band counts and the student answer come from the household list; counts by birth date are everyday answers on every site (#175)', async () => {
   const app = await desktop({ settings: trusted });
@@ -1633,10 +1646,10 @@ test('a household member without a birth date leaves every count by age unanswer
 });
 
 test('the household list itself is never released, whatever asks for it', async () => {
-  const app = await desktop({ settings: trusted });
+  const app = await desktop({ settings: trusted, receipt: BIRTH_YEAR_RECEIPT });
   await app.invoke('saveProfile', listedHousehold());
   await assert.rejects(app.request({ type: 'getFields', url: PANTRY, fields: ['householdMembers'] }), /doesn’t share/);
-  const reply = JSON.stringify(plain(await app.request({ type: 'getFields', url: PANTRY, fields: ['firstName', 'studentNameGrade'] })));
+  const reply = JSON.stringify(withoutReceipt(plain(await app.request({ type: 'getFields', url: PANTRY, fields: ['firstName', 'studentNameGrade'] }))));
   assert.doesNotMatch(reply, /Sam|Morgan|1958|2021|householdMembers/);
 });
 
@@ -2272,12 +2285,12 @@ test('a household question left open because no household list is saved says so 
 });
 
 test('with a household list saved, a count by age left open names the first person without a birth date by their row, never by name (#180)', async () => {
-  const app = await desktop({ settings: trusted });
+  const app = await desktop({ settings: trusted, receipt: BIRTH_YEAR_RECEIPT });
   await app.invoke('saveProfile', listedHousehold({ 2: { birthDate: '' }, 3: { birthDate: '' } }));
   const reply = plain(await app.request({ type: 'getFields', url: PANTRY, fields: [...BANDS, 'householdSize', 'studentNameGrade'] }));
   assert.deepEqual(reply.values, { householdSize: '4', studentNameGrade: 'Riley Example, 5th' });
   assert.deepEqual(reply.household, { need: 'birthDate', person: 3 });
-  assert.doesNotMatch(JSON.stringify(reply), /Sam|Morgan|1958|householdMembers/);
+  assert.doesNotMatch(JSON.stringify(withoutReceipt(reply)), /Sam|Morgan|1958|householdMembers/);
   assert.equal(plain(await app.request({ type: 'getFields', url: PANTRY, fields: ['householdSize'] })).household, undefined, 'the size needs no birth dates');
   await app.invoke('saveProfile', { ...listedHousehold(), birthDate: '' });
   assert.deepEqual(plain(await app.request({ type: 'getFields', url: PANTRY, fields: ['householdChildren'] })).household, { need: 'birthDate', person: 'you' }, 'the applicant’s own row');

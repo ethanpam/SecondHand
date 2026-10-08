@@ -38,6 +38,11 @@ api.start(async ({ bytes, format, limits }) => {
   try {
     api.progress({ phase: 'loading', page: 0, total: 0 });
     if (format.kind === 'pdf') {
+      // PDF.js smooths an enlarged scan only while it is drawn at most devicePixelRatio × 96/72 times its size,
+      // and this hidden window takes its ratio from the display: a Retina screen and a scale-1 one gave Tesseract
+      // different pages (#260). At ratio 1 every display renders the same page, and a scan enlarged more than
+      // 4/3 is drawn unsmoothed, which reads the synthetic samples best.
+      Object.defineProperty(window, 'devicePixelRatio', { value: 1 });
       loadingTask = pdfjs.getDocument({ data: bytes, isEvalSupported: false, enableXfa: false,
         maxImageSize: limits.imagePixels, canvasMaxAreaInBytes: limits.pagePixels * 4,
         cMapUrl: new URL('./assets/pdf/cmaps/', location.href).href, cMapPacked: true,
