@@ -27,6 +27,9 @@ const SITE_FIELD_ID = /^f\d{1,6}:[A-Za-z][A-Za-z0-9_-]{0,59}$/;
 const english = (key, params = {}) => SecondHandStrings.english(key, params);
 const say = (key, params = {}) => ({ message: english(key, params), messageKey: key, messageParams: params });
 const fault = (key, params = {}) => Object.assign(new Error(english(key, params)), { messageKey: key, messageParams: params });
+// A failure the applicant has nothing to do about, beside a fallback that is right, goes where Chrome records SecondHand's
+// errors (chrome://extensions, Errors), not into a result on screen.
+const unshown = what => error => console.error(what, error);
 // Fixed English written by the Iowa adapter or a content script, with the key it has in the catalog.
 function adapterSays(text, field = 'message') {
   const { key, params } = SecondHandStrings.describeEnglish(text);
@@ -173,6 +176,9 @@ function stopAutopilot(tabId, result, pilot) {
   autopilots.delete(tabId);
   return remember(tabId, result);
 }
+// After a fill, the app marks the application in progress. A failure there can't undo the fill, which already happened.
+const recordProgress = (url, filled) => nativeRequest('recordProgress', { url: safeUrl(url), filledCount: Math.min(filled, 100) })
+  .catch(unshown('The SecondHand app couldn’t mark the application in progress after a fill. The fill stands.'));
 async function fillPage(tabId, state, pilot) {
   const { url } = state;
   const pageKey = state.page.pageKey;
@@ -219,7 +225,7 @@ async function fillPage(tabId, state, pilot) {
     const after = await readPage(tabId);
     currentPilot(tabId, pilot);
     if (after.pageInstance !== state.pageInstance || after.url !== url || (after.page.pageKey !== pageKey && after.page.kind !== 'blocked')) throw fault('worker.pageChangedCheck');
-    if (filled > 0) await nativeRequest('recordProgress', { url: safeUrl(url), filledCount: Math.min(filled, 100) }).catch(() => {});
+    if (filled > 0) await recordProgress(url, filled);
     currentPilot(tabId, pilot);
     const missing = needYou(after.page);
     const summary = withReason(filled ? filledSummary(filled, missing)
@@ -276,7 +282,7 @@ async function fillRecordPage(tabId, state, pilot) {
     const after = await readPage(tabId); currentPilot(tabId, pilot);
     if (after.url !== state.url || after.pageInstance !== state.pageInstance || after.page.pageKey !== pageKey) throw fault('worker.pageChangedCheck');
     pilot.accessRevision = revision;
-    if (filled > 0) await nativeRequest('recordProgress', { url: safeUrl(state.url), filledCount: Math.min(filled, 100) }).catch(() => {});
+    if (filled > 0) await recordProgress(state.url, filled);
     currentPilot(tabId, pilot);
     const missing = needYou(after.page), summary = filled ? filledSummary(filled, missing) : missing.length ? { key: 'result.needYouNotSaved', params: { count: missing.length } } : { key: 'result.nothingNew', params: {} };
     return { state: 'done', filled, needYou: missing, notSaved: missing.filter(key => unsaved.has(key)), ...say(summary.key, summary.params), pageKey };

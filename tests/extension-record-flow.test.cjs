@@ -166,6 +166,16 @@ test('missing record data stops Next; manual completion gets a no-data authoriza
   assert.equal(stale.calls.native.some(call => call.type === 'getFields'), false);
 });
 
+test('a record page the app can’t mark in the application’s progress still stands and continues, and the failure goes where Chrome records SecondHand’s errors', async () => {
+  const w = worker({ nativeHook: request => { if (request.type === 'recordProgress') throw new Error('Synthetic progress failure'); } });
+  const result = await w.start();
+  assert.equal(result.data.state, 'continuing', JSON.stringify(result));
+  assert.deepEqual(w.model.filled, PHASES.flat()); assert.equal(w.model.nextCount, 1);
+  const logged = workerLogged();
+  assert.deepEqual(logged.map(([what]) => what), ['The SecondHand app couldn’t mark the application in progress after a fill. The fill stands.']);
+  assert.equal(logged[0][1].message, 'Synthetic progress failure');
+});
+
 test('locking between the final filled page and Continue prevents navigation', async () => {
   const w = worker({ nativeHook: (request, _data, { vault }) => { if (request.type === 'recordProgress') vault.unlocked = false; } });
   assert.equal((await w.start()).data.state, 'locked');

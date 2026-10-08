@@ -8,6 +8,8 @@ const { plain, read, serviceWorker, nativeHost, workerLogged } = require('./help
 test.afterEach(() => assert.deepEqual(workerLogged(), [], 'the worker logged an error the test didn’t expect'));
 
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
+// What the worker logs when the app fails to mark the application in progress after a fill.
+const PROGRESS_UNRECORDED = 'The SecondHand app couldn’t mark the application in progress after a fill. The fill stands.';
 const { GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey } = require('../extension/generic-adapter.js');
 // Verified Iowa pages never use the general engine; any call there is a bug.
 const noSiteEngine = { GENERIC_KEYS, SAVE_KEYS, requestKeys: () => { throw new Error('Iowa used the site engine.'); }, deriveValues: () => { throw new Error('Iowa used the site engine.'); },
@@ -126,7 +128,8 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
         if (request.type === 'showApp') return reply({ shown: true });
         if (request.type === 'unlockWithTouchId' && vault.touchIdUnlock) return reply(structuredClone(vault.touchIdUnlock));
         if (request.type === 'openApp') return vault.openError ? fail(vault.openError) : reply(vault.opened || { opened: 'shown' });
-        if (request.type === 'recordProgress') return reply({ recorded: true });
+        // `progressError`: the app fails to mark the application in progress after a fill.
+        if (request.type === 'recordProgress') return vault.progressError ? fail(vault.progressError) : reply({ recorded: true });
         if (request.type === 'saveFields') return reply({ saved: Object.keys(request.fields) });
         // Laya (#39, #42): readied before a click's questions; "not ready" unless a test plays it.
         if (request.type === 'warmLaya') return reply({ state: vault.layaState || 'unavailable' });
@@ -218,6 +221,18 @@ test('one click makes one status and one getFields request, fills revealed field
   assert.doesNotMatch(JSON.stringify(response), /Synthetic private/);
   assert.equal(w.calls.content.some(message => message.type.startsWith('secondhand:generic:')), false, 'verified pages never use the general engine');
   assert.deepEqual(w.calls.injected[0], { target: { tabId: 7, frameIds: [0] }, files: ['address-policy.js', 'iowa-later-adapter.js', 'iowa-record-adapter.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js'] });
+});
+
+test('a fill the app can’t mark in the application’s progress still stands, and the failure goes where Chrome records SecondHand’s errors', async () => {
+  const w = worker({ desktop: { progressError: 'Synthetic progress failure' } });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.state, 'done', 'the fill already happened');
+  assert.equal(result.filled, 3);
+  assert.match(result.message, /^Filled 3 answers · 1 left for you/);
+  assert.deepEqual(w.filled(), ['firstName', 'hasHomeAddress', 'mailingCity']);
+  const logged = workerLogged();
+  assert.deepEqual(logged.map(([what]) => what), [PROGRESS_UNRECORDED]);
+  assert.equal(logged[0][1].message, 'Synthetic progress failure');
 });
 
 test('locked and unreachable desktops map to widget states without filling', async () => {
