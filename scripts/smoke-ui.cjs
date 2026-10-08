@@ -1,5 +1,6 @@
 'use strict';
 // All test data is synthetic and confined to a temporary vault.
+// Each window it opens takes keyboard focus, so nobody may type on this machine while it runs.
 const { _electron: electron, expect } = require('@playwright/test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
@@ -331,6 +332,8 @@ async function main() {
     // Keep automated runs away from the real Keychain or Windows protected storage;
     // tests/desktop-recovery-main.test.cjs covers reset on this computer.
     if (await page.locator('#device-reset-field').isVisible()) await page.locator('#allow-device-reset').uncheck();
+    await expect(page.locator('#passphrase')).toHaveValue(passphrase);
+    await expect(page.locator('#confirm-passphrase')).toHaveValue(passphrase);
     await submitAuthForm(page);
     await expect(page.locator('#recovery-dialog')).toBeVisible();
     const recoveryKey = await page.locator('#recovery-key-value').textContent();
@@ -470,6 +473,7 @@ async function main() {
     assert.equal(await page.locator('.household-member').count(), 0, 'the household list is cleared on lock');
     await rejectedPassphrase(page);
     await page.locator('#passphrase').fill(passphrase);
+    await expect(page.locator('#passphrase')).toHaveValue(passphrase);
     await submitAuthForm(page);
     await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('.nav-item[data-view="profile"]').click();
@@ -503,6 +507,7 @@ async function main() {
       await expect.poll(() => page.evaluate(() => window.__secondHandSmokeAuth.filter(event => event.type === 'locked').at(-1)?.revision)).toBe(revision);
     });
     await page.locator('#passphrase').fill(passphrase);
+    await expect(page.locator('#passphrase')).toHaveValue(passphrase);
     await submitAuthForm(page);
     await expect(page.locator('#workspace')).toBeVisible();
     await page.evaluate(() => window.secondHand.lock());
@@ -520,6 +525,7 @@ async function main() {
       trustedSites: [pantry, wic], alwaysAllowedSites: [pantry, wic, forms] }));
     page = await launch();
     await page.locator('#passphrase').fill(passphrase);
+    await expect(page.locator('#passphrase')).toHaveValue(passphrase);
     await submitAuthForm(page);
     await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('.nav-item[data-view="extension"]').click();
@@ -569,6 +575,7 @@ async function main() {
     await expect(page.locator('#touch-id-unlock')).toBeHidden();
     await expect(page.locator('#touch-id-note')).toBeHidden();
     await page.locator('#passphrase').fill(passphrase);
+    await expect(page.locator('#passphrase')).toHaveValue(passphrase);
     await submitAuthForm(page);
     await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('.nav-item[data-view="privacy"]').click();
@@ -638,10 +645,12 @@ async function main() {
     await expect(page.locator('#touch-id-dialog')).toBeVisible();
     await expect(page.locator('#touch-id-toggle')).not.toBeChecked();
     await page.locator('#touch-id-password').fill('incorrect-passphrase');
+    await expect(page.locator('#touch-id-password')).toHaveValue('incorrect-passphrase');
     await page.locator('#touch-id-confirm').click();
     await expect(page.locator('#touch-id-error')).toHaveText(/That password isn’t right/);
     await expect(page.locator('#touch-id-dialog')).toBeVisible();
     await page.locator('#touch-id-password').fill(passphrase);
+    await expect(page.locator('#touch-id-password')).toHaveValue(passphrase);
     await page.locator('#touch-id-confirm').click();
     await expect(page.locator('#touch-id-dialog')).toBeHidden();
     await expect(page.locator('#touch-id-toggle')).toBeChecked();
@@ -675,6 +684,9 @@ async function main() {
     await page.locator('#recovery-key-input').fill(recoveryKey.toLowerCase().replace(/-/g, ' '));
     await page.locator('#reset-password').fill(resetPassword);
     await page.locator('#reset-confirm').fill(resetPassword);
+    await expect(page.locator('#recovery-key-input')).toHaveValue(recoveryKey.toLowerCase().replace(/-/g, ' '));
+    await expect(page.locator('#reset-password')).toHaveValue(resetPassword);
+    await expect(page.locator('#reset-confirm')).toHaveValue(resetPassword);
     await page.locator('#reset-submit').click();
     await expect(page.locator('#workspace')).toBeVisible();
     assert.deepEqual(withoutIds((await page.evaluate(() => window.secondHand.getData())).profile), withoutIds(applicantFixture));
@@ -689,9 +701,11 @@ async function main() {
     await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('#lock-button').click();
     await page.locator('#passphrase').fill(passphrase);
+    await expect(page.locator('#passphrase')).toHaveValue(passphrase);
     await submitAuthForm(page);
     await expect(page.locator('#auth-error')).toBeVisible();
     await page.locator('#passphrase').fill(resetPassword);
+    await expect(page.locator('#passphrase')).toHaveValue(resetPassword);
     await submitAuthForm(page);
     await expect(page.locator('#workspace')).toBeVisible();
     const bytes = await fs.readFile(path.join(userData, 'vault.secondhand'), 'utf8');
@@ -709,6 +723,7 @@ async function main() {
     assert.deepEqual(withoutIds((await page.evaluate(() => window.secondHand.getData())).profile), withoutIds(unanswered));
     await page.locator('#lock-button').click();
     await page.locator('#passphrase').fill(resetPassword);
+    await expect(page.locator('#passphrase')).toHaveValue(resetPassword);
     await submitAuthForm(page);
     await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('.nav-item[data-view="profile"]').click();
@@ -722,6 +737,7 @@ async function main() {
     await page.locator('#start-over').click();
     await expect(page.locator('#start-over-submit')).toBeDisabled();
     await page.locator('#start-over-confirm').fill('start over');
+    await expect(page.locator('#start-over-confirm')).toHaveValue('start over');
     await page.locator('#start-over-submit').click();
     await expect(page.locator('#confirm-passphrase-field')).toBeVisible();
     await assert.rejects(fs.access(path.join(userData, 'vault.secondhand')));
@@ -730,6 +746,8 @@ async function main() {
     await page.locator('#passphrase').fill(startOverPassword);
     await page.locator('#confirm-passphrase').fill(startOverPassword);
     if (await page.locator('#device-reset-field').isVisible()) await page.locator('#allow-device-reset').uncheck();
+    await expect(page.locator('#passphrase')).toHaveValue(startOverPassword);
+    await expect(page.locator('#confirm-passphrase')).toHaveValue(startOverPassword);
     // The setup is offered only if its start is saved while the key is on screen (renderer/app.js): wait for the
     // attempt, setup save included, to settle before Continue.
     await submitAuthForm(page);
@@ -773,7 +791,17 @@ async function main() {
         recoveryOpen: document.querySelector('#recovery-dialog').open,
         recoverySaved: document.querySelector('#recovery-saved').checked,
         recoveryDoneDisabled: document.querySelector('#recovery-done').disabled,
-        recoveryKeyShown: Boolean(document.querySelector('#recovery-key-value').textContent)
+        recoveryKeyShown: Boolean(document.querySelector('#recovery-key-value').textContent),
+        // The password boxes and the reset form: lengths and whether they match, never what was typed. The error is the app's own.
+        passphraseLength: document.querySelector('#passphrase').value.length,
+        confirmPassphraseLength: document.querySelector('#confirm-passphrase').value.length,
+        resetFormHidden: document.querySelector('#reset-form').hidden,
+        recoveryKeyLength: document.querySelector('#recovery-key-input').value.length,
+        resetPasswordLength: document.querySelector('#reset-password').value.length,
+        resetConfirmLength: document.querySelector('#reset-confirm').value.length,
+        resetPasswordsEqual: document.querySelector('#reset-password').value === document.querySelector('#reset-confirm').value,
+        resetErrorHidden: document.querySelector('#reset-error').hidden,
+        resetErrorText: document.querySelector('#reset-error').textContent
       })).catch(() => ({ unavailable: true }));
       console.error('Sanitized auth failure diagnostics:', JSON.stringify(auth));
       // Record what the window showed when a step failed; CI uploads artifacts/.
