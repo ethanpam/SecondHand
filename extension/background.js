@@ -15,7 +15,7 @@ if (typeof globalThis.SecondHandTranslation?.create !== 'function') {
 // Must match BUILD in panel.js: change both together, with every change to the extension. The panel
 // compares them to tell when Chrome is still running an older worker than the pages it loaded from
 // disk, and the worker compares it with the build the desktop app ships to update itself (#85).
-const BUILD = '2026-10-06.21';
+const BUILD = '2026-10-06.22';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
@@ -1519,9 +1519,9 @@ function sitePilotStep(tabId) {
   if (pilot.running) return pilot.running;
   const guard = () => currentSitePilot(tabId, pilot);
   pilot.running = (async () => {
-    let prior = results.get(tabId) || siteResult('waiting', say('worker.siteContinuing'));
+    let prior = results.get(tabId) || siteResult('waiting', say('worker.siteContinuing')), url = null;
     try {
-      const { tab, origin } = await activeSite(tabId); guard();
+      const { tab, origin } = await activeSite(tabId); guard(); url = tab.url;
       if (origin !== pilot.origin) return stopSitePilot(tabId, pilot, siteResult('stopped', say('worker.siteOriginChanged')));
       await requireSite(origin); guard();
       const before = await siteNavigation(tabId); guard();
@@ -1564,7 +1564,14 @@ function sitePilotStep(tabId) {
       return prior;
     } catch (error) {
       if (sitePilots.get(tabId) !== pilot) return results.get(tabId) || prior;
-      if (error.code === 'site-not-ready' && pilot.awaiting && Date.now() - pilot.awaiting < 15000) return prior;
+      if (pilot.awaiting && Date.now() - pilot.awaiting < 15000) {
+        if (error.code === 'site-not-ready') return prior;
+        // The page this step asked may be the one this run's Next is replacing: Chrome ends a message to a page torn
+        // down mid-reply empty. The new page's own load event steps it.
+        const moved = await chrome.tabs.get(tabId);
+        if (sitePilots.get(tabId) !== pilot) return results.get(tabId) || prior;
+        if (moved.status === 'loading' || (url && moved.url !== url)) return prior;
+      }
       return stopSitePilot(tabId, pilot, siteResult(failed(error).state, failed(error)));
     }
   })().finally(() => {

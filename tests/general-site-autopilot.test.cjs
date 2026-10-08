@@ -6,6 +6,8 @@ const { plain, tick, deferred, until, serviceWorker, nativeHost } = require('./h
 const ORIGIN = 'https://pantry.example.org';
 const PANEL = 'chrome-extension://testextension/panel.html';
 const files = ['generic-adapter.js', 'generic-navigation.js', 'page-text.js', 'generic-content.js'];
+// What `onNavigation` returns for a page torn down while its reply is on the way: Chrome resolves the message empty.
+const EMPTY = Symbol('empty reply');
 
 // Real service worker and pure adapter helpers, with Chrome, the native host,
 // and the content-script protocol simulated. No browser, applicant data, or
@@ -31,7 +33,7 @@ function worker({ fields = [{ key: 'firstName', label: 'First name' }], reason, 
       onActivated: event('activated'), onUpdated: event('updated'), onRemoved: event('removed'),
       sendMessage: async (_id, message) => {
         const request = plain(message); content.push(request); log.push(`content:${request.type}`);
-        if (request.type === 'secondhand:generic:navigation') { await state.onNavigation?.(); return navigationState(); }
+        if (request.type === 'secondhand:generic:navigation') return await state.onNavigation?.() === EMPTY ? undefined : navigationState();
         if (request.type === 'secondhand:generic:frames') return { origins: [] };
         if (request.type === 'secondhand:generic:formFrames') return undefined;
         if (request.type === 'secondhand:generic:plan') {
@@ -298,4 +300,68 @@ test('a step that read the address just before the next page loaded leaves that 
   assert.equal(w.native.filter(item => item.type === 'authorizeSiteNavigation').length, 2);
   assert.equal((await w.info()).data.autopilot, true);
   await w.stop();
+});
+
+// After Next, a poll's step asks the page whether it can go on and gets an empty reply, while the tab reports `tab`.
+// Resolves with the panel's next poll, after that step ended.
+async function emptyPoll(w, tab) {
+  w.state.onNavigation = async () => { w.state.onNavigation = null; Object.assign(w.tab, tab); return EMPTY; };
+  await w.info(); await until(() => !w.state.onNavigation, 'the poll’s page check'); await tick();
+  return w.info();
+}
+
+for (const [where, url] of [['a new address', `${ORIGIN}/intake?step=2`], ['its own address', `${ORIGIN}/intake?step=1`]]) test(`a poll that finds the page Next is replacing, loading at ${where}, leaves the run to fill the next page`, async () => {
+  const w = worker({ values: { firstName: 'Synthetic', zip: '50309' } });
+  await w.start(); assert.equal(w.state.clicks, 1);
+  const info = await emptyPoll(w, { url, status: 'loading' });
+  assert.equal(info.data.autopilot, true, JSON.stringify(info.data.result)); assert.notEqual(info.data.result?.state, 'error');
+  w.move({ url }); await until(() => w.state.clicks === 2, 'the next page’s own step to fill it and click its Next');
+  assert.equal(w.state.fields[0].answer, '50309');
+  assert.equal(w.native.filter(item => item.type === 'authorizeSiteNavigation').length, 2);
+  await w.stop();
+});
+
+test('an empty page check while the page stays loaded at its address still stops the run without a second Next', async () => {
+  const w = worker({ values: { firstName: 'Synthetic', zip: '50309' } });
+  await w.start(); assert.equal(w.state.clicks, 1);
+  const info = await emptyPoll(w, {});
+  assert.equal(info.data.autopilot, false); assert.equal(info.data.result.state, 'error');
+  for (let i = 0; i < 3; i++) assert.equal((await w.info()).data.autopilot, false);
+  assert.equal(w.state.clicks, 1); assert.equal(w.state.advances, 1);
+  assert.equal(w.native.filter(item => item.type === 'authorizeSiteNavigation').length, 1);
+});
+
+test('an empty page check while the page loads, more than 15 seconds after the run’s Next, still stops the run', async () => {
+  const w = worker({ values: { firstName: 'Synthetic', zip: '50309' } });
+  await w.start(); assert.equal(w.state.clicks, 1);
+  w.clock.now += 16000;
+  const info = await emptyPoll(w, { url: `${ORIGIN}/intake?step=2`, status: 'loading' });
+  assert.equal(info.data.autopilot, false); assert.equal(info.data.result.state, 'error');
+  w.move(); await tick(); await w.info(); await tick();
+  assert.equal(w.state.fields[0].answer, undefined); assert.equal(w.state.clicks, 1);
+  assert.equal(w.native.filter(item => item.type === 'authorizeSiteNavigation').length, 1);
+});
+
+test('a step soon after Next that finds the tab loaded at an address it cannot use still stops the run', async () => {
+  const w = worker({ values: { firstName: 'Synthetic', zip: '50309' } });
+  await w.start(); assert.equal(w.state.clicks, 1);
+  w.move({ url: 'http://pantry.example.org/intake?step=2' }); await tick();
+  w.move({ url: `${ORIGIN}/intake?step=3`, step: 'third-page' }); await tick(); await w.info(); await tick();
+  assert.equal(w.state.fields[0].answer, undefined); assert.equal(w.state.clicks, 1);
+  assert.equal((await w.info()).data.autopilot, false);
+});
+
+test('Stop while a step looks at the tab after an empty page check is what that step answers with', async () => {
+  const w = worker({ values: { firstName: 'Synthetic', zip: '50309' } });
+  await w.start(); assert.equal(w.state.clicks, 1);
+  w.state.onNavigation = async () => {
+    w.state.onNavigation = null; Object.assign(w.tab, { url: `${ORIGIN}/intake?step=2`, status: 'loading' });
+    w.hooks.tabGet = async () => { w.hooks.tabGet = null; await w.stop(); };
+    return EMPTY;
+  };
+  const response = await w.start();
+  assert.equal(response.ok, true); assert.equal(response.data.state, 'stopped', JSON.stringify(response.data));
+  w.move(); await tick(); await w.info(); await tick();
+  assert.equal(w.state.fields[0].answer, undefined); assert.equal(w.state.clicks, 1);
+  assert.equal((await w.info()).data.autopilot, false);
 });
