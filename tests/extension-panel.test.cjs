@@ -406,6 +406,11 @@ async function panel(t, initial = {}) {
   if (initial.Summarizer) window.Summarizer = initial.Summarizer;
   // jsdom lays nothing out, so it has no ResizeObserver: a test that measures the side panel's strip provides one.
   if (initial.ResizeObserver) window.ResizeObserver = initial.ResizeObserver;
+  // What the page logs as an error, which Chrome records on SecondHand's Errors page (chrome://extensions). A test
+  // that expects one takes it with `logged()`; one left over fails the test.
+  const errors = [];
+  window.console.error = (...args) => { errors.push(args); };
+  t.after(() => assert.deepEqual(errors, [], 'the page logged an error the test didn’t expect'));
   // Chrome gives extension pages localStorage; jsdom has none for this origin. A shared map is one browser profile.
   const storage = initial.storage || new Map();
   const mapStorage = map => ({ getItem: key => map.has(key) ? map.get(key) : null, setItem: (key, value) => { map.set(key, String(value)); }, removeItem: key => { map.delete(key); } });
@@ -436,6 +441,7 @@ async function panel(t, initial = {}) {
   const get = id => window.document.getElementById(id);
   const clickNow = target => clicks.get(typeof target === 'string' ? get(target) : target)({ isTrusted: true });
   return { window, requests, state, desktop, tabs, listeners, get, clickNow, storage,
+    logged: () => errors.splice(0),
     types: () => requests.map(request => request.type),
     row: key => window.document.querySelector(`[data-key="${key}"]`),
     async userClick(target) { clickNow(target); await tick(); await tick(); } };
@@ -1142,6 +1148,10 @@ test('while Autofill waits for the app, both surfaces say where its window is on
     await Promise.all([cardClick, sideClick]);
     await settle();
     assert.match(card.get('widget-text').textContent, /^Filled 3 answers/);
+    // Chrome's failure, which the reader can't act on, goes where Chrome records SecondHand's errors, not on screen.
+    const failed = os instanceof Error ? [['Chrome couldn’t name this computer’s system. Autofill’s waiting line says where the app’s window may be on any computer.', os]] : [];
+    assert.deepEqual(card.logged(), failed, String(os));
+    assert.deepEqual(side.logged(), failed, String(os));
   }
 });
 
@@ -2706,14 +2716,20 @@ test('the buttons that the keyboard shortcuts work name them in their tooltips, 
   await settle();
   assert.equal(none.get('shortcuts-line').hidden, true);
   assert.equal(none.get('panel-autofill').title, '');
-  // Nor when Chrome fails to list them: the buttons say what they do, without a shortcut that may be wrong.
-  const unread = await panel(t, { shortcuts: new Error('Synthetic commands failure') });
+  // Nor when Chrome fails to list them: the buttons say what they do, without a shortcut that may be wrong. Chrome's
+  // failure, which the reader can't act on, goes where Chrome records SecondHand's errors, not on screen.
+  const failure = new Error('Synthetic commands failure');
+  const unlisted = [['Chrome couldn’t list SecondHand’s keyboard shortcuts. No button names one.', failure]];
+  const unread = await panel(t, { shortcuts: failure });
   await settle();
   assert.equal(unread.get('shortcuts-line').hidden, true);
   assert.equal(unread.get('panel-autofill').title, '');
-  const unreadWidget = await panel(t, { launcher: true, shortcuts: new Error('Synthetic commands failure') });
+  assert.equal(unread.get('status').classList.contains('error'), false);
+  assert.deepEqual(unread.logged(), unlisted);
+  const unreadWidget = await panel(t, { launcher: true, shortcuts: failure });
   await settle();
   assert.equal(unreadWidget.get('autofill').title, EN['widget.autofillIowaTitle']);
+  assert.deepEqual(unreadWidget.logged(), unlisted);
 });
 
 test('the side panel keeps the row the keyboard moves to clear of the pinned Autofill strip, by the strip’s own height, and needs no room once the strip scrolls away', async t => {
