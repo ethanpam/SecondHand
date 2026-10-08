@@ -379,6 +379,24 @@ async function main() {
     await fs.writeFile(path.join(root, 'artifacts/extension-zoom-200.png'), Buffer.from(drawnExtension, 'base64'));
     await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1));
     await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(extensionWidth);
+    // Every error line looks like the password screen's (#232): red, the same size, line height and space above, even
+    // in Connect Chrome's steps and a form card. Hidden ones compute their style too, so none has to fail to be checked.
+    const errorLines = await page.evaluate(() => {
+      const probe = document.body.appendChild(document.createElement('span'));
+      probe.style.color = 'var(--danger)';
+      const danger = getComputedStyle(probe).color;
+      probe.remove();
+      return { danger, errors: Array.from(document.querySelectorAll('.inline-error'), element => {
+        const { color, fontSize, lineHeight, marginTop } = getComputedStyle(element);
+        return { id: element.id, color, fontSize, lineHeight, marginTop };
+      }) };
+    });
+    const errorLine = error => `#${error.id}: ${error.color}, ${error.fontSize} / ${error.lineHeight}, ${error.marginTop} above`;
+    assert.equal(errorLines.errors.length, 12, `twelve error lines in the desktop window:\n${errorLines.errors.map(errorLine).join('\n')}`);
+    const authErrorLine = errorLines.errors.find(error => error.id === 'auth-error');
+    assert.equal(authErrorLine.color, errorLines.danger, `#auth-error is --danger (${errorLines.danger}): ${errorLine(authErrorLine)}`);
+    const unlikeErrors = errorLines.errors.filter(error => ['color', 'fontSize', 'lineHeight', 'marginTop'].some(key => error[key] !== authErrorLine[key]));
+    assert.equal(unlikeErrors.length, 0, `Error lines that don’t look like ${errorLine(authErrorLine)}:\n${unlikeErrors.map(errorLine).join('\n')}`);
     // Turning it off is saved, and stays off after a restart (checked below).
     await page.locator('#laya-toggle').uncheck();
     await expect(page.locator('#toast')).toHaveText('Laya is off.');
