@@ -29,17 +29,25 @@
   const strings = value => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
   // The widget's frame is as wide as the widget measured itself, never past 272px or the screen.
   const fits = width => Number.isInteger(width) && width > 0 && width <= 1000;
+  const tall = height => Number.isInteger(height) && height >= 46 && height <= 166;
   const frameWidth = width => `min(${width || 272}px, 272px, calc(100vw - 24px))`;
   const SIZES = ['width', 'height', 'narrowWidth', 'narrowHeight'];
-  let line = false; // the widget shows a line the reader must act on, taller
+  let line = false; // the widget shows a line to read, above its row
   let card = {}; // the widget's measured size; empty until it measures
-  // With a line, the frame is as tall as the widget measured itself, from 86px up to 110px. A page
-  // under 640px wide keeps the widget as narrow as its buttons and gives the line more rows instead,
-  // so the widget covers no more of the page than it does without a line.
+  let pill = false; // the reader hid the widget: its frame is the logo and the word that shows it again
+  // The frame is as wide and as tall as the widget measured itself: 46px for its row alone, up to 166px with
+  // all it can hold. A page under 640px wide keeps the widget as narrow as its buttons, or the least wider
+  // that shows its whole line, and gives the line more rows instead, so the widget covers little more of the
+  // page than it does without a line. A widget the reader
+  // hid is its logo and the word that shows it again, as wide as the widget measured them (the round logo alone
+  // when it gave no width).
   function fitHost() {
     const size = line && card.narrowWidth && innerWidth < 640 ? { width: card.narrowWidth, height: card.narrowHeight } : card;
-    panelHost.style.setProperty('width', frameWidth(size.width), 'important');
-    panelHost.style.setProperty('height', line ? `${Math.min(110, Math.max(86, size.height || 0))}px` : '46px', 'important');
+    const labeled = pill && fits(card.width);
+    panelHost.setAttribute('data-secondhand-size', pill ? 'pill' : 'full');
+    panelHost.style.setProperty('border-radius', pill ? (labeled ? '23px' : '50%') : '12px', 'important');
+    panelHost.style.setProperty('width', pill ? (labeled ? frameWidth(card.width) : '46px') : frameWidth(size.width), 'important');
+    panelHost.style.setProperty('height', pill ? '46px' : `${size.height || (line ? 86 : 46)}px`, 'important');
   }
 
   function withOwnPanelHidden(work) {
@@ -54,6 +62,26 @@
     }
   }
 
+  let cardFrame = null;
+  // A card whose worker can't size its frame (an older build than the card, or none after SecondHand restarted)
+  // asks this script directly, in the same terms. Only the card's own frame is heard: a page's script can post a
+  // message too, but never as that frame.
+  const cardOrigin = topFrame ? chrome.runtime.getURL('').replace(/\/$/, '') : '';
+  // The widget's own size for its frame, from the worker or from the card itself: whether it shows a line, its
+  // measured width and height (and those a narrow page keeps), and whether the reader hid it to its logo.
+  const sizeAsked = message => typeof message?.line === 'boolean' && SIZES.every(key => message[key] === undefined || (/height$/i.test(key) ? tall : fits)(message[key])) &&
+    (message.pill === undefined || message.pill === true);
+  function fitCard(message) {
+    line = message.line;
+    card = Object.fromEntries(SIZES.filter(key => message[key] !== undefined).map(key => [key, message[key]]));
+    pill = message.pill === true;
+    if (panelHost) fitHost();
+  }
+  if (topFrame) window.addEventListener('message', event => {
+    if (!panelHost || !cardFrame || event.source !== cardFrame.contentWindow || event.origin !== cardOrigin) return;
+    if (event.data?.type === 'secondhand:cardSize' && sizeAsked(event.data)) fitCard(event.data);
+  });
+
   function ensurePanel() {
     if (!topFrame || !document.body) return;
     if (!panelHost) {
@@ -64,17 +92,19 @@
         all: 'initial', position: 'fixed', right: '12px', bottom: '16px', display: 'block',
         width: frameWidth(0), height: '46px',
         'z-index': '2147483647', margin: '0', padding: '0', border: '0',
-        'border-radius': '14px', 'box-shadow': '0 12px 42px #17342235',
+        'border-radius': '12px', 'box-shadow': '0 2px 3px #202c2010, 0 8px 24px -8px #202c2030',
         'color-scheme': 'light', isolation: 'isolate'
       })) panelHost.style.setProperty(property, value, 'important');
       const shadow = panelHost.attachShadow({ mode: 'closed' });
-      const frame = document.createElement('iframe');
+      const frame = cardFrame = document.createElement('iframe');
       frame.src = chrome.runtime.getURL('panel.html?surface=launcher');
       frame.title = 'SecondHand autofill';
       frame.setAttribute('sandbox', 'allow-scripts allow-same-origin');
       frame.setAttribute('allow', 'language-model; language-detector'); // lets the widget use Chrome's on-device AI and language detector
       frame.referrerPolicy = 'no-referrer';
-      for (const [property, value] of Object.entries({ width: '100%', height: '100%', display: 'block', border: '0', margin: '0', padding: '0', 'border-radius': '14px', background: 'transparent' })) frame.style.setProperty(property, value, 'important');
+      // Tells the card it can ask this script to hide it, should its worker be unable to.
+      frame.addEventListener('load', () => frame.contentWindow?.postMessage({ type: 'secondhand:cardHello' }, cardOrigin));
+      for (const [property, value] of Object.entries({ width: '100%', height: '100%', display: 'block', border: '0', margin: '0', padding: '0', 'border-radius': '12px', background: 'transparent' })) frame.style.setProperty(property, value, 'important');
       shadow.append(frame);
     }
     if (!panelHost.isConnected) document.body.append(panelHost);
@@ -286,10 +316,8 @@
         // Every question's label for the applicant's translated list, and the language this document declares.
         const listed = withOwnPanelHidden(() => engine.questions(document));
         respond({ lang: document.documentElement.lang || '', questions: listed.map(({ id, label }) => ({ id, label })) });
-      } else if (message.type === 'secondhand:widgetSize' && typeof message.line === 'boolean' && SIZES.every(key => message[key] === undefined || fits(message[key])) && topFrame) {
-        line = message.line;
-        card = Object.fromEntries(SIZES.filter(key => message[key] !== undefined).map(key => [key, message[key]]));
-        if (panelHost) fitHost();
+      } else if (message.type === 'secondhand:widgetSize' && sizeAsked(message) && topFrame) {
+        fitCard(message);
         respond({ sized: Boolean(panelHost) });
       } else if (message.type === 'secondhand:generic:pageText') {
         // This frame's own words for the side panel's summary, and the language it declares. Never form values.

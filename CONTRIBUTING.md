@@ -35,7 +35,7 @@ npm run dev
 2. **Run the checks.** `npm test` and `npm run check` always. If you touched the desktop app, the extension, OCR, or Laya, also run the matching smoke test (`npm run test:ui`, `test:extension`, `test:ocr`, `test:laya`). For `website/`, run `npm test`, `npm run typecheck`, `npm run lint`, and `npm run build` there.
 3. **Bump the extension's `BUILD`** in `extension/background.js` and `extension/panel.js` when you change anything in `extension/`. `npm run check` tells you if you forgot.
 4. **One change per commit**, with a conventional title such as `fix:`, `feat:`, `docs:`, `test:`, `refactor:`, or `chore:`.
-5. **Show what changed on screen.** If your change is visible, put before and after screenshots in the pull request.
+5. **Show what changed on screen.** If your change is visible, put before and after screenshots in the pull request. For the extension's card and side panel, `npm run capture:ui -- before` on main and `npm run capture:ui -- after` on your branch take them.
 
 ## Product rules the code keeps
 

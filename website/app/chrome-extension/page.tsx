@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
-import { SiteFooter, SiteHeader } from '../site-chrome';
+import { SiteFooter, SiteHeader } from '../_components/site-chrome';
 import { GuideVideo } from './guide-video';
 
 export const metadata: Metadata = {
@@ -20,7 +20,7 @@ export default function ChromeExtensionGuide() {
         <p className="doc-lead">
           Do this once, after you install the SecondHand app. It takes about two
           minutes. You need Google Chrome 116 or newer. Don’t have the app yet?{' '}
-          <Link href="/#downloads">Download SecondHand</Link>.
+          <Link href="/downloads">Download SecondHand</Link>.
         </p>
 
         <section aria-labelledby="step-prepare">
@@ -105,9 +105,9 @@ export default function ChromeExtensionGuide() {
           <Image
             className="guide-media guide-card"
             src="/guide/iowa-card.png"
-            alt="The SecondHand card on Iowa’s page, with the SecondHand logo and an Autofill button."
-            width={374}
-            height={208}
+            alt="The SecondHand card on Iowa’s page. It says the SecondHand app asks you first, then SecondHand fills each page and moves on. If Iowa suggests addresses, SecondHand picks the first, so make sure it is yours, and it never signs or sends your application. Below are the SecondHand logo, an Autofill button and a Hide button."
+            width={652}
+            height={408}
             unoptimized
           />
           <p>
@@ -143,6 +143,9 @@ export default function ChromeExtensionGuide() {
             your Iowa tab. Later updates are automatic.
           </p>
         </section>
+        <p className="guide-back-link">
+          <Link href="/setup">Back to the full setup guide</Link>
+        </p>
       </main>
       <SiteFooter />
     </>

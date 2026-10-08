@@ -2,7 +2,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const adapter = require('../extension/iowa-adapter.js');
-const { plain, serviceWorker, nativeHost } = require('./helpers/harness.cjs');
+const { plain, serviceWorker, nativeHost, workerLogged } = require('./helpers/harness.cjs');
+// An error the worker logged that the test didn't take fails it.
+test.afterEach(() => assert.deepEqual(workerLogged(), [], 'the worker logged an error the test didn’t expect'));
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
@@ -28,7 +30,7 @@ function worker({ pageKey = 'iowa-personal-information', complete = false, todo,
     return { pageInstance: model.pageInstance, page: { kind: unverified ? 'manual' : 'fillable', pageKey: model.pageKey, canAdvance, todo: model.todo,
       checklist: keys.map(key => ({ key, label: key, required: true, status: model.complete || model.filled.includes(key) ? 'complete' : 'missing' })) },
       scan: { recognizedPage: !unverified, token: 'fill-preview', fields: keys.filter(key => (!model.complete || model.revealed.includes(key)) && !model.filled.includes(key)).map(key => ({ key, label: key })) },
-      nextToken: message.navigationPreview === false ? null : model.nextToken };
+      nextToken: message.navigationPreview === false ? null : model.nextToken, typing: model.typing === true };
   }
   const chrome = {
     tabs: { get: async () => ({ ...tab }), onActivated: w.event('activated'), onUpdated: w.event('updated'), onRemoved: w.event('removed'),
@@ -99,6 +101,31 @@ test('missing required answers wait, then manual completion authorizes Next with
   assert.equal(w.model.nextCount, 1);
 });
 
+test('while the person is still in the box they typed the last answer in, Autofill waits, then continues once they leave it', async () => {
+  const w = worker();
+  assert.equal((await w.start()).data.state, 'done');
+  // The page is complete, but the cursor is still in the box the person typed in: they may not have finished.
+  w.model.complete = true; w.model.typing = true;
+  for (let poll = 0; poll < 3; poll++) { await w.poll(); await tick(); }
+  assert.equal(w.model.nextCount, 0, 'no Save and Continue while the person may still be typing');
+  w.model.typing = false;
+  await w.poll(); await tick();
+  assert.equal((await w.poll()).data.result.state, 'continuing');
+  assert.equal(w.model.nextCount, 1);
+});
+
+test('a page Autofill completes while the person is in a box they typed in waits for them to leave it', async () => {
+  const w = worker({ complete: true });
+  w.model.typing = true;
+  assert.equal((await w.start()).data.state, 'done');
+  await w.poll(); await tick();
+  assert.equal(w.model.nextCount, 0);
+  w.model.typing = false;
+  await w.poll(); await tick();
+  assert.equal((await w.poll()).data.result.state, 'continuing');
+  assert.equal(w.model.nextCount, 1);
+});
+
 test('verified address uses no-data authorization and polling cannot replace its final navigation snapshot', async () => {
   const held = deferred(), reached = deferred();
   const w = worker({ pageKey: 'iowa-select-address', nativeHook: async (request, _data, { calls }) => {
@@ -111,7 +138,11 @@ test('verified address uses no-data authorization and polling cannot replace its
   assert.equal(w.model.nextToken, token);
   assert.equal(w.calls.content.at(-1).navigationPreview, false);
   held.resolve();
-  assert.equal((await run).data.state, 'continuing');
+  const result = (await run).data;
+  assert.equal(result.state, 'continuing');
+  // What SecondHand chose is said as it happens, with what to check.
+  assert.equal(result.messageKey, 'worker.pickedAddress');
+  assert.equal(result.message, 'SecondHand picked Iowa’s first suggested home address and clicked Save and Continue. Make sure it is your address before you submit.');
   assert.equal(w.model.nextCount, 1);
   assert.deepEqual(requests(w).map(request => request.fields), [[]]);
   assert.equal(requests(w)[0].url, `${adapter.PORTAL}/applyForBenefits/addressValidation`);
@@ -214,7 +245,7 @@ test('Stop revokes a pending native request and late approval or rejection canno
     assert.equal((await w.stop()).data.state, 'stopped');
     release.resolve(); await run;
     const state = (await w.poll()).data;
-    assert.equal(state.result.message, 'Autofill stopped.');
+    assert.equal(state.result.message, 'Autofill stopped. Nothing was erased.');
     assert.equal(state.autopilot, false);
     assert.equal(w.model.filled.length, 0);
     assert.equal(w.model.nextCount, 0);

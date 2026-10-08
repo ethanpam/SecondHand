@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { authorized, download, publish, filenames, LATEST_RELEASE, RELEASE } from '../lib/downloads.ts';
-import { release as displayedRelease, downloads } from '../app/release.ts';
+import { release as displayedRelease, downloads } from '../lib/release.ts';
 const secret = 'test-secret-that-is-at-least-32-characters';
 const request = (path: string = filenames[0], headers = {}, method='GET') => new Request(`https://example.test/download/${path}`, {method, headers});
 const object = {size:10,httpEtag:'"etag"',customMetadata:{sha256:'a'.repeat(64)}};

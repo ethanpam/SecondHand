@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { SiteFooter, SiteHeader } from '../site-chrome';
+import { SiteFooter, SiteHeader } from '../_components/site-chrome';
 import { faq } from './questions';
 
 export const metadata: Metadata = {
@@ -47,7 +47,7 @@ export default function CommonQuestions() {
           ))}
         </div>
         <p className="faq-more">
-          Still stuck? Read the <Link href="/#setup">setup guide</Link> or the{' '}
+          Still stuck? Read the <Link href="/setup">setup guide</Link> or the{' '}
           <Link href="/privacy">privacy policy</Link>.
         </p>
       </main>

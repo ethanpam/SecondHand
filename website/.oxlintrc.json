@@ -34,8 +34,10 @@
   "overrides": [
     {
       "files": [
-        "app/home.tsx",
-        "app/site-chrome.tsx",
+        "app/_home/home.tsx",
+        "app/downloads/download-options.tsx",
+        "app/setup/page.tsx",
+        "app/_components/site-chrome.tsx",
         "app/not-found.tsx",
         "app/thank-you/**/page.tsx"
       ],

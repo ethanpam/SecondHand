@@ -1,5 +1,5 @@
 import type { MetadataRoute } from 'next';
-import { siteUrl } from './site';
+import { siteUrl } from '../lib/site';
 
 // Installer files and the publishing API are not pages. Thank-you pages stay
 // crawlable so search engines can read their noindex tag.

@@ -198,6 +198,57 @@ async function guidedSetup(page, application, userData) {
   console.log('Guided setup: offered after the recovery key, six steps saved as the applicant moved on, finished later from Overview; the household step listed four people and counted their ages.');
 }
 
+// Readable text (#166): every visible element `selector` matches that has text is at least `min` px (a `.field-hint`
+// at least 12px), has 4.5:1 contrast with the nearest background that isn't transparent, and an h3 is at least as
+// large as the paragraphs under it. Returns one line per element that falls short, naming its text, size and ratio.
+async function unreadableText(page, selector, min) {
+  return page.evaluate(({ selector, min }) => {
+    const rgba = value => { const [r, g, b, a = 1] = value.match(/[\d.]+/g).map(Number); return [r, g, b, a]; };
+    const over = ([r, g, b, a], below) => [r, g, b].map((channel, index) => channel * a + below[index] * (1 - a));
+    const luminance = rgb => {
+      const [r, g, b] = rgb.map(channel => { const c = channel / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const background = element => {
+      const layers = [];
+      for (let node = element; node; node = node.parentElement) {
+        const color = rgba(getComputedStyle(node).backgroundColor);
+        if (color[3] > 0) layers.push(color);
+        if (color[3] === 1) break;
+      }
+      return layers.reduceRight((below, color) => over(color, below), [255, 255, 255]);
+    };
+    const visible = element => element.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && element.textContent.trim();
+    const size = element => parseFloat(getComputedStyle(element).fontSize);
+    const name = element => `“${element.textContent.replace(/\s+/g, ' ').trim().slice(0, 70)}”`;
+    const problems = [];
+    for (const element of Array.from(document.querySelectorAll(selector)).filter(visible)) {
+      const fill = background(element);
+      const [l1, l2] = [luminance(over(rgba(getComputedStyle(element).color), fill)), luminance(fill)].sort((a, b) => b - a);
+      const ratio = (l1 + 0.05) / (l2 + 0.05);
+      const least = element.matches('.field-hint') ? 12 : min;
+      if (size(element) < least || ratio < 4.5) problems.push(`${name(element)}: ${size(element)}px (needs ${least}px), ${ratio.toFixed(2)}:1 (needs 4.5:1)`);
+      if (element.tagName !== 'H3') continue;
+      for (let next = element.nextElementSibling; next && next.tagName !== 'H3'; next = next.nextElementSibling) {
+        if (next.tagName === 'P' && visible(next) && size(next) > size(element)) problems.push(`${name(element)}: ${size(element)}px heading over a ${size(next)}px paragraph`);
+      }
+    }
+    return problems;
+  }, { selector, min });
+}
+
+// #200: every element each selector in `texts` matches is visible, and none falls short of unreadableText at the
+// size it maps to. Problems name the selector, so a failure says which rule to fix.
+async function assertReadable(page, texts, where) {
+  const problems = [];
+  for (const [selector, min] of Object.entries(texts)) {
+    await expect(page.locator(selector)).not.toHaveCount(0);
+    for (const element of await page.locator(selector).all()) await expect(element).toBeVisible();
+    problems.push(...(await unreadableText(page, selector, min)).map(problem => `${selector} ${problem}`));
+  }
+  assert.equal(problems.length, 0, `Text too small or faint on ${where}:\n${problems.join('\n')}`);
+}
+
 // #186: one answer remembered from https://pantry.example.org through the bridge, shown, changed and removed in My information.
 async function remembered(page, application, userData, pantry) {
   await application.evaluate(({ dialog }) => {
@@ -272,6 +323,9 @@ async function main() {
     await fs.mkdir(path.join(root, 'artifacts'), { recursive: true });
     page = await launch();
     await captureDiagnostic(page, 'vault-setup.png');
+    const authHints = await unreadableText(page, '.field-hint', 12);
+    assert.equal(authHints.length, 0, `Hints too small or faint on the create-password screen:\n${authHints.join('\n')}`);
+    await assertReadable(page, { '#auth-description': 13, '#recovery-note': 12, '.auth-footnote': 12 }, 'the create-password screen');
     await page.locator('#passphrase').fill(passphrase);
     await page.locator('#confirm-passphrase').fill(passphrase);
     // Keep automated runs away from the real Keychain or Windows protected storage;
@@ -283,6 +337,11 @@ async function main() {
     assert.match(recoveryKey, /^[0-9A-Z]{4}(?:-[0-9A-Z]{4}){7}$/);
     await expect(page.locator('#recovery-done')).toBeDisabled();
     await page.locator('#recovery-saved').check();
+    // Only the box's change event enables Continue (renderer/app.js), and showing a key, closing the dialog or locking
+    // disables it again. Click once the app has seen the box checked for this key, so a miss names its step.
+    await expect(page.locator('#recovery-saved')).toBeChecked();
+    await expect(page.locator('#recovery-key-value')).toHaveText(recoveryKey);
+    await expect(page.locator('#recovery-done')).toBeEnabled();
     await page.locator('#recovery-done').click();
     await expect(page.locator('#recovery-dialog')).not.toBeVisible();
     await expect(page.locator('#workspace')).toBeVisible();
@@ -302,12 +361,33 @@ async function main() {
     await expect(page.locator('#autofill-trust-hint')).toContainText('on every site SecondHand is on. That includes your Social Security number, birth date, income, benefits, and citizenship and disability answers.');
     await expect(page.locator('#always-allowed-sites-empty')).toBeVisible();
     await expect(page.locator('#always-allowed-sites li')).toHaveCount(0);
+    // Connect Chrome is readable (#199): the sensitive-details warning, the setup steps, their hints and both switches
+    // are at least 13px (hints 12px) and 4.5:1, at 100% and at 200% zoom.
+    for (const hint of ['#extension-folder-help', '#autofill-trust-hint', '#all-sites-status', '#trusted-sites-empty', '#always-allowed-sites-empty']) await expect(page.locator(hint)).toBeVisible();
+    const toggles = page.locator('#view-extension .trust-toggle>span');
+    await expect(toggles).toHaveText(['Let Chrome autofill without asking', 'Find more fields with Laya (runs on this computer)']);
+    for (const toggle of await toggles.all()) await expect(toggle).toBeVisible();
+    const extensionText = '#view-extension :is(p, h3, .trust-toggle>span)';
+    const extension = await unreadableText(page, extensionText, 13);
+    assert.equal(extension.length, 0, `Text too small or faint on Connect Chrome:\n${extension.join('\n')}`);
+    const extensionWidth = await page.evaluate(() => window.innerWidth);
+    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(2));
+    await expect.poll(() => page.evaluate(() => window.innerWidth)).toBeLessThanOrEqual(Math.ceil(extensionWidth / 2));
+    const extensionZoomed = await unreadableText(page, extensionText, 13);
+    assert.equal(extensionZoomed.length, 0, `Text too small or faint on Connect Chrome at 200% zoom:\n${extensionZoomed.join('\n')}`);
+    const drawnExtension = await application.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString('base64'));
+    await fs.writeFile(path.join(root, 'artifacts/extension-zoom-200.png'), Buffer.from(drawnExtension, 'base64'));
+    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1));
+    await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(extensionWidth);
     // Turning it off is saved, and stays off after a restart (checked below).
     await page.locator('#laya-toggle').uncheck();
     await expect(page.locator('#toast')).toHaveText('Laya is off.');
     await expect(page.locator('#laya-status')).toHaveText(/^Off\. /);
     assert.equal(JSON.parse(await fs.readFile(path.join(userData, 'settings.json'), 'utf8')).layaEnabled, false);
     await page.locator('.nav-item[data-view="profile"]').click();
+    await expect(page.locator('#view-profile .field-hint').first()).toBeVisible();
+    const profileHints = await unreadableText(page, '.field-hint', 12);
+    assert.equal(profileHints.length, 0, `Hints too small or faint on My information:\n${profileHints.join('\n')}`);
     // What My information shows for every saved field, read the way the form submits it.
     const shownProfile = () => page.locator('#profile-form').evaluate((form, fields) => Object.fromEntries(fields.map(field => {
       const control = form.elements.namedItem(field);
@@ -350,8 +430,17 @@ async function main() {
     await expect(page.locator('#application-list')).toContainText('Synthetic follow-up task');
     await page.locator('.nav-item[data-view="overview"]').click();
     await captureDiagnostic(page, 'desktop-overview.png', { fullPage: true });
+    // The sidebar's menu and "Not a government service." are readable (#200), and fit the sidebar without sideways scrolling.
+    await expect(page.locator('.nav-item')).toHaveCount(6);
+    await assertReadable(page, { '.nav-item': 12, '.sidebar-disclaimer': 12 }, 'Overview’s sidebar');
+    const sidebarOverflow = await page.locator('.sidebar').evaluate(sidebar => sidebar.scrollWidth - sidebar.clientWidth);
+    assert.ok(sidebarOverflow <= 1, `no sideways scrolling in the sidebar (${sidebarOverflow}px)`);
     await page.locator('#lock-button').click();
     await expect(page.locator('#auth-view')).toBeVisible();
+    // #201 hides the create-password description on the unlock screen; the note under the form is readable (#200).
+    await expect(page.locator('#auth-description')).toBeHidden();
+    await expect(page.locator('#recovery-note')).toHaveText('Your password never leaves this computer.');
+    await assertReadable(page, { '#recovery-note': 12 }, 'the unlock screen');
     const cleared = await page.evaluate(() => ({
       firstName: document.querySelector('#firstName').value,
       notes: document.querySelector('#application-notes').value,
@@ -467,6 +556,22 @@ async function main() {
     await page.locator('.nav-item[data-view="privacy"]').click();
     await expect(page.locator('#touch-id-setting')).toBeVisible();
     await expect(page.locator('#touch-id-toggle')).not.toBeChecked();
+    // Privacy & backups is readable (#166): its text at least 13px, hints 12px, all at 4.5:1, at 100% and at 200% zoom.
+    const privacyText = '#view-privacy :is(p, h3, strong, label), .field-hint';
+    const privacy = await unreadableText(page, privacyText, 13);
+    assert.equal(privacy.length, 0, `Text too small or faint on Privacy & backups:\n${privacy.join('\n')}`);
+    await captureDiagnostic(page, 'desktop-privacy.png', { fullPage: true });
+    const privacyWidth = await page.evaluate(() => window.innerWidth);
+    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(2));
+    await expect.poll(() => page.evaluate(() => window.innerWidth)).toBeLessThanOrEqual(Math.ceil(privacyWidth / 2));
+    const privacyOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    assert.ok(privacyOverflow <= 1, `no sideways scrolling on Privacy & backups at 200% (${privacyOverflow}px)`);
+    const privacyZoomed = await unreadableText(page, privacyText, 13);
+    assert.equal(privacyZoomed.length, 0, `Text too small or faint on Privacy & backups at 200% zoom:\n${privacyZoomed.join('\n')}`);
+    const drawnPrivacy = await application.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString('base64'));
+    await fs.writeFile(path.join(root, 'artifacts/privacy-zoom-200.png'), Buffer.from(drawnPrivacy, 'base64'));
+    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1));
+    await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(privacyWidth);
     // Turning it on opens the password dialog; the box stays clear until the password is checked.
     await page.locator('#touch-id-toggle').click();
     await expect(page.locator('#touch-id-dialog')).toBeVisible();
@@ -564,7 +669,9 @@ async function main() {
     await page.locator('#passphrase').fill(startOverPassword);
     await page.locator('#confirm-passphrase').fill(startOverPassword);
     if (await page.locator('#device-reset-field').isVisible()) await page.locator('#allow-device-reset').uncheck();
-    await page.locator('#auth-submit').click();
+    // The setup is offered only if its start is saved while the key is on screen (renderer/app.js): wait for the
+    // attempt, setup save included, to settle before Continue.
+    await submitAuthForm(page);
     await page.locator('#recovery-saved').check();
     await page.locator('#recovery-done').click();
     await expect(page.locator('#workspace')).toBeVisible();
@@ -590,7 +697,7 @@ async function main() {
     assert.equal(JSON.parse(await fs.readFile(path.join(userData, 'settings.json'), 'utf8')).householdNoteDismissed, true);
     console.log('#180: with no household list saved, Overview offered Add your household; openHousehold through the bridge opened My information at Your household; Dismiss kept the note away and was saved.');
     assert.deepEqual(errors, []);
-    console.log('Electron UI smoke passed: guided setup offered after the recovery key, saved step by step with a household list, the student status and the answers from lists, finished later from Overview and readable at 200% zoom; Laya downloads on its own on a new install and stays off once turned off, create, save full applicant choices, Iowa’s questions about you and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence, Touch ID on (test hook) with a lock-screen lock, a Touch ID unlock, and Touch ID ready at once after a restart, recovery key password reset that keeps Touch ID, clear Iowa’s questions, start over (which removes Touch ID) and its setup offer.');
+    console.log('Electron UI smoke passed: guided setup offered after the recovery key, saved step by step with a household list, the student status and the answers from lists, finished later from Overview and readable at 200% zoom; Laya downloads on its own on a new install and stays off once turned off, create, save full applicant choices, Iowa’s questions about you and mailing details, track application, lock/clear all fields, wrong password with normal and delayed lock notification, unlock, restart persistence, readable hints, password screen notes and sidebar text, Connect Chrome text and Privacy & backups text (both also at 200% zoom), Touch ID on (test hook) with a lock-screen lock, a Touch ID unlock, and Touch ID ready at once after a restart, recovery key password reset that keeps Touch ID, clear Iowa’s questions, start over (which removes Touch ID) and its setup offer.');
   } catch (error) {
     if (page && !page.isClosed()) {
       const auth = await page.evaluate(() => ({
@@ -600,7 +707,12 @@ async function main() {
         errorHidden: document.querySelector('#auth-error').hidden,
         submitDisabled: document.querySelector('#auth-submit').disabled,
         submitBusy: document.querySelector('#auth-submit').getAttribute('aria-busy'),
-        workspaceHidden: document.querySelector('#workspace').hidden
+        workspaceHidden: document.querySelector('#workspace').hidden,
+        // The recovery key dialog: whether it is open, its box checked, Continue disabled, and a key shown (never the key).
+        recoveryOpen: document.querySelector('#recovery-dialog').open,
+        recoverySaved: document.querySelector('#recovery-saved').checked,
+        recoveryDoneDisabled: document.querySelector('#recovery-done').disabled,
+        recoveryKeyShown: Boolean(document.querySelector('#recovery-key-value').textContent)
       })).catch(() => ({ unavailable: true }));
       console.error('Sanitized auth failure diagnostics:', JSON.stringify(auth));
       // Record what the window showed when a step failed; CI uploads artifacts/.

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, type PointerEvent } from 'react';
-import { useSiteMotion } from './site-motion';
+import { useSiteMotion } from '../../lib/site-motion';
 
 const label = 'SecondHand';
 const restingSettings = '"wght" 450';

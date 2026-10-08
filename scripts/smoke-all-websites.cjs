@@ -449,7 +449,7 @@ async function main() {
     await expect.poll(() => panel.visible('#guesses-section'), { timeout: 15000 }).toBe(true);
     assert.equal(await panel.text('#guesses-title'), en('guesses.title'));
     assert.equal(await panel.text('#guesses-list'), GUESS_QUESTION);
-    await expect(guessWidget.locator('#widget-text')).toHaveText(`${en('widget.filled', { count: 2 })} · ${en('widget.layaGuessed', { count: 1 })}`, { timeout: 15000 });
+    await expect(guessWidget.locator('#widget-text')).toHaveText(guessed, { timeout: 15000 });
     await page.screenshot({ path: path.join(root, 'artifacts/all-websites/laya-guess-filled.png') });
     await panel.screenshot(path.join(root, 'artifacts/all-websites/laya-guess-panel.png'));
     await panel.click('[data-guess-id]');
@@ -474,10 +474,32 @@ async function main() {
     assert.equal(await page.locator('#apt').inputValue(), '');
     assert.deepEqual((await calls('getFields')).filter(call => call.url === HOUSEHOLD).map(call => call.fields),
       [['householdChildren', 'householdCount:18-59', 'householdCount:60+', 'studentNameGrade', 'addressLine2']]);
+    // The side panel names the two questions Autofill left, in the form's own words; a row finds its box.
+    const leftRows = () => panel.evaluate(() => [...document.querySelectorAll('#left-list > *')].map(row => [row.querySelector('.checklist-label').textContent, row.querySelector('.checklist-detail').textContent]));
+    await expect.poll(() => panel.visible('#left-section'), { timeout: 15000 }).toBe(true);
+    assert.deepEqual((await leftRows()).sort(), [[HOUSEHOLD_QUESTIONS.apt, en('checklist.missing')], [HOUSEHOLD_QUESTIONS.guardian, en('checklist.missing')]].sort());
+    assert.equal(await panel.text('#left-summary'), en('checklist.left', { count: 2 }));
+    await panel.click(`#left-list > :nth-child(${(await leftRows()).findIndex(([label]) => label === HOUSEHOLD_QUESTIONS.guardian) + 1})`);
+    // On another site a question is scrolled to and outlined; the keyboard's focus is left where it was.
+    await expect.poll(() => page.evaluate(() => Boolean(document.getElementById('guardian').closest('[data-secondhand-attention]'))), { timeout: 15000 }).toBe(true);
+    assert.equal(await page.evaluate(() => Boolean(document.getElementById('apt').closest('[data-secondhand-attention]'))), false);
+    assert.equal(await page.locator('#guardian').inputValue(), '', 'finding a question writes nothing');
+    // What was filled is named too, folded away until opened: the four household answers, none a guess.
+    assert.equal(await panel.visible('#filled-section'), true);
+    assert.equal(await panel.evaluate(() => document.getElementById('filled-section').open), false);
+    assert.equal(await panel.text('#filled-summary'), en('questions.count', { count: 4 }));
+    await panel.click('#filled-section > summary');
+    await expect.poll(() => panel.evaluate(() => document.getElementById('filled-section').open), { timeout: 5000 }).toBe(true);
+    assert.deepEqual(await panel.evaluate(() => [...document.querySelectorAll('#filled-list > *')].map(row => [row.querySelector('.checklist-label').textContent, row.querySelector('.checklist-detail').textContent])),
+      [HOUSEHOLD_QUESTIONS.young, HOUSEHOLD_QUESTIONS.middle, HOUSEHOLD_QUESTIONS.older, HOUSEHOLD_QUESTIONS.student].map(label => [label, en('checklist.complete')]));
     await expect.poll(() => panel.visible('#save-section'), { timeout: 15000 }).toBe(true);
     await expect.poll(() => panel.text('#save-list')).toBe(`${HOUSEHOLD_QUESTIONS.apt}${en('save.answerFirst')}`);
     await page.locator('#apt').fill('Unit 5');
     await expect.poll(() => panel.visible('[data-save-id] button'), { timeout: 15000 }).toBe(true);
+    // The apartment now holds an answer, so its row is done and one question is left.
+    await expect.poll(async () => (await leftRows()).find(([label]) => label === HOUSEHOLD_QUESTIONS.apt)?.[1], { timeout: 15000 }).toBe(en('checklist.complete'));
+    assert.equal(await panel.text('#left-summary'), en('checklist.left', { count: 1 }));
+    assert.equal(await panel.evaluate(() => document.getElementById('left-section').textContent.includes('Unit 5')), false, 'the list never shows an answer');
     assert.equal(await panel.text('[data-save-id] button'), en('save.button'));
     assert.equal(await panel.evaluate(() => document.getElementById('save-section').textContent.includes('Unit 5')), false, 'the panel never shows the answer');
     assert.deepEqual(await worker.evaluate(() => globalThis.__desktop.saves), [], 'nothing is saved before the click');
@@ -489,7 +511,7 @@ async function main() {
     await expect.poll(() => panel.visible('#save-section'), { timeout: 15000 }).toBe(false);
     await settled();
     assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
-    console.log('#98: a pantry form’s household questions filled from the fictional household list (0-17, 18-59, 60+, and the student’s name and grade); the guardian stayed blank; the typed apartment was saved to My information after the Save click.');
+    console.log('#98: a pantry form’s household questions filled from the fictional household list (0-17, 18-59, 60+, and the student’s name and grade); the guardian stayed blank and the side panel named it and the apartment as left; the typed apartment was saved to My information after the Save click.');
 
     // #180: with no household list saved, the Jotform's household questions (adults, and children by age) stay open. The widget
     // says they wait in the side panel, which lists them with Add your household; its click asks the app to open Your household.
@@ -503,7 +525,8 @@ async function main() {
     for (const id of Object.keys(NO_LIST_QUESTIONS)) assert.equal(await page.locator(`#${id}`).inputValue(), '', `${id} stays open`);
     assert.deepEqual((await calls('getFields')).filter(call => call.url === NO_LIST).map(call => call.fields), [['firstName', 'householdAdults', 'householdCount:0-5', 'householdCount:6-18']]);
     await expect(noListWidget.locator('#need-you')).toHaveText(en('widget.needYou', { count: 3 }), { timeout: 15000 });
-    await expect(noListWidget.locator('#widget-text')).toHaveText(`${en('widget.filled', { count: 1 })} · ${en('widget.household', { count: 3 })}`);
+    // The card says the side panel's sentence without the count its link carries, then where the household questions wait.
+    await expect(noListWidget.locator('#widget-text')).toHaveText(`${en('result.siteFilled', { count: 1 })} ${en('widget.household', { count: 3 })}`);
     await expect.poll(() => panel.visible('#household-section'), { timeout: 15000 }).toBe(true);
     assert.equal(await panel.text('#household-hint'), en('household.hintList'));
     assert.equal(await panel.text('#household-list'), Object.values(NO_LIST_QUESTIONS).join(''));
@@ -534,11 +557,11 @@ async function main() {
     assert.equal(await page.locator('#dob').inputValue(), '', 'the date of birth waits');
     assert.deepEqual(await heldCalls(since176), [{ url: DETAILS, fields: ['firstName', 'birthDate'], sensitive: false }], 'one request, as before');
     await expect(detailsWidget.locator('#need-you')).toHaveText(en('widget.needYou', { count: 1 }), { timeout: 15000 });
-    await expect(detailsWidget.locator('#widget-text')).toHaveText(`${en('widget.filled', { count: 1 })} · ${en('widget.held', { count: 1 })}`);
+    await expect(detailsWidget.locator('#widget-text')).toHaveText(en('result.withHeld', { summary: { key: 'result.siteFilled', params: { count: 1 } }, count: 1 }));
     await expect.poll(() => panel.visible('#held-section'), { timeout: 15000 }).toBe(true);
     assert.equal(await panel.text('#held-list'), 'Date of birth');
     assert.equal(await panel.text('#held-fill'), en('held.fill'));
-    const waiting = en('result.withHeld', { summary: { key: 'result.siteFilledNeedYou', params: { count: 1, needYou: 1 } }, count: 1 });
+    const waiting = en('result.withHeldBelow', { summary: { key: 'result.siteFilledNeedYou', params: { count: 1, needYou: 1 } }, count: 1 });
     assert.equal(await panel.text('#status'), waiting);
     assert.equal(await panel.visible('#save-section'), false, 'a held date of birth is saved: it is never offered to Save to My information');
     assert.deepEqual(await worker.evaluate(() => globalThis.__desktop.prompts), [], 'nothing about it was asked yet');
@@ -556,7 +579,7 @@ async function main() {
     await expect.poll(() => panel.visible('#held-section'), { timeout: 15000 }).toBe(false);
     await expect.poll(() => panel.text('#status'), { timeout: 15000 }).toBe(en('result.siteFilled', { count: 2 }));
     await expect(detailsWidget.locator('#need-you')).toBeHidden({ timeout: 15000 });
-    await expect(detailsWidget.locator('#widget-text')).toHaveText(en('widget.filled', { count: 2 }));
+    await expect(detailsWidget.locator('#widget-text')).toHaveText(en('result.siteFilled', { count: 2 }));
     assert.deepEqual(await worker.evaluate(() => globalThis.__desktop.prompts), ['Fill sensitive details on https://pantry.example.org?', 'Fill sensitive details on https://pantry.example.org?'],
       'the sensitive prompt came only from the button, once for Cancel and once for Allow once');
     await settled();
@@ -614,7 +637,7 @@ async function main() {
     assert.ok(asked186.slice(1).every(call => call.url === VISIT && !call.fields.includes('EMPLID')), 'a filled question isn’t asked about again');
     await expect.poll(() => panel.text('#status'), { timeout: 15000 })
       .toBe(en('result.fromCustom', { summary: { key: 'result.siteFilledNeedYou', params: { count: 3, needYou: 1 } }, count: 2 }));
-    await expect(visitWidget.locator('#widget-text')).toHaveText(`${en('widget.filled', { count: 3 })} · ${en('widget.fromCustom', { count: 2 })}`, { timeout: 15000 });
+    await expect(visitWidget.locator('#widget-text')).toHaveText(en('result.fromCustom', { summary: { key: 'result.siteFilled', params: { count: 3 } }, count: 2 }), { timeout: 15000 });
     assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
     await page.screenshot({ path: path.join(root, 'artifacts/remember/visit-filled.png') });
     await worker.evaluate(() => { const desktop = globalThis.__desktop; desktop.customFieldsAvailable = false; desktop.profile.customFields = desktop.profile.customFields.filter(row => !row.site); });
@@ -767,7 +790,7 @@ async function main() {
     // Iowa's portal still works, with no Chrome restart.
     await page.goto(`${applicant}?next=stay`, { waitUntil: 'domcontentloaded' });
     await launcherFrame();
-    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofillIowa'));
     await panel.click('#panel-autofill');
     await expect(page.locator('#firstName')).toHaveValue(syntheticProfile.firstName, { timeout: 20000 });
     await expect(page.locator('#lastName')).toHaveValue(syntheticProfile.lastName);

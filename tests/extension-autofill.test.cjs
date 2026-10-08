@@ -3,9 +3,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const adapter = require('../extension/iowa-adapter.js');
 const strings = require('../extension/strings.js');
-const { plain, read, serviceWorker, nativeHost } = require('./helpers/harness.cjs');
+const { plain, read, serviceWorker, nativeHost, workerLogged } = require('./helpers/harness.cjs');
+// An error the worker logged that the test didn't take fails it.
+test.afterEach(() => assert.deepEqual(workerLogged(), [], 'the worker logged an error the test didn’t expect'));
 
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
+// What the worker logs when the app fails to mark the application in progress after a fill.
+const PROGRESS_UNRECORDED = 'The SecondHand app couldn’t mark the application in progress after a fill. The fill stands.';
+// What the worker logs when Chrome can't say what page a keyboard shortcut was pressed on.
+const SHORTCUT_LOST = 'Chrome couldn’t say what page a keyboard shortcut was pressed on. The shortcut did nothing.';
 const { GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey } = require('../extension/generic-adapter.js');
 // Verified Iowa pages never use the general engine; any call there is a bug.
 const noSiteEngine = { GENERIC_KEYS, SAVE_KEYS, requestKeys: () => { throw new Error('Iowa used the site engine.'); }, deriveValues: () => { throw new Error('Iowa used the site engine.'); },
@@ -63,12 +69,17 @@ function generalPage(message, plan) {
 // the way Iowa's form reveals conditional sections.
 // `build` runs the worker as another build; `disk` is the build in the files Chrome would load on a
 // reload (null: they can't be read); `desktop.extension` is what the app says about the extension it ships.
-function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noSiteEngine, general = nothingPlanned(), page = {}, questions, pageText, build, disk } = {}) {
+// `focus` is the page's answer when SecondHand goes to one of its questions, and `panelBehavior` Chrome's when the worker
+// sets what its toolbar icon does.
+function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noSiteEngine, general = nothingPlanned(), page = {}, questions, pageText, build, disk, focus = () => ({ focused: true }),
+  panelBehavior = async () => {} } = {}) {
   const model = { kind, filled: [], revealed: false, token: null };
   const vault = { reachable: true, unlocked: true, getFieldsError: null,
     values: { firstName: 'Synthetic private first', hasHomeAddress: 'yes', mailingCity: 'Synthetic private city' }, ...desktop };
   const calls = { native: [], content: [], pageTabs: [], injected: [], reads: [], order: [] };
   const tab = { id: 7, active: true, url: `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo` };
+  // The person closed the tab: Chrome finds no tab with its id.
+  let closed = false;
   const w = serviceWorker();
   const visible = () => ['firstName', 'lastName', 'hasHomeAddress', ...(model.revealed ? ['mailingCity'] : [])];
   function pageState() {
@@ -80,7 +91,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
   }
   const chrome = {
     tabs: {
-      get: async () => ({ ...tab }),
+      get: async id => { if (closed) throw new Error(`No tab with id: ${id}.`); return { ...tab }; },
       sendMessage: async (id, message) => {
         calls.pageTabs.push(id); calls.content.push(message);
         if (message.type === 'secondhand:pageState') return pageState();
@@ -94,7 +105,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
           }
           return { ok: true, filledCount, skippedCount: message.fields.length - filledCount };
         }
-        if (message.type === 'secondhand:focusField') return { focused: true };
+        if (message.type === 'secondhand:focusField') return focus(message);
         if (message.type === 'secondhand:questions' && questions) return structuredClone(questions);
         if (message.type === 'secondhand:pageText' && pageText) return structuredClone(pageText);
         if (message.type === 'secondhand:widgetSize') return { sized: true };
@@ -104,7 +115,8 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
       },
       onActivated: w.event('activated'), onRemoved: w.event('removed'), onUpdated: w.event('updated')
     },
-    sidePanel: { setPanelBehavior: async () => {}, open: async () => {} },
+    sidePanel: { setPanelBehavior: panelBehavior, open: async () => {} },
+    commands: { onCommand: w.event('command') },
     scripting: { executeScript: async details => { calls.injected.push(plain(details)); }, getRegisteredContentScripts: async () => [] },
     // Iowa's site is the extension's own host permission; no other site is on.
     permissions: { contains: async ({ origins }) => origins.every(origin => origin === 'https://hhsservices.iowa.gov/*') },
@@ -123,7 +135,8 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
         if (request.type === 'showApp') return reply({ shown: true });
         if (request.type === 'unlockWithTouchId' && vault.touchIdUnlock) return reply(structuredClone(vault.touchIdUnlock));
         if (request.type === 'openApp') return vault.openError ? fail(vault.openError) : reply(vault.opened || { opened: 'shown' });
-        if (request.type === 'recordProgress') return reply({ recorded: true });
+        // `progressError`: the app fails to mark the application in progress after a fill.
+        if (request.type === 'recordProgress') return vault.progressError ? fail(vault.progressError) : reply({ recorded: true });
         if (request.type === 'saveFields') return reply({ saved: Object.keys(request.fields) });
         // Laya (#39, #42): readied before a click's questions; "not ready" unless a test plays it.
         if (request.type === 'warmLaya') return reply({ state: vault.layaState || 'unavailable' });
@@ -150,6 +163,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
   return {
     calls, tab, events: w.events, vault, filled: () => [...model.filled],
     restart: w.restart,
+    close: () => { closed = true; },
     reloads: () => calls.order.filter(step => step === 'reload').length,
     send,
     panel: message => send({ tabId: 7, ...message }, { id: 'testextension', url: PANEL_URL }),
@@ -157,6 +171,95 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
   };
 }
 const autofill = w => w.panel({ type: 'ui:autofill', confirmed: true });
+
+test('SecondHand’s toolbar icon opens its side panel, and Chrome’s failure to set that goes where Chrome records SecondHand’s errors', async () => {
+  const set = [];
+  worker({ panelBehavior: async behavior => { set.push(plain(behavior)); } });
+  assert.deepEqual(set, [{ openPanelOnActionClick: true }]);
+  const failure = new Error('Synthetic side panel failure');
+  worker({ panelBehavior: async () => { throw failure; } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(workerLogged(), [['Chrome couldn’t make SecondHand’s toolbar icon open the side panel. The card and Chrome’s side panel menu still open it.', failure]]);
+});
+
+// Keyboard shortcuts: Chrome sends a command only for keys the person pressed, with the tab in front.
+const settleShortcut = async () => { for (let i = 0; i < 30; i++) await new Promise(resolve => setImmediate(resolve)); };
+test('the Autofill shortcut does what the tab’s Autofill button does, and stops Autofill while it runs', async () => {
+  const w = worker();
+  w.events.command('autofill', { id: 7 });
+  await settleShortcut();
+  assert.deepEqual(w.filled(), ['firstName', 'hasHomeAddress', 'mailingCity'], 'one press fills as one click does');
+  assert.deepEqual(w.calls.native.map(call => call.type).filter(type => type !== 'status'), ['getFields', 'recordProgress'], 'and asks the app the same way');
+  const state = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.equal(state.autopilot, true, 'Autofill goes on, as after a click');
+  assert.match(state.result.message, /^Filled 3 answers · 1 left for you/);
+  w.events.command('autofill', { id: 7 });
+  await settleShortcut();
+  assert.equal(plain((await w.panel({ type: 'ui:pageState' })).data).autopilot, false, 'a second press stops it');
+  assert.deepEqual(w.filled(), ['firstName', 'hasHomeAddress', 'mailingCity'], 'and Stop erases nothing');
+});
+
+test('the next-question shortcut goes to each question the tab’s result left, in turn, and does nothing before there is one', async () => {
+  const w = worker({ desktop: { values: { hasHomeAddress: 'yes', mailingCity: 'Synthetic private city' } } });
+  const focused = () => w.calls.content.filter(message => message.type === 'secondhand:focusField').map(message => message.key);
+  w.events.command('next-question', { id: 7 });
+  await settleShortcut();
+  assert.deepEqual(focused(), [], 'nothing is left before Autofill has run');
+  await autofill(w);
+  for (let i = 0; i < 3; i++) { w.events.command('next-question', { id: 7 }); await settleShortcut(); }
+  assert.deepEqual(focused(), ['firstName', 'lastName', 'firstName']);
+});
+
+test('a failed next-question shortcut ends where a failed click on the card’s link does: a passing note on the card, with the tab’s result and its questions left as they were', async () => {
+  const lost = 'Could not establish connection. Receiving end does not exist.';
+  const w = worker({ focus: () => { throw new Error(lost); } });
+  await autofill(w);
+  const before = plain((await w.panel({ type: 'ui:pageState' })).data).result;
+  assert.deepEqual(before.needYou, ['lastName']);
+  w.events.command('next-question', { id: 7 });
+  await settleShortcut();
+  // The side panel reads the tab's result as it was, and no note.
+  const side = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.deepEqual(side.result, before);
+  assert.equal(Object.hasOwn(side, 'note'), false);
+  // The card takes the note once, in the words the worker's reply to a failed click on its link gives.
+  const card = plain((await w.launcher({ type: 'ui:pageState' })).data);
+  assert.deepEqual(card.result, before);
+  const clicked = plain(await w.launcher({ type: 'ui:focusField', key: 'lastName', confirmed: true }));
+  assert.deepEqual(card.note, { message: clicked.error, messageKey: clicked.errorKey, messageParams: clicked.errorParams });
+  assert.deepEqual(card.note, { message: lost, messageKey: 'detail', messageParams: { detail: lost } });
+  assert.equal(Object.hasOwn(plain((await w.launcher({ type: 'ui:pageState' })).data), 'note'), false, 'and then it has passed');
+  // A note the card hasn't taken goes when the page moves on.
+  w.events.command('next-question', { id: 7 });
+  await settleShortcut();
+  w.events.updated(7, { status: 'loading' });
+  assert.equal(Object.hasOwn(plain((await w.launcher({ type: 'ui:pageState' })).data), 'note'), false);
+  assert.deepEqual(w.filled(), ['firstName', 'hasHomeAddress', 'mailingCity'], 'and nothing is erased');
+});
+
+test('a shortcut on a tab Chrome can no longer find does nothing, and says so where Chrome records SecondHand’s errors', async () => {
+  const w = worker();
+  w.close();
+  w.events.command('autofill', { id: 7 });
+  w.events.command('next-question', { id: 7 });
+  await settleShortcut();
+  const logged = workerLogged();
+  assert.deepEqual(logged.map(([what]) => what), [SHORTCUT_LOST, SHORTCUT_LOST]);
+  assert.deepEqual(logged.map(([, error]) => error.message), ['No tab with id: 7.', 'No tab with id: 7.']);
+  assert.deepEqual(w.calls.native.filter(call => call.type === 'getFields'), []);
+});
+
+test('a shortcut on a tab that is neither Iowa’s form nor a site that is on does nothing, and an unknown command is ignored', async () => {
+  const w = worker();
+  w.tab.url = 'https://unknown.example/form';
+  w.events.command('autofill', { id: 7 });
+  w.events.command('next-question', { id: 7 });
+  w.events.command('something-else', { id: 7 });
+  w.events.command('autofill', {});
+  await settleShortcut();
+  assert.deepEqual(w.calls.native.filter(call => call.type === 'getFields'), []);
+  assert.deepEqual(w.filled(), []);
+});
 
 test('one click makes one status and one getFields request, fills revealed fields, and records progress', async () => {
   const w = worker();
@@ -171,10 +274,22 @@ test('one click makes one status and one getFields request, fills revealed field
   assert.equal(result.state, 'done');
   assert.equal(result.filled, 3);
   assert.deepEqual(result.needYou, ['lastName']);
-  assert.match(result.message, /Filled 3 · 1 need you/);
+  assert.match(result.message, /Filled 3 answers · 1 left for you/);
   assert.doesNotMatch(JSON.stringify(response), /Synthetic private/);
   assert.equal(w.calls.content.some(message => message.type.startsWith('secondhand:generic:')), false, 'verified pages never use the general engine');
   assert.deepEqual(w.calls.injected[0], { target: { tabId: 7, frameIds: [0] }, files: ['address-policy.js', 'iowa-later-adapter.js', 'iowa-record-adapter.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js'] });
+});
+
+test('a fill the app can’t mark in the application’s progress still stands, and the failure goes where Chrome records SecondHand’s errors', async () => {
+  const w = worker({ desktop: { progressError: 'Synthetic progress failure' } });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.state, 'done', 'the fill already happened');
+  assert.equal(result.filled, 3);
+  assert.match(result.message, /^Filled 3 answers · 1 left for you/);
+  assert.deepEqual(w.filled(), ['firstName', 'hasHomeAddress', 'mailingCity']);
+  const logged = workerLogged();
+  assert.deepEqual(logged.map(([what]) => what), [PROGRESS_UNRECORDED]);
+  assert.equal(logged[0][1].message, 'Synthetic progress failure');
 });
 
 test('locked and unreachable desktops map to widget states without filling', async () => {
@@ -231,8 +346,10 @@ test('an unknown Iowa page gets one general fill, then waits for the applicant t
   const w = worker({ kind: 'manual', engine: generalEngine, general: financialPlan(), desktop: { values: financialValues } });
   const response = await autofill(w);
   assert.equal(response.ok, true, response.error);
-  assert.deepEqual(plain(response.data), { state: 'done', filled: 2, needYou: ['sh-1-3', 'sh-1-2'],
-    message: 'Filled 2 · 2 need you. Check your answers, then click Continue.', todo: 'Check your answers, then click Continue.', pageKey: 'iowa-manual',
+  // `left` names what needYou lists, in the page's own words (a question the plan gave no label has none).
+  assert.deepEqual(plain(response.data), { state: 'done', filled: 2, needYou: ['sh-1-3', 'sh-1-2'], left: [{ key: 'sh-1-3', label: 'Is anyone blind?' }, { key: 'sh-1-2', label: '' }],
+    filledQuestions: [{ label: '', guessed: false }, { label: '', guessed: false }],
+    message: 'Filled 2 answers · 2 left for you. Check your answers, then click Continue.', todo: 'Check your answers, then click Continue.', pageKey: 'iowa-manual',
     messageKey: 'result.thenTodo', messageParams: { summary: { key: 'result.filledNeedYou', params: { count: 2, needYou: 2 } }, todo: { key: 'worker.checkThenContinue', params: {} } },
     todoKey: 'worker.checkThenContinue', todoParams: {} });
   assert.deepEqual(w.calls.native.map(call => call.type).filter(type => type !== 'status'), ['warmLaya', 'getFields'], 'Laya is readied for the open question and isn’t ready');
@@ -292,7 +409,7 @@ test('an unknown Iowa page fills questions its answers reveal in the same click,
     'secondhand:generic:plan', 'secondhand:generic:fill', 'secondhand:generic:plan']);
   assert.equal(result.filled, 3);
   assert.deepEqual(result.needYou, ['sh-1-3', 'sh-1-2', 'sh-1-5']);
-  assert.equal(result.message, 'Filled 3 · 3 need you. Check your answers, then click Continue.');
+  assert.equal(result.message, 'Filled 3 answers · 3 left for you. Check your answers, then click Continue.');
   assert.equal(w.calls.content.some(message => message.type === 'secondhand:continue'), false);
   assert.doesNotMatch(JSON.stringify(w.calls.content), /700/);
 });
@@ -304,7 +421,7 @@ test('an answer an unknown Iowa page refuses needs the applicant and is not coun
   const result = plain((await autofill(w)).data);
   assert.equal(result.filled, 1);
   assert.deepEqual(result.needYou, ['sh-1-3', 'sh-1-0', 'sh-1-2']);
-  assert.equal(result.message, 'Filled 1 · 3 need you. Check your answers, then click Continue.');
+  assert.equal(result.message, 'Filled 1 answer · 3 left for you. Check your answers, then click Continue.');
   assert.equal(w.calls.content.filter(message => message.type === 'secondhand:generic:fill').length, 1, 'a refused answer is not tried again');
 });
 
@@ -366,7 +483,7 @@ test('with Laya ready, its answer joins the general fill on an unknown Iowa page
   assert.deepEqual(plain(w.calls.content.find(message => message.type === 'secondhand:generic:fill').assignments).at(-1), { id: blind.id, option: 'No', guessed: true });
   assert.equal(result.filled, 3);
   assert.equal(result.laya, 1);
-  assert.equal(result.message, 'Filled 3 · 1 need you. Suggestions came from Laya on this computer. Check your answers, then click Continue.');
+  assert.equal(result.message, 'Filled 3 answers · 1 left for you. Suggestions came from Laya on this computer. Check your answers, then click Continue.');
   assert.doesNotMatch(JSON.stringify(answer), /Synthetic private/);
 });
 
@@ -401,7 +518,7 @@ test('an unknown Iowa page that declares no language, with no detector to read i
   assert.equal(w.calls.native.some(call => call.type === 'answerFields'), false, 'Laya is asked nothing');
   assert.equal(result.filled, 2);
   assert.ok(result.needYou.includes(blind.id));
-  assert.equal(result.message, 'Filled 2 · 2 need you. Laya skipped questions in a language SecondHand couldn’t identify. Check your answers, then click Continue.');
+  assert.equal(result.message, 'Filled 2 answers · 2 left for you. Laya skipped questions in a language SecondHand couldn’t identify. Check your answers, then click Continue.');
 });
 
 test('launcher is bound to its own tab, needs confirmed clicks, and cannot use panel-only or unknown types', async () => {
@@ -610,7 +727,7 @@ function journey({ screens, desktop = {}, continueStays = false, engine = noSite
 const info = (name, path, pageKey) => ({ name, path, page: { kind: 'info', pageKey } });
 const walk = () => [
   { name: 'household', path: '/applyForBenefits/guestLogin', fields: ['householdApplyProg'],
-    page: filled => filled.has('householdApplyProg') ? { kind: 'blocked', pageKey: 'iowa-captcha', todo: 'Solve the CAPTCHA, then click Continue.', checklist: [] }
+    page: filled => filled.has('householdApplyProg') ? { kind: 'blocked', pageKey: 'iowa-captcha', todo: 'Type the characters shown in Iowa’s security check, then click Continue.', checklist: [] }
       : { kind: 'fillable', pageKey: 'iowa-program-intent', checklist: [{ key: 'householdApplyProg', label: 'q', required: true, status: 'missing' }] } },
   info('beforeYouStart', '/applyForBenefits/welcome', 'iowa-before-start'),
   { name: 'consent', path: '/applyForBenefits/letsGetStarted', page: { kind: 'blocked', pageKey: 'iowa-consent', todo: 'Read and accept Iowa’s consent, then click Continue.', checklist: [] } },
@@ -628,7 +745,7 @@ test('one click walks the application: fills, continues info screens, and waits 
   const first = (await w.send({ type: 'ui:autofill', confirmed: true })).data;
   assert.deepEqual(plain(w.getFields()[0].fields), ['programSnap', 'programFip', 'programMedicaid']);
   assert.deepEqual(w.filled(), ['householdApplyProg']);
-  assert.match(first.message, /Filled 1\. Solve the CAPTCHA, then click Continue\./);
+  assert.match(first.message, /Filled 1 answer\. Type the characters shown in Iowa’s security check, then click Continue\./);
   assert.equal((await lastResult(w)).autopilot, true);
 
   w.userContinues(); await settle();            // applicant solved the CAPTCHA
@@ -641,7 +758,7 @@ test('one click walks the application: fills, continues info screens, and waits 
   assert.equal(w.getFields().length, 2);
   assert.deepEqual(plain(w.getFields()[1].fields), adapter.profileRequest('iowa-personal-information'));
   const applicant = (await lastResult(w)).result;
-  assert.match(applicant.message, /^Filled 2\. Check your answers, then click Save and Continue\.$/);
+  assert.match(applicant.message, /^Filled 2 answers\. Check your answers, then click Save and Continue\.$/);
 
   w.userContinues(); await settle();            // applicant saved the page
   const unknown = await lastResult(w);
@@ -658,7 +775,7 @@ test('the walk fills an unknown page with the general engine, waits for the appl
     { name: 'members', path: '/applyForBenefits/householdMembers', page: { kind: 'manual', pageKey: 'iowa-manual', checklist: [] } }
   ] });
   const first = (await w.send({ type: 'ui:autofill', confirmed: true })).data;
-  assert.equal(first.message, 'Filled 2 · 2 need you. Check your answers, then click Continue.');
+  assert.equal(first.message, 'Filled 2 answers · 2 left for you. Check your answers, then click Continue.');
   await settle();
   w.events.updated(7, { status: 'complete' }); await settle();
   const waiting = await lastResult(w);
@@ -776,12 +893,12 @@ test('an error reply names its catalog key next to the same English', async () =
 });
 
 test('page state names the catalog key of each instruction, reason, and checklist label the Iowa adapter wrote', async () => {
-  const w = worker({ page: { todo: 'Solve the CAPTCHA, then click Continue.', reason: 'SecondHand doesn’t know this Iowa page. Check it and fill in anything missing yourself, then continue in Iowa’s form.', checklist: [
+  const w = worker({ page: { todo: 'Type the characters shown in Iowa’s security check, then click Continue.', reason: 'SecondHand doesn’t know this Iowa page. Check it and fill in anything missing yourself, then continue in Iowa’s form.', checklist: [
     { key: 'firstName', label: 'First name', status: 'missing', required: true },
     { key: 'hasHomeAddress', label: 'Do you have a home address?: review existing dependent answers', status: 'manual', required: true },
     { key: 'manualReview', label: 'Synthetic unrecognized text', status: 'manual', required: true }] } });
   const { page } = plain((await w.panel({ type: 'ui:pageState' })).data);
-  assert.equal(page.todo, 'Solve the CAPTCHA, then click Continue.', 'the English stays as it was');
+  assert.equal(page.todo, 'Type the characters shown in Iowa’s security check, then click Continue.', 'the English stays as it was');
   assert.equal(page.todoKey, 'iowa.solveCaptcha');
   assert.equal(page.reasonKey, 'iowa.manualStep');
   assert.deepEqual(page.checklist.map(item => [item.label, item.labelKey, item.labelParams]), [
@@ -916,13 +1033,20 @@ test('the widget’s request for room for its line goes to its own tab’s conte
   assert.deepEqual(plain((await w.launcher({ type: 'ui:widgetSize', line: false, width: 152 })).data), { sized: true });
   assert.deepEqual(plain(w.calls.content.at(-1)), { type: 'secondhand:widgetSize', line: false, width: 152 }, 'the widget’s measured width goes along');
   for (const width of [0, -5, 1.5, '152', 5000, null]) assert.equal(await w.launcher({ type: 'ui:widgetSize', line: false, width }), undefined, `width ${width}`);
-  // The heights for its line, and its size on a narrow page, go along too; nothing else does.
+  assert.deepEqual(plain((await w.launcher({ type: 'ui:widgetSize', line: true, width: 254, height: 95 })).data), { sized: true });
+  assert.deepEqual(plain(w.calls.content.at(-1)), { type: 'secondhand:widgetSize', line: true, width: 254, height: 95 }, 'and its measured height');
+  for (const height of [0, 45, 167, 80.5, '95', null]) assert.equal(await w.launcher({ type: 'ui:widgetSize', line: true, width: 254, height }), undefined, `height ${height}`);
+  // Its size on a narrow page goes along too; nothing else does.
   const size = { line: true, width: 272, height: 84, narrowWidth: 133, narrowHeight: 97 };
   await w.launcher({ type: 'ui:widgetSize', ...size, extra: 'synthetic' });
   assert.deepEqual(plain(w.calls.content.at(-1)), { type: 'secondhand:widgetSize', ...size });
-  for (const key of ['height', 'narrowWidth', 'narrowHeight']) {
-    for (const value of [0, 1.5, '97', 5000, null]) assert.equal(await w.launcher({ type: 'ui:widgetSize', ...size, [key]: value }), undefined, `${key} ${value}`);
-  }
+  for (const value of [0, 1.5, '133', 5000, null]) assert.equal(await w.launcher({ type: 'ui:widgetSize', ...size, narrowWidth: value }), undefined, `narrowWidth ${value}`);
+  for (const value of [0, 45, 167, 1.5, '97', null]) assert.equal(await w.launcher({ type: 'ui:widgetSize', ...size, narrowHeight: value }), undefined, `narrowHeight ${value}`);
+  // A widget the reader hid asks for the logo alone.
+  assert.deepEqual(plain((await w.launcher({ type: 'ui:widgetSize', line: true, width: 254, height: 95, pill: true })).data), { sized: true });
+  assert.deepEqual(plain(w.calls.content.at(-1)), { type: 'secondhand:widgetSize', line: true, width: 254, height: 95, pill: true });
+  for (const pill of [false, 'true', 1, null]) assert.equal(await w.launcher({ type: 'ui:widgetSize', line: true, pill }), undefined, `pill ${pill}`);
+  assert.equal(await w.panel({ type: 'ui:widgetSize', line: true, pill: true }), undefined);
   assert.deepEqual(w.calls.native, []);
 });
 
@@ -1068,7 +1192,7 @@ test('on a verified Iowa page, an answer the app left out because of a saved dat
   const result = plain((await autofill(w)).data);
   assert.equal(result.state, 'done');
   assert.deepEqual(w.filled(), ['firstName', 'hasHomeAddress', 'mailingCity']);
-  assert.match(result.message, /^Filled 3 · 1 need you\. .*SecondHand left the answers that need a date of birth for you: a date of birth in My information is after today or more than 130 years ago\. Check it in the SecondHand app\./);
+  assert.match(result.message, /^Filled 3 answers · 1 left for you\. .*SecondHand left the answers that need a date of birth for you: a date of birth in My information is after today or more than 130 years ago\. Check it in the SecondHand app\./);
 });
 
 test('observed household screening routes fill only rule matches, never ready or call Laya, and leave Next manual', async () => {

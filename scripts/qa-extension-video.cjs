@@ -79,13 +79,13 @@ async function main() {
       await page.waitForTimeout(hold);
     }
     async function panelTop() {
-      await panel.evaluate(() => { document.getElementById('panel-body').scrollTop = 0; });
+      await panel.evaluate(() => { document.getElementById('sidepanel').scrollTop = 0; });
     }
     async function noNext() { assert.equal(await page.evaluate(() => window.__nextClicks), 0); }
 
     await chapter('1. Start Autofill with an intentionally incomplete fictional profile.', 3200);
     await panel.click('#panel-autofill');
-    await expect.poll(() => panel.text('[data-key="firstName"]'), { timeout: 20000 }).toContain('Not saved in SecondHand: add it in My information');
+    await expect.poll(() => panel.text('[data-key="firstName"]'), { timeout: 20000 }).toContain('No saved answer: type it in Iowa’s form');
     await expect(page.locator('#lastName')).toHaveValue(syntheticProfile.lastName);
     await expect(page.locator('#addressLine1')).toHaveValue(syntheticProfile.addressLine1);
     await expect(page.locator('#mailingAddressLine1')).toHaveValue(syntheticProfile.mailingAddressLine1);
@@ -99,7 +99,7 @@ async function main() {
     await chapter('Separate mailing address filled automatically too.', 3000);
     await panel.click('[data-key="firstName"]');
     await expect.poll(() => page.evaluate(() => document.activeElement.id)).toBe('firstName');
-    await expect.poll(() => panel.text('[data-key="firstName"]')).toContain('Not saved in SecondHand: add it in My information');
+    await expect.poll(() => panel.text('[data-key="firstName"]')).toContain('No saved answer: type it in Iowa’s form');
     await chapter('2. Click a missing checklist item to focus its field in the form.', 3000);
     await page.locator('#firstName').pressSequentially(syntheticProfile.firstName, { delay: 160 });
     await expect.poll(() => panel.text('[data-key="firstName"]')).toContain('Done');
@@ -110,7 +110,7 @@ async function main() {
     await chapter('3. Acting as the fictional applicant: answer Yes to applying for benefits.', 2600);
     await page.locator('#applicant1').check();
     await expect(page.locator('#progSelection')).toBeVisible();
-    await expect.poll(() => panel.text('[data-key="programs"]'), { timeout: 15000 }).toContain('Needs you');
+    await expect.poll(() => panel.text('[data-key="programs"]'), { timeout: 15000 }).toContain('Needs your answer');
     await noNext();
     await panel.click('[data-key="programs"]');
     await chapter('The new program question is detected. Select SNAP for this QA applicant.', 3000);

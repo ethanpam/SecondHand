@@ -210,7 +210,7 @@
   function probePage(doc, url) {
     if (!scope(doc, url)) return null;
     const result = { kind: 'manual', pageKey: PAGE, heading: 'Job and Job History', canAdvance: false, fields: [], checklist: [], requiredRemaining: 0, manualRemaining: 1,
-      todo: 'Choose and review a saved job record for this person. Complete any remaining questions in Iowa’s form.', reason: 'Only an explicitly owned job record can fill this page.' };
+      todo: 'Choose and review a saved job record for this person. Complete any remaining questions in Iowa’s form.', reason: 'SecondHand fills this page only from a saved job record for the person chosen on this page. If no one is chosen yet, it chooses the person the record belongs to. It clicks Save and Continue only when every question that needs an answer has one and Iowa shows no errors or pop-ups. A question SecondHand doesn’t know stops it too.' };
     const current = context(doc, url); if (!current) return result;
     const proof = proofs.get(current.form), covered = new Set(), checklist = [];
     let missing = 0, manual = 0;
@@ -381,7 +381,7 @@
   function typedProbe(doc, url) {
     const page = typedScope(doc, url); if (!page) return null;
     const base = { kind: 'manual', pageKey: page.pageKey, heading: page.heading, canAdvance: false, fields: [], checklist: [], requiredRemaining: 0, manualRemaining: 1,
-      todo: 'Choose and review a saved record for this person. Complete any remaining questions in Iowa’s form.', reason: 'Only an explicitly owned record can fill this page.' };
+      todo: 'Choose and review a saved record for this person. Complete any remaining questions in Iowa’s form.', reason: 'SecondHand fills this page only from a saved record for the person chosen on this page. If no one is chosen yet, it chooses the person the record belongs to. It clicks Save and Continue only when every question that needs an answer has one and Iowa shows no errors or pop-ups. A question SecondHand doesn’t know stops it too.' };
     const current = typedContext(doc, url); if (!current) return base;
     const proof = proofs.get(current.form), covered = new Set(), checklist = [];
     let missing = 0, manual = 0;

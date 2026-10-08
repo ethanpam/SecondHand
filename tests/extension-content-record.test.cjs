@@ -15,9 +15,20 @@ function tab(t) {
   fixture.attachHandlers(document);
   let listener, now = Date.now(); window.Date.now = () => now;
   window.chrome = { runtime: { id: EXTENSION_ID, getURL: file => `chrome-extension://${EXTENSION_ID}/${file}`, onMessage: { addListener: fn => { listener = fn; } } } };
-  for (const file of ['address-policy.js', 'iowa-later-adapter.js', 'iowa-record-adapter.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js']) evalFile(window, `extension/${file}`);
+  for (const file of ['address-policy.js', 'iowa-later-adapter.js', 'iowa-record-adapter.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js']) evalFile(window, `extension/${file}`);
+  // jsdom sends no trusted input event for a keystroke or a pick from a list: userInput gives the person's own input
+  // to content.js's input listener as Chrome sends it, trusted and from the control they used.
+  const inputListeners = [], listen = document.addEventListener;
+  document.addEventListener = function (type, callback, options) {
+    if (type === 'input') inputListeners.push(callback);
+    return listen.call(this, type, callback, options);
+  };
+  evalFile(window, 'extension/content.js');
+  document.addEventListener = listen;
+  assert.equal(inputListeners.length, 1, 'content.js listens for input once');
   function request(message, sender = { id: EXTENSION_ID }) { let value; listener(message, sender, result => { value = result; }); return value === undefined ? value : plain(value); }
   return { window, document, request, state: () => request({ type: 'secondhand:pageState' }),
+    userInput: (control, value) => { control.focus(); control.value = value; inputListeners[0]({ isTrusted: true, composedPath: () => [control] }); },
     context: state => request({ type: 'secondhand:recordContext', token: state.scan.token, pageInstance: state.pageInstance }),
     selectOwner: value => { const owner = document.getElementById('answerSets0.personSelection'); owner.value = value; owner.dispatchEvent(new window.Event('change', { bubbles: true })); },
     move: url => { window.history.replaceState({}, '', url); window.dispatchEvent(new window.PopStateEvent('popstate')); },
@@ -35,6 +46,76 @@ test('record context is private to a current extension request, while ordinary p
   assert.deepEqual(page.context(selected), { ok: true, personName: 'Jordan Sample' });
   assert.doesNotMatch(JSON.stringify(selected), /Avery|Jordan|Sample|Example|answerSets|bindings|element|personName/);
   assert.equal(page.request({ type: 'secondhand:recordContext', token: selected.scan.token, pageInstance: selected.pageInstance }, { id: 'untrusted-extension' }), undefined);
+});
+
+test('page state never takes a script’s input for the person typing, so SecondHand’s own fills cannot hold Autofill back', async t => {
+  const page = tab(t); await tick();
+  assert.equal(page.state().typing, false);
+  // The person's own keystrokes are trusted events, which only a real browser sends: the extension smoke types them.
+  page.selectOwner('1'); await tick();
+  const box = [...page.document.querySelectorAll('input[type="text"]')].find(input => !input.disabled);
+  box.focus();
+  box.value = 'Set by a script';
+  box.dispatchEvent(new page.window.Event('input', { bubbles: true }));
+  assert.equal(page.document.activeElement, box);
+  assert.equal(page.state().typing, false);
+});
+
+test('page state says the person is typing while they are in the text box they typed in, and not once they leave it', async t => {
+  const page = tab(t); await tick();
+  page.selectOwner('1'); await tick();
+  const [box, other] = [...page.document.querySelectorAll('input[type="text"]')].filter(input => !input.disabled);
+  page.userInput(box, 'D');
+  assert.equal(page.state().typing, true, 'they may not have finished the answer');
+  box.blur();
+  assert.equal(page.state().typing, false, 'they left the box');
+  box.focus();
+  assert.equal(page.state().typing, false, 'coming back to the box is not typing in it');
+  // Moving to another box leaves the first; only typing in the new one counts.
+  page.userInput(box, 'Da');
+  other.focus();
+  assert.equal(page.state().typing, false);
+  page.userInput(other, '4');
+  assert.equal(page.state().typing, true);
+  // A textarea is a text box too.
+  const notes = page.document.createElement('textarea');
+  page.document.body.append(notes);
+  page.userInput(notes, 'Started in March');
+  assert.equal(page.state().typing, true);
+  notes.blur();
+  assert.equal(page.state().typing, false);
+  // A page that takes away the box the person is in sends no focusout: they are no longer in it.
+  page.userInput(notes, 'Started in April');
+  notes.remove();
+  assert.equal(page.state().typing, false);
+});
+
+test('a choice the person makes is not typing, so Autofill need not wait for them to leave it', async t => {
+  const page = tab(t); await tick();
+  page.selectOwner('1'); await tick();
+  const select = page.document.getElementById('answerSets0.personSelection');
+  page.userInput(select, '1');
+  assert.equal(page.document.activeElement, select);
+  assert.equal(page.state().typing, false, 'a list');
+  // jsdom's own click on a checkbox sends a trusted input event, as Chrome does.
+  const checkbox = page.document.querySelector('input[type="checkbox"]');
+  checkbox.focus(); checkbox.click();
+  assert.equal(checkbox.checked, true);
+  assert.equal(page.document.activeElement, checkbox);
+  assert.equal(page.state().typing, false, 'a checkbox');
+});
+
+test('a text box inside a page component’s shadow root counts as typing while the person is in it', async t => {
+  const page = tab(t); await tick();
+  const host = page.document.createElement('div');
+  page.document.body.append(host);
+  const box = page.document.createElement('input');
+  host.attachShadow({ mode: 'open' }).append(box);
+  page.userInput(box, 'D');
+  assert.equal(page.document.activeElement, host, 'the page sees only the component');
+  assert.equal(page.state().typing, true);
+  box.blur();
+  assert.equal(page.state().typing, false);
 });
 
 test('record context rejects a stale token, another document, a changed URL, expiry, and a consumed fill preview', async t => {

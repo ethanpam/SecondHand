@@ -21,7 +21,7 @@ This guide describes repository source at the baseline in the [guide index](READ
 ## For a visitor
 
 1. Open the homepage and review what the current release supports.
-2. Choose Windows, Mac Apple silicon, or Mac Intel. The page initially selects a platform from the visitor's environment, but verify it yourself.
+2. Open the Downloads page and choose Windows, Mac Apple silicon, or Mac Intel. The page initially selects a platform from the visitor's environment, but verify it yourself.
 3. Review the unsigned/early-access notice and select the installer.
 4. On the thank-you page, allow the ordinary file download to start. Use the direct download link if automatic download does not start.
 5. Install the desktop app using the [Windows](windows-exe.md) or [Mac](macos-dmg.md) guide.
@@ -34,7 +34,9 @@ The homepage's autofill illustration uses fictional details and demonstrates beh
 
 | Route | Purpose | Main source |
 | --- | --- | --- |
-| `/` | Product explanation, demo, platform downloads, privacy summary, and setup | [page.tsx](../../website/app/page.tsx), [home.tsx](../../website/app/home.tsx) |
+| `/` | Product explanation and demo | [page.tsx](../../website/app/page.tsx), [home.tsx](../../website/app/_home/home.tsx) |
+| `/downloads` | Platform downloads, requirements, and privacy summary | [page.tsx](../../website/app/downloads/page.tsx), [download-options.tsx](../../website/app/downloads/download-options.tsx) |
+| `/setup` | Installation, passwords, extension setup, and updates | [page.tsx](../../website/app/setup/page.tsx) |
 | `/faq` | Common questions and matching FAQ structured data | [questions.ts](../../website/app/faq/questions.ts), [page.tsx](../../website/app/faq/page.tsx) |
 | `/chrome-extension` | Illustrated guide to loading the prepared extension | [page.tsx](../../website/app/chrome-extension/page.tsx) |
 | `/thank-you/windows` | Start Windows download and explain next steps | [platform page](../../website/app/thank-you/[platform]/page.tsx) |
@@ -44,7 +46,7 @@ The homepage's autofill illustration uses fictional details and demonstrates beh
 | `/download/<file>` | Serve an allowed release file from R2 | [download route](../../website/app/download/[file]/route.ts) |
 | `/api/publish/<file>` | Authenticated maintenance upload endpoint | [publish route](../../website/app/api/publish/[file]/route.ts) |
 
-There are also a custom 404, robots, sitemap, and social preview image. The public canonical origin is centralized in [app/site.ts](../../website/app/site.ts). Thank-you pages are not intended for indexing.
+There are also a custom 404, robots, sitemap, and social preview image. The public canonical origin is centralized in [lib/site.ts](../../website/lib/site.ts). Thank-you pages are not intended for indexing.
 
 ## Technology and runtime
 
@@ -58,15 +60,15 @@ Source responsibilities:
 | --- | --- |
 | [package.json](../../website/package.json) | Runtime/development dependencies and commands |
 | [app/layout.tsx](../../website/app/layout.tsx) | Shared document layout and metadata |
-| [app/site-chrome.tsx](../../website/app/site-chrome.tsx) | Shared navigation/footer presentation |
-| [app/release.ts](../../website/app/release.ts) | Advertised version and public download links |
+| [app/_components/site-chrome.tsx](../../website/app/_components/site-chrome.tsx) | Shared navigation/footer presentation |
+| [lib/release.ts](../../website/lib/release.ts) | Advertised version and public download links |
 | [lib/downloads.ts](../../website/lib/downloads.ts) | Allowed files, release selection, HTTP streaming, upload validation |
 | [scripts/publish-downloads.mjs](../../website/scripts/publish-downloads.mjs) | Maintainer upload and round-trip byte verification |
 | [app/globals.css](../../website/app/globals.css) | Visual system and responsive presentation |
-| [app/autofill-demo.tsx](../../website/app/autofill-demo.tsx) | Fictional click-to-autofill illustration |
-| [app/gradient-background.tsx](../../website/app/gradient-background.tsx) | Decorative shader and fallback |
-| [app/text-type.tsx](../../website/app/text-type.tsx) | Animated demo heading |
-| [app/variable-wordmark.tsx](../../website/app/variable-wordmark.tsx) | Responsive decorative footer wordmark |
+| [app/_home/autofill-demo.tsx](../../website/app/_home/autofill-demo.tsx) | Fictional click-to-autofill illustration |
+| [app/_home/gradient-background.tsx](../../website/app/_home/gradient-background.tsx) | Decorative shader and fallback |
+| [app/_home/text-type.tsx](../../website/app/_home/text-type.tsx) | Animated demo heading |
+| [app/_components/variable-wordmark.tsx](../../website/app/_components/variable-wordmark.tsx) | Responsive decorative footer wordmark |
 
 Navigation uses ordinary anchors. Full-document navigation is intentional, especially so the thank-you page's download startup runs consistently. Do not replace it with client routing without checking production download behavior.
 
@@ -151,7 +153,7 @@ Confirm the output set contains all expected installers, extension ZIP, and `SHA
 
 ### 2. Prepare a staged website change
 
-In `website/lib/downloads.ts`, add the new version to the recognized releases and set the upload target `RELEASE`. Keep `LATEST_RELEASE` and the visible `website/app/release.ts` version on the previous complete release during upload. This avoids offering a half-published set to visitors.
+In `website/lib/downloads.ts`, add the new version to the recognized releases and set the upload target `RELEASE`. Keep `LATEST_RELEASE` and the visible `website/lib/release.ts` version on the previous complete release during upload. This avoids offering a half-published set to visitors.
 
 The existing source permits maintenance upload only with a fresh `RELEASE_UPLOAD_TOKEN` of at least 32 characters. Provision it as a hosting secret, not a committed `.env` value or browser-bundled configuration. Set it with `npx wrangler secret put RELEASE_UPLOAD_TOKEN`, and deploy with `npm run deploy`; a GitHub merge does not publish the site by itself.
 
@@ -180,7 +182,7 @@ Keep the prior release available as intended by the allowlist. Do not publish pr
 | Download never starts | Thank-you page direct link, browser download handling, route, and object availability |
 | 404 | Exact filename, recognized release, and optional release query; publish endpoints also intentionally hide without a secret |
 | 503 for a download | Allowlisted artifact missing from the deployed bucket |
-| Correct page but old installer | `app/release.ts`, `LATEST_RELEASE`, object key, and verified artifact provenance |
+| Correct page but old installer | `lib/release.ts`, `LATEST_RELEASE`, object key, and verified artifact provenance |
 | Resumed download fails | Single-range syntax, object size, ETag/If-Range handling |
 | Local preview lacks downloads | Runtime bucket binding and staging data; UI preview alone does not upload artifacts |
 | Publish request rejected | Secret presence/length, bearer token, allowed target, multipart ordering, size, existing key |

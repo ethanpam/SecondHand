@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { useSiteMotion } from '../site-motion';
+import { useSiteMotion } from '../../lib/site-motion';
 
 // A short, silent screen recording. It loops only when the visitor allows
 // motion; otherwise it shows its poster and waits for the play control.

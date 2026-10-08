@@ -16,14 +16,20 @@ To deploy, log in once with `npx wrangler login`, then run `npm run deploy`. It 
 
 ## Pages
 
-- `/`: in order, the hero, the autofill demo and what SecondHand does today, downloads (opening on the visitor's platform) with its privacy promises, setup steps, and a link to the common questions, with `SoftwareApplication` structured data.
+- `/`: the hero, autofill demo, what SecondHand does today, and links to downloads, setup, and common questions, with `SoftwareApplication` structured data. Homepage components live in `app/_home/`.
+- `/downloads`: platform downloads (opening on the visitor's platform), requirements, privacy promises, and early-access notes, in `app/downloads/`.
+- `/setup`: installation, passwords, Chrome extension setup, and update instructions, in `app/setup/`.
 - `/faq`: the common questions, from `app/faq/questions.ts`, with `FAQPage` structured data built from the same list.
 - `/chrome-extension`: the picture guide to adding the extension to Chrome.
 - `/thank-you/windows`, `/thank-you/mac-apple-silicon`, `/thank-you/mac-intel`: start the installer download once the page loads (with a direct link as a fallback) and list next steps. Not indexed.
 - `/privacy`: the privacy policy. Update its date when the wording changes.
 - A custom 404 page, `robots.txt`, `sitemap.xml`, and a share image (`app/opengraph-image.png`, generated from `scripts/og-image.html`).
 
-The site URL used for canonical links, the sitemap, and share previews is in `app/site.ts`.
+The site URL used for canonical links, the sitemap, and share previews is in `lib/site.ts`.
+
+## Source organization
+
+Page folders own their route and page-specific components. `app/_home/` holds the homepage, `app/_components/` holds shared branding, navigation, icons, and the footer, and `lib/` holds site configuration, release links, download handling, and shared motion hooks. Download checksums are linked from the Downloads page.
 
 ## Visual design
 
@@ -35,7 +41,7 @@ For browser checks, install the root and website dependencies and Playwright Chr
 
 The social preview source is `scripts/og-image.html`. After changing it, render it at 1200×630 with the website dependencies installed and save the screenshot to `app/opengraph-image.png`.
 
-Page navigation uses ordinary anchors. This static download site does not need client routing, and full document navigation reliably runs the confirmation page’s download redirect in production. The `nextjs/no-html-link-for-pages` lint override is limited to the four components that own these navigation links.
+Page navigation uses ordinary anchors. This static download site does not need client routing, and full document navigation reliably runs the confirmation page’s download redirect in production. The `nextjs/no-html-link-for-pages` lint override is limited to the components that own these navigation links.
 
 ## Publish installers
 
@@ -48,7 +54,7 @@ npx wrangler r2 object put secondhand-downloads/releases/0.6.0/secondHand-0.6.0-
 Then download each file back from the live site, check it against `SHA256SUMS.txt`, and only then update `LATEST_RELEASE` and the displayed version and deploy. The steps below use the site's own publish route instead, which also verifies every byte.
 
 1. Build the reviewed desktop source for Windows x64 and Mac arm64/x64. Run its unit, UI, and packaged native-bridge tests. Generate `secondHand-extension.zip` and `SHA256SUMS.txt` with the desktop release scripts.
-2. Add the new version to `releases` and set `RELEASE` in `lib/downloads.ts`. Keep `LATEST_RELEASE` and the version displayed in `app/release.ts` on the previous release while uploading. Existing object keys cannot be overwritten.
+2. Add the new version to `releases` and set `RELEASE` in `lib/downloads.ts`. Keep `LATEST_RELEASE` and the version displayed in `lib/release.ts` on the previous release while uploading. Existing object keys cannot be overwritten.
 3. Set a fresh random `RELEASE_UPLOAD_TOKEN` of at least32 characters as a Worker secret (`npx wrangler secret put RELEASE_UPLOAD_TOKEN`), deploy the reviewed website, and retain the credential locally only for this upload session.
 4. Set the same token as an environment variable and run `node scripts/publish-downloads.mjs https://your-site.example /absolute/path/to/release`. The script uploads in8MiB parts then downloads each full file and verifies its SHA256 against the local artifact. Neither credential is sent to a redirect target or included in browser bundles.
 5. After verifying every new file, update `LATEST_RELEASE` and the displayed version, rebuild, and **remove the upload secret before deploying that final version**. With no secret, all publishing routes return404. Make the completed download site public when authorized. Verify anonymous downloads and byte-range resume responses.

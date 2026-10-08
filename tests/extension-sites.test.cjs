@@ -7,7 +7,9 @@ const { JSDOM } = require('jsdom');
 const adapter = require('../extension/iowa-adapter.js');
 const strings = require('../extension/strings.js');
 const forms = require('./fixtures/pantry-forms.cjs');
-const { plain, tick, runFile, evalFile, layout, layoutElements, serviceWorker, nativeHost } = require('./helpers/harness.cjs');
+const { plain, tick, runFile, evalFile, layout, layoutElements, serviceWorker, nativeHost, workerLogged } = require('./helpers/harness.cjs');
+// An error the worker logged that the test didn't take fails it.
+test.afterEach(() => assert.deepEqual(workerLogged(), [], 'the worker logged an error the test didn’t expect'));
 
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
 const SITE_URL = 'https://pantry.example.org/intake?step=1';
@@ -237,6 +239,7 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
       }
     },
     sidePanel: { setPanelBehavior: async () => {}, open: async options => { opened.push(plain(options)); } },
+    commands: { onCommand: event('command') },
     runtime: {
       id: 'testextension', getURL: file => `chrome-extension://testextension/${file}`,
       onMessage: w.onMessage,
@@ -353,6 +356,27 @@ test('the worker loads the site engine, its text, and its translator next to the
     /generic-adapter\.js/, 'an engine without Laya’s question rule is refused');
 });
 
+test('the Autofill shortcut on a site ends where its click would: on a site that is on its failure is the tab’s result, and on one that is off it does nothing', async () => {
+  const w = siteWorker({ enabled: true });
+  // The person moved to another tab as the shortcut ran.
+  w.tab.active = false;
+  w.events.command('autofill', { id: 7 });
+  await settle();
+  w.tab.active = true;
+  const { result } = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.equal(result.state, 'error');
+  assert.equal(result.messageKey, 'worker.openFormActiveTab');
+  assert.equal(result.pageKey, 'general');
+  assert.deepEqual(w.page.answered(), []);
+  assert.equal(w.nativeTypes().includes('getFields'), false);
+  // A site that is off has no Autofill button to press, so the shortcut has nothing to say once it is turned on.
+  const off = siteWorker({ granted: true });
+  off.events.command('autofill', { id: 7 });
+  await settle();
+  assert.equal((await off.panel({ type: 'ui:enableSite', confirmed: true })).ok, true);
+  assert.equal(plain((await off.panel({ type: 'ui:pageState' })).data).result, null);
+});
+
 test('turning a site on checks Chrome access, asks the desktop, then registers and injects the site scripts', async () => {
   const w = siteWorker({ granted: true });
   const response = await w.panel({ type: 'ui:enableSite', confirmed: true });
@@ -430,8 +454,11 @@ test('autofill on an approved site asks for the planned keys once and fills with
   assert.deepEqual(fill.assignments, [{ id: 'sh-1-0', key: 'fullName', guessed: false }, { id: 'sh-1-1', key: 'zip', guessed: false }]);
   assert.deepEqual(fill.values, { fullName: 'Synthetic private first Synthetic private last', zip: '50309' }, 'only the values being placed reach the page');
   assert.deepEqual(plain(response.data), { state: 'done', filled: 2, guessed: 0, needYou: [w.page.idOf('pickup'), w.page.idOf('size')].map(id => `f0:${id}`),
-    message: 'Filled 2 · 2 need you. Check your answers before you submit.', messageKey: 'result.siteFilledNeedYou', messageParams: { count: 2, needYou: 2 }, pageKey: 'general' });
+    left: [{ key: `f0:${w.page.idOf('pickup')}`, label: 'Preferred pickup day' }, { key: `f0:${w.page.idOf('size')}`, label: 'size' }],
+    filledQuestions: [{ label: 'name', guessed: false }, { label: 'zip', guessed: false }],
+    message: 'Filled 2 answers · 2 left for you. Check them before you submit.', messageKey: 'result.siteFilledNeedYou', messageParams: { count: 2, needYou: 2 }, pageKey: 'general' });
   assert.deepEqual(plain(response.data.needYou), ['f0:sh-2-1', 'f0:sh-2-0'], 'need-you ids come from the latest plan');
+  assert.deepEqual(plain(response.data.left.map(item => item.key)), plain(response.data.needYou), 'and each is named, in the same order');
   assert.doesNotMatch(JSON.stringify(response), /Synthetic private/);
 
   const state = plain((await w.panel({ type: 'ui:pageState' })).data);
@@ -466,7 +493,7 @@ test('answers that reveal more questions are filled in the same click from one d
   assert.equal(result.filled, 3);
   assert.deepEqual(result.needYou, [w.page.idOf('pickup'), w.page.idOf('size'), w.page.idOf('phone')].map(id => `f0:${id}`));
   assert.ok(result.needYou.every(id => id.startsWith('f0:sh-3-')), 'need-you ids come from the latest plan');
-  assert.match(result.message, /^Filled 3 · 3 need you\./);
+  assert.match(result.message, /^Filled 3 answers · 3 left for you\./);
   assert.doesNotMatch(JSON.stringify(w.content), /5155550100/);
 });
 
@@ -479,7 +506,7 @@ test('answers the page refuses are listed as need-you, not filled, and not tried
   assert.equal(result.filled, 1);
   // The cleared ZIP box is back in the latest plan; the chosen veteran option keeps its first id.
   assert.deepEqual(result.needYou, [w.page.idOf('pickup'), w.page.idOf('zip'), 'sh-1-2'].map(id => `f0:${id}`));
-  assert.equal(result.message, 'Filled 1 · 3 need you. Check your answers before you submit.');
+  assert.equal(result.message, 'Filled 1 answer · 3 left for you. Check it before you submit.');
 
   const alone = siteWorker({ enabled: true, fields: [{ name: 'zip', key: 'zip', rejects: true }], desktop: { values: { zip: '5030' } } });
   const refused = plain((await autofill(alone)).data);
@@ -508,15 +535,15 @@ test('a second click on the next page of a multi-page form plans that page again
   assert.deepEqual(w.native.filter(call => call.type === 'getFields').map(call => call.fields), [['firstName', 'lastName'], ['zip']]);
   assert.equal(second.state, 'done');
   assert.equal(second.filled, 1, 'only this page’s answers count');
-  assert.equal(second.message, 'Filled 1. Check your answers before you submit.');
+  assert.equal(second.message, 'Filled 1 answer. Check it before you submit.');
 });
 
 test('another click on the same page reports the running total, not what that click added', async () => {
   const w = siteWorker({ enabled: true });
-  assert.equal((await autofill(w)).data.message, 'Filled 2 · 2 need you. Check your answers before you submit.');
+  assert.equal((await autofill(w)).data.message, 'Filled 2 answers · 2 left for you. Check them before you submit.');
   const again = plain((await autofill(w)).data);
   assert.equal(again.filled, 2);
-  assert.equal(again.message, 'Filled 2 · 2 need you. Check your answers before you submit.');
+  assert.equal(again.message, 'Filled 2 answers · 2 left for you. Check them before you submit.');
   assert.deepEqual(w.tallies.map(call => call.target), [{ tabId: 7, frameIds: [0] }, { tabId: 7, frameIds: [0] }]);
   assert.deepEqual(w.injected, [], 'no files are injected');
 });
@@ -525,11 +552,11 @@ test('a page where nothing matches the saved profile says so instead of Filled 0
   const unknown = siteWorker({ enabled: true, fields: [{ ...PICKUP }, { name: 'shoe', label: 'Shoe size', type: 'text' }] });
   const result = plain((await autofill(unknown)).data);
   assert.equal(result.filled, 0);
-  assert.equal(result.message, 'Nothing here matches your saved profile. 2 need you.');
+  assert.equal(result.message, 'No question here matches your answers in My information. 2 left for you.');
   const unsaved = siteWorker({ enabled: true, desktop: { values: {} } });
   const empty = plain((await autofill(unsaved)).data);
   assert.deepEqual(unsaved.nativeTypes(), ['status', 'getFields']);
-  assert.equal(empty.message, 'Nothing here matches your saved profile. 4 need you.');
+  assert.equal(empty.message, 'No question here matches your answers in My information. 4 left for you.');
 });
 
 test('a page with nothing to fill points to Next when the form has one', async () => {
@@ -611,7 +638,10 @@ test('AI guesses join the one desktop request and are filled with the guessed ma
   const result = plain(response.data);
   assert.equal(result.filled, 3);
   assert.equal(result.guessed, 2);
-  assert.equal(result.message, 'Filled 3 · 2 suggested · 1 need you. Check your answers before you submit.');
+  assert.equal(result.message, 'Filled 3 answers · 2 suggested · 1 left for you. Check them before you submit.');
+  // Each filled question is named for the side panel, with the guesses marked.
+  assert.deepEqual(plain(result.filledQuestions).map(item => item.guessed), [false, true, true]);
+  assert.ok(plain(result.filledQuestions).every(item => typeof item.label === 'string'));
   assert.doesNotMatch(JSON.stringify(result), /Synthetic private|5155550100/);
 });
 
@@ -672,7 +702,7 @@ test('a form with nothing SecondHand recognizes never contacts the desktop', asy
   assert.equal(result.state, 'done');
   assert.equal(result.filled, 0);
   assert.deepEqual(result.needYou, ['f0:sh-1-0']);
-  assert.equal(result.message, 'Nothing here matches your saved profile. 1 need you.');
+  assert.equal(result.message, 'No question here matches your answers in My information. 1 left for you.');
 });
 
 test('sites that are not turned on never reach the vault or the page', async () => {
@@ -1139,7 +1169,7 @@ test('the Save offers and page words kept for a site Chrome took back are forgot
 test('a restarted worker listens for every event before its first one, and the sites turned on stay on, from Chrome’s records', async () => {
   const w = siteWorker({ enabled: true, frames: [secondFrame({ enabled: true })] });
   w.restart();
-  assert.deepEqual(w.listening(), ['activated', 'installed', 'message', 'permissionsRemoved', 'removed', 'updated'],
+  assert.deepEqual(w.listening(), ['activated', 'command', 'installed', 'message', 'permissionsRemoved', 'removed', 'updated'],
     'registered while the worker starts, so the event that woke it is heard');
   assert.deepEqual(plain((await w.panel({ type: 'ui:pageState' })).data.site), { origin: ORIGIN, enabled: true, ready: true, frames: [{ origin: FRAME_ORIGIN, enabled: true }] });
   const result = plain((await autofill(w)).data);
@@ -1458,7 +1488,7 @@ test('with Laya ready, the widget’s plan says so, and its match fills a text b
   assert.equal(result.filled, 2);
   assert.equal(result.guessed, 1);
   assert.equal(result.laya, 1);
-  assert.equal(result.message, 'Filled 2 · 1 suggested · 1 need you. Check your answers before you submit. Suggestions came from Laya on this computer.');
+  assert.equal(result.message, 'Filled 2 answers · 1 suggested · 1 left for you. Check them before you submit. Suggestions came from Laya on this computer.');
   assert.equal(result.messageKey, 'result.suggestedByLaya');
   assert.doesNotMatch(JSON.stringify(layaCalls(w)), /Synthetic private|synthetic\.private|50309/, 'no saved value is ever sent to Laya');
 });
@@ -1478,7 +1508,7 @@ test('Laya answers a choice question from the saved profile: the option is picke
   assert.equal(w.page.fields[1].mark, 'guess');
   assert.deepEqual(result.needYou, [idOf(w, 'pet')], '"Do you have a pet?" stays under need you');
   assert.equal(result.guessed, 1);
-  assert.equal(result.message, 'Filled 2 · 1 suggested · 1 need you. Check your answers before you submit. Suggestions came from Laya on this computer.');
+  assert.equal(result.message, 'Filled 2 answers · 1 suggested · 1 left for you. Check them before you submit. Suggestions came from Laya on this computer.');
   assert.deepEqual(w.nativeTypes().filter(type => type !== 'status'), ['warmLaya', 'answerFields', 'getFields'],
     'Laya is readied, answers the choice questions first, and the saved values follow');
   assert.doesNotMatch(JSON.stringify(layaCalls(w)), /Synthetic private|synthetic\.private|50309/, 'no saved value is ever sent to Laya');
@@ -1500,7 +1530,7 @@ test('a question whose label hides a zero-width space stays with the applicant, 
   assert.deepEqual(answerRequest.questions.map(question => question.label), [SIXTY.label, PET.label], 'Laya gets every other question');
   assert.deepEqual(w.page.answered(), ['name', 'sixty']);
   assert.deepEqual(result.needYou, [idOf(w, 'delivery'), idOf(w, 'pet')], 'the hidden-character question is left to the applicant');
-  assert.equal(result.message, 'Filled 2 · 1 suggested · 2 need you. Check your answers before you submit. Suggestions came from Laya on this computer.');
+  assert.equal(result.message, 'Filled 2 answers · 1 suggested · 2 left for you. Check them before you submit. Suggestions came from Laya on this computer.');
 });
 
 test('answers alone fill under their own access receipt, which is checked before the page is touched', async () => {
@@ -1568,22 +1598,22 @@ test('Laya not ready: the widget’s plan says so after one readiness check, and
   assert.deepEqual(today.nativeTypes(), ['warmLaya', 'status', 'status', 'getFields', 'status'], 'custom availability is checked; Laya is not asked again in the same click');
   assert.equal(guessed.guessed, 1);
   assert.equal(guessed.laya, undefined);
-  assert.equal(guessed.message, 'Filled 2 · 1 suggested · 2 need you. Check your answers before you submit.');
+  assert.equal(guessed.message, 'Filled 2 answers · 1 suggested · 2 left for you. Check them before you submit.');
 
   const unguessed = siteWorker({ enabled: true, fields: openQuestions(), desktop: { values: SAVED } });
   await plan(unguessed);
   const plain_ = plain((await unguessed.launcher({ type: 'ui:autofill', confirmed: true })).data);
   assert.deepEqual(unguessed.nativeTypes(), ['warmLaya', 'status', 'status', 'getFields', 'status'], 'a fresh plan in the same click does not ask Laya again');
-  assert.equal(plain_.message, 'Filled 1 · 3 need you. Check your answers before you submit.');
+  assert.equal(plain_.message, 'Filled 1 answer · 3 left for you. Check it before you submit.');
 
   const side = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...REACH }, { ...SIXTY }], desktop: { values: SAVED } });
   const fromPanel = plain((await autofill(side)).data);
   assert.deepEqual(side.nativeTypes(), ['status', 'warmLaya', 'status', 'getFields', 'status'], 'one "not ready" answer and Laya is left alone for the click');
-  assert.equal(fromPanel.message, 'Filled 1 · 2 need you. Check your answers before you submit.');
+  assert.equal(fromPanel.message, 'Filled 1 answer · 2 left for you. Check it before you submit.');
   // Custom answers can match an otherwise unknown question, so a closed app must be opened to check either path.
   const alone = plain((await autofill(siteWorker({ enabled: true, fields: [{ ...REACH }], desktop: { reachable: false } }))).data);
   assert.equal(alone.state, 'offline');
-  assert.equal(alone.message, 'Open the SecondHand app, then click Autofill again.');
+  assert.equal(alone.message, 'Open the SecondHand app, then start Autofill again.');
   assert.equal((await autofill(siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...REACH }], desktop: { reachable: false } }))).data.state, 'offline');
 });
 
@@ -1711,12 +1741,12 @@ test('#185: Laya’s guess fills a single-choice question with its own mark; the
   assert.deepEqual([result.filled, result.guessed, result.laya, result.layaGuessed], [3, 1, 1, 1], 'the guess is filled, apart from the sure answer');
   assert.deepEqual(result.layaGuesses, [{ id: size, label: SIZE.label }]);
   assert.deepEqual(result.needYou, [idOf(w, 'pet')]);
-  assert.equal(result.message, 'Filled 3 · 1 suggested · 1 need you. Check your answers before you submit. Suggestions came from Laya on this computer. 1 guessed by Laya, check it.');
+  assert.equal(result.message, 'Filled 3 answers · 1 suggested · 1 left for you. Check them before you submit. Suggestions came from Laya on this computer. 1 guessed by Laya, check it.');
   assert.equal(result.messageKey, 'result.layaGuessed');
   assert.deepEqual(plain((await w.panel({ type: 'ui:pageState' })).data).result.layaGuesses, [{ id: size, label: SIZE.label }]);
   assert.deepEqual(plain((await w.panel({ type: 'ui:focusField', key: size })).data), { focused: true }, 'the side panel finds it after the fill planned the page again');
   assert.equal(strings.english('result.layaGuessed', { summary: { key: 'result.siteFilled', params: { count: 2 } }, count: 2 }),
-    'Filled 2. Check your answers before you submit. 2 guessed by Laya, check them.');
+    'Filled 2 answers. Check them before you submit. 2 guessed by Laya, check them.');
 });
 
 test('#185: guesses alone fill under their own access receipt; a desktop from before guesses sends none', async () => {
@@ -1724,7 +1754,7 @@ test('#185: guesses alone fill under their own access receipt; a desktop from be
   const w = siteWorker({ enabled: true, fields: [{ ...SIZE }], desktop: only });
   const result = plain((await autofill(w)).data);
   assert.deepEqual([result.filled, result.guessed, result.laya, result.layaGuessed], [1, 0, undefined, 1]);
-  assert.equal(result.message, 'Filled 1. Check your answers before you submit. 1 guessed by Laya, check it.');
+  assert.equal(result.message, 'Filled 1 answer. Check it before you submit. 1 guessed by Laya, check it.');
   const stale = siteWorker({ enabled: true, fields: [{ ...SIZE }], desktop: layaDesktop({ answerFields: request => ({ answers: {}, guesses: { [request.questions[0].id]: '1' }, accessRevision: 99 }) }) });
   const refused = plain((await autofill(stale)).data);
   assert.equal(refused.state, 'error');
@@ -1843,7 +1873,61 @@ test('the site widget frame is as wide as the widget measured itself, never past
   assert.match(page.host().style.width, /^min\(272px/);
 });
 
-test('the site widget frame is as tall as its line needs, up to 110px, and narrow on a narrow page', t => {
+test('the site widget frame is as tall as the widget measured itself, from its row alone to six lines above it', t => {
+  const page = siteContent(t);
+  assert.equal(page.host().style.height, '46px');
+  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 166 })), { sized: true });
+  assert.equal(page.host().style.height, '166px');
+  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: false, width: 152, height: 46 })), { sized: true });
+  assert.equal(page.host().style.height, '46px');
+  for (const height of [0, 45, 167, 80.5, '80', null]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height }), undefined, `height ${height}`);
+  assert.equal(page.host().style.height, '46px');
+  assert.equal(page.request({ type: 'secondhand:widgetSize', line: true, height: 95 }, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
+  assert.equal(page.host().style.height, '46px');
+});
+
+test('an outdated site card asks the page’s content script directly for its frame, and only its own frame is heard', t => {
+  const page = siteContent(t);
+  const host = page.host();
+  const [frame] = page.frames;
+  const greeted = [];
+  frame.contentWindow.postMessage = (data, origin) => greeted.push([data, origin]);
+  frame.dispatchEvent(new page.window.Event('load'));
+  assert.deepEqual(plain(greeted), [[{ type: 'secondhand:cardHello' }, `chrome-extension://${extensionId}`]], 'the script tells its card it can be asked directly');
+  const post = (data, { source = frame.contentWindow, origin = `chrome-extension://${extensionId}` } = {}) =>
+    page.window.dispatchEvent(new page.window.MessageEvent('message', { data, source, origin }));
+  page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 95 });
+  const hidden = { type: 'secondhand:cardSize', line: true, width: 92, pill: true };
+  post(hidden, { source: page.window });
+  post(hidden, { origin: new URL(SITE_URL).origin });
+  post({ ...hidden, pill: 'yes' });
+  post({ type: 'secondhand:cardSize', line: true, height: 167 });
+  assert.equal(host.getAttribute('data-secondhand-size'), 'full');
+  post(hidden);
+  assert.match(host.style.width, /^min\(92px/, 'as wide as the logo and the word beside it');
+  assert.deepEqual([host.style.height, host.style.borderRadius, host.getAttribute('data-secondhand-size')], ['46px', '23px', 'pill']);
+  post({ type: 'secondhand:cardSize', line: true, width: 254, height: 118 });
+  assert.deepEqual([host.style.height, host.getAttribute('data-secondhand-size')], ['118px', 'full']);
+});
+
+test('the site widget the reader hid is its logo and the word that shows it again, until the widget asks for its card back', t => {
+  const page = siteContent(t);
+  const host = page.host();
+  assert.deepEqual(plain(page.request({ type: 'secondhand:widgetSize', line: true, width: 92, pill: true })), { sized: true });
+  assert.match(host.style.width, /^min\(92px/);
+  assert.deepEqual([host.style.height, host.style.borderRadius, host.getAttribute('data-secondhand-size')], ['46px', '23px', 'pill']);
+  // A widget that gives no width is the round logo alone.
+  page.request({ type: 'secondhand:widgetSize', line: true, pill: true });
+  assert.deepEqual([host.style.width, host.style.height, host.style.borderRadius], ['46px', '46px', '50%']);
+  page.request({ type: 'secondhand:widgetSize', line: true, width: 254, height: 95 });
+  assert.match(host.style.width, /^min\(254px/);
+  assert.deepEqual([host.style.height, host.style.borderRadius, host.getAttribute('data-secondhand-size')], ['95px', '12px', 'full']);
+  for (const pill of [false, 'true', 1, null]) assert.equal(page.request({ type: 'secondhand:widgetSize', line: true, pill }), undefined, `pill ${pill}`);
+  assert.equal(page.request({ type: 'secondhand:widgetSize', line: true, pill: true }, { id: 'b'.repeat(32) }), undefined, 'another extension gets nothing');
+  assert.equal(host.getAttribute('data-secondhand-size'), 'full');
+});
+
+test('the site widget frame keeps the widget as narrow as its buttons on a narrow page, with the rows its line then needs', t => {
   const page = siteContent(t);
   const size = { type: 'secondhand:widgetSize', line: true, width: 272, height: 108, narrowWidth: 133, narrowHeight: 140 };
   assert.deepEqual(plain(page.request(size)), { sized: true });
@@ -1852,10 +1936,11 @@ test('the site widget frame is as tall as its line needs, up to 110px, and narro
   Object.defineProperty(page.window, 'innerWidth', { value: 400, configurable: true });
   page.window.dispatchEvent(new page.window.Event('resize'));
   assert.match(page.host().style.width, /^min\(133px, 272px/);
-  assert.equal(page.host().style.height, '110px', 'never taller than 110px');
+  assert.equal(page.host().style.height, '140px');
   page.request({ type: 'secondhand:widgetSize', line: false, width: 133 });
   assert.equal(page.host().style.height, '46px');
   for (const key of ['height', 'narrowWidth', 'narrowHeight']) assert.equal(page.request({ ...size, [key]: 5000 }), undefined, key);
+  for (const value of [0, 45, 167, 1.5, '97', null]) assert.equal(page.request({ ...size, narrowHeight: value }), undefined, `narrowHeight ${value}`);
 });
 
 test('a site frame answers the page-text request with its declared language and its words, never an answer, for our extension only', t => {
@@ -1914,7 +1999,7 @@ test('only a confirmed side-panel request turns on all websites, and only with C
   assert.equal(noAccess.registered.size, 0);
 });
 
-const CHROME_STILL = 'Chrome still lists SecondHand’s access to all websites, but nothing uses it. To remove it, open chrome://extensions, then SecondHand, then Details, then Site access.';
+const CHROME_STILL = 'Chrome may still show SecondHand as allowed on all websites, but SecondHand doesn’t use that while this is off. To remove it, open Details for SecondHand on Chrome’s Extensions page and set Site access to On click.';
 test('when the app declines all websites or can’t be reached, nothing is registered or trusted, Chrome’s grant is left alone, and the panel says the app didn’t approve', async () => {
   const w = siteWorker({ url: OTHER_URL, allGranted: true, desktop: { trustAllError: 'You cancelled trusting all websites.' } });
   const declined = await allSitesOn(w);
@@ -2950,7 +3035,7 @@ test('when the app leaves answers out because of a saved date of birth, the clic
   const result = plain((await autofill(w)).data);
   assert.equal(result.state, 'done');
   assert.equal(result.filled, 2);
-  assert.equal(result.message, `Filled 2 · 2 need you. Check your answers before you submit. ${BIRTH_DATE_REASON}`);
+  assert.equal(result.message, `Filled 2 answers · 2 left for you. Check them before you submit. ${BIRTH_DATE_REASON}`);
   assert.equal(strings.english('worker.birthDateUnusable'), BIRTH_DATE_REASON);
   for (const language of ['es', 'vi', 'zh', 'fr', 'ar']) assert.notEqual(strings.text(language, 'worker.birthDateUnusable'), BIRTH_DATE_REASON, language);
 });
@@ -2960,7 +3045,7 @@ test('when Laya answers without a saved date of birth it can’t use, the click 
   const w = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...SIXTY }, { ...PET }], desktop: layaDesktop(play) });
   const result = plain((await autofill(w)).data);
   assert.equal(result.filled, 2);
-  assert.equal(result.message, `Filled 2 · 1 suggested · 1 need you. Check your answers before you submit. Suggestions came from Laya on this computer. ${BIRTH_DATE_REASON}`);
+  assert.equal(result.message, `Filled 2 answers · 1 suggested · 1 left for you. Check them before you submit. Suggestions came from Laya on this computer. ${BIRTH_DATE_REASON}`);
   const both = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }, { ...SIXTY }, { ...PET }], desktop: { ...layaDesktop(play), fieldsReason: 'birthDate' } });
   assert.equal(plain((await autofill(both)).data).message.split(BIRTH_DATE_REASON).length, 2, 'the same reason is said once');
 });
@@ -3030,7 +3115,7 @@ const sensitiveForm = () => [{ name: 'name', key: 'fullName' }, { name: 'dob', k
 const holding = (options = {}) => siteWorker({ enabled: true, fields: sensitiveForm(), ...options, desktop: { values: SENSITIVE_SAVED, holds: ['birthDate', 'ssn'], ...options.desktop } });
 const fillHeld = w => w.panel({ type: 'ui:fillHeld', confirmed: true });
 const heldList = async w => plain((await w.panel({ type: 'ui:pageState' })).data).held;
-const WAITING = 'Check your answers before you submit. 2 sensitive details wait until you click Fill sensitive details in the side panel.';
+const WAITING = 'Check it before you submit. 2 sensitive details wait until you click Fill sensitive details in the side panel.';
 
 test('without Always allow, Autofill fills everything else at once; the held questions count as need-you and wait in the side panel’s list (#176)', async () => {
   const w = holding();
@@ -3042,7 +3127,8 @@ test('without Always allow, Autofill fills everything else at once; the held que
   assert.deepEqual(fills.map(call => Object.keys(call.values)), [['fullName']], 'only the answers the app gave reach the page');
   const [dob, ssn, pickup] = ['dob', 'ssn', 'pickup'].map(name => `f0:${w.page.idOf(name)}`);
   assert.deepEqual(result, { state: 'done', filled: 1, guessed: 0, needYou: [pickup, dob, ssn], held: 2, pageKey: 'general',
-    message: `Filled 1 · 3 need you. ${WAITING}`, messageKey: 'result.withHeld',
+    left: [{ key: pickup, label: PICKUP.label }, { key: dob, label: 'Date of birth' }, { key: ssn, label: 'Social Security number' }], filledQuestions: [{ label: 'name', guessed: false }],
+    message: `Filled 1 answer · 3 left for you. ${WAITING}`, messageKey: 'result.withHeld',
     messageParams: { summary: { key: 'result.siteFilledNeedYou', params: { count: 1, needYou: 3 } }, count: 2 } });
   assert.doesNotMatch(JSON.stringify(result), /1985|123-45/);
 
@@ -3057,7 +3143,7 @@ test('without Always allow, Autofill fills everything else at once; the held que
   // Nothing waits when nothing was held: everything filled in one go.
   const allowed = holding({ desktop: { holds: [] } });
   const everything = plain((await autofill(allowed)).data);
-  assert.deepEqual([everything.filled, everything.held, everything.message], [3, undefined, 'Filled 3 · 1 need you. Check your answers before you submit.']);
+  assert.deepEqual([everything.filled, everything.held, everything.message], [3, undefined, 'Filled 3 answers · 1 left for you. Check them before you submit.']);
   assert.equal(await heldList(allowed), undefined);
 });
 
@@ -3065,10 +3151,10 @@ test('a page whose only saved answers were held back says how many wait, not tha
   const w = holding({ fields: sensitiveForm().filter(field => field.name !== 'name') });
   const result = plain((await autofill(w)).data);
   assert.equal(result.filled, 0);
-  assert.equal(result.message, '3 need you. 2 sensitive details wait until you click Fill sensitive details in the side panel.');
+  assert.equal(result.message, '3 left for you. 2 sensitive details wait until you click Fill sensitive details in the side panel.');
   assert.deepEqual(w.contentTypes().filter(type => type === 'secondhand:generic:fill'), [], 'nothing was filled');
   const one = holding({ fields: [{ name: 'ssn', key: 'ssn', label: 'Social Security number' }] });
-  assert.equal(plain((await autofill(one)).data).message, '1 need you. 1 sensitive detail waits until you click Fill sensitive details in the side panel.');
+  assert.equal(plain((await autofill(one)).data).message, '1 left for you. 1 sensitive detail waits until you click Fill sensitive details in the side panel.');
 });
 
 test('Fill sensitive details asks the app for the held fields alone, in the site’s name, and fills only those questions (#176)', async () => {
@@ -3090,8 +3176,10 @@ test('Fill sensitive details asks the app for the held fields alone, in the site
     assignments: [{ id: dob, key: 'birthDate', guessed: false }, { id: ssn, key: 'ssn', guessed: false }], values: { birthDate: '1985-04-12', ssn: '123-45-6789' } });
   assert.deepEqual(w.page.answered(), ['name', 'dob', 'ssn']);
   const result = plain(response.data);
-  assert.deepEqual(result, { state: 'done', filled: 3, guessed: 0, needYou: [`f0:${pickup}`], pageKey: 'general',
-    message: 'Filled 3 · 1 need you. Check your answers before you submit.', messageKey: 'result.siteFilledNeedYou', messageParams: { count: 3, needYou: 1 } });
+  // The questions it filled leave the list of what is left and join the list of what was filled.
+  assert.deepEqual(result, { state: 'done', filled: 3, guessed: 0, needYou: [`f0:${pickup}`], pageKey: 'general', left: [{ key: `f0:${pickup}`, label: PICKUP.label }],
+    filledQuestions: [{ label: 'name', guessed: false }, { label: 'Date of birth', guessed: false }, { label: 'Social Security number', guessed: false }],
+    message: 'Filled 3 answers · 1 left for you. Check them before you submit.', messageKey: 'result.siteFilledNeedYou', messageParams: { count: 3, needYou: 1 } });
   assert.deepEqual(plain((await w.panel({ type: 'ui:pageState' })).data).result, result, 'the tab’s result says so too');
   assert.equal(await heldList(w), undefined, 'nothing waits now');
   assert.equal((await fillHeld(w)).errorKey, 'worker.heldGone', 'and nothing is asked twice');
@@ -3342,7 +3430,7 @@ test('the summary says how many answers came from custom answers (#186)', async 
     custom: request => ({ values: { [request.fields[0].id]: 'SYN-4471' }, accessRevision: 0 }) } });
   const result = plain((await autofill(w)).data);
   assert.deepEqual([result.filled, result.custom, result.messageKey], [2, 1, 'result.fromCustom']);
-  assert.equal(result.message, 'Filled 2. Check your answers before you submit. 1 from your custom answers.');
+  assert.equal(result.message, 'Filled 2 answers. Check them before you submit. 1 from your custom answers.');
   assert.equal(strings.text('es', result.messageKey, result.messageParams).includes('1'), true);
   const none = plain((await autofill(siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName' }] }))).data);
   assert.equal(none.custom, undefined);
@@ -3358,7 +3446,7 @@ test('a custom answer the app holds back for its sensitive subject waits for Fil
   const result = plain((await autofill(w)).data);
   const income = idOf(w, 'income');
   assert.deepEqual([result.filled, result.held, result.needYou], [1, 1, [income]]);
-  assert.equal(result.message, 'Filled 1 · 1 need you. Check your answers before you submit. 1 sensitive detail waits until you click Fill sensitive details in the side panel.');
+  assert.equal(result.message, 'Filled 1 answer · 1 left for you. Check it before you submit. 1 sensitive detail waits until you click Fill sensitive details in the side panel.');
   assert.equal(w.page.fields[0].answered, undefined);
   assert.deepEqual(suggested, [], 'Laya never guesses a question whose custom answer waits');
   assert.deepEqual(plain((await w.panel({ type: 'ui:pageState' })).data).held, [{ id: income, label: 'Monthly income' }]);
@@ -3370,7 +3458,7 @@ test('a custom answer the app holds back for its sensitive subject waits for Fil
   assert.deepEqual({ url: request.url, fields: request.fields, sensitive: request.sensitive }, { url: `${ORIGIN}/intake`, fields: [{ id: w.page.idOf('income'), label: 'Monthly income', type: 'number', options: [] }], sensitive: true });
   assert.equal(w.page.fields[0].answered, '1200');
   assert.deepEqual([filled.filled, filled.held, filled.needYou], [2, undefined, []]);
-  assert.equal(filled.message, 'Filled 2. Check your answers before you submit. 1 from your custom answers.');
+  assert.equal(filled.message, 'Filled 2 answers. Check them before you submit. 1 from your custom answers.');
 
   // A held list naming a question the worker didn't ask about, or one it was given an answer for, fills nothing.
   for (const odd of [request => ({ values: {}, held: ['sh-9-9'], accessRevision: 0 }), request => ({ values: { [request.fields[0].id]: '1200' }, held: [request.fields[0].id], accessRevision: 0 }),
@@ -3469,7 +3557,7 @@ test('a question the rules answered in part counts as filled, stays under need-y
     desktop: { values: { firstName: 'Synthetic', lastName: 'Applicant', incomeSources: 'job,financial-aid,family-support' } } });
   const result = plain((await autofill(w)).data);
   const income = `f0:${w.page.idOf('income')}`;
-  assert.deepEqual([result.filled, result.needYou, result.message], [2, [income], 'Filled 2 · 1 need you. Check your answers before you submit.']);
+  assert.deepEqual([result.filled, result.needYou, result.message], [2, [income], 'Filled 2 answers · 1 left for you. Check them before you submit.']);
   const fills = w.content.filter(call => call.type === 'secondhand:generic:fill');
   assert.deepEqual(fills.map(call => call.assignments.map(item => item.key)), [['fullName', 'incomeSources']], 'filled once, never again');
   assert.equal((await w.panel({ type: 'ui:focusField', key: income, confirmed: true })).ok, true, 'the need-you list can show it');
@@ -3488,7 +3576,7 @@ test('held income sources answered in part by Fill sensitive details count as fi
   const response = await w.panel({ type: 'ui:fillHeld', confirmed: true });
   assert.equal(response.ok, true, response.error);
   const result = plain(response.data);
-  assert.deepEqual([result.filled, result.needYou, result.held, result.message], [2, [income], undefined, 'Filled 2 · 1 need you. Check your answers before you submit.']);
+  assert.deepEqual([result.filled, result.needYou, result.held, result.message], [2, [income], undefined, 'Filled 2 answers · 1 left for you. Check them before you submit.']);
   assert.equal(await heldList(w), undefined);
   const asked = w.native.filter(call => call.type === 'getFields').length;
   const again = plain((await autofill(w)).data);
@@ -3511,7 +3599,7 @@ test('household questions left open because no household list is saved are liste
   assert.deepEqual(result.needYou, [pickup, young, adults, size, student]);
   assert.deepEqual(result.household, { need: 'list', questions: [{ id: young, label: '# of Children 0-5' }, { id: adults, label: '# of Adults' },
     { id: size, label: 'Household size' }, { id: student, label: 'Student name and grade' }] });
-  assert.equal(result.message, 'Filled 1 · 5 need you. Check your answers before you submit.', 'the summary is as before');
+  assert.equal(result.message, 'Filled 1 answer · 5 left for you. Check it before you submit.', 'the summary is as before');
   assert.deepEqual(w.native.filter(call => call.type === 'getFields').map(call => call.fields), [['firstName', 'lastName', 'householdCount:0-5', 'householdAdults', 'householdSize', 'studentNameGrade']]);
   assert.deepEqual(plain((await w.panel({ type: 'ui:pageState' })).data).result, result, 'kept for the tab');
   // A household question the app answered, or one the page refused, isn't the list's to explain.

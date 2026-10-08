@@ -122,6 +122,21 @@ test('Google Forms choice questions are planned, counted as need-you, and filled
   assert.equal(doc.querySelector('[role="listbox"] [aria-selected="true"]').getAttribute('data-value'), '');
 });
 
+test('Google Forms questions labelled by an error message Google has not added yet are planned and filled from their heading', () => {
+  const doc = page(forms.googleServed);
+  const clicks = googleClicks(doc);
+  const result = generic.plan(doc);
+  assert.deepEqual(result.matched.map(({ key, label }) => [key, label]), [['householdSize', 'Number of Family / Household Members'],
+    ['householdChildren', '# of people in your household 0 - 17 yrs old'], ['email', '3.Email Address'], ['phone', '4.PhoneNumber']]);
+  const note = result.unmatched.find(field => field.label === 'Anything else we should know?');
+  assert.equal(result.unmatched.length, 1); assert.equal(generic.canCustom(note), true);
+  const filled = generic.fillFields(doc, result.token, [...result.matched.map(({ id, key }) => ({ id, key })), { id: note.id, custom: true }],
+    { ...generic.deriveValues(profile), [note.id]: 'Pickup after 5' });
+  assert.deepEqual(filled.filled, [...result.matched.map(item => item.id), note.id]);
+  assert.deepEqual(clicks, ['Three']);
+  assert.deepEqual([...doc.querySelectorAll('input[type="text"]')].map(input => input.value), ['1', 'avery.example@example.invalid', '(202) 555-0148', 'Pickup after 5']);
+});
+
 test('number words and "or more" choices pick the right count; a click Google ignores is not reported as filled', () => {
   const pick = size => {
     const doc = page(forms.googleChoices);

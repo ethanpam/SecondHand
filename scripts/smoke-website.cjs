@@ -265,9 +265,10 @@ async function inspectDemoMotion(page) {
 async function inspectWhatItDoes(page) {
   await page.goto(site, { waitUntil: 'networkidle' });
   const scope = await page.locator('.scope-note').innerText();
-  for (const phrase of ['first suggested home address', 'guesses', 'Vietnamese', 'Arabic', 'on this computer']) {
+  for (const phrase of ['first suggested home address', 'suggested by Laya', 'only when it is sure', 'Vietnamese', 'Arabic', 'on this computer']) {
     assert.ok(scope.includes(phrase), `What it does today must mention "${phrase}"`);
   }
+  assert.doesNotMatch(scope, /guess|turn on Laya/i, 'What it does today must not call Laya\'s answers guesses or say Laya starts off (#189)');
   // The address the applicant must review ends the first paragraph, where a skimming reader sees it.
   await expect(page.locator('.scope-note p')).toHaveCount(3);
   await expect(page.locator('.scope-note p').first()).toContainText(/review that address before you submit\.$/);
@@ -276,6 +277,8 @@ async function inspectWhatItDoes(page) {
     assert.ok(scope.includes(phrase), `What it does today must mention "${phrase}"`);
   }
   assert.doesNotMatch(scope, /every other page|stay manual|other Next buttons/i, 'What it does today must not say every other page waits for you');
+  await page.goto(`${site}/setup`, { waitUntil: 'networkidle' });
+  await inspectLayout(page);
   const ready = await page.locator('.ready-strip').innerText();
   for (const phrase of ['Save and Continue', 'submit']) {
     assert.ok(ready.includes(phrase), `Ready to apply must mention "${phrase}"`);
@@ -350,13 +353,20 @@ async function main() {
     assert.equal(await shaderFrame(), reducedFrame, 'Reduced motion must stop animation');
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await expect.poll(shaderFrame).toBeGreaterThan(reducedFrame);
-    await page.locator('#setup').evaluate(element => element.scrollIntoView({ behavior: 'instant', block: 'start' }));
+    await page.locator('.site-footer').evaluate(element => element.scrollIntoView({ behavior: 'instant', block: 'end' }));
     await expect.poll(() => page.locator('.gradient-canvas[data-paper-shader]').evaluate(element => element.paperShaderMount.currentSpeed)).toBe(0);
     console.log('Shader rendering, reduced motion, and offscreen suspension passed.');
     await inspectWordmark(page);
     await inspectDemoMotion(page);
     await inspectWhatItDoes(page);
 
+    await expect(page.locator('.download-panel, #setup')).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Download checksums' })).toHaveCount(0);
+    await page.getByRole('link', { name: 'Get SecondHand' }).first().click();
+    await expect(page).toHaveURL(`${site}/downloads`);
+    await page.waitForLoadState('networkidle');
+    await inspectLayout(page);
+    await expect(page.getByRole('link', { name: 'Download checksums' })).toHaveAttribute('href', /\/download\/SHA256SUMS\.txt\?release=/);
     await page.getByRole('tab', { name: 'Windows', exact: true }).click();
     await page.getByRole('tab', { name: 'Windows', exact: true }).press('ArrowRight');
     await expect(page.getByRole('tab', { name: 'Mac', exact: true })).toBeFocused();
@@ -372,7 +382,7 @@ async function main() {
       ['mac-apple-silicon', 'Mac', 'Apple Silicon', /mac-arm64\.dmg$/],
       ['mac-intel', 'Mac', 'Download for Intel Mac', /mac-x64\.dmg$/],
     ]) {
-      await page.goto(site, { waitUntil: 'networkidle' });
+      await page.goto(`${site}/downloads`, { waitUntil: 'networkidle' });
       await page.getByRole('tab', { name: tab, exact: true }).click();
       console.log('Checking installer:', platform);
       const [downloaded] = await Promise.all([
@@ -406,7 +416,7 @@ async function main() {
     await expect(page.getByText('No. The download is free, and there is no account or subscription.', { exact: true })).toBeVisible();
     await question.press('Enter');
     await expect(page.getByText('No. The download is free, and there is no account or subscription.', { exact: true })).toBeHidden();
-    await page.goto(site, { waitUntil: 'networkidle' });
+    await page.goto(`${site}/setup`, { waitUntil: 'networkidle' });
     await page.getByText('If your computer shows a warning', { exact: true }).click();
     await expect(page.getByRole('link', { name: 'Apple’s guidance on opening apps' })).toBeVisible();
 
@@ -420,7 +430,6 @@ async function main() {
     const mobileContext = await openContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
     const mobile = await mobileContext.newPage();
     await mobile.goto(site, { waitUntil: 'networkidle' });
-    await expect(mobile.locator('.phone-note')).toBeVisible();
     await mobile.screenshot({ path: path.join(artifacts, 'mobile-hero.png') });
     await mobile.screenshot({ path: path.join(artifacts, 'mobile.png'), fullPage: true });
     for (const width of [320, 390, 768, 1024]) {
@@ -434,8 +443,19 @@ async function main() {
     await expect(mobile.getByRole('heading', { level: 1 })).toHaveText('Privacy policy');
     await inspectLayout(mobile);
     await mobile.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Setup guide' }).click();
-    await expect(mobile).toHaveURL(`${site}/#setup`);
+    await expect(mobile).toHaveURL(`${site}/setup`);
     await expect(mobile.getByRole('heading', { name: /A few steps.*Then you’re set./ })).toBeInViewport();
+    for (const route of ['/downloads', '/setup']) {
+      await mobile.goto(`${site}${route}`, { waitUntil: 'networkidle' });
+      for (const width of [320, 390, 768, 1024, 1440]) {
+        await mobile.setViewportSize({ width, height: 844 });
+        await inspectLayout(mobile);
+      }
+      await mobile.screenshot({ path: path.join(artifacts, `${route.slice(1)}.png`), fullPage: true });
+    }
+    await mobile.setViewportSize({ width: 390, height: 844 });
+    await mobile.goto(`${site}/downloads`);
+    await expect(mobile.locator('.phone-note')).toBeVisible();
 
     await page.goto(site, { waitUntil: 'networkidle' });
     await page.locator('canvas').evaluate(canvas => canvas.getContext('webgl2').getExtension('WEBGL_lose_context').loseContext());
@@ -452,6 +472,7 @@ async function main() {
     await fallback.goto(site, { waitUntil: 'networkidle' });
     await expect(fallback.locator('canvas')).toHaveCount(0);
     await expect(fallback.getByRole('heading', { level: 1 })).toBeVisible();
+    await fallback.goto(`${site}/downloads`, { waitUntil: 'networkidle' });
     await fallback.getByRole('tab', { name: 'Mac', exact: true }).click();
     await expect(fallback.getByRole('link', { name: 'Apple Silicon' })).toBeVisible();
     await fallback.screenshot({ path: path.join(artifacts, 'webgl-fallback.png') });
@@ -461,6 +482,10 @@ async function main() {
     await inspectHeroLayout(staticPage);
     await inspectLayout(staticPage);
     await inspectStaticDemo(staticPage);
+    await expect(staticPage.locator('.download-panel, #setup')).toHaveCount(0);
+    await staticPage.getByRole('link', { name: 'Get SecondHand' }).first().click();
+    await expect(staticPage).toHaveURL(`${site}/downloads`);
+    await inspectLayout(staticPage);
     await expect(staticPage.getByRole('link', { name: 'Download for Windows' })).toBeAttached();
     await staticPage.goto(`${site}/thank-you/windows`);
     await expect(staticPage.locator('meta[http-equiv="refresh"]')).toHaveCount(0);

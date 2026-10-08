@@ -2,7 +2,7 @@
 
 import type { GrainGradient } from '@paper-design/shaders-react';
 import { useEffect, useRef, useState } from 'react';
-import { useSiteMotion } from './site-motion';
+import { useSiteMotion } from '../../lib/site-motion';
 
 const colors = ['#8bb89a', '#d7e6cf', '#337d5b'];
 export function GradientBackground() {
