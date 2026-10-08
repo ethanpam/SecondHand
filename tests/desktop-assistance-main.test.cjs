@@ -1975,6 +1975,29 @@ test('on an Iowa evening, with no day pinned, My information refuses a child bor
   assert.equal(saved.householdMembers[2].birthDate, '2026-10-05', 'born today');
 });
 
+// #258: a page asking for today's date gets this same "today", with no saved answer, as an everyday answer.
+test('today’s date is the day the app runs on: it needs no saved answer, and is never held back as a sensitive detail (#258)', async () => {
+  const app = await desktop({ settings: asking, profile: { firstName: 'Synthetic', birthDate: '1985-04-12' }, today: '2027-01-31' });
+  const reply = plain(await app.request({ type: 'getFields', url: PANTRY, fields: ['todayDate', 'birthDate'] }));
+  assert.deepEqual(reply.values, { todayDate: '2027-01-31' });
+  assert.deepEqual(reply.held, ['birthDate'], 'the date of birth waits for Fill sensitive details; today’s date does not');
+  assert.equal(app.prompts.length, 1);
+  assert.equal(app.prompts[0].title, 'Let Chrome fill this form?', 'the ordinary prompt');
+  assert.match(app.prompts[0].detail, /^Website: https:\/\/pantry\.example\.org\n\nToday’s date\n/);
+  const empty = await desktop({ settings: trusted, profile: {} });
+  assert.deepEqual(plain((await empty.request({ type: 'getFields', url: PANTRY, fields: ['todayDate'] })).values), { todayDate: TODAY });
+});
+
+test('on an Iowa evening, with no day pinned, today’s date is the day on this computer’s calendar, not in UTC (#258)', async t => {
+  const before = process.env.TZ;
+  process.env.TZ = 'America/Chicago';
+  t.after(() => { if (before === undefined) delete process.env.TZ; else process.env.TZ = before; });
+  // 8:30 pm on October 5 in Iowa: already October 6 in UTC.
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-10-06T01:30:00Z') });
+  const app = await desktop({ settings: trusted, env: {} });
+  assert.deepEqual(plain((await app.request({ type: 'getFields', url: PANTRY, fields: ['todayDate'] })).values), { todayDate: '2026-10-05' });
+});
+
 test('My information and Save to My information refuse a birth date after today or more than 130 years ago, and say which', async () => {
   const app = await desktop({ settings: trusted });
   await assert.rejects(app.invoke('saveProfile', { birthDate: '2026-10-06' }), /Your date of birth can’t be after today \(2026-10-05 on this computer\)\./);

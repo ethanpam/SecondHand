@@ -110,6 +110,18 @@ test('whether a Social Security number is saved is a field pages can ask for, ne
   assert.equal(DERIVED_FIELDS.hasSsn({}), '', 'a profile saved before the SSN field existed has none');
 });
 
+test('today’s date is a field pages can ask for, never one the profile saves: the day the app runs on, on this computer’s calendar (#258)', () => {
+  assert.equal(FIELD_LABELS.todayDate, 'Today’s date');
+  assert.equal(PROFILE_FIELDS.includes('todayDate'), false);
+  assert.ok(REQUEST_FIELDS.includes('todayDate'));
+  assert.throws(() => validateProfile({ todayDate: '2026-10-05' }), /Unknown profile field/);
+  // It needs no saved answer: an empty profile gets it too.
+  assert.equal(releasedValue(validateProfile({}), 'todayDate', { today: '2026-10-05' }), '2026-10-05');
+  assert.equal(releasedValue(validateProfile(fictionalProfile), 'todayDate', { today: '2027-01-31' }), '2027-01-31');
+  // The computer's own day, never the UTC one: 11:30 pm on January 31 here is January 31.
+  assert.equal(releasedValue(validateProfile({}), 'todayDate', { today: new Date(2027, 0, 31, 23, 30) }), '2027-01-31');
+});
+
 test('the applicant’s own answers to Iowa’s Tell Us More questions are optional choices; blank means not saved', () => {
   assert.deepEqual(Object.fromEntries(['sex', 'maritalStatus', 'hasSsnAnswer', 'ssnCardNameMatches', 'usCitizen', 'militaryOrVeteran', 'disabled', 'blind', 'healthLimitation', 'medicare']
     .map(key => [key, FIELD_LABELS[key]])), {
@@ -164,7 +176,7 @@ test('the household list is a profile field that defaults to empty and is never 
   assert.ok(PROFILE_FIELDS.includes('householdMembers'));
   assert.equal(REQUEST_FIELDS.includes('householdMembers'), false);
   assert.deepEqual(validateProfile({}).householdMembers, []);
-  assert.deepEqual(REQUEST_FIELDS, [...PROFILE_FIELDS.filter(field => !LIST_FIELDS.includes(field)), 'hasSsn', 'studentNameGrade']);
+  assert.deepEqual(REQUEST_FIELDS, [...PROFILE_FIELDS.filter(field => !LIST_FIELDS.includes(field)), 'hasSsn', 'studentNameGrade', 'todayDate']);
 });
 
 test('each household member is checked like the rest of the profile: trimmed, length-limited names and real past dates', () => {
