@@ -4,7 +4,9 @@ SecondHand holds some of the most sensitive details a person has: their Social S
 
 ## Report a problem privately
 
-Please don't open a public issue for a security problem. Instead, use GitHub's private reporting: go to this repository's **Security** tab and click **Report a vulnerability**. Only the maintainers can see the report.
+Please don't open a public issue for a security problem. Use [GitHub's private vulnerability reporting](https://github.com/ethanpam/secondHand/security/advisories/new) when available. Reports are shared privately with the maintainers and advisory collaborators, rather than posted as public issues.
+
+If the form is unavailable, do not post vulnerability details or applicant data publicly. Ask a maintainer to arrange a private reporting channel, without including the vulnerability itself. Maintainers must enable and verify private reporting when the repository becomes public; see the [release checklist](docs/public-release-review.md#repository-owner-actions).
 
 Include what you found, how to reproduce it, and what an attacker could do with it. Use only the fictional test profile or made-up details, never real applicant data.
 
