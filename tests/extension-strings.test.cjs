@@ -466,6 +466,10 @@ test('#189: in every language, the summary’s count of suggested answers never 
     for (const key of ['widget.filledSuggested', 'result.siteFilledSuggested', 'result.siteFilledSuggestedNeedYou', 'result.suggestedByLaya']) {
       for (const text of typeof catalog[key] === 'string' ? [catalog[key]] : [catalog[key].one, catalog[key].other]) assert.doesNotMatch(text, pattern, `${code} ${key}`);
     }
+    // The side panel's Laya status lines never call Laya's answers guesses. A Laya that is ready has no line
+    // of its own, so nothing there can call its sure answers guesses: the fill's result names them suggested (#222).
+    assert.equal(Object.hasOwn(catalog, 'desktop.layaReady'), false, `${code} desktop.layaReady is gone`);
+    for (const key of ['desktop.layaOff', 'desktop.layaDownloading', 'desktop.layaNotReady']) assert.doesNotMatch(catalog[key], pattern, `${code} ${key}`);
   }
   for (const key of ['widget.filledGuessed', 'result.siteFilledGuessed', 'result.siteFilledGuessedNeedYou']) assert.equal(Object.hasOwn(en, key), false, `${key} is gone`);
 });

@@ -66,18 +66,20 @@ export function Home() {
               </p>
               <p>
                 It answers Iowa’s Tell Us More questions only from answers you
-                saved in My information. If you turn on Laya, SecondHand’s AI on
-                this computer, it fills more questions and marks them as guesses
-                to check. It moves past information-only screens for you. It
-                also selects Save and Continue on Tell Us More, Background
-                Information, and Iowa’s questions about emergency SNAP, jobs,
-                income, expenses and property. It does the same on pages for one
-                person’s saved job, private pension, Social Security, rent,
-                utilities or cash. It does this only when it knows every
-                question on the page and every required answer is filled in. If
-                a required answer is missing, or Iowa shows an error or pop-up,
-                it stays on that page. Anywhere else, you move on yourself. You
-                handle consent, signatures and submission.
+                saved in My information. On Iowa pages SecondHand doesn’t know,
+                Laya, SecondHand’s AI on this computer, may fill questions from
+                your saved information, but only when it is sure of the answer.
+                It outlines each one and the side panel says it was suggested by
+                Laya, so check it. It moves past information-only screens for
+                you. It also selects Save and Continue on Tell Us More,
+                Background Information, and Iowa’s questions about emergency
+                SNAP, jobs, income, expenses and property. It does the same on
+                pages for one person’s saved job, private pension, Social
+                Security, rent, utilities or cash. It does this only when it
+                knows every question on the page and every required answer is
+                filled in. If a required answer is missing, or Iowa shows an
+                error or pop-up, it stays on that page. Anywhere else, you move
+                on yourself. You handle consent, signatures and submission.
               </p>
               <p>
                 The side panel works in English, Spanish, Vietnamese, Chinese,
