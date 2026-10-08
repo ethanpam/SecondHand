@@ -7,7 +7,9 @@ const { JSDOM } = require('jsdom');
 const adapter = require('../extension/iowa-adapter.js');
 const strings = require('../extension/strings.js');
 const forms = require('./fixtures/pantry-forms.cjs');
-const { plain, tick, runFile, evalFile, layout, layoutElements, serviceWorker, nativeHost } = require('./helpers/harness.cjs');
+const { plain, tick, runFile, evalFile, layout, layoutElements, serviceWorker, nativeHost, workerLogged } = require('./helpers/harness.cjs');
+// An error the worker logged that the test didn't take fails it.
+test.afterEach(() => assert.deepEqual(workerLogged(), [], 'the worker logged an error the test didn’t expect'));
 
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
 const SITE_URL = 'https://pantry.example.org/intake?step=1';

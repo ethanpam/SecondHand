@@ -3,7 +3,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const adapter = require('../extension/iowa-adapter.js');
 const strings = require('../extension/strings.js');
-const { plain, read, serviceWorker, nativeHost } = require('./helpers/harness.cjs');
+const { plain, read, serviceWorker, nativeHost, workerLogged } = require('./helpers/harness.cjs');
+// An error the worker logged that the test didn't take fails it.
+test.afterEach(() => assert.deepEqual(workerLogged(), [], 'the worker logged an error the test didn’t expect'));
 
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
 const { GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey } = require('../extension/generic-adapter.js');

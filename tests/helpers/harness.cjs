@@ -152,6 +152,11 @@ function runMain(modules, globals) {
   });
 }
 
+// What the workers a test runs log as errors, which Chrome records on SecondHand's Errors page (chrome://extensions).
+// `workerLogged()` takes them: a test that expects one takes it, and each file of worker tests fails a test that leaves one.
+const workerErrors = [];
+const workerConsole = { ...console, error: (...args) => { workerErrors.push(args); } };
+const workerLogged = () => workerErrors.splice(0);
 // The extension's service worker: extension/background.js in a vm context, as Chrome runs it. A test builds
 // its Chrome stand-in with `worker.event(name)` for each event the worker listens to (its listener lands in
 // `worker.events[name]`) and `worker.onMessage` for runtime.onMessage, then calls `worker.start`.
@@ -179,7 +184,7 @@ function serviceWorker() {
       run = () => runFile('extension/background.js', {
         chrome, SecondHandIowa: require('../../extension/iowa-adapter.js'), SecondHandGeneric: require('../../extension/generic-adapter.js'),
         SecondHandStrings: require('../../extension/strings.js'), SecondHandTranslation: require('../../extension/translation.js'),
-        importScripts: () => {}, crypto: require('node:crypto').webcrypto, setTimeout, clearTimeout, URL, Map, Set, console, fetch, ...globals
+        importScripts: () => {}, crypto: require('node:crypto').webcrypto, setTimeout, clearTimeout, URL, Map, Set, console: workerConsole, fetch, ...globals
       }, build ? withBuild(build, true) : code);
       run();
       return worker;
@@ -219,4 +224,5 @@ function nativeHost({ posted = () => {}, answer }) {
   };
 }
 
-module.exports = { root, plain, tick, deferred, until, read, runFile, evalFile, loadRenderer, BOX, layout, layoutElements, laidOut, startMain, runMain, safeStorage, serviceWorker, nativeHost };
+module.exports = { root, plain, tick, deferred, until, read, runFile, evalFile, loadRenderer, BOX, layout, layoutElements, laidOut, startMain, runMain, safeStorage, serviceWorker, nativeHost,
+  workerConsole, workerLogged };

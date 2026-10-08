@@ -1,7 +1,9 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { runFile } = require('./helpers/harness.cjs');
+const { runFile, workerConsole, workerLogged } = require('./helpers/harness.cjs');
+// An error the worker logged that the test didn't take fails it.
+test.afterEach(() => assert.deepEqual(workerLogged(), [], 'the worker logged an error the test didn’t expect'));
 const { webcrypto } = require('node:crypto');
 const adapter = require('../extension/iowa-adapter.js');
 const generic = require('../extension/generic-adapter.js');
@@ -83,7 +85,7 @@ function worker({ selectedOwner = '', values = PRIVATE_RECORD, nativeHook, conte
   };
   runFile('extension/background.js', {
     chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, SecondHandTranslation: translation,
-    importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL: globalThis.URL, Map, Set, console
+    importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL: globalThis.URL, Map, Set, console: workerConsole
   });
   const send = message => new Promise(resolve => listener({ tabId: 7, ...message }, { id: 'testextension', url: chrome.runtime.getURL('panel.html') }, resolve));
   return { model, vault, calls, events, start: () => send({ type: 'ui:autofill', confirmed: true }), poll: () => send({ type: 'ui:pageState' }) };
