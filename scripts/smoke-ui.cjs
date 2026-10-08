@@ -592,6 +592,10 @@ async function main() {
       `The Touch ID and password-reset notes should both be 12px with the same line height and color:\n${switchNotes.map(switchNote).join('\n')}`);
     await captureDiagnostic(page, 'desktop-privacy.png', { fullPage: true });
     const privacyWidth = await page.evaluate(() => window.innerWidth);
+    // The menu stays a column at the default window, and the page doesn't scroll sideways (#230).
+    assert.equal(await page.locator('.main-nav').evaluate(nav => getComputedStyle(nav).flexDirection), 'column');
+    const privacyOverflowDefault = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    assert.ok(privacyOverflowDefault <= 1, `no sideways scrolling on Privacy & backups (${privacyOverflowDefault}px)`);
     await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(2));
     await expect.poll(() => page.evaluate(() => window.innerWidth)).toBeLessThanOrEqual(Math.ceil(privacyWidth / 2));
     const privacyOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -600,6 +604,33 @@ async function main() {
     assert.equal(privacyZoomed.length, 0, `Text too small or faint on Privacy & backups at 200% zoom:\n${privacyZoomed.join('\n')}`);
     const drawnPrivacy = await application.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString('base64'));
     await fs.writeFile(path.join(root, 'artifacts/privacy-zoom-200.png'), Buffer.from(drawnPrivacy, 'base64'));
+    // At 200% all six menu items show whole, inside the menu and the window, at least 12px, and the menu doesn't
+    // scroll sideways (#230).
+    await expect(page.locator('.nav-item')).toHaveCount(6);
+    for (const item of await page.locator('.nav-item').all()) await expect(item).toBeVisible();
+    const menu = await page.locator('.main-nav').evaluate(nav => {
+      const within = (box, outer) => box.left >= outer.left - 1 && box.top >= outer.top - 1 && box.right <= outer.right + 1 && box.bottom <= outer.bottom + 1;
+      const edges = box => `${Math.round(box.left)} to ${Math.round(box.right)}px across, ${Math.round(box.top)} to ${Math.round(box.bottom)}px down`;
+      const menuBox = nav.getBoundingClientRect();
+      const windowBox = { left: 0, top: 0, right: innerWidth, bottom: innerHeight };
+      const problems = [];
+      for (const item of nav.querySelectorAll('.nav-item')) {
+        const box = item.getBoundingClientRect();
+        const size = parseFloat(getComputedStyle(item).fontSize);
+        const name = `“${item.innerText.trim()}” (${edges(box)})`;
+        if (!within(box, menuBox)) problems.push(`${name} is outside the menu (${edges(menuBox)})`);
+        if (!within(box, windowBox)) problems.push(`${name} is outside the window (${edges(windowBox)})`);
+        if (size < 12) problems.push(`${name} is ${size}px (needs 12px)`);
+      }
+      return { overflow: nav.scrollWidth - nav.clientWidth, problems };
+    });
+    assert.equal(menu.problems.length, 0, `Menu items cut off or too small at 200% zoom:\n${menu.problems.join('\n')}`);
+    assert.ok(menu.overflow <= 1, `no sideways scrolling in the menu at 200% (${menu.overflow}px)`);
+    // Chrome extension and Privacy & backups open from the menu at 200% (#230).
+    await page.locator('.nav-item[data-view="extension"]').click();
+    await expect(page.locator('#view-extension')).toBeVisible();
+    await page.locator('.nav-item[data-view="privacy"]').click();
+    await expect(page.locator('#view-privacy')).toBeVisible();
     await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1));
     await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(privacyWidth);
     // Turning it on opens the password dialog; the box stays clear until the password is checked.
