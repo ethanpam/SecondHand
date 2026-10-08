@@ -57,6 +57,8 @@ const rememberables = new Map();
 const sitePlans = new Map(); // tabId -> { url, frames } the widget's on-device AI saw. Field metadata only.
 // Tabs whose widget asked the side panel to open on the question list. The panel takes it once.
 const questionViews = new Set();
+// tabId -> the note a failed next-question shortcut left for the tab's card, which takes it once.
+const questionNotes = new Map();
 // tabId -> Map(url -> { id, url, pageKey, lang, text, unread, summary }): the words of pages the side
 // panel summarizes and the key points it wrote for them. Memory only. Iowa's information-only screens
 // stay until the tab leaves Iowa; other pages are kept by address, the latest few.
@@ -1610,7 +1612,13 @@ async function startSitePilot(tabId) {
 // The side panel routes by the tab's current page; a widget acts only as what it was loaded on.
 async function pageState(tabId, route) {
   const state = await currentPageState(tabId, route);
-  if (route !== undefined) return state;
+  // The card (a route) takes the note a failed next-question shortcut left, once: it shows it until its next poll, as it
+  // shows a failed click's on its link.
+  if (route !== undefined) {
+    const note = questionNotes.get(tabId);
+    questionNotes.delete(tabId);
+    return note ? { ...state, note } : state;
+  }
   // Only the side panel (no route) opens the question list the widget asked for, and gets the questions it may save
   // and those whose answers wait for Fill sensitive details.
   const shown = questionViews.delete(tabId) ? { ...state, showQuestions: true } : state;
@@ -2182,34 +2190,47 @@ async function nextQuestion(tabId) {
   return focusField(tabId, keys[index]);
 }
 // A shortcut presses a button the tab has only on Iowa's form or on a site that is on: elsewhere it does nothing. When the
-// press fails, it ends where a click's would: the tab's result says why.
-async function shortcut(tabId, press) {
+// press fails, `fail(error, iowa)` ends it where a click's failure would.
+async function shortcut(tabId, press, fail) {
   const tab = await chrome.tabs.get(tabId);
   const iowa = SecondHandIowa.isSupportedUrl(tab.url), origin = siteOrigin(tab.url);
   if (!iowa && !(origin && await siteEnabled(origin))) return;
   try { await press(); }
-  catch (error) {
-    const { state, ...message } = failed(error);
-    remember(tabId, iowa ? { state, ...message, filled: 0, needYou: [], pageKey: results.get(tabId)?.pageKey || '' } : siteResult(state, message));
-  }
+  catch (error) { fail(error, iowa); }
 }
-// When Chrome can't say what page the tab is on (it closed as the keys were pressed), there is no result to say so in.
+// A failed Autofill or Stop, as after a click: the tab's result says why.
+const autofillFailed = tabId => (error, iowa) => {
+  const { state, ...message } = failed(error);
+  remember(tabId, iowa ? { state, ...message, filled: 0, needYou: [], pageKey: results.get(tabId)?.pageKey || '' } : siteResult(state, message));
+};
+// A failed next-question, as after a click on the card's link to what is left: the card says why until its next poll, in
+// the words the worker's reply to that click has, and the tab's result, with its questions left, stays as it was.
+const questionFailed = tabId => error => {
+  const { error: message, errorKey: messageKey, errorParams: messageParams } = errorReply(error);
+  questionNotes.set(tabId, { message, messageKey, messageParams });
+};
+// When Chrome can't say what page the tab is on (it closed as the keys were pressed), there is nowhere on screen to say so.
 const shortcutLost = unshown('Chrome couldn’t say what page a keyboard shortcut was pressed on. The shortcut did nothing.');
 chrome.commands?.onCommand.addListener((command, tab) => {
   const tabId = tab?.id;
   if (!Number.isInteger(tabId)) return;
-  if (command === 'next-question') { shortcut(tabId, () => nextQuestion(tabId)).catch(shortcutLost); return; }
+  if (command === 'next-question') {
+    // A press replaces the note an earlier one left.
+    questionNotes.delete(tabId);
+    shortcut(tabId, () => nextQuestion(tabId), questionFailed(tabId)).catch(shortcutLost);
+    return;
+  }
   if (command !== 'autofill') return;
   // As a click does, the shortcut holds off an update until it settles. What it presses is what the tab shows now.
   clicksUnderway++;
   const press = autopilots.has(tabId) ? () => stop(tabId) : () => autofill(tabId);
-  shortcut(tabId, press).catch(shortcutLost).finally(() => { clicksUnderway--; reloadWhenIdle(); });
+  shortcut(tabId, press, autofillFailed(tabId)).catch(shortcutLost).finally(() => { clicksUnderway--; reloadWhenIdle(); });
 });
 chrome.tabs.onActivated?.addListener(info => {
   for (const [tabId, pilot] of sitePilots) if (tabId !== info.tabId) stopSitePilot(tabId, pilot, siteResult('stopped', say('worker.stoppedTabChanged')));
   for (const tabId of autopilots.keys()) if (tabId !== info.tabId) stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], ...say('worker.stoppedTabChanged'), pageKey: results.get(tabId)?.pageKey || '' });
 });
-chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); sitePilots.delete(tabId); questionTurns.delete(tabId); generalPages.delete(tabId); sitePlans.delete(tabId); questionViews.delete(tabId); pageReads.delete(tabId); formFrames.delete(tabId); formChecks.delete(tabId); savables.delete(tabId); rememberables.delete(tabId); heldDetails.delete(tabId); });
+chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); sitePilots.delete(tabId); questionTurns.delete(tabId); questionNotes.delete(tabId); generalPages.delete(tabId); sitePlans.delete(tabId); questionViews.delete(tabId); pageReads.delete(tabId); formFrames.delete(tabId); formChecks.delete(tabId); savables.delete(tabId); rememberables.delete(tabId); heldDetails.delete(tabId); });
 chrome.tabs.onUpdated?.addListener((tabId, change) => {
   if (change.status === 'loading') {
     results.delete(tabId);
@@ -2222,6 +2243,7 @@ chrome.tabs.onUpdated?.addListener((tabId, change) => {
     generalPages.delete(tabId);
     sitePlans.delete(tabId);
     questionViews.delete(tabId);
+    questionNotes.delete(tabId);
     // Chrome omits other sites' URLs without the tabs permission, so re-read the tab: anything that
     // is not Iowa's portal (or unreadable) ends autofill and forgets the Iowa screens kept for the summary.
     if (autopilots.has(tabId) || [...(pageReads.get(tabId)?.values() || [])].some(isIowaRead)) {

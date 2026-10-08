@@ -210,15 +210,30 @@ test('the next-question shortcut goes to each question the tab’s result left, 
   assert.deepEqual(focused(), ['firstName', 'lastName', 'firstName']);
 });
 
-test('a shortcut that fails ends where its click would: the tab’s result says why, as the side panel and the card read it', async () => {
+test('a failed next-question shortcut ends where a failed click on the card’s link does: a passing note on the card, with the tab’s result and its questions left as they were', async () => {
   const lost = 'Could not establish connection. Receiving end does not exist.';
   const w = worker({ focus: () => { throw new Error(lost); } });
   await autofill(w);
+  const before = plain((await w.panel({ type: 'ui:pageState' })).data).result;
+  assert.deepEqual(before.needYou, ['lastName']);
   w.events.command('next-question', { id: 7 });
   await settleShortcut();
-  const { result } = plain((await w.panel({ type: 'ui:pageState' })).data);
-  assert.deepEqual(result, { state: 'error', message: lost, messageKey: 'detail', messageParams: { detail: lost }, filled: 0, needYou: [], pageKey: 'iowa-personal-information' });
-  assert.deepEqual(plain((await w.launcher({ type: 'ui:pageState' })).data).result, result);
+  // The side panel reads the tab's result as it was, and no note.
+  const side = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.deepEqual(side.result, before);
+  assert.equal(Object.hasOwn(side, 'note'), false);
+  // The card takes the note once, in the words the worker's reply to a failed click on its link gives.
+  const card = plain((await w.launcher({ type: 'ui:pageState' })).data);
+  assert.deepEqual(card.result, before);
+  const clicked = plain(await w.launcher({ type: 'ui:focusField', key: 'lastName', confirmed: true }));
+  assert.deepEqual(card.note, { message: clicked.error, messageKey: clicked.errorKey, messageParams: clicked.errorParams });
+  assert.deepEqual(card.note, { message: lost, messageKey: 'detail', messageParams: { detail: lost } });
+  assert.equal(Object.hasOwn(plain((await w.launcher({ type: 'ui:pageState' })).data), 'note'), false, 'and then it has passed');
+  // A note the card hasn't taken goes when the page moves on.
+  w.events.command('next-question', { id: 7 });
+  await settleShortcut();
+  w.events.updated(7, { status: 'loading' });
+  assert.equal(Object.hasOwn(plain((await w.launcher({ type: 'ui:pageState' })).data), 'note'), false);
   assert.deepEqual(w.filled(), ['firstName', 'hasHomeAddress', 'mailingCity'], 'and nothing is erased');
 });
 

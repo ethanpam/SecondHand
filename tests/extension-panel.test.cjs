@@ -1511,6 +1511,35 @@ test('widget and side panel say when nothing on a site matches the saved profile
   assert.equal(paged.get('need-you').hidden, true);
 });
 
+test('the card shows the note a failed next-question shortcut left as it shows a failed click on its link’s, until its next poll, and keeps the questions left', async t => {
+  const lost = 'Could not establish connection. Receiving end does not exist.';
+  const failure = { message: lost, messageKey: 'detail', messageParams: { detail: lost } };
+  // The worker hands the card the note once, with the page's state.
+  let note = null;
+  const view = await panel(t, { launcher: true, result: doneResult, pageState: state => { const next = structuredClone(state); if (note) next.note = note; note = null; return next; } });
+  const poll = async () => { view.window.document.dispatchEvent(new view.window.Event('visibilitychange')); await tick(); await tick(); };
+  const resultLine = view.get('widget-text').textContent;
+  assert.equal(view.get('need-you').textContent, '2 questions left');
+  // A failed click on the link, for comparison: its note shows until the next poll.
+  const send = view.window.chrome.runtime.sendMessage;
+  view.window.chrome.runtime.sendMessage = async payload => payload.type === 'ui:focusField'
+    ? { ok: false, error: failure.message, errorKey: failure.messageKey, errorParams: failure.messageParams } : send(payload);
+  await view.userClick('need-you');
+  const clicked = view.get('widget-text').textContent;
+  assert.notEqual(clicked, resultLine);
+  await poll();
+  assert.equal(view.get('widget-text').textContent, resultLine);
+  // The shortcut's note says the same, beside the same link, and passes the same way.
+  note = failure;
+  await poll();
+  assert.equal(view.get('widget-text').textContent, clicked);
+  assert.equal(view.get('need-you').hidden, false);
+  assert.equal(view.get('need-you').textContent, '2 questions left');
+  await poll();
+  assert.equal(view.get('widget-text').textContent, resultLine);
+  assert.equal(view.get('need-you').textContent, '2 questions left');
+});
+
 test('widget on a site that is on autofills once, lists what needs you, and never shows Stop', async t => {
   const view = await panel(t, { launcher: true, tab: SITE, site: { origin: ORIGIN, enabled: true }, autofill: siteDone });
   assert.equal(view.get('widget').hidden, false);

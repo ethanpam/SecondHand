@@ -355,7 +355,9 @@
           // this widget's own result and adopt the worker's only after a reload, or while
           // questions wait for the side panel's Fill sensitive details, which changes it (#176).
           if (autopilot || !result || Number(result.held) > 0) result = state?.result || result;
-          note = null;
+          // The worker hands over the note a failed next-question shortcut left once: it shows until the next poll, as
+          // a failed click's on the link does.
+          note = state?.note ? fromResult(state.note) : null;
         } catch (error) { note = trouble(error); }
         render();
         if (known && !outdated && !languageChecked) checkLanguage();
