@@ -46,6 +46,9 @@
   "overrides": {
     "vinext": {
       "image-size": "2.0.3"
+    },
+    "miniflare": {
+      "sharp": "0.35.5"
     }
   }
 }
