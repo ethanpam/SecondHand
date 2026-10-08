@@ -15,7 +15,7 @@ if (typeof globalThis.SecondHandTranslation?.create !== 'function') {
 // Must match BUILD in panel.js: change both together, with every change to the extension. The panel
 // compares them to tell when Chrome is still running an older worker than the pages it loaded from
 // disk, and the worker compares it with the build the desktop app ships to update itself (#85).
-const BUILD = '2026-10-06.23';
+const BUILD = '2026-10-06.24';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
@@ -255,7 +255,8 @@ async function fillRecordPage(tabId, state, pilot) {
       ...(recipient.personName ? { personName: recipient.personName } : {}) });
     currentPilot(tabId, pilot);
     const revision = receiptRevision(response);
-    if (response?.reason === 'recordMissing') return { state: 'waiting', filled: 0, needYou: needYou(state.page), ...say('worker.recordMissing'), pageKey };
+    // No saved record fits: the run ends, as a lock ends it, so once the record is saved one click on Autofill asks again (#236).
+    if (response?.reason === 'recordMissing') return { state: 'stopped', filled: 0, needYou: needYou(state.page), ...say('worker.recordMissing'), pageKey };
     if (!response?.values || typeof response.values !== 'object' || Array.isArray(response.values) || typeof response.recordId !== 'string' ||
         !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(response.recordId) || typeof response.values.person !== 'string' || !response.values.person.trim() ||
         Object.entries(response.values).some(([key, value]) => !request.fields.includes(key) || typeof value !== 'string' || value.length > 200)) throw fault('worker.desktopUnexpected');

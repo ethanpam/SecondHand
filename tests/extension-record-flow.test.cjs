@@ -141,12 +141,15 @@ for (const mutate of [data => ({ ...data, recordId: 'not-a-record-id' }), data =
   });
 }
 
+// A missing record ends the run, as a lock does: once the record is saved, one click on Autofill asks again (#236).
 test('a missing record waits without retrying or exposing any record list', async () => {
   const w = worker({ nativeHook: (request, data) => request.type === 'getRecordFields' ? { values: {}, reason: 'recordMissing', accessRevision: data.accessRevision } : undefined });
   const result = await w.start();
-  assert.equal(result.data.state, 'waiting'); assert.equal(result.data.messageKey, 'worker.recordMissing');
-  await w.poll(); await w.poll();
+  assert.equal(result.data.state, 'stopped'); assert.equal(result.data.messageKey, 'worker.recordMissing');
+  assert.deepEqual(plain(result.data.needYou), PHASES[0]);
+  await w.poll(); const polled = await w.poll();
   assert.equal(records(w).length, 1); assert.deepEqual(w.model.filled, []); assert.equal(w.model.nextCount, 0);
+  assert.equal(polled.data.autopilot, false);
 });
 
 test('missing record data stops Next; manual completion gets a no-data authorization and honors the original record revision', async () => {

@@ -122,7 +122,7 @@ Version **0.5.0**, released October 6, 2026.
 <details>
 <summary><strong>Exactly which Iowa screens are covered</strong></summary>
 
-Autofill stays on for the tab until you click **Stop**, lock SecondHand, leave Iowa's site, or reach a screen it doesn't know. It also stops after 64 automatic steps so you can check where you are.
+Autofill stays on for the tab until you click **Stop**, lock SecondHand, leave Iowa's site, reach a screen it doesn't know, or reach a record page with no matching saved record. It also stops after 64 automatic steps so you can check where you are.
 
 | Iowa screen | What SecondHand does |
 | --- | --- |

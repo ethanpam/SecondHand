@@ -403,13 +403,15 @@ async function main() {
     };
     const calls = type => worker.evaluate(type => globalThis.__nativeSmoke.calls.filter(call => call.type === type), type);
     // The worker's own state, so a check that nothing more happened waits on it, not on the clock (#143): the clicks
-    // and page polls it has received, whether it is busy (handling a click, running an autopilot step or a site
-    // fill), and whether an autopilot waits for the applicant. A waiting autopilot looks at the page again at each poll.
+    // and page polls it has received (and how many came from the side panel), whether it is busy (handling a click,
+    // running an autopilot step or a site fill), and whether an autopilot waits for the applicant. A waiting autopilot
+    // looks at the page again at each poll.
     await worker.evaluate(() => {
-      globalThis.__smokeProbe = { actions: 0, polls: 0 };
-      chrome.runtime.onMessage.addListener(message => {
+      globalThis.__smokeProbe = { actions: 0, polls: 0, panelPolls: 0 };
+      chrome.runtime.onMessage.addListener((message, sender) => {
         if (message?.confirmed === true) globalThis.__smokeProbe.actions++;
         if (message?.type === 'ui:pageState') globalThis.__smokeProbe.polls++;
+        if (message?.type === 'ui:pageState' && sender.url === chrome.runtime.getURL('panel.html')) globalThis.__smokeProbe.panelPolls++;
       });
     });
     const workerState = () => worker.evaluate(() => ({ ...globalThis.__smokeProbe, waiting: autopilots.size,
@@ -1257,9 +1259,28 @@ async function main() {
       await expect(page.locator('[id="answerSets0.answers4.answerValue"]')).toHaveValue('');
       assert.deepEqual(await calls('getFields'), []);
       console.log(`Job record ${variant}: no financial fill and no Next.`);
+      if (variant !== 'missing') continue;
+      // No saved record ends the run, as a lock does: Autofill's button is back, and nothing asks the app again until
+      // it is clicked, however many polls pass. Once the record is saved, that one click fills the page (#236).
+      await expect.poll(() => panel.text('#status')).toContain(strings.text('en', 'worker.recordMissing'));
+      assert.equal(await panel.text('#panel-autofill'), strings.text('en', 'panel.autofillIowa'));
+      widget = await launcherFrame();
+      await expect(widget.locator('#autofill')).toBeVisible({ timeout: 10000 });
+      await expect(widget.locator('#stop')).toBeHidden();
+      const saved = await workerState();
+      await worker.evaluate(record => { globalThis.__nativeSmoke.record = record; }, fictionalJob);
+      await expect.poll(async () => (await workerState()).panelPolls, { timeout: 15000 }).toBeGreaterThanOrEqual(saved.panelPolls + 2);
+      await settled();
+      assert.equal((await calls('getRecordFields')).length, 1);
+      await panel.click('#panel-autofill');
+      await expect(page.locator('[id="answerSets0.answers8.answerValue"]')).toHaveValue('850.50', { timeout: 20000 });
+      assert.equal((await calls('getRecordFields')).length, 2);
+      await settled();
+      console.log('Job record missing: the run ends with Start Autofill and the card’s Autofill; saving the record asks nothing until one click, which fills the page.');
     }
-    // No saved record, on a first run: the card shows the whole step and what Stop does in each language, 6 lines at
-    // most beside the offer of the questions in the reader's language, and its tooltip holds the whole step (#207).
+    // No saved record, on a first run: the card shows the whole step in each language, 6 lines at most beside the offer
+    // of the questions in the reader's language, and its tooltip holds the whole step (#207). The run has ended (#236),
+    // so nothing about Stop follows the step.
     for (const code of strings.LANGUAGES) {
       await resetTo(jobFixture.URL);
       await (await launcherFrame()).evaluate(code => { globalThis.SecondHandStrings.setLanguage(code); localStorage.removeItem('secondhand.autofillStarted'); }, code);
@@ -1270,13 +1291,13 @@ async function main() {
       await panel.click('#panel-autofill');
       await expect.poll(async () => (await calls('getRecordFields')).length, { timeout: 20000 }).toBe(1);
       const step = strings.text(code, 'worker.recordMissing');
-      await expect.poll(() => lineProblems(widget, `${step} ${stopNote(code)}`, code), { timeout: 10000, message: `${code} no saved record` }).toEqual([]);
+      await expect.poll(() => lineProblems(widget, step, code), { timeout: 10000, message: `${code} no saved record` }).toEqual([]);
       assert.equal(await widget.locator('#translate-offer').isVisible(), code !== 'en', `${code}: the offer of the questions in the reader's language`);
       assert.equal(await widget.evaluate(() => document.getElementById('widget-text').title), step, `${code}: the tooltip holds the whole step`);
       assert.equal(await page.evaluate(() => document.__jobQa.nextClicks), 0);
     }
     await (await launcherFrame()).evaluate(() => globalThis.SecondHandStrings.setLanguage('en'));
-    console.log(`Job record missing: the card shows the whole step and what Stop does in ${strings.LANGUAGES.join(', ')}, and its tooltip holds the step.`);
+    console.log(`Job record missing: the card shows the whole step in ${strings.LANGUAGES.join(', ')}, and its tooltip holds the step.`);
     currentSharedPage = 'self';
 
     assert.deepEqual(errors, []);
