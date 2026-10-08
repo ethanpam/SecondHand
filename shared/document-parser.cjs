@@ -44,7 +44,12 @@ function parseTaxPage(page, type) {
   const spouse = one("If joint return spouse's first name and middle initial") || one("spouse's first name and middle initial");
   const home = one('Home address');
   const city = one('City town or post office');
-  const foreign = one('Foreign country name');
+  // The line under the city header prints three foreign-address labels. When
+  // OCR misreads a word of the first, the next label read marks that line.
+  // Whichever label is used must be read exactly once.
+  const foreignFound = ['Foreign country name', 'Foreign province/state/county', 'Foreign postal code']
+    .map(label => matches(rows, label)).find(found => found.length);
+  const foreign = foreignFound?.length === 1 ? foreignFound[0] : null;
   const filing = one('Filing');
   const sameRow = (anchor, label) => {
     if (!anchor) return null;
@@ -79,7 +84,9 @@ function parseTaxPage(page, type) {
   const state = sameRow(city, 'State'), zip = sameRow(city, 'ZIP code'), apt = sameRow(home, 'Apt no');
   const rightColumn = sameRow(primary, 'Your social security number');
   if (home && city && foreign && primary && spouse && rightColumn && primary.y0 < spouse.y0 && spouse.y0 < home.y0 && home.y0 < city.y0) {
-    const foreignValues = filing ? afterLabel(rows, foreign, filing, foreign.x0, rightColumn.x0) : [];
+    // Read the foreign-address line from the address column's left edge,
+    // whichever of its labels was found.
+    const foreignValues = filing ? afterLabel(rows, foreign, filing, Math.min(city.x0, foreign.x0), rightColumn.x0) : [];
     if (foreignValues.length) warnings.push('Foreign-address information needs manual review; no domestic address was proposed.');
     else {
       const addressWords = apt ? afterLabel(rows, home, city, home.x0, apt.x0) : [];
