@@ -52,9 +52,14 @@ const jotformQuestion = ([type, q, label, options]) => `<li class="form-line jf-
 // #180: a Jotform's household questions from the live QA, asked while no household list is saved.
 const NO_LIST = 'https://pantry.example.org/household-order';
 const NO_LIST_QUESTIONS = { adults: '# of Adults', young: '# of Children 0-5', older: '# of Children 6-18' };
+// #258: a pantry order form's "Date ordered" date box. The app's today is pinned to a day that isn't this one, so the box can
+// only hold it if it came from the app, not from the browser's clock.
+const ORDER = 'https://pantry.example.org/order';
+const TODAY = '2026-03-04';
 // What the desktop works out from the fictional household list, as the app does: band counts and the one student's name and grade.
 const listed = validateProfile(syntheticProfile);
-const desktopProfile = { ...syntheticProfile, customFields: customAnswers, ...Object.fromEntries(['householdCount:18-59', 'householdCount:60+', 'studentNameGrade'].map(key => [key, releasedValue(listed, key)])) };
+const desktopProfile = { ...syntheticProfile, customFields: customAnswers, ...Object.fromEntries(['householdCount:18-59', 'householdCount:60+', 'studentNameGrade'].map(key => [key, releasedValue(listed, key)])),
+  todayDate: releasedValue(listed, 'todayDate', { today: TODAY }) };
 // #186: a pantry's own questions no saved field covers, asked again at every visit: an ID, how the applicant heard of it,
 // and a pickup day, whose answer changes. Remember for next time keeps the first two as custom answers.
 const VISIT = 'https://pantry.example.org/visit';
@@ -117,6 +122,8 @@ const pages = {
     `<fieldset><legend>${HEARD}</legend>${['Friend', 'Church', 'Flyer'].map((option, index) => `<label><input type="radio" name="heard" id="heard-${index}" value="${option}">${option}</label>`).join('')}</fieldset>` +
     '<label for="day">Preferred pickup day</label><select id="day" name="day"><option value="">Choose a day</option><option>Monday</option><option>Friday</option></select>' +
     '<button type="submit">Submit</button></form>'),
+  [ORDER]: formPage('Pantry order', '<form><label for="first">First name</label><input id="first" name="first">' +
+    '<label for="ordered">Date ordered</label><input id="ordered" name="ordered" type="date"><button type="submit">Submit</button></form>'),
   [NO_LIST]: formPage('Pantry order: who lives with you', `<form><label for="first">First name</label><input id="first" name="first">${Object.entries(NO_LIST_QUESTIONS)
     .map(([id, label]) => `<label for="${id}">${label}</label><input id="${id}" name="${id}">`).join('')}<button type="submit">Submit</button></form>`),
   [HOUSEHOLD]: formPage('Pantry order: household', `<form>${Object.entries(HOUSEHOLD_QUESTIONS).map(([id, label]) => `<label for="${id}">${label}</label><input id="${id}" name="${id}">`).join('')}` +
@@ -512,6 +519,24 @@ async function main() {
     await settled();
     assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
     console.log('#98: a pantry form’s household questions filled from the fictional household list (0-17, 18-59, 60+, and the student’s name and grade); the guardian stayed blank and the side panel named it and the apartment as left; the typed apartment was saved to My information after the Save click.');
+
+    // #258: the order form's Date ordered box takes the app's today, asked for with the first name in one request, counted with
+    // it, and outlined as a rule's answer.
+    await page.goto(ORDER, { waitUntil: 'domcontentloaded' });
+    const orderWidget = await launcherFrame();
+    await expect.poll(() => panel.text('#panel-autofill'), { timeout: 15000 }).toBe(en('panel.autofill'));
+    await panel.click('#panel-autofill');
+    await expect(page.locator('#ordered')).toHaveValue(TODAY, { timeout: 20000 });
+    await expect(page.locator('#first')).toHaveValue(syntheticProfile.firstName);
+    await settled();
+    assert.notEqual(TODAY, await page.evaluate(() => new Date().toISOString().slice(0, 10)), 'the pinned day is not the browser’s');
+    assert.equal(await page.locator('#ordered').getAttribute('data-secondhand-filled'), 'rule');
+    assert.deepEqual((await calls('getFields')).filter(call => call.url === ORDER).map(call => call.fields), [['firstName', 'todayDate']]);
+    await expect(orderWidget.locator('#widget-text')).toHaveText(en('result.siteFilled', { count: 2 }), { timeout: 15000 });
+    await expect.poll(() => panel.text('#filled-summary'), { timeout: 15000 }).toBe(en('questions.count', { count: 2 }));
+    assert.equal(await page.evaluate(() => window.__submits), 0, 'nothing is submitted');
+    await page.screenshot({ path: path.join(root, 'artifacts/all-websites/date-ordered-filled.png') });
+    console.log('#258: a pantry order form’s Date ordered box took today’s date from the app (stub, pinned to another day) with the first name, in one request; the card and the side panel counted both.');
 
     // #180: with no household list saved, the Jotform's household questions (adults, and children by age) stay open. The widget
     // says they wait in the side panel, which lists them with Add your household; its click asks the app to open Your household.
