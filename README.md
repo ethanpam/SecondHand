@@ -10,7 +10,6 @@
 
 <p align="center">
   <a href="https://secondhand.ethanpam.workers.dev"><strong>Download SecondHand 0.5.0</strong></a>
-  &nbsp;·&nbsp; <a href="#watch-the-film">Watch the film</a>
   &nbsp;·&nbsp; <a href="docs/setup.md">Setup guide</a>
   &nbsp;·&nbsp; <a href="#tech-stack-and-architecture">How it's built</a>
   &nbsp;·&nbsp; <a href="#what-it-costs-to-run-for-a-year">Yearly cost</a>
@@ -28,17 +27,16 @@
 
 1. [What is SecondHand?](#what-is-secondhand)
 2. [Why it matters](#why-it-matters)
-3. [Watch the film](#watch-the-film)
-4. [How you use it](#how-you-use-it)
-5. [What it does today](#what-it-does-today)
-6. [Tech stack and architecture](#tech-stack-and-architecture)
-7. [Privacy and safety](#privacy-and-safety)
-8. [What it costs to run for a year](#what-it-costs-to-run-for-a-year)
-9. [Get started](#get-started)
-10. [How a new form gets supported](#how-a-new-form-gets-supported)
-11. [Roadmap](#roadmap)
-12. [For developers](#for-developers)
-13. [License and credits](#license-and-credits)
+3. [How you use it](#how-you-use-it)
+4. [What it does today](#what-it-does-today)
+5. [Tech stack and architecture](#tech-stack-and-architecture)
+6. [Privacy and safety](#privacy-and-safety)
+7. [What it costs to run for a year](#what-it-costs-to-run-for-a-year)
+8. [Get started](#get-started)
+9. [How a new form gets supported](#how-a-new-form-gets-supported)
+10. [Roadmap](#roadmap)
+11. [For developers](#for-developers)
+12. [License and credits](#license-and-credits)
 
 ## What is SecondHand?
 
@@ -92,23 +90,13 @@ The panel's number one technology wish was a **single point of entry**: a "passp
 
 SecondHand was built for **Hack Away Hunger**, the DSMHack / CharityHack 2026 hackathon in Des Moines on food insecurity in Iowa.
 
-## Watch the film
-
-<p align="center">
-  <a href="https://secondhand.ethanpam.workers.dev/media/secondhand-film.mp4">
-    <img src="docs/media/film-poster.png" width="880" alt="Play the 46-second SecondHand film: a paper-cutout bear mascot waves beside the words SecondHand, A little help, A lot less typing, Free for Windows and Mac.">
-  </a>
-  <br>
-  <sub>A 46-second animated film about what SecondHand does. Click the picture to play it in your browser (MP4, 3 MB, with narration).</sub>
-</p>
-
 ## How you use it
 
 **1. Save your details once.** A short guided setup takes about five minutes: you (including whether you're a student), your household, where you live, income and where it comes from, the benefits you get now and the help you're looking for, and Iowa's questions about you. Skip any step and come back later.
 
 | Your saved details, in the desktop app | The overview |
 | --- | --- |
-| <img src="docs/media/desktop-my-information.png" alt="The My information page of the SecondHand desktop app, with the fictional applicant Daniel Ceaser's name, date of birth, and program choices" width="100%"> | <img src="docs/media/desktop-overview.png" alt="The SecondHand desktop app's Overview: a Prepare my application button, three next steps, and one Iowa SNAP application in progress" width="100%"> |
+| <img src="docs/media/desktop-my-information.png" alt="The My information page of the SecondHand desktop app, with the fictional applicant Avery Example's name, date of birth, and student status" width="100%"> | <img src="docs/media/desktop-overview.png" alt="The SecondHand desktop app's Overview: a Prepare my application button, three next steps, and one Iowa SNAP application in progress" width="100%"> |
 
 **2. Click Autofill on the application.** Open Iowa's SNAP application in Chrome and click **Autofill** in the SecondHand card. The app asks first: **Allow once**, or **Always allow on this computer**.
 
@@ -347,7 +335,6 @@ SecondHand contributors' original code is released under the [MIT License](LICEN
 
 - **Laya** is fine-tuned from the open [Laya](https://huggingface.co/convaiinnovations/laya) model and published at [huggingface.co/JacobTDang/secondhand-laya](https://huggingface.co/JacobTDang/secondhand-laya) under Apache-2.0.
 - **Bundled open-source software:** Electron (MIT), ONNX Runtime (MIT), Tesseract.js (Apache-2.0), pdf.js (Apache-2.0), React (MIT). The website adapts components from [React Bits](https://reactbits.dev) ([notice](website/public/react-bits-license.txt)) and [Paper Shaders](https://github.com/paper-design/shaders).
-- **The film's narration** was generated with [ElevenLabs](https://elevenlabs.io).
 - **Built by** the SecondHand team for Hack Away Hunger 2026. See [everyone who contributed](https://github.com/ethanpam/secondHand/graphs/contributors).
 
 ---
