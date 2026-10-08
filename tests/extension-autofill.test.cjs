@@ -10,6 +10,8 @@ test.afterEach(() => assert.deepEqual(workerLogged(), [], 'the worker logged an 
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
 // What the worker logs when the app fails to mark the application in progress after a fill.
 const PROGRESS_UNRECORDED = 'The SecondHand app couldn’t mark the application in progress after a fill. The fill stands.';
+// What the worker logs when Chrome can't say what page a keyboard shortcut was pressed on.
+const SHORTCUT_LOST = 'Chrome couldn’t say what page a keyboard shortcut was pressed on. The shortcut did nothing.';
 const { GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey } = require('../extension/generic-adapter.js');
 // Verified Iowa pages never use the general engine; any call there is a bug.
 const noSiteEngine = { GENERIC_KEYS, SAVE_KEYS, requestKeys: () => { throw new Error('Iowa used the site engine.'); }, deriveValues: () => { throw new Error('Iowa used the site engine.'); },
@@ -67,12 +69,15 @@ function generalPage(message, plan) {
 // the way Iowa's form reveals conditional sections.
 // `build` runs the worker as another build; `disk` is the build in the files Chrome would load on a
 // reload (null: they can't be read); `desktop.extension` is what the app says about the extension it ships.
-function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noSiteEngine, general = nothingPlanned(), page = {}, questions, pageText, build, disk } = {}) {
+// `focus` is the page's answer when SecondHand goes to one of its questions.
+function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noSiteEngine, general = nothingPlanned(), page = {}, questions, pageText, build, disk, focus = () => ({ focused: true }) } = {}) {
   const model = { kind, filled: [], revealed: false, token: null };
   const vault = { reachable: true, unlocked: true, getFieldsError: null,
     values: { firstName: 'Synthetic private first', hasHomeAddress: 'yes', mailingCity: 'Synthetic private city' }, ...desktop };
   const calls = { native: [], content: [], pageTabs: [], injected: [], reads: [], order: [] };
   const tab = { id: 7, active: true, url: `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo` };
+  // The person closed the tab: Chrome finds no tab with its id.
+  let closed = false;
   const w = serviceWorker();
   const visible = () => ['firstName', 'lastName', 'hasHomeAddress', ...(model.revealed ? ['mailingCity'] : [])];
   function pageState() {
@@ -84,7 +89,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
   }
   const chrome = {
     tabs: {
-      get: async () => ({ ...tab }),
+      get: async id => { if (closed) throw new Error(`No tab with id: ${id}.`); return { ...tab }; },
       sendMessage: async (id, message) => {
         calls.pageTabs.push(id); calls.content.push(message);
         if (message.type === 'secondhand:pageState') return pageState();
@@ -98,7 +103,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
           }
           return { ok: true, filledCount, skippedCount: message.fields.length - filledCount };
         }
-        if (message.type === 'secondhand:focusField') return { focused: true };
+        if (message.type === 'secondhand:focusField') return focus(message);
         if (message.type === 'secondhand:questions' && questions) return structuredClone(questions);
         if (message.type === 'secondhand:pageText' && pageText) return structuredClone(pageText);
         if (message.type === 'secondhand:widgetSize') return { sized: true };
@@ -156,6 +161,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
   return {
     calls, tab, events: w.events, vault, filled: () => [...model.filled],
     restart: w.restart,
+    close: () => { closed = true; },
     reloads: () => calls.order.filter(step => step === 'reload').length,
     send,
     panel: message => send({ tabId: 7, ...message }, { id: 'testextension', url: PANEL_URL }),
@@ -190,6 +196,30 @@ test('the next-question shortcut goes to each question the tab’s result left, 
   await autofill(w);
   for (let i = 0; i < 3; i++) { w.events.command('next-question', { id: 7 }); await settleShortcut(); }
   assert.deepEqual(focused(), ['firstName', 'lastName', 'firstName']);
+});
+
+test('a shortcut that fails ends where its click would: the tab’s result says why, as the side panel and the card read it', async () => {
+  const lost = 'Could not establish connection. Receiving end does not exist.';
+  const w = worker({ focus: () => { throw new Error(lost); } });
+  await autofill(w);
+  w.events.command('next-question', { id: 7 });
+  await settleShortcut();
+  const { result } = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.deepEqual(result, { state: 'error', message: lost, messageKey: 'detail', messageParams: { detail: lost }, filled: 0, needYou: [], pageKey: 'iowa-personal-information' });
+  assert.deepEqual(plain((await w.launcher({ type: 'ui:pageState' })).data).result, result);
+  assert.deepEqual(w.filled(), ['firstName', 'hasHomeAddress', 'mailingCity'], 'and nothing is erased');
+});
+
+test('a shortcut on a tab Chrome can no longer find does nothing, and says so where Chrome records SecondHand’s errors', async () => {
+  const w = worker();
+  w.close();
+  w.events.command('autofill', { id: 7 });
+  w.events.command('next-question', { id: 7 });
+  await settleShortcut();
+  const logged = workerLogged();
+  assert.deepEqual(logged.map(([what]) => what), [SHORTCUT_LOST, SHORTCUT_LOST]);
+  assert.deepEqual(logged.map(([, error]) => error.message), ['No tab with id: 7.', 'No tab with id: 7.']);
+  assert.deepEqual(w.calls.native.filter(call => call.type === 'getFields'), []);
 });
 
 test('a shortcut on a tab that is neither Iowa’s form nor a site that is on does nothing, and an unknown command is ignored', async () => {

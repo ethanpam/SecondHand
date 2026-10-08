@@ -356,6 +356,27 @@ test('the worker loads the site engine, its text, and its translator next to the
     /generic-adapter\.js/, 'an engine without Laya’s question rule is refused');
 });
 
+test('the Autofill shortcut on a site ends where its click would: on a site that is on its failure is the tab’s result, and on one that is off it does nothing', async () => {
+  const w = siteWorker({ enabled: true });
+  // The person moved to another tab as the shortcut ran.
+  w.tab.active = false;
+  w.events.command('autofill', { id: 7 });
+  await settle();
+  w.tab.active = true;
+  const { result } = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.equal(result.state, 'error');
+  assert.equal(result.messageKey, 'worker.openFormActiveTab');
+  assert.equal(result.pageKey, 'general');
+  assert.deepEqual(w.page.answered(), []);
+  assert.equal(w.nativeTypes().includes('getFields'), false);
+  // A site that is off has no Autofill button to press, so the shortcut has nothing to say once it is turned on.
+  const off = siteWorker({ granted: true });
+  off.events.command('autofill', { id: 7 });
+  await settle();
+  assert.equal((await off.panel({ type: 'ui:enableSite', confirmed: true })).ok, true);
+  assert.equal(plain((await off.panel({ type: 'ui:pageState' })).data).result, null);
+});
+
 test('turning a site on checks Chrome access, asks the desktop, then registers and injects the site scripts', async () => {
   const w = siteWorker({ granted: true });
   const response = await w.panel({ type: 'ui:enableSite', confirmed: true });

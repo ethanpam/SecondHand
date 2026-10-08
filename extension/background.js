@@ -2181,14 +2181,29 @@ async function nextQuestion(tabId) {
   questionTurns.set(tabId, { result, index });
   return focusField(tabId, keys[index]);
 }
+// A shortcut presses a button the tab has only on Iowa's form or on a site that is on: elsewhere it does nothing. When the
+// press fails, it ends where a click's would: the tab's result says why.
+async function shortcut(tabId, press) {
+  const tab = await chrome.tabs.get(tabId);
+  const iowa = SecondHandIowa.isSupportedUrl(tab.url), origin = siteOrigin(tab.url);
+  if (!iowa && !(origin && await siteEnabled(origin))) return;
+  try { await press(); }
+  catch (error) {
+    const { state, ...message } = failed(error);
+    remember(tabId, iowa ? { state, ...message, filled: 0, needYou: [], pageKey: results.get(tabId)?.pageKey || '' } : siteResult(state, message));
+  }
+}
+// When Chrome can't say what page the tab is on (it closed as the keys were pressed), there is no result to say so in.
+const shortcutLost = unshown('Chrome couldn’t say what page a keyboard shortcut was pressed on. The shortcut did nothing.');
 chrome.commands?.onCommand.addListener((command, tab) => {
   const tabId = tab?.id;
   if (!Number.isInteger(tabId)) return;
-  if (command === 'next-question') { nextQuestion(tabId).catch(() => {}); return; }
+  if (command === 'next-question') { shortcut(tabId, () => nextQuestion(tabId)).catch(shortcutLost); return; }
   if (command !== 'autofill') return;
-  // As a click does, the shortcut holds off an update until it settles.
+  // As a click does, the shortcut holds off an update until it settles. What it presses is what the tab shows now.
   clicksUnderway++;
-  (autopilots.has(tabId) ? stop(tabId) : autofill(tabId)).catch(() => {}).finally(() => { clicksUnderway--; reloadWhenIdle(); });
+  const press = autopilots.has(tabId) ? () => stop(tabId) : () => autofill(tabId);
+  shortcut(tabId, press).catch(shortcutLost).finally(() => { clicksUnderway--; reloadWhenIdle(); });
 });
 chrome.tabs.onActivated?.addListener(info => {
   for (const [tabId, pilot] of sitePilots) if (tabId !== info.tabId) stopSitePilot(tabId, pilot, siteResult('stopped', say('worker.stoppedTabChanged')));
