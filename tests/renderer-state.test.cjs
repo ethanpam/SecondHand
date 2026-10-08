@@ -1352,9 +1352,10 @@ test('reset on this computer skips the recovery key, and either method can be ch
 });
 
 test('a lock notification arriving after the lock response cannot clear an unlock attempt already under way', async t => {
+  const passwordError = 'That password didn’t open SecondHand. Check it and try again. If you’re sure it’s right, you can use your recovery key or restore a backup.';
   const view = await renderer(t, {
     lock: async () => ({ exists: true, unlocked: false, lockRevision: 1, recoveryKey: true, extensionId: '', bridgeRunning: true }),
-    unlock: async () => { throw new Error('Unable to unlock. Check your password or restore an intact backup.'); }
+    unlock: async () => { throw new Error(passwordError); }
   });
   // The lock response shows the unlock screen before the separate notification arrives.
   view.get('lock-button').click();
@@ -1368,7 +1369,7 @@ test('a lock notification arriving after the lock response cannot clear an unloc
   // The late notice carries the same lock revision as the response already shown.
   view.lock(1);
   assert.equal(view.get('auth-error').hidden, false, 'A late lock notice must not hide the unlock error');
-  assert.match(view.get('auth-error').textContent, /Unable to unlock/);
+  assert.equal(view.get('auth-error').textContent, `Error: ${passwordError}`);
   assert.equal(view.get('workspace').hidden, true);
 });
 

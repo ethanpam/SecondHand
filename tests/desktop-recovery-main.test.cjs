@@ -45,6 +45,7 @@ async function desktop(t, { encryptionAvailable = true, shell = {}, env = {}, is
   };
 }
 const EXTENSION = 'a'.repeat(32);
+const PASSWORD_UNLOCK_ERROR = 'That password didn’t open SecondHand. Check it and try again. If you’re sure it’s right, you can use your recovery key or restore a backup.';
 
 test('a password created with reset on this computer can be reset there, and turning it off removes the secret', async t => {
   const app = await desktop(t);
@@ -62,7 +63,7 @@ test('a password created with reset on this computer can be reset there, and tur
   const reset = await app.invoke('resetPassword', { method: 'device', password: 'synthetic second password' });
   assert.equal(reset.unlocked, true);
   await app.invoke('lock');
-  await assert.rejects(app.invoke('unlock', 'synthetic first password'), /Unable to unlock/);
+  await assert.rejects(app.invoke('unlock', 'synthetic first password'), new Error(PASSWORD_UNLOCK_ERROR));
   await app.invoke('unlock', 'synthetic second password');
 
   const off = await app.invoke('setDeviceReset', false);
@@ -129,7 +130,13 @@ test('starting over erases the locked information and reset secret, keeps settin
   assert.equal(created.status.unlocked, true);
   assert.deepEqual((await app.invoke('getData')).profile, {});
   await app.invoke('lock');
-  await assert.rejects(app.invoke('unlock', 'synthetic first password'), /Unable to unlock/);
+  await assert.rejects(app.invoke('unlock', 'synthetic first password'), new Error(PASSWORD_UNLOCK_ERROR));
+});
+
+test('an unparseable vault keeps the generic unlock message', async t => {
+  const app = await desktop(t);
+  await fsp.writeFile(app.vaultPath, 'not a vault');
+  await assert.rejects(app.invoke('unlock', 'synthetic first password'), new Error('Could not unlock SecondHand.'));
 });
 
 // Backups (#140). Every refused restore leaves the saved information as it was: the same encrypted bytes,

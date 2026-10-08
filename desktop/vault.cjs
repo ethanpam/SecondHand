@@ -241,7 +241,7 @@ class Vault {
         Object.assign(this, { key, salt: envelope.version === 1 ? salt : null, slots: envelope.slots || null, version: envelope.version, data });
       } catch {
         key?.fill(0); this.data = null;
-        throw new Error('Unable to unlock. Check your password or restore an intact backup.');
+        throw new Error('That password didn’t open SecondHand. Check it and try again. If you’re sure it’s right, you can use your recovery key or restore a backup.');
       } finally { if (key !== passwordKey) passwordKey.fill(0); }
     });
   }
