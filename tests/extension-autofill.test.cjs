@@ -69,8 +69,10 @@ function generalPage(message, plan) {
 // the way Iowa's form reveals conditional sections.
 // `build` runs the worker as another build; `disk` is the build in the files Chrome would load on a
 // reload (null: they can't be read); `desktop.extension` is what the app says about the extension it ships.
-// `focus` is the page's answer when SecondHand goes to one of its questions.
-function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noSiteEngine, general = nothingPlanned(), page = {}, questions, pageText, build, disk, focus = () => ({ focused: true }) } = {}) {
+// `focus` is the page's answer when SecondHand goes to one of its questions, and `panelBehavior` Chrome's when the worker
+// sets what its toolbar icon does.
+function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noSiteEngine, general = nothingPlanned(), page = {}, questions, pageText, build, disk, focus = () => ({ focused: true }),
+  panelBehavior = async () => {} } = {}) {
   const model = { kind, filled: [], revealed: false, token: null };
   const vault = { reachable: true, unlocked: true, getFieldsError: null,
     values: { firstName: 'Synthetic private first', hasHomeAddress: 'yes', mailingCity: 'Synthetic private city' }, ...desktop };
@@ -113,7 +115,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
       },
       onActivated: w.event('activated'), onRemoved: w.event('removed'), onUpdated: w.event('updated')
     },
-    sidePanel: { setPanelBehavior: async () => {}, open: async () => {} },
+    sidePanel: { setPanelBehavior: panelBehavior, open: async () => {} },
     commands: { onCommand: w.event('command') },
     scripting: { executeScript: async details => { calls.injected.push(plain(details)); }, getRegisteredContentScripts: async () => [] },
     // Iowa's site is the extension's own host permission; no other site is on.
@@ -169,6 +171,16 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
   };
 }
 const autofill = w => w.panel({ type: 'ui:autofill', confirmed: true });
+
+test('SecondHand’s toolbar icon opens its side panel, and Chrome’s failure to set that goes where Chrome records SecondHand’s errors', async () => {
+  const set = [];
+  worker({ panelBehavior: async behavior => { set.push(plain(behavior)); } });
+  assert.deepEqual(set, [{ openPanelOnActionClick: true }]);
+  const failure = new Error('Synthetic side panel failure');
+  worker({ panelBehavior: async () => { throw failure; } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(workerLogged(), [['Chrome couldn’t make SecondHand’s toolbar icon open the side panel. The card and Chrome’s side panel menu still open it.', failure]]);
+});
 
 // Keyboard shortcuts: Chrome sends a command only for keys the person pressed, with the tab in front.
 const settleShortcut = async () => { for (let i = 0; i < 30; i++) await new Promise(resolve => setImmediate(resolve)); };

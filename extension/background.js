@@ -2245,4 +2245,5 @@ async function refreshSiteScripts() {
 chrome.runtime.onInstalled?.addListener(details => { if (details.reason === 'update') void refreshSiteScripts(); });
 chrome.permissions?.onRemoved?.addListener(() => { sitePilots.clear(); forgetRevoked().catch(error => { if (!appClosed(error)) throw error; }); });
 // Chrome's native panel persists alongside navigation; it never opens itself.
-chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true })
+  .catch(unshown('Chrome couldn’t make SecondHand’s toolbar icon open the side panel. The card and Chrome’s side panel menu still open it.'));

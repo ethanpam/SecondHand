@@ -491,7 +491,8 @@ test('the worker says nothing in English of its own: every message it builds com
     'SecondHand could not load strings.js. Reinstall the extension.', 'Open SecondHand, connect this extension, and unlock SecondHand.',
     'Open SecondHand, connect this extension, and unlock your local vault.',
     'The SecondHand app couldn’t mark the application in progress after a fill. The fill stands.',
-    'Chrome couldn’t say what page a keyboard shortcut was pressed on. The shortcut did nothing.'];
+    'Chrome couldn’t say what page a keyboard shortcut was pressed on. The shortcut did nothing.',
+    'Chrome couldn’t make SecondHand’s toolbar icon open the side panel. The card and Chrome’s side panel menu still open it.'];
   const prose = unique(literals(code).map(item => item.text).filter(text => /^[A-Z][a-z’']+\s/.test(text) && !allowed.includes(text)));
   assert.deepEqual(prose, []);
   const keys = [...code.matchAll(/\b(?:say|fault|english)\(\s*'([^']+)'/g)].map(match => match[1]);
