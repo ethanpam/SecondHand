@@ -41,9 +41,10 @@
   const problem = (error, fallback = 'panel.assistantUnavailable') => error?.messageKey ? { key: error.messageKey, params: error.messageParams }
     : fixedText(error?.message) ? { key: 'detail', params: { detail: fixedText(error.message) } } : { key: fallback };
   const keyedError = (key, params = {}) => Object.assign(new Error(strings.english(key, params)), { messageKey: key, messageParams: params });
-  // A lookup the reader didn't ask for, whose fallback is right on any computer (its system, the keyboard shortcuts),
-  // reports its failure where Chrome records SecondHand's errors (chrome://extensions, Errors), not on screen: there
-  // it would push aside what the reader needs, with nothing for them to do about it.
+  // A lookup or request the reader didn't ask for, whose fallback is right on any computer (its system, the keyboard
+  // shortcuts, the room an outdated card asks for), reports its failure where Chrome records SecondHand's errors
+  // (chrome://extensions, Errors), not on screen: there it would push aside what the reader needs, with nothing for
+  // them to do about it.
   const unshown = what => error => console.error(what, error);
   const trusted = callback => event => { if (event.isTrusted) return callback(event); };
   const outdatedError = (key = 'panel.outdated') => Object.assign(keyedError(key), { outdated: true });
@@ -290,7 +291,8 @@
       if ($('widget-status').textContent !== spoken) $('widget-status').textContent = spoken;
       if (outdated && !direct && outdatedKey !== 'panel.reloadPage' && !roomAsked) {
         roomAsked = true;
-        send({ type: 'ui:widgetSize', line: true }).catch(() => {});
+        send({ type: 'ui:widgetSize', line: true })
+          .catch(unshown('SecondHand’s outdated worker couldn’t make room for the card’s notice. The card shows its short form when the whole doesn’t fit.'));
       }
       // The widget is as wide and as tall as what it shows, up to 272px by 166px (see panel.css). An outdated
       // worker is not asked for anything more; its notice fills the frame the widget already has.

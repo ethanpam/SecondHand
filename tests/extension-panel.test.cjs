@@ -17,6 +17,13 @@ const BUILD = source('panel.js').match(/const BUILD = '([^']+)'/)[1];
 // frame can't hold the whole), and the side panel's notice above its own.
 const OUTDATED = 'SecondHand was updated. Click Restart SecondHand, then go to the next page, or reload this one with the round arrow by the address bar. That clears what you typed on this page; your saved details stay in the app.';
 const OUTDATED_SHORT = 'SecondHand was updated.';
+// An outdated card whose worker doesn't answer its one request for room logs that, where Chrome records SecondHand's errors.
+const ROOM_UNMADE = 'SecondHand’s outdated worker couldn’t make room for the card’s notice. The card shows its short form when the whole doesn’t fit.';
+function unroomed(view) {
+  const logged = view.logged();
+  assert.deepEqual(logged.map(([what]) => what), [ROOM_UNMADE]);
+  assert.equal(logged[0][1].messageKey, 'panel.outdated');
+}
 const OUTDATED_PANEL = 'SecondHand was updated and needs to restart. This side panel will close. To use SecondHand again, go on to the next page of your form, or reload its page with the round arrow by the address bar. That clears what you typed on that page; your saved details stay in the SecondHand app.';
 
 
@@ -1220,8 +1227,13 @@ test('a worker that never answers gets a plain notice and a Restart button in th
   assert.equal(widget.get('widget').classList.contains('restartable'), true);
   // The outdated worker is asked once, in the oldest form of the request, for a frame with room for a line.
   assert.deepEqual(plainRequests(widget.requests).filter(request => request.type === 'ui:widgetSize'), [{ type: 'ui:widgetSize', line: true }]);
+  // This one doesn't answer that either. Its failure, which the reader can't act on, goes where Chrome records SecondHand's
+  // errors, not over the notice the reader needs.
+  unroomed(widget);
+  assert.equal(widget.get('widget-text').textContent, OUTDATED);
   // A frame too small for the whole notice gets the short form beside the button.
   const small = await panel(t, { launcher: true, silent: true });
+  unroomed(small);
   Object.defineProperties(small.get('widget-text'), { scrollHeight: { get() { return this.textContent === OUTDATED ? 56 : 28; } }, clientHeight: { get: () => 42 } });
   small.window.dispatchEvent(new small.window.Event('resize'));
   assert.equal(small.get('widget-text').textContent, OUTDATED_SHORT);
@@ -1239,6 +1251,7 @@ test('a worker that never answers gets a plain notice and a Restart button in th
 
 test('an outdated card the page can size directly is drawn whole, can be hidden, and asks the page, not the worker', async t => {
   const widget = await panel(t, { launcher: true, silent: true });
+  unroomed(widget);
   assert.equal(widget.get('hide').hidden, true, 'without the page’s word, hiding would leave an empty frame over the page');
   assert.equal(widget.get('widget').classList.contains('outdated'), true, 'and the notice keeps to the frame it has');
   const posted = [];
