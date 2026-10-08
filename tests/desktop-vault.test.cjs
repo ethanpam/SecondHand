@@ -6,6 +6,8 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { Vault, parseEnvelope } = require('../desktop/vault.cjs');
+
+const PASSWORD_UNLOCK_ERROR = 'That password didn’t open SecondHand. Check it and try again. If you’re sure it’s right, you can use your recovery key or restore a backup.';
 const { validateApplication } = require('../shared/schema.cjs');
 
 const PASSPHRASE = 'test only long local phrase';
@@ -83,14 +85,14 @@ test('wrong passphrase and authenticated ciphertext tampering do not unlock or c
   await vault.create(PASSPHRASE);
   await vault.lock();
   const original = await fs.readFile(file);
-  await assert.rejects(vault.unlock('a completely different phrase'), /Unable to unlock/);
+  await assert.rejects(vault.unlock('a completely different phrase'), new Error(PASSWORD_UNLOCK_ERROR));
   assert.equal(vault.unlocked, false);
   assert.deepEqual(await fs.readFile(file), original);
   const envelope = JSON.parse(original);
   const cipher = Buffer.from(envelope.ciphertext, 'base64');
   cipher[0] ^= 1; envelope.ciphertext = cipher.toString('base64');
   await fs.writeFile(file, JSON.stringify(envelope));
-  await assert.rejects(vault.unlock(PASSPHRASE), /Unable to unlock/);
+  await assert.rejects(vault.unlock(PASSPHRASE), new Error(PASSWORD_UNLOCK_ERROR));
   assert.equal(vault.unlocked, false);
   assert.throws(() => vault.getData(), /Unlock/);
 });
@@ -193,7 +195,7 @@ test('a new password comes with a recovery key that can set a new password and k
   await vault.resetWithRecoveryKey(typed, 'a brand new password');
   assert.equal(vault.getData().profile.firstName, 'Recovered Synthetic');
   await vault.lock();
-  await assert.rejects(vault.unlock(PASSPHRASE), /Unable to unlock/);
+  await assert.rejects(vault.unlock(PASSPHRASE), new Error(PASSWORD_UNLOCK_ERROR));
   await vault.unlock('a brand new password');
   assert.equal(vault.getData().profile.firstName, 'Recovered Synthetic');
   await vault.lock();
@@ -237,7 +239,7 @@ test('version 2 envelopes require a password slot and reject unknown or malforme
   assert.throws(() => parseEnvelope(variant({ ...envelope.slots, recovery: { ...envelope.slots.recovery, key: 'AAAA' } })), /Invalid/);
   const swapped = variant({ password: envelope.slots.recovery, recovery: envelope.slots.password });
   await fs.writeFile(file, swapped);
-  await assert.rejects(vault.unlock(PASSPHRASE), /Unable to unlock/);
+  await assert.rejects(vault.unlock(PASSPHRASE), new Error(PASSWORD_UNLOCK_ERROR));
 });
 
 test('this computer’s secret can reset the password only while its slot is enabled and matching', async t => {

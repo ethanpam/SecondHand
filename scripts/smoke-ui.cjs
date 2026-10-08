@@ -18,6 +18,7 @@ const passphrase = 'synthetic-test-vault-passphrase';
 // main process: about 65 ms on an M4 Max, but many times that on a loaded hosted
 // macOS runner. Bound the whole attempt generously instead of Playwright's 5s default.
 const AUTH_ATTEMPT_TIMEOUT_MS = 30000;
+const PASSWORD_UNLOCK_ERROR = 'That password didn’t open SecondHand. Check it and try again. If you’re sure it’s right, you can use your recovery key or restore a backup.';
 const resetPassword = 'synthetic-reset-password';
 // Iowa's Tell Us More questions in the About you card: radio buttons, and a marital status list.
 const IOWA_QUESTIONS = ['sex', 'maritalStatus', 'hasSsnAnswer', 'ssnCardNameMatches', 'usCitizen', 'militaryOrVeteran', 'disabled', 'blind', 'healthLimitation', 'medicare'];
@@ -52,7 +53,7 @@ async function rejectedPassphrase(page, afterEntry) {
   if (afterEntry) await afterEntry();
   await expect(page.locator('#passphrase')).toHaveValue('incorrect-passphrase');
   await submitAuthForm(page, 'incorrect-passphrase');
-  await expect(page.locator('#auth-error')).toBeVisible();
+  await expect(page.locator('#auth-error')).toContainText(PASSWORD_UNLOCK_ERROR);
   await expect(page.locator('#workspace')).not.toBeVisible();
 }
 
