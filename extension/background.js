@@ -255,7 +255,8 @@ async function fillRecordPage(tabId, state, pilot) {
       ...(recipient.personName ? { personName: recipient.personName } : {}) });
     currentPilot(tabId, pilot);
     const revision = receiptRevision(response);
-    if (response?.reason === 'recordMissing') return { state: 'waiting', filled: 0, needYou: needYou(state.page), ...say('worker.recordMissing'), pageKey };
+    // No saved record fits: the run ends, as a lock ends it, so once the record is saved one click on Autofill asks again (#236).
+    if (response?.reason === 'recordMissing') return { state: 'stopped', filled: 0, needYou: needYou(state.page), ...say('worker.recordMissing'), pageKey };
     if (!response?.values || typeof response.values !== 'object' || Array.isArray(response.values) || typeof response.recordId !== 'string' ||
         !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(response.recordId) || typeof response.values.person !== 'string' || !response.values.person.trim() ||
         Object.entries(response.values).some(([key, value]) => !request.fields.includes(key) || typeof value !== 'string' || value.length > 200)) throw fault('worker.desktopUnexpected');
