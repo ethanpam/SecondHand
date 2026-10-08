@@ -177,7 +177,12 @@ async function inspectStaticDemo(page) {
   await expect(page.locator('.autofill-demo input, .autofill-demo form')).toHaveCount(0);
 }
 
-async function inspectDemoMotion(page) {
+async function inspectDemoMotion(browser) {
+  // The demo's timers run on Playwright's clock, so the checks wait on the animation's own state, not on real time (#220).
+  // The clock covers a whole context, so the demo gets its own, and the rest of the smoke keeps real time.
+  const context = await openContext(browser, { viewport: { width: 1440, height: 1000 } });
+  const page = await context.newPage();
+  await page.clock.install();
   // At 1440x1000 the heading is on screen when the page opens, so it would type while a slow page loads
   // (#160). Reduced motion keeps it from starting until the check has scrolled away from it.
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -204,25 +209,46 @@ async function inspectDemoMotion(page) {
     record();
     element.motionProbe = { samples, observer };
   });
+  // From here time moves only when the check advances the clock. The clock has kept real time since it was installed,
+  // so it pauses a moment past now; the demo is off screen, so neither loop has a timer to fire.
+  await page.clock.pauseAt(Date.now() + 1000);
+  // Each loop is a chain of timers, and React starts the next one only after the previous state renders, so one large
+  // jump would fire only the first. The clock moves in steps of half the loop's shortest timer (40ms for the text, 280ms
+  // for the demo), and the page is read after each step, so every state shows at least once, even when the page renders
+  // late. Every state comes round once a cycle; one that has not shown in two cycles is left to the assertion after it.
+  const textLoop = { step: 20, cycle: 5410 };
+  const demoLoop = { step: 140, cycle: 6240 };
+  async function advanceUntil({ step, cycle }, reached) {
+    for (let elapsed = 0; elapsed < 2 * cycle && !(await reached()); elapsed += step) await page.clock.runFor(step);
+  }
+  const typed = async () => (await content.innerText()).length;
+  const phase = () => demo.getAttribute('data-phase');
   await page.locator('.demo-section').evaluate(element => element.scrollIntoView({ behavior: 'instant', block: 'start' }));
   await expect(text).toHaveAttribute('data-running', 'true');
   await expect(demo).toHaveAttribute('data-running', 'true');
   await expect(heading).toHaveAccessibleName('Ready for less typing?');
   const headingSize = await heading.boundingBox();
+  await advanceUntil(textLoop, async () => (await typed()) > 0);
   await expect.poll(async () => (await content.innerText()).length).toBeGreaterThan(0);
   assert.ok((await content.innerText()).length < 'Ready for\nless typing?'.length, 'The heading must type, not appear in one frame');
+  await advanceUntil(demoLoop, async () => (await phase()) === 'complete');
   await expect(demo).toHaveAttribute('data-phase', 'complete');
   const stages = await demo.evaluate(element => {
     element.motionProbe.observer.disconnect();
     return element.motionProbe.samples;
   });
   assert.deepEqual(stages, [['approach', 0], ['click', 0], ['name', 1], ['email', 2], ['city', 3], ['complete', 3]], 'Approval must precede fields filling one at a time');
+  await advanceUntil(textLoop, async () => (await typed()) === 'Ready for\nless typing?'.length);
   await expect(content).toHaveText('Ready for less typing?');
+  await advanceUntil(textLoop, async () => (await text.getAttribute('data-deleting')) === 'true');
   await expect(text).toHaveAttribute('data-deleting', 'true');
+  await advanceUntil(textLoop, async () => (await typed()) < 'Ready for\nless typing?'.length);
   await expect.poll(async () => (await content.innerText()).length).toBeLessThan('Ready for\nless typing?'.length);
   assert.deepEqual(await heading.boundingBox(), headingSize, 'Typing and deleting must not shift the heading layout');
   await expect(heading).toHaveAccessibleName('Ready for less typing?');
+  await advanceUntil(demoLoop, async () => (await phase()) === 'approach');
   await expect(demo).toHaveAttribute('data-phase', 'approach');
+  await advanceUntil(demoLoop, async () => (await phase()) === 'complete');
   await expect(demo).toHaveAttribute('data-phase', 'complete');
   await page.screenshot({ path: path.join(artifacts, 'text-type-desktop.png') });
 
@@ -230,16 +256,17 @@ async function inspectDemoMotion(page) {
     await expect(text).toHaveAttribute('data-running', 'false');
     await expect(demo).toHaveAttribute('data-running', 'false');
     assert.equal(await page.locator('.text-type__cursor').evaluate(element => getComputedStyle(element).animationPlayState), 'paused');
-    // data-running="false" means their timers are cleared. A change in the next 30 rendered frames would show one
-    // still running (#143: rendered frames, not a fixed wait).
-    const changes = await page.evaluate(() => new Promise(resolve => {
+    // data-running="false" means their timers are cleared. A timer still running would fire within one demo cycle on the
+    // clock, longer than any timer in either loop, and change the page (#143: the animation's time, not a fixed wait). The
+    // paused clock also stops requestAnimationFrame, so this advances the clock instead of counting rendered frames.
+    const watch = await page.evaluateHandle(() => {
       const seen = [];
       const observer = new MutationObserver(records => seen.push(...records.map(record => record.type)));
       for (const selector of ['.text-type__content', '.autofill-demo']) observer.observe(document.querySelector(selector), { subtree: true, childList: true, characterData: true, attributes: true });
-      let frames = 30;
-      const frame = () => { if (--frames) requestAnimationFrame(frame); else { observer.disconnect(); resolve(seen); } };
-      requestAnimationFrame(frame);
-    }));
+      return { seen, observer };
+    });
+    await page.clock.runFor(demoLoop.cycle);
+    const changes = await watch.evaluate(({ seen, observer }) => { observer.disconnect(); return seen; });
     assert.deepEqual(changes, [], 'Nothing moves while suspended');
   }
 
@@ -258,6 +285,7 @@ async function inspectDemoMotion(page) {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await inspectStaticDemo(page);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await context.close();
   console.log('Text Type and click-to-autofill: typing/deleting, stable layout, field sequence, reduced motion, and visibility suspension passed.');
 }
 
@@ -357,7 +385,7 @@ async function main() {
     await expect.poll(() => page.locator('.gradient-canvas[data-paper-shader]').evaluate(element => element.paperShaderMount.currentSpeed)).toBe(0);
     console.log('Shader rendering, reduced motion, and offscreen suspension passed.');
     await inspectWordmark(page);
-    await inspectDemoMotion(page);
+    await inspectDemoMotion(browser);
     await inspectWhatItDoes(page);
 
     await expect(page.locator('.download-panel, #setup')).toHaveCount(0);
