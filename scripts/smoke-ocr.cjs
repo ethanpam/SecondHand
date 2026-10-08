@@ -8,22 +8,50 @@ const path = require('node:path');
 const os = require('node:os');
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
+const { checkOcrResult, checkSameReading } = require('./smoke-checks.cjs');
 const root = path.resolve(__dirname, '..');
 if (!process.versions.electron) {
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
-  const child = spawn(require('electron'), [__filename, ...process.argv.slice(2)], { env, stdio: 'inherit' });
-  child.on('error', () => { process.exitCode = 1; });
-  child.on('exit', (code, signal) => {
-    if (signal) process.stderr.write(`Local OCR process stopped by ${signal}.\n`);
-    process.exitCode = code === 0 ? 0 : 1;
+  // This script run in Electron with `args`: whether it passed.
+  const electronRun = args => new Promise(resolve => {
+    const child = spawn(require('electron'), [__filename, ...args], { env, stdio: 'inherit' });
+    child.on('error', () => resolve(false));
+    child.on('exit', (code, signal) => {
+      if (signal) process.stderr.write(`Local OCR process stopped by ${signal}.\n`);
+      resolve(code === 0);
+    });
+  });
+  (async () => {
+    const args = process.argv.slice(2);
+    if (!await electronRun(args)) return false;
+    if (args.includes('--input')) return true;
+    // Every synthetic fixture reads the same on a scale-1 display as on a Retina one (#260).
+    const assets = args.includes('--assets') ? ['--assets', args[args.indexOf('--assets') + 1]] : [];
+    const fixtures = path.join(root, 'tests/fixtures/ocr');
+    const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-ocr-scales-'));
+    try {
+      for (const file of (await fs.readdir(fixtures)).filter(name => name.endsWith('.pdf')).sort()) {
+        const readings = [];
+        for (const scale of [1, 2]) {
+          const output = path.join(temporary, `scale-${scale}.json`);
+          if (!await electronRun([`--force-device-scale-factor=${scale}`, ...assets, '--input', path.join(fixtures, file), '--output', output])) return false;
+          readings.push(JSON.parse(await fs.readFile(output, 'utf8')));
+        }
+        checkSameReading(...readings);
+        process.stdout.write(`${file} reads the same at display scales 1 and 2.\n`);
+      }
+    } finally { await fs.rm(temporary, { recursive: true, force: true }); }
+    return true;
+  })().then(passed => { process.exitCode = passed ? 0 : 1; }, error => {
+    process.stderr.write(`Local OCR smoke failed: ${error.message}\n`);
+    process.exitCode = 1;
   });
 } else {
   const { app, BrowserWindow, session, ipcMain } = require('electron');
   const { createOcrEngine } = require('../desktop/ocr-engine.cjs');
   const { readSelectedFile } = require('../desktop/ocr-service.cjs');
   const { analyzeDocument } = require('../shared/document-parser.cjs');
-  const { checkOcrResult } = require('./smoke-checks.cjs');
   let temporary, engine;
   app.on('window-all-closed', () => {});
   async function syntheticImage() {

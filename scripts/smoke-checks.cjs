@@ -1,6 +1,7 @@
 'use strict';
 // What the OCR and Laya smokes check about the results they get, kept apart so tests/smoke-checks.test.cjs can
 // show each check fails when it should. Each throws with the reason.
+const { isDeepStrictEqual } = require('node:util');
 
 // OCR's result for a document: every page it counted, each with text and positioned words from both
 // segmentation passes. `pages`, when given, is how many pages the document has.
@@ -12,6 +13,22 @@ function checkOcrResult(result, { pages } = {}) {
     if (!page.text?.length || !page.words?.length) throw new Error(`OCR must return text and positioned words (page ${index + 1}).`);
     if (!page.alternative?.words?.length) throw new Error(`Both segmentation passes must return positioned words (page ${index + 1}).`);
   });
+}
+
+// Two readings of one document, as a scale-1 display and a Retina one give them (#260): the same pages, with the
+// same words in the same places from both passes, and the same suggestions.
+function checkSameReading(first, second) {
+  if (first.pageCount !== second.pageCount) throw new Error(`The readings have ${first.pageCount} and ${second.pageCount} pages.`);
+  first.pages.forEach((page, index) => {
+    const other = second.pages[index];
+    if (!isDeepStrictEqual(page, other)) throw new Error(`Page ${index + 1} reads differently: ${page.words.length} and ${other.words.length} words, ` +
+      `${page.alternative.words.length} and ${other.alternative.words.length} in the sparse-text pass.`);
+  });
+  const fields = analysis => new Map(analysis.fields.map(field => [field.id, field]));
+  const a = fields(first.analysis), b = fields(second.analysis);
+  const differ = [...new Set([...a.keys(), ...b.keys()])].filter(id => !isDeepStrictEqual(a.get(id), b.get(id)));
+  if (differ.length) throw new Error(`The suggestions differ: ${differ.join(', ')}.`);
+  if (!isDeepStrictEqual(first.analysis, second.analysis)) throw new Error('The suggestions match; the document type, tax year or warnings differ.');
 }
 
 const LAYA_KEYS = { suggestFields: ['budgetMs', 'fields', 'type', 'url'], answerFields: ['budgetMs', 'questions', 'type', 'url'] };
@@ -31,4 +48,4 @@ function checkLayaRequests(calls, savedValues) {
   return counts;
 }
 
-module.exports = { checkOcrResult, checkLayaRequests };
+module.exports = { checkOcrResult, checkSameReading, checkLayaRequests };

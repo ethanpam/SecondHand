@@ -24,8 +24,9 @@ const address = { addressLine1: '1847 TEST DATA AVE', addressLine2: 'APT 4B', ci
 const cases = {
   '1040sr': {
     file: 'synthetic-1040sr.pdf', title: 'Form 1040-SR tax return · Tax year 2024', text: '1040',
-    profile: { firstName: 'ALEXANDER', lastName: 'SAMPLE', ...address, addressLine2: '4B' },
-    review: { taxLine1a: '68450', taxLine2b: '460' }, amount: 'taxLine1a',
+    profile: { firstName: 'ALEXANDER', lastName: 'SAMPLE', ssn: '000-12-3456', ...address, addressLine2: '4B' },
+    review: { spouseFirstName: 'MORGAN', spouseMiddleName: 'L', spouseLastName: 'SAMPLE', spouseSsn: '000-98-7654', taxLine1a: '68450', taxLine2b: '460' },
+    amount: 'taxLine1a', ssn: 'applicantSsn',
     statement: { documentType: '1040-sr', taxYear: '2024', sourceName: '', sourceRole: 'taxpayer', annualIncome: '68450', annualWithholding: '' }
   },
   'w2': {
