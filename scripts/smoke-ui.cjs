@@ -578,6 +578,18 @@ async function main() {
     const privacyText = '#view-privacy :is(p, h3, strong, label), .field-hint';
     const privacy = await unreadableText(page, privacyText, 13);
     assert.equal(privacy.length, 0, `Text too small or faint on Privacy & backups:\n${privacy.join('\n')}`);
+    // The notes under the two switches that let someone else in, Touch ID and password reset, read alike (#229).
+    for (const setting of ['#touch-id-setting', '#device-reset-setting']) {
+      await expect(page.locator(setting)).toBeVisible();
+      await expect(page.locator(`${setting} .field-hint`)).toBeVisible();
+    }
+    const switchNotes = await page.evaluate(() => ['#touch-id-setting', '#device-reset-setting'].map(setting => {
+      const { fontSize, lineHeight, color } = getComputedStyle(document.querySelector(`${setting} .field-hint`));
+      return { setting, fontSize, lineHeight, color };
+    }));
+    const switchNote = note => `${note.setting} .field-hint: ${note.fontSize} / ${note.lineHeight}, ${note.color}`;
+    assert.ok(switchNotes.every(note => note.fontSize === '12px' && note.lineHeight === switchNotes[0].lineHeight && note.color === switchNotes[0].color),
+      `The Touch ID and password-reset notes should both be 12px with the same line height and color:\n${switchNotes.map(switchNote).join('\n')}`);
     await captureDiagnostic(page, 'desktop-privacy.png', { fullPage: true });
     const privacyWidth = await page.evaluate(() => window.innerWidth);
     await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(2));
