@@ -129,7 +129,7 @@ Version **0.5.0**, released October 6, 2026.
 - **Remembers your own answers (new in 0.5.0).** When you answer a question SecondHand didn't know, it offers to remember it for next time, with your permission. Up to 50 custom answers, encrypted with your profile.
 - **Fill and continue (new in 0.5.0).** On recognized multi-page forms, it can fill and click ordinary **Next** buttons, and stops for anything missing, consent, signatures, payments, or submission.
 - **Reads your documents on your computer.** Open a PDF or photo of a tax form such as a W-2 or 1040, and SecondHand reads it with offline text recognition and suggests details for you to review. Nothing is uploaded.
-- **Answers some questions the rules miss, as a guess.** Laya, a small AI model that runs inside the app, picks an answer from your saved facts when it's confident, and marks it as a guess for you to check. It runs on Windows and Apple-silicon Macs, and you can turn it off.
+- **Answers some questions the rules miss, only when it's sure.** Laya, a small AI model that runs inside the app, picks an answer from your saved facts only when it's confident, outlines it, and the side panel says it was suggested by Laya, for you to check. It runs on Windows and Apple-silicon Macs, and you can turn it off.
 
 <details>
 <summary><strong>Exactly which Iowa screens are covered</strong></summary>
@@ -146,7 +146,7 @@ Autofill stays on for the tab until you click **Stop**, lock SecondHand, leave I
 | Tell Us More | Fills matching saved answers. The fully captured layout can continue only when all visible questions are recognized and answered. |
 | Captured screening pages | Emergency, Background, Job, Income, Expenses, and Property Information use saved answers and continue only when every visible question is supported and complete. |
 | Captured financial records | One job, Private Pension/Social Security income, rent, a utility record, or a Cash/Uncashed Check asset. You choose among matching saved records. |
-| Other Iowa pages | May fill matching saved answers after you approve, and Laya's answers marked as guesses. You continue. |
+| Other Iowa pages | May fill matching saved answers after you approve, and Laya's sure answers, marked as suggested by Laya. You continue. |
 | Security check (CAPTCHA), consent, signatures, final Submit | Never touched. |
 
 [Portal coverage](docs/iowa-portal.md) has the exact field list, and [SNAP preparation](docs/snap-information.md) covers jobs, expenses, property, and tax references.
@@ -259,7 +259,7 @@ Reviewers asked the right question: does every new form need someone to write co
 
 - **Most forms need no code of their own.** The general rules in [`extension/generic-adapter.js`](extension/generic-adapter.js) read each question's label, autocomplete hint, and accessible name, the same way a screen reader does. They fill only what they recognize, never change an answer already there, and never submit. A test fills a made-up food pantry form that has no special code at all.
 - **Your own answers fill the gaps.** When a form asks something new, you answer it once, and SecondHand offers to remember it for that same question next time.
-- **Laya handles odd wording.** On 15 real forms collected after training that nobody wrote code for, 57 of Laya's 72 filled answers matched the answer key, 10 more were right by the saved facts, and 5 were wrong. That's why every Laya answer is marked as a guess. [Details](docs/laya-model.md#final-holdout).
+- **Laya handles odd wording.** On 15 real forms collected after training that nobody wrote code for, 57 of Laya's 72 filled answers matched the answer key, 10 more were right by the saved facts, and 5 were wrong. That's why every Laya answer is outlined and marked as suggested by Laya, for you to check. [Details](docs/laya-model.md#final-holdout).
 
   <p align="center">
     <img src="docs/media/laya.gif" width="820" alt="A food-pantry form asks 'Is anyone in your household 60 or older?' and 'Do you have a pet?'. SecondHand reads the two questions, the desktop app writes the fictional applicant's profile as plain facts, and Laya scores each option: No 0.994, Yes 0.001, None of these 0.031. No is filled with a dashed amber guess outline. For the pet question Laya picks None of these, so it is left for the applicant and the side panel marks it Needs you.">
