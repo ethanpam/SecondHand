@@ -37,16 +37,18 @@ const FIELD_LABELS = Object.freeze({
   // Each person in the household: name, birth date, relationship to the applicant, and whether they are a student.
   householdMembers: 'Household members',
   customFields: 'Custom answers',
-  hasSsn: 'Whether you have a Social Security number', studentNameGrade: 'Student name and grade',
+  hasSsn: 'Whether you have a Social Security number', studentNameGrade: 'Student name and grade', todayDate: 'Today’s date',
   ...Object.fromEntries(SNAP_INFORMATION.scalarFields.map(field => [field.key, field.label])),
   ...Object.fromEntries(SNAP_INFORMATION.records.map(record => [record.key, record.label]))
 });
 // Answers the desktop works out from saved fields when a page asks for them. They are never saved,
 // and never carry the saved value itself: hasSsn is Yes when a Social Security number is saved,
 // otherwise the applicant's own saved Yes or No. studentNameGrade is the one student's "First Last, Grade".
+// todayDate (#258) is the same "today" ages are worked out from, YYYY-MM-DD, and needs no saved answer.
 const DERIVED_FIELDS = Object.freeze({
   hasSsn: profile => typeof profile.ssn === 'string' && profile.ssn.trim() ? 'yes' : ['yes', 'no'].includes(profile.hasSsnAnswer) ? profile.hasSsnAnswer : '',
-  studentNameGrade: profile => household.studentNameGrade(profile)
+  studentNameGrade: profile => household.studentNameGrade(profile),
+  todayDate: (profile, { today }) => household.localDate(today)
 });
 const PROFILE_FIELDS = Object.freeze(Object.keys(FIELD_LABELS).filter(key => !Object.hasOwn(DERIVED_FIELDS, key)));
 // The household list never leaves the app whole: a page gets only the answers worked out from it.
@@ -298,7 +300,7 @@ function fieldLabel(key) {
 function releasedValue(profile, field, { today } = {}) {
   if (!isRequestField(field)) throw new Error('This is not a field a page may ask for.');
   if (household.isBandKey(field)) return household.bandCount(profile, field, { today });
-  if (Object.hasOwn(DERIVED_FIELDS, field)) return DERIVED_FIELDS[field](profile);
+  if (Object.hasOwn(DERIVED_FIELDS, field)) return DERIVED_FIELDS[field](profile, { today });
   if (Object.hasOwn(HOUSEHOLD_COUNT_FIELDS, field) && household.listed(profile)) return household.householdCounts(profile, { today })[HOUSEHOLD_COUNT_FIELDS[field]];
   if (field === 'birthDate' && household.birthDateProblem(profile.birthDate, today)) return '';
   return typeof profile[field] === 'string' ? profile[field] : '';
