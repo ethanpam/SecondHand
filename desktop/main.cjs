@@ -80,6 +80,8 @@ if (nativeOrigin) {
   let lockTimer;
   let lockRevision = 0;
   let quitting = false;
+  // Opened again while quitting (#256): Electron starts SecondHand again once this copy has exited.
+  let relaunching = false;
   let fieldRequestPending = false;
   let extensionSetupPending = false;
   let autofillWithoutAsking = false;
@@ -1084,7 +1086,15 @@ if (nativeOrigin) {
     });
   }
 
-  app.on('second-instance', () => { if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); } });
+  app.on('second-instance', () => {
+    // The new copy has already given way to this one, which is closing: ask Electron for a fresh copy
+    // that starts after this one exits, so two copies never share the data folder. One is enough.
+    if (quitting) {
+      if (!relaunching) { relaunching = true; app.relaunch(); }
+      return;
+    }
+    if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); }
+  });
   app.whenReady().then(async () => {
     // Packaged builds get the icon from electron-builder; show it in development too.
     if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(path.join(__dirname, 'icon.png'));
