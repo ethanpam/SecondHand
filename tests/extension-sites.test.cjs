@@ -3637,6 +3637,34 @@ test('what the desktop says the household list lacks is checked: anything else f
   assert.equal(plain((await autofill(size)).data).messageKey, 'worker.desktopUnexpected');
 });
 
+// #258: a question that asks for today's date takes the app's own "today", asked for like any rule's answer.
+const ORDERED = { name: 'ordered', key: 'todayDate', label: 'Date ordered' };
+const todayForm = () => [{ name: 'name', key: 'fullName' }, { ...ORDERED }, { ...PICKUP }];
+test('today’s date is asked of the app like any rule’s answer and counted like any rule fill, with nothing saved or offered to save (#258)', async () => {
+  const w = siteWorker({ enabled: true, fields: todayForm(), desktop: { values: { firstName: 'Synthetic', lastName: 'Applicant', todayDate: '2026-03-04' } } });
+  const result = plain((await autofill(w)).data);
+  assert.deepEqual(w.native.filter(call => call.type === 'getFields').map(call => call.fields), [['firstName', 'lastName', 'todayDate']]);
+  assert.equal(w.page.fields.find(field => field.name === 'ordered').answered, '2026-03-04');
+  assert.equal(w.page.fields.find(field => field.name === 'ordered').mark, 'rule');
+  assert.deepEqual([result.filled, result.guessed, result.message], [2, 0, 'Filled 2 answers · 1 left for you. Check them before you submit.']);
+  assert.deepEqual(result.filledQuestions, [{ label: 'name', guessed: false }, { label: 'Date ordered', guessed: false }]);
+  assert.deepEqual(result.needYou, [`f0:${w.page.idOf('pickup')}`]);
+  // Without an answer from the app it waits for the applicant, who is never offered to save it: only the ZIP code, a saved field, is.
+  const without = siteWorker({ enabled: true, fields: [...todayForm(), { name: 'zip', key: 'zip' }], desktop: { values: { firstName: 'Synthetic', lastName: 'Applicant' } } });
+  const open = plain((await autofill(without)).data);
+  assert.deepEqual([open.filled, open.needYou.length], [1, 3]);
+  assert.deepEqual((await savable(without)).map(item => item.label), ['zip'], 'today’s date is no saved field');
+});
+
+test('a today’s date from the app that isn’t a real date written YYYY-MM-DD fills nothing and shows a fixed error (#258)', async () => {
+  for (const todayDate of ['03/04/2026', '2026-3-4', '2026-02-30', '2026-13-01', '2026-03-04T00:00', 'today']) {
+    const w = siteWorker({ enabled: true, fields: todayForm(), desktop: { values: { firstName: 'Synthetic', lastName: 'Applicant', todayDate } } });
+    const result = plain((await autofill(w)).data);
+    assert.deepEqual([result.state, result.messageKey], ['error', 'worker.desktopUnexpected'], todayDate);
+    assert.deepEqual(w.page.answered(), [], todayDate);
+  }
+});
+
 test('Add your household asks the app to open Your household, from the side panel’s confirmed click only, carrying nothing (#180)', async () => {
   const w = withoutList();
   await autofill(w);

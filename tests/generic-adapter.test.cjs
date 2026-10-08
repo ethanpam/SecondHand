@@ -70,16 +70,16 @@ test('a guardian’s or parent’s name is never filled: the applicant being tha
 test('a generic date or time sub-label is read together with its question, and birth dates go only to birth questions', () => {
   const doc = page(forms.googleDates);
   const result = generic.plan(doc);
-  assert.deepEqual(byElement(doc, result), { dob: 'birthDate' });
+  assert.deepEqual(byElement(doc, result), { ordered: 'todayDate', dob: 'birthDate' }, 'the date ordered is today’s date (#258)');
   assert.deepEqual(result.unmatched.map(field => field.label),
-    ['5.Date ordered: Date', 'Pickup time: Hour', 'Pickup time: Minute', 'Birthday: Month', 'Birthday: Day', 'Birthday: Year']);
+    ['Pickup time: Hour', 'Pickup time: Minute', 'Birthday: Month', 'Birthday: Day', 'Birthday: Year']);
   for (const label of ['5.Date ordered: Date', 'Birthday: Month', 'Month of birth', 'Child’s date of birth', 'Date'])
     assert.equal(generic.canSuggest('birthDate', { label }), false, label);
   for (const label of ['Your birthday', 'Date of birth (MM/DD/YYYY)']) assert.equal(generic.canSuggest('birthDate', { label }), true, label);
   assert.equal(generic.canSuggest('email', { label: 'Date' }), true);
   assert.equal(generic.canSuggest('password', { label: 'Password' }), false);
   // A guessed birth date is never placed in a question that is not about birth.
-  const ordered = result.unmatched.find(field => field.label.startsWith('5.'));
+  const ordered = result.matched.find(item => item.label.startsWith('5.'));
   const month = result.unmatched.find(field => field.label === 'Birthday: Month');
   const dob = result.matched.find(item => item.key === 'birthDate');
   const filled = generic.fillFields(doc, result.token, [{ id: ordered.id, key: 'birthDate', guessed: true }, { id: month.id, key: 'birthDate', guessed: false },
@@ -506,6 +506,131 @@ test('a date box with no hint gets the date month first, a date input gets it as
   }
   // Which order the page wants can't be told: the applicant answers it.
   assert.deepEqual(fillDate(dobBox('Date of birth (MM/DD/YYYY)', 'placeholder="DD/MM/YYYY"')), { value: '', filled: false });
+});
+
+// #258: a question that asks for the date of this visit, order or request gets today's date, which the app gives
+// from its one "today" (todayDate). TODAY stands in for the app's answer.
+const TODAY = '2026-03-04';
+function fillToday(html, url) {
+  const doc = page(html, url);
+  const result = generic.plan(doc);
+  const today = result.matched.filter(item => item.key === 'todayDate');
+  const filled = generic.fillFields(doc, result.token, today.map(({ id }) => ({ id, key: 'todayDate', guessed: false })), generic.deriveValues({ todayDate: TODAY }));
+  return { doc, result, today, filled };
+}
+const todayBox = (label, attributes = 'type="date"') => `<label for="d">${label}</label><input id="d" ${attributes}>`;
+test('only questions that ask for today’s date take it: each of the issue’s phrases, never a bare Date, a birth, start, move-in, due or end date (#258)', () => {
+  for (const label of ['Today’s date', 'Today\'s date', 'Today', 'Date ordered', 'Order date', 'Date of visit', 'Visit date', 'Date of request', 'Request date',
+    'Date of application', 'Application date', '5.Date ordered:', 'Date ordered *', 'What is today’s date?', 'Today’s date (MM/DD/YYYY)', 'Your visit date']) {
+    assert.deepEqual(byElement(null, generic.plan(page(todayBox(label)))), { d: 'todayDate' }, label);
+  }
+  for (const label of ['Date', 'Date:', 'Date of birth', 'Birth date', 'Start date', 'Date you started', 'Move-in date', 'Date moved in', 'Due date', 'End date',
+    'Date of last visit', 'Date of next visit', 'Pickup date', 'Application date (start)', 'Order date (due by)', 'Today’s date of birth']) {
+    assert.deepEqual(byElement(null, generic.plan(page(todayBox(label)))), label === 'Date of birth' || label === 'Birth date' ? { d: 'birthDate' } : {}, label);
+  }
+  // Nothing is ever offered for it but by the rules: not Laya's guess, and never Save to My information or a remembered answer.
+  assert.equal(generic.GENERIC_KEYS.includes('todayDate'), false);
+  assert.equal(generic.SAVE_KEYS.includes('todayDate'), false);
+  assert.equal(generic.canSuggest('todayDate', { label: 'Date ordered' }), false);
+  assert.deepEqual(generic.requestKeys(['todayDate']), ['todayDate'], 'the app is asked for it like any rule’s answer; no saved field is needed');
+  assert.equal(generic.deriveValues({ todayDate: TODAY }).todayDate, TODAY);
+});
+
+test('today’s date fills in the box’s own format: a date input, a text box in the order its hint shows, and split month, day and year boxes (#258)', () => {
+  for (const [attributes, value] of [['type="date"', TODAY], ['', '03/04/2026'], ['placeholder="MM/DD/YYYY"', '03/04/2026'], ['placeholder="DD/MM/YYYY"', '04/03/2026'],
+    ['placeholder="YYYY-MM-DD"', TODAY], ['title="Day, month and year: DD-MM-YYYY"', '04/03/2026']]) {
+    const { doc, filled, today } = fillToday(todayBox('Date of visit', attributes));
+    assert.equal(doc.getElementById('d').value, value, attributes);
+    assert.deepEqual(filled.filled, today.map(item => item.id), attributes);
+    assert.equal(doc.getElementById('d').getAttribute('data-secondhand-filled'), 'rule', 'a rule’s answer');
+  }
+  // A box asking for two orders: which one can't be told, so the applicant answers it.
+  const unsure = fillToday(todayBox('Date of visit', 'placeholder="DD/MM/YYYY" title="MM/DD/YYYY"'));
+  assert.deepEqual([unsure.doc.getElementById('d').value, unsure.filled.filled], ['', []]);
+  // Google Forms' date question: a date input labelled by its sub-label "Date", under the question.
+  const google = fillToday(forms.googleDates);
+  assert.equal(google.doc.getElementById('ordered').value, TODAY);
+  assert.deepEqual(google.today.map(item => item.label), ['5.Date ordered: Date']);
+  assert.equal(google.doc.getElementById('dob').value, '', 'the birthday question is not today’s');
+  // Jotform's date question: split month, day and year boxes, each labelled by the question and its own part.
+  const split = fillToday(jotformDate('Date ordered'));
+  assert.deepEqual(['month_5', 'day_5', 'year_5'].map(id => split.doc.getElementById(id).value), ['03', '04', '2026']);
+  assert.deepEqual(split.filled.filled, split.today.map(item => item.id));
+  assert.equal(split.today.length, 3);
+  // Jotform's lite date: one text box whose placeholder shows the order.
+  const lite = fillToday(jotformLiteDate('Date of request'));
+  assert.equal(lite.doc.getElementById('lite_mode_6').value, '03/04/2026');
+});
+
+// Jotform's date questions as it draws them (fictional): split boxes, or one "lite" box with the split ones hidden.
+const jotformDate = (question, { q = 5, month = '' } = {}) => `<form class="jotform-form"><ul><li class="form-line" data-type="control_datetime"><label class="form-label" id="label_${q}" for="month_${q}">${question}</label>` +
+  `<div class="form-input">${[['month', 2, month], ['day', 2, ''], ['year', 4, '']].map(([part, size, value]) => `<span class="form-sub-label-container"><input type="tel" class="form-textbox" id="${part}_${q}" name="q${q}_date[${part}]" size="${size}" maxlength="${size}" value="${value}" aria-labelledby="label_${q} sublabel_${q}_${part}">` +
+  `<label class="form-sub-label" for="${part}_${q}" id="sublabel_${q}_${part}">${part[0].toUpperCase()}${part.slice(1)}</label></span>`).join('')}</div></li></ul></form>`;
+const jotformLiteDate = (question, q = 6) => `<li class="form-line" data-type="control_datetime"><label class="form-label" id="label_${q}" for="lite_mode_${q}">${question}</label><div class="form-input">` +
+  `<div style="display:none"><input type="tel" id="month_${q}" aria-labelledby="label_${q} sublabel_${q}_month"><label for="month_${q}" id="sublabel_${q}_month">Month</label></div>` +
+  `<span class="form-sub-label-container"><input type="text" class="form-textbox" id="lite_mode_${q}" maxlength="12" placeholder="MM-DD-YYYY" aria-labelledby="label_${q} sublabel_${q}_litemode">` +
+  `<label class="form-sub-label" for="lite_mode_${q}" id="sublabel_${q}_litemode">Date</label></span></div></li>`;
+const jotformSignature = (label = 'Signature', q = 7) => `<li class="form-line" data-type="control_signature"><label class="form-label" id="label_${q}" for="input_${q}">${label}<span class="form-required">*</span></label>` +
+  `<div class="form-input"><div class="pad" id="sig_pad_${q}" aria-labelledby="label_${q}" data-name="q${q}_signature"></div><input type="hidden" id="input_${q}" name="q${q}_signature"></div></li>`;
+
+test('a bare "Date" takes today’s date only directly after a signature line the applicant signs (#258)', () => {
+  const beside = [
+    ['a label after the signature box', '<form><label for="sig">Signature</label><input id="sig"><label for="d">Date</label><input id="d" type="date"></form>', 'd', TODAY],
+    ['Jotform’s Date after its signature pad', `<form><ul>${jotformSignature()}${jotformLiteDate('Date', 8)}</ul></form>`, 'lite_mode_8', '03/04/2026'],
+    ['Google Forms’ Date question after a Signature question', '<form><div role="list"><div role="listitem"><div id="s1" role="heading">Applicant’s signature</div><input id="sig" type="text" aria-labelledby="s1"></div>' +
+      '<div role="listitem"><div id="s2" role="heading">Date</div><div><div id="s2d">Date</div><input id="d" type="date" aria-labelledby="s2d"></div></div></div></form>', 'd', TODAY],
+    ['a row of a signature and its date', '<form><div class="row"><div><label for="sig">Signature of applicant</label><input id="sig"></div><div><label for="d">Date:</label><input id="d" placeholder="mm/dd/yyyy"></div></div></form>', 'd', '03/04/2026']];
+  for (const [what, html, id, value] of beside) {
+    const { doc, today, filled } = fillToday(html);
+    assert.equal(today.length, 1, what);
+    assert.equal(doc.getElementById(id).value, value, what);
+    assert.deepEqual(filled.filled, [today[0].id], what);
+    if (doc.getElementById('sig')) assert.equal(doc.getElementById('sig').value, '', `${what}: the signature is never filled`);
+  }
+  const elsewhere = [
+    ['a Date on its own', '<form><label for="d">Date</label><input id="d" type="date"></form>'],
+    ['a Date after another question', '<form><label for="e">Email</label><input id="e" type="email"><label for="d">Date</label><input id="d" type="date"></form>'],
+    ['a Date after a staff member’s signature', '<form><label for="sig">Staff signature</label><input id="sig"><label for="d">Date</label><input id="d" type="date"></form>'],
+    ['a Date after a guardian’s signature', '<form><label for="sig">Parent/Guardian signature</label><input id="sig"><label for="d">Date</label><input id="d" type="date"></form>'],
+    ['a Date before the signature', '<form><label for="d">Date</label><input id="d" type="date"><label for="sig">Signature</label><input id="sig"></form>'],
+    ['a question between them', '<form><label for="sig">Signature</label><input id="sig"><label for="p">Phone</label><input id="p" type="tel"><label for="d">Date</label><input id="d" type="date"></form>'],
+    ['a signature in another form', '<form><label for="sig">Signature</label><input id="sig"></form><form><label for="d">Date</label><input id="d" type="date"></form>'],
+    ['a hidden signature line', '<form><div style="display:none"><label for="sig">Signature</label><input id="sig"></div><label for="d">Date</label><input id="d" type="date"></form>'],
+    ['a Date of birth after a signature', '<form><label for="sig">Signature</label><input id="sig"><label for="d">Date of birth</label><input id="d" type="date"></form>']];
+  for (const [what, html] of elsewhere) {
+    const { doc, today } = fillToday(html);
+    assert.deepEqual(today, [], what);
+    assert.equal(doc.getElementById('d').value, '', what);
+  }
+});
+
+test('today’s date never changes an answer on the page, and never fills part of a date the applicant began (#258)', () => {
+  const answered = fillToday(todayBox('Date ordered', 'type="date" value="2026-01-02"'));
+  assert.deepEqual(answered.today, [], 'an answered question is not planned');
+  assert.equal(answered.doc.getElementById('d').value, '2026-01-02');
+  // Typed after the plan was made: the fill leaves it.
+  const doc = page(todayBox('Date ordered', ''));
+  const result = generic.plan(doc);
+  doc.getElementById('d').value = '01/02/2026';
+  const late = generic.fillFields(doc, result.token, result.matched.map(({ id }) => ({ id, key: 'todayDate', guessed: false })), { todayDate: TODAY });
+  assert.deepEqual(late.filled, []);
+  assert.equal(doc.getElementById('d').value, '01/02/2026');
+  // The month typed in a split date: its day and year are the applicant's too.
+  const begun = fillToday(jotformDate('Date ordered', { month: '01' }));
+  assert.deepEqual(begun.today, []);
+  assert.deepEqual(['month_5', 'day_5', 'year_5'].map(id => begun.doc.getElementById(id).value), ['01', '', '']);
+  assert.deepEqual(begun.result.unmatched.map(field => field.label), ['Date ordered Day', 'Date ordered Year']);
+});
+
+test('today’s date is never placed on Iowa’s portal, by the rules or as a guess (#258)', () => {
+  for (const url of ['https://hhsservices.iowa.gov/apspssp/ssp.portal/applyForBenefits/somethingNew', 'https://hhsservices.iowa.gov/other']) {
+    const doc = page(todayBox('Date of application'), url);
+    const result = generic.plan(doc);
+    assert.deepEqual(result.matched, [], url);
+    const filled = generic.fillFields(doc, result.token, result.unmatched.map(({ id }) => ({ id, key: 'todayDate', guessed: true })), { todayDate: TODAY });
+    assert.deepEqual(filled.filled, [], url);
+    assert.equal(doc.getElementById('d').value, '', url);
+  }
 });
 
 test('a stale plan, an unknown key, or a field changed since planning is never filled', () => {

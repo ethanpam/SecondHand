@@ -33,6 +33,9 @@
   // Answers about a household member, worked out by the desktop from the household list. Only the
   // rules place them, and only in a box that asks for that member: never a guess, never an applicant box.
   const MEMBER_KEYS = Object.freeze(['studentNameGrade']);
+  // Today's date (#258), which the desktop gives from its one "today", as it works out ages (todayDate in shared/schema.cjs).
+  // Only the rules place it, and only in a box that asks for the date of this visit, order or request (todayAsked).
+  const TODAY_KEY = 'todayDate';
   // These are explicit saved Iowa answers, not general-site fields or model guesses. The question
   // must state its scope and match a whole phrase. Person/amount/source detail rows stay manual.
   const IOWA_RULES = Object.freeze([
@@ -80,11 +83,11 @@
     const match = typeof key === 'string' ? BAND_KEY.exec(key) : null;
     return Boolean(match) && Number(match[1]) <= 120 && (Boolean(match[3]) || (Number(match[2]) <= 120 && Number(match[2]) >= Number(match[1])));
   }
-  // Keys the rules may place beyond the profile's own: composites, a member's answer, band counts, and answers from lists.
-  const ruleOnlyKey = key => MEMBER_KEYS.includes(key) || isBandKey(key) || IOWA_KEYS.includes(key) || CHOICE_KEYS.includes(key);
+  // Keys the rules may place beyond the profile's own: composites, a member's answer, band counts, answers from lists, and today's date.
+  const ruleOnlyKey = key => MEMBER_KEYS.includes(key) || isBandKey(key) || IOWA_KEYS.includes(key) || CHOICE_KEYS.includes(key) || key === TODAY_KEY;
   // Answers that are only ever a guess for the applicant to review, however they were matched.
   const GUESS_KEYS = Object.freeze(['iowaResident']);
-  const KIND = Object.freeze({ birthDate: 'date', email: 'email', phone: 'tel', state: 'state', ageRange: 'ageRange', householdSize: 'count', householdAdults: 'count',
+  const KIND = Object.freeze({ birthDate: 'date', todayDate: 'date', email: 'email', phone: 'tel', state: 'state', ageRange: 'ageRange', householdSize: 'count', householdAdults: 'count',
     householdChildren: 'count', householdSeniors: 'count', householdVeteran: 'yesno', householdDisability: 'yesno', totalMonthlyIncome: 'money',
     annualIncome: 'money', monthlyRent: 'money', monthlyUtilities: 'money', assetsOnHand: 'money', monthlyMedicalExpenses: 'money',
     householdAllCitizens: 'yesno', householdLegalStatus: 'yesno', householdPregnant: 'yesno', householdMedicare: 'yesno', anyoneSenior: 'yesno',
@@ -493,6 +496,52 @@
   }
   const isNumeric = options => options.length > 0 && options.every(option => countOf(option));
   const ageRange = option => /^(\d+) (\d+)( yrs?| years?)?$/.exec(normal(option)) || /^(\d+)(\+| and older| or older)( yrs?| years?)?$/.exec(normal(option));
+  // #258: the questions today's date answers, in the words pantry forms ask them. A bare "Date" only directly after a signature
+  // line (besideSignature). Never one about a birth, start, move-in, due or end date, and never on Iowa's portal.
+  const TODAY_QUESTION = /^(todays date|today|date ordered|order date|date of (visit|request|application)|(visit|request|application) date)$/;
+  const NOT_TODAY = /\b(birth\w*|born|dob|start\w*|move in|moved in|moving in|due|end|ends|ending|ended)\b/;
+  // A date box's words after its question: the order it is written in ("MM/DD/YYYY"), and the part a split date's box holds ("Month").
+  const DATE_HINT = /(^| )(mm? dd? (yyyy|yy)|dd? mm? (yyyy|yy)|yyyy mm? dd?)$/;
+  const SPLIT_PART = /(^| )(month|day|year)$/;
+  // What a label asks of a date ('' when it only names a part or an order), and the part its box holds: Google's "Date ordered:
+  // Date" asks "date ordered" for the whole date, Jotform's "Date ordered Month" for its month.
+  function dateLabel(text) {
+    let asked = question(text).replace(DATE_HINT, '');
+    const part = SPLIT_PART.exec(asked);
+    if (part) asked = asked.slice(0, part.index);
+    if (!TODAY_QUESTION.test(asked) && / date$/.test(asked)) asked = asked.slice(0, -' date'.length);
+    return { asked, part: part ? part[2] : null };
+  }
+  // The applicant's own signature line. A staff member's or a guardian's isn't theirs.
+  const SIGNATURE_LINE = /^((applicant|applicants|your|client|clients|participant|participants|electronic|e) )?signature( of (the )?(applicant|client|participant))?$|^sign here$/;
+  const QUESTION_WORDS = 'label, legend, [role="heading"]';
+  // Whether a box comes directly after a signature line: past the box's own words ("Date", "Month"), the question before it, in
+  // the same form, is the signature.
+  function besideSignature(element) {
+    const doc = element.ownerDocument, form = closestAcross(element, 'form');
+    const before = Array.from(rootOf(element).querySelectorAll(QUESTION_WORDS)).filter(node => !node.contains(element) && rendered(node, true) &&
+      Boolean(node.compareDocumentPosition(element) & doc.defaultView.Node.DOCUMENT_POSITION_FOLLOWING));
+    let index = before.length - 1;
+    while (index >= 0 && ['', 'date'].includes(dateLabel(textWithoutControls(before[index])).asked)) index--;
+    return index >= 0 && closestAcross(before[index], 'form') === form && SIGNATURE_LINE.test(question(textWithoutControls(before[index])));
+  }
+  // What a box asks of today's date: 'date' for the whole date, or the part of a split date its box holds. Null when it asks
+  // anything else: each of its labels asks for today's date, or only says "Date" directly after a signature line, and they name one part at most.
+  function todayAsked(entry) {
+    const element = entry.elements[0], doc = element.ownerDocument;
+    if (entry.kind !== 'input' || doc.location.origin === 'https://hhsservices.iowa.gov' || entry.labels.some(label => NOT_TODAY.test(normal(label)))) return null;
+    const labels = entry.labels.map(dateLabel);
+    const parts = [...new Set(labels.map(label => label.part).filter(Boolean))];
+    const phrase = labels.find(label => TODAY_QUESTION.test(label.asked))?.asked || 'date';
+    if (parts.length > 1 || !labels.every(label => ['', 'date', phrase].includes(label.asked)) || !labels.some(label => label.asked === phrase)) return null;
+    if (phrase === 'date' && !besideSignature(element)) return null;
+    const part = parts[0] || 'date';
+    // A split date is one answer: a box of it the applicant began (one SecondHand didn't fill) leaves the rest to them.
+    const form = closestAcross(element, 'form');
+    const begun = other => other.kind === 'input' && other.elements[0] !== element && closestAcross(other.elements[0], 'form') === form && answered(other) &&
+      !other.elements[0].hasAttribute('data-secondhand-filled') && other.labels.some(label => { const asked = dateLabel(label); return Boolean(asked.part) && asked.asked === phrase; });
+    return part !== 'date' && questionsOn(doc).some(begun) ? null : part;
+  }
   // A key is only placed on a control that can hold its kind of answer.
   const answerKind = key => IOWA_KEYS.includes(key) ? 'yesno' : isBandKey(key) ? 'count' : KIND[key] || 'text';
   function compatible(key, entry) {
@@ -510,6 +559,8 @@
     if (kind === 'several') return entry.kind === 'checkbox' && entry.elements.length > 1 && options.some(option => optionCodes(key, option).length);
     if (kind === 'count') return (entry.kind === 'input' && ['number', 'text', 'tel', ''].includes(type)) || ((entry.kind === 'select' || choice) && isNumeric(options.filter(option => normal(option))));
     if (kind === 'state') return ['select', 'ariaCombo', 'ariaListbox'].includes(entry.kind) || (entry.kind === 'input' && type === 'text');
+    // Today's date goes in a date or text box, and its parts in a split date's own boxes (Jotform's are tel).
+    if (key === TODAY_KEY) { const part = todayAsked(entry); return Boolean(part) && (part === 'date' ? ['date', 'text', ''] : ['text', 'tel', 'number', '']).includes(type); }
     if (kind === 'date') return entry.kind === 'input' && ['date', 'text', ''].includes(type);
     if (kind === 'email') return entry.kind === 'input' && ['email', 'text'].includes(type);
     if (kind === 'tel') return entry.kind === 'input' && ['tel', 'text', 'number'].includes(type);
@@ -582,6 +633,8 @@
       const key = ruleFor(text);
       if (key && compatible(key, entry)) return { key, confidence: 'high' };
     }
+    // Today's date is placed by its labels alone, never by a box's name.
+    if (compatible(TODAY_KEY, entry)) return { key: TODAY_KEY, confidence: 'high' };
     if (ARIA_TYPES[entry.kind]) return { key: null, confidence: null };
     const hint = normal(`${element.name || ''}`.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/\[[^\]]*\]$/, '')) || normal(element.id || '');
     const key = ruleFor(NAME_HINTS[hint.replace(/ /g, '')] || hint);
@@ -860,9 +913,14 @@
   function formatted(key, value, entry) {
     const element = entry.elements[0];
     const text = String(value);
-    if (key === 'birthDate') {
+    if (key === 'birthDate' || key === TODAY_KEY) {
+      const date = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+      if (!date) return null;
+      const [, year, month, day] = date;
+      // A split date's box takes its own part (#258).
+      const part = key === TODAY_KEY ? todayAsked(entry) : 'date';
+      if (part !== 'date') return { year, month, day }[part] ?? null;
       if (element.type === 'date') return text;
-      const [year, month, day] = text.split('-');
       // In the order the box asks for (#156); month first when it doesn't say, as US forms write it.
       const orders = dateOrders(entry);
       if (orders.size > 1) return null;
