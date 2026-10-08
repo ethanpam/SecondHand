@@ -51,7 +51,7 @@ async function rejectedPassphrase(page, afterEntry) {
   await page.locator('#passphrase').fill('incorrect-passphrase');
   if (afterEntry) await afterEntry();
   await expect(page.locator('#passphrase')).toHaveValue('incorrect-passphrase');
-  await submitAuthForm(page);
+  await submitAuthForm(page, 'incorrect-passphrase');
   await expect(page.locator('#auth-error')).toBeVisible();
   await expect(page.locator('#workspace')).not.toBeVisible();
 }
@@ -59,16 +59,25 @@ async function rejectedPassphrase(page, afterEntry) {
 // Click the auth form's submit button and wait until that create/unlock attempt has
 // settled (the button leaves its busy state). A form that fails validation never
 // starts an attempt, so fail at once with the reason rather than waiting on a result.
-async function submitAuthForm(page) {
-  const before = await page.evaluate(() => ({ ...window.__smokeAuthForm }));
+// `password` and `confirm` are what the test filled: a box that held anything else when
+// the form was submitted fails here, naming the box, instead of as a refused password.
+async function submitAuthForm(page, password, confirm = '') {
+  const before = await page.evaluate(filled => {
+    const counts = window.__smokeAuthForm;
+    counts.filled = filled;
+    return { submit: counts.submit, invalid: counts.invalid };
+  }, [password, confirm]);
   await page.locator('#auth-submit').click();
   const outcome = await (await page.waitForFunction(before => {
     const counts = window.__smokeAuthForm;
-    if (counts.invalid > before.invalid) return { submitted: false, passphraseEmpty: !document.querySelector('#passphrase').value };
-    if (counts.submit > before.submit && document.querySelector('#auth-submit').getAttribute('aria-busy') !== 'true') return { submitted: true };
+    if (counts.invalid > before.invalid) return { submitted: false, passphraseEmpty: !document.querySelector('#passphrase').value, keys: counts.keys };
+    if (counts.submit > before.submit && document.querySelector('#auth-submit').getAttribute('aria-busy') !== 'true') return { submitted: true, changed: counts.changed, keys: counts.keys };
     return null;
   }, before, { polling: 50, timeout: AUTH_ATTEMPT_TIMEOUT_MS })).jsonValue();
-  assert.ok(outcome.submitted, `The auth form was not submitted: it failed validation (passphrase empty: ${outcome.passphraseEmpty}). Something reset the form after the test filled it.`);
+  assert.ok(outcome.submitted, `The auth form was not submitted: it failed validation (passphrase empty: ${outcome.passphraseEmpty}; key presses in the form since this window opened: ${outcome.keys}). Something reset the form after the test filled it.`);
+  assert.deepEqual(outcome.changed, [], `When the auth form was submitted, ${outcome.changed.map(id => `#${id}`).join(' and ')} held something other than what the test filled, ` +
+    `and ${outcome.keys} key presses had reached the form since this window opened. ` +
+    (outcome.keys ? 'Something typed on this computer while the smoke ran: each window it opens takes keyboard focus.' : 'Something in the page changed it.'));
 }
 
 // A local stand-in for the Laya model repo: latest.json names a synthetic model (placeholder bytes;
@@ -313,10 +322,16 @@ async function main() {
       for (const type of ['submit', 'invalid', 'reset']) document.querySelector('#auth-form').addEventListener(type, () => record({ type }), true);
       window.secondHand.onLocked(event => record({ type: 'locked', revision: event?.lockRevision }));
       const form = document.querySelector('#auth-form');
-      const counts = window.__smokeAuthForm = { submit: 0, invalid: 0 };
+      // `filled` is what submitAuthForm was told the test filled; `changed` names the boxes that held anything else when
+      // the form was submitted. The test fills the boxes without key presses, so `keys` counts only keys typed on this computer.
+      const counts = window.__smokeAuthForm = { submit: 0, invalid: 0, keys: 0, filled: null, changed: [] };
       // Capture phase also sees `invalid`, which fires on the control and does not bubble.
-      form.addEventListener('submit', () => { counts.submit++; }, true);
+      form.addEventListener('submit', () => {
+        counts.submit++;
+        counts.changed = ['passphrase', 'confirm-passphrase'].filter((id, index) => counts.filled && document.getElementById(id).value !== counts.filled[index]);
+      }, true);
       form.addEventListener('invalid', () => { counts.invalid++; }, true);
+      form.addEventListener('keydown', () => { counts.keys++; }, true);
     });
     return page;
   };
@@ -334,7 +349,7 @@ async function main() {
     if (await page.locator('#device-reset-field').isVisible()) await page.locator('#allow-device-reset').uncheck();
     await expect(page.locator('#passphrase')).toHaveValue(passphrase);
     await expect(page.locator('#confirm-passphrase')).toHaveValue(passphrase);
-    await submitAuthForm(page);
+    await submitAuthForm(page, passphrase, passphrase);
     await expect(page.locator('#recovery-dialog')).toBeVisible();
     const recoveryKey = await page.locator('#recovery-key-value').textContent();
     assert.match(recoveryKey, /^[0-9A-Z]{4}(?:-[0-9A-Z]{4}){7}$/);
@@ -474,7 +489,7 @@ async function main() {
     await rejectedPassphrase(page);
     await page.locator('#passphrase').fill(passphrase);
     await expect(page.locator('#passphrase')).toHaveValue(passphrase);
-    await submitAuthForm(page);
+    await submitAuthForm(page, passphrase);
     await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('.nav-item[data-view="profile"]').click();
     await expect(page.locator('#firstName')).toHaveValue(applicantFixture.firstName);
@@ -508,7 +523,7 @@ async function main() {
     });
     await page.locator('#passphrase').fill(passphrase);
     await expect(page.locator('#passphrase')).toHaveValue(passphrase);
-    await submitAuthForm(page);
+    await submitAuthForm(page, passphrase);
     await expect(page.locator('#workspace')).toBeVisible();
     await page.evaluate(() => window.secondHand.lock());
     await expect(page.locator('#auth-view')).toBeVisible();
@@ -526,7 +541,7 @@ async function main() {
     page = await launch();
     await page.locator('#passphrase').fill(passphrase);
     await expect(page.locator('#passphrase')).toHaveValue(passphrase);
-    await submitAuthForm(page);
+    await submitAuthForm(page, passphrase);
     await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('.nav-item[data-view="extension"]').click();
     await expect(page.locator('#laya-toggle')).not.toBeChecked();
@@ -576,7 +591,7 @@ async function main() {
     await expect(page.locator('#touch-id-note')).toBeHidden();
     await page.locator('#passphrase').fill(passphrase);
     await expect(page.locator('#passphrase')).toHaveValue(passphrase);
-    await submitAuthForm(page);
+    await submitAuthForm(page, passphrase);
     await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('.nav-item[data-view="privacy"]').click();
     await expect(page.locator('#touch-id-setting')).toBeVisible();
@@ -702,11 +717,11 @@ async function main() {
     await page.locator('#lock-button').click();
     await page.locator('#passphrase').fill(passphrase);
     await expect(page.locator('#passphrase')).toHaveValue(passphrase);
-    await submitAuthForm(page);
+    await submitAuthForm(page, passphrase);
     await expect(page.locator('#auth-error')).toBeVisible();
     await page.locator('#passphrase').fill(resetPassword);
     await expect(page.locator('#passphrase')).toHaveValue(resetPassword);
-    await submitAuthForm(page);
+    await submitAuthForm(page, resetPassword);
     await expect(page.locator('#workspace')).toBeVisible();
     const bytes = await fs.readFile(path.join(userData, 'vault.secondhand'), 'utf8');
     for (const secret of ['Avery', 'Example', 'Riley', 'Morgan', '2015-09-03', applicantFixture.addressLine1, '2025550147', 'SYNTHETIC-RECEIPT-ONLY', passphrase, resetPassword, recoveryKey, recoveryKey.replace(/-/g, '')]) assert.equal(bytes.includes(secret), false);
@@ -724,7 +739,7 @@ async function main() {
     await page.locator('#lock-button').click();
     await page.locator('#passphrase').fill(resetPassword);
     await expect(page.locator('#passphrase')).toHaveValue(resetPassword);
-    await submitAuthForm(page);
+    await submitAuthForm(page, resetPassword);
     await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('.nav-item[data-view="profile"]').click();
     const { householdMembers: __, ...scalarUnanswered } = unanswered;
@@ -750,7 +765,7 @@ async function main() {
     await expect(page.locator('#confirm-passphrase')).toHaveValue(startOverPassword);
     // The setup is offered only if its start is saved while the key is on screen (renderer/app.js): wait for the
     // attempt, setup save included, to settle before Continue.
-    await submitAuthForm(page);
+    await submitAuthForm(page, startOverPassword, startOverPassword);
     await page.locator('#recovery-saved').check();
     await page.locator('#recovery-done').click();
     await expect(page.locator('#workspace')).toBeVisible();
