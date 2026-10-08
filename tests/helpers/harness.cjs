@@ -74,7 +74,7 @@ function laidOut(markup, url) {
 // finished starting: its window is open and it listens for the screen locking.
 async function startMain({ userData, packaged = false, platform = process.platform, env = {}, electron = {}, dialog = {}, modules = {}, globals = {} } = {}) {
   assert.ok(userData, 'Give the main process its data folder');
-  let window, invoke, bridge, shows = 0;
+  let window, invoke, bridge, shows = 0, focuses = 0, relaunches = 0;
   const sent = [];
   const appEvents = new Map();
   const powerEvents = new Map();
@@ -86,11 +86,11 @@ async function startMain({ userData, packaged = false, platform = process.platfo
       this.webContents = { mainFrame: { url: pathToFileURL(path.join(root, 'renderer/index.html')).href },
         setWindowOpenHandler() {}, on() {}, send(...args) { sent.push(plain(args)); } };
     }
-    show() { shows++; } focus() {} setMenuBarVisibility() {} once() {} on() {} loadFile() {}
-    isDestroyed() { return false; }
+    show() { shows++; } focus() { focuses++; } setMenuBarVisibility() {} once() {} on() {} loadFile() {}
+    isMinimized() { return false; } restore() {} isDestroyed() { return false; }
   }
   const app = { isPackaged: packaged, setName() {}, setPath() {}, getPath: () => userData, requestSingleInstanceLock: () => true,
-    whenReady: () => Promise.resolve(), on: (name, handler) => { appEvents.set(name, handler); }, quit() {} };
+    whenReady: () => Promise.resolve(), on: (name, handler) => { appEvents.set(name, handler); }, quit() {}, relaunch() { relaunches++; } };
   const simulated = { app, BrowserWindow, ipcMain: { handle(_name, handler) { invoke = handler; } },
     dialog: { showErrorBox(title, message) { assert.fail(`The desktop showed an error: ${title}. ${message}`); }, ...dialog },
     shell: {}, clipboard: {}, powerMonitor: { on: (name, handler) => { powerEvents.set(name, handler); } },
@@ -118,6 +118,9 @@ async function startMain({ userData, packaged = false, platform = process.platfo
     sent, timers, appEvents, powerEvents,
     get window() { return window; },
     get shows() { return shows; },
+    get focuses() { return focuses; },
+    // How many times main.cjs asked Electron to start the app again once it has quit.
+    get relaunches() { return relaunches; },
     event,
     // A request from the desktop's own window, and one from a sender a test makes up.
     invoke: (method, ...args) => invoke(event(), method, ...args),
