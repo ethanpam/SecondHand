@@ -236,7 +236,7 @@ test('all five record pages localize owner, money, utility, and asset labels wit
 });
 
 test('a missing record gives a translated action to save an explicit owner and restart Autofill', () => {
-  assert.equal(strings.english('worker.recordMissing'), 'No saved record fits this page. In the SecondHand app, add one under My information, then More SNAP information, with “Person this belongs to” set to the name chosen here. Then stop Autofill and start it again.');
+  assert.equal(strings.english('worker.recordMissing'), 'No saved record fits this page. In the SecondHand app, add one under My information, then More SNAP information, with “Person this belongs to” set to the name chosen here. Then start Autofill.');
   assert.deepEqual(strings.describeEnglish(strings.english('worker.recordMissing')), { key: 'worker.recordMissing', params: {} });
   for (const code of strings.LANGUAGES) {
     const value = strings.text(code, 'worker.recordMissing');
@@ -259,14 +259,14 @@ test('on Iowa’s screening and financial pages, the reasons and the missing-rec
     }
   }
   const plain = text => text.replace(/\u00a0/g, ' ');
-  // The card on Iowa's page shows this message too, then what Stop does, cut after 7 lines, or 6 beside the offer of the
-  // questions in the reader's language (scripts/smoke-extension.cjs measures that). Its tooltip is cut at a fixed length.
+  // The card on Iowa's page shows this message too, cut after 7 lines, or 6 beside the offer of the questions in the
+  // reader's language (scripts/smoke-extension.cjs measures that). Its tooltip is cut at a fixed length.
   const tooltip = Number(/\$\('widget-text'\)\.title = [^\n]*fixedText\(details\.filter\(Boolean\)\.join\(' '\), (\d+)\)/.exec(source('panel.js'))?.[1]);
   assert.ok(tooltip > 0, 'the card’s tooltip length is found in panel.js');
-  // Autofill is still on when no record fits. The step comes last and says to stop Autofill and start it again, which
-  // is Stop Autofill, then Start Autofill in the side panel, and Stop, then Autofill on the card.
-  const restart = { en: 'Then stop Autofill and start it again.', es: 'Luego detenga y reinicie el autocompletado.', vi: 'Rồi dừng Tự\u00a0điền và bắt đầu lại.',
-    zh: '然后停止自动填写，再重新开始。', fr: 'Puis arrêtez et relancez le remplissage.', ar: 'ثم أوقف التعبئة التلقائية وابدأها من جديد.' };
+  // No record ends Autofill's run (#236). The step comes last and says to start Autofill, which is Start Autofill in the
+  // side panel and Autofill on the card.
+  const restart = { en: 'Then start Autofill.', es: 'Luego inicie el autocompletado.', vi: 'Rồi bắt đầu Tự\u00a0điền.',
+    zh: '然后开始自动填写。', fr: 'Puis lancez le remplissage.', ar: 'ثم ابدأ التعبئة التلقائية.' };
   for (const code of strings.LANGUAGES) {
     // The desktop app's names stay in English, quoted as each language quotes “My information”.
     const [, open = '', close = ''] = /([“«]\u00a0?)My information(\u00a0?[”»])/.exec(strings.text(code, 'save.button')) || [];
@@ -298,6 +298,18 @@ test('on Iowa’s screening and financial pages, the reasons and the missing-rec
   for (const kind of ['retirement', 'rent', 'utilities', 'assets']) {
     const recordDoc = onScreen(financial.makeHtml(kind), financial.URL);
     try { assert.equal(reasonKey(records.probePage(recordDoc, financial.URL)), 'iowa.recordReason', kind); } finally { recordDoc.defaultView.close(); }
+  }
+});
+
+// No saved record ends Autofill's run, so its step never says to click Stop: one click on Autofill asks the app again (#236).
+test('the missing-record step never tells the person to click Stop, in any language', () => {
+  const folded = (code, text) => text.replace(/\u00a0/g, ' ').toLocaleLowerCase(code);
+  // The verb "stop" in each language, in the forms a sentence uses, not only the buttons' own words.
+  const stopping = { en: /\bstop/, es: /deten/, vi: /dừng/, zh: /停/, fr: /arrêt/, ar: /أوقف|إيقاف|توقف/ };
+  for (const code of strings.LANGUAGES) {
+    const value = folded(code, strings.text(code, 'worker.recordMissing'));
+    for (const key of ['panel.stopAutofill', 'widget.stop']) assert.ok(!value.includes(folded(code, strings.text(code, key))), `${code}: the step names ${key}`);
+    assert.doesNotMatch(value, stopping[code], `${code}: the step says to stop`);
   }
 });
 

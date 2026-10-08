@@ -119,7 +119,7 @@
     "iowa.record.rent": "Your share of rent",
     "iowa.record.payment": "Current payment amount",
 
-    "worker.recordMissing": "No saved record fits this page. In the SecondHand app, add one under My information, then More SNAP information, with “Person this belongs to” set to the name chosen here. Then stop Autofill and start it again.",
+    "worker.recordMissing": "No saved record fits this page. In the SecondHand app, add one under My information, then More SNAP information, with “Person this belongs to” set to the name chosen here. Then start Autofill.",
     'brand.name': 'SecondHand',
     'language.label': 'Language',
     'language.en': 'English',
@@ -647,7 +647,7 @@
     "iowa.record.rent": "Su parte del alquiler",
     "iowa.record.payment": "Monto del pago actual",
 
-    "worker.recordMissing": "Ningún registro de SecondHand sirve aquí. Agregue uno en “More SNAP information” de “My information”, con el nombre elegido aquí en “Person this belongs to”. Luego detenga y reinicie el autocompletado.",
+    "worker.recordMissing": "Ningún registro de SecondHand sirve aquí. Agregue uno en “More SNAP information” de “My information”, con el nombre elegido aquí en “Person this belongs to”. Luego inicie el autocompletado.",
     'brand.name': 'SecondHand',
     'language.label': 'Idioma',
     'language.en': 'English',
@@ -1168,7 +1168,7 @@
     "iowa.record.rent": "Phần tiền thuê nhà của bạn",
     "iowa.record.payment": "Số tiền chi trả hiện tại",
 
-    "worker.recordMissing": "Không có bản ghi đã lưu nào phù hợp. Trong SecondHand, hãy thêm bản ghi ở “More SNAP information” trong “My information”, điền tên được chọn ở đây vào “Person this belongs to”. Rồi dừng Tự điền và bắt đầu lại.",
+    "worker.recordMissing": "Không có bản ghi đã lưu nào phù hợp. Trong SecondHand, hãy thêm bản ghi ở “More SNAP information” trong “My information”, điền tên được chọn ở đây vào “Person this belongs to”. Rồi bắt đầu Tự điền.",
     'brand.name': 'SecondHand',
     'language.label': 'Ngôn ngữ',
     'language.en': 'English',
@@ -1690,7 +1690,7 @@
     "iowa.record.rent": "您承担的租金",
     "iowa.record.payment": "当前付款金额",
 
-    "worker.recordMissing": "没有适合此页面的已保存记录。请在 SecondHand 的“My information”中打开“More SNAP information”添加一条，把“Person this belongs to”设为此页选中的姓名。然后停止自动填写，再重新开始。",
+    "worker.recordMissing": "没有适合此页面的已保存记录。请在 SecondHand 的“My information”中打开“More SNAP information”添加一条，把“Person this belongs to”设为此页选中的姓名。然后开始自动填写。",
     'brand.name': 'SecondHand',
     'language.label': '语言',
     'language.en': 'English',
@@ -2212,7 +2212,7 @@
     "iowa.record.rent": "Votre part du loyer",
     "iowa.record.payment": "Montant du versement actuel",
 
-    "worker.recordMissing": "Aucune fiche ne convient ici. Dans SecondHand, ajoutez-en une dans « More SNAP information » de « My information », avec le nom choisi ici dans « Person this belongs to ». Puis arrêtez et relancez le remplissage.",
+    "worker.recordMissing": "Aucune fiche ne convient ici. Dans SecondHand, ajoutez-en une dans « More SNAP information » de « My information », avec le nom choisi ici dans « Person this belongs to ». Puis lancez le remplissage.",
     'brand.name': 'SecondHand',
     'language.label': 'Langue',
     'language.en': 'English',
@@ -2734,7 +2734,7 @@
     "iowa.record.rent": "حصتك من الإيجار",
     "iowa.record.payment": "مبلغ الدفعة الحالية",
 
-    "worker.recordMissing": "لا يوجد سجل محفوظ مناسب. أضف سجلًا في SecondHand في “More SNAP information” ضمن “My information”، باسم الشخص المختار هنا في “Person this belongs to”. ثم أوقف التعبئة التلقائية وابدأها من جديد.",
+    "worker.recordMissing": "لا يوجد سجل محفوظ مناسب. أضف سجلًا في SecondHand في “More SNAP information” ضمن “My information”، باسم الشخص المختار هنا في “Person this belongs to”. ثم ابدأ التعبئة التلقائية.",
     'brand.name': 'SecondHand',
     'language.label': 'اللغة',
     'language.en': 'English',
