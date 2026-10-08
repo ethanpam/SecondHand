@@ -15,7 +15,6 @@ SecondHand contributors' original code is licensed under [MIT](LICENSE). Third-p
 ## Permission records still needed before public release
 
 - **Copied questionnaires:** `ML_model/questions/` records original form sources. Source URLs alone are not redistribution licenses. Record the applicable permission or terms for each source, or replace/remove material whose redistribution is not established.
-- **Film and narration:** `website/public/media/secondhand-film.mp4` remains tracked and available as a website public asset even though its page links were removed. The README credits ElevenLabs narration. Record the generation account/plan and applicable usage rights, plus the provenance of other included media. Do not publish account credentials or billing details as evidence.
 - **External design/template material:** retain the source references in the website README and design research note; confirm applicable terms for copied template code as well as installed packages.
 
 These open items are documentation gaps, not a claim that the material is unauthorized. Adding MIT to this repository does not resolve them. See the [public-release review](docs/public-release-review.md) for the remaining checks.
