@@ -19,7 +19,7 @@ The original shader remains behind the header and fades into the page without a 
 
 The demo heading, under the hero, reserves its full size while typing and deleting, and exposes one unchanging accessible name instead of announcing each character. It pauses offscreen and in hidden tabs. Reduced-motion and server-rendered/no-JavaScript views show the complete phrase.
 
-The nearby click-to-autofill illustration is an original React/CSS sequence: a pointer moves to “Approve fill,” clicks, and fills three fields (Daniel Ceaser, Ceaser.Daniel@example.com, Toronto) one at a time before holding and starting over. It uses explicitly fictional details, no actual form inputs, and no data requests. Its static accessible description preserves the approval and review boundaries; the animated scene is hidden from assistive technology. It also suspends offscreen and while hidden, and shows completed fields when motion is disabled. The hero remains card-free.
+The nearby click-to-autofill illustration is an original React/CSS sequence: a pointer moves to “Approve fill,” clicks, and fills three fields (Avery Example, avery.example@example.com, Ames) one at a time before holding and starting over. It uses explicitly fictional details, no actual form inputs, and no data requests. Its static accessible description preserves the approval and review boundaries; the animated scene is hidden from assistive technology. It also suspends offscreen and while hidden, and shows completed fields when motion is disabled. The hero remains card-free.
 
 ## What was intentionally excluded
 

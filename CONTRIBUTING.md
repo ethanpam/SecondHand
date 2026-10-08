@@ -4,7 +4,7 @@ Thank you for helping. SecondHand serves people applying for food and other assi
 
 ## Never use real applicant data
 
-Don't put a real person's name, address, Social Security number, income, or any other personal detail in an issue, a pull request, a test, a screenshot, or a commit. Use the fictional applicant in [`tests/fixtures/applicant-profile.json`](tests/fixtures/applicant-profile.json) (Daniel Ceaser) or make up obviously fake details. When you share a form that doesn't fill, save a copy with the answers removed, or describe the question labels instead.
+Don't put a real person's name, address, Social Security number, income, or any other personal detail in an issue, a pull request, a test, a screenshot, or a commit. Use the fictional applicant in [`tests/fixtures/applicant-profile.json`](tests/fixtures/applicant-profile.json) (Avery Example) or make up obviously fake details. When you share a form that doesn't fill, save a copy with the answers removed, or describe the question labels instead.
 
 ## Ways to help
 
