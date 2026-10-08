@@ -15,7 +15,7 @@ if (typeof globalThis.SecondHandTranslation?.create !== 'function') {
 // Must match BUILD in panel.js: change both together, with every change to the extension. The panel
 // compares them to tell when Chrome is still running an older worker than the pages it loaded from
 // disk, and the worker compares it with the build the desktop app ships to update itself (#85).
-const BUILD = '2026-10-06.22';
+const BUILD = '2026-10-06.23';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
@@ -27,6 +27,9 @@ const SITE_FIELD_ID = /^f\d{1,6}:[A-Za-z][A-Za-z0-9_-]{0,59}$/;
 const english = (key, params = {}) => SecondHandStrings.english(key, params);
 const say = (key, params = {}) => ({ message: english(key, params), messageKey: key, messageParams: params });
 const fault = (key, params = {}) => Object.assign(new Error(english(key, params)), { messageKey: key, messageParams: params });
+// A failure the applicant has nothing to do about, beside a fallback that is right, goes where Chrome records SecondHand's
+// errors (chrome://extensions, Errors), not into a result on screen.
+const unshown = what => error => console.error(what, error);
 // Fixed English written by the Iowa adapter or a content script, with the key it has in the catalog.
 function adapterSays(text, field = 'message') {
   const { key, params } = SecondHandStrings.describeEnglish(text);
@@ -54,6 +57,8 @@ const rememberables = new Map();
 const sitePlans = new Map(); // tabId -> { url, frames } the widget's on-device AI saw. Field metadata only.
 // Tabs whose widget asked the side panel to open on the question list. The panel takes it once.
 const questionViews = new Set();
+// tabId -> the note a failed next-question shortcut left for the tab's card, which takes it once.
+const questionNotes = new Map();
 // tabId -> Map(url -> { id, url, pageKey, lang, text, unread, summary }): the words of pages the side
 // panel summarizes and the key points it wrote for them. Memory only. Iowa's information-only screens
 // stay until the tab leaves Iowa; other pages are kept by address, the latest few.
@@ -173,6 +178,9 @@ function stopAutopilot(tabId, result, pilot) {
   autopilots.delete(tabId);
   return remember(tabId, result);
 }
+// After a fill, the app marks the application in progress. A failure there can't undo the fill, which already happened.
+const recordProgress = (url, filled) => nativeRequest('recordProgress', { url: safeUrl(url), filledCount: Math.min(filled, 100) })
+  .catch(unshown('The SecondHand app couldn’t mark the application in progress after a fill. The fill stands.'));
 async function fillPage(tabId, state, pilot) {
   const { url } = state;
   const pageKey = state.page.pageKey;
@@ -219,7 +227,7 @@ async function fillPage(tabId, state, pilot) {
     const after = await readPage(tabId);
     currentPilot(tabId, pilot);
     if (after.pageInstance !== state.pageInstance || after.url !== url || (after.page.pageKey !== pageKey && after.page.kind !== 'blocked')) throw fault('worker.pageChangedCheck');
-    if (filled > 0) await nativeRequest('recordProgress', { url: safeUrl(url), filledCount: Math.min(filled, 100) }).catch(() => {});
+    if (filled > 0) await recordProgress(url, filled);
     currentPilot(tabId, pilot);
     const missing = needYou(after.page);
     const summary = withReason(filled ? filledSummary(filled, missing)
@@ -276,7 +284,7 @@ async function fillRecordPage(tabId, state, pilot) {
     const after = await readPage(tabId); currentPilot(tabId, pilot);
     if (after.url !== state.url || after.pageInstance !== state.pageInstance || after.page.pageKey !== pageKey) throw fault('worker.pageChangedCheck');
     pilot.accessRevision = revision;
-    if (filled > 0) await nativeRequest('recordProgress', { url: safeUrl(state.url), filledCount: Math.min(filled, 100) }).catch(() => {});
+    if (filled > 0) await recordProgress(state.url, filled);
     currentPilot(tabId, pilot);
     const missing = needYou(after.page), summary = filled ? filledSummary(filled, missing) : missing.length ? { key: 'result.needYouNotSaved', params: { count: missing.length } } : { key: 'result.nothingNew', params: {} };
     return { state: 'done', filled, needYou: missing, notSaved: missing.filter(key => unsaved.has(key)), ...say(summary.key, summary.params), pageKey };
@@ -1604,7 +1612,13 @@ async function startSitePilot(tabId) {
 // The side panel routes by the tab's current page; a widget acts only as what it was loaded on.
 async function pageState(tabId, route) {
   const state = await currentPageState(tabId, route);
-  if (route !== undefined) return state;
+  // The card (a route) takes the note a failed next-question shortcut left, once: it shows it until its next poll, as it
+  // shows a failed click's on its link.
+  if (route !== undefined) {
+    const note = questionNotes.get(tabId);
+    questionNotes.delete(tabId);
+    return note ? { ...state, note } : state;
+  }
   // Only the side panel (no route) opens the question list the widget asked for, and gets the questions it may save
   // and those whose answers wait for Fill sensitive details.
   const shown = questionViews.delete(tabId) ? { ...state, showQuestions: true } : state;
@@ -2175,20 +2189,48 @@ async function nextQuestion(tabId) {
   questionTurns.set(tabId, { result, index });
   return focusField(tabId, keys[index]);
 }
+// A shortcut presses a button the tab has only on Iowa's form or on a site that is on: elsewhere it does nothing. When the
+// press fails, `fail(error, iowa)` ends it where a click's failure would.
+async function shortcut(tabId, press, fail) {
+  const tab = await chrome.tabs.get(tabId);
+  const iowa = SecondHandIowa.isSupportedUrl(tab.url), origin = siteOrigin(tab.url);
+  if (!iowa && !(origin && await siteEnabled(origin))) return;
+  try { await press(); }
+  catch (error) { fail(error, iowa); }
+}
+// A failed Autofill or Stop, as after a click: the tab's result says why.
+const autofillFailed = tabId => (error, iowa) => {
+  const { state, ...message } = failed(error);
+  remember(tabId, iowa ? { state, ...message, filled: 0, needYou: [], pageKey: results.get(tabId)?.pageKey || '' } : siteResult(state, message));
+};
+// A failed next-question, as after a click on the card's link to what is left: the card says why until its next poll, in
+// the words the worker's reply to that click has, and the tab's result, with its questions left, stays as it was.
+const questionFailed = tabId => error => {
+  const { error: message, errorKey: messageKey, errorParams: messageParams } = errorReply(error);
+  questionNotes.set(tabId, { message, messageKey, messageParams });
+};
+// When Chrome can't say what page the tab is on (it closed as the keys were pressed), there is nowhere on screen to say so.
+const shortcutLost = unshown('Chrome couldn’t say what page a keyboard shortcut was pressed on. The shortcut did nothing.');
 chrome.commands?.onCommand.addListener((command, tab) => {
   const tabId = tab?.id;
   if (!Number.isInteger(tabId)) return;
-  if (command === 'next-question') { nextQuestion(tabId).catch(() => {}); return; }
+  if (command === 'next-question') {
+    // A press replaces the note an earlier one left.
+    questionNotes.delete(tabId);
+    shortcut(tabId, () => nextQuestion(tabId), questionFailed(tabId)).catch(shortcutLost);
+    return;
+  }
   if (command !== 'autofill') return;
-  // As a click does, the shortcut holds off an update until it settles.
+  // As a click does, the shortcut holds off an update until it settles. What it presses is what the tab shows now.
   clicksUnderway++;
-  (autopilots.has(tabId) ? stop(tabId) : autofill(tabId)).catch(() => {}).finally(() => { clicksUnderway--; reloadWhenIdle(); });
+  const press = autopilots.has(tabId) ? () => stop(tabId) : () => autofill(tabId);
+  shortcut(tabId, press, autofillFailed(tabId)).catch(shortcutLost).finally(() => { clicksUnderway--; reloadWhenIdle(); });
 });
 chrome.tabs.onActivated?.addListener(info => {
   for (const [tabId, pilot] of sitePilots) if (tabId !== info.tabId) stopSitePilot(tabId, pilot, siteResult('stopped', say('worker.stoppedTabChanged')));
   for (const tabId of autopilots.keys()) if (tabId !== info.tabId) stopAutopilot(tabId, { state: 'stopped', filled: 0, needYou: [], ...say('worker.stoppedTabChanged'), pageKey: results.get(tabId)?.pageKey || '' });
 });
-chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); sitePilots.delete(tabId); questionTurns.delete(tabId); generalPages.delete(tabId); sitePlans.delete(tabId); questionViews.delete(tabId); pageReads.delete(tabId); formFrames.delete(tabId); formChecks.delete(tabId); savables.delete(tabId); rememberables.delete(tabId); heldDetails.delete(tabId); });
+chrome.tabs.onRemoved?.addListener(tabId => { results.delete(tabId); autopilots.delete(tabId); sitePilots.delete(tabId); questionTurns.delete(tabId); questionNotes.delete(tabId); generalPages.delete(tabId); sitePlans.delete(tabId); questionViews.delete(tabId); pageReads.delete(tabId); formFrames.delete(tabId); formChecks.delete(tabId); savables.delete(tabId); rememberables.delete(tabId); heldDetails.delete(tabId); });
 chrome.tabs.onUpdated?.addListener((tabId, change) => {
   if (change.status === 'loading') {
     results.delete(tabId);
@@ -2201,6 +2243,7 @@ chrome.tabs.onUpdated?.addListener((tabId, change) => {
     generalPages.delete(tabId);
     sitePlans.delete(tabId);
     questionViews.delete(tabId);
+    questionNotes.delete(tabId);
     // Chrome omits other sites' URLs without the tabs permission, so re-read the tab: anything that
     // is not Iowa's portal (or unreadable) ends autofill and forgets the Iowa screens kept for the summary.
     if (autopilots.has(tabId) || [...(pageReads.get(tabId)?.values() || [])].some(isIowaRead)) {
@@ -2224,4 +2267,5 @@ async function refreshSiteScripts() {
 chrome.runtime.onInstalled?.addListener(details => { if (details.reason === 'update') void refreshSiteScripts(); });
 chrome.permissions?.onRemoved?.addListener(() => { sitePilots.clear(); forgetRevoked().catch(error => { if (!appClosed(error)) throw error; }); });
 // Chrome's native panel persists alongside navigation; it never opens itself.
-chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true })
+  .catch(unshown('Chrome couldn’t make SecondHand’s toolbar icon open the side panel. The card and Chrome’s side panel menu still open it.'));

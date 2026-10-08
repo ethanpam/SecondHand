@@ -1,7 +1,9 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { runFile } = require('./helpers/harness.cjs');
+const { runFile, workerConsole, workerLogged } = require('./helpers/harness.cjs');
+// An error the worker logged that the test didn't take fails it.
+test.afterEach(() => assert.deepEqual(workerLogged(), [], 'the worker logged an error the test didn’t expect'));
 const { webcrypto } = require('node:crypto');
 const adapter = require('../extension/iowa-adapter.js');
 const generic = require('../extension/generic-adapter.js');
@@ -83,7 +85,7 @@ function worker({ selectedOwner = '', values = PRIVATE_RECORD, nativeHook, conte
   };
   runFile('extension/background.js', {
     chrome, SecondHandIowa: adapter, SecondHandGeneric: generic, SecondHandStrings: strings, SecondHandTranslation: translation,
-    importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL: globalThis.URL, Map, Set, console
+    importScripts: () => {}, crypto: webcrypto, setTimeout, clearTimeout, URL: globalThis.URL, Map, Set, console: workerConsole
   });
   const send = message => new Promise(resolve => listener({ tabId: 7, ...message }, { id: 'testextension', url: chrome.runtime.getURL('panel.html') }, resolve));
   return { model, vault, calls, events, start: () => send({ type: 'ui:autofill', confirmed: true }), poll: () => send({ type: 'ui:pageState' }) };
@@ -162,6 +164,16 @@ test('missing record data stops Next; manual completion gets a no-data authoriza
   await stale.poll(); await tick(); await stale.poll();
   assert.equal(stale.model.nextCount, 0);
   assert.equal(stale.calls.native.some(call => call.type === 'getFields'), false);
+});
+
+test('a record page the app can’t mark in the application’s progress still stands and continues, and the failure goes where Chrome records SecondHand’s errors', async () => {
+  const w = worker({ nativeHook: request => { if (request.type === 'recordProgress') throw new Error('Synthetic progress failure'); } });
+  const result = await w.start();
+  assert.equal(result.data.state, 'continuing', JSON.stringify(result));
+  assert.deepEqual(w.model.filled, PHASES.flat()); assert.equal(w.model.nextCount, 1);
+  const logged = workerLogged();
+  assert.deepEqual(logged.map(([what]) => what), ['The SecondHand app couldn’t mark the application in progress after a fill. The fill stands.']);
+  assert.equal(logged[0][1].message, 'Synthetic progress failure');
 });
 
 test('locking between the final filled page and Continue prevents navigation', async () => {

@@ -3,9 +3,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const adapter = require('../extension/iowa-adapter.js');
 const strings = require('../extension/strings.js');
-const { plain, read, serviceWorker, nativeHost } = require('./helpers/harness.cjs');
+const { plain, read, serviceWorker, nativeHost, workerLogged } = require('./helpers/harness.cjs');
+// An error the worker logged that the test didn't take fails it.
+test.afterEach(() => assert.deepEqual(workerLogged(), [], 'the worker logged an error the test didn’t expect'));
 
 const PANEL_URL = 'chrome-extension://testextension/panel.html';
+// What the worker logs when the app fails to mark the application in progress after a fill.
+const PROGRESS_UNRECORDED = 'The SecondHand app couldn’t mark the application in progress after a fill. The fill stands.';
+// What the worker logs when Chrome can't say what page a keyboard shortcut was pressed on.
+const SHORTCUT_LOST = 'Chrome couldn’t say what page a keyboard shortcut was pressed on. The shortcut did nothing.';
 const { GENERIC_KEYS, SAVE_KEYS, unsafeQuestion, layaQuestion, isBandKey } = require('../extension/generic-adapter.js');
 // Verified Iowa pages never use the general engine; any call there is a bug.
 const noSiteEngine = { GENERIC_KEYS, SAVE_KEYS, requestKeys: () => { throw new Error('Iowa used the site engine.'); }, deriveValues: () => { throw new Error('Iowa used the site engine.'); },
@@ -63,12 +69,17 @@ function generalPage(message, plan) {
 // the way Iowa's form reveals conditional sections.
 // `build` runs the worker as another build; `disk` is the build in the files Chrome would load on a
 // reload (null: they can't be read); `desktop.extension` is what the app says about the extension it ships.
-function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noSiteEngine, general = nothingPlanned(), page = {}, questions, pageText, build, disk } = {}) {
+// `focus` is the page's answer when SecondHand goes to one of its questions, and `panelBehavior` Chrome's when the worker
+// sets what its toolbar icon does.
+function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noSiteEngine, general = nothingPlanned(), page = {}, questions, pageText, build, disk, focus = () => ({ focused: true }),
+  panelBehavior = async () => {} } = {}) {
   const model = { kind, filled: [], revealed: false, token: null };
   const vault = { reachable: true, unlocked: true, getFieldsError: null,
     values: { firstName: 'Synthetic private first', hasHomeAddress: 'yes', mailingCity: 'Synthetic private city' }, ...desktop };
   const calls = { native: [], content: [], pageTabs: [], injected: [], reads: [], order: [] };
   const tab = { id: 7, active: true, url: `${adapter.PORTAL}/applyForBenefits/enterPersonalInfo` };
+  // The person closed the tab: Chrome finds no tab with its id.
+  let closed = false;
   const w = serviceWorker();
   const visible = () => ['firstName', 'lastName', 'hasHomeAddress', ...(model.revealed ? ['mailingCity'] : [])];
   function pageState() {
@@ -80,7 +91,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
   }
   const chrome = {
     tabs: {
-      get: async () => ({ ...tab }),
+      get: async id => { if (closed) throw new Error(`No tab with id: ${id}.`); return { ...tab }; },
       sendMessage: async (id, message) => {
         calls.pageTabs.push(id); calls.content.push(message);
         if (message.type === 'secondhand:pageState') return pageState();
@@ -94,7 +105,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
           }
           return { ok: true, filledCount, skippedCount: message.fields.length - filledCount };
         }
-        if (message.type === 'secondhand:focusField') return { focused: true };
+        if (message.type === 'secondhand:focusField') return focus(message);
         if (message.type === 'secondhand:questions' && questions) return structuredClone(questions);
         if (message.type === 'secondhand:pageText' && pageText) return structuredClone(pageText);
         if (message.type === 'secondhand:widgetSize') return { sized: true };
@@ -104,7 +115,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
       },
       onActivated: w.event('activated'), onRemoved: w.event('removed'), onUpdated: w.event('updated')
     },
-    sidePanel: { setPanelBehavior: async () => {}, open: async () => {} },
+    sidePanel: { setPanelBehavior: panelBehavior, open: async () => {} },
     commands: { onCommand: w.event('command') },
     scripting: { executeScript: async details => { calls.injected.push(plain(details)); }, getRegisteredContentScripts: async () => [] },
     // Iowa's site is the extension's own host permission; no other site is on.
@@ -124,7 +135,8 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
         if (request.type === 'showApp') return reply({ shown: true });
         if (request.type === 'unlockWithTouchId' && vault.touchIdUnlock) return reply(structuredClone(vault.touchIdUnlock));
         if (request.type === 'openApp') return vault.openError ? fail(vault.openError) : reply(vault.opened || { opened: 'shown' });
-        if (request.type === 'recordProgress') return reply({ recorded: true });
+        // `progressError`: the app fails to mark the application in progress after a fill.
+        if (request.type === 'recordProgress') return vault.progressError ? fail(vault.progressError) : reply({ recorded: true });
         if (request.type === 'saveFields') return reply({ saved: Object.keys(request.fields) });
         // Laya (#39, #42): readied before a click's questions; "not ready" unless a test plays it.
         if (request.type === 'warmLaya') return reply({ state: vault.layaState || 'unavailable' });
@@ -151,6 +163,7 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
   return {
     calls, tab, events: w.events, vault, filled: () => [...model.filled],
     restart: w.restart,
+    close: () => { closed = true; },
     reloads: () => calls.order.filter(step => step === 'reload').length,
     send,
     panel: message => send({ tabId: 7, ...message }, { id: 'testextension', url: PANEL_URL }),
@@ -158,6 +171,16 @@ function worker({ kind = 'fillable', desktop = {}, duringGetFields, engine = noS
   };
 }
 const autofill = w => w.panel({ type: 'ui:autofill', confirmed: true });
+
+test('SecondHand’s toolbar icon opens its side panel, and Chrome’s failure to set that goes where Chrome records SecondHand’s errors', async () => {
+  const set = [];
+  worker({ panelBehavior: async behavior => { set.push(plain(behavior)); } });
+  assert.deepEqual(set, [{ openPanelOnActionClick: true }]);
+  const failure = new Error('Synthetic side panel failure');
+  worker({ panelBehavior: async () => { throw failure; } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(workerLogged(), [['Chrome couldn’t make SecondHand’s toolbar icon open the side panel. The card and Chrome’s side panel menu still open it.', failure]]);
+});
 
 // Keyboard shortcuts: Chrome sends a command only for keys the person pressed, with the tab in front.
 const settleShortcut = async () => { for (let i = 0; i < 30; i++) await new Promise(resolve => setImmediate(resolve)); };
@@ -185,6 +208,45 @@ test('the next-question shortcut goes to each question the tab’s result left, 
   await autofill(w);
   for (let i = 0; i < 3; i++) { w.events.command('next-question', { id: 7 }); await settleShortcut(); }
   assert.deepEqual(focused(), ['firstName', 'lastName', 'firstName']);
+});
+
+test('a failed next-question shortcut ends where a failed click on the card’s link does: a passing note on the card, with the tab’s result and its questions left as they were', async () => {
+  const lost = 'Could not establish connection. Receiving end does not exist.';
+  const w = worker({ focus: () => { throw new Error(lost); } });
+  await autofill(w);
+  const before = plain((await w.panel({ type: 'ui:pageState' })).data).result;
+  assert.deepEqual(before.needYou, ['lastName']);
+  w.events.command('next-question', { id: 7 });
+  await settleShortcut();
+  // The side panel reads the tab's result as it was, and no note.
+  const side = plain((await w.panel({ type: 'ui:pageState' })).data);
+  assert.deepEqual(side.result, before);
+  assert.equal(Object.hasOwn(side, 'note'), false);
+  // The card takes the note once, in the words the worker's reply to a failed click on its link gives.
+  const card = plain((await w.launcher({ type: 'ui:pageState' })).data);
+  assert.deepEqual(card.result, before);
+  const clicked = plain(await w.launcher({ type: 'ui:focusField', key: 'lastName', confirmed: true }));
+  assert.deepEqual(card.note, { message: clicked.error, messageKey: clicked.errorKey, messageParams: clicked.errorParams });
+  assert.deepEqual(card.note, { message: lost, messageKey: 'detail', messageParams: { detail: lost } });
+  assert.equal(Object.hasOwn(plain((await w.launcher({ type: 'ui:pageState' })).data), 'note'), false, 'and then it has passed');
+  // A note the card hasn't taken goes when the page moves on.
+  w.events.command('next-question', { id: 7 });
+  await settleShortcut();
+  w.events.updated(7, { status: 'loading' });
+  assert.equal(Object.hasOwn(plain((await w.launcher({ type: 'ui:pageState' })).data), 'note'), false);
+  assert.deepEqual(w.filled(), ['firstName', 'hasHomeAddress', 'mailingCity'], 'and nothing is erased');
+});
+
+test('a shortcut on a tab Chrome can no longer find does nothing, and says so where Chrome records SecondHand’s errors', async () => {
+  const w = worker();
+  w.close();
+  w.events.command('autofill', { id: 7 });
+  w.events.command('next-question', { id: 7 });
+  await settleShortcut();
+  const logged = workerLogged();
+  assert.deepEqual(logged.map(([what]) => what), [SHORTCUT_LOST, SHORTCUT_LOST]);
+  assert.deepEqual(logged.map(([, error]) => error.message), ['No tab with id: 7.', 'No tab with id: 7.']);
+  assert.deepEqual(w.calls.native.filter(call => call.type === 'getFields'), []);
 });
 
 test('a shortcut on a tab that is neither Iowa’s form nor a site that is on does nothing, and an unknown command is ignored', async () => {
@@ -216,6 +278,18 @@ test('one click makes one status and one getFields request, fills revealed field
   assert.doesNotMatch(JSON.stringify(response), /Synthetic private/);
   assert.equal(w.calls.content.some(message => message.type.startsWith('secondhand:generic:')), false, 'verified pages never use the general engine');
   assert.deepEqual(w.calls.injected[0], { target: { tabId: 7, frameIds: [0] }, files: ['address-policy.js', 'iowa-later-adapter.js', 'iowa-record-adapter.js', 'iowa-adapter.js', 'generic-adapter.js', 'page-text.js', 'content.js'] });
+});
+
+test('a fill the app can’t mark in the application’s progress still stands, and the failure goes where Chrome records SecondHand’s errors', async () => {
+  const w = worker({ desktop: { progressError: 'Synthetic progress failure' } });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.state, 'done', 'the fill already happened');
+  assert.equal(result.filled, 3);
+  assert.match(result.message, /^Filled 3 answers · 1 left for you/);
+  assert.deepEqual(w.filled(), ['firstName', 'hasHomeAddress', 'mailingCity']);
+  const logged = workerLogged();
+  assert.deepEqual(logged.map(([what]) => what), [PROGRESS_UNRECORDED]);
+  assert.equal(logged[0][1].message, 'Synthetic progress failure');
 });
 
 test('locked and unreachable desktops map to widget states without filling', async () => {

@@ -1,7 +1,9 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { plain, tick, deferred, until, serviceWorker, nativeHost } = require('./helpers/harness.cjs');
+const { plain, tick, deferred, until, serviceWorker, nativeHost, workerLogged } = require('./helpers/harness.cjs');
+// An error the worker logged that the test didn't take fails it.
+test.afterEach(() => assert.deepEqual(workerLogged(), [], 'the worker logged an error the test didn’t expect'));
 
 const ORIGIN = 'https://pantry.example.org';
 const PANEL = 'chrome-extension://testextension/panel.html';

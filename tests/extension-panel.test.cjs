@@ -17,6 +17,13 @@ const BUILD = source('panel.js').match(/const BUILD = '([^']+)'/)[1];
 // frame can't hold the whole), and the side panel's notice above its own.
 const OUTDATED = 'SecondHand was updated. Click Restart SecondHand, then go to the next page, or reload this one with the round arrow by the address bar. That clears what you typed on this page; your saved details stay in the app.';
 const OUTDATED_SHORT = 'SecondHand was updated.';
+// An outdated card whose worker doesn't answer its one request for room logs that, where Chrome records SecondHand's errors.
+const ROOM_UNMADE = 'SecondHand’s outdated worker couldn’t make room for the card’s notice. The card shows its short form when the whole doesn’t fit.';
+function unroomed(view) {
+  const logged = view.logged();
+  assert.deepEqual(logged.map(([what]) => what), [ROOM_UNMADE]);
+  assert.equal(logged[0][1].messageKey, 'panel.outdated');
+}
 const OUTDATED_PANEL = 'SecondHand was updated and needs to restart. This side panel will close. To use SecondHand again, go on to the next page of your form, or reload its page with the round arrow by the address bar. That clears what you typed on that page; your saved details stay in the SecondHand app.';
 
 
@@ -1220,8 +1227,13 @@ test('a worker that never answers gets a plain notice and a Restart button in th
   assert.equal(widget.get('widget').classList.contains('restartable'), true);
   // The outdated worker is asked once, in the oldest form of the request, for a frame with room for a line.
   assert.deepEqual(plainRequests(widget.requests).filter(request => request.type === 'ui:widgetSize'), [{ type: 'ui:widgetSize', line: true }]);
+  // This one doesn't answer that either. Its failure, which the reader can't act on, goes where Chrome records SecondHand's
+  // errors, not over the notice the reader needs.
+  unroomed(widget);
+  assert.equal(widget.get('widget-text').textContent, OUTDATED);
   // A frame too small for the whole notice gets the short form beside the button.
   const small = await panel(t, { launcher: true, silent: true });
+  unroomed(small);
   Object.defineProperties(small.get('widget-text'), { scrollHeight: { get() { return this.textContent === OUTDATED ? 56 : 28; } }, clientHeight: { get: () => 42 } });
   small.window.dispatchEvent(new small.window.Event('resize'));
   assert.equal(small.get('widget-text').textContent, OUTDATED_SHORT);
@@ -1239,6 +1251,7 @@ test('a worker that never answers gets a plain notice and a Restart button in th
 
 test('an outdated card the page can size directly is drawn whole, can be hidden, and asks the page, not the worker', async t => {
   const widget = await panel(t, { launcher: true, silent: true });
+  unroomed(widget);
   assert.equal(widget.get('hide').hidden, true, 'without the page’s word, hiding would leave an empty frame over the page');
   assert.equal(widget.get('widget').classList.contains('outdated'), true, 'and the notice keeps to the frame it has');
   const posted = [];
@@ -1496,6 +1509,35 @@ test('widget and side panel say when nothing on a site matches the saved profile
   await paged.userClick('autofill');
   assert.equal(paged.get('widget-text').textContent, next.message);
   assert.equal(paged.get('need-you').hidden, true);
+});
+
+test('the card shows the note a failed next-question shortcut left as it shows a failed click on its link’s, until its next poll, and keeps the questions left', async t => {
+  const lost = 'Could not establish connection. Receiving end does not exist.';
+  const failure = { message: lost, messageKey: 'detail', messageParams: { detail: lost } };
+  // The worker hands the card the note once, with the page's state.
+  let note = null;
+  const view = await panel(t, { launcher: true, result: doneResult, pageState: state => { const next = structuredClone(state); if (note) next.note = note; note = null; return next; } });
+  const poll = async () => { view.window.document.dispatchEvent(new view.window.Event('visibilitychange')); await tick(); await tick(); };
+  const resultLine = view.get('widget-text').textContent;
+  assert.equal(view.get('need-you').textContent, '2 questions left');
+  // A failed click on the link, for comparison: its note shows until the next poll.
+  const send = view.window.chrome.runtime.sendMessage;
+  view.window.chrome.runtime.sendMessage = async payload => payload.type === 'ui:focusField'
+    ? { ok: false, error: failure.message, errorKey: failure.messageKey, errorParams: failure.messageParams } : send(payload);
+  await view.userClick('need-you');
+  const clicked = view.get('widget-text').textContent;
+  assert.notEqual(clicked, resultLine);
+  await poll();
+  assert.equal(view.get('widget-text').textContent, resultLine);
+  // The shortcut's note says the same, beside the same link, and passes the same way.
+  note = failure;
+  await poll();
+  assert.equal(view.get('widget-text').textContent, clicked);
+  assert.equal(view.get('need-you').hidden, false);
+  assert.equal(view.get('need-you').textContent, '2 questions left');
+  await poll();
+  assert.equal(view.get('widget-text').textContent, resultLine);
+  assert.equal(view.get('need-you').textContent, '2 questions left');
 });
 
 test('widget on a site that is on autofills once, lists what needs you, and never shows Stop', async t => {
