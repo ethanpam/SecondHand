@@ -177,6 +177,10 @@ The extension talks to the app through Chrome's native messaging, a direct conne
 | Download website | React with [Vinext](https://github.com/cloudflare/vinext), on a Cloudflare Worker with installers in R2 ([`website/`](website/README.md)) | Free tier, no download fees, no trackers |
 | Tests | Node's test runner, jsdom, Playwright (Electron and Chromium) | 1,700+ tests on synthetic data only |
 
+## Library mode
+
+On Windows and Mac, turn on **Privacy & backups → Library mode** to delete SecondHand’s local data after two minutes without mouse or keyboard activity. It also deletes on exit, computer lock, and sleep, and stays on for the next person. Website entries, exported files, and original documents are not deleted. See [deletion scope](docs/security.md#library-mode-windows-and-macos).
+
 ## Privacy and safety
 
 - **Your details stay in the desktop app.** Chrome's extension storage and Chrome Sync never hold applicant information.
@@ -299,6 +303,7 @@ For live reloading, run `npm run dev` (run `npx playwright install chromium` onc
 | `npm run check` | Syntax checks, the extension's permission rules, and a newer `BUILD` whenever `extension/` changed since main. |
 | `npm run test:coverage` | Unit tests with coverage floors from `scripts/coverage.cjs`. |
 | `npm run test:ui` | Drives the real Electron app end to end. Needs a desktop session. |
+| `node scripts/smoke-library-mode.cjs` | Tests Library mode in Electron with an isolated profile and controlled idle readings. |
 | `npm run test:extension` | Runs the extension in an isolated Chromium against synthetic Iowa pages and a made-up pantry form. |
 | `npm run capture:ui -- after` | Screenshots every state of the card and side panel into `docs/pr-media/`, and fails if the extension logs an error. Run it with `before` on main for a pull request's before pictures. |
 | `npm run test:translation` | Checks the language picker, translated questions, and right-to-left Arabic. |

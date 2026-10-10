@@ -175,7 +175,7 @@ async function desktop(options = {}) {
         return bytes;
       } } },
       // settings.json from `options.settings`; the guided setup's progress file from `options.setup` (none by default), as written since.
-      'node:fs/promises': { mkdir: async () => {}, stat: async () => ({ size: 10 }), rm: async file => { removed.push(file); if (file.endsWith('setup-progress.json')) setupFile = null; },
+      'node:fs/promises': { access: async () => { throw Object.assign(new Error('No file'), { code: 'ENOENT' }); }, mkdir: async () => {}, stat: async () => ({ size: 10 }), rm: async file => { removed.push(file); if (file.endsWith('setup-progress.json')) setupFile = null; },
         readFile: async file => {
           if (!String(file).endsWith('setup-progress.json')) return JSON.stringify(options.settings ?? { extensionId });
           if (setupFile === null) throw Object.assign(new Error('No such file'), { code: 'ENOENT' });

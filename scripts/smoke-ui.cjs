@@ -411,7 +411,7 @@ async function main() {
       }) };
     });
     const errorLine = error => `#${error.id}: ${error.color}, ${error.fontSize} / ${error.lineHeight}, ${error.marginTop} above`;
-    assert.equal(errorLines.errors.length, 12, `twelve error lines in the desktop window:\n${errorLines.errors.map(errorLine).join('\n')}`);
+    assert.equal(errorLines.errors.length, 13, `thirteen error lines in the desktop window:\n${errorLines.errors.map(errorLine).join('\n')}`);
     const authErrorLine = errorLines.errors.find(error => error.id === 'auth-error');
     assert.equal(authErrorLine.color, errorLines.danger, `#auth-error is --danger (${errorLines.danger}): ${errorLine(authErrorLine)}`);
     const unlikeErrors = errorLines.errors.filter(error => ['color', 'fontSize', 'lineHeight', 'marginTop'].some(key => error[key] !== authErrorLine[key]));

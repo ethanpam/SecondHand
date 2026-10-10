@@ -78,6 +78,15 @@ if (nativeOrigin) {
   let bridge;
   let extensionId = null;
   let lockTimer;
+  let libraryMode = false;
+  let libraryTimer;
+  let libraryIdleExpired = false;
+  let copiedRecoveryKey;
+  let libraryErasing = false;
+  let libraryError = null;
+  let libraryEpoch = 0;
+  let libraryCleanup;
+  const libraryOperations = new Set();
   let lockRevision = 0;
   let quitting = false;
   // Opened again while quitting (#256): Electron starts SecondHand again once this copy has exited.
@@ -141,6 +150,7 @@ if (nativeOrigin) {
   const touchIdUnlock = createTouchIdUnlock({ vault, filePath: path.join(userData, 'touch-unlock.bin'), revision: () => accessRevision,
     platform: touchIdPlatform({ systemPreferences, safeStorage, platform: process.platform, packaged: app.isPackaged, env: process.env }) });
   const configPath = path.join(userData, 'settings.json');
+  const libraryPath = path.join(userData, 'library-mode.json');
   const deviceSecretPath = path.join(userData, 'device-reset.bin');
   const deviceResetSupported = ['darwin', 'win32'].includes(process.platform);
   const rendererPath = path.join(__dirname, '../renderer/index.html');
@@ -185,7 +195,7 @@ if (nativeOrigin) {
   }
   async function status() {
     const details = await vault.inspect().catch(() => null);
-    return { exists: await vault.exists(), unlocked: vault.unlocked, lockRevision, recoveryKey: Boolean(details?.recoveryKey),
+    return { exists: await vault.exists(), unlocked: vault.unlocked && !libraryErasing, libraryMode, libraryErasing, libraryError, lockRevision, recoveryKey: Boolean(details?.recoveryKey),
       deviceReset: Boolean(details?.deviceReset) && await hasDeviceSecret(), deviceResetSupported, extensionId, autofillWithoutAsking, trustedSites: [...trustedSites], allSites,
       alwaysAllowedSites: [...alwaysAllowedSites], householdNoteDismissed,
       touchId: await touchIdUnlock.state(), touchIdSupported: touchIdUnlock.supported(), touchIdNotice: touchIdUnlock.notice, settingsNotice,
@@ -194,7 +204,7 @@ if (nativeOrigin) {
   }
   function touch() {
     clearTimeout(lockTimer);
-    if (vault.unlocked) lockTimer = setTimeout(() => lockVault().catch(() => {}), AUTO_LOCK_MS);
+    if (vault.unlocked && !libraryMode) lockTimer = setTimeout(() => lockVault().catch(() => {}), AUTO_LOCK_MS);
   }
   async function lockVault() {
     clearTimeout(lockTimer);
@@ -207,7 +217,85 @@ if (nativeOrigin) {
     return status();
   }
   function requireUnlocked() {
-    if (!vault.unlocked) throw publicError('Unlock SecondHand first.');
+    if (libraryErasing || !vault.unlocked) throw publicError('Unlock SecondHand first.');
+  }
+  // OS input includes Chrome and mouse movement. Background requests never reset this timer.
+  function watchLibraryIdle() {
+    clearTimeout(libraryTimer);
+    if (!libraryMode || quitting) return;
+    libraryTimer = setTimeout(async () => {
+      try {
+        const idle = powerMonitor.getSystemIdleTime();
+        if (idle < 120) libraryIdleExpired = false;
+        if (libraryError || (idle >= 120 && !libraryIdleExpired)) {
+          libraryIdleExpired = true;
+          await eraseLibrarySession();
+        }
+      } catch { /* The locked UI reports the failure; the next poll retries. */ }
+      finally { watchLibraryIdle(); }
+    }, 1000);
+  }
+  async function eraseLibraryFiles() {
+    await vault.lock();
+    await vault.erase();
+    if (copiedRecoveryKey && clipboard.readText() === copiedRecoveryKey) clipboard.clear();
+    copiedRecoveryKey = null;
+    await fs.rm(deviceSecretPath, { force: true });
+    await touchIdUnlock.removeSealed();
+    await fs.rm(setupPath, { force: true });
+    const temporaryBases = ['device-reset.bin', 'touch-unlock.bin', 'setup-progress.json', 'settings.json'];
+    for (const name of await fs.readdir(userData)) {
+      if (name.endsWith('.tmp') && temporaryBases.some(base => name.startsWith(`${base}.`))) {
+        await fs.rm(path.join(userData, name), { force: true });
+      }
+    }
+    autofillWithoutAsking = false;
+    trustedSites = []; alwaysAllowedSites = []; allSites = false;
+    householdNoteDismissed = false;
+    await saveSettings();
+  }
+  function notifyLibraryReset() {
+    lockRevision++;
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('secondhand:library-reset', { lockRevision });
+  }
+  function eraseLibrarySession() {
+    if (libraryCleanup) return libraryCleanup;
+    libraryErasing = true;
+    libraryEpoch++;
+    accessRevision++;
+    clearTimeout(lockTimer);
+    documentReader.cancel();
+    notifyLibraryReset();
+    libraryCleanup = (async () => {
+      try {
+        // Clear immediately, then drain old operations before permitting another patron.
+        // A late file picker or credential write cannot resurrect the previous session.
+        await eraseLibraryFiles();
+        await Promise.allSettled([...libraryOperations]);
+        await eraseLibraryFiles();
+        libraryError = null;
+        libraryErasing = false;
+      } catch {
+        libraryError = 'Library mode could not delete local data. Close pending dialogs and check folder access. Retrying.';
+        throw publicError(libraryError);
+      } finally {
+        accessRevision++;
+        libraryCleanup = null;
+        notifyLibraryReset();
+      }
+    })();
+    return libraryCleanup;
+  }
+  async function libraryOperation(run) {
+    if (libraryErasing) throw publicError(libraryError || 'Library mode is deleting local data. Close any pending dialogs.');
+    const epoch = libraryEpoch;
+    const operation = Promise.resolve(run());
+    libraryOperations.add(operation);
+    try {
+      const result = await operation;
+      if (epoch !== libraryEpoch) throw publicError('Library mode ended this session.');
+      return result;
+    } finally { libraryOperations.delete(operation); }
   }
   async function saveSettings() {
     await atomicWrite(configPath, Buffer.from(JSON.stringify({ extensionId, autofillWithoutAsking, trustedSites, layaEnabled, ...(allSites && { allSites }),
@@ -757,6 +845,16 @@ if (nativeOrigin) {
 
   const methods = {
     status,
+    async setLibraryMode(enabled) {
+      if (typeof enabled !== 'boolean') throw publicError('Invalid setting.');
+      requireUnlocked();
+      if (enabled) await atomicWrite(libraryPath, Buffer.from('{"enabled":true}'));
+      else await fs.rm(libraryPath, { force: true });
+      libraryMode = enabled;
+      watchLibraryIdle();
+      touch();
+      return status();
+    },
     async createVault(request) {
       let device = null;
       let deviceResetFailed = false;
@@ -848,15 +946,18 @@ if (nativeOrigin) {
       touch(); return status();
     },
     async saveRecoveryKey(value) {
+      const epoch = libraryEpoch;
       const recoveryKey = formattedRecoveryKey(value);
       const result = await dialog.showSaveDialog(mainWindow, { title: 'Save recovery key', defaultPath: 'SecondHand recovery key.txt', filters: [{ name: 'Text file', extensions: ['txt'] }] });
       if (result.canceled || !result.filePath) return { cancelled: true };
+      if (epoch !== libraryEpoch) throw publicError('Library mode ended this session.');
       await atomicWrite(result.filePath, Buffer.from(`SecondHand recovery key\n\n${recoveryKey}\n\nIf you forget your password, choose "Forgot password?" on the SecondHand unlock screen and enter this key.\nAnyone with this key and your SecondHand files can open your information. Keep it somewhere safe, away from this computer.\n`));
       return { cancelled: false };
     },
     async copyRecoveryKey(value) {
       const recoveryKey = formattedRecoveryKey(value);
       clipboard.writeText(recoveryKey);
+      copiedRecoveryKey = recoveryKey;
       setTimeout(() => { if (clipboard.readText() === recoveryKey) clipboard.clear(); }, 60 * 1000);
       return true;
     },
@@ -1026,16 +1127,20 @@ if (nativeOrigin) {
       return saveExtensionRegistration(id);
     },
     async exportBackup() {
+      const epoch = libraryEpoch;
       if (!await vault.exists()) throw publicError('Create a password before saving a backup.');
       const result = await dialog.showSaveDialog(mainWindow, { title: 'Export encrypted backup', defaultPath: 'secondhand-backup.secondhand', filters: [{ name: 'SecondHand encrypted backup', extensions: ['secondhand'] }] });
       if (result.canceled || !result.filePath) return { cancelled: true };
+      if (epoch !== libraryEpoch) throw publicError('Library mode ended this session.');
       await atomicWrite(result.filePath, await vault.readEncrypted());
       return { cancelled: false };
     },
     async importBackup() {
+      const epoch = libraryEpoch;
       if (vault.unlocked) throw publicError('Lock SecondHand before restoring a backup.');
       const result = await dialog.showOpenDialog(mainWindow, { title: 'Import encrypted backup', properties: ['openFile'], filters: [{ name: 'SecondHand encrypted backup', extensions: ['secondhand'] }] });
       if (result.canceled || !result.filePaths[0]) return { cancelled: true };
+      if (epoch !== libraryEpoch) throw publicError('Library mode ended this session.');
       const file = result.filePaths[0];
       const stat = await fs.stat(file);
       if (!stat.isFile() || stat.size > MAX_VAULT_BYTES) throw publicError('This is not a supported encrypted backup.');
@@ -1054,6 +1159,7 @@ if (nativeOrigin) {
       try { await touchIdUnlock.removeSealed(); }
       catch (error) { throw publicError(`Touch ID’s key on this Mac couldn’t be removed (${error.code || error.message}), so the backup wasn’t restored. Please try again.`); }
       accessRevision++;
+      if (epoch !== libraryEpoch) throw publicError('Library mode ended this session.');
       await vault.importEncrypted(bytes);
       // Setup progress belonged to the information just replaced.
       await fs.rm(setupPath, { force: true });
@@ -1100,6 +1206,11 @@ if (nativeOrigin) {
     if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(path.join(__dirname, 'icon.png'));
     await fs.mkdir(userData, { recursive: true, mode: 0o700 });
     await loadSettings();
+    // Presence is fail-closed, even if this dedicated mode marker is damaged.
+    try { await fs.access(libraryPath); libraryMode = true; }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (libraryMode) await eraseLibrarySession();
+    watchLibraryIdle();
     await laya.setEnabled(layaEnabled !== false);
     // Downloads the model if it's missing, then checks for a newer one now and every 24 hours.
     // It needs no unlock: it touches no saved information. It does nothing while Laya is off.
@@ -1110,22 +1221,23 @@ if (nativeOrigin) {
     ipcMain.handle('secondhand:invoke', async (event, method, ...args) => {
       if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame ||
           event.senderFrame.url !== rendererUrl || !Object.hasOwn(methods, method) || args.length > 1) throw new Error('Request denied.');
-      try { return await methods[method](...args); }
+      try { return await (method === 'status' ? status() : libraryOperation(() => methods[method](...args))); }
       catch (error) { throw new Error(error.publicMessage || 'The local operation could not be completed. Please try again.'); }
     });
     createWindow();
     watchRendererForDev();
-    try { bridge = await startBridge(userData, () => extensionId, bridgeRequest); }
+    try { bridge = await startBridge(userData, () => extensionId, (request, context) => libraryOperation(() => bridgeRequest(request, context))); }
     catch { dialog.showErrorBox('Local bridge unavailable', 'Your saved information is available. Restart SecondHand to connect the Chrome extension.'); }
-    powerMonitor.on('suspend', () => lockVault().catch(() => {}));
-    powerMonitor.on('lock-screen', () => lockVault().catch(() => {}));
+    powerMonitor.on('suspend', () => (libraryMode ? eraseLibrarySession() : lockVault()).catch(() => {}));
+    powerMonitor.on('lock-screen', () => (libraryMode ? eraseLibrarySession() : lockVault()).catch(() => {}));
   }).catch(() => { dialog.showErrorBox('SecondHand could not start', 'Check that the app can access its local data folder.'); app.quit(); });
   app.on('window-all-closed', () => app.quit());
   app.on('before-quit', event => {
     if (quitting) return;
     event.preventDefault(); quitting = true;
     clearTimeout(lockTimer);
+    clearTimeout(libraryTimer);
     documentReader.cancel();
-    Promise.allSettled([vault.lock(), bridge?.close(), laya.close()]).then(() => app.quit());
+    Promise.allSettled([libraryMode ? eraseLibrarySession() : vault.lock(), bridge?.close(), laya.close()]).then(() => app.quit());
   });
 }

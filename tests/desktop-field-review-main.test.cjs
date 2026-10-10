@@ -15,7 +15,7 @@ async function desktop() {
   }
   const laya = { status: async () => ({ state: 'off' }), setEnabled: async () => {}, startUpdates() {}, close: async () => {} };
   const main = await startMain({ userData: '/synthetic-field-review', platform: 'darwin', modules: {
-    'node:fs/promises': { mkdir: async () => {}, stat: async () => ({ size: 2 }), readFile: async () => '{}' },
+    'node:fs/promises': { access: async () => { throw Object.assign(new Error('No file'), { code: 'ENOENT' }); }, mkdir: async () => {}, stat: async () => ({ size: 2 }), readFile: async () => '{}' },
     './vault.cjs': { Vault }, './laya.cjs': { createLaya: () => laya },
     './touch-id.cjs': { touchIdPlatform: () => ({}), createTouchIdUnlock: () => ({
       state: async () => 'off', supported: () => false, passwordUnlocked: async () => {} }) },
