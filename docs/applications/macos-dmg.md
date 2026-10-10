@@ -33,7 +33,7 @@ Current packaging calls the bundle, display name, and executable **SecondHand** 
 2. Open the disk image and drag **SecondHand** into **Applications**.
 3. Eject the disk image.
 4. Launch **Applications → SecondHand**.
-5. Create the password and retain the recovery key. Review the same-computer reset option before using real information.
+5. Create the password and retain the recovery key. Only the recovery key can reset a forgotten password.
 6. Save your profile or complete the guided setup.
 7. Choose **Chrome extension → Prepare Chrome extension**.
 8. In Chrome's extensions page, use Developer mode and **Load unpacked** to select the prepared folder. In its folder chooser, **Command–Shift–G** opens Go to Folder so you can paste the copied path.
@@ -151,4 +151,4 @@ Save open work and quit the old application before replacing it. Install the new
 | App opens but extension says disconnected | Stable prepared folder, exact extension ID, native manifest, unlocked app |
 | Touch ID missing | Compatible hardware and current OS availability; password remains the fallback |
 | New source feature absent | Installed build provenance; rebuild/reinstall is separate from merging |
-| Password unavailable | Recovery key or previously enabled device reset; never erase just to restart |
+| Password unavailable | Recovery key, or restore a backup; never erase just to restart |
