@@ -116,7 +116,7 @@
     [/^(age range|age group)$/, 'ageRange'],
     [/^(social security( number)?|ssn)$/, 'ssn'],
     [/^e ?mail( address)?$/, 'email'],
-    [/^((cell|mobile|home|best|primary) )?(phone|telephone)( number)?$|^(mobile|cell) number$/, 'phone'],
+    [/^((cell|mobile|home|best|primary) )?(phone|telephone)( number)?( \d{1,2} digits)?$|^(mobile|cell)( number)?( \d{1,2} digits)?$/, 'phone'],
     [/^(city (and )?state|ciudad (y )?estado)$/, 'cityState'],
     [/^(city (and )?(zip|zip code|zipcode|postal code)|ciudad (y )?codigo postal)$/, 'cityZip'],
     [/^(city (and )?state (and )?(zip|zip code|zipcode|postal code)|ciudad (y )?estado (y )?codigo postal)$/, 'cityStateZip'],
@@ -940,6 +940,13 @@
     }
     return options.findIndex(option => normal(option) === wanted);
   }
+  // Whether a value meets the box's own pattern, as the browser checks it. A pattern that doesn't compile checks nothing.
+  function takesPattern(element, value) {
+    const pattern = element.getAttribute('pattern');
+    if (!pattern) return true;
+    for (const flags of ['v', 'u']) { try { return new RegExp(`^(?:${pattern})$`, flags).test(value); } catch {} }
+    return true;
+  }
   // A saved value as the box takes it. Null when the box asks for more than one date order: which it wants can't be told.
   function formatted(key, value, entry) {
     const element = entry.elements[0];
@@ -960,7 +967,10 @@
     if (key === 'phone') {
       const digits = text.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
       if (element.type === 'number') return digits;
-      return digits.length === 10 ? `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}` : text;
+      if (digits.length !== 10) return text;
+      // The first shape the box takes, by its length and pattern: "(202) 555-0148", "202-555-0148", then the digits alone.
+      const shapes = [`(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`, `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`, digits];
+      return shapes.find(shape => !(element.maxLength > 0 && shape.length > element.maxLength) && takesPattern(element, shape)) || shapes[0];
     }
     return text;
   }
