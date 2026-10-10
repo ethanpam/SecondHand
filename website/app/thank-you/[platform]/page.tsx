@@ -2,11 +2,11 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ExternalIcon } from '../../_components/icons';
-import { downloads } from '../../../lib/release';
+import { downloads, libraryDownloads } from '../../../lib/release';
 import { SiteFooter, SiteHeader } from '../../_components/site-chrome';
 import { StartDownload } from '../start-download';
 
-const platforms = {
+const personalPlatforms = {
   windows: {
     name: 'Windows',
     file: downloads.windows,
@@ -25,6 +25,12 @@ const platforms = {
     install:
       'Open the downloaded .dmg file, drag SecondHand into Applications, and open it from Applications. If your Mac blocks it, follow Apple’s guidance below.',
   },
+} as const;
+const platforms = {
+  ...personalPlatforms,
+  'library-windows': { ...personalPlatforms.windows, file: libraryDownloads.windows },
+  'library-mac-apple-silicon': { ...personalPlatforms['mac-apple-silicon'], file: libraryDownloads.macArm },
+  'library-mac-intel': { ...personalPlatforms['mac-intel'], file: libraryDownloads.macIntel },
 } as const;
 type PlatformId = keyof typeof platforms;
 type Props = { params: Promise<{ platform: string }> };
@@ -49,21 +55,23 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function ThankYou({ params }: Props) {
   const { platform } = await params;
   if (!Object.hasOwn(platforms, platform)) notFound();
+  const library = platform.startsWith('library-');
   const { name, file, install } = platforms[platform as PlatformId];
   return (
     <>
       <StartDownload href={file} />
       <SiteHeader />
       <main id="main" className="wrap doc-page">
-        <h1>Thanks for downloading SecondHand</h1>
+        <h1>Thanks for downloading SecondHand{library ? ' Library' : ''}</h1>
         <p className="doc-lead">
           Your download for {name} should start in a moment. If it doesn’t,{' '}
           <a href={file}>download it directly</a>.
         </p>
+        {library && <p className="doc-lead">Library mode is already on and cannot be turned off in this version. Local data is deleted after 2 minutes of inactivity and on exit, computer lock, or sleep. It uses separate storage from the personal version.</p>}
         <h2>What to do next</h2>
         <ol className="next-steps">
           <li>
-            <strong>Install the app.</strong> {install}
+            <strong>Install the app.</strong> {library ? install.replaceAll('SecondHand', 'SecondHand Library') : install}
           </li>
           <li>
             <strong>Create a password.</strong> Open SecondHand and choose a
@@ -77,7 +85,7 @@ export default async function ThankYou({ params }: Props) {
             <Link href="/chrome-extension">See each step with pictures</Link>.
           </li>
         </ol>
-        {platform !== 'windows' && (
+        {!platform.endsWith('windows') && (
           <p>
             <a
               href="https://support.apple.com/en-us/102445"

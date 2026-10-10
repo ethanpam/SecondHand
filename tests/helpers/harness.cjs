@@ -77,6 +77,7 @@ async function startMain({ userData, packaged = false, platform = process.platfo
   let window, invoke, bridge, shows = 0, focuses = 0, relaunches = 0;
   const sent = [];
   const appEvents = new Map();
+  const paths = new Map();
   const powerEvents = new Map();
   // Every timer main.cjs sets, in order: { id, callback, ms, cleared }.
   const timers = [];
@@ -89,7 +90,7 @@ async function startMain({ userData, packaged = false, platform = process.platfo
     show() { shows++; } focus() { focuses++; } setMenuBarVisibility() {} once() {} on() {} loadFile() {}
     isMinimized() { return false; } restore() {} isDestroyed() { return false; }
   }
-  const app = { isPackaged: packaged, setName() {}, setPath() {}, getPath: () => userData, requestSingleInstanceLock: () => true,
+  const app = { isPackaged: packaged, setName() {}, setPath: (name, value) => paths.set(name, value), getPath: () => userData, requestSingleInstanceLock: () => true,
     whenReady: () => Promise.resolve(), on: (name, handler) => { appEvents.set(name, handler); }, quit() {}, relaunch() { relaunches++; } };
   const simulated = { app, BrowserWindow, ipcMain: { handle(_name, handler) { invoke = handler; } },
     dialog: { showErrorBox(title, message) { assert.fail(`The desktop showed an error: ${title}. ${message}`); }, ...dialog },
@@ -115,7 +116,7 @@ async function startMain({ userData, packaged = false, platform = process.platfo
   await until(() => powerEvents.has('lock-screen'), 'the desktop to finish starting');
   const event = () => ({ sender: window.webContents, senderFrame: window.webContents.mainFrame });
   return {
-    sent, timers, appEvents, powerEvents,
+    sent, timers, appEvents, powerEvents, paths,
     get window() { return window; },
     get shows() { return shows; },
     get focuses() { return focuses; },

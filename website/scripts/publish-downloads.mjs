@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { open, stat } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
-import { filenames, PART_BYTES, RELEASE } from '../lib/downloads.ts';
-const [origin, directory] = process.argv.slice(2);
+import { filenames, libraryFilenames, PART_BYTES, RELEASE } from '../lib/downloads.ts';
+const [origin, directory, edition] = process.argv.slice(2);
 const token = process.env.RELEASE_UPLOAD_TOKEN;
 if (!origin?.startsWith('https://') || !directory || !token || token.length < 32) throw new Error('Usage: RELEASE_UPLOAD_TOKEN=... node scripts/publish-downloads.mjs https://site.example release-directory');
 const site = new URL(origin);
@@ -17,7 +17,8 @@ async function call(file, action, init = {}, query = {}) {
   if (!response.ok) throw new Error(`${file}: ${action} returned ${response.status}: ${(await response.text()).slice(0,200)}`);
   return response.status === 204 ? null : response.json();
 }
-for (const file of filenames) {
+if (edition !== undefined && edition !== '--library') throw new Error('Use --library for Library edition artifacts.');
+for (const file of edition === '--library' ? libraryFilenames : filenames) {
   const path = resolve(directory, file);
   const size = (await stat(path)).size;
   const hash = createHash('sha256');

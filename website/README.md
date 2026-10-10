@@ -61,6 +61,24 @@ Then download each file back from the live site, check it against `SHA256SUMS.tx
 
 Do not commit build output, credentials, `.env` files, or installers.
 
+## Library downloads
+
+Downloads offers **Personal** and **Library** versions for Windows, Apple silicon, and Intel Mac. The Library edition is a separate installation named **SecondHand Library**, with a separate local data folder. Library mode starts on and cannot be disabled in that edition. Prepare Chrome extension from the edition you intend to use; Chrome connects to the edition most recently registered.
+
+Build Library installers from the repository root:
+
+```sh
+npm run dist:library:win  # on Windows
+npm run dist:library:mac  # on macOS
+node scripts/release-checksums.cjs release/library --library
+```
+
+Validate the edition with `node scripts/smoke-library-mode.cjs --library-edition`. With the website running, `node scripts/smoke-library-download.cjs` checks all Library links and 320–1440px layouts using synthetic downloads.
+
+Collect all three installers in `release/library` before generating checksums. Their names begin `secondHand-library-`; `SHA256SUMS-library.txt` is separate from the personal release's immutable checksum file. The publish script accepts a third argument, `--library`, to upload and verify only these four files. Follow the same credential and byte-verification procedure above. Add future Library versions to `libraryReleases` in `lib/downloads.ts` to retain archived links.
+
+For the first Library release, upload directly to R2 with Wrangler (as above) and verify the downloaded bytes before deploying the download selector. The API publisher requires a server with the Library allowlist already deployed. Keep `libraryRelease` in `lib/release.ts` on the verified Library version independently of the personal release. A Library button must never serve the personal installer. The Library confirmation routes are `/thank-you/library-windows`, `/thank-you/library-mac-apple-silicon`, and `/thank-you/library-mac-intel`.
+
 ## Release boundaries
 
 Windows and Mac builds are unsigned early-access software; Mac builds are not Apple notarized. The page states this before download and links to Apple's official opening guidance. The application only fills verified supported Iowa fields; it does not submit applications or decide eligibility. CAPTCHA, consent, signatures, and submission stay with the applicant.

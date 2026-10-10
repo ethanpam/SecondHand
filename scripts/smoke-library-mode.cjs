@@ -7,11 +7,20 @@ const os = require('node:os');
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 (async () => {
+  const libraryEdition = process.argv.includes('--library-edition');
+  let appRoot = root;
+  if (libraryEdition) {
+    appRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-library-edition-'));
+    for (const folder of ['desktop', 'renderer', 'shared']) await fs.cp(path.join(root, folder), path.join(appRoot, folder), { recursive: true });
+    const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
+    await fs.writeFile(path.join(appRoot, 'package.json'), JSON.stringify({ ...pkg, secondHandEdition: 'library' }));
+    await fs.symlink(path.join(root, 'node_modules'), path.join(appRoot, 'node_modules'), 'dir');
+  }
   const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-library-ui-'));
   await fs.writeFile(path.join(userData, 'settings.json'), '{"layaEnabled":false}');
   let app;
   const launch = async () => {
-    app = await electron.launch({ args: [root], env: { ...process.env, SECONDHAND_TEST_MODE: '1', SECONDHAND_TEST_USER_DATA: userData } });
+    app = await electron.launch({ args: [appRoot], env: { ...process.env, SECONDHAND_TEST_MODE: '1', SECONDHAND_TEST_USER_DATA: userData } });
     await app.evaluate(({ powerMonitor }) => { powerMonitor.getSystemIdleTime = () => 0; });
     const page = await app.firstWindow();
     await expect(page.locator('#auth-view')).toBeVisible();
@@ -26,8 +35,15 @@ const root = path.resolve(__dirname, '..');
     await page.reload();
     await expect(page.locator('#workspace')).toBeVisible();
     await page.locator('.nav-item[data-view="privacy"]').click();
-    page.once('dialog', dialog => dialog.accept());
-    await page.locator('#library-mode-toggle').check();
+    if (libraryEdition) {
+      await expect(page.locator('#library-mode-toggle')).toBeChecked();
+      await expect(page.locator('#library-mode-toggle')).toBeDisabled();
+      assert.equal(await app.evaluate(({ app }) => app.getName()), 'SecondHand Library');
+      assert.equal(await page.evaluate(async () => (await window.secondHand.status()).libraryEdition), true);
+    } else {
+      page.once('dialog', dialog => dialog.accept());
+      await page.locator('#library-mode-toggle').check();
+    }
     await expect(page.locator('#library-mode-notice')).toBeVisible();
     await app.evaluate(({ powerMonitor }) => { powerMonitor.getSystemIdleTime = () => 119; });
     await page.waitForTimeout(1100);
@@ -51,5 +67,6 @@ const root = path.resolve(__dirname, '..');
   } finally {
     if (app) await app.close();
     await fs.rm(userData, { recursive: true, force: true });
+    if (libraryEdition) await fs.rm(appRoot, { recursive: true, force: true });
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });
