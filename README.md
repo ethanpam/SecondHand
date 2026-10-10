@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://secondhand.ethanpam.workers.dev"><strong>Download SecondHand 0.5.0</strong></a>
+  <a href="https://secondhand.ethanpam.workers.dev"><strong>Download SecondHand 0.5.1</strong></a>
   &nbsp;·&nbsp; <a href="docs/setup.md">Setup guide</a>
   &nbsp;·&nbsp; <a href="#tech-stack-and-architecture">How it's built</a>
   &nbsp;·&nbsp; <a href="#what-it-costs-to-run-for-a-year">Yearly cost</a>
@@ -106,15 +106,15 @@ SecondHand was built for **Hack Away Hunger**, the DSMHack / CharityHack 2026 ha
 
 ## What it does today
 
-Version **0.5.0**, released October 6, 2026.
+Version **0.5.1**, released October 10, 2026.
 
 - **Keeps your details on your computer.** Your profile and application notes are in an encrypted file that only your password or recovery key opens. There is no account, no cloud copy, and no analytics.
 - **Knows your household.** List the people you live with once. SecondHand works out the counts forms ask for, such as "How many people 0 to 17?", and never guesses a guardian's name.
 - **Fills Iowa's SNAP application screen by screen.** It fills what it knows, moves past screens that only give information, and stops wherever you're needed. Iowa's security check (the CAPTCHA), consent, signatures, and final submission are always yours.
 - **Speaks your language.** The side panel works in English, Spanish, Vietnamese, Chinese, French, and Arabic. It can show Iowa's questions in your language and sum up long pages in plain words, using Chrome's built-in translator and summarizer on your computer.
 - **Works on other forms too.** Turn SecondHand on for any secure website, such as a food pantry's sign-up form. It reads each question's label and fills only the ones it recognizes.
-- **Answers food pantry sign-up questions (coming in the next release).** Questions such as "Student status", "Assistance needed", "Source of income" and "Does anyone in your family receive cash assistance?" are answered from what you saved, but only when exactly one option matches. Otherwise the question stays with you.
-- **Fills in today's date (coming in the next release).** Pantry questions such as "Date ordered", "Date of visit" and "Today's date" get today's date from your computer's calendar, in the way the form writes dates. A plain "Date" is filled only right after your signature line, and never a birth, start, move-in, due or end date. Not on Iowa's application.
+- **Answers food pantry sign-up questions (new in 0.5.1).** Questions such as "Student status", "Assistance needed", "Source of income" and "Does anyone in your family receive cash assistance?" are answered from what you saved, but only when exactly one option matches. Otherwise the question stays with you.
+- **Fills in today's date (new in 0.5.1).** Pantry questions such as "Date ordered", "Date of visit" and "Today's date" get today's date from your computer's calendar, in the way the form writes dates. A plain "Date" is filled only right after your signature line, and never a birth, start, move-in, due or end date. Not on Iowa's application.
 - **Remembers your own answers (new in 0.5.0).** When you answer a question SecondHand didn't know, it offers to remember it for next time, with your permission. Up to 50 custom answers, encrypted with your profile.
 - **Fill and continue (new in 0.5.0).** On recognized multi-page forms, it can fill and click ordinary **Next** buttons, and stops for anything missing, consent, signatures, payments, or submission.
 - **Reads your documents on your computer.** Open a PDF or photo of a tax form such as a W-2 or 1040, and SecondHand reads it with offline text recognition and suggests details for you to review. Nothing is uploaded.
@@ -333,7 +333,7 @@ Tests use only the fictional profile in [`tests/fixtures/applicant-profile.json`
 | `tests/`, `scripts/` | Unit tests, fictional fixtures, smoke tests, and packaging |
 | `docs/` | Guides and design notes |
 
-**Documentation:** [setup](docs/setup.md) · [application guides](docs/applications/README.md) · [Iowa portal coverage](docs/iowa-portal.md) · [security design](docs/security.md) · [Laya model card](docs/laya-model.md) · [local document reading](docs/document-ocr.md) · [extension QA](docs/extension-qa.md) · [presenting a demo](docs/demo.md) · [live-portal check](docs/iowa-live-journey.md) · [implementation contract](docs/implementation-contract.md) · [release notes](docs/releases/0.5.0.md)
+**Documentation:** [setup](docs/setup.md) · [application guides](docs/applications/README.md) · [Iowa portal coverage](docs/iowa-portal.md) · [security design](docs/security.md) · [Laya model card](docs/laya-model.md) · [local document reading](docs/document-ocr.md) · [extension QA](docs/extension-qa.md) · [presenting a demo](docs/demo.md) · [live-portal check](docs/iowa-live-journey.md) · [implementation contract](docs/implementation-contract.md) · [release notes](docs/releases/0.5.1.md)
 
 ## License and credits
 

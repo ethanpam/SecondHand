@@ -14,7 +14,7 @@ We aim to reply within a week and to tell you when a fix ships. We're happy to c
 
 ## Supported versions
 
-Only the latest release gets security fixes. Today that is **0.5.0**.
+Only the latest release gets security fixes. Today that is **0.5.1**.
 
 ## What's in scope
 
