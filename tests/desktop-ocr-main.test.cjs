@@ -21,7 +21,7 @@ async function desktop() {
       './extension-setup.cjs': { getExtensionSetup: async () => ({}) },
       './ocr-service.cjs': { createDocumentReader: options => {
         readerOptions = options;
-        return { read: async id => { reads.push(id); await options.chooseFile(); return { cancelled: true }; }, cancel: id => { canceled.push(id); return true; } };
+        return { read: async (id, filePath) => { reads.push(filePath ? { id, filePath } : id); if (!filePath) await options.chooseFile(); return { cancelled: true }; }, cancel: id => { canceled.push(id); return true; } };
       } }
     } });
   return { invoke: main.invoke, raw: main.raw, event: main.event, canceled, reads, get picker() { return picker; }, get unlocked() { return readerOptions.isUnlocked(); },
@@ -50,4 +50,19 @@ test('vault lock/quit cancel the document reader and client cancellation require
   assert.equal(await app.invoke('cancelDocumentRead', ID), true);
   await app.lock(); app.quit();
   assert.deepEqual(app.canceled, [ID, undefined, undefined]);
+});
+
+test('dropped document IPC validates paths, frame, and unlocked state without opening a picker', async () => {
+  const app = await desktop();
+  const request = { requestId: ID, filePath: '/synthetic/document.pdf' };
+  await assert.rejects(app.raw({ ...app.event(), sender: {} }, 'readDroppedDocument', request), /Request denied/);
+  for (const filePath of ['', 'relative.pdf', 42, '/bad\0path']) {
+    await assert.rejects(app.invoke('readDroppedDocument', { ...request, filePath }), /document request is invalid/);
+  }
+  await assert.rejects(app.invoke('readDroppedDocument', { ...request, requestId: 'bad' }), /document request is invalid/);
+  await app.invoke('readDroppedDocument', request);
+  assert.deepEqual(app.reads, [{ id: ID, filePath: request.filePath }]);
+  assert.equal(app.picker, 0);
+  await app.lock();
+  await assert.rejects(app.invoke('readDroppedDocument', request), /Unlock/);
 });

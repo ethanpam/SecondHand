@@ -117,7 +117,7 @@ For supported missing profile values entered on a site, **Save to My information
 
 ## Read a document and review extracted information
 
-1. In **Documents**, select a PDF, PNG, or JPEG.
+1. In **Documents**, select a PDF, PNG, or JPEG, or drag one into the drop area.
 2. Wait for local reading, or choose **Cancel reading**. A late result after cancellation or lock is discarded.
 3. Compare extracted text and proposed details with the original.
 4. Edit and select only details you want to use. A supported form can still yield partial or incorrect results.

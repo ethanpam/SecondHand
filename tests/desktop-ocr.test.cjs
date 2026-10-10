@@ -179,3 +179,13 @@ test('preload exposes correlated document actions and sanitizes progress without
   assert.deepEqual(events, [{ requestId: ID, phase: 'recognizing', page: 1, total: 2 }]);
   unsubscribe(); assert.equal(listeners.size, 0);
 });
+
+test('dropped files bypass the picker while preserving transient OCR and byte clearing', async () => {
+  const fixture = reader();
+  const result = await fixture.instance.read(ID, '/synthetic/Dropped.pdf');
+  assert.equal(result.document.name, 'Dropped.pdf');
+  assert.equal(fixture.selected, 0);
+  assert.equal(fixture.reads, 1);
+  assert.ok(fixture.bytes.every(byte => byte === 0));
+  assert.equal(fixture.cancels, 1);
+});

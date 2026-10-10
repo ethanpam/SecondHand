@@ -55,3 +55,6 @@ input[readonly]{background:#f6f7f2}
 #library-mode-notice { position: sticky; top: 0; z-index: 6; }
 
 body:has(#library-mode-notice:not([hidden])) .sidebar { top: 40px; }
+
+.document-drop-zone { padding: 24px; margin-bottom: 16px; border: 2px dashed currentColor; border-radius: 12px; text-align: center; }
+.document-drop-zone.is-dragging { background: #e8f2ec; }
