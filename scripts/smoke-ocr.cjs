@@ -134,12 +134,19 @@ if (!process.versions.electron) {
     process.stdout.write(`Local OCR smoke passed: ${result.pageCount} page(s), ${result.pages.reduce((n,p)=>n+p.words.length,0)} positioned words.\n`);
   })().then(async () => {
     engine?.cancel();
-    if (temporary) await fs.rm(temporary, { recursive: true, force: true });
+    await removeTemporary();
     app.exit(0);
   }, async error => {
     engine?.cancel();
     process.stderr.write(`Local OCR smoke failed: ${error.code || error.name}: ${error.publicMessage || error.message}\n`);
-    if (temporary) await fs.rm(temporary, { recursive: true, force: true }).catch(() => {});
+    await removeTemporary();
     app.exit(1);
   });
+  // The temporary folder is this app's own data folder, and on Windows Electron keeps files in it open until it
+  // exits (EBUSY). A folder that can't be removed yet stays in the system's temporary folder; the smoke still exits.
+  async function removeTemporary() {
+    if (!temporary) return;
+    await fs.rm(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+      .catch(error => process.stderr.write(`Left the temporary folder ${temporary} (${error.code || error.message}).\n`));
+  }
 }
