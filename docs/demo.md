@@ -7,8 +7,9 @@ from `tests/fixtures/applicant-profile.json`. Nothing is ever submitted.
 
 1. **Use a computer you can share on screen.** Make a new Chrome profile just for the demo (Chrome menu →
    Profiles → Add), so no bookmarks, sign-ins or history of your own show. Chrome 116 or newer.
-2. **Run the app from this checkout** (`npm ci`, then `npm start`) until a release newer than 0.5.0 is on the
-   download site. The 0.5.0 download predates the fixes for ad-heavy pages and household tables listed below.
+2. **Install SecondHand 0.5.1 or newer** from the [download site](https://secondhand.ethanpam.workers.dev), or run
+   it from a checkout with `npm ci` and `npm start`. Releases before 0.5.1 lack the fixes for ad-heavy pages and
+   household tables.
 3. **Make the demo data.** `npm run demo:backup` writes `artifacts/demo/secondhand-demo.secondhand` and prints
    its password. In the app's password screen choose **Restore an encrypted backup**, pick that file, and
    unlock with the printed password. My information now holds Avery Example and a household of four. If the
