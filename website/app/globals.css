@@ -155,9 +155,6 @@ nav a[aria-current='page'] {
   font-weight: 500;
 }
 .header-download svg,
-.primary-link svg {
-  transition: transform 180ms ease;
-}
 .header-download:hover svg,
 .primary-link:hover svg {
   transform: translateX(4px);
@@ -229,7 +226,6 @@ nav a[aria-current='page'] {
   border-radius: 100px;
   padding: 17px 24px;
   box-shadow: 0 3px 0 #0c3323;
-  transition: transform 180ms ease;
 }
 .primary-link:active {
   transform: translateY(2px);
@@ -372,9 +368,6 @@ nav a[aria-current='page'] {
   border-radius: 100px;
   font-size: 13px;
   font-weight: 500;
-}
-.download-button svg {
-  transition: transform 180ms ease;
 }
 .download-button:hover svg {
   transform: translateY(3px);
