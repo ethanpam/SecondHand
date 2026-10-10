@@ -209,6 +209,8 @@
   const answeredInPart = new WeakMap();
   const inPart = entry => entry.kind === 'checkbox' && answeredInPart.has(entry.elements[0]) &&
     entry.elements.every(box => box.checked === answeredInPart.get(entry.elements[0]).includes(box));
+  // Saved answers about the applicant as a person, which another household member answers differently.
+  const PERSON_KEYS = Object.freeze(['firstName', 'middleName', 'lastName', 'fullName', 'suffix', 'birthDate', 'ageRange', 'ssn', 'email', 'phone']);
   const EXAMPLE_EMAIL = /^\s*[\w.+-]+@[\w-]+(\.[\w-]+)+\s*$/;
   const NAME_HINTS = Object.freeze({ fname: 'first name', firstname: 'first name', lname: 'last name', lastname: 'last name', dob: 'date of birth',
     zipcode: 'zip code', postalcode: 'postal code', hhsize: 'household size', tel: 'phone', telephone: 'phone', email: 'email', zip: 'zip', city: 'city', state: 'state' });
@@ -745,12 +747,19 @@
     const map = new Map();
     const matched = [], unmatched = [];
     const entries = scan(doc), rules = entries.map(match);
+    // A question about a person asked again in the same words in one form ("Name" on each row of a household table, or a
+    // member's section after the applicant's) is someone else's after its first box: only the first takes the applicant's
+    // answer. Separate forms on one page each ask it once.
+    const formOf = entry => closestAcross(entry.elements[0], 'form') || rootOf(entry.elements[0]);
+    const asked = entry => entry.labels[0] ? question(entry.labels[0]) : '';
+    const listed = index => PERSON_KEYS.includes(rules[index].key) && asked(entries[index]) && entries.slice(0, index).some((other, at) =>
+      rules[at].key === rules[index].key && asked(other) === asked(entries[index]) && formOf(other) === formOf(entries[index]));
     entries.forEach((entry, index) => {
       const id = `sh-${sequence}-${index}`;
       entry.binding = binding(entry);
       map.set(id, entry);
       const result = rules[index];
-      if (IOWA_KEYS.includes(result.key) && rules.filter(rule => rule.key === result.key).length !== 1) { unmatched.push({ id, ...fieldOf(entry) }); return; }
+      if ((IOWA_KEYS.includes(result.key) && rules.filter(rule => rule.key === result.key).length !== 1) || listed(index)) { unmatched.push({ id, ...fieldOf(entry) }); return; }
       if (IOWA_KEYS.includes(result.key)) entry.iowaState = iowaEntryState(entry);
       // Answered in part (#184): it still needs the applicant, and nothing fills it again.
       if (result.confidence === 'high') { matched.push({ id, key: result.key, confidence: 'high', label: entry.labels[0] || '', ...(inPart(entry) ? { partial: true } : {}) }); return; }
