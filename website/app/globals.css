@@ -1054,6 +1054,91 @@ footer p {
   color: var(--primary-foreground);
 }
 
+/* Chrome guide: larger text and one picture per click. */
+.guide-page p,
+.guide-page li {
+  font-size: 18px;
+  line-height: 1.75;
+  color: #304d3b;
+}
+.guide-page h2 {
+  scroll-margin-top: 24px;
+}
+.guide-page h3 {
+  margin: 40px 0 16px;
+}
+.guide-tip {
+  padding: 16px 20px;
+  border-radius: 12px;
+  background: var(--muted);
+}
+.guide-contents ol {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 16px;
+  padding-left: 24px;
+}
+.guide-contents a {
+  display: inline-block;
+  padding-block: 4px;
+}
+.guide-shots {
+  display: grid;
+  gap: 40px;
+  margin: 28px 0 40px;
+  padding: 0;
+  list-style: none;
+  counter-reset: shot;
+}
+.guide-shots > li {
+  counter-increment: shot;
+}
+.guide-shots > li > p {
+  position: relative;
+  padding-left: 48px;
+  margin-bottom: 14px;
+}
+.guide-shots > li > p::before {
+  content: counter(shot);
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  font-weight: 700;
+  font-size: 16px;
+}
+.guide-shot {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+}
+.guide-steps-text {
+  display: grid;
+  gap: 10px;
+  padding-left: 24px;
+}
+kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 0 7px;
+  border: 1px solid #b9c3bb;
+  border-bottom-width: 3px;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--foreground);
+  font: 600 0.85em/1.6 'Geist', Arial, sans-serif;
+  text-align: center;
+}
 .guide-button {
   display: inline-flex;
   align-items: center;
