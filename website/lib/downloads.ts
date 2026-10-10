@@ -1,8 +1,8 @@
 // Only application distribution artifacts are stored online. No applicant data.
 // Upload target. Keep public defaults on the verified release until staging completes.
-export const RELEASE = '0.5.0';
-export const LATEST_RELEASE = '0.5.0';
-const releases = ['0.2.0', '0.3.0', '0.4.0', '0.5.0'] as const;
+export const RELEASE = '0.5.1';
+export const LATEST_RELEASE = '0.5.1';
+const releases = ['0.2.0', '0.3.0', '0.4.0', '0.5.0', '0.5.1'] as const;
 export const filenames = [
   `secondHand-${RELEASE}-win-x64.exe`,
   `secondHand-${RELEASE}-mac-arm64.dmg`,

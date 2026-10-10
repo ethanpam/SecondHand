@@ -59,6 +59,9 @@ void test('versioned downloads preserve older releases and reject mismatched or 
   ['secondHand-0.5.0-win-x64.exe','','0.5.0'],
   ['secondHand-0.5.0-mac-arm64.dmg','','0.5.0'],
   ['secondHand-0.5.0-mac-x64.dmg','','0.5.0'],
+  ['secondHand-0.5.1-win-x64.exe','','0.5.1'],
+  ['secondHand-0.5.1-mac-arm64.dmg','','0.5.1'],
+  ['secondHand-0.5.1-mac-x64.dmg','','0.5.1'],
   ['secondHand-extension.zip','?release=0.3.0','0.3.0'],
   ['SHA256SUMS.txt','',LATEST_RELEASE],
  ]) {
