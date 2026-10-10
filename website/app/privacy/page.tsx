@@ -14,7 +14,7 @@ export default function PrivacyPolicy() {
       <SiteHeader current="/privacy" />
       <main id="main" className="wrap doc-page">
         <h1>Privacy policy</h1>
-        <p className="doc-date">Last updated September 27, 2026</p>
+        <p className="doc-date">Last updated October 10, 2026</p>
         <p className="doc-lead">
           SecondHand helps you prepare an Iowa SNAP application on your own
           computer. We do not collect your benefits information. There are no
@@ -55,11 +55,9 @@ export default function PrivacyPolicy() {
             your information, so keep the key somewhere safe.
           </li>
           <li>
-            If you turn on “Let this computer reset my password,” a reset secret
-            is protected by your computer’s own secure storage (the macOS
-            Keychain or Windows data protection). Anyone who can sign in to the
-            same computer account could use it. You can turn it off in Privacy
-            &amp; backups.
+            Only your recovery key can reset your password. If you have neither
+            your password nor your recovery key, no one can reset it: you can
+            start over, which erases your information, or restore a backup.
           </li>
           <li>
             Encrypted backups are saved only where you choose. A folder synced
@@ -103,15 +101,15 @@ export default function PrivacyPolicy() {
         <p>
           To delete what the desktop app saved, uninstall SecondHand and delete
           its data folder: <code>%LOCALAPPDATA%\SecondHand</code> on Windows or{' '}
-          <code>~/Library/Application Support/SecondHand</code> on a Mac. This
-          also removes the password reset secret for this computer. Delete any
-          encrypted backups you exported as well.
+          <code>~/Library/Application Support/SecondHand</code> on a Mac. Delete
+          any encrypted backups you exported as well.
         </p>
         <p>
           If you forget your password and don’t have your recovery key, choose
           “Forgot password?” and then “Start over” in the app. This erases your
-          profile, your application records, and the reset secret for this
-          computer, so you can create a new password without reinstalling.
+          profile and your application records, so you can create a new password
+          without reinstalling. If you saved an encrypted backup, you can
+          restore it with the password or recovery key it was saved with.
         </p>
         <p>
           Information you already gave Iowa’s website is kept by Iowa HHS. Ask

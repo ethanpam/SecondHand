@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { Vault, parseEnvelope } = require('../desktop/vault.cjs');
+const { addRetiredDeviceSlot } = require('./helpers/harness.cjs');
 
 const PASSWORD_UNLOCK_ERROR = 'That password didn’t open SecondHand. Check it and try again. If you’re sure it’s right, you can use your recovery key or restore a backup.';
 const { validateApplication } = require('../shared/schema.cjs');
@@ -181,7 +182,7 @@ test('a new password comes with a recovery key that can set a new password and k
   await vault.update(data => { data.profile = { firstName: 'Recovered Synthetic' }; });
   await vault.lock();
   assert.equal((await fs.readFile(file, 'utf8')).includes(recoveryKey.replace(/-/g, '')), false);
-  assert.deepEqual(await new Vault(file).inspect(), { recoveryKey: true, deviceReset: false });
+  assert.deepEqual(await new Vault(file).inspect(), { recoveryKey: true });
 
   const before = await fs.readFile(file);
   await assert.rejects(vault.resetWithRecoveryKey('0000-0000-0000-0000-0000-0000-0000-0000', 'a brand new password'), /didn’t work/);
@@ -207,7 +208,7 @@ test('a version 1 file gains a recovery key without changing its password, and r
   const { file } = await fixture(t);
   await writeLegacyVault(file, PASSPHRASE, { version: 1, profile: { firstName: 'Legacy Synthetic' }, applications: [] });
   const vault = new Vault(file);
-  assert.deepEqual(await vault.inspect(), { recoveryKey: false, deviceReset: false });
+  assert.deepEqual(await vault.inspect(), { recoveryKey: false });
   await assert.rejects(vault.resetWithRecoveryKey('0000-0000-0000-0000-0000-0000-0000-0000', 'a brand new password'), /no recovery key/);
   await vault.unlock(PASSPHRASE);
   const legacyKey = vault.key;
@@ -242,65 +243,65 @@ test('version 2 envelopes require a password slot and reject unknown or malforme
   await assert.rejects(vault.unlock(PASSPHRASE), new Error(PASSWORD_UNLOCK_ERROR));
 });
 
-test('this computer’s secret can reset the password only while its slot is enabled and matching', async t => {
+const slotsOf = async file => JSON.parse(await fs.readFile(file, 'utf8')).slots;
+
+// "Let this computer reset my password" was removed: anyone signed in to the computer could set a new
+// password without the recovery key. Files saved with its slot still open, and nothing resets through it.
+test('a file saved with the retired reset-on-this-computer slot opens, can’t be reset through it, and loses only that slot', async t => {
   const { file } = await fixture(t);
-  const deviceSecret = crypto.randomBytes(32);
   const vault = new Vault(file);
-  await vault.create(PASSPHRASE, { deviceSecret });
+  const { recoveryKey } = await vault.create(PASSPHRASE);
   await vault.update(data => { data.profile = { firstName: 'Device Synthetic' }; });
   await vault.lock();
-  assert.deepEqual(await vault.inspect(), { recoveryKey: true, deviceReset: true });
-  assert.equal((await fs.readFile(file, 'utf8')).includes(deviceSecret.toString('base64')), false);
+  addRetiredDeviceSlot(file, PASSPHRASE);
+  const before = await slotsOf(file);
+  assert.deepEqual(Object.keys(before).sort(), ['device', 'password', 'recovery']);
+  assert.equal(typeof vault.resetWithDeviceSecret, 'undefined');
+  assert.deepEqual(await vault.inspect(), { recoveryKey: true });
 
-  const before = await fs.readFile(file);
-  await assert.rejects(vault.resetWithDeviceSecret(crypto.randomBytes(32), 'a brand new password'), /can’t reset/);
-  await assert.rejects(vault.resetWithDeviceSecret(Buffer.alloc(8), 'a brand new password'), /can’t reset/);
-  await assert.rejects(vault.resetWithDeviceSecret(deviceSecret, 'short'), /at least 12/);
-  assert.deepEqual(await fs.readFile(file), before);
-
-  await vault.resetWithDeviceSecret(deviceSecret, 'a brand new password');
+  await vault.unlock(PASSPHRASE);
+  assert.equal(vault.hasDeviceSlot, true);
+  await vault.removeDeviceSlot();
+  assert.equal(vault.hasDeviceSlot, false);
+  const after = await slotsOf(file);
+  assert.deepEqual(Object.keys(after).sort(), ['password', 'recovery']);
+  for (const name of ['password', 'recovery']) assert.deepEqual(after[name], before[name], `${name} slot unchanged`);
   assert.equal(vault.getData().profile.firstName, 'Device Synthetic');
-  await vault.setDeviceSecret(null);
   await vault.lock();
-  assert.deepEqual(await vault.inspect(), { recoveryKey: true, deviceReset: false });
-  await assert.rejects(vault.resetWithDeviceSecret(deviceSecret, 'another new password'), /isn’t set up/);
-  await vault.unlock('a brand new password');
+  await vault.unlock(PASSPHRASE);
+  await vault.lock();
+  await vault.resetWithRecoveryKey(recoveryKey, 'a brand new password');
+  assert.equal(vault.getData().profile.firstName, 'Device Synthetic');
   await vault.lock();
 });
 
-test('turning on reset for this computer upgrades a version 1 file and keeps its password', async t => {
+test('a reset with the recovery key drops the retired reset-on-this-computer slot', async t => {
   const { file } = await fixture(t);
-  await writeLegacyVault(file, PASSPHRASE, { version: 1, profile: { firstName: 'Legacy Synthetic' }, applications: [] });
-  const deviceSecret = crypto.randomBytes(32);
   const vault = new Vault(file);
-  await vault.unlock(PASSPHRASE);
-  await vault.setDeviceSecret(deviceSecret);
+  const { recoveryKey } = await vault.create(PASSPHRASE);
   await vault.lock();
-  assert.deepEqual(await vault.inspect(), { recoveryKey: false, deviceReset: true });
-  await vault.unlock(PASSPHRASE);
-  await vault.lock();
-  await vault.resetWithDeviceSecret(deviceSecret, 'a brand new password');
-  assert.equal(vault.getData().profile.firstName, 'Legacy Synthetic');
+  addRetiredDeviceSlot(file, PASSPHRASE);
+  await vault.resetWithRecoveryKey(recoveryKey, 'a brand new password');
+  assert.equal(vault.hasDeviceSlot, false);
+  assert.deepEqual(Object.keys(await slotsOf(file)).sort(), ['password', 'recovery']);
   await vault.lock();
 });
 
 // The Touch ID slot (#99): the data key wrapped by a random key that main.cjs seals in the Keychain.
-const slotsOf = async file => JSON.parse(await fs.readFile(file, 'utf8')).slots;
 
 test('a Touch ID key opens the information through its own slot only, and removing the slot leaves the others unchanged', async t => {
   const { file } = await fixture(t);
-  const deviceSecret = crypto.randomBytes(32);
   const touchIdKey = crypto.randomBytes(32);
   const vault = new Vault(file);
-  await vault.create(PASSPHRASE, { deviceSecret });
+  await vault.create(PASSPHRASE);
   await vault.update(data => { data.profile = { firstName: 'Touch Synthetic' }; });
   const before = await slotsOf(file);
   assert.equal(vault.hasTouchIdSlot, false);
   await vault.setTouchIdKey(touchIdKey);
   assert.equal(vault.hasTouchIdSlot, true);
   const withTouchId = await slotsOf(file);
-  assert.deepEqual(Object.keys(withTouchId).sort(), ['device', 'password', 'recovery', 'touchId']);
-  for (const name of ['password', 'recovery', 'device']) assert.deepEqual(withTouchId[name], before[name], `${name} slot unchanged`);
+  assert.deepEqual(Object.keys(withTouchId).sort(), ['password', 'recovery', 'touchId']);
+  for (const name of ['password', 'recovery']) assert.deepEqual(withTouchId[name], before[name], `${name} slot unchanged`);
   assert.equal((await fs.readFile(file, 'utf8')).includes(touchIdKey.toString('base64')), false);
   await vault.lock();
 
@@ -310,8 +311,6 @@ test('a Touch ID key opens the information through its own slot only, and removi
   await assert.rejects(vault.unlockWithTouchIdKey(null), error => error.code === 'TOUCH_ID_KEY');
   assert.equal(vault.unlocked, false);
   assert.deepEqual(await fs.readFile(file), locked, 'a failed Touch ID unlock changes nothing');
-  // A Touch ID key can't stand in for this computer's reset secret: each slot is bound to its name.
-  await assert.rejects(vault.resetWithDeviceSecret(touchIdKey, 'a brand new password'), /can’t reset/);
 
   await vault.unlockWithTouchIdKey(touchIdKey);
   assert.equal(vault.getData().profile.firstName, 'Touch Synthetic');
@@ -326,30 +325,26 @@ test('a Touch ID key opens the information through its own slot only, and removi
   assert.equal(vault.getData().profile.lastName, 'Saved After Touch ID');
 });
 
-test('resetting the password with the recovery key or this computer keeps the Touch ID slot, which still unlocks', async t => {
-  for (const method of ['recovery', 'device']) {
-    const { file } = await fixture(t);
-    const deviceSecret = crypto.randomBytes(32);
-    const touchIdKey = crypto.randomBytes(32);
-    const vault = new Vault(file);
-    const { recoveryKey } = await vault.create(PASSPHRASE, { deviceSecret });
-    await vault.setTouchIdKey(touchIdKey);
-    const before = await slotsOf(file);
-    await vault.lock();
-    if (method === 'recovery') await vault.resetWithRecoveryKey(recoveryKey, 'a brand new password');
-    else await vault.resetWithDeviceSecret(deviceSecret, 'a brand new password');
-    assert.equal(vault.hasTouchIdSlot, true, method);
-    const after = await slotsOf(file);
-    assert.deepEqual(Object.keys(after).sort(), ['device', 'password', 'recovery', 'touchId'], method);
-    for (const name of ['recovery', 'device', 'touchId']) assert.deepEqual(after[name], before[name], `${method}: ${name} slot unchanged`);
-    assert.notDeepEqual(after.password, before.password, `${method}: only the password slot is new`);
-    await vault.lock();
-    // A reset keeps the data key, so the Touch ID key still opens the information.
-    await vault.unlockWithTouchIdKey(touchIdKey);
-    await vault.lock();
-    await vault.unlock('a brand new password');
-    await vault.lock();
-  }
+test('resetting the password with the recovery key keeps the Touch ID slot, which still unlocks', async t => {
+  const { file } = await fixture(t);
+  const touchIdKey = crypto.randomBytes(32);
+  const vault = new Vault(file);
+  const { recoveryKey } = await vault.create(PASSPHRASE);
+  await vault.setTouchIdKey(touchIdKey);
+  const before = await slotsOf(file);
+  await vault.lock();
+  await vault.resetWithRecoveryKey(recoveryKey, 'a brand new password');
+  assert.equal(vault.hasTouchIdSlot, true);
+  const after = await slotsOf(file);
+  assert.deepEqual(Object.keys(after).sort(), ['password', 'recovery', 'touchId']);
+  for (const name of ['recovery', 'touchId']) assert.deepEqual(after[name], before[name], `${name} slot unchanged`);
+  assert.notDeepEqual(after.password, before.password, 'only the password slot is new');
+  await vault.lock();
+  // A reset keeps the data key, so the Touch ID key still opens the information.
+  await vault.unlockWithTouchIdKey(touchIdKey);
+  await vault.lock();
+  await vault.unlock('a brand new password');
+  await vault.lock();
 });
 
 test('the password can be checked while unlocked, for a version 1 or 2 file, without changing anything', async t => {

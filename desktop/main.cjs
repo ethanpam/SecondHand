@@ -106,6 +106,8 @@ if (nativeOrigin) {
   let layaEnabled;
   // Overview's note to add the household list (#180), once the person dismissed it. Saved only once dismissed.
   let householdNoteDismissed = false;
+  // Says once, after an unlock, that reset on this computer was removed (see removeDeviceSlot).
+  let deviceResetEnded = false;
   // What was reset because settings.json couldn't be read at startup, until a setting is saved (#139).
   let settingsNotice = null;
   // On sites other than Iowa's portal, these get their own named confirmation unless Always allow is on (#175).
@@ -151,8 +153,8 @@ if (nativeOrigin) {
     platform: touchIdPlatform({ systemPreferences, safeStorage, platform: process.platform, packaged: app.isPackaged, env: process.env }) });
   const configPath = path.join(userData, 'settings.json');
   const libraryPath = path.join(userData, 'library-mode.json');
+  // The secret sealed by the removed "Let this computer reset my password", deleted when SecondHand starts.
   const deviceSecretPath = path.join(userData, 'device-reset.bin');
-  const deviceResetSupported = ['darwin', 'win32'].includes(process.platform);
   const rendererPath = path.join(__dirname, '../renderer/index.html');
   const rendererUrl = pathToFileURL(rendererPath).href;
   const AUTO_LOCK_MS = 10 * 60 * 1000;
@@ -176,27 +178,20 @@ if (nativeOrigin) {
     analyzeDocument
   });
 
-  // The operating system protects this secret (macOS Keychain or Windows data
-  // protection), so only this computer account can use it to reset the password.
-  function sealDeviceSecret() {
-    if (!deviceResetSupported || !safeStorage.isEncryptionAvailable()) throw new Error('Device reset is unavailable.');
-    const secret = crypto.randomBytes(32);
-    return { secret, sealed: safeStorage.encryptString(secret.toString('base64')) };
-  }
-  async function readDeviceSecret() {
-    try {
-      if ((await fs.stat(deviceSecretPath)).size > 4096) return null;
-      const secret = Buffer.from(safeStorage.decryptString(await fs.readFile(deviceSecretPath)), 'base64');
-      return secret.length === 32 ? secret : null;
-    } catch { return null; }
-  }
-  async function hasDeviceSecret() {
-    try { await fs.access(deviceSecretPath); return true; } catch { return false; }
+  // "Let this computer reset my password" was removed: anyone signed in to the computer account could
+  // use it to set a new password without the recovery key. Information saved while it was on loses its
+  // slot at the next unlock. After a password or Touch ID unlock, the app then says once that only the
+  // recovery key resets the password now; a reset with the key needs no such note.
+  async function removeDeviceSlot({ notice }) {
+    if (!vault.hasDeviceSlot) return;
+    // The slot opens nothing without its deleted secret, so a failed write waits for the next unlock.
+    try { await vault.removeDeviceSlot(); } catch { return; }
+    if (notice) deviceResetEnded = true;
   }
   async function status() {
     const details = await vault.inspect().catch(() => null);
     return { exists: await vault.exists(), unlocked: vault.unlocked && !libraryErasing, libraryMode, libraryErasing, libraryError, lockRevision, recoveryKey: Boolean(details?.recoveryKey),
-      deviceReset: Boolean(details?.deviceReset) && await hasDeviceSecret(), deviceResetSupported, extensionId, autofillWithoutAsking, trustedSites: [...trustedSites], allSites,
+      deviceResetEnded, extensionId, autofillWithoutAsking, trustedSites: [...trustedSites], allSites,
       alwaysAllowedSites: [...alwaysAllowedSites], householdNoteDismissed,
       touchId: await touchIdUnlock.state(), touchIdSupported: touchIdUnlock.supported(), touchIdNotice: touchIdUnlock.notice, settingsNotice,
       bridgeRunning: Boolean(bridge), platform: process.platform, laya: await layaStatus(),
@@ -213,6 +208,7 @@ if (nativeOrigin) {
     await vault.lock();
     accessRevision++;
     lockRevision++;
+    deviceResetEnded = false;
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('secondhand:locked', { lockRevision });
     return status();
   }
@@ -252,6 +248,7 @@ if (nativeOrigin) {
     autofillWithoutAsking = false;
     trustedSites = []; alwaysAllowedSites = []; allSites = false;
     householdNoteDismissed = false;
+    deviceResetEnded = false;
     await saveSettings();
   }
   function notifyLibraryReset() {
@@ -643,6 +640,7 @@ if (nativeOrigin) {
     if (request.type === 'unlockWithTouchId') {
       const result = await touchIdUnlock.unlock();
       if (!result.unlocked) return { unlocked: false, reason: result.reason };
+      await removeDeviceSlot({ notice: true });
       touch();
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('secondhand:unlocked', { lockRevision });
       return { unlocked: true };
@@ -856,44 +854,28 @@ if (nativeOrigin) {
       return status();
     },
     async createVault(request) {
-      let device = null;
-      let deviceResetFailed = false;
-      if (request?.allowDeviceReset === true && deviceResetSupported) {
-        try { device = sealDeviceSecret(); } catch { deviceResetFailed = true; }
-      }
       let created;
-      try { created = await vault.create(request?.password, { deviceSecret: device?.secret }); }
+      try { created = await vault.create(request?.password); }
       catch (error) { throw publicError(/password/.test(error.message) ? error.message : 'Could not set up SecondHand. Please try again.'); }
-      finally { device?.secret.fill(0); }
       // A Touch ID key left from earlier information can't open this one.
       await touchIdUnlock.forget();
-      // Store the sealed secret only after creation succeeds, so a failed attempt
-      // never replaces the secret that belongs to an existing file.
-      if (device) {
-        try { await atomicWrite(deviceSecretPath, device.sealed); }
-        catch { deviceResetFailed = true; await vault.setDeviceSecret(null).catch(() => {}); }
-      }
-      touch(); return { status: await status(), recoveryKey: created.recoveryKey, deviceResetFailed };
+      touch(); return { status: await status(), recoveryKey: created.recoveryKey };
     },
     async unlock(passphrase) {
       try { await vault.unlock(passphrase); }
       catch (error) { throw publicError(/password|already unlocked|Unable to unlock/.test(error.message) ? error.message : 'Could not unlock SecondHand.'); }
       await touchIdUnlock.passwordUnlocked();
+      await removeDeviceSlot({ notice: true });
       touch(); return status();
     },
     async resetPassword(request) {
-      try {
-        if (request?.method === 'device') {
-          const secret = await readDeviceSecret();
-          try { await vault.resetWithDeviceSecret(secret, request?.password); } finally { secret?.fill(0); }
-        } else await vault.resetWithRecoveryKey(request?.recoveryKey, request?.password);
-      }
+      try { await vault.resetWithRecoveryKey(request?.recoveryKey, request?.password); }
       catch (error) { throw publicError(/password|recovery key|already unlocked/.test(error.message) ? error.message : 'Could not reset your password. Please try again.'); }
       // A reset keeps the data key, so Touch ID stays on.
       touch(); return status();
     },
     // For someone who has lost both their password and recovery key: erase the
-    // saved information and the reset secret so a new password can be created.
+    // saved information so a new password can be created.
     // Chrome extension settings stay. The person must type the phrase.
     async startOver(request) {
       if (vault.unlocked) throw publicError('Lock SecondHand before starting over.');
@@ -901,7 +883,6 @@ if (nativeOrigin) {
       accessRevision++;
       try {
         await vault.erase();
-        await fs.rm(deviceSecretPath, { force: true });
         await touchIdUnlock.removeSealed();
       } catch { throw publicError('Could not erase your saved information. Please try again.'); }
       finally { accessRevision++; }
@@ -912,26 +893,12 @@ if (nativeOrigin) {
       let recoveryKey;
       try { recoveryKey = await vault.replaceRecoveryKey(); }
       catch { throw publicError('Could not create a recovery key. Please try again.'); }
+      deviceResetEnded = false;
       touch(); return { recoveryKey };
     },
-    async setDeviceReset(enabled) {
-      requireUnlocked();
-      if (typeof enabled !== 'boolean') throw publicError('Invalid setting.');
-      try {
-        if (enabled) {
-          let secret = await readDeviceSecret();
-          if (!secret) {
-            const device = sealDeviceSecret();
-            await atomicWrite(deviceSecretPath, device.sealed);
-            secret = device.secret;
-          }
-          try { await vault.setDeviceSecret(secret); } finally { secret.fill(0); }
-        } else {
-          await vault.setDeviceSecret(null);
-          await fs.rm(deviceSecretPath, { force: true });
-        }
-      } catch { throw publicError(enabled ? 'This computer couldn’t save a reset option. Your recovery key still works.' : 'Could not turn off reset on this computer. Please try again.'); }
-      touch(); return status();
+    async dismissDeviceResetNotice() {
+      deviceResetEnded = false;
+      return status();
     },
     // { enabled: true, password } turns Touch ID on; { enabled: false } turns it off.
     async setTouchIdUnlock(request) {
@@ -943,6 +910,7 @@ if (nativeOrigin) {
     async unlockWithTouchId() {
       const result = await touchIdUnlock.unlock();
       if (!result.unlocked) throw publicError(result.message);
+      await removeDeviceSlot({ notice: true });
       touch(); return status();
     },
     async saveRecoveryKey(value) {
@@ -1205,6 +1173,8 @@ if (nativeOrigin) {
     // Packaged builds get the icon from electron-builder; show it in development too.
     if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(path.join(__dirname, 'icon.png'));
     await fs.mkdir(userData, { recursive: true, mode: 0o700 });
+    // Nothing reads this secret any more; one that can't be removed now is tried again at the next start.
+    try { await fs.access(deviceSecretPath); await fs.rm(deviceSecretPath, { force: true }); } catch {}
     await loadSettings();
     // Presence is fail-closed, even if this dedicated mode marker is damaged.
     try { await fs.access(libraryPath); libraryMode = true; }

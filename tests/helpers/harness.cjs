@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const vm = require('node:vm');
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const { pathToFileURL } = require('node:url');
 
 const root = path.resolve(__dirname, '../..');
@@ -131,6 +132,25 @@ async function startMain({ userData, packaged = false, platform = process.platfo
   };
 }
 
+// Gives a saved file the slot that "Let this computer reset my password" added before it was removed:
+// the data key wrapped by an HKDF key from a random secret, which the app sealed in device-reset.bin.
+// The password opens the data key. Returns the secret, to show it no longer resets anything.
+function addRetiredDeviceSlot(file, password) {
+  const envelope = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const slot = Object.fromEntries(Object.entries(envelope.slots.password).map(([name, value]) => [name, Buffer.from(value, 'base64')]));
+  const passwordKey = crypto.scryptSync(password, slot.salt, 32, { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
+  const decipher = crypto.createDecipheriv('aes-256-gcm', passwordKey, slot.iv);
+  decipher.setAAD(Buffer.from('SecondHand vault key slot v2:password')); decipher.setAuthTag(slot.tag);
+  const key = Buffer.concat([decipher.update(slot.key), decipher.final()]);
+  const secret = crypto.randomBytes(32), salt = crypto.randomBytes(32), iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', Buffer.from(crypto.hkdfSync('sha256', secret, salt, 'SecondHand device reset', 32)), iv);
+  cipher.setAAD(Buffer.from('SecondHand vault key slot v2:device'));
+  const wrapped = Buffer.concat([cipher.update(key), cipher.final()]);
+  envelope.slots.device = { salt: salt.toString('base64'), iv: iv.toString('base64'), tag: cipher.getAuthTag().toString('base64'), key: wrapped.toString('base64') };
+  fs.writeFileSync(file, JSON.stringify(envelope));
+  return secret;
+}
+
 // Electron's safeStorage with the operating system's protected storage simulated, so no Keychain item is
 // touched: text is sealed as hex. `unsealing` runs before each decryption.
 function safeStorage({ available = true, unsealing = () => {} } = {}) {
@@ -227,5 +247,5 @@ function nativeHost({ posted = () => {}, answer }) {
   };
 }
 
-module.exports = { root, plain, tick, deferred, until, read, runFile, evalFile, loadRenderer, BOX, layout, layoutElements, laidOut, startMain, runMain, safeStorage, serviceWorker, nativeHost,
+module.exports = { root, plain, tick, deferred, until, read, runFile, evalFile, loadRenderer, BOX, layout, layoutElements, laidOut, startMain, runMain, safeStorage, addRetiredDeviceSlot, serviceWorker, nativeHost,
   workerConsole, workerLogged };

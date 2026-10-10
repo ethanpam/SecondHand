@@ -29,9 +29,8 @@ It is not a browser replacement, an agency account, or an eligibility decision e
 
 1. Open the installed app. On first use, choose a password of at least 12 characters and confirm it.
 2. Save the recovery key shown once. Keep it somewhere you can access if the computer or password becomes unavailable.
-3. Review **Let this computer reset my password**. It allows the same OS account to reset the password through a locally protected secret. It is a convenience with consequences on a shared OS account.
-4. Complete the guided profile setup, or skip and return later. Unknown answers should remain unanswered.
-5. On later launches, use the password. Compatible Macs can enable Touch ID in **Privacy & backups** after setup.
+3. Complete the guided profile setup, or skip and return later. Unknown answers should remain unanswered.
+4. On later launches, use the password. Compatible Macs can enable Touch ID in **Privacy & backups** after setup.
 
 The app locks after ten minutes of inactivity and on supported sleep/OS-lock events or exit. Locking clears the active profile UI and interrupts pending sharing. Restarting the program is different from **Start over**, which erases saved information after confirmation.
 
@@ -146,7 +145,7 @@ Editing saved data and bundled OCR can work offline. Visiting a destination webs
 
 Use **Privacy & backups** to export an encrypted backup before changing computers or performing destructive resets. Restoring uses the locked-vault flow and explicit replacement confirmation. The backup uses the password/recovery slots present when it was exported; changing a later password or recovery key does not rewrite an old exported file.
 
-If the password is lost, use the recovery key or the same-account device-reset option if previously enabled. Without an available recovery path, SecondHand cannot recover the encrypted information. **Start over** is not a password-reset shortcut that preserves the profile.
+If the password is lost, use the recovery key. Only the recovery key resets a password: the earlier **Let this computer reset my password** option was removed because anyone signed in to the computer account could use it. Without an available recovery path, SecondHand cannot recover the encrypted information. **Start over** is not a password-reset shortcut that preserves the profile.
 
 ## Architecture and source map
 
@@ -166,7 +165,7 @@ If the password is lost, use the recovery key or the same-account device-reset o
 
 A fill travels from page detection to extension worker, through Chrome native messaging, into a registered local relay/host, and then to the unlocked app's bridge. The desktop validates origin, requested field scope, current access state, and approvals before returning bounded values. The page engine rechecks the target controls before applying them.
 
-The main BrowserWindow has context isolation and sandboxing enabled, with renderer Node integration disabled. The bridge is a local socket/named pipe, not an HTTP server. Messages are length-prefixed and bounded to 64 KiB. The vault uses AES-256-GCM and password-derived scrypt wrapping; optional device and Touch ID slots depend on OS-protected local secrets. See the security design before modifying these boundaries.
+The main BrowserWindow has context isolation and sandboxing enabled, with renderer Node integration disabled. The bridge is a local socket/named pipe, not an HTTP server. Messages are length-prefixed and bounded to 64 KiB. The vault uses AES-256-GCM and password-derived scrypt wrapping; the optional Touch ID slot depends on an OS-protected local secret. See the security design before modifying these boundaries.
 
 ## Development and validation
 
@@ -207,4 +206,4 @@ The hosted CI workflow was removed. Contributors run relevant commands locally a
 | OCR yields partial information | Supported layout, page/file limits, scan quality, pass disagreement; compare with the original |
 | A source change is missing from the app | Confirm the installed artifact was rebuilt from that revision; a Git pull does not modify an installed bundle |
 | Extension shows old branding | Refresh prepared files and reload the extension; do not assume a copied demo folder updates with the repo |
-| Lost password | Recovery key or previously enabled device reset; do not erase data merely to restart the app |
+| Lost password | Recovery key, or restore a backup; do not erase data merely to restart the app |

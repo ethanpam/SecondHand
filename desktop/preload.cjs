@@ -17,7 +17,6 @@ contextBridge.exposeInMainWorld('secondHand', Object.freeze({
   resetPassword: request => invoke('resetPassword', request),
   startOver: request => invoke('startOver', request),
   replaceRecoveryKey: () => invoke('replaceRecoveryKey'),
-  setDeviceReset: enabled => invoke('setDeviceReset', enabled),
   setTouchIdUnlock: request => invoke('setTouchIdUnlock', request),
   unlockWithTouchId: () => invoke('unlockWithTouchId'),
   // SecondHand was unlocked from Chrome's side panel with Touch ID. Only the lock revision it
@@ -74,6 +73,7 @@ contextBridge.exposeInMainWorld('secondHand', Object.freeze({
     return () => ipcRenderer.removeListener('secondhand:open-household', listener);
   },
   dismissHouseholdNote: () => invoke('dismissHouseholdNote'),
+  dismissDeviceResetNotice: () => invoke('dismissDeviceResetNotice'),
   saveApplication: application => invoke('saveApplication', application),
   deleteApplication: id => invoke('deleteApplication', id),
   openPortal: () => invoke('openPortal'),
