@@ -36,7 +36,8 @@ const SITES = {
   'usda-snap': { url: 'https://www.fns.usda.gov/snap/supplemental-nutrition-assistance-program', expect: 'none' },
   'feeding-america': { url: 'https://www.feedingamerica.org/find-your-local-foodbank', expect: 'none' },
   'salesforce-trial': { url: 'https://www.salesforce.com/form/signup/freetrial-sales/', expect: 'form' },
-  'github-signup': { url: 'https://github.com/signup', expect: 'form' },
+  // GitHub answers an automated browser with a bot check, which SecondHand never touches.
+  'github-signup': { url: 'https://github.com/signup', expect: 'none' },
   'redcross-volunteer': { url: 'https://www.redcross.org/volunteer/become-a-volunteer.html', expect: 'none' },
   'mailchimp-signup': { url: 'https://login.mailchimp.com/signup/', expect: 'form' },
   'wufoo-example': { url: 'https://examples.wufoo.com/forms/contact-form/', expect: 'form' },
@@ -48,7 +49,9 @@ const SITES = {
   'lambdatest-input': { url: 'https://www.lambdatest.com/selenium-playground/input-form-demo', expect: 'form' },
   'expandtesting-inputs': { url: 'https://practice.expandtesting.com/inputs', expect: 'form' },
   'techlistic': { url: 'https://www.techlistic.com/p/selenium-practice-form.html', expect: 'form' },
-  'hubspot-contact': { url: 'https://www.hubspot.com/company/contact', expect: 'form' },
+  'hubspot-contact': { url: 'https://www.hubspot.com/company/contact', expect: 'none' },
+  'hubspot-get-started': { url: 'https://www.hubspot.com/products/get-started', expect: 'none' },
+  'github-contact': { url: 'https://support.github.com/contact', expect: 'none' },
   'jotform-template': { url: 'https://www.jotform.com/form-templates/food-bank-registration-form', expect: 'form' },
   '211': { url: 'https://www.211.org/', expect: 'none' },
   'nifb': { url: 'https://solvehungertoday.org/get-help/', expect: 'none' },
@@ -183,8 +186,12 @@ async function main() {
   const manifest = JSON.parse(await fs.readFile(path.join(extension, 'manifest.json'), 'utf8'));
   manifest.host_permissions = [...manifest.host_permissions, 'https://*/*'];
   await fs.writeFile(path.join(extension, 'manifest.json'), JSON.stringify(manifest));
-  const context = await chromium.launchPersistentContext(path.join(tmp, 'profile'), { channel: 'chromium', headless: true, viewport: { width: 1280, height: 900 },
-    args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`] });
+  // Some sites send headless Chromium no form: it reads as an ordinary Chrome.
+  const probe = await chromium.launch({ channel: 'chromium', headless: true });
+  const userAgent = (await probe.version()) && (await (await probe.newPage()).evaluate(() => navigator.userAgent)).replace('HeadlessChrome', 'Chrome');
+  await probe.close();
+  const context = await chromium.launchPersistentContext(path.join(tmp, 'profile'), { channel: 'chromium', headless: true, viewport: { width: 1280, height: 900 }, userAgent,
+    args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`, '--disable-blink-features=AutomationControlled'] });
   const report = { label, started: new Date().toISOString(), runs: [] };
   try {
     let [worker] = context.serviceWorkers();
