@@ -311,9 +311,10 @@ test('a Keychain or file error doesn’t turn Touch ID off: Touch ID didn’t wo
       /^Error: Touch ID didn’t work this time \(this Mac’s Keychain couldn’t open its key\)\. Use your password\.$/],
     ['not sealed by this Mac', async app => { await fsp.writeFile(app.sealedPath, 'tampered'); }, async (app, sealed) => { await fsp.writeFile(app.sealedPath, sealed); },
       /^Error: Touch ID didn’t work this time \(this Mac’s Keychain couldn’t open its key\)\. Use your password\.$/],
-    ['the key file can’t be read', async app => { await fsp.rm(app.sealedPath); await fsp.mkdir(app.sealedPath); },
+    // A folder where the key file goes reads as EISDIR on macOS and Linux; Windows, which has no Touch ID, says otherwise.
+    ...(process.platform === 'win32' ? [] : [['the key file can’t be read', async app => { await fsp.rm(app.sealedPath); await fsp.mkdir(app.sealedPath); },
       async (app, sealed) => { await fsp.rmdir(app.sealedPath); await fsp.writeFile(app.sealedPath, sealed); },
-      /^Error: Touch ID didn’t work this time \(its key file on this Mac couldn’t be read \(EISDIR\)\)\. Use your password\.$/]
+      /^Error: Touch ID didn’t work this time \(its key file on this Mac couldn’t be read \(EISDIR\)\)\. Use your password\.$/]])
   ];
   for (const [name, fail, recover, message] of cases) {
     const { app } = await withTouchId(t);
@@ -543,7 +544,8 @@ test('from Chrome: status says only ready or off, and unlockWithTouchId unlocks 
 });
 
 // Turning Touch ID on adds the slot first, then saves the sealed key; a key that can't be saved takes its slot away again.
-test('a turn-on whose key can’t be saved removes the slot it added, and says so if that fails too', async t => {
+// A key file whose folder is a file fails with ENOTDIR on macOS and Linux; Windows, which has no Touch ID, reports it otherwise.
+test('a turn-on whose key can’t be saved removes the slot it added, and says so if that fails too', { skip: process.platform === 'win32' && 'Touch ID is Mac-only, and Windows reports this file error differently' }, async t => {
   const userData = await folder(t);
   await fsp.writeFile(path.join(userData, 'a file'), 'synthetic');
   // The key file's folder is a file, so the key can't be saved.
