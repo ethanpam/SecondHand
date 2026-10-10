@@ -801,6 +801,15 @@ test('a question about a person asked again in one form (each row of Jotform’s
   assert.deepEqual(byElement(two, generic.plan(two)), { c1: 'city', c2: 'city' });
 });
 
+test('a phone box that takes fewer characters or a pattern gets the saved number in the shape it takes', () => {
+  const doc = page('<form><label for="a">Mobile(10 Digits)</label><input id="a" maxlength="10"><label for="b">Phone</label><input id="b" maxlength="12">' +
+    '<label for="c">Telephone</label><input id="c" pattern="[0-9]{10}"><label for="d">Cell phone</label><input id="d" type="tel"><label for="e">Home phone</label><input id="e" maxlength="7"></form>');
+  const plan = generic.plan(doc);
+  const result = generic.fillFields(doc, plan.token, plan.matched.map(field => ({ id: field.id, key: field.key, guessed: false })), generic.deriveValues(profile));
+  assert.deepEqual(['a', 'b', 'c', 'd', 'e'].map(id => doc.getElementById(id).value), ['2025550148', '202-555-0148', '2025550148', '(202) 555-0148', '']);
+  assert.equal(result.skipped.length, 1, 'a box too short for any shape is left for the applicant');
+});
+
 test('a menu toggle beside a form is no question: it is never planned or listed, and the form fills as before', () => {
   const doc = page('<nav><input type="checkbox" id="menu" role="button" aria-haspopup="true" aria-label="Main menu"></nav>' +
     '<form><label for="fname">First name</label><input id="fname"><label for="note">Anything else?</label><input id="note"></form>');
