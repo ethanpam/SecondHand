@@ -1155,6 +1155,24 @@ kbd {
   text-decoration: underline;
 }
 
+/* Home: the same-answers animation beside its explanation. */
+.show-section {
+  display: grid;
+  grid-template-columns: 0.8fr 1.2fr;
+  gap: 64px;
+  align-items: center;
+  padding: 0 0 var(--space-section);
+}
+.show-copy h2 {
+  margin-bottom: 24px;
+}
+.show-copy p {
+  color: var(--muted-foreground);
+  font-size: 16px;
+  line-height: 1.8;
+  max-width: 440px;
+}
+
 /* How it works */
 .how-page {
   padding-top: 64px;
