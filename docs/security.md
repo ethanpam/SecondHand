@@ -21,6 +21,14 @@ Profile choices for address availability, mailing address, applicant status, pro
 
 Encrypted export is available through the operating system's file dialog. Import requires a locked vault and explicit confirmation before replacing existing records. The prior encrypted vault is retained as a rollback file. An imported envelope is structurally validated before writing; authentication and payload validation happen when the user supplies its password or recovery key. Keep an independent backup. Losing both the password and the recovery key (with no device reset available) is not recoverable by secondHand. A backup keeps the key slots it was saved with, so an old recovery key still opens a backup made before the key was replaced.
 
+## Library mode (Windows and macOS)
+
+Enable **Privacy & backups → Library mode** on a shared computer. After 120 seconds without operating-system mouse or keyboard input, SecondHand deletes its local vault, import rollback copies, unfinished vault writes, device-reset and Touch ID credentials, and setup progress. It clears the open profile, application drafts, document review, copied recovery key (if still on the clipboard), and site-sharing approvals. Chrome activity counts; background autofill and status requests do not. The main process checks once per second, including while the app is locked or minimized.
+
+Library mode also erases on exit, computer lock, and suspend. It remains enabled for the next patron. On startup it erases any session left by a crash before accepting requests. A separate mode marker survives settings resets; a damaged marker still enables cleanup. Failed deletion keeps access blocked, reports the error, and retries. Outstanding operations must settle and a final cleanup must finish before another session starts.
+
+This removes app-owned files, not forensic traces or operating-system backups. It does not delete source documents, exported backups or recovery-key files, browser history, fields already filled on websites, or records held by those websites. The installed extension and downloaded AI model remain. A process that is stopped or a computer that is powered off cannot run the timer; cleanup resumes when SecondHand opens.
+
 ## Touch ID unlock (macOS)
 
 **Unlock with Touch ID** is off by default. The setting (Privacy & backups) shows only on macOS when Electron's `systemPreferences.canPromptTouchID()` is true. Windows and Linux are unchanged; Windows Hello is out of scope.

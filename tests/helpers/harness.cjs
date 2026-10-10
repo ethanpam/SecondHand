@@ -72,7 +72,7 @@ function laidOut(markup, url) {
 //   globals         more of the main process's globals, such as Date
 // The main process's timers are kept, never run, until a test runs one. It resolves once main.cjs has
 // finished starting: its window is open and it listens for the screen locking.
-async function startMain({ userData, packaged = false, platform = process.platform, env = {}, electron = {}, dialog = {}, modules = {}, globals = {} } = {}) {
+async function startMain({ userData, packaged = false, platform = process.platform, env = {}, electron = {}, dialog = {}, modules = {}, globals = {}, systemIdleTime = () => 0 } = {}) {
   assert.ok(userData, 'Give the main process its data folder');
   let window, invoke, bridge, shows = 0, focuses = 0, relaunches = 0;
   const sent = [];
@@ -93,7 +93,7 @@ async function startMain({ userData, packaged = false, platform = process.platfo
     whenReady: () => Promise.resolve(), on: (name, handler) => { appEvents.set(name, handler); }, quit() {}, relaunch() { relaunches++; } };
   const simulated = { app, BrowserWindow, ipcMain: { handle(_name, handler) { invoke = handler; } },
     dialog: { showErrorBox(title, message) { assert.fail(`The desktop showed an error: ${title}. ${message}`); }, ...dialog },
-    shell: {}, clipboard: {}, powerMonitor: { on: (name, handler) => { powerEvents.set(name, handler); } },
+    shell: {}, clipboard: {}, powerMonitor: { on: (name, handler) => { powerEvents.set(name, handler); }, getSystemIdleTime: systemIdleTime },
     session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, webRequest: { onBeforeRequest() {} } } },
     // A Mac without Touch ID; tests/desktop-touch-id-main.test.cjs covers Touch ID.
     systemPreferences: { canPromptTouchID: () => false },

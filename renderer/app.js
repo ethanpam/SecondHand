@@ -202,6 +202,7 @@
     if (revision !== null) handledLockRevision = Math.max(handledLockRevision, revision);
     clearSensitiveUI();
     vaultStatus = { ...status, unlocked: false };
+    renderLibraryMode();
     $('workspace').hidden = true;
     $('auth-view').hidden = false;
     const exists = Boolean(vaultStatus.exists);
@@ -317,7 +318,16 @@
     $('recovery-dialog').showModal();
   }
 
+  function renderLibraryMode() {
+    $('library-mode-toggle').checked = Boolean(vaultStatus.libraryMode);
+    $('library-mode-notice').hidden = !vaultStatus.libraryMode;
+    $('library-mode-notice').textContent = vaultStatus.libraryError || (vaultStatus.libraryErasing
+      ? 'Library mode is deleting local data. Close any pending dialogs.'
+      : 'Library mode: local data is deleted after 2 minutes of inactivity.');
+    $('auth-submit').disabled = Boolean(vaultStatus.libraryErasing);
+  }
   function renderRecovery() {
+    renderLibraryMode();
     const hasKey = Boolean(vaultStatus.recoveryKey);
     $('recovery-reminder').hidden = hasKey;
     $('recovery-status').textContent = hasKey
@@ -1595,6 +1605,17 @@
   documentControls();
   $('overview-start').addEventListener('click', () => showView('profile'));
   $('lock-button').addEventListener('click', lockVault);
+  $('library-mode-toggle').addEventListener('change', async () => {
+    const enabled = $('library-mode-toggle').checked;
+    if (enabled && !window.confirm('Enable Library mode? Local saved information will be deleted after 2 minutes without mouse or keyboard activity, and on exit, computer lock, or sleep.')) {
+      renderLibraryMode(); return;
+    }
+    try {
+      vaultStatus = await api.setLibraryMode(enabled);
+      clearError('library-mode-error');
+    } catch (error) { showError('library-mode-error', error); }
+    renderLibraryMode();
+  });
   $('privacy-lock').addEventListener('click', lockVault);
   $('profile-form').addEventListener('input', (event) => {
     clearFieldReviews();
@@ -1828,6 +1849,13 @@
     // revision lets showLocked skip a repeat of a lock already shown, so a late notice
     // cannot reset an unlock attempt the person has started, while a newer lock still
     // cancels any pending unlock or profile load.
+    api.onLibraryReset?.(() => {
+      showLocked({ ...vaultStatus, exists: false, libraryErasing: true }, { refresh: true });
+      const generation = vaultGeneration;
+      api.status().then(status => {
+        if (generation === vaultGeneration) showLocked(status, { refresh: true });
+      }).catch(error => showError('auth-error', error));
+    });
     api.onLocked(notification => {
       showLocked({ ...vaultStatus, exists: true, unlocked: false, lockRevision: notification?.lockRevision });
       refreshTouchIdUnlock();

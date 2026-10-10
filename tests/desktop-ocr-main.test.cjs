@@ -15,7 +15,7 @@ async function desktop() {
   const main = await startMain({ userData: '/synthetic-ocr-only', platform: 'darwin',
     dialog: { showOpenDialog: async () => { picker++; return { canceled: true, filePaths: [] }; } },
     modules: {
-      'node:fs/promises': { mkdir: async () => {}, stat: async () => ({ size: 2 }), readFile: async () => '{}' },
+      'node:fs/promises': { access: async () => { throw Object.assign(new Error('No file'), { code: 'ENOENT' }); }, mkdir: async () => {}, stat: async () => ({ size: 2 }), readFile: async () => '{}' },
       './vault.cjs': { Vault }, './laya.cjs': { createLaya: () => laya },
       './field-suggestions.cjs': { createFieldSuggestions: () => ({}) }, './field-answers.cjs': { createFieldAnswers: () => ({}) },
       './extension-setup.cjs': { getExtensionSetup: async () => ({}) },

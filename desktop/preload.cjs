@@ -5,6 +5,13 @@ const invoke = (method, ...args) => ipcRenderer.invoke('secondhand:invoke', meth
 
 contextBridge.exposeInMainWorld('secondHand', Object.freeze({
   status: () => invoke('status'),
+  setLibraryMode: enabled => invoke('setLibraryMode', enabled),
+  onLibraryReset: callback => {
+    if (typeof callback !== 'function') throw new TypeError('A callback is required.');
+    const listener = () => callback();
+    ipcRenderer.on('secondhand:library-reset', listener);
+    return () => ipcRenderer.removeListener('secondhand:library-reset', listener);
+  },
   createVault: request => invoke('createVault', request),
   unlock: passphrase => invoke('unlock', passphrase),
   resetPassword: request => invoke('resetPassword', request),
