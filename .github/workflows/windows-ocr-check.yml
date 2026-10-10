@@ -1,0 +1,16 @@
+name: Windows document reading check
+on:
+  push:
+    branches: [ci/windows-ocr-check]
+jobs:
+  check:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - run: npx playwright install chromium
+      - run: npm run test:ocr
+      - run: npm run test:ocr:ui
