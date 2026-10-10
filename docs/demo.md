@@ -29,7 +29,7 @@ Open these tabs in order before you start:
 | The SecondHand app, on My information | Details saved once, on this computer, behind a password |
 | [CSI Food Pantry appointment (Google Forms)](https://docs.google.com/forms/d/e/1FAIpQLSePpl2_E4U4RduWCqiB5M6h5rH3LVFPFKGsgNc2mLdwDOLT7Q/viewform) | A real pantry form: email, name, phone and household size in one click |
 | [Food bank registration (Jotform template)](https://www.jotform.com/form-templates/food-bank-registration-form) | A long intake: 11 answers, address and household counts, and a household table |
-| [Student registration practice form](https://demoqa.com/automation-practice-form) | Any website: a form SecondHand has never seen |
+| [Student registration practice form](https://demoqa.com/automation-practice-form) | Any website: a form SecondHand has never seen, gender included |
 | [Wikipedia: SNAP](https://en.wikipedia.org/wiki/Supplemental_Nutrition_Assistance_Program) | No form, no card: SecondHand stays out of the way |
 
 ## Run of show
@@ -44,8 +44,8 @@ Open these tabs in order before you start:
 4. **A long intake (60 s).** Jotform tab. One click fills 11 answers, including the address and how many
    adults and seniors live there. In the household table only the first row gets Avery's name; the other rows
    stay empty, because SecondHand never guesses who another row is.
-5. **Any website (45 s).** Practice form tab. It fills name, email, mobile number and address on a form it
-   has never seen. Gender and hobbies stay for the applicant.
+5. **Any website (45 s).** Practice form tab. It fills name, email, gender, mobile number and address on a
+   form it has never seen. Hobbies and subjects stay for the applicant.
 6. **Stays out of the way (15 s).** Wikipedia tab: no card on a page without a form.
 7. **The side panel (30 s).** Click the SecondHand icon: what was filled, each question left, and a way to
    turn SecondHand off for a site.
@@ -64,11 +64,13 @@ clicks Autofill once ([extension QA](extension-qa.md#live-sweep-of-everyday-webs
 | Hornets Market pantry (Google Forms) | 3 | 9 |
 | Food insecurity intake (Jotform) | 7 | 8 |
 | Food bank registration (Jotform template) | 11 | 28 |
-| Student registration practice form | 5 | 6 |
+| Student registration practice form | 6 | 5 |
 | Pizza order sample (httpbin) | 3 | 4 |
 | Food Bank of Iowa page | 3 | 4 |
 | Input form demo (LambdaTest) | 5 | 5 |
+| Salesforce free trial sign-up | 3 | 3 |
 | Wikipedia, BBC News, USDA SNAP, usa.gov | no card | |
+| GitHub sign-up | no card: GitHub shows an automated browser a bot check | |
 
 Run it again the morning of the demo: third-party forms change without notice.
 
@@ -89,6 +91,6 @@ Chrome profile if you no longer need it.
 ## Say it straight
 
 - SecondHand is an independent pilot, not part of Iowa HHS, and it doesn't decide who qualifies.
-- It fills what it is sure of and leaves the rest. Gender, signatures, consent, uploads and final Submit are
-  always the applicant's.
+- It fills what it is sure of and leaves the rest. Signatures, consent, uploads, bot checks and final Submit
+  are always the applicant's.
 - A complete live submission on Iowa's portal has not been validated end to end.
