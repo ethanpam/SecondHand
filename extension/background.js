@@ -15,7 +15,7 @@ if (typeof globalThis.SecondHandTranslation?.create !== 'function') {
 // Must match BUILD in panel.js: change both together, with every change to the extension. The panel
 // compares them to tell when Chrome is still running an older worker than the pages it loaded from
 // disk, and the worker compares it with the build the desktop app ships to update itself (#85).
-const BUILD = '2026-10-06.25';
+const BUILD = '2026-10-10.1';
 const HOST = 'org.secondhand.bridge';
 const IOWA_ORIGIN = new URL(SecondHandIowa.PORTAL).origin;
 const KEY = /^[A-Za-z][A-Za-z0-9]{0,59}$/; // Iowa field keys and saved profile keys
@@ -792,6 +792,12 @@ function reloadWhenIdle() {
 const formFrames = new Map();
 // tabId -> the worker asking the tab's frames. Reports that come meanwhile wait for its one answer.
 const formChecks = new Map();
+// A message to an embedded frame, or undefined when SecondHand's script never ran there (an ad Chrome placed before the
+// script's load): such a frame is passed over, never read or written to.
+async function embeddedMessage(tabId, frameId, message) {
+  try { return await chrome.tabs.sendMessage(tabId, message, { frameId }); }
+  catch (error) { if (NO_RECEIVER.includes(error.message)) return undefined; throw error; }
+}
 // Each embedded frame Chrome places on a site that is on says whether its page has a form. One without
 // SecondHand's script yet reports when it loads, and one SecondHand was turned off for answers nothing.
 async function askFormFrames(tabId, top) {
@@ -983,6 +989,8 @@ async function planGeneral(tabId, frameId = 0, prefix = false, documentId = unde
     return plan;
   } catch (error) {
     if (!prefix || error.code === 'site-not-ready') throw error;
+    // An embedded frame SecondHand's script never ran in (an ad Chrome placed before the script's load) answers nothing.
+    if (frameId !== 0 && NO_RECEIVER.includes(error.message)) throw Object.assign(fault(FRAME_ERROR), { code: 'frame-absent' });
     throw fault(FRAME_ERROR);
   }
 }
@@ -1000,9 +1008,12 @@ async function siteFramePlans(tabId, url, stopForPending = false) {
     const pending = embedded.filter(frame => !frame.enabled);
     if (stopForPending && !top.plan.matched.length && !top.plan.unmatched.length && pending.length) return { frames: [top], pending };
     const enabled = await enabledSiteFrames(tabId, origin);
-    const frames = [top, ...await Promise.all(enabled.filter(frame => frame.frameId !== 0).map(async ({ frameId, documentId, url: frameUrl }) =>
-      ({ frameId, documentId, url: frameUrl, plan: await planGeneral(tabId, frameId, true, documentId) })))];
-    return { frames, pending };
+    // Such a frame is passed over: it is never asked for answers or written to, and the rest of the page still fills.
+    const embeddedPlans = await Promise.all(enabled.filter(frame => frame.frameId !== 0).map(async ({ frameId, documentId, url: frameUrl }) => {
+      try { return { frameId, documentId, url: frameUrl, plan: await planGeneral(tabId, frameId, true, documentId) }; }
+      catch (error) { if (error.code === 'frame-absent') return null; throw error; }
+    }));
+    return { frames: [top, ...embeddedPlans.filter(Boolean)], pending };
   } catch (error) {
     if (error.code === 'site-not-ready') throw error;
     throw fault(FRAME_ERROR);
@@ -1961,10 +1972,11 @@ async function pageQuestions(tabId, route) {
   await requireSite(origin);
   const pending = (await siteFrames(tabId, origin)).filter(frame => !frame.enabled).length;
   const message = { type: 'secondhand:generic:questions' };
-  const frames = await Promise.all((await enabledSiteFrames(tabId, origin)).map(async ({ frameId }) => {
-    const reply = frameId === 0 ? await topSiteMessage(tabId, message) : await chrome.tabs.sendMessage(tabId, message, { frameId });
+  const frames = (await Promise.all((await enabledSiteFrames(tabId, origin)).map(async ({ frameId }) => {
+    const reply = frameId === 0 ? await topSiteMessage(tabId, message) : await embeddedMessage(tabId, frameId, message);
+    if (frameId !== 0 && reply === undefined) return null;
     return { lang: languageTag(reply?.lang), questions: listedQuestions(reply, `f${frameId}:`) };
-  }));
+  }))).filter(Boolean);
   // The form's language is the one its biggest part declares; the panel checks it against the text.
   const main = frames.reduce((best, frame) => frame.questions.length > best.questions.length ? frame : best, frames[0]);
   return { lang: main.lang, pending, questions: frames.flatMap(frame => frame.questions).slice(0, QUESTION_LIMIT) };
@@ -2023,7 +2035,10 @@ async function sitePageText(tabId) {
   await requireSite(origin);
   const message = { type: 'secondhand:generic:pageText' };
   const frames = (await enabledSiteFrames(tabId, origin)).sort((a, b) => a.frameId - b.frameId);
-  const reads = await Promise.all(frames.map(async ({ frameId }) => readOf(frameId === 0 ? await topSiteMessage(tabId, message) : await chrome.tabs.sendMessage(tabId, message, { frameId }), false)));
+  const reads = (await Promise.all(frames.map(async ({ frameId }) => {
+    const reply = frameId === 0 ? await topSiteMessage(tabId, message) : await embeddedMessage(tabId, frameId, message);
+    return frameId !== 0 && reply === undefined ? null : readOf(reply, false);
+  }))).filter(Boolean);
   let text = '';
   for (const line of reads.flatMap(read => read.text ? read.text.split('\n') : [])) {
     const joined = text ? `${text}\n${line}` : line;

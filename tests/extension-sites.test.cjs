@@ -173,6 +173,8 @@ function siteWorker({ url = SITE_URL, enabled = false, granted = enabled, allSit
         const frame = frames.find(frame => frame.frameId === options?.frameId);
         // A message for one document reaches its frame only while that document is still there.
         if (options?.documentId !== undefined && options.documentId !== documentOf(frame).documentId) throw new Error('Could not establish connection. Receiving end does not exist.');
+        // `absent`: SecondHand's script never ran in the frame (an ad Chrome placed before the script's load), so nothing there answers.
+        if (frame?.absent) throw new Error('Could not establish connection. Receiving end does not exist.');
         const model = frame?.page || page;
         if (message.type === 'secondhand:generic:plan') {
           if (frame?.planError) throw new Error('private frame failure');
@@ -1010,6 +1012,32 @@ test('site fill asks once for each site and uses each frame token', async () => 
   assert.deepEqual(w.native.filter(call => call.type === 'getFields').map(({ url, fields }) => ({ url, fields })),
     [{ url: `${ORIGIN}/intake`, fields: ['firstName', 'lastName', 'zip', 'householdSize'] }, { url: `${FRAME_ORIGIN}/form`, fields: ['zip'] }]);
   assert.deepEqual(w.content.filter(call => call.type === 'secondhand:generic:fill').map(call => [call.frameId, call.token]), [[0, 'plan-1'], [4, 'frame4-1']]);
+});
+test('an embedded frame SecondHand’s script never reached (an ad) is passed over: the page and its other forms still fill, and the frame gets nothing', async () => {
+  const ad = secondFrame({ enabled: true, frameId: 7, origin: 'https://ads.example.net', absent: true });
+  const child = secondFrame({ enabled: true, fields: [{ name: 'zip', key: 'zip' }] });
+  const w = siteWorker({ enabled: true, frames: [ad, child] });
+  const result = plain((await autofill(w)).data);
+  assert.equal(result.state, 'done', result.message);
+  assert.equal(result.filled, 3);
+  assert.deepEqual(w.content.filter(call => call.type === 'secondhand:generic:fill').map(call => call.frameId), [0, 4]);
+  assert.deepEqual(w.native.filter(call => call.type === 'getFields').map(call => call.url), [`${ORIGIN}/intake`, `${FRAME_ORIGIN}/form`]);
+
+  // The widget's planned click passes it over the same way.
+  const planned = siteWorker({ enabled: true, frames: [secondFrame({ enabled: true, frameId: 7, origin: 'https://ads.example.net', absent: true })] });
+  await plan(planned);
+  const clicked = plain((await planned.launcher({ type: 'ui:autofill', confirmed: true, guesses: {} })).data);
+  assert.equal(clicked.state, 'done', clicked.message);
+
+  // The side panel's list of questions and its page words leave it out too.
+  const listed = siteWorker({ enabled: true, fields: [{ name: 'name', key: 'fullName', label: 'Full name' }], pageText: { lang: 'en', text: 'Riverbend pantry sign-up.' },
+    frames: [secondFrame({ enabled: true, frameId: 7, origin: 'https://ads.example.net', absent: true })] });
+  const questions = await listed.panel({ type: 'ui:questions' });
+  assert.equal(questions.ok, true, questions.error);
+  assert.deepEqual(plain(questions.data.questions).map(question => question.label), ['Full name']);
+  const read = await listed.panel({ type: 'ui:pageText' });
+  assert.equal(read.ok, true, read.error);
+  assert.equal(read.data.pages[0].text, 'Riverbend pantry sign-up.');
 });
 for (const failure of [{ planError: true }, { fillError: true }, { plan: { token: 'bad', matched: [null], unmatched: [] } }, { fillResult: { ok: true, filled: 'bad' } }]) {
   test(`frame failure is a fixed error: ${JSON.stringify(failure)}`, async () => {

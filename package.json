@@ -21,6 +21,8 @@
     "test:summary": "node scripts/smoke-summary.cjs",
     "test:laya": "node --test tests/laya-speed.cjs && node scripts/smoke-laya.cjs",
     "test:extension:video": "node scripts/qa-extension-video.cjs",
+    "qa:any-website": "node scripts/qa-any-website.cjs",
+    "demo:backup": "node scripts/make-demo-backup.cjs",
     "capture:ui": "node scripts/capture-ui.cjs",
     "test:native": "node tests/desktop-native-smoke.cjs",
     "extension:zip": "node scripts/zip-extension.cjs",

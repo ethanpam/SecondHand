@@ -15,7 +15,8 @@
   const BENEFIT_KEYS = Object.freeze({ snap: 'receivesSnap', wic: 'receivesWic', 'cash-assistance': 'receivesCashAssistance', medicaid: 'receivesMedicaid', ssi: 'receivesSsi',
     housing: 'receivesHousingAssistance', 'school-meals': 'receivesSchoolMeals' });
   // Answers chosen from lists, and the yes or no about each benefit worked out from one. Only the rules place them.
-  const CHOICE_KEYS = Object.freeze(['studentLevel', 'incomeSources', 'currentBenefits', 'helpWanted', ...Object.values(BENEFIT_KEYS)]);
+  // The saved sex (Iowa's Male or Female) is one of them: it is only ever placed on an option that names it.
+  const CHOICE_KEYS = Object.freeze(['studentLevel', 'incomeSources', 'currentBenefits', 'helpWanted', 'sex', ...Object.values(BENEFIT_KEYS)]);
   const SOURCES = Object.freeze({ fullName: ['firstName', 'lastName'], phone: ['mobilePhone', 'homePhone', 'phone'],
     cityState: ['city', 'state'], cityZip: ['city', 'zip'], cityStateZip: ['city', 'state', 'zip'], fullAddress: ['addressLine1', 'addressLine2', 'city', 'state', 'zip'],
     ageRange: ['birthDate'], totalMonthlyIncome: ['monthlyEarnedIncome', 'monthlyOtherIncome'], annualIncome: ['monthlyEarnedIncome', 'monthlyOtherIncome'],
@@ -91,7 +92,7 @@
     householdChildren: 'count', householdSeniors: 'count', householdVeteran: 'yesno', householdDisability: 'yesno', totalMonthlyIncome: 'money',
     annualIncome: 'money', monthlyRent: 'money', monthlyUtilities: 'money', assetsOnHand: 'money', monthlyMedicalExpenses: 'money',
     householdAllCitizens: 'yesno', householdLegalStatus: 'yesno', householdPregnant: 'yesno', householdMedicare: 'yesno', anyoneSenior: 'yesno',
-    iowaResident: 'yesno', wantsHealthCoverage: 'yesno', studentLevel: 'one', incomeSources: 'several', currentBenefits: 'several', helpWanted: 'several',
+    iowaResident: 'yesno', wantsHealthCoverage: 'yesno', studentLevel: 'one', sex: 'one', incomeSources: 'several', currentBenefits: 'several', helpWanted: 'several',
     ...Object.fromEntries(Object.values(BENEFIT_KEYS).map(key => [key, 'yesno'])) });
   const AUTOCOMPLETE = Object.freeze({ 'given-name': 'firstName', 'additional-name': 'middleName', 'family-name': 'lastName', name: 'fullName',
     'honorific-suffix': 'suffix', email: 'email', tel: 'phone', 'tel-national': 'phone', 'street-address': 'addressLine1', 'address-line1': 'addressLine1',
@@ -111,17 +112,17 @@
     [/^(first|given) name$|^first$/, 'firstName'],
     [/^middle (name|initial)$/, 'middleName'],
     [/^(last|family|sur) ?name$|^last$/, 'lastName'],
-    [/^(full |legal |applicant )?name$|^(first (and )?last|full) name$|^name of (the )?head of household$|^head of household name$/, 'fullName'],
+    [/^(full |legal |applicant |customer |client |participant |your )?name$|^(first (and )?last|full) name$|^name of (the )?head of household$|^head of household name$/, 'fullName'],
     [/^(date of birth|birth ?date|dob|birthday)( mm dd yyyy| date)?$/, 'birthDate'],
     [/^(age range|age group)$/, 'ageRange'],
     [/^(social security( number)?|ssn)$/, 'ssn'],
     [/^e ?mail( address)?$/, 'email'],
-    [/^((cell|mobile|home|best|primary) )?(phone|telephone)( number)?$|^(mobile|cell) number$/, 'phone'],
+    [/^((cell|mobile|home|best|primary) )?(phone|telephone)( number)?( \d{1,2} digits)?$|^(mobile|cell)( number)?( \d{1,2} digits)?$/, 'phone'],
     [/^(city (and )?state|ciudad (y )?estado)$/, 'cityState'],
     [/^(city (and )?(zip|zip code|zipcode|postal code)|ciudad (y )?codigo postal)$/, 'cityZip'],
     [/^(city (and )?state (and )?(zip|zip code|zipcode|postal code)|ciudad (y )?estado (y )?codigo postal)$/, 'cityStateZip'],
     [/^(complete |full )(physical |home |residential )?address( including (town|city|town city))?$|^direccion completa$/, 'fullAddress'],
-    [/^(street |home )?address( line 1)?$|^street$/, 'addressLine1'],
+    [/^(street |home |current |residential |physical )?address( line 1)?$|^street$/, 'addressLine1'],
     [/^address line 2$|^(apt|apartment|unit|suite)( number| or unit)?$|^apt suite$/, 'addressLine2'],
     [/^(city|town)$/, 'city'],
     [/^state( province)?$/, 'state'],
@@ -162,6 +163,8 @@
   const BENEFIT_RULES = Object.entries(BENEFIT_WORDS).map(([code, words]) => [new RegExp(`^((do|does) ${HOUSEHOLD_WHO} (currently |now )?(receive|get)|(is|are) ${HOUSEHOLD_WHO} (currently |now )?(receiving|getting|on|enrolled in)) ` +
     `(${words})( benefits?)?( now| currently)?( through (?!.*\\b(another|other|out of) state\\b).+)?$`), BENEFIT_KEYS[code]]);
   const CHOICE_RULES = [
+    // A gender identity question asks something else.
+    [/^(sex|gender)$/, 'sex'],
     [/^((current |your )?student (status|level|type|classification)|are you (currently |now )?(a |an )?(college |university )?student|what is your (current )?student (status|level))$/, 'studentLevel'],
     [/^((current |household )?(sources?|types?) of (household )?income( (and |or )?resources?| received)?|(current |household )?income (sources?|types?)|what are (your |the )?(households? )?(current )?sources of income|where does (your |the )?(households? )?income come from|(do|does) (you|your household|you or anyone in (your |the )?(household|family)) (currently )?receive income from (any of )?the following( sources)?)$/, 'incomeSources'],
     [/^((current|public|government) benefits( received| you receive)?|benefits (currently )?received|(which|what) (of the following )?benefits do (you|your household) (currently )?(receive|get)|(do|does) (you|your household|you or anyone in (your |the )?(household|family)) (currently )?(receive|get) any of the following( benefits| assistance| programs)?|(are you|is anyone in (your |the )?household) (currently )?receiving any of the following( benefits| assistance| programs)?)$/, 'currentBenefits'],
@@ -171,6 +174,7 @@
   // What an option says, as codes of the saved lists (shared/schema.cjs PROFILE_CHOICES.studentLevel and SEVERAL_CHOICES). An option
   // may name more than one ("SSI or SSDI"). One that starts with "not" or "no" names only None or Not a student.
   const CHOICE_OPTIONS = Object.freeze({
+    sex: Object.freeze({ Male: /^(male|man|m)$/, Female: /^(female|woman|f)$/ }),
     studentLevel: Object.freeze({ 'not-student': /^(not a student|not (currently )?(a student|enrolled|in school)|non student)$/, 'high-school': /^high school\b/,
       undergraduate: /\bundergrad(uate)?\b/, graduate: /\b(graduate|grad|masters?|doctoral|phd)\b/, other: /^other\b/ }),
     incomeSources: Object.freeze({ job: /(?<!self )\b(jobs?|employment|employed|wages?|salary|paychecks?)\b|^work\b(?! study)/, 'self-employment': /\bself ?employ(ed|ment)\b|\bown business\b/,
@@ -209,6 +213,9 @@
   const answeredInPart = new WeakMap();
   const inPart = entry => entry.kind === 'checkbox' && answeredInPart.has(entry.elements[0]) &&
     entry.elements.every(box => box.checked === answeredInPart.get(entry.elements[0]).includes(box));
+  // Saved answers about the applicant as a person, which another household member answers differently.
+  const PERSON_KEYS = Object.freeze(['firstName', 'middleName', 'lastName', 'fullName', 'suffix', 'birthDate', 'ageRange', 'ssn', 'email', 'phone']);
+  const EXAMPLE_EMAIL = /^\s*[\w.+-]+@[\w-]+(\.[\w-]+)+\s*$/;
   const NAME_HINTS = Object.freeze({ fname: 'first name', firstname: 'first name', lname: 'last name', lastname: 'last name', dob: 'date of birth',
     zipcode: 'zip code', postalcode: 'postal code', hhsize: 'household size', tel: 'phone', telephone: 'phone', email: 'email', zip: 'zip', city: 'city', state: 'state' });
   const STATES = Object.freeze({ AL: 'alabama', AK: 'alaska', AZ: 'arizona', AR: 'arkansas', CA: 'california', CO: 'colorado', CT: 'connecticut', DE: 'delaware',
@@ -629,8 +636,12 @@
     const tokens = String(element.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/).reverse();
     const auto = tokens.map(token => AUTOCOMPLETE[token]).find(Boolean);
     if (auto && compatible(auto, entry)) return { key: auto, confidence: 'high' };
+    // A box whose only words are an example address ("name@example.com") asks for an email.
+    if (entry.labels.length === 1 && EXAMPLE_EMAIL.test(entry.labels[0]) && compatible('email', entry)) return { key: 'email', confidence: 'high' };
     for (const text of entry.labels) {
-      const key = ruleFor(text);
+      let key = ruleFor(text);
+      // An address asked for in a multi-line box takes the whole address.
+      if (key === 'addressLine1' && entry.kind === 'textarea' && !/ line 1$/.test(question(text))) key = 'fullAddress';
       if (key && compatible(key, entry)) return { key, confidence: 'high' };
     }
     // Today's date is placed by its labels alone, never by a box's name.
@@ -647,6 +658,16 @@
   // The question list's own ids, kept apart from the plan so listing never invalidates a fill.
   let listed = null;
   let listings = 0;
+  // The site's own controls, not questions: a checkbox or radio that works as a button or opens a menu (Wikipedia's
+  // menus), and anything in the site's navigation, a menu, a toolbar or a tab list.
+  const CHROME_ROLES = new Set(['button', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'tab']);
+  const CHROME_AREAS = 'nav, [role="navigation"], [role="menu"], [role="menubar"], [role="toolbar"], [role="tablist"]';
+  function pageChrome(element) {
+    const toggle = ['checkbox', 'radio'].includes(String(element.type || '').toLowerCase()) || ['checkbox', 'radio'].includes(element.getAttribute('role'));
+    if (toggle && element.matches('input') && CHROME_ROLES.has(element.getAttribute('role'))) return true;
+    if (toggle && ![null, 'false'].includes(element.getAttribute('aria-haspopup'))) return true;
+    return Boolean(closestAcross(element, CHROME_AREAS));
+  }
   // Every eligible question on the page with its labels, answered or not.
   function questionsOn(doc) {
     const entries = [];
@@ -655,7 +676,7 @@
     const controls = deepQueryAll(doc, `input, select, textarea, ${ARIA_CONTROLS}, ${EDITABLE}`);
     const ownedLists = new Set(controls.filter(element => element.getAttribute('role') === 'combobox').map(group => listboxFor({ group, kind: 'ariaCombo' })).filter(Boolean));
     for (const element of controls) {
-      if (ownedLists.has(element)) continue;
+      if (ownedLists.has(element) || pageChrome(element)) continue;
       if (element.matches(EDITABLE) && !element.matches(ARIA_CONTROLS)) {
         if (editableUsable(element)) entries.push({ kind: 'editable', elements: [element] });
         continue;
@@ -730,12 +751,26 @@
     const map = new Map();
     const matched = [], unmatched = [];
     const entries = scan(doc), rules = entries.map(match);
+    // A question about a person asked again in the same words in one form ("Name" on each row of a household table, or a
+    // member's section after the applicant's) is someone else's after its first box: only the first takes the applicant's
+    // answer. Separate forms on one page each ask it once.
+    const formOf = entry => closestAcross(entry.elements[0], 'form') || rootOf(entry.elements[0]);
+    const asked = entry => entry.labels[0] ? question(entry.labels[0]) : '';
+    // Answered boxes count too: once the first is answered, the next one is still not the applicant's.
+    let every = null;
+    const listed = index => {
+      const entry = entries[index], key = rules[index].key;
+      if (!PERSON_KEYS.includes(key) || !asked(entry)) return false;
+      if (!every) every = questionsOn(doc).map(other => ({ other, key: match(other).key }));
+      const at = every.findIndex(({ other }) => other.elements[0] === entry.elements[0]);
+      return every.slice(0, at).some(({ other, key: earlier }) => earlier === key && asked(other) === asked(entry) && formOf(other) === formOf(entry));
+    };
     entries.forEach((entry, index) => {
       const id = `sh-${sequence}-${index}`;
       entry.binding = binding(entry);
       map.set(id, entry);
       const result = rules[index];
-      if (IOWA_KEYS.includes(result.key) && rules.filter(rule => rule.key === result.key).length !== 1) { unmatched.push({ id, ...fieldOf(entry) }); return; }
+      if ((IOWA_KEYS.includes(result.key) && rules.filter(rule => rule.key === result.key).length !== 1) || listed(index)) { unmatched.push({ id, ...fieldOf(entry) }); return; }
       if (IOWA_KEYS.includes(result.key)) entry.iowaState = iowaEntryState(entry);
       // Answered in part (#184): it still needs the applicant, and nothing fills it again.
       if (result.confidence === 'high') { matched.push({ id, key: result.key, confidence: 'high', label: entry.labels[0] || '', ...(inPart(entry) ? { partial: true } : {}) }); return; }
@@ -909,6 +944,13 @@
     }
     return options.findIndex(option => normal(option) === wanted);
   }
+  // Whether a value meets the box's own pattern, as the browser checks it. A pattern that doesn't compile checks nothing.
+  function takesPattern(element, value) {
+    const pattern = element.getAttribute('pattern');
+    if (!pattern) return true;
+    for (const flags of ['v', 'u']) { try { return new RegExp(`^(?:${pattern})$`, flags).test(value); } catch {} }
+    return true;
+  }
   // A saved value as the box takes it. Null when the box asks for more than one date order: which it wants can't be told.
   function formatted(key, value, entry) {
     const element = entry.elements[0];
@@ -929,7 +971,10 @@
     if (key === 'phone') {
       const digits = text.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
       if (element.type === 'number') return digits;
-      return digits.length === 10 ? `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}` : text;
+      if (digits.length !== 10) return text;
+      // The first shape the box takes, by its length and pattern: "(202) 555-0148", "202-555-0148", then the digits alone.
+      const shapes = [`(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`, `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`, digits];
+      return shapes.find(shape => !(element.maxLength > 0 && shape.length > element.maxLength) && takesPattern(element, shape)) || shapes[0];
     }
     return text;
   }
@@ -1282,7 +1327,7 @@
     const fields = entries.map(entry => ({ elements: [...entry.elements, ...(entry.kind === 'ariaCombo' && listboxFor(entry) ? [listboxFor(entry)] : [])], answered: answered(entry) && !inPart(entry), required: fieldOf(entry).required,
       safe: !entry.invalidLabels && !applicantOnly(entry) && !protectedCustom(fieldOf(entry)) && !entry.labels.some(otherPersonQuestion) && !besideForm(entry, doc), supported: true }));
     for (const control of deepQueryAll(doc, 'input,select,textarea,[contenteditable],[role="textbox"],[role="radio"],[role="checkbox"],[role="switch"],[role="combobox"],[role="listbox"],[role="slider"],[role="spinbutton"]')) {
-      if (covered.has(control) || !rendered(control) || control.disabled || control.getAttribute('aria-disabled') === 'true' || control.type === 'hidden' || ['submit', 'button', 'reset', 'image'].includes(control.type)) continue;
+      if (covered.has(control) || pageChrome(control) || !rendered(control) || control.disabled || control.getAttribute('aria-disabled') === 'true' || control.type === 'hidden' || ['submit', 'button', 'reset', 'image'].includes(control.type)) continue;
       // The popup list of an already represented combobox is part of that one control.
       if (entries.some(entry => entry.kind === 'ariaCombo' && listboxFor(entry) === control)) continue;
       fields.push({ elements: [control], answered: false, required: control.required === true || control.getAttribute('aria-required') === 'true', safe: false, supported: false });

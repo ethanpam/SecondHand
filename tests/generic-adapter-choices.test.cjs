@@ -175,3 +175,29 @@ test('each yes or no about a benefit comes from the saved list of everything the
   // Only the rules place these: never a guess, and never an answer saved from a page.
   for (const key of [...generic.CHOICE_KEYS]) assert.ok(!generic.GENERIC_KEYS.includes(key) && !generic.SAVE_KEYS.includes(key), key);
 });
+
+// The saved sex (Iowa's Male or Female) answers a Sex or Gender question whose options name it: radios, a select, or Google's
+// ARIA radios. Only the option that names it is chosen; a text box, a gender identity question, and someone else's stay open.
+test('a Sex or Gender question with options that name the saved answer gets it, and nothing else does', () => {
+  const doc = page('<form><fieldset><legend>Gender</legend><label><input type="radio" name="g" value="m">Male</label><label><input type="radio" name="g" value="f">Female</label>' +
+    '<label><input type="radio" name="g" value="o">Other</label></fieldset>' +
+    '<label for="sex">Sex</label><select id="sex"><option value="">Choose</option><option value="M">M</option><option value="F">F</option></select>' +
+    '<label for="typed">Gender </label><input id="typed">' +
+    '<fieldset><legend>Gender identity</legend><label><input type="radio" name="gi" value="w">Woman</label><label><input type="radio" name="gi" value="m">Man</label></fieldset>' +
+    '<fieldset><legend>Emergency contact: Gender</legend><label><input type="radio" name="ec" value="f">Female</label><label><input type="radio" name="ec" value="m">Male</label></fieldset></form>');
+  const result = generic.plan(doc);
+  assert.deepEqual(keysOf(result), ['sex', 'sex']);
+  assert.deepEqual(generic.requestKeys(keysOf(result)), ['sex']);
+  assert.deepEqual(fillAll(doc, result, { sex: 'Female' }).filled.length, 2);
+  assert.deepEqual(checked(doc, 'g'), ['f']);
+  assert.equal(doc.getElementById('sex').value, 'F');
+  assert.equal(doc.getElementById('typed').value, '');
+  assert.deepEqual(checked(doc, 'gi'), []);
+  assert.deepEqual(checked(doc, 'ec'), []);
+  // No saved answer, or one no option names, leaves the question as it was.
+  const empty = page('<form><fieldset><legend>Sex</legend><label><input type="radio" name="s" value="m">Male</label><label><input type="radio" name="s" value="f">Female</label></fieldset></form>');
+  const plan = generic.plan(empty);
+  fillAll(empty, plan, {});
+  assert.deepEqual(checked(empty, 's'), []);
+  assert.equal(generic.SAVE_KEYS.includes('sex'), false, 'a page’s answer is never saved over the saved sex');
+});

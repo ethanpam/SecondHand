@@ -755,9 +755,68 @@ test('the card stays hidden on pages without inputs, search boxes, sign-in forms
     'a texted code': '<form><label for="otp">Enter the 6-digit code we sent you</label><input id="otp" inputmode="numeric"></form>',
     'a verification code': '<form><label for="code">Verification code</label><input id="code"></form>',
     'a one-time code': '<form><input name="token" autocomplete="one-time-code" aria-label="Code"></form>',
-    'consent only': '<form><label><input type="checkbox" name="agree"> I agree to the terms</label><label for="sig">Signature</label><input id="sig"></form>'
+    'consent only': '<form><label><input type="checkbox" name="agree"> I agree to the terms</label><label for="sig">Signature</label><input id="sig"></form>',
+    // Wikipedia's menus open from checkboxes that act as buttons.
+    'menu toggles': '<header><input type="checkbox" id="main-menu" role="button" aria-haspopup="true" aria-label="Main menu"><label for="main-menu">Main menu</label></header>' +
+      '<div><input type="checkbox" id="langs" role="button" aria-haspopup="true" aria-label="21 languages"><input type="checkbox" id="tools" aria-haspopup="true" aria-label="Tools"></div>',
+    'site navigation': '<nav><label><input type="checkbox" name="open"> Menu</label><label><input type="radio" name="theme"> Dark</label><label><input type="radio" name="theme"> Light</label></nav>' +
+      '<div role="toolbar"><label><input type="checkbox" name="bold"> Bold</label></div>'
   };
   for (const [name, html] of Object.entries(hidden)) assert.equal(generic.offers(page(html)), false, name);
+});
+
+test('everyday sign-up forms: an example address as the only label asks for an email, a customer’s or client’s name for the full name, and a current address in a multi-line box for the whole address', () => {
+  const doc = page('<form><label>Email</label><input id="userEmail" type="text" placeholder="name@example.com">' +
+    '<label>Customer name: <input id="custname" name="custname"></label><label for="client">Client name</label><input id="client">' +
+    '<label for="current">Current Address</label><textarea id="current" placeholder="Current Address"></textarea>' +
+    '<label for="street">Residential address</label><input id="street"></form>');
+  const plan = generic.plan(doc);
+  assert.deepEqual(byElement(doc, plan), { userEmail: 'email', custname: 'fullName', client: 'fullName', current: 'fullAddress', street: 'addressLine1' });
+  assert.equal(generic.fillFields(doc, plan.token, plan.matched.map(field => ({ id: field.id, key: field.key, guessed: false })), generic.deriveValues(profile)).ok, true);
+  assert.equal(doc.getElementById('userEmail').value, 'avery.example@example.invalid');
+  assert.equal(doc.getElementById('custname').value, 'Avery Example');
+  assert.equal(doc.getElementById('current').value, '123 Test Way, Unit 4, Demo City, IA 50309');
+  assert.equal(doc.getElementById('street').value, '123 Test Way');
+  // Someone else's name, and an address that isn't the applicant's home, stay as they were.
+  const other = generic.plan(page('<form><label for="a">Company name</label><input id="a"><label for="b">Previous address</label><textarea id="b"></textarea>' +
+    '<label for="c">Work email</label><input id="c" placeholder="name@company.com"></form>'));
+  assert.deepEqual(other.matched, []);
+});
+
+test('a question about a person asked again in one form (each row of Jotform’s household table) takes the applicant’s answer in its first box only', () => {
+  const doc = page('<form><label for="email">Email</label><input id="email">' +
+    '<label>Name <input id="row1"></label><label>Age <input id="age1"></label><label>Name <input id="row2"></label><label>Age <input id="age2"></label><label>Name <input id="row3"></label></form>');
+  const plan = generic.plan(doc);
+  assert.deepEqual(byElement(doc, plan), { email: 'email', row1: 'fullName' });
+  assert.deepEqual(plan.unmatched.filter(field => field.label === 'Name').length, 2, 'the other rows stay for the applicant');
+  // Once the first row is answered, by SecondHand or the applicant, the next plan still leaves the other rows alone.
+  assert.equal(generic.fillFields(doc, plan.token, plan.matched.map(field => ({ id: field.id, key: field.key, guessed: false })), generic.deriveValues(profile)).ok, true);
+  assert.equal(doc.getElementById('row1').value, 'Avery Example');
+  assert.deepEqual(generic.plan(doc).matched, [], 'a later plan fills no other row');
+  // A household count asked twice is the same answer in each box.
+  const counts = page('<form><label for="a">How many children under 18?</label><input id="a"><label for="b">How many children under 18?</label><input id="b"></form>');
+  assert.deepEqual(byElement(counts, generic.plan(counts)), { a: 'householdChildren', b: 'householdChildren' });
+  // The same question in two separate forms on one page is asked once in each, and each still fills.
+  const two = page('<form><label for="c1">City</label><input id="c1"></form><form><label for="c2">City*</label><input id="c2"></form>');
+  assert.deepEqual(byElement(two, generic.plan(two)), { c1: 'city', c2: 'city' });
+});
+
+test('a phone box that takes fewer characters or a pattern gets the saved number in the shape it takes', () => {
+  const doc = page('<form><label for="a">Mobile(10 Digits)</label><input id="a" maxlength="10"><label for="b">Phone</label><input id="b" maxlength="12">' +
+    '<label for="c">Telephone</label><input id="c" pattern="[0-9]{10}"><label for="d">Cell phone</label><input id="d" type="tel"><label for="e">Home phone</label><input id="e" maxlength="7"></form>');
+  const plan = generic.plan(doc);
+  const result = generic.fillFields(doc, plan.token, plan.matched.map(field => ({ id: field.id, key: field.key, guessed: false })), generic.deriveValues(profile));
+  assert.deepEqual(['a', 'b', 'c', 'd', 'e'].map(id => doc.getElementById(id).value), ['2025550148', '202-555-0148', '2025550148', '(202) 555-0148', '']);
+  assert.equal(result.skipped.length, 1, 'a box too short for any shape is left for the applicant');
+});
+
+test('a menu toggle beside a form is no question: it is never planned or listed, and the form fills as before', () => {
+  const doc = page('<nav><input type="checkbox" id="menu" role="button" aria-haspopup="true" aria-label="Main menu"></nav>' +
+    '<form><label for="fname">First name</label><input id="fname"><label for="note">Anything else?</label><input id="note"></form>');
+  const plan = generic.plan(doc);
+  assert.deepEqual(plan.matched.map(field => field.key), ['firstName']);
+  assert.deepEqual(plan.unmatched.map(field => field.label), ['Anything else?']);
+  assert.deepEqual(generic.questions(doc).map(question => question.label), ['First name', 'Anything else?']);
 });
 
 test('Laya takes text boxes and choice questions within the bridge’s limits, never a question only the applicant answers', () => {
@@ -957,7 +1016,8 @@ test('a question the page asks more than once, as in a household member’s sect
     '<label for="zip">Zip code</label><input id="zip">');
   const result = generic.plan(doc);
   const ids = key => result.matched.filter(item => item.key === key).map(item => item.id);
-  assert.equal(ids('birthDate').length, 2, 'the section has no heading, so both boxes look like the applicant’s');
+  assert.equal(ids('birthDate').length, 1, 'the section has no heading: only the first box, the applicant’s, takes the saved answer');
+  assert.deepEqual(result.unmatched.map(field => field.label), ['First name', 'Date of birth (MM/DD/YYYY)'], 'the member’s boxes stay for the applicant');
   for (const [id, value] of [['first', 'Avery'], ['dob', '04/12/1985'], ['first2', 'Riley'], ['dob2', '09/03/2015'], ['zip', '50309']]) doc.getElementById(id).value = value;
   for (const key of ['birthDate', 'firstName']) for (const id of ids(key)) assert.deepEqual(generic.readAnswer(doc, result.token, id, key), { repeated: true }, `${key} ${id}`);
   assert.deepEqual(generic.readAnswer(doc, result.token, ids('zip')[0], 'zip'), { value: '50309' }, 'a question asked once is read');

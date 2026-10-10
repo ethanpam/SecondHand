@@ -111,3 +111,16 @@ that ends in a hyphen takes every shot that starts with it, as in `npm run captu
 The side panel is captured at Chrome's own 360 by 765 pixels and the card as a 330 by 190 corner of the
 page, both at twice that size. `card-autofill` is a short recording and needs `ffmpeg` on the PATH. Every
 run fails if the extension logged an error in any of its pages or its worker.
+
+## Live sweep of everyday websites
+
+`npm run qa:any-website -- <label>` loads the extension in a throwaway Chromium profile with SecondHand on for
+all websites, then opens about thirty real public pages: Google Forms and Jotform pantry forms, practice
+registration forms, contact forms, a sign-in page, and reading pages such as Wikipedia and news sites. On each
+it waits for the card, or checks that none came, clicks Autofill once, and records what every box holds
+afterwards, the card's words, page errors, and a screenshot in `artifacts/qa-any/<label>/`. Site names after
+the label limit the run, as in `npm run qa:any-website -- after jotform-template,demoqa`.
+
+The desktop app is a DevTools stub that answers with the fictional profile, with Always allow on and Laya
+off. The run never clicks Next, Submit or Save, and it reports any request that carried a saved value.
+Third-party pages change and some block headless browsers, so read the report rather than treating it as a gate.
