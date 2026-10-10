@@ -33,7 +33,7 @@ The supported build target in this repository is **Windows x64**. Do not infer a
 1. Visit the project's download website and choose Windows. Save the `.exe` installer from the intended release.
 2. Review the pilot's unsigned-build notice. Verify the source before opening it; do not disable OS security protections to make an unknown installer run.
 3. Run the installer. The current NSIS configuration is interactive rather than one-click, installs per user, allows a chosen installation directory, and creates a desktop shortcut.
-4. Open **SecondHand**. Create a password, store the recovery key, and review whether same-computer password reset should be enabled.
+4. Open **SecondHand**. Create a password and store the recovery key. Only the recovery key can reset a forgotten password.
 5. Save your profile. Leave uncertain details unanswered rather than entering placeholders that could later fill a real form.
 6. Open **Chrome extension → Prepare Chrome extension**.
 7. In Chrome, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select the prepared directory. Paste the copied folder path into the chooser's address bar if necessary.
@@ -54,15 +54,12 @@ Record the official result under Applications only after checking the website. T
 Production data normally lives under `%LOCALAPPDATA%\SecondHand`. This is selected by the app rather than Electron's default roaming directory. Important files include:
 
 - `vault.secondhand`: encrypted applicant records.
-- `device-reset.bin`: the optional OS-protected device-reset secret.
 - `settings.json`: app/extension preferences, not a plaintext copy of the profile.
 - `native-messaging\org.secondhand.bridge.json`: Chrome's native-host manifest.
 - `chrome-extension\`: the prepared extension files.
 - Model files and runtime caches used by the local app.
 
-Do not manually edit an encrypted vault, copy a device secret between OS accounts, or delete this directory to troubleshoot a display problem. Use the app's encrypted export/import and recovery flows.
-
-The optional device-reset secret uses Electron safeStorage backed by Windows DPAPI. Its same-account protection is different from knowing the user's SecondHand password. Anyone with access to that signed-in Windows account may have the corresponding reset capability if enabled.
+Do not manually edit an encrypted vault or delete this directory to troubleshoot a display problem. Use the app's encrypted export/import and recovery flows.
 
 The installer is configured not to delete app data on uninstall. That is not a substitute for an independently retained encrypted backup; user deletion, OS reinstallation, or lost local keys can still make data unavailable.
 

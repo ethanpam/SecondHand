@@ -983,20 +983,19 @@ test('creating a password shows the recovery key once and requires acknowledgeme
   const created = [];
   const recoveryKey = 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789';
   const view = await renderer(t, {
-    status: async () => ({ exists: false, unlocked: false, recoveryKey: false, deviceResetSupported: true, extensionId: '', bridgeRunning: true }),
+    status: async () => ({ exists: false, unlocked: false, recoveryKey: false, extensionId: '', bridgeRunning: true }),
     createVault: async request => {
       created.push({ ...request });
       return { status: { exists: true, unlocked: true, recoveryKey: true, extensionId: '', bridgeRunning: true }, recoveryKey };
     }
   });
   assert.equal(view.get('forgot-password').hidden, true);
-  assert.equal(view.get('device-reset-field').hidden, false);
-  assert.equal(view.get('allow-device-reset').checked, true);
+  assert.equal(view.get('allow-device-reset'), null, 'nothing offers to let this computer reset the password');
   view.edit('passphrase', 'synthetic long password');
   view.edit('confirm-passphrase', 'synthetic long password');
   view.submit('auth-form');
   await tick(); await tick();
-  assert.deepEqual(created, [{ password: 'synthetic long password', allowDeviceReset: true }]);
+  assert.deepEqual(created, [{ password: 'synthetic long password' }]);
   assert.equal(view.get('workspace').hidden, false);
   assert.equal(view.get('recovery-dialog').open, true);
   assert.equal(view.get('recovery-key-value').textContent, recoveryKey);
@@ -1013,7 +1012,7 @@ test('creating a password shows the recovery key once and requires acknowledgeme
   assert.equal(view.get('recovery-dialog').open, false);
 });
 
-test('a pending or failed setup save does not hide the new recovery key or its reset warning', async t => {
+test('a pending or failed setup save does not hide the new recovery key', async t => {
   const completion = deferred();
   const recoveryKey = 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789';
   let setupRequests = 0;
@@ -1021,7 +1020,7 @@ test('a pending or failed setup save does not hide the new recovery key or its r
     status: async () => ({ exists: false, unlocked: false, lockRevision: 0 }),
     createVault: async () => ({
       status: { exists: true, unlocked: true, recoveryKey: true, lockRevision: 0 },
-      recoveryKey, deviceResetFailed: true
+      recoveryKey
     }),
     startSetup: () => { setupRequests++; return completion.promise; }
   });
@@ -1033,7 +1032,6 @@ test('a pending or failed setup save does not hide the new recovery key or its r
   assert.equal(view.get('workspace').hidden, false);
   assert.equal(view.get('recovery-dialog').open, true, 'the key must be available before the setup save settles');
   assert.equal(view.get('recovery-key-value').textContent, recoveryKey);
-  assert.match(view.get('recovery-feedback').textContent, /couldn’t save a reset option/);
   assert.equal(view.get('recovery-done').disabled, true);
   view.get('recovery-done').click();
   assert.equal(view.get('recovery-dialog').open, true, 'a slow setup save does not bypass acknowledgement');
@@ -1043,7 +1041,6 @@ test('a pending or failed setup save does not hide the new recovery key or its r
   assert.equal(view.get('recovery-dialog').open, true);
   assert.equal(view.get('recovery-key-value').textContent, recoveryKey);
   assert.match(view.get('recovery-feedback').textContent, /setup/i, 'the failure is reported in the open recovery dialog');
-  assert.match(view.get('recovery-feedback').textContent, /couldn’t save a reset option/, 'the earlier reset warning is preserved');
   assert.equal(view.get('auth-error').hidden, true, 'setup failure must not be routed to the hidden authentication form');
   assert.equal(view.get('auth-error').textContent, '');
   assert.equal(view.get('recovery-done').disabled, true);
@@ -1149,7 +1146,7 @@ test('locking while setup is being saved discards late success and failure witho
       status: async () => ({ exists: false, unlocked: false, lockRevision: 0 }),
       createVault: async () => ({
         status: { exists: true, unlocked: true, recoveryKey: true, lockRevision: 0 },
-        recoveryKey: 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789', deviceResetFailed: true
+        recoveryKey: 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789'
       }),
       startSetup: () => completion.promise
     });
@@ -1183,7 +1180,7 @@ test('locking during initial profile loading cannot redisplay the newly created 
     status: async () => ({ exists: false, unlocked: false, lockRevision: 0 }),
     createVault: async () => ({
       status: { exists: true, unlocked: true, recoveryKey: true, lockRevision: 0 },
-      recoveryKey: 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789', deviceResetFailed: true
+      recoveryKey: 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789'
     }),
     getData: () => { dataRequests++; return completion.promise; }
   });
@@ -1321,26 +1318,16 @@ test('forgot password resets with a recovery key, and older saved information ex
   assert.equal(older.get('auth-title').textContent, 'Welcome back');
 });
 
-test('reset on this computer skips the recovery key, and either method can be chosen when both exist', async t => {
+// "Let this computer reset my password" was removed: anyone signed in to the computer could set a new password with it.
+test('Forgot password? always asks for the recovery key', async t => {
   const resets = [];
   const view = await renderer(t, {
-    status: async () => ({ exists: true, unlocked: false, recoveryKey: true, deviceReset: true, deviceResetSupported: true, extensionId: '', bridgeRunning: true }),
-    resetPassword: async request => { resets.push({ ...request }); throw new Error('This computer can’t reset this password. Use your recovery key instead.'); }
+    status: async () => ({ exists: true, unlocked: false, recoveryKey: true, extensionId: '', bridgeRunning: true }),
+    resetPassword: async request => { resets.push({ ...request }); throw new Error('That recovery key didn’t work. Check it and try again.'); }
   });
   view.get('forgot-password').click();
-  assert.equal(view.get('reset-method').hidden, false);
-  assert.equal(view.get('reset-method-device').checked, true);
-  assert.equal(view.get('recovery-key-field').hidden, true);
-  assert.equal(view.get('recovery-key-input').required, false);
-  view.edit('reset-password', 'new synthetic password');
-  view.edit('reset-confirm', 'new synthetic password');
-  view.submit('reset-form');
-  await tick();
-  assert.deepEqual(resets, [{ method: 'device', password: 'new synthetic password' }]);
-  assert.match(view.get('reset-error').textContent, /Use your recovery key/);
-
-  view.get('reset-method-recovery').checked = true;
-  view.get('reset-method-recovery').dispatchEvent(new view.window.Event('change'));
+  assert.equal(view.get('reset-method'), null, 'no choice of how to reset');
+  assert.doesNotMatch(view.get('reset-form').textContent, /On this computer/);
   assert.equal(view.get('recovery-key-field').hidden, false);
   assert.equal(view.get('recovery-key-input').required, true);
   view.edit('recovery-key-input', 'typed key');
@@ -1348,7 +1335,8 @@ test('reset on this computer skips the recovery key, and either method can be ch
   view.edit('reset-confirm', 'new synthetic password');
   view.submit('reset-form');
   await tick();
-  assert.deepEqual(resets.at(-1), { recoveryKey: 'typed key', password: 'new synthetic password' });
+  assert.deepEqual(resets, [{ recoveryKey: 'typed key', password: 'new synthetic password' }]);
+  assert.match(view.get('reset-error').textContent, /didn’t work/);
 });
 
 test('a lock notification arriving after the lock response cannot clear an unlock attempt already under way', async t => {
@@ -1374,7 +1362,7 @@ test('a lock notification arriving after the lock response cannot clear an unloc
 });
 
 // Privacy & backups and the Chrome extension page (#140): what each button asks the desktop, and what it shows.
-const unlockedStatus = (changes = {}) => ({ exists: true, unlocked: true, recoveryKey: true, deviceReset: false, deviceResetSupported: true, extensionId: '', bridgeRunning: true, ...changes });
+const unlockedStatus = (changes = {}) => ({ exists: true, unlocked: true, recoveryKey: true, extensionId: '', bridgeRunning: true, ...changes });
 const NEW_KEY = 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789';
 
 test('a new recovery key asks first when one exists, shows once in its dialog, and Copy and Save say what happened', async t => {
@@ -1437,39 +1425,45 @@ test('a new recovery key asks first when one exists, shows once in its dialog, a
   assert.equal(first.get('recovery-dialog').open, false);
 });
 
-test('letting this computer reset the password turns on and off through the desktop, and a failed change is undone', async t => {
+test('Privacy & backups has no setting to let this computer reset the password', async t => {
+  const view = await renderer(t, { status: async () => unlockedStatus() });
+  assert.equal(view.get('device-reset-toggle'), null);
+  assert.doesNotMatch(view.get('view-privacy').textContent, /Let this computer reset/);
+});
+
+// After the update, information saved with reset on this computer turned on says once that only the recovery key resets the password.
+test('after the update, Overview says once that only the recovery key resets the password, and offers a new key', async t => {
   const calls = [];
-  let fail = false;
-  let status = unlockedStatus();
-  let view;
-  view = await renderer(t, {
+  let status = unlockedStatus({ deviceResetEnded: true });
+  const view = await renderer(t, {
     status: async () => status,
-    setDeviceReset: async enabled => {
-      calls.push(enabled);
-      if (fail) throw new view.window.Error('This computer couldn’t save a reset option. Your recovery key still works.');
-      status = { ...status, deviceReset: enabled };
-      return status;
-    }
+    dismissDeviceResetNotice: async () => { calls.push('dismiss'); status = { ...status, deviceResetEnded: false }; return status; },
+    replaceRecoveryKey: async () => { calls.push('replace'); status = { ...status, deviceResetEnded: false }; return { recoveryKey: 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789' }; }
   });
-  const toggle = view.get('device-reset-toggle');
-  assert.equal(view.get('device-reset-setting').hidden, false);
-  assert.equal(toggle.checked, false);
-  const change = async checked => { toggle.checked = checked; toggle.dispatchEvent(new view.window.Event('change')); await tick(); await tick(); };
-  await change(true);
-  assert.deepEqual(calls, [true]);
-  assert.equal(toggle.checked, true);
-  assert.equal(view.get('toast').textContent, 'This computer can now reset your password.');
-  await change(false);
-  assert.deepEqual(calls, [true, false]);
-  assert.equal(view.get('toast').textContent, 'Reset on this computer is turned off.');
-  fail = true;
-  await change(true);
-  assert.equal(toggle.checked, false, 'a failed change is undone');
-  assert.equal(toggle.disabled, false);
-  assert.equal(view.get('toast').textContent, 'This computer couldn’t save a reset option. Your recovery key still works.');
-  assert.equal(view.get('toast').classList.contains('error'), true);
-  const elsewhere = await renderer(t, { status: async () => unlockedStatus({ deviceResetSupported: false }) });
-  assert.equal(elsewhere.get('device-reset-setting').hidden, true, 'shown only where the system can keep the secret');
+  const note = view.get('device-reset-ended');
+  assert.equal(note.hidden, false);
+  assert.match(note.textContent, /only your recovery key can reset your password/i);
+  view.get('device-reset-ended-create').click();
+  await tick(); await tick();
+  assert.deepEqual(calls, ['replace']);
+  assert.equal(view.get('recovery-dialog').open, true);
+  assert.equal(view.get('recovery-key-value').textContent, 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345-6789');
+  assert.equal(note.hidden, true, 'a new key answers it');
+
+  status = unlockedStatus({ deviceResetEnded: true });
+  const other = await renderer(t, {
+    status: async () => status,
+    dismissDeviceResetNotice: async () => { calls.push('dismiss'); status = { ...status, deviceResetEnded: false }; return status; }
+  });
+  other.get('device-reset-ended-dismiss').click();
+  await tick(); await tick();
+  assert.deepEqual(calls, ['replace', 'dismiss']);
+  assert.equal(other.get('device-reset-ended').hidden, true);
+  other.lock();
+  assert.equal(other.get('device-reset-ended').hidden, true);
+
+  const quiet = await renderer(t, { status: async () => unlockedStatus() });
+  assert.equal(quiet.get('device-reset-ended').hidden, true, 'nothing to say without the old reset');
 });
 
 test('a custom extension ID is checked before it is sent, and the desktop’s answer is shown', async t => {
@@ -1692,7 +1686,7 @@ test('turning Laya off says so and stops showing download controls', async t => 
 });
 
 test('start over is offered on the reset screen, needs the typed phrase, and returns to creating a password', async t => {
-  let status = { exists: true, unlocked: false, recoveryKey: true, deviceReset: false, lockRevision: 0 };
+  let status = { exists: true, unlocked: false, recoveryKey: true, lockRevision: 0 };
   const calls = [];
   const view = await renderer(t, {
     status: async () => status,
@@ -1731,7 +1725,7 @@ test('start over is offered on the reset screen, needs the typed phrase, and ret
 
 test('going back from start over returns to the reset screen, and a failed erase shows why', async t => {
   const view = await renderer(t, {
-    status: async () => ({ exists: true, unlocked: false, recoveryKey: false, deviceReset: false, lockRevision: 0 }),
+    status: async () => ({ exists: true, unlocked: false, recoveryKey: false, lockRevision: 0 }),
     startOver: async () => { throw new Error('Could not erase your saved information. Please try again.'); }
   });
   view.get('forgot-password').click();

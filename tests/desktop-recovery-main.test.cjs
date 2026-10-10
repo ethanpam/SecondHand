@@ -6,7 +6,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const realLaya = require('../desktop/laya.cjs');
-const { plain, startMain, safeStorage } = require('./helpers/harness.cjs');
+const { plain, startMain, safeStorage, addRetiredDeviceSlot } = require('./helpers/harness.cjs');
 
 // Runs the real main process and vault against a temporary folder. Only the
 // operating system's protected storage is simulated, so no Keychain is touched.
@@ -45,49 +45,80 @@ async function desktop(t, { encryptionAvailable = true, shell = {}, env = {}, is
   };
 }
 const EXTENSION = 'a'.repeat(32);
+const PASSWORD = 'synthetic first password';
+const KEY = /^[0-9A-Z]{4}(?:-[0-9A-Z]{4}){7}$/;
 const PASSWORD_UNLOCK_ERROR = 'That password didn’t open SecondHand. Check it and try again. If you’re sure it’s right, you can use your recovery key or restore a backup.';
 
-test('a password created with reset on this computer can be reset there, and turning it off removes the secret', async t => {
+// "Let this computer reset my password" was removed: anyone signed in to the computer account could set
+// a new password without the recovery key. Only the recovery key resets a password now.
+test('a new password gets a recovery key, and nothing else resets it', async t => {
   const app = await desktop(t);
-  const created = await app.invoke('createVault', { password: 'synthetic first password', allowDeviceReset: true });
-  assert.equal(created.status.deviceReset, true);
-  assert.equal(created.status.deviceResetSupported, true);
-  assert.equal(created.deviceResetFailed, false);
-  assert.match((await fsp.readFile(app.secretPath)).toString(), /^sealed:/);
-  const sealed = await fsp.readFile(app.secretPath);
-
-  await assert.rejects(app.invoke('createVault', { password: 'another synthetic password', allowDeviceReset: true }), /already has a password/);
-  assert.deepEqual(await fsp.readFile(app.secretPath), sealed, 'A failed create must not replace the existing secret');
-
+  const created = await app.invoke('createVault', { password: PASSWORD, allowDeviceReset: true });
+  assert.match(created.recoveryKey, KEY);
+  assert.deepEqual(Object.keys(created).sort(), ['recoveryKey', 'status']);
+  for (const name of ['deviceReset', 'deviceResetSupported']) assert.equal(name in created.status, false, name);
+  await assert.rejects(fsp.access(app.secretPath), { code: 'ENOENT' }, 'no reset secret is sealed');
+  await assert.rejects(app.invoke('setDeviceReset', true), /Request denied/);
   await app.invoke('lock');
-  const reset = await app.invoke('resetPassword', { method: 'device', password: 'synthetic second password' });
-  assert.equal(reset.unlocked, true);
-  await app.invoke('lock');
-  await assert.rejects(app.invoke('unlock', 'synthetic first password'), new Error(PASSWORD_UNLOCK_ERROR));
-  await app.invoke('unlock', 'synthetic second password');
-
-  const off = await app.invoke('setDeviceReset', false);
-  assert.equal(off.deviceReset, false);
-  await assert.rejects(fsp.access(app.secretPath), { code: 'ENOENT' });
-  await app.invoke('lock');
-  await assert.rejects(app.invoke('resetPassword', { method: 'device', password: 'synthetic third password' }), /isn’t set up/);
-
-  await app.invoke('unlock', 'synthetic second password');
-  assert.equal((await app.invoke('setDeviceReset', true)).deviceReset, true);
-  await app.invoke('lock');
-  await fsp.writeFile(app.secretPath, 'tampered');
-  await assert.rejects(app.invoke('resetPassword', { method: 'device', password: 'synthetic third password' }), /Use your recovery key/);
+  const before = await fsp.readFile(app.vaultPath);
+  await assert.rejects(app.invoke('resetPassword', { method: 'device', password: 'synthetic second password' }), /Enter the recovery key/);
+  assert.deepEqual(await fsp.readFile(app.vaultPath), before);
+  assert.equal((await app.invoke('resetPassword', { recoveryKey: created.recoveryKey, password: 'synthetic second password' })).unlocked, true);
 });
 
-test('without protected storage, a new password still gets a recovery key and reports that device reset failed', async t => {
-  const app = await desktop(t, { encryptionAvailable: false });
-  const created = await app.invoke('createVault', { password: 'synthetic first password', allowDeviceReset: true });
-  assert.equal(created.deviceResetFailed, true);
-  assert.equal(created.status.deviceReset, false);
-  assert.equal(created.status.recoveryKey, true);
-  assert.match(created.recoveryKey, /^[0-9A-Z]{4}(?:-[0-9A-Z]{4}){7}$/);
-  await assert.rejects(fsp.access(app.secretPath), { code: 'ENOENT' });
-  await assert.rejects(app.invoke('setDeviceReset', true), /couldn’t save a reset option/);
+// Information saved while reset on this computer was on: its sealed secret and its slot.
+async function savedWithDeviceReset(t) {
+  const first = await desktop(t);
+  const { recoveryKey } = await first.invoke('createVault', { password: PASSWORD });
+  await first.invoke('saveProfile', { firstName: 'Saved Before' });
+  await first.invoke('lock');
+  const secret = addRetiredDeviceSlot(first.vaultPath, PASSWORD);
+  await fsp.writeFile(first.secretPath, safeStorage().encryptString(secret.toString('base64')));
+  return { userData: first.userData, recoveryKey };
+}
+const slotNames = async app => Object.keys(JSON.parse(await fsp.readFile(app.vaultPath, 'utf8')).slots).sort();
+
+test('information saved with reset on this computer turned on can’t be reset without the recovery key after the update', async t => {
+  const { userData } = await savedWithDeviceReset(t);
+  const app = await desktop(t, { userData });
+  await assert.rejects(fsp.access(app.secretPath), { code: 'ENOENT' }, 'the sealed secret is deleted when SecondHand starts');
+  const before = await fsp.readFile(app.vaultPath);
+  await assert.rejects(app.invoke('resetPassword', { method: 'device', password: 'synthetic attacker password' }), /Enter the recovery key/);
+  assert.deepEqual(await fsp.readFile(app.vaultPath), before, 'nothing changed');
+  assert.equal((await app.invoke('status')).unlocked, false);
+  await assert.rejects(app.invoke('unlock', 'synthetic attacker password'), new Error(PASSWORD_UNLOCK_ERROR));
+});
+
+test('the first unlock after the update removes the old reset slot and says so once, until dismissed or a new key is made', async t => {
+  const { userData } = await savedWithDeviceReset(t);
+  const app = await desktop(t, { userData });
+  assert.equal((await app.invoke('status')).deviceResetEnded, false, 'nothing to say while locked');
+  const unlocked = await app.invoke('unlock', PASSWORD);
+  assert.equal(unlocked.deviceResetEnded, true);
+  assert.deepEqual(await slotNames(app), ['password', 'recovery']);
+  assert.equal((await app.invoke('getData')).profile.firstName, 'Saved Before');
+  assert.equal((await app.invoke('dismissDeviceResetNotice')).deviceResetEnded, false);
+  await app.invoke('lock');
+  assert.equal((await app.invoke('unlock', PASSWORD)).deviceResetEnded, false, 'once only');
+
+  const replaced = await desktop(t, { userData: (await savedWithDeviceReset(t)).userData });
+  assert.equal((await replaced.invoke('unlock', PASSWORD)).deviceResetEnded, true);
+  await replaced.invoke('replaceRecoveryKey');
+  assert.equal((await replaced.invoke('status')).deviceResetEnded, false, 'a new recovery key answers it');
+
+  const locked = await desktop(t, { userData: (await savedWithDeviceReset(t)).userData });
+  assert.equal((await locked.invoke('unlock', PASSWORD)).deviceResetEnded, true);
+  assert.equal((await locked.invoke('lock')).deviceResetEnded, false, 'locking ends it');
+  assert.equal((await locked.invoke('unlock', PASSWORD)).deviceResetEnded, false);
+});
+
+test('a reset with the recovery key removes the old reset slot without the notice: the key is in hand', async t => {
+  const { userData, recoveryKey } = await savedWithDeviceReset(t);
+  const app = await desktop(t, { userData });
+  const reset = await app.invoke('resetPassword', { recoveryKey, password: 'synthetic second password' });
+  assert.equal(reset.unlocked, true);
+  assert.equal(reset.deviceResetEnded, false);
+  assert.deepEqual(await slotNames(app), ['password', 'recovery']);
 });
 
 test('the Chrome setup guide opens the published page, or a local website only during development', async t => {
@@ -102,10 +133,10 @@ test('the Chrome setup guide opens the published page, or a local website only d
   assert.deepEqual(opened, [published, 'http://localhost:3002/chrome-extension', published, published, published]);
 });
 
-test('starting over erases the locked information and reset secret, keeps settings, and allows a new password', async t => {
+test('starting over erases the locked information, keeps settings, and allows a new password', async t => {
   const app = await desktop(t);
-  const userData = path.dirname(app.secretPath);
-  await app.invoke('createVault', { password: 'synthetic first password', allowDeviceReset: true });
+  const userData = app.userData;
+  await app.invoke('createVault', { password: 'synthetic first password' });
   const settings = path.join(userData, 'settings.json');
   await fsp.writeFile(settings, JSON.stringify({ extensionId: '', autofillWithoutAsking: false, trustedSites: [] }));
   await fsp.writeFile(path.join(userData, 'vault.secondhand.before-import-1-abcd1234'), 'encrypted copy');
@@ -120,13 +151,11 @@ test('starting over erases the locked information and reset secret, keeps settin
   const erased = await app.invoke('startOver', { confirmation: '  Start Over ' });
   assert.equal(erased.exists, false);
   assert.equal(erased.unlocked, false);
-  assert.equal(erased.deviceReset, false);
   await assert.rejects(fsp.access(path.join(userData, 'vault.secondhand')), { code: 'ENOENT' });
   await assert.rejects(fsp.access(path.join(userData, 'vault.secondhand.before-import-1-abcd1234')), { code: 'ENOENT' });
-  await assert.rejects(fsp.access(app.secretPath), { code: 'ENOENT' });
   await fsp.access(settings);
 
-  const created = await app.invoke('createVault', { password: 'synthetic new password', allowDeviceReset: false });
+  const created = await app.invoke('createVault', { password: 'synthetic new password' });
   assert.equal(created.status.unlocked, true);
   assert.deepEqual((await app.invoke('getData')).profile, {});
   await app.invoke('lock');
@@ -141,7 +170,6 @@ test('an unparseable vault keeps the generic unlock message', async t => {
 
 // Backups (#140). Every refused restore leaves the saved information as it was: the same encrypted bytes,
 // no copy of them, and the guided setup's progress.
-const PASSWORD = 'synthetic first password';
 const snapshot = async app => ({ vault: await fsp.readFile(app.vaultPath), files: (await fsp.readdir(app.userData)).sort() });
 
 test('every refused or cancelled restore leaves the saved information as it was', async t => {
@@ -158,7 +186,7 @@ test('every refused or cancelled restore leaves the saved information as it was'
     showOpenDialog: async () => chosen ? { canceled: false, filePaths: [chosen] } : { canceled: true, filePaths: [] },
     showMessageBox: async () => ({ response: replace })
   } });
-  await app.invoke('createVault', { password: PASSWORD, allowDeviceReset: false });
+  await app.invoke('createVault', { password: PASSWORD });
   await app.invoke('saveProfile', { firstName: 'Backed up' });
   assert.deepEqual(plain(await app.invoke('exportBackup')), { cancelled: false });
   await app.invoke('saveProfile', { firstName: 'Current' });
@@ -211,7 +239,7 @@ test('export: refused before a password exists, nothing written when cancelled, 
   const app = await desktop(t, { dialog: { showSaveDialog: async () => ({ canceled: cancel, filePath: target }) } });
   await assert.rejects(app.invoke('exportBackup'), /^Error: Create a password before saving a backup\.$/);
   assert.deepEqual(app.dialogs, [], 'no file is asked for');
-  await app.invoke('createVault', { password: PASSWORD, allowDeviceReset: false });
+  await app.invoke('createVault', { password: PASSWORD });
   assert.deepEqual(plain(await app.invoke('exportBackup')), { cancelled: true });
   await assert.rejects(fsp.access(target), { code: 'ENOENT' });
   cancel = false;
@@ -222,10 +250,9 @@ test('export: refused before a password exists, nothing written when cancelled, 
 });
 
 // The recovery key (#140).
-const KEY = /^[0-9A-Z]{4}(?:-[0-9A-Z]{4}){7}$/;
 test('Copy puts the recovery key on the clipboard and clears it a minute later, unless something else was copied', async t => {
   const app = await desktop(t);
-  const created = await app.invoke('createVault', { password: PASSWORD, allowDeviceReset: false });
+  const created = await app.invoke('createVault', { password: PASSWORD });
   const typed = created.recoveryKey.toLowerCase().replace(/-/g, ' ');
   await assert.rejects(app.invoke('copyRecoveryKey', 'not a recovery key'), /Enter the recovery key exactly as it was shown/);
   assert.equal(app.clipboard.text, '');
@@ -250,7 +277,7 @@ test('Save writes the recovery key and how to use it to the file the person pick
   const target = path.join(folder, 'key.txt');
   let cancel = true;
   const app = await desktop(t, { dialog: { showSaveDialog: async () => ({ canceled: cancel, filePath: target }) } });
-  const { recoveryKey } = await app.invoke('createVault', { password: PASSWORD, allowDeviceReset: false });
+  const { recoveryKey } = await app.invoke('createVault', { password: PASSWORD });
   await assert.rejects(app.invoke('saveRecoveryKey', 'not a recovery key'), /Enter the recovery key exactly as it was shown/);
   assert.deepEqual(app.dialogs, [], 'a key that isn’t one is never offered for saving');
   assert.deepEqual(plain(await app.invoke('saveRecoveryKey', recoveryKey)), { cancelled: true });
@@ -264,7 +291,7 @@ test('Save writes the recovery key and how to use it to the file the person pick
 
 test('a new recovery key needs SecondHand unlocked, stops the old key working, and a failed one keeps the old key', async t => {
   const app = await desktop(t);
-  const { recoveryKey: first } = await app.invoke('createVault', { password: PASSWORD, allowDeviceReset: false });
+  const { recoveryKey: first } = await app.invoke('createVault', { password: PASSWORD });
   await app.invoke('lock');
   await assert.rejects(app.invoke('replaceRecoveryKey'), /Unlock SecondHand first/);
   await app.invoke('unlock', PASSWORD);
@@ -297,7 +324,7 @@ const trusting = { showMessageBox: async options => ({ response: options.title =
 
 test('50 trusted sites with the longest host names, Always allow on each, and every other setting, survive a restart', async t => {
   const app = await desktop(t, { dialog: trusting });
-  await app.invoke('createVault', { password: PASSWORD, allowDeviceReset: false });
+  await app.invoke('createVault', { password: PASSWORD });
   await app.invoke('connectExtension', EXTENSION);
   await app.invoke('setLayaEnabled', false);
   assert.equal(longestHost(0).length, 253);
@@ -322,7 +349,7 @@ test('50 trusted sites with the longest host names, Always allow on each, and ev
 
 test('a site whose host name is longer than DNS allows can’t be trusted', async t => {
   const app = await desktop(t, { dialog: trusting });
-  await app.invoke('createVault', { password: PASSWORD, allowDeviceReset: false });
+  await app.invoke('createVault', { password: PASSWORD });
   await app.invoke('connectExtension', EXTENSION);
   const tooLong = `https://${longestHost(0)}x/apply`;
   await assert.rejects(app.request({ type: 'trustSite', url: tooLong }), error => error.publicMessage === 'This site’s address is too long for SecondHand to trust.');

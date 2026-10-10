@@ -101,7 +101,6 @@ async function main() {
     await expect(page.locator('#auth-view')).toBeVisible();
     await page.locator('#passphrase').fill(passphrase);
     await page.locator('#confirm-passphrase').fill(passphrase);
-    if (await page.locator('#device-reset-field').isVisible()) await page.locator('#allow-device-reset').uncheck();
     await page.locator('#auth-submit').click();
     await expect(page.locator('#recovery-dialog')).toBeVisible({ timeout: 30000 });
     await page.locator('#recovery-saved').check();

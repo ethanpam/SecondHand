@@ -31,7 +31,7 @@ SecondHand is independent software. It does not decide benefits eligibility, rep
 | --- | --- | --- | --- | --- |
 | Main technology | Electron, JavaScript/CommonJS | SwiftUI and Safari web extension | Kotlin, Compose, AndroidX WebKit | React, Vinext, Cloudflare Worker/R2 |
 | Profile storage | Password-protected encrypted vault | Encrypted App Group files and Keychain-backed keys | Encrypted private files and Android Keystore | No applicant profile storage |
-| Unlock | Password; recovery/device reset; optional Mac Touch ID | Four-digit app PIN; optional Face ID | Strong biometric or device credential | No applicant sign-in |
+| Unlock | Password; recovery key reset; optional Mac Touch ID | Four-digit app PIN; optional Face ID | Strong biometric or device credential | No applicant sign-in |
 | Imported document originals | Read from their original location; not kept in a document vault | Encrypted document library | Encrypted document library | No document intake |
 | Document OCR | Bundled PDF.js/Tesseract, with reviewable extraction | Apple Vision/PDF text, camera scanning where available | No equivalent native OCR workflow documented in this source | None |
 | Browser surface | Chrome extension and native messaging | Safari extension and native messaging | App-owned WebView | Ordinary browser pages |

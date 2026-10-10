@@ -335,7 +335,7 @@ The extension talks to the app through Chrome's native messaging, a direct conne
 | Layer | Technology | Why |
 | --- | --- | --- |
 | Desktop app | [Electron](https://www.electronjs.org/) 44, plain HTML/CSS/JavaScript | One codebase for Windows and Mac; no framework to keep up with |
-| Encrypted storage | AES-256-GCM, scrypt password keys, optional macOS Keychain / Windows DPAPI for Touch ID and password reset | Strong, standard encryption with a recovery key; [security design](docs/security.md) |
+| Encrypted storage | AES-256-GCM, scrypt password keys, optional macOS Keychain for Touch ID unlock | Strong, standard encryption with a recovery key; [security design](docs/security.md) |
 | Browser extension | Chrome Manifest V3, content scripts, side panel, native messaging | Works on existing websites without any change from the agency |
 | Form understanding | Hand-mapped Iowa adapter plus general label rules ([`extension/`](extension)) | Deterministic and testable; no AI needed for the core |
 | Local AI (optional) | [Laya](docs/laya-model.md), a small fine-tuned model run with [ONNX Runtime](https://onnxruntime.ai/) on the computer's processor | Handles oddly worded questions offline; about 429 MB, free, Apache-2.0 |
