@@ -333,7 +333,7 @@ Tests use only the fictional profile in [`tests/fixtures/applicant-profile.json`
 | `tests/`, `scripts/` | Unit tests, fictional fixtures, smoke tests, and packaging |
 | `docs/` | Guides and design notes |
 
-**Documentation:** [setup](docs/setup.md) · [application guides](docs/applications/README.md) · [Iowa portal coverage](docs/iowa-portal.md) · [security design](docs/security.md) · [Laya model card](docs/laya-model.md) · [local document reading](docs/document-ocr.md) · [extension QA](docs/extension-qa.md) · [live-portal check](docs/iowa-live-journey.md) · [implementation contract](docs/implementation-contract.md) · [release notes](docs/releases/0.5.0.md)
+**Documentation:** [setup](docs/setup.md) · [application guides](docs/applications/README.md) · [Iowa portal coverage](docs/iowa-portal.md) · [security design](docs/security.md) · [Laya model card](docs/laya-model.md) · [local document reading](docs/document-ocr.md) · [extension QA](docs/extension-qa.md) · [presenting a demo](docs/demo.md) · [live-portal check](docs/iowa-live-journey.md) · [implementation contract](docs/implementation-contract.md) · [release notes](docs/releases/0.5.0.md)
 
 ## License and credits
 
