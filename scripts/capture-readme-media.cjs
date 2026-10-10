@@ -1,11 +1,14 @@
 'use strict';
 
 // Records the README's pictures of the extension (docs/media/autofill.gif and docs/media/side-panel.png) and of the
-// desktop app's My information page (docs/media/desktop-my-information.png) from this checkout. Like capture-guide-card.cjs, it loads extension/ into Chromium against the synthetic Iowa page and
+// desktop app's My information page and Overview (docs/media/desktop-my-information.png, desktop-overview.png) from this checkout. Like capture-guide-card.cjs, it loads extension/ into Chromium against the synthetic Iowa page and
 // stubbed desktop app of smoke-extension.cjs, with the fictional applicant Avery Example, and blocks every other
-// request. The first name is left out of the saved profile so the card shows "1 need you". The desktop picture runs
+// request. The first name is left out of the saved profile so the card shows "1 question left". The desktop picture runs
 // the real Electron app with its data in a temporary folder, a throwaway password, and the same fictional profile.
 // Needs ffmpeg on the PATH.
+//
+//   node scripts/capture-readme-media.cjs [extension|desktop]
+// Without a word it takes every picture; "extension" takes the GIF and side panel, "desktop" the two app pages.
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -64,12 +67,13 @@ function record(page, directory) {
 
 async function autofillGif(userData, frames) {
   const { context, page, widget } = await open(userData);
+  let stop;
   try {
     await page.waitForTimeout(500);
-    const stop = record(page, frames);
+    stop = record(page, frames);
     await page.waitForTimeout(1200);
     await widget.locator('#autofill').click();
-    await expect(widget.locator('#need-you')).toHaveText('1 need you', { timeout: 20000 });
+    await expect(widget.locator('#need-you')).toHaveText('1 question left', { timeout: 20000 });
     await expect(page.locator('#lastName')).toHaveValue(syntheticProfile.lastName);
     await page.waitForTimeout(1600);
     await widget.locator('#need-you').click();
@@ -78,6 +82,7 @@ async function autofillGif(userData, frames) {
     await page.locator('#firstName').pressSequentially(syntheticProfile.firstName, { delay: 160 });
     await page.waitForTimeout(2200);
     const count = await stop();
+    stop = null;
     assert.ok(count > 20, 'enough frames were recorded');
     const output = path.join(media, 'autofill.gif');
     await run('ffmpeg', ['-v', 'error', '-y', '-framerate', String(FPS), '-i', path.join(frames, 'f%04d.png'), '-vf',
@@ -85,6 +90,8 @@ async function autofillGif(userData, frames) {
       '-loop', '0', output]);
     console.log(`Recorded ${count} frames to ${path.relative(process.cwd(), output)}.`);
   } finally {
+    // A failed step stops the recording first, so its own error is the one reported.
+    if (stop) await stop().catch(() => {});
     await context.close().catch(() => {});
   }
 }
@@ -94,7 +101,7 @@ async function sidePanelPng(userData, work) {
   let panel;
   try {
     await widget.locator('#autofill').click();
-    await expect(widget.locator('#need-you')).toHaveText('1 need you', { timeout: 20000 });
+    await expect(widget.locator('#need-you')).toHaveText('1 question left', { timeout: 20000 });
     await widget.locator('#details').click();
     panel = await attachNativePanel(context, page, extensionId);
     await expect.poll(() => panel.text('#page-checklist'), { timeout: 15000 }).toContain('First name');
@@ -146,6 +153,8 @@ async function desktopPng(userData) {
     await page.locator('#recovery-done').click();
     await page.locator('#setup-skip').click();
     await page.evaluate(profile => window.secondHand.saveProfile(profile), syntheticProfile);
+    // The details are all in, so the guided setup is done, as it is for someone who finished it.
+    await page.evaluate(() => window.secondHand.saveSetupProgress(6));
     // Lock and unlock so the window shows the profile it just saved.
     await page.locator('#lock-button').click();
     await page.locator('#passphrase').fill(password);
@@ -158,19 +167,37 @@ async function desktopPng(userData) {
     const output = path.join(media, 'desktop-my-information.png');
     await page.screenshot({ path: output, animations: 'disabled', caret: 'hide' });
     console.log(`Captured My information to ${path.relative(process.cwd(), output)}.`);
+    // One application in progress, so the Overview shows its list.
+    await page.locator('.nav-item[data-view="applications"]').click();
+    await page.locator('#new-application').click();
+    await page.locator('#application-status').selectOption('in_progress');
+    await page.locator('#application-next-action').fill('Upload a recent pay stub');
+    await page.locator('#save-application').click();
+    await expect(page.locator('#application-dialog')).not.toBeVisible();
+    await page.locator('.nav-item[data-view="overview"]').click();
+    await expect(page.locator('#overview-applications')).toContainText('Upload a recent pay stub');
+    await expect(page.locator('#toast')).toBeHidden({ timeout: 15000 });
+    await page.waitForTimeout(500);
+    const overview = path.join(media, 'desktop-overview.png');
+    await page.screenshot({ path: overview, animations: 'disabled', caret: 'hide' });
+    console.log(`Captured the Overview to ${path.relative(process.cwd(), overview)}.`);
   } finally {
     await application.close().catch(() => {});
   }
 }
 
 async function main() {
+  const only = process.argv[2];
+  if (only && !['extension', 'desktop'].includes(only)) throw new Error('Choose extension, desktop, or nothing for every picture.');
   const work = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-readme-media-'));
   try {
     const frames = path.join(work, 'frames');
     await fs.mkdir(frames);
-    await autofillGif(path.join(work, 'gif-profile'), frames);
-    await sidePanelPng(path.join(work, 'panel-profile'), work);
-    await desktopPng(path.join(work, 'desktop-data'));
+    if (only !== 'desktop') {
+      await autofillGif(path.join(work, 'gif-profile'), frames);
+      await sidePanelPng(path.join(work, 'panel-profile'), work);
+    }
+    if (only !== 'extension') await desktopPng(path.join(work, 'desktop-data'));
   } finally {
     await fs.rm(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }

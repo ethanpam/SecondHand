@@ -2,7 +2,7 @@
 
 The desktop app's **Documents** view reads a local PDF, PNG, or JPEG and shows its text for review. English OCR, PDF rendering, and field extraction run on your computer. They do not upload the document, call Laya, or need an OCR account, API key, model download, or separate command-line program.
 
-This feature is in the source branch. These instructions do not establish that it is included in the public download or that a Windows installer has been tested.
+The Mac and Windows downloads include it from 0.5.0 on. The Windows installer's OCR has not been tried on a Windows machine yet ([0.5.1 release notes](releases/0.5.1.md)).
 
 ## Review before saving
 
