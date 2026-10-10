@@ -228,7 +228,7 @@ Pick your language at the top of the side panel: English, Español, Tiếng Vi�
 
 ### Laya, the optional helper
 
-Laya is a small AI model that runs inside the app. It answers a question no rule recognizes, but only when it is sure, from your saved facts. A Laya answer has an amber outline, and the side panel lists it as suggested by Laya, so you can check it. The app downloads Laya (about 429 MB) the first time you turn it on under **Chrome extension**, and you can turn it off there. Laya isn't available on Intel Macs; everything else is. See the [Laya model card](docs/laya-model.md).
+Laya is a small AI model that runs inside the app. It answers a question no rule recognizes, but only when it is sure, from your saved facts. A Laya answer has an amber outline, and the side panel lists it as suggested by Laya, so you can check it. A new install has Laya on and downloads it (about 429 MB) by itself; turn it off or remove it under **Chrome extension** in the app. Laya isn't available on Intel Macs; everything else is. See the [Laya model card](docs/laya-model.md).
 
 ### Keyboard shortcuts
 
