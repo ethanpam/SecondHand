@@ -15,7 +15,8 @@
   const BENEFIT_KEYS = Object.freeze({ snap: 'receivesSnap', wic: 'receivesWic', 'cash-assistance': 'receivesCashAssistance', medicaid: 'receivesMedicaid', ssi: 'receivesSsi',
     housing: 'receivesHousingAssistance', 'school-meals': 'receivesSchoolMeals' });
   // Answers chosen from lists, and the yes or no about each benefit worked out from one. Only the rules place them.
-  const CHOICE_KEYS = Object.freeze(['studentLevel', 'incomeSources', 'currentBenefits', 'helpWanted', ...Object.values(BENEFIT_KEYS)]);
+  // The saved sex (Iowa's Male or Female) is one of them: it is only ever placed on an option that names it.
+  const CHOICE_KEYS = Object.freeze(['studentLevel', 'incomeSources', 'currentBenefits', 'helpWanted', 'sex', ...Object.values(BENEFIT_KEYS)]);
   const SOURCES = Object.freeze({ fullName: ['firstName', 'lastName'], phone: ['mobilePhone', 'homePhone', 'phone'],
     cityState: ['city', 'state'], cityZip: ['city', 'zip'], cityStateZip: ['city', 'state', 'zip'], fullAddress: ['addressLine1', 'addressLine2', 'city', 'state', 'zip'],
     ageRange: ['birthDate'], totalMonthlyIncome: ['monthlyEarnedIncome', 'monthlyOtherIncome'], annualIncome: ['monthlyEarnedIncome', 'monthlyOtherIncome'],
@@ -91,7 +92,7 @@
     householdChildren: 'count', householdSeniors: 'count', householdVeteran: 'yesno', householdDisability: 'yesno', totalMonthlyIncome: 'money',
     annualIncome: 'money', monthlyRent: 'money', monthlyUtilities: 'money', assetsOnHand: 'money', monthlyMedicalExpenses: 'money',
     householdAllCitizens: 'yesno', householdLegalStatus: 'yesno', householdPregnant: 'yesno', householdMedicare: 'yesno', anyoneSenior: 'yesno',
-    iowaResident: 'yesno', wantsHealthCoverage: 'yesno', studentLevel: 'one', incomeSources: 'several', currentBenefits: 'several', helpWanted: 'several',
+    iowaResident: 'yesno', wantsHealthCoverage: 'yesno', studentLevel: 'one', sex: 'one', incomeSources: 'several', currentBenefits: 'several', helpWanted: 'several',
     ...Object.fromEntries(Object.values(BENEFIT_KEYS).map(key => [key, 'yesno'])) });
   const AUTOCOMPLETE = Object.freeze({ 'given-name': 'firstName', 'additional-name': 'middleName', 'family-name': 'lastName', name: 'fullName',
     'honorific-suffix': 'suffix', email: 'email', tel: 'phone', 'tel-national': 'phone', 'street-address': 'addressLine1', 'address-line1': 'addressLine1',
@@ -162,6 +163,8 @@
   const BENEFIT_RULES = Object.entries(BENEFIT_WORDS).map(([code, words]) => [new RegExp(`^((do|does) ${HOUSEHOLD_WHO} (currently |now )?(receive|get)|(is|are) ${HOUSEHOLD_WHO} (currently |now )?(receiving|getting|on|enrolled in)) ` +
     `(${words})( benefits?)?( now| currently)?( through (?!.*\\b(another|other|out of) state\\b).+)?$`), BENEFIT_KEYS[code]]);
   const CHOICE_RULES = [
+    // A gender identity question asks something else.
+    [/^(sex|gender)$/, 'sex'],
     [/^((current |your )?student (status|level|type|classification)|are you (currently |now )?(a |an )?(college |university )?student|what is your (current )?student (status|level))$/, 'studentLevel'],
     [/^((current |household )?(sources?|types?) of (household )?income( (and |or )?resources?| received)?|(current |household )?income (sources?|types?)|what are (your |the )?(households? )?(current )?sources of income|where does (your |the )?(households? )?income come from|(do|does) (you|your household|you or anyone in (your |the )?(household|family)) (currently )?receive income from (any of )?the following( sources)?)$/, 'incomeSources'],
     [/^((current|public|government) benefits( received| you receive)?|benefits (currently )?received|(which|what) (of the following )?benefits do (you|your household) (currently )?(receive|get)|(do|does) (you|your household|you or anyone in (your |the )?(household|family)) (currently )?(receive|get) any of the following( benefits| assistance| programs)?|(are you|is anyone in (your |the )?household) (currently )?receiving any of the following( benefits| assistance| programs)?)$/, 'currentBenefits'],
@@ -171,6 +174,7 @@
   // What an option says, as codes of the saved lists (shared/schema.cjs PROFILE_CHOICES.studentLevel and SEVERAL_CHOICES). An option
   // may name more than one ("SSI or SSDI"). One that starts with "not" or "no" names only None or Not a student.
   const CHOICE_OPTIONS = Object.freeze({
+    sex: Object.freeze({ Male: /^(male|man|m)$/, Female: /^(female|woman|f)$/ }),
     studentLevel: Object.freeze({ 'not-student': /^(not a student|not (currently )?(a student|enrolled|in school)|non student)$/, 'high-school': /^high school\b/,
       undergraduate: /\bundergrad(uate)?\b/, graduate: /\b(graduate|grad|masters?|doctoral|phd)\b/, other: /^other\b/ }),
     incomeSources: Object.freeze({ job: /(?<!self )\b(jobs?|employment|employed|wages?|salary|paychecks?)\b|^work\b(?! study)/, 'self-employment': /\bself ?employ(ed|ment)\b|\bown business\b/,
