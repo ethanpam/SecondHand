@@ -3,7 +3,7 @@
 // Records the README's pictures of the extension (docs/media/autofill.gif and docs/media/side-panel.png) and of the
 // desktop app's My information page (docs/media/desktop-my-information.png) from this checkout. Like capture-guide-card.cjs, it loads extension/ into Chromium against the synthetic Iowa page and
 // stubbed desktop app of smoke-extension.cjs, with the fictional applicant Avery Example, and blocks every other
-// request. The first name is left out of the saved profile so the card shows "1 need you". The desktop picture runs
+// request. The first name is left out of the saved profile so the card shows "1 question left". The desktop picture runs
 // the real Electron app with its data in a temporary folder, a throwaway password, and the same fictional profile.
 // Needs ffmpeg on the PATH.
 const assert = require('node:assert/strict');
@@ -64,12 +64,13 @@ function record(page, directory) {
 
 async function autofillGif(userData, frames) {
   const { context, page, widget } = await open(userData);
+  let stop;
   try {
     await page.waitForTimeout(500);
-    const stop = record(page, frames);
+    stop = record(page, frames);
     await page.waitForTimeout(1200);
     await widget.locator('#autofill').click();
-    await expect(widget.locator('#need-you')).toHaveText('1 need you', { timeout: 20000 });
+    await expect(widget.locator('#need-you')).toHaveText('1 question left', { timeout: 20000 });
     await expect(page.locator('#lastName')).toHaveValue(syntheticProfile.lastName);
     await page.waitForTimeout(1600);
     await widget.locator('#need-you').click();
@@ -78,6 +79,7 @@ async function autofillGif(userData, frames) {
     await page.locator('#firstName').pressSequentially(syntheticProfile.firstName, { delay: 160 });
     await page.waitForTimeout(2200);
     const count = await stop();
+    stop = null;
     assert.ok(count > 20, 'enough frames were recorded');
     const output = path.join(media, 'autofill.gif');
     await run('ffmpeg', ['-v', 'error', '-y', '-framerate', String(FPS), '-i', path.join(frames, 'f%04d.png'), '-vf',
@@ -85,6 +87,8 @@ async function autofillGif(userData, frames) {
       '-loop', '0', output]);
     console.log(`Recorded ${count} frames to ${path.relative(process.cwd(), output)}.`);
   } finally {
+    // A failed step stops the recording first, so its own error is the one reported.
+    if (stop) await stop().catch(() => {});
     await context.close().catch(() => {});
   }
 }
@@ -94,7 +98,7 @@ async function sidePanelPng(userData, work) {
   let panel;
   try {
     await widget.locator('#autofill').click();
-    await expect(widget.locator('#need-you')).toHaveText('1 need you', { timeout: 20000 });
+    await expect(widget.locator('#need-you')).toHaveText('1 question left', { timeout: 20000 });
     await widget.locator('#details').click();
     panel = await attachNativePanel(context, page, extensionId);
     await expect.poll(() => panel.text('#page-checklist'), { timeout: 15000 }).toContain('First name');
