@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
 import { SiteFooter, SiteHeader } from '../_components/site-chrome';
-import { GuideVideo } from './guide-video';
+import { LoopVideo } from '../_components/loop-video';
 
 export const metadata: Metadata = {
   title: 'Add SecondHand to Chrome',
@@ -35,7 +35,7 @@ export default function ChromeExtensionGuide() {
             shows where it is. Click <strong>Copy folder path</strong>. You’ll
             paste it in step 3.
           </p>
-          <GuideVideo
+          <LoopVideo
             src="/guide/prepare.mp4"
             poster="/guide/prepare.jpg"
             width={1800}
@@ -56,7 +56,7 @@ export default function ChromeExtensionGuide() {
             Chrome asks for this because this early version of SecondHand isn’t
             in the Chrome Web Store yet.
           </p>
-          <GuideVideo
+          <LoopVideo
             src="/guide/developer-mode.mp4"
             poster="/guide/developer-mode.jpg"
             width={1800}
