@@ -6,7 +6,7 @@ SecondHand contributors' original code is licensed under [MIT](LICENSE). Third-p
 
 | Material | Location / source | Terms and notice |
 | --- | --- | --- |
-| React Bits Variable Proximity and Text Type adaptations | `website/app/_components/variable-wordmark.tsx`, `website/app/_home/text-type.tsx`; [source and pinned revision](docs/react-bits-design-research.md) | **MIT with Commons Clause, not plain MIT.** Keep the full [upstream notice](website/public/react-bits-license.txt). Read its restrictions before extracting or redistributing these components. |
+| React Bits Variable Proximity, Text Type and Tech Text adaptations | `website/app/_components/variable-wordmark.tsx`, `website/app/_home/text-type.tsx`, `website/app/how-it-works/tech-text.tsx`; [source and pinned revision](docs/react-bits-design-research.md) | **MIT with Commons Clause, not plain MIT.** Keep the full [upstream notice](website/public/react-bits-license.txt). Read its restrictions before extracting or redistributing these components. |
 | Geist and Bricolage Grotesque fonts | Extension font assets and website Fontsource packages | SIL Open Font License; [bundled extension notices](extension/font-licenses.txt). Preserve the website packages' notices when distributing their fonts. |
 | Electron, ONNX Runtime, Tesseract.js, pdf.js, React, and other dependencies | Package manifests and lockfiles | Each dependency's own license applies. Preserve notices from installed packages and packaged runtimes. The README credits are not an exhaustive dependency license inventory. |
 | SecondHand mascot | Shared app/website icons | Generation provenance and prompt are recorded in [the mascot note](docs/secondhand-mascot.md). |

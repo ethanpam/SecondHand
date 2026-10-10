@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 export default function PrivacyPolicy() {
   return (
     <>
-      <SiteHeader />
+      <SiteHeader current="/privacy" />
       <main id="main" className="wrap doc-page">
         <h1>Privacy policy</h1>
         <p className="doc-date">Last updated September 27, 2026</p>
