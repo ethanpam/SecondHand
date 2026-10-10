@@ -176,6 +176,29 @@ nav a[aria-current='page'] {
   flex-direction: column;
   justify-content: center;
 }
+.gradient-background {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  overflow: hidden;
+  pointer-events: none;
+  mask-image: linear-gradient(#000 58%, #000000b3 80%, transparent 100%);
+  background:
+    radial-gradient(ellipse at 100% 0%, #337d5b, #8bb89a 10%, transparent 45%),
+    radial-gradient(ellipse at 0% 100%, #8bb89a, #d7e6cf 12%, transparent 46%),
+    #f8faf7;
+}
+.gradient-background::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at 35% 34%,
+    #f8faf7ed,
+    #f8faf755 54%,
+    transparent 80%
+  );
+}
 .hero-content {
   text-align: center;
   padding-top: 72px;
@@ -1401,6 +1424,14 @@ kbd {
   }
   .hero-note {
     font-size: 11px;
+  }
+  .gradient-background::after {
+    background: radial-gradient(
+      ellipse at 25% 25%,
+      #f8faf7ed,
+      #f8faf766 50%,
+      transparent 85%
+    );
   }
   .intro {
     grid-template-columns: 1fr;
