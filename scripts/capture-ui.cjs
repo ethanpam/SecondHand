@@ -9,7 +9,7 @@
 //
 // The side panel is Chrome's own, 360 by 765 CSS pixels in this window. The card is a 330 by 140 crop of
 // the page's corner. Both are captured at twice that size. The card-autofill recording needs ffmpeg on the
-// PATH. Each browser session ends by asking Chrome for the extension's error list, and fails if it has one.
+// PATH, as does card-pantry, a film of a whole pantry sign-up form. Each browser session ends by asking Chrome for the extension's error list, and fails if it has one.
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -27,6 +27,7 @@ const VIEW = { width: 1200, height: 900 };
 // Tall enough for the card at its largest, 166px, with its 16px margin.
 const CARD = { x: VIEW.width - 330, y: VIEW.height - 190, width: 330, height: 190 };
 const FILM = { width: 800, height: 600 };
+const PANTRY_FILM = { width: 880, height: 700 };
 const applicant = `${smoke.applicant}?next=stay`;
 const screen = name => `${smoke.portal}${preApplicant.screens[name].path}`;
 const UNKNOWN = `${smoke.portal}/applyForBenefits/householdMembers`;
@@ -40,6 +41,8 @@ const DESPENSA = 'https://despensa.example.org/registro';
 const NO_LIST = 'https://pantry.example.org/household-order';
 const NO_LIST_QUESTIONS = { adults: '# of Adults', young: '# of Children 0-5', older: '# of Children 6-18' };
 const VISIT = 'https://pantry.example.org/visit';
+// A whole sign-up form, for the pantry film: what SecondHand knows, what it leaves, and what it never fills.
+const SIGN_UP = 'https://pantry.example.org/sign-up';
 // A shot is asked for by its name, or by the start of its name ending in a hyphen.
 const wanted = name => !only.length || only.some(asked => asked.endsWith('-') ? name.startsWith(asked) : name === asked);
 
@@ -64,6 +67,16 @@ const pages = {
     `${['Friend', 'Church', 'Flyer'].map((option, index) => `<label><input type="radio" name="heard" id="heard-${index}" value="${option}">${option}</label>`).join('')}</fieldset>` +
     '<label for="day">Preferred pickup day</label><select id="day" name="day"><option value="">Choose a day</option><option>Monday</option><option>Friday</option></select>' +
     '<button type="submit">Submit</button></form>'),
+  [SIGN_UP]: formPage('Riverbend Community Pantry sign-up', '<style>form{display:grid;grid-template-columns:1fr 1fr;gap:0 28px}' +
+    'input,select{width:100%;box-sizing:border-box}fieldset{grid-column:span 2;border:0;padding:0;margin:12px 0 0}fieldset label{display:inline;margin-right:16px}' +
+    'fieldset input{display:inline;width:auto;height:auto}button{justify-self:start}</style>' +
+    `<form>${field('fname', 'First Name *')}${field('lname', 'Last Name *')}${field('phone', 'Phone Number', 'tel')}${field('email', 'Email', 'email')}` +
+    `${field('addr', 'Street Address')}${field('city', 'City')}${field('zip', 'ZIP Code')}${field('hh', 'How many people live in your household?', 'number')}` +
+    `${field('adults', 'Number of adults', 'number')}${field('kids', 'Number of children', 'number')}` +
+    '<label for="day">Preferred pickup day</label><select id="day" name="day"><option value="">Choose a day</option><option>Tuesday</option><option>Saturday</option></select>' +
+    `${field('pw', 'Create a password', 'password')}` +
+    '<fieldset><legend>Is anyone in your household a veteran?</legend><label><input type="radio" name="vet" value="y"> Yes</label><label><input type="radio" name="vet" value="n"> No</label></fieldset>' +
+    '<button type="submit">Sign up</button></form>'),
   [DESPENSA]: formPage('Registro de la despensa', `<form>${field('nombre', 'Nombre')}${field('apellido', 'Apellido')}${field('cp', 'Código postal')}` +
     `${field('correo', 'Correo electrónico', 'email')}<button type="submit">Enviar</button></form>`, 'es')
 };
@@ -416,12 +429,12 @@ async function iowaPanel() {
 // Other websites. Chrome can't show its permission prompt to a script, so a first launch of a copy of the
 // extension lists these sites as required host permissions, which Chrome grants at load. The second launch,
 // on the same profile, uses the shipped manifest: the panel's own request then resolves without a prompt.
-async function granted(work) {
+async function granted(work, options = {}) {
   await withCopy(async () => {}, async copy => {
     const manifestPath = path.join(copy, 'manifest.json');
     const shipped = await fs.readFile(manifestPath, 'utf8');
     const granting = JSON.parse(shipped);
-    granting.host_permissions = [...granting.host_permissions, 'https://*/*', ...[PANTRY, DESPENSA].map(url => `${new URL(url).origin}/*`)];
+    granting.host_permissions = [...granting.host_permissions, 'https://*/*', ...[PANTRY, SIGN_UP, DESPENSA].map(url => `${new URL(url).origin}/*`)];
     const session = async work => {
       const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-capture-'));
       let running;
@@ -429,7 +442,7 @@ async function granted(work) {
         await fs.writeFile(manifestPath, JSON.stringify(granting));
         await (await launch(userData, copy)).context.close();
         await fs.writeFile(manifestPath, shipped);
-        running = await launch(userData, copy);
+        running = await launch(userData, copy, options);
         await work(running);
         await expectNoErrors(running);
       } finally {
@@ -579,9 +592,36 @@ async function shortcutsPage() {
   });
 }
 
+// Chrome records no pointer, so the page draws one that follows each move. Returns a click on the card that
+// moves the drawn pointer there first.
+async function drawPointer(page, card) {
+  await page.evaluate(() => {
+    const pointer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    pointer.id = 'capture-pointer';
+    pointer.setAttribute('viewBox', '0 0 28 34');
+    pointer.innerHTML = '<path d="M3 2v24l6-6 5 11 5-2-5-11h10L3 2Z" fill="#163a2c" stroke="#fff" stroke-width="2.5" stroke-linejoin="round"/>';
+    pointer.style.cssText = 'position:fixed;left:0;top:0;width:22px;height:27px;z-index:2147483647;pointer-events:none;transform:translate(300px,260px);transition:transform 700ms ease';
+    document.documentElement.append(pointer);
+  });
+  return async selector => {
+    const box = await (await card()).locator(selector).boundingBox();
+    const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    await page.evaluate(point => { document.getElementById('capture-pointer').style.transform = `translate(${point.x}px,${point.y}px)`; }, point);
+    await page.waitForTimeout(900);
+    await page.mouse.click(point.x, point.y);
+  };
+}
+// The film's GIF, from the moment its page was ready.
+async function filmGif(name, video, begins) {
+  await save(name, 'gif', async file => {
+    // The recording starts when Chrome does; the film starts once the page and its card are ready.
+    const filter = 'fps=10,split[a][b];[a]palettegen=max_colors=96[p];[b][p]paletteuse=dither=bayer:bayer_scale=4';
+    await promisify(execFile)('ffmpeg', ['-y', '-loglevel', 'error', '-ss', (begins / 1000).toFixed(2), '-i', video, '-vf', filter, file]);
+  });
+}
+
 // A short recording of the card at work: Autofill, then the link to the answer that is missing.
 async function recording() {
-  const run = promisify(execFile);
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-capture-film-'));
   try {
     let video, begins;
@@ -590,22 +630,7 @@ async function recording() {
       const { page, open, card } = session;
       await open(applicant, { profile: { ...smoke.syntheticProfile, firstName: '' } });
       await expect((await card()).locator('#autofill')).toBeVisible();
-      // Chrome records no pointer, so the page draws one that follows each move.
-      await page.evaluate(() => {
-        const pointer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        pointer.id = 'capture-pointer';
-        pointer.setAttribute('viewBox', '0 0 28 34');
-        pointer.innerHTML = '<path d="M3 2v24l6-6 5 11 5-2-5-11h10L3 2Z" fill="#163a2c" stroke="#fff" stroke-width="2.5" stroke-linejoin="round"/>';
-        pointer.style.cssText = 'position:fixed;left:0;top:0;width:22px;height:27px;z-index:2147483647;pointer-events:none;transform:translate(300px,260px);transition:transform 700ms ease';
-        document.documentElement.append(pointer);
-      });
-      const clickOn = async selector => {
-        const box = await (await card()).locator(selector).boundingBox();
-        const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-        await page.evaluate(point => { document.getElementById('capture-pointer').style.transform = `translate(${point.x}px,${point.y}px)`; }, point);
-        await page.waitForTimeout(900);
-        await page.mouse.click(point.x, point.y);
-      };
+      const clickOn = await drawPointer(page, card);
       await page.waitForTimeout(600);
       begins = Date.now() - started;
       await page.waitForTimeout(800);
@@ -617,11 +642,39 @@ async function recording() {
       await page.waitForTimeout(1800);
       video = await page.video().path();
     });
-    await save('card-autofill', 'gif', async file => {
-      // The recording starts when Chrome does; the film starts once the page and its card are ready.
-      const filter = 'fps=10,split[a][b];[a]palettegen=max_colors=96[p];[b][p]paletteuse=dither=bayer:bayer_scale=4';
-      await run('ffmpeg', ['-y', '-loglevel', 'error', '-ss', (begins / 1000).toFixed(2), '-i', video, '-vf', filter, file]);
-    });
+    await filmGif('card-autofill', video, begins);
+  } finally { await fs.rm(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+}
+
+// The card on a whole pantry sign-up form SecondHand has no code of its own for: one click fills what the saved
+// details answer, the link goes to what is left, and the password stays empty.
+async function pantryRecording() {
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-capture-film-'));
+  try {
+    let video, begins;
+    const started = Date.now();
+    await granted(async session => {
+      await session(async running => {
+        const { page, open, card } = running;
+        await open(SIGN_UP);
+        await turnOn(running);
+        await open(SIGN_UP);
+        await expect((await card()).locator('#autofill')).toBeVisible({ timeout: 20000 });
+        const clickOn = await drawPointer(page, card);
+        await page.waitForTimeout(600);
+        begins = Date.now() - started;
+        await page.waitForTimeout(800);
+        await clickOn('#autofill');
+        await expect(page.locator('#fname')).toHaveValue(smoke.syntheticProfile.firstName, { timeout: 20000 });
+        await expect((await card()).locator('#need-you')).toBeVisible({ timeout: 20000 });
+        assert.equal(await page.locator('#pw').inputValue(), '', 'the password is never filled');
+        await page.waitForTimeout(2200);
+        await clickOn('#need-you');
+        await page.waitForTimeout(2200);
+        video = await page.video().path();
+      });
+    }, { viewport: PANTRY_FILM, scale: 1, video: temporary });
+    await filmGif('card-pantry', video, begins);
   } finally { await fs.rm(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 }
 
@@ -631,7 +684,8 @@ const sessions = [
   [sites, ['panel-site-off', 'panel-site-filled', 'panel-site-filled-open', 'panel-laya-off', 'panel-save', 'panel-site-held', 'panel-site-guessed', 'panel-site-household', 'panel-site-remember', 'panel-site-guessed-es', 'panel-all-sites-off', 'card-site', 'card-offer', 'card-offer-filled']],
   [outdated, ['card-outdated', 'panel-outdated', 'card-reload']],
   [shortcutsPage, ['chrome-shortcuts']],
-  [recording, ['card-autofill']]
+  [recording, ['card-autofill']],
+  [pantryRecording, ['card-pantry']]
 ];
 
 async function main() {
