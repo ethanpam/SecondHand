@@ -467,7 +467,7 @@ async function main() {
       await inspectStaticDemo(mobile);
     }
     await mobile.setViewportSize({ width: 390, height: 844 });
-    await mobile.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Privacy', exact: true }).click();
+    await mobile.getByRole('navigation', { name: 'Footer' }).getByRole('link', { name: 'Privacy policy', exact: true }).click();
     await expect(mobile.getByRole('heading', { level: 1 })).toHaveText('Privacy policy');
     await inspectLayout(mobile);
     await mobile.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Setup guide' }).click();
