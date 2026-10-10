@@ -12,9 +12,11 @@ const KDF = Object.freeze({ name: 'scrypt', N: 32768, r: 8, p: 1 });
 const AAD = Buffer.from('SecondHand encrypted vault v1');
 const AAD_V2 = Buffer.from('SecondHand encrypted vault v2');
 // Version 2 encrypts contents with a random data key. Each slot stores that key
-// wrapped by one secret, so a recovery key or this computer's protected secret
-// can set a new password without re-encrypting or exposing the password, and a
-// key this Mac keeps for Touch ID can unlock it.
+// wrapped by one secret, so a recovery key can set a new password without
+// re-encrypting or exposing the password, and a key this Mac keeps for Touch ID
+// can unlock it. 'device' is the slot of the removed "Let this computer reset my
+// password": it is still read so older files open, never used, and removed once
+// the file is unlocked.
 const SLOT_NAMES = Object.freeze(['password', 'recovery', 'device', 'touchId']);
 const slotAad = name => Buffer.from(`SecondHand vault key slot v2:${name}`);
 // Crockford base32: no I, L, O, or U, so handwritten keys are hard to misread.
@@ -89,14 +91,8 @@ async function deriveSecretKey(bytes, salt) {
 
 const deriveKey = (passphrase, salt) => deriveSecretKey(passphraseBytes(passphrase), salt);
 const deriveRecoveryKey = (recoveryKey, salt) => deriveSecretKey(Buffer.from(normalizeRecoveryKey(recoveryKey), 'utf8'), salt);
-// The device secret is 32 random bytes kept by the operating system, so a fast
-// HKDF is enough; scrypt only needs to slow down guessing of human secrets.
-function deriveDeviceKey(deviceSecret, salt) {
-  if (!Buffer.isBuffer(deviceSecret) || deviceSecret.length !== 32) throw new Error('This computer’s reset secret is unavailable.');
-  return Buffer.from(crypto.hkdfSync('sha256', deviceSecret, salt, 'SecondHand device reset', 32));
-}
-
-// The Touch ID key is 32 random bytes sealed in this Mac's Keychain, so HKDF is enough here too.
+// The Touch ID key is 32 random bytes sealed in this Mac's Keychain, so a fast HKDF is enough;
+// scrypt only needs to slow down guessing of human secrets.
 // Its errors carry a code: main.cjs turns Touch ID off and names the reason.
 const touchIdError = (code, message) => Object.assign(new Error(message), { code });
 function deriveTouchIdKey(touchIdKey, salt) {
@@ -187,6 +183,7 @@ class Vault {
   }
   get unlocked() { return this.key !== null; }
   get hasTouchIdSlot() { return Boolean(this.slots?.touchId); }
+  get hasDeviceSlot() { return Boolean(this.slots?.device); }
   async exists() {
     try { await fs.access(this.filePath); return true; }
     catch (error) { if (error.code === 'ENOENT') return false; throw error; }
@@ -195,8 +192,8 @@ class Vault {
     if (!await this.exists()) return null;
     try {
       const { slots } = parseEnvelope(await this.readEncrypted());
-      return { recoveryKey: Boolean(slots?.recovery), deviceReset: Boolean(slots?.device) };
-    } catch { return { recoveryKey: false, deviceReset: false }; }
+      return { recoveryKey: Boolean(slots?.recovery) };
+    } catch { return { recoveryKey: false }; }
   }
   enqueue(operation) {
     const result = this.pending.then(operation);
@@ -209,7 +206,7 @@ class Vault {
     if (this.key && this.key !== state.key) this.key.fill(0);
     Object.assign(this, { key: state.key, salt: state.salt || null, slots: state.slots || null, version: state.version, data });
   }
-  create(passphrase, { deviceSecret } = {}) {
+  create(passphrase) {
     return this.enqueue(async () => {
       if (await this.exists()) throw new Error('SecondHand already has a password on this computer. Unlock it instead.');
       const recoveryKey = createRecoveryKey();
@@ -221,7 +218,6 @@ class Vault {
         passwordKey = await deriveKey(passphrase, passwordSalt);
         recoveryWrappingKey = await deriveRecoveryKey(recoveryKey, recoverySalt);
         const slots = { password: wrapKey(key, passwordKey, 'password', passwordSalt), recovery: wrapKey(key, recoveryWrappingKey, 'recovery', recoverySalt) };
-        if (deviceSecret) slots.device = this.deviceSlot(key, deviceSecret);
         await this.commit({ version: 1, profile: {}, applications: [] }, { version: 2, key, slots });
       } catch (error) { key.fill(0); throw error; }
       finally { passwordKey?.fill(0); recoveryWrappingKey?.fill(0); }
@@ -277,22 +273,11 @@ class Vault {
       finally { passwordKey.fill(0); if (key && key !== passwordKey) key.fill(0); }
     });
   }
-  deviceSlot(key, deviceSecret) {
-    const salt = crypto.randomBytes(32);
-    const wrappingKey = deriveDeviceKey(deviceSecret, salt);
-    try { return wrapKey(key, wrappingKey, 'device', salt); }
-    finally { wrappingKey.fill(0); }
-  }
   async resetWithRecoveryKey(recoveryKey, passphrase) {
     normalizeRecoveryKey(recoveryKey);
     return this.resetFromSlot('recovery', salt => deriveRecoveryKey(recoveryKey, salt), passphrase, {
       missing: 'This information was saved before recovery keys were added, so it has no recovery key.',
       failed: 'That recovery key didn’t work. Check it and try again.' });
-  }
-  resetWithDeviceSecret(deviceSecret, passphrase) {
-    return this.resetFromSlot('device', async salt => deriveDeviceKey(deviceSecret, salt), passphrase, {
-      missing: 'This computer isn’t set up to reset your password. Use your recovery key instead.',
-      failed: 'This computer can’t reset this password. Use your recovery key instead.' });
   }
   resetFromSlot(name, deriveWrappingKey, passphrase, messages) {
     return this.enqueue(async () => {
@@ -310,7 +295,8 @@ class Vault {
       let passwordKey;
       try {
         passwordKey = await deriveKey(passphrase, salt);
-        await this.commit(data, { version: 2, key, slots: { ...envelope.slots, password: wrapKey(key, passwordKey, 'password', salt) } });
+        const { device, ...slots } = envelope.slots;
+        await this.commit(data, { version: 2, key, slots: { ...slots, password: wrapKey(key, passwordKey, 'password', salt) } });
       } catch (error) { key.fill(0); throw error; }
       finally { passwordKey?.fill(0); }
     });
@@ -339,10 +325,9 @@ class Vault {
       return recoveryKey;
     });
   }
-  setDeviceSecret(deviceSecret) {
-    return this.enqueue(() => this.changeSlots((slots, key) => {
-      if (deviceSecret) slots.device = this.deviceSlot(key, deviceSecret); else delete slots.device;
-    }));
+  // Removes the slot of the retired "Let this computer reset my password". Other slots stay as they are.
+  removeDeviceSlot() {
+    return this.enqueue(() => this.changeSlots(slots => { delete slots.device; }));
   }
   // Adds (or replaces) the Touch ID slot, or removes it with null. Other slots stay as they are.
   setTouchIdKey(touchIdKey) {
