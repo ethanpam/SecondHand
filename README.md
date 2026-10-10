@@ -243,7 +243,7 @@ Change them at `chrome://extensions/shortcuts`.
 
 - **Back up your details** with **Privacy & backups → Export encrypted backup**. To restore one, lock SecondHand and choose **Restore an encrypted backup** on the unlock screen. A backup opens only with the password or recovery key it was saved with.
 - **Library mode** (**Privacy & backups**) deletes SecondHand's local data after two minutes without mouse or keyboard activity, and on exit, computer lock, and sleep. It stays on for the next person. Website entries, exported files, and original documents are not deleted. See [what it deletes](docs/security.md#library-mode-windows-and-macos).
-- **SecondHand Library edition** enables Library mode automatically and keeps it on. It uses its own data folder; personal-edition profiles are untouched. Build it with `npm run dist:library:win` (Windows) or `npm run dist:library:mac` (Mac).
+- **SecondHand Library edition**, for libraries and community centers, turns Library mode on by itself and keeps it on. Choose **Library** on the [Downloads page](https://secondhand.ethanpam.workers.dev/downloads). It is a separate app with its own data folder, so personal-edition profiles are untouched. Prepare the Chrome extension from the edition you use: Chrome connects to the one prepared most recently.
 - **Update** by installing the new app and opening it. The next time you use the extension, SecondHand refreshes its files and reloads itself in Chrome, once nothing is filling. If the card offers **Restart**, click it, then reload the page.
 
 <details>
