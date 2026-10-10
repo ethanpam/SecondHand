@@ -346,7 +346,7 @@ The extension talks to the app through Chrome's native messaging, a direct conne
 | Tests | Node's test runner, jsdom, Playwright (Electron and Chromium) | 1,900+ tests on synthetic data only |
 
 <p align="center">
-  <a href="https://secondhand.ethanpam.workers.dev"><img src="docs/media/website-home.jpg" width="880" alt="The SecondHand download website: the words A little help. A lot less typing. on a plain light background, with How it works, Setup guide, Add to Chrome and Questions links, a Get SecondHand button, and a Setup guide link."></a>
+  <a href="https://secondhand.ethanpam.workers.dev"><img src="docs/media/website-home.jpg" width="880" alt="The SecondHand download website: the words A little help. A lot less typing. over a soft animated green gradient, with How it works, Setup guide, Add to Chrome and Questions links, a Get SecondHand button, and a Setup guide link."></a>
   <br>
   <sub>The download website, where the installers live.</sub>
 </p>
@@ -465,7 +465,7 @@ Tests use only the fictional profile in [`tests/fixtures/applicant-profile.json`
 SecondHand contributors' original code is released under the [MIT License](LICENSE). You're free to use, change, and share that code, including for nonprofit and government work. Third-party material retains its own terms; see [third-party notices and permission status](THIRD_PARTY_NOTICES.md), including the React Bits Commons Clause exception.
 
 - **Laya** is fine-tuned from the open [Laya](https://huggingface.co/convaiinnovations/laya) model and published at [huggingface.co/JacobTDang/secondhand-laya](https://huggingface.co/JacobTDang/secondhand-laya) under Apache-2.0.
-- **Bundled open-source software:** Electron (MIT), ONNX Runtime (MIT), Tesseract.js (Apache-2.0), pdf.js (Apache-2.0), React (MIT). The website adapts components from [React Bits](https://reactbits.dev) ([notice](website/public/react-bits-license.txt)).
+- **Bundled open-source software:** Electron (MIT), ONNX Runtime (MIT), Tesseract.js (Apache-2.0), pdf.js (Apache-2.0), React (MIT). The website adapts components from [React Bits](https://reactbits.dev) ([notice](website/public/react-bits-license.txt)) and [Paper Shaders](https://github.com/paper-design/shaders).
 - **Built by** the SecondHand team for Hack Away Hunger 2026. See [everyone who contributed](https://github.com/ethanpam/secondHand/graphs/contributors).
 
 ---
