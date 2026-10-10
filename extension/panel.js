@@ -7,7 +7,7 @@
   const summary = globalThis.SecondHandSummary;
   // Must match BUILD in background.js: change both together. Chrome loads these pages
   // from disk right away but keeps running the old worker until SecondHand is reloaded.
-  const BUILD = '2026-10-10.2';
+  const BUILD = '2026-10-10.3';
   // The applicant's language: the choice saved in this extension's storage, else the browser's.
   let language = strings.language();
   const t = (key, params = {}) => strings.text(language, key, params);
@@ -503,6 +503,8 @@
     let filledNames = [];
     let filledSignature = '';
     let site = null;
+    // The site the reader just turned off here: until it is on again, the panel keeps saying to reload its page.
+    let turnedOff = null;
     let page = null;
     // The questions the last Autofill on this page could have filled but had no saved answer for.
     let notSaved = [];
@@ -1004,7 +1006,10 @@
       renderGuesses();
       renderRemember();
       const loading = target?.status === 'loading';
-      if (site?.enabled && !site.ready) show({ key: loading ? 'panel.waitingLoad' : 'panel.reloadToRead' });
+      // Turned on again, another site, or the page loading again (the reload it asked for) ends it.
+      if (site?.enabled || site?.origin !== turnedOff || loading) turnedOff = null;
+      if (turnedOff) show({ key: 'panel.siteOffDone' });
+      else if (site?.enabled && !site.ready) show({ key: loading ? 'panel.waitingLoad' : 'panel.reloadToRead' });
       // What Autofill reported, with its count of what is left kept current as the reader answers.
       else if (reported(result)) show(briefly(withLeft(fromResult(result), ran ? (named.length ? named.filter(item => !item.done).length : left.length) : fieldKeys(result.needYou).length)), result.state === 'error');
       else if (site && !site.enabled) show({ key: 'panel.siteOff', params: { host: hostOf(site.origin) } });
@@ -1473,7 +1478,9 @@
     }));
     $('site-disable').addEventListener('click', trusted(async () => {
       if ($('site-disable').disabled) return;
+      const origin = site?.origin ?? null;
       const result = await act({ type: 'ui:disableSite', confirmed: true }, { key: 'panel.turningOff' });
+      if (result && !result.enabled) turnedOff = origin;
       await refresh();
       if (result && !result.enabled) show({ key: 'panel.siteOffDone' });
     }));

@@ -1433,6 +1433,13 @@ test('on a site that is on, Autofill fills once without Stop, and Turn off asks 
   assert.equal(view.get('site-enable').hidden, false);
   assert.equal(view.get('site-disable').hidden, true);
   assert.match(view.get('status').textContent, /off for this site/);
+  // Chrome's events after the turn-off read the page again: the panel still says to reload the page.
+  view.listeners.activated({ tabId: 7 }); await tick(); await tick();
+  assert.match(view.get('status').textContent, /off for this site\. Reload the page/);
+  // Once the page loads again, the panel offers to turn the site on.
+  view.tabs.current = { ...view.tabs.current, status: 'loading' };
+  view.listeners.updated(7, { status: 'loading', url: view.tabs.current.url }, { ...view.tabs.current, active: true }); await tick(); await tick();
+  assert.doesNotMatch(view.get('status').textContent, /Reload the page/);
 });
 
 test('widget on a site asks the on-device AI about open questions and sends its guesses with Autofill', async t => {

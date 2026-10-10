@@ -131,13 +131,15 @@ async function inspectLayout(page) {
 async function inspectHeroLayout(page) {
   await expect(page.locator('.workflow-preview, .paper-stack, .stack-controls')).toHaveCount(0);
   await expect(page.locator('.hero')).not.toContainText(/A place for your details|Your say, every time|Filled in. Still your call/);
+  const background = await page.locator('.gradient-background').boundingBox();
   const header = await page.locator('.site-header').boundingBox();
   const content = await page.locator('.hero h1').boundingBox();
-  assert.ok(header && content);
+  assert.ok(background && header && content);
+  assert.ok(background.y <= header.y, 'Shader must extend behind the top navigation');
+  assert.equal(background.x, 0, 'Shader must reach the left edge');
+  assert.equal(background.width, page.viewportSize().width, 'Shader must span the viewport');
   assert.ok(header.y + header.height < content.y, 'Navigation must not overlap hero copy');
-  // The hero sits on the page's own flat color: no gradient, grain or shader (the site's design rules).
-  await expect(page.locator('.hero canvas, .gradient-background')).toHaveCount(0);
-  assert.equal(await page.locator('.hero').evaluate(element => getComputedStyle(element).backgroundImage), 'none', 'The hero must have no gradient');
+  assert.notEqual(await page.locator('.gradient-background').evaluate(element => getComputedStyle(element).maskImage), 'none', 'Shader must fade out before its bottom edge');
   for (const selector of ['.site-header', '.site-header nav', '.demo-section']) {
     assert.equal(await page.locator(selector).evaluate(element => {
       const style = getComputedStyle(element);
@@ -357,15 +359,31 @@ async function main() {
     const context = await openContext(browser, { viewport: { width: 1440, height: 1000 } });
     const page = await context.newPage();
     await page.goto(site, { waitUntil: 'networkidle' });
+    await expect(page.locator('.gradient-background canvas')).toBeVisible();
     await inspectLayout(page);
     await inspectHeroLayout(page);
     const structuredData = JSON.parse(await page.locator('script[type="application/ld+json"]').textContent());
     assert.equal(structuredData.find(entry => entry['@type'] === 'SoftwareApplication').name, 'SecondHand');
     assert.equal(structuredData.some(entry => entry['@type'] === 'FAQPage'), false, 'The questions are described on their own page');
+    const shaderFrame = () => page.locator('.gradient-canvas[data-paper-shader]').evaluate(element => element.paperShaderMount.getCurrentFrame());
+    const initialFrame = await shaderFrame();
+    await expect.poll(shaderFrame).toBeGreaterThan(initialFrame);
     // Animations always play: there is no pause, play, or replay button.
     await expect(page.getByRole('button', { name: /animations|replay/i })).toHaveCount(0);
     await page.screenshot({ path: path.join(artifacts, 'desktop.png'), fullPage: true });
 
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const shaderSpeed = () => page.locator('.gradient-canvas[data-paper-shader]').evaluate(element => element.paperShaderMount.currentSpeed);
+    await expect.poll(shaderSpeed).toBe(0);
+    const reducedFrame = await shaderFrame();
+    // A shader that still ran would draw a new frame within the next rendered frames (#143: frames, not a fixed wait).
+    await page.evaluate(() => new Promise(resolve => { let frames = 10; const frame = () => (--frames ? requestAnimationFrame(frame) : resolve()); requestAnimationFrame(frame); }));
+    assert.equal(await shaderFrame(), reducedFrame, 'Reduced motion must stop animation');
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await expect.poll(shaderFrame).toBeGreaterThan(reducedFrame);
+    await page.locator('.site-footer').evaluate(element => element.scrollIntoView({ behavior: 'instant', block: 'end' }));
+    await expect.poll(() => page.locator('.gradient-canvas[data-paper-shader]').evaluate(element => element.paperShaderMount.currentSpeed)).toBe(0);
+    console.log('Shader rendering, reduced motion, and offscreen suspension passed.');
     await inspectWordmark(page);
     await inspectDemoMotion(browser);
     await inspectWhatItDoes(page);
@@ -391,9 +409,19 @@ async function main() {
       ['windows', 'Windows', 'Download for Windows', /win-x64\.exe$/],
       ['mac-apple-silicon', 'Mac', 'Apple Silicon', /mac-arm64\.dmg$/],
       ['mac-intel', 'Mac', 'Download for Intel Mac', /mac-x64\.dmg$/],
+      ['library-windows', 'Windows', 'Download Library for Windows', /secondHand-library-.*-win-x64\.exe$/],
+      ['library-mac-apple-silicon', 'Mac', 'Library for Apple Silicon', /secondHand-library-.*-mac-arm64\.dmg$/],
+      ['library-mac-intel', 'Mac', 'Download Library for Intel Mac', /secondHand-library-.*-mac-x64\.dmg$/],
     ]) {
       await page.goto(`${site}/downloads`, { waitUntil: 'networkidle' });
       await page.getByRole('tab', { name: tab, exact: true }).click();
+      const library = platform.startsWith('library-');
+      if (library) {
+        await page.getByRole('radio', { name: 'Library', exact: true }).check();
+        await expect(page.locator('.library-download-note')).toContainText('2 minutes');
+        await expect(page.getByRole('link', { name: 'Download checksums' })).toHaveAttribute('href', /SHA256SUMS-library/);
+        await page.screenshot({ path: path.join(artifacts, 'library-downloads.png'), fullPage: true });
+      }
       console.log('Checking installer:', platform);
       const [downloaded] = await Promise.all([
         page.waitForEvent('download').catch(async error => {
@@ -404,12 +432,13 @@ async function main() {
         page.getByRole('link', { name: label }).click(),
       ]);
       await expect(page).toHaveURL(`${site}/thank-you/${platform}`);
-      await expect(page.getByRole('heading', { level: 1 })).toHaveText('Thanks for downloading SecondHand');
+      await expect(page.getByRole('heading', { level: 1 })).toHaveText(`Thanks for downloading SecondHand${library ? ' Library' : ''}`);
+      if (library) await expect(page.getByText(/Library mode is already on/)).toBeVisible();
       assert.match(downloaded.url(), filename);
       await inspectLayout(page);
       await page.screenshot({ path: path.join(artifacts, `${platform}.png`), fullPage: true });
     }
-    console.log('Keyboard tabs and all three installer routes passed.');
+    console.log('Keyboard tabs and all six installer routes passed.');
 
     // The common questions live on their own page, linked from the bottom of the home page.
     await page.goto(site, { waitUntil: 'networkidle' });
@@ -461,12 +490,23 @@ async function main() {
         await mobile.setViewportSize({ width, height: 844 });
         await inspectLayout(mobile);
       }
+      if (route === '/downloads') {
+        await mobile.getByRole('radio', { name: 'Library', exact: true }).check();
+        for (const width of [320, 390, 768, 1024, 1440]) {
+          await mobile.setViewportSize({ width, height: 844 });
+          await inspectLayout(mobile);
+        }
+      }
       await mobile.screenshot({ path: path.join(artifacts, `${route.slice(1)}.png`), fullPage: true });
     }
     await mobile.setViewportSize({ width: 390, height: 844 });
     await mobile.goto(`${site}/downloads`);
     await expect(mobile.locator('.phone-note')).toBeVisible();
 
+    await page.goto(site, { waitUntil: 'networkidle' });
+    await page.locator('canvas').evaluate(canvas => canvas.getContext('webgl2').getExtension('WEBGL_lose_context').loseContext());
+    await expect(page.locator('.gradient-background canvas')).toHaveCount(0);
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
 
     const fallback = await context.newPage();
     await fallback.addInitScript(() => {
@@ -504,8 +544,8 @@ async function main() {
     await expect(staticPage).toHaveURL(`${site}/thank-you/windows`);
     assert.deepEqual(browser.contexts().filter(open => !watchedContexts.has(open)), [], 'Every browser context must be watched');
     assert.deepEqual(errors, [], 'No browser runtime errors');
-    assert.deepEqual([...externalRequests], [], 'Fonts must stay self-hosted');
-    console.log('Website smoke passed: no tracking on any page, robots.txt and sitemap, a flat hero with no gradient, the page without WebGL, responsive layouts, keyboard tabs, downloads, FAQ, privacy, and 404.');
+    assert.deepEqual([...externalRequests], [], 'Fonts and shaders must stay self-hosted');
+    console.log('Website smoke passed: no tracking on any page, robots.txt and sitemap, shader animation, reduced motion, offscreen suspension, context loss, WebGL fallback, responsive layouts, keyboard tabs, downloads, FAQ, privacy, and 404.');
   } finally {
     await browser.close();
   }

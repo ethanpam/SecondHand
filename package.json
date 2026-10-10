@@ -27,6 +27,8 @@
     "test:native": "node tests/desktop-native-smoke.cjs",
     "extension:zip": "node scripts/zip-extension.cjs",
     "dist:win": "npm run ocr:prepare && node scripts/build-native-host.cjs && electron-builder --win nsis --x64 --publish never",
+    "dist:library:win": "npm run ocr:prepare && node scripts/build-native-host.cjs --library && electron-builder --config scripts/library-build-config.cjs --win nsis --x64 --publish never",
+    "dist:library:mac": "npm run ocr:prepare && electron-builder --config scripts/library-build-config.cjs --mac dmg --arm64 --x64 --publish never",
     "dist:mac": "npm run ocr:prepare && electron-builder --mac dmg --arm64 --x64 --publish never",
     "dist:mac:arm64": "npm run ocr:prepare && electron-builder --mac dmg --arm64 --publish never",
     "dist:mac:x64": "npm run ocr:prepare && electron-builder --mac dmg --x64 --publish never",

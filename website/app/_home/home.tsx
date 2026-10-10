@@ -2,6 +2,7 @@
 
 import { ArrowIcon } from '../_components/icons';
 import Link from 'next/link';
+import { GradientBackground } from './gradient-background';
 import { SiteFooter, SiteHeader } from '../_components/site-chrome';
 import { TextType } from './text-type';
 import { AutofillDemo } from './autofill-demo';
@@ -13,6 +14,7 @@ export function Home() {
       <SiteHeader />
       <main id="main">
         <section className="hero" aria-labelledby="hero-heading">
+          <GradientBackground />
           <div className="hero-content wrap">
             <div className="hero-copy">
               <h1 id="hero-heading">

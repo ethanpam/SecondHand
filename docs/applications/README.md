@@ -2,7 +2,7 @@
 
 These guides explain what each SecondHand application does, how to use it, and how its implementation works. They are written for both people using the software and contributors maintaining it.
 
-**Source baseline:** `b31b5a9` on `main`, reviewed October 6, 2026. These are descriptions of repository source, not a claim that every feature is present in a published installer. The website currently declares desktop release `0.4.0`; several features below were added after the original public 0.4 downloads. Rebuilding an installer, installing it locally, merging a PR, and publishing a download are separate operations.
+**Source baseline:** `main` as of October 10, 2026, which is the published release 0.5.1 plus small interface fixes. These are descriptions of repository source, not a claim that every feature is present in an older installer. The [0.5.1 release notes](../releases/0.5.1.md) list what that download includes. Rebuilding an installer, installing it locally, merging a PR, and publishing a download are separate operations.
 
 ## Choose a guide
 

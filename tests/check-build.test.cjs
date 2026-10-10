@@ -12,8 +12,11 @@ const { checkBuild } = require('../scripts/check.cjs');
 // config, so no hook, signing or identity of the person running the tests applies.
 function repository(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'secondhand-build-check-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const env = { PATH: process.env.PATH, HOME: root, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull,
+  // An empty global config of its own: Windows' null device (\\.\nul) is no file git can read as one.
+  const config = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'secondhand-build-config-')), 'gitconfig');
+  fs.writeFileSync(config, '');
+  t.after(() => { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(path.dirname(config), { recursive: true, force: true }); });
+  const env = { PATH: process.env.PATH, HOME: root, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: config,
     GIT_AUTHOR_NAME: 'Synthetic', GIT_AUTHOR_EMAIL: 'synthetic@example.invalid', GIT_COMMITTER_NAME: 'Synthetic', GIT_COMMITTER_EMAIL: 'synthetic@example.invalid' };
   const run = (cwd, args) => {
     const result = spawnSync('git', args, { cwd, env, encoding: 'utf8' });

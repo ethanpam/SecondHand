@@ -57,7 +57,8 @@ Keyboard: **Alt+Shift+F** (Option+Shift+F on a Mac) runs Autofill on the page in
 ## Forms checked before a demo
 
 `npm run qa:any-website -- <label>` opens each of these in a throwaway browser with the fictional profile and
-clicks Autofill once ([extension QA](extension-qa.md#live-sweep-of-everyday-websites)). On 10 October 2026 it gave:
+clicks Autofill once ([extension QA](extension-qa.md#live-sweep-of-everyday-websites)). On 10 October 2026 it gave, in two runs
+hours apart:
 
 | Form | Filled | Left for the applicant |
 | --- | --- | --- |
@@ -70,7 +71,8 @@ clicks Autofill once ([extension QA](extension-qa.md#live-sweep-of-everyday-webs
 | Food Bank of Iowa page | 3 | 4 |
 | Input form demo (LambdaTest) | 5 | 5 |
 | Salesforce free trial sign-up | 3 | 3 |
-| Wikipedia, BBC News, USDA SNAP, usa.gov | no card | |
+| USDA SNAP page | 1: its newsletter email box | 0 |
+| Wikipedia, BBC News, usa.gov | no card | |
 | GitHub sign-up | no card: GitHub shows an automated browser a bot check | |
 
 Run it again the morning of the demo: third-party forms change without notice.
@@ -80,8 +82,8 @@ Run it again the morning of the demo: third-party forms change without notice.
 - **No card on a form:** the app must be running and unlocked. Click the SecondHand icon; the side panel says
   what is missing (locked, site off, or the page needs a reload).
 - **The card says to reload:** the extension was updated while the tab was open. Reload the tab.
-- **No internet:** play the recordings instead: `docs/media/autofill.gif` and `docs/media/same-answers.gif`, or
-  `website/public/demo/autofill.mp4`.
+- **No internet:** play the recordings instead: `docs/media/autofill.gif` (Iowa's form), `docs/media/pantry.gif` (a
+  whole pantry sign-up form) and `docs/media/same-answers.gif`, or `website/public/demo/autofill.mp4`.
 - **A pop-up in the app asks to share answers:** that is the privacy check. Click **Allow once**.
 
 ## Afterwards

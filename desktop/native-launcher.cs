@@ -20,6 +20,11 @@ internal static class NativeLauncher
     private const int MaximumBytes = 65536;
     // The desktop app, installed in this relay's folder (package.json build.win).
     private const string AppExecutable = "secondHand.exe";
+#if LIBRARY_EDITION
+    private const string DataDirectory = "SecondHand Library";
+#else
+    private const string DataDirectory = "SecondHand";
+#endif
     private const uint DetachedProcess = 0x00000008;
     private const uint CreateNewProcessGroup = 0x00000200;
     private static readonly UTF8Encoding Utf8 = new UTF8Encoding(false, true);
@@ -118,7 +123,7 @@ internal static class NativeLauncher
     {
         string local = Environment.GetEnvironmentVariable("LOCALAPPDATA");
         if (String.IsNullOrEmpty(local)) local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        string sessionPath = Path.Combine(local, "SecondHand", "bridge-session.json");
+        string sessionPath = Path.Combine(local, DataDirectory, "bridge-session.json");
         byte[] sessionBytes;
         using (var file = new FileStream(sessionPath, FileMode.Open, FileAccess.Read, FileShare.Read))
         {

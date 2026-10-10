@@ -35,9 +35,9 @@ Page folders own their route and page-specific components. `app/_home/` holds th
 
 The website keeps SecondHand’s original forest green (`#164c38`), soft white (`#f8faf7`), and sage accents in an open, type-led design. Bricolage Grotesque variable headings and Geist body text are self-hosted through Fontsource. The hero is card-free, with a full-width animated green background. The homepage adapts [React Bits Variable Proximity](https://reactbits.dev/text-animations/variable-proximity) into a responsive footer wordmark. A green bear mascot appears in the shared branding and favicon; its generation brief is in [the mascot note](../docs/secondhand-mascot.md). Source references, accessibility adaptations, and design decisions are in [the research note](../docs/react-bits-design-research.md); the upstream license is preserved in [the third-party notice](public/react-bits-license.txt). The browser does not request third-party fonts or scripts.
 
-The hero sits on the page’s own flat color, with no gradient or shader. The demo section under the hero adapts [React Bits Text Type](https://reactbits.dev/text-animations/text-type) for “Ready for less typing?” alongside a click-to-autofill illustration with fictional details. Animations play without controls and hold still when the visitor’s device asks for reduced motion. The heading and illustration suspend offscreen or while hidden and show complete static content without JavaScript. The same tokens style downloads, numbered setup rows, the FAQ page, confirmations, and the 404 page.
+The decorative hero retains the `GrainGradient` adapted from mxthxn’s [Shader Gradient Component](https://v0.app/templates/shader-gradient-component-cAawT1AJaki), using the pinned `@paper-design/shaders-react` package. It reaches behind the header and fades into the page. The shader loads after hydration, with a CSS fallback for unavailable or lost WebGL. The demo section under the hero adapts [React Bits Text Type](https://reactbits.dev/text-animations/text-type) for “Ready for less typing?” alongside a click-to-autofill illustration with fictional details. Animations play without controls and hold still when the visitor’s device asks for reduced motion. The heading and illustration suspend offscreen or while hidden and show complete static content without JavaScript. Paper Shaders also suspends rendering offscreen or while hidden, capped at 1.5 million pixels. The same tokens style downloads, numbered setup rows, the FAQ page, confirmations, and the 404 page.
 
-For browser checks, install the root and website dependencies and Playwright Chromium (`npx playwright install chromium` from the root), then start the website with `npm run dev`. From the repository root, run `node scripts/smoke-website.cjs`. Set `SECONDHAND_WEBSITE_URL` if the preview uses a port other than 5173, or `SECONDHAND_BROWSER_CHANNEL=chrome` to use an installed Chrome. The smoke checks exercise a flat hero with no gradient, the page without WebGL, reduced motion, proximity wordmark behavior, typed heading layout and accessibility, click-to-autofill sequencing, the absence of motion buttons, card removal, consistent branding and mascot loading, keyboard tabs, all download confirmation routes with synthetic installer responses, FAQ disclosure, privacy, 404s, and 320–1440px layouts. Screenshots are saved under `artifacts/website/`.
+For browser checks, install the root and website dependencies and Playwright Chromium (`npx playwright install chromium` from the root), then start the website with `npm run dev`. From the repository root, run `node scripts/smoke-website.cjs`. Set `SECONDHAND_WEBSITE_URL` if the preview uses a port other than 5173, or `SECONDHAND_BROWSER_CHANNEL=chrome` to use an installed Chrome. The smoke checks exercise shader motion and fallbacks, reduced motion, proximity wordmark behavior, typed heading layout and accessibility, click-to-autofill sequencing, the absence of motion buttons, card removal, consistent branding and mascot loading, keyboard tabs, all download confirmation routes with synthetic installer responses, FAQ disclosure, privacy, 404s, and 320–1440px layouts. Screenshots are saved under `artifacts/website/`.
 
 The social preview source is `scripts/og-image.html`. After changing it, render it at 1200×630 with the website dependencies installed and save the screenshot to `app/opengraph-image.png`.
 
@@ -60,6 +60,24 @@ Then download each file back from the live site, check it against `SHA256SUMS.tx
 5. After verifying every new file, update `LATEST_RELEASE` and the displayed version, rebuild, and **remove the upload secret before deploying that final version**. With no secret, all publishing routes return404. Make the completed download site public when authorized. Verify anonymous downloads and byte-range resume responses.
 
 Do not commit build output, credentials, `.env` files, or installers.
+
+## Library downloads
+
+Downloads offers **Personal** and **Library** versions for Windows, Apple silicon, and Intel Mac. The Library edition is a separate installation named **SecondHand Library**, with a separate local data folder. Library mode starts on and cannot be disabled in that edition. Prepare Chrome extension from the edition you intend to use; Chrome connects to the edition most recently registered.
+
+Build Library installers from the repository root:
+
+```sh
+npm run dist:library:win  # on Windows
+npm run dist:library:mac  # on macOS
+node scripts/release-checksums.cjs release/library --library
+```
+
+Validate the edition with `node scripts/smoke-library-mode.cjs --library-edition`. With the website running, `node scripts/smoke-library-download.cjs` checks all Library links and 320–1440px layouts using synthetic downloads.
+
+Collect all three installers in `release/library` before generating checksums. Their names begin `secondHand-library-`; `SHA256SUMS-library.txt` is separate from the personal release's immutable checksum file. The publish script accepts a third argument, `--library`, to upload and verify only these four files. Follow the same credential and byte-verification procedure above. Add future Library versions to `libraryReleases` in `lib/downloads.ts` to retain archived links.
+
+For the first Library release, upload directly to R2 with Wrangler (as above) and verify the downloaded bytes before deploying the download selector. The API publisher requires a server with the Library allowlist already deployed. Keep `libraryRelease` in `lib/release.ts` on the verified Library version independently of the personal release. A Library button must never serve the personal installer. The Library confirmation routes are `/thank-you/library-windows`, `/thank-you/library-mac-apple-silicon`, and `/thank-you/library-mac-intel`.
 
 ## Release boundaries
 

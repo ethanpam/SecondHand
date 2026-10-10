@@ -7,7 +7,7 @@ const os = require('node:os');
 const { startMain, safeStorage, deferred, until } = require('./helpers/harness.cjs');
 const realLaya = require('../desktop/laya.cjs');
 
-async function setup(t, { userData, platform = 'win32', modules = {}, dialog = {} } = {}) {
+async function setup(t, { userData, platform = 'win32', modules = {}, dialog = {}, libraryEdition = false } = {}) {
   if (!userData) {
     userData = await fs.mkdtemp(path.join(os.tmpdir(), 'secondhand-library-'));
     t.after(() => fs.rm(userData, { recursive: true, force: true }));
@@ -15,7 +15,7 @@ async function setup(t, { userData, platform = 'win32', modules = {}, dialog = {
   let idle = 0;
   const app = await startMain({ userData, platform, dialog,
     electron: { safeStorage: safeStorage() }, systemIdleTime: () => idle,
-    modules: { './laya.cjs': { ...realLaya, createLaya: options => ({ ...realLaya.createLaya(options), startUpdates() {} }) }, ...modules }
+    modules: { '../package.json': { secondHandEdition: libraryEdition ? 'library' : undefined }, './laya.cjs': { ...realLaya, createLaya: options => ({ ...realLaya.createLaya(options), startUpdates() {} }) }, ...modules }
   });
   return { ...app, userData, setIdle: value => { idle = value; },
     poll: async () => {
@@ -146,4 +146,28 @@ test('expiry clears patron approvals but keeps the installed extension connectio
   assert.equal(status.householdNoteDismissed, false);
   assert.equal(status.trustedSites.length, 0);
   assert.equal(status.alwaysAllowedSites.length, 0);
+});
+
+
+test('Library edition starts protected without a marker and cannot disable deletion', async t => {
+  const app = await setup(t, { libraryEdition: true });
+  const status = await app.invoke('status');
+  assert.equal(status.libraryEdition, true);
+  assert.equal(status.libraryMode, true);
+  assert.equal(status.exists, false);
+  await create(app);
+  await assert.rejects(app.invoke('setLibraryMode', false), /stays on in the Library edition/);
+  app.setIdle(120); await app.poll();
+  assert.equal((await app.invoke('status')).exists, false);
+});
+
+
+test('Library and Personal editions choose different default data directories', async t => {
+  for (const platform of ['darwin', 'win32']) {
+    const library = await setup(t, { platform, libraryEdition: true });
+    const personal = await setup(t, { platform });
+    assert.equal(path.basename(library.paths.get('userData')), 'SecondHand Library');
+    assert.equal(path.basename(personal.paths.get('userData')), 'SecondHand');
+    assert.notEqual(library.paths.get('userData'), personal.paths.get('userData'));
+  }
 });

@@ -2,7 +2,7 @@
 
 import { useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import { CheckIcon, DownloadIcon, ExternalIcon } from '../_components/icons';
-import { downloads, release } from '../../lib/release';
+import { downloads, libraryDownloads, libraryRelease, release } from '../../lib/release';
 
 const platforms = [
   { id: 'windows', label: 'Windows' },
@@ -29,6 +29,8 @@ export function DownloadOptions() {
   );
   const [chosen, setPlatform] = useState<Platform | null>(null);
   const platform = chosen ?? detected;
+  const [library, setLibrary] = useState(false);
+  const route = (target: string) => `/thank-you/${library ? 'library-' : ''}${target}`;
   // Arrow keys, Home, and End move between tabs, following the ARIA tabs pattern.
   const moveBetweenTabs = (event: KeyboardEvent<HTMLButtonElement>) => {
     const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -83,12 +85,18 @@ export function DownloadOptions() {
       <div className="download-panel">
         <div className="panel-heading">
           <h3>Download SecondHand</h3>
-          <span className="version">v{release}</span>
+          <span className="version">v{library ? libraryRelease : release}</span>
         </div>
         <p className="phone-note">
           SecondHand installs on Windows and Mac computers. Open this page on
           your computer to download it.
         </p>
+        <fieldset className="edition-choice">
+          <legend>Choose a version</legend>
+          <label><input type="radio" name="edition" checked={!library} onChange={() => setLibrary(false)} /> Personal</label>
+          <label><input type="radio" name="edition" checked={library} onChange={() => setLibrary(true)} /> Library</label>
+        </fieldset>
+        {library && <p className="library-download-note">For shared computers. Library mode is always on: local data is deleted after 2 minutes without mouse or keyboard activity, and on exit, computer lock, or sleep. Website entries, exported files, and original documents are not deleted.</p>}
         <div
           className="platform-tabs"
           role="tablist"
@@ -122,8 +130,8 @@ export function DownloadOptions() {
             Windows 10 or later <span aria-hidden="true">·</span> 64-bit Intel /
             AMD
           </p>
-          <a className="download-button" href="/thank-you/windows">
-            <DownloadIcon /> Download for Windows <span>.exe</span>
+          <a className="download-button" href={route('windows')}>
+            <DownloadIcon /> {library ? 'Download Library for Windows' : 'Download for Windows'} <span>.exe</span>
           </a>
           <p className="micro">
             Chrome extension included. No separate download needed.
@@ -141,11 +149,11 @@ export function DownloadOptions() {
             macOS 13 or later <span aria-hidden="true">·</span> MacBook, iMac
             &amp; Mac mini
           </p>
-          <a className="download-button" href="/thank-you/mac-apple-silicon">
-            <DownloadIcon /> Apple Silicon <span>.dmg</span>
+          <a className="download-button" href={route('mac-apple-silicon')}>
+            <DownloadIcon /> {library ? 'Library for Apple Silicon' : 'Apple Silicon'} <span>.dmg</span>
           </a>
-          <a className="secondary-download" href="/thank-you/mac-intel">
-            Download for Intel Mac
+          <a className="secondary-download" href={route('mac-intel')}>
+            {library ? 'Download Library for Intel Mac' : 'Download for Intel Mac'}
           </a>
           <p className="micro">
             Find your chip in Apple menu → About This Mac. Choose Apple Silicon
@@ -153,7 +161,7 @@ export function DownloadOptions() {
           </p>
         </div>
         <p className="micro">
-          <a className="text-link" href={downloads.checksums}>
+          <a className="text-link" href={(library ? libraryDownloads : downloads).checksums}>
             Download checksums <ExternalIcon size={14} />
           </a>
         </p>

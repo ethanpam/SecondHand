@@ -2,6 +2,7 @@
 // Upload target. Keep public defaults on the verified release until staging completes.
 export const RELEASE = '0.5.1';
 export const LATEST_RELEASE = '0.5.1';
+const libraryReleases: readonly string[] = ['0.5.1'];
 const releases = ['0.2.0', '0.3.0', '0.4.0', '0.5.0', '0.5.1'] as const;
 export const filenames = [
   `secondHand-${RELEASE}-win-x64.exe`,
@@ -10,11 +11,23 @@ export const filenames = [
   'secondHand-extension.zip',
   'SHA256SUMS.txt',
 ] as const;
-export function allowedFile(file: string) { return (filenames as readonly string[]).includes(file); }
+export const libraryFilenames = [
+  `secondHand-library-${RELEASE}-win-x64.exe`,
+  `secondHand-library-${RELEASE}-mac-arm64.dmg`,
+  `secondHand-library-${RELEASE}-mac-x64.dmg`,
+  'SHA256SUMS-library.txt',
+] as const;
+export function allowedFile(file: string) { return ([...filenames, ...libraryFilenames] as readonly string[]).includes(file); }
 export function objectKey(file: string, release: string = RELEASE) { return `releases/${release}/${file}`; }
 function downloadRelease(request: Request, file: string) {
   const explicit = new URL(request.url).searchParams.get('release');
   if (explicit !== null && !(releases as readonly string[]).includes(explicit)) return null;
+  if (file === 'SHA256SUMS-library.txt') return explicit === null ? libraryReleases.at(-1)! : libraryReleases.includes(explicit) ? explicit : null;
+  for (const version of libraryReleases) {
+    if ([`secondHand-library-${version}-win-x64.exe`, `secondHand-library-${version}-mac-arm64.dmg`, `secondHand-library-${version}-mac-x64.dmg`].includes(file)) {
+      return !explicit || explicit === version ? version : null;
+    }
+  }
   if (file === 'secondHand-extension.zip' || file === 'SHA256SUMS.txt') return explicit ?? LATEST_RELEASE;
   for (const version of releases) {
     if ([`secondHand-${version}-win-x64.exe`, `secondHand-${version}-mac-arm64.dmg`, `secondHand-${version}-mac-x64.dmg`].includes(file)) {
