@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ExternalIcon } from '../_components/icons';
+import { SetupPath } from '../_components/setup-path';
 import { SiteFooter, SiteHeader } from '../_components/site-chrome';
 
 export const metadata: Metadata = {
@@ -13,8 +14,9 @@ export const metadata: Metadata = {
 export default function SetupGuide() {
   return (
     <>
-      <SiteHeader />
+      <SiteHeader current="/setup" />
       <main id="main" className="wrap setup-page">
+        <SetupPath current="/setup" />
         <p className="setup-download-note">
           Need the app first?{' '}
           <a href="/downloads">Download SecondHand for Windows or Mac</a>.
@@ -108,8 +110,8 @@ export default function SetupGuide() {
                   <strong>Load unpacked</strong>, and select that folder.
                 </p>
                 <p>
-                  <Link href="/chrome-extension">
-                    See each step with pictures
+                  <Link className="guide-button" href="/chrome-extension">
+                    Show me each click, with pictures
                   </Link>
                 </p>
                 <details>

@@ -5,18 +5,20 @@ import { useSiteMotion } from '../../lib/site-motion';
 
 // A short, silent screen recording. It loops only when the visitor allows
 // motion; otherwise it shows its poster and waits for the play control.
-export function GuideVideo({
+export function LoopVideo({
   src,
   poster,
   label,
   width,
   height,
+  className = 'guide-media',
 }: {
   src: string;
   poster: string;
   label: string;
   width: number;
   height: number;
+  className?: string;
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const { enabled } = useSiteMotion();
@@ -31,7 +33,7 @@ export function GuideVideo({
   return (
     <video
       ref={video}
-      className="guide-media"
+      className={className}
       src={src}
       poster={poster}
       width={width}

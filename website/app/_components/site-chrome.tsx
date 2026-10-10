@@ -18,7 +18,15 @@ function Brand({ className = 'brand' }: { className?: string }) {
   );
 }
 
-export function SiteHeader() {
+const mainLinks = [
+  { href: '/how-it-works', label: 'How it works' },
+  { href: '/setup', label: 'Setup guide' },
+  { href: '/chrome-extension', label: 'Add to Chrome' },
+  { href: '/faq', label: 'Questions' },
+];
+
+// `current` is the path of the page being shown, so its link is marked.
+export function SiteHeader({ current }: { current?: string } = {}) {
   return (
     <>
       <a href="#main" className="skip">
@@ -27,9 +35,15 @@ export function SiteHeader() {
       <header className="site-header wrap">
         <Brand />
         <nav aria-label="Main navigation">
-          <a href="/setup">Setup guide</a>
-          <a href="/faq">Questions</a>
-          <a href="/privacy">Privacy</a>
+          {mainLinks.map(({ href, label }) => (
+            <a
+              key={href}
+              href={href}
+              aria-current={href === current ? 'page' : undefined}
+            >
+              {label}
+            </a>
+          ))}
         </nav>
         <a className="header-download" href="/downloads">
           Get SecondHand <ArrowIcon size={15} />
@@ -53,7 +67,9 @@ export function SiteFooter() {
         </div>
         <nav aria-label="Footer" className="footer-links">
           <a href="/downloads">Download</a>
+          <a href="/how-it-works">How it works</a>
           <a href="/setup">Setup guide</a>
+          <a href="/chrome-extension">Add to Chrome</a>
           <a href="/faq">Common questions</a>
           <a href="/privacy">Privacy policy</a>
         </nav>

@@ -6,6 +6,7 @@ import { GradientBackground } from './gradient-background';
 import { SiteFooter, SiteHeader } from '../_components/site-chrome';
 import { TextType } from './text-type';
 import { AutofillDemo } from './autofill-demo';
+import { LoopVideo } from '../_components/loop-video';
 
 export function Home() {
   return (
@@ -49,6 +50,28 @@ export function Home() {
               <TextType text={'Ready for\nless typing?'} />
             </h2>
             <AutofillDemo />
+          </section>
+
+          <section className="show-section" aria-labelledby="show-heading">
+            <div className="show-copy">
+              <h2 id="show-heading">Type it once. Not on every form.</h2>
+              <p>
+                Food help, utility help and school meals all ask for the same
+                name, address, household and income. Without SecondHand you type
+                them again on every form. With it, you save them once.
+              </p>
+              <Link className="text-link" href="/how-it-works">
+                See how it works, step by step
+              </Link>
+            </div>
+            <LoopVideo
+              className="how-media"
+              src="/demo/same-answers.mp4"
+              poster="/demo/same-answers-poster.jpg"
+              width={960}
+              height={560}
+              label="Four forms side by side: Iowa SNAP, Food pantry sign-up, Utility help, and Summer meals, each asking for the same details. The first two are typed by hand while a key counter climbs to 96. Then an Autofill button fills the other two in green while the counter stays put."
+            />
           </section>
 
           <div className="scope-note">

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { SiteFooter, SiteHeader } from '../_components/site-chrome';
+import { SetupPath } from '../_components/setup-path';
 import { DownloadOptions } from './download-options';
 
 export const metadata: Metadata = {
@@ -14,6 +15,7 @@ export default function Downloads() {
     <>
       <SiteHeader />
       <main id="main" className="wrap downloads-page">
+        <SetupPath current="/downloads" />
         <DownloadOptions />
       </main>
       <SiteFooter />

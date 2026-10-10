@@ -31,7 +31,7 @@ export default function CommonQuestions() {
           __html: JSON.stringify(structuredData).replace(/</g, '\\u003c'),
         }}
       />
-      <SiteHeader />
+      <SiteHeader current="/faq" />
       <main id="main" className="wrap doc-page faq-page">
         <h1>Common questions</h1>
         <p className="doc-lead">
