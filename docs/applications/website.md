@@ -67,6 +67,7 @@ Source responsibilities:
 | [scripts/publish-downloads.mjs](../../website/scripts/publish-downloads.mjs) | Maintainer upload and round-trip byte verification |
 | [app/globals.css](../../website/app/globals.css) | Visual system and responsive presentation |
 | [app/_home/autofill-demo.tsx](../../website/app/_home/autofill-demo.tsx) | Fictional click-to-autofill illustration |
+| [app/_home/gradient-background.tsx](../../website/app/_home/gradient-background.tsx) | Decorative shader and fallback |
 | [app/_home/text-type.tsx](../../website/app/_home/text-type.tsx) | Animated demo heading |
 | [app/_components/variable-wordmark.tsx](../../website/app/_components/variable-wordmark.tsx) | Responsive decorative footer wordmark |
 
@@ -76,7 +77,7 @@ Navigation uses ordinary anchors. Full-document navigation is intentional, espec
 
 The site uses forest green, soft white, sage accents, the green mascot, and self-hosted Bricolage Grotesque/Geist fonts. The browser does not need third-party font or script hosts for those assets.
 
-The hero sits on the page's own flat color, with no gradient or shader. Reduced-motion settings should show stable content. Animations pause offscreen or while hidden. The typed heading and illustrative form retain meaningful static content without JavaScript.
+The hero shader initializes after hydration, with a CSS fallback if WebGL is unavailable or lost. Reduced-motion settings should show stable content. Animations pause offscreen or while hidden; the shader has a 1.5-million-pixel cap. The typed heading and illustrative form retain meaningful static content without JavaScript.
 
 Keep semantic labels, keyboard behavior, focus states, and narrow-screen layouts when editing animated components. The synthetic form illustration must remain clearly separate from actual applicant-data collection.
 

@@ -345,7 +345,7 @@ The extension talks to the app through Chrome's native messaging, a direct conne
 | Tests | Node's test runner, jsdom, Playwright (Electron and Chromium) | 1,900+ tests on synthetic data only |
 
 <p align="center">
-  <a href="https://secondhand.ethanpam.workers.dev"><img src="docs/media/website-home.jpg" width="880" alt="The SecondHand download website: the words A little help. A lot less typing. on a plain light background, with How it works, Setup guide, Add to Chrome and Questions links, a Get SecondHand button, and a Setup guide link."></a>
+  <a href="https://secondhand.ethanpam.workers.dev"><img src="docs/media/website-home.jpg" width="880" alt="The SecondHand download website: the words A little help. A lot less typing. over a soft animated green gradient, with How it works, Setup guide, Add to Chrome and Questions links, a Get SecondHand button, and a Setup guide link."></a>
   <br>
   <sub>The download website, where the installers live.</sub>
 </p>
