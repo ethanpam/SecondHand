@@ -179,6 +179,8 @@ The extension talks to the app through Chrome's native messaging, a direct conne
 
 ## Library mode
 
+The separate **SecondHand Library** edition enables Library mode automatically and keeps it on. It uses its own data folder; personal-edition profiles are untouched. Build it with `npm run dist:library:win` (Windows) or `npm run dist:library:mac` (Mac).
+
 On Windows and Mac, turn on **Privacy & backups → Library mode** to delete SecondHand’s local data after two minutes without mouse or keyboard activity. It also deletes on exit, computer lock, and sleep, and stays on for the next person. Website entries, exported files, and original documents are not deleted. See [deletion scope](docs/security.md#library-mode-windows-and-macos).
 
 ## Privacy and safety

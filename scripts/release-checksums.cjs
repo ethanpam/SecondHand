@@ -15,6 +15,6 @@ const crypto = require('node:crypto');
     for await (const chunk of fs.createReadStream(path.join(directory, file))) hash.update(chunk);
     lines.push(`${hash.digest('hex')}  ${file}`);
   }
-  fs.writeFileSync(path.join(directory, 'SHA256SUMS.txt'), `${lines.join('\n')}\n`);
+  fs.writeFileSync(path.join(directory, process.argv.includes('--library') ? 'SHA256SUMS-library.txt' : 'SHA256SUMS.txt'), `${lines.join('\n')}\n`);
   console.log(`Wrote SHA-256 checksums for ${files.length} downloads.`);
 })().catch(error => { console.error(error.message); process.exitCode = 1; });

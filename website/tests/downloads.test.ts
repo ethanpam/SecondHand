@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { authorized, download, publish, filenames, LATEST_RELEASE, RELEASE } from '../lib/downloads.ts';
-import { release as displayedRelease, downloads } from '../lib/release.ts';
+import { authorized, download, publish, filenames, libraryFilenames, LATEST_RELEASE, RELEASE } from '../lib/downloads.ts';
+import { release as displayedRelease, downloads, libraryDownloads, libraryRelease } from '../lib/release.ts';
 const secret = 'test-secret-that-is-at-least-32-characters';
 const request = (path: string = filenames[0], headers = {}, method='GET') => new Request(`https://example.test/download/${path}`, {method, headers});
 const object = {size:10,httpEtag:'"etag"',customMetadata:{sha256:'a'.repeat(64)}};
@@ -95,4 +95,21 @@ void test('public links and unversioned downloads stay on the verified release i
   assert.equal((await download(request(`${file}?release=${RELEASE}`),file,files)).status,200);
   assert.equal(keys.at(-1),`releases/${RELEASE}/${file}`);
  }
+});
+
+void test('Library installers and checksums resolve to separate allowlisted artifacts', async () => {
+  for (const href of Object.values(libraryDownloads)) {
+    const url = new URL(href, 'https://example.test');
+    const file = url.pathname.split('/').at(-1)!;
+    assert.ok((libraryFilenames as readonly string[]).includes(file));
+    let key = '';
+    const storage = { ...bucket, head: async (value: string) => { key = value; return object; } } as unknown as R2Bucket;
+    const result = await download(new Request(url), file, storage);
+    assert.equal(result.status, 200);
+    assert.equal(key, `releases/${libraryRelease}/${file}`);
+    assert.equal(result.headers.get('content-disposition'), `attachment; filename="${file}"`);
+    url.searchParams.set('release', '0.2.0');
+    assert.equal((await download(new Request(url), file, storage)).status, 404);
+  }
+  assert.notEqual(libraryDownloads.windows as string, downloads.windows);
 });

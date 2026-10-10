@@ -320,6 +320,7 @@
 
   function renderLibraryMode() {
     $('library-mode-toggle').checked = Boolean(vaultStatus.libraryMode);
+    $('library-mode-toggle').disabled = Boolean(vaultStatus.libraryEdition);
     $('library-mode-notice').hidden = !vaultStatus.libraryMode;
     $('library-mode-notice').textContent = vaultStatus.libraryError || (vaultStatus.libraryErasing
       ? 'Library mode is deleting local data. Close any pending dialogs.'

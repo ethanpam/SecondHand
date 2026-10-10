@@ -28,7 +28,9 @@ const { validateProfile, validateApplication, HOUSEHOLD_COUNT_FIELDS, YES_NO_FIE
   blockedByBirthDate, savedBirthDateRefusal, SNAP_IOWA_ONLY_FIELDS, RECORD_FIELDS, validateInformationValue } = require('../shared/schema.cjs');
 const household = require('../shared/household.cjs');
 
-app.setName('SecondHand');
+const libraryEdition = require('../package.json').secondHandEdition === 'library';
+const appName = libraryEdition ? 'SecondHand Library' : 'SecondHand';
+app.setName(appName);
 // The step-by-step Chrome setup guide on SecondHand's website. During
 // development, SECONDHAND_WEBSITE_URL can point it at a local website.
 const EXTENSION_GUIDE_URL = 'https://secondhand.ethanpam.workers.dev/chrome-extension';
@@ -46,7 +48,7 @@ function extensionGuideUrl() {
 const localAppData = process.platform === 'win32' ?
   (process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')) : app.getPath('appData');
 app.setPath('userData', testStoragePath() || (!app.isPackaged && process.env.SECONDHAND_USER_DATA ?
-  path.resolve(process.env.SECONDHAND_USER_DATA) : path.join(localAppData, 'SecondHand')));
+  path.resolve(process.env.SECONDHAND_USER_DATA) : path.join(localAppData, appName)));
 
 // On macOS/Linux, Chrome invokes the app executable with its origin. Handle this
 // before the desktop single-instance lock. Windows uses its standalone C# relay.
@@ -78,7 +80,7 @@ if (nativeOrigin) {
   let bridge;
   let extensionId = null;
   let lockTimer;
-  let libraryMode = false;
+  let libraryMode = libraryEdition;
   let libraryTimer;
   let libraryIdleExpired = false;
   let copiedRecoveryKey;
@@ -195,7 +197,7 @@ if (nativeOrigin) {
   }
   async function status() {
     const details = await vault.inspect().catch(() => null);
-    return { exists: await vault.exists(), unlocked: vault.unlocked && !libraryErasing, libraryMode, libraryErasing, libraryError, lockRevision, recoveryKey: Boolean(details?.recoveryKey),
+    return { exists: await vault.exists(), unlocked: vault.unlocked && !libraryErasing, libraryMode, libraryEdition, libraryErasing, libraryError, lockRevision, recoveryKey: Boolean(details?.recoveryKey),
       deviceReset: Boolean(details?.deviceReset) && await hasDeviceSecret(), deviceResetSupported, extensionId, autofillWithoutAsking, trustedSites: [...trustedSites], allSites,
       alwaysAllowedSites: [...alwaysAllowedSites], householdNoteDismissed,
       touchId: await touchIdUnlock.state(), touchIdSupported: touchIdUnlock.supported(), touchIdNotice: touchIdUnlock.notice, settingsNotice,
@@ -846,6 +848,7 @@ if (nativeOrigin) {
   const methods = {
     status,
     async setLibraryMode(enabled) {
+      if (libraryEdition && enabled === false) throw publicError('Library mode stays on in the Library edition.');
       if (typeof enabled !== 'boolean') throw publicError('Invalid setting.');
       requireUnlocked();
       if (enabled) await atomicWrite(libraryPath, Buffer.from('{"enabled":true}'));
@@ -1169,7 +1172,7 @@ if (nativeOrigin) {
 
   function createWindow() {
     mainWindow = new BrowserWindow({ width: 1220, height: 850, minWidth: 860, minHeight: 650,
-      title: 'SecondHand', backgroundColor: '#f5f5ed', show: false, icon: path.join(__dirname, 'icon.png'),
+      title: appName, backgroundColor: '#f5f5ed', show: false, icon: path.join(__dirname, 'icon.png'),
       webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true,
         nodeIntegration: false, sandbox: true, webSecurity: true, spellcheck: false, devTools: !app.isPackaged } });
     mainWindow.setMenuBarVisibility(false);

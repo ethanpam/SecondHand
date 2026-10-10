@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import './support/app-modules.ts';
 import { env } from './support/cloudflare-workers.ts';
 import { MemoryBucket } from './support/memory-bucket.ts';
-import { filenames, objectKey, PART_BYTES } from '../lib/downloads.ts';
+import { filenames, libraryFilenames, objectKey, PART_BYTES } from '../lib/downloads.ts';
 
 // Loaded after the hooks above, so `cloudflare:workers` is the stand-in env.
 const routes = {
@@ -74,11 +74,11 @@ function network(bucket: MemoryBucket, log: string[]) {
   };
 }
 
-async function releaseDirectory(t: TestContext) {
+async function releaseDirectory(t: TestContext, names: readonly string[] = filenames) {
   const directory = await mkdtemp(join(tmpdir(), 'secondhand-release-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const files = new Map<string, Uint8Array>();
-  for (const file of filenames) {
+  for (const file of names) {
     // One installer spans two parts, so the publisher's part numbering is exercised.
     const bytes =
       file === installer
@@ -95,6 +95,7 @@ async function runPublisher(
   t: TestContext,
   bucket: MemoryBucket,
   directory: string,
+  library = false,
 ) {
   const requests: string[] = [];
   const output: string[] = [];
@@ -104,7 +105,7 @@ async function runPublisher(
   );
   const { argv } = process;
   const accessToken = process.env.SITES_ACCESS_TOKEN;
-  process.argv = [argv[0], 'publish-downloads.mjs', origin, directory];
+  process.argv = [argv[0], 'publish-downloads.mjs', origin, directory, ...(library ? ['--library'] : [])];
   process.env.RELEASE_UPLOAD_TOKEN = token;
   delete process.env.SITES_ACCESS_TOKEN;
   env.RELEASE_UPLOAD_TOKEN = token;
@@ -181,4 +182,16 @@ void test('the publisher refuses to replace a published file whose bytes changed
     sha256(original),
     'The published file is unchanged',
   );
+});
+
+void test('the Library publisher uploads and verifies only Library artifacts', async t => {
+  const bucket = new MemoryBucket();
+  const { directory, files } = await releaseDirectory(t, libraryFilenames);
+  const { output } = await runPublisher(t, bucket, directory, true);
+  for (const [file, bytes] of files) {
+    assert.ok(output.includes(`Verified download: ${file} (${bytes.length} bytes)`));
+    assert.equal(sha256(bucket.objects.get(objectKey(file))!.bytes), sha256(bytes));
+  }
+  assert.equal(bucket.objects.size, libraryFilenames.length);
+  for (const file of filenames) assert.equal(bucket.objects.has(objectKey(file)), false);
 });
