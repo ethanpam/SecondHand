@@ -111,7 +111,7 @@
     [/^(first|given) name$|^first$/, 'firstName'],
     [/^middle (name|initial)$/, 'middleName'],
     [/^(last|family|sur) ?name$|^last$/, 'lastName'],
-    [/^(full |legal |applicant )?name$|^(first (and )?last|full) name$|^name of (the )?head of household$|^head of household name$/, 'fullName'],
+    [/^(full |legal |applicant |customer |client |participant |your )?name$|^(first (and )?last|full) name$|^name of (the )?head of household$|^head of household name$/, 'fullName'],
     [/^(date of birth|birth ?date|dob|birthday)( mm dd yyyy| date)?$/, 'birthDate'],
     [/^(age range|age group)$/, 'ageRange'],
     [/^(social security( number)?|ssn)$/, 'ssn'],
@@ -121,7 +121,7 @@
     [/^(city (and )?(zip|zip code|zipcode|postal code)|ciudad (y )?codigo postal)$/, 'cityZip'],
     [/^(city (and )?state (and )?(zip|zip code|zipcode|postal code)|ciudad (y )?estado (y )?codigo postal)$/, 'cityStateZip'],
     [/^(complete |full )(physical |home |residential )?address( including (town|city|town city))?$|^direccion completa$/, 'fullAddress'],
-    [/^(street |home )?address( line 1)?$|^street$/, 'addressLine1'],
+    [/^(street |home |current |residential |physical )?address( line 1)?$|^street$/, 'addressLine1'],
     [/^address line 2$|^(apt|apartment|unit|suite)( number| or unit)?$|^apt suite$/, 'addressLine2'],
     [/^(city|town)$/, 'city'],
     [/^state( province)?$/, 'state'],
@@ -209,6 +209,7 @@
   const answeredInPart = new WeakMap();
   const inPart = entry => entry.kind === 'checkbox' && answeredInPart.has(entry.elements[0]) &&
     entry.elements.every(box => box.checked === answeredInPart.get(entry.elements[0]).includes(box));
+  const EXAMPLE_EMAIL = /^\s*[\w.+-]+@[\w-]+(\.[\w-]+)+\s*$/;
   const NAME_HINTS = Object.freeze({ fname: 'first name', firstname: 'first name', lname: 'last name', lastname: 'last name', dob: 'date of birth',
     zipcode: 'zip code', postalcode: 'postal code', hhsize: 'household size', tel: 'phone', telephone: 'phone', email: 'email', zip: 'zip', city: 'city', state: 'state' });
   const STATES = Object.freeze({ AL: 'alabama', AK: 'alaska', AZ: 'arizona', AR: 'arkansas', CA: 'california', CO: 'colorado', CT: 'connecticut', DE: 'delaware',
@@ -629,8 +630,12 @@
     const tokens = String(element.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/).reverse();
     const auto = tokens.map(token => AUTOCOMPLETE[token]).find(Boolean);
     if (auto && compatible(auto, entry)) return { key: auto, confidence: 'high' };
+    // A box whose only words are an example address ("name@example.com") asks for an email.
+    if (entry.labels.length === 1 && EXAMPLE_EMAIL.test(entry.labels[0]) && compatible('email', entry)) return { key: 'email', confidence: 'high' };
     for (const text of entry.labels) {
-      const key = ruleFor(text);
+      let key = ruleFor(text);
+      // An address asked for in a multi-line box takes the whole address.
+      if (key === 'addressLine1' && entry.kind === 'textarea' && !/ line 1$/.test(question(text))) key = 'fullAddress';
       if (key && compatible(key, entry)) return { key, confidence: 'high' };
     }
     // Today's date is placed by its labels alone, never by a box's name.
