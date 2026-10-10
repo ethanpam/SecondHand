@@ -3,6 +3,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { SiteFooter, SiteHeader } from '../_components/site-chrome';
 import { LoopVideo } from '../_components/loop-video';
+import { SetupPath } from '../_components/setup-path';
 
 export const metadata: Metadata = {
   title: 'Add SecondHand to Chrome',
@@ -14,8 +15,9 @@ export const metadata: Metadata = {
 export default function ChromeExtensionGuide() {
   return (
     <>
-      <SiteHeader />
+      <SiteHeader current="/chrome-extension" />
       <main id="main" className="wrap doc-page guide-page">
+        <SetupPath current="/chrome-extension" />
         <h1>Add SecondHand to Chrome</h1>
         <p className="doc-lead">
           Do this once, after you install the SecondHand app. It takes about two
