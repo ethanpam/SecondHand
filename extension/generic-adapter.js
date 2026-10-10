@@ -647,6 +647,16 @@
   // The question list's own ids, kept apart from the plan so listing never invalidates a fill.
   let listed = null;
   let listings = 0;
+  // The site's own controls, not questions: a checkbox or radio that works as a button or opens a menu (Wikipedia's
+  // menus), and anything in the site's navigation, a menu, a toolbar or a tab list.
+  const CHROME_ROLES = new Set(['button', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'tab']);
+  const CHROME_AREAS = 'nav, [role="navigation"], [role="menu"], [role="menubar"], [role="toolbar"], [role="tablist"]';
+  function pageChrome(element) {
+    const toggle = ['checkbox', 'radio'].includes(String(element.type || '').toLowerCase()) || ['checkbox', 'radio'].includes(element.getAttribute('role'));
+    if (toggle && element.matches('input') && CHROME_ROLES.has(element.getAttribute('role'))) return true;
+    if (toggle && ![null, 'false'].includes(element.getAttribute('aria-haspopup'))) return true;
+    return Boolean(closestAcross(element, CHROME_AREAS));
+  }
   // Every eligible question on the page with its labels, answered or not.
   function questionsOn(doc) {
     const entries = [];
@@ -655,7 +665,7 @@
     const controls = deepQueryAll(doc, `input, select, textarea, ${ARIA_CONTROLS}, ${EDITABLE}`);
     const ownedLists = new Set(controls.filter(element => element.getAttribute('role') === 'combobox').map(group => listboxFor({ group, kind: 'ariaCombo' })).filter(Boolean));
     for (const element of controls) {
-      if (ownedLists.has(element)) continue;
+      if (ownedLists.has(element) || pageChrome(element)) continue;
       if (element.matches(EDITABLE) && !element.matches(ARIA_CONTROLS)) {
         if (editableUsable(element)) entries.push({ kind: 'editable', elements: [element] });
         continue;
@@ -1282,7 +1292,7 @@
     const fields = entries.map(entry => ({ elements: [...entry.elements, ...(entry.kind === 'ariaCombo' && listboxFor(entry) ? [listboxFor(entry)] : [])], answered: answered(entry) && !inPart(entry), required: fieldOf(entry).required,
       safe: !entry.invalidLabels && !applicantOnly(entry) && !protectedCustom(fieldOf(entry)) && !entry.labels.some(otherPersonQuestion) && !besideForm(entry, doc), supported: true }));
     for (const control of deepQueryAll(doc, 'input,select,textarea,[contenteditable],[role="textbox"],[role="radio"],[role="checkbox"],[role="switch"],[role="combobox"],[role="listbox"],[role="slider"],[role="spinbutton"]')) {
-      if (covered.has(control) || !rendered(control) || control.disabled || control.getAttribute('aria-disabled') === 'true' || control.type === 'hidden' || ['submit', 'button', 'reset', 'image'].includes(control.type)) continue;
+      if (covered.has(control) || pageChrome(control) || !rendered(control) || control.disabled || control.getAttribute('aria-disabled') === 'true' || control.type === 'hidden' || ['submit', 'button', 'reset', 'image'].includes(control.type)) continue;
       // The popup list of an already represented combobox is part of that one control.
       if (entries.some(entry => entry.kind === 'ariaCombo' && listboxFor(entry) === control)) continue;
       fields.push({ elements: [control], answered: false, required: control.required === true || control.getAttribute('aria-required') === 'true', safe: false, supported: false });
