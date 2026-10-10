@@ -347,7 +347,6 @@ async function main() {
     await page.locator('#confirm-passphrase').fill(passphrase);
     // Keep automated runs away from the real Keychain or Windows protected storage;
     // tests/desktop-recovery-main.test.cjs covers reset on this computer.
-    if (await page.locator('#device-reset-field').isVisible()) await page.locator('#allow-device-reset').uncheck();
     await expect(page.locator('#passphrase')).toHaveValue(passphrase);
     await expect(page.locator('#confirm-passphrase')).toHaveValue(passphrase);
     await submitAuthForm(page, passphrase, passphrase);
@@ -601,18 +600,9 @@ async function main() {
     const privacyText = '#view-privacy :is(p, h3, strong, label), .field-hint';
     const privacy = await unreadableText(page, privacyText, 13);
     assert.equal(privacy.length, 0, `Text too small or faint on Privacy & backups:\n${privacy.join('\n')}`);
-    // The notes under the two switches that let someone else in, Touch ID and password reset, read alike (#229).
-    for (const setting of ['#touch-id-setting', '#device-reset-setting']) {
-      await expect(page.locator(setting)).toBeVisible();
-      await expect(page.locator(`${setting} .field-hint`)).toBeVisible();
-    }
-    const switchNotes = await page.evaluate(() => ['#touch-id-setting', '#device-reset-setting'].map(setting => {
-      const { fontSize, lineHeight, color } = getComputedStyle(document.querySelector(`${setting} .field-hint`));
-      return { setting, fontSize, lineHeight, color };
-    }));
-    const switchNote = note => `${note.setting} .field-hint: ${note.fontSize} / ${note.lineHeight}, ${note.color}`;
-    assert.ok(switchNotes.every(note => note.fontSize === '12px' && note.lineHeight === switchNotes[0].lineHeight && note.color === switchNotes[0].color),
-      `The Touch ID and password-reset notes should both be 12px with the same line height and color:\n${switchNotes.map(switchNote).join('\n')}`);
+    // The note under the Touch ID switch, which lets someone else in, is 12px like the other hints (#229).
+    await expect(page.locator('#touch-id-setting .field-hint')).toBeVisible();
+    assert.equal(await page.locator('#touch-id-setting .field-hint').evaluate(note => getComputedStyle(note).fontSize), '12px');
     await captureDiagnostic(page, 'desktop-privacy.png', { fullPage: true });
     const privacyWidth = await page.evaluate(() => window.innerWidth);
     // The menu stays a column at the default window, and the page doesn't scroll sideways (#230).
@@ -761,7 +751,6 @@ async function main() {
     await expect(page.locator('#touch-id-unlock')).toBeHidden();
     await page.locator('#passphrase').fill(startOverPassword);
     await page.locator('#confirm-passphrase').fill(startOverPassword);
-    if (await page.locator('#device-reset-field').isVisible()) await page.locator('#allow-device-reset').uncheck();
     await expect(page.locator('#passphrase')).toHaveValue(startOverPassword);
     await expect(page.locator('#confirm-passphrase')).toHaveValue(startOverPassword);
     // The setup is offered only if its start is saved while the key is on screen (renderer/app.js): wait for the

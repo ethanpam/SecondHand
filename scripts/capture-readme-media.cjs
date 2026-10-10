@@ -139,7 +139,6 @@ async function desktopPng(userData) {
     await page.locator('#passphrase').fill(password);
     await page.locator('#confirm-passphrase').fill(password);
     // Keep the capture away from the real Keychain or Windows protected storage.
-    if (await page.locator('#device-reset-field').isVisible()) await page.locator('#allow-device-reset').uncheck();
     await page.locator('#auth-submit').click();
     await expect(page.locator('#recovery-dialog')).toBeVisible({ timeout: 30000 });
     await page.locator('#recovery-saved').check();
