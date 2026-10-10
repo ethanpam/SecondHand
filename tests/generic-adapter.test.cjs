@@ -789,6 +789,10 @@ test('a question about a person asked again in one form (each row of Jotform’s
   const plan = generic.plan(doc);
   assert.deepEqual(byElement(doc, plan), { email: 'email', row1: 'fullName' });
   assert.deepEqual(plan.unmatched.filter(field => field.label === 'Name').length, 2, 'the other rows stay for the applicant');
+  // Once the first row is answered, by SecondHand or the applicant, the next plan still leaves the other rows alone.
+  assert.equal(generic.fillFields(doc, plan.token, plan.matched.map(field => ({ id: field.id, key: field.key, guessed: false })), generic.deriveValues(profile)).ok, true);
+  assert.equal(doc.getElementById('row1').value, 'Avery Example');
+  assert.deepEqual(generic.plan(doc).matched, [], 'a later plan fills no other row');
   // A household count asked twice is the same answer in each box.
   const counts = page('<form><label for="a">How many children under 18?</label><input id="a"><label for="b">How many children under 18?</label><input id="b"></form>');
   assert.deepEqual(byElement(counts, generic.plan(counts)), { a: 'householdChildren', b: 'householdChildren' });
