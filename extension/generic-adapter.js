@@ -752,8 +752,15 @@
     // answer. Separate forms on one page each ask it once.
     const formOf = entry => closestAcross(entry.elements[0], 'form') || rootOf(entry.elements[0]);
     const asked = entry => entry.labels[0] ? question(entry.labels[0]) : '';
-    const listed = index => PERSON_KEYS.includes(rules[index].key) && asked(entries[index]) && entries.slice(0, index).some((other, at) =>
-      rules[at].key === rules[index].key && asked(other) === asked(entries[index]) && formOf(other) === formOf(entries[index]));
+    // Answered boxes count too: once the first is answered, the next one is still not the applicant's.
+    let every = null;
+    const listed = index => {
+      const entry = entries[index], key = rules[index].key;
+      if (!PERSON_KEYS.includes(key) || !asked(entry)) return false;
+      if (!every) every = questionsOn(doc).map(other => ({ other, key: match(other).key }));
+      const at = every.findIndex(({ other }) => other.elements[0] === entry.elements[0]);
+      return every.slice(0, at).some(({ other, key: earlier }) => earlier === key && asked(other) === asked(entry) && formOf(other) === formOf(entry));
+    };
     entries.forEach((entry, index) => {
       const id = `sh-${sequence}-${index}`;
       entry.binding = binding(entry);
