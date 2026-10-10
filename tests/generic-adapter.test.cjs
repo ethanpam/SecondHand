@@ -755,9 +755,23 @@ test('the card stays hidden on pages without inputs, search boxes, sign-in forms
     'a texted code': '<form><label for="otp">Enter the 6-digit code we sent you</label><input id="otp" inputmode="numeric"></form>',
     'a verification code': '<form><label for="code">Verification code</label><input id="code"></form>',
     'a one-time code': '<form><input name="token" autocomplete="one-time-code" aria-label="Code"></form>',
-    'consent only': '<form><label><input type="checkbox" name="agree"> I agree to the terms</label><label for="sig">Signature</label><input id="sig"></form>'
+    'consent only': '<form><label><input type="checkbox" name="agree"> I agree to the terms</label><label for="sig">Signature</label><input id="sig"></form>',
+    // Wikipedia's menus open from checkboxes that act as buttons.
+    'menu toggles': '<header><input type="checkbox" id="main-menu" role="button" aria-haspopup="true" aria-label="Main menu"><label for="main-menu">Main menu</label></header>' +
+      '<div><input type="checkbox" id="langs" role="button" aria-haspopup="true" aria-label="21 languages"><input type="checkbox" id="tools" aria-haspopup="true" aria-label="Tools"></div>',
+    'site navigation': '<nav><label><input type="checkbox" name="open"> Menu</label><label><input type="radio" name="theme"> Dark</label><label><input type="radio" name="theme"> Light</label></nav>' +
+      '<div role="toolbar"><label><input type="checkbox" name="bold"> Bold</label></div>'
   };
   for (const [name, html] of Object.entries(hidden)) assert.equal(generic.offers(page(html)), false, name);
+});
+
+test('a menu toggle beside a form is no question: it is never planned or listed, and the form fills as before', () => {
+  const doc = page('<nav><input type="checkbox" id="menu" role="button" aria-haspopup="true" aria-label="Main menu"></nav>' +
+    '<form><label for="fname">First name</label><input id="fname"><label for="note">Anything else?</label><input id="note"></form>');
+  const plan = generic.plan(doc);
+  assert.deepEqual(plan.matched.map(field => field.key), ['firstName']);
+  assert.deepEqual(plan.unmatched.map(field => field.label), ['Anything else?']);
+  assert.deepEqual(generic.questions(doc).map(question => question.label), ['First name', 'Anything else?']);
 });
 
 test('Laya takes text boxes and choice questions within the bridge’s limits, never a question only the applicant answers', () => {
