@@ -765,6 +765,24 @@ test('the card stays hidden on pages without inputs, search boxes, sign-in forms
   for (const [name, html] of Object.entries(hidden)) assert.equal(generic.offers(page(html)), false, name);
 });
 
+test('everyday sign-up forms: an example address as the only label asks for an email, a customer’s or client’s name for the full name, and a current address in a multi-line box for the whole address', () => {
+  const doc = page('<form><label>Email</label><input id="userEmail" type="text" placeholder="name@example.com">' +
+    '<label>Customer name: <input id="custname" name="custname"></label><label for="client">Client name</label><input id="client">' +
+    '<label for="current">Current Address</label><textarea id="current" placeholder="Current Address"></textarea>' +
+    '<label for="street">Residential address</label><input id="street"></form>');
+  const plan = generic.plan(doc);
+  assert.deepEqual(byElement(doc, plan), { userEmail: 'email', custname: 'fullName', client: 'fullName', current: 'fullAddress', street: 'addressLine1' });
+  assert.equal(generic.fillFields(doc, plan.token, plan.matched.map(field => ({ id: field.id, key: field.key, guessed: false })), generic.deriveValues(profile)).ok, true);
+  assert.equal(doc.getElementById('userEmail').value, 'avery.example@example.invalid');
+  assert.equal(doc.getElementById('custname').value, 'Avery Example');
+  assert.equal(doc.getElementById('current').value, '123 Test Way, Unit 4, Demo City, IA 50309');
+  assert.equal(doc.getElementById('street').value, '123 Test Way');
+  // Someone else's name, and an address that isn't the applicant's home, stay as they were.
+  const other = generic.plan(page('<form><label for="a">Company name</label><input id="a"><label for="b">Previous address</label><textarea id="b"></textarea>' +
+    '<label for="c">Work email</label><input id="c" placeholder="name@company.com"></form>'));
+  assert.deepEqual(other.matched, []);
+});
+
 test('a menu toggle beside a form is no question: it is never planned or listed, and the form fills as before', () => {
   const doc = page('<nav><input type="checkbox" id="menu" role="button" aria-haspopup="true" aria-label="Main menu"></nav>' +
     '<form><label for="fname">First name</label><input id="fname"><label for="note">Anything else?</label><input id="note"></form>');
