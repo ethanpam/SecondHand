@@ -35,6 +35,7 @@ The homepage's autofill illustration uses fictional details and demonstrates beh
 | Route | Purpose | Main source |
 | --- | --- | --- |
 | `/` | Product explanation and demo | [page.tsx](../../website/app/page.tsx), [home.tsx](../../website/app/_home/home.tsx) |
+| `/how-it-works` | How the app and extension work together, with short recordings | [page.tsx](../../website/app/how-it-works/page.tsx) |
 | `/downloads` | Platform downloads, requirements, and privacy summary | [page.tsx](../../website/app/downloads/page.tsx), [download-options.tsx](../../website/app/downloads/download-options.tsx) |
 | `/setup` | Installation, passwords, extension setup, and updates | [page.tsx](../../website/app/setup/page.tsx) |
 | `/faq` | Common questions and matching FAQ structured data | [questions.ts](../../website/app/faq/questions.ts), [page.tsx](../../website/app/faq/page.tsx) |
@@ -66,7 +67,6 @@ Source responsibilities:
 | [scripts/publish-downloads.mjs](../../website/scripts/publish-downloads.mjs) | Maintainer upload and round-trip byte verification |
 | [app/globals.css](../../website/app/globals.css) | Visual system and responsive presentation |
 | [app/_home/autofill-demo.tsx](../../website/app/_home/autofill-demo.tsx) | Fictional click-to-autofill illustration |
-| [app/_home/gradient-background.tsx](../../website/app/_home/gradient-background.tsx) | Decorative shader and fallback |
 | [app/_home/text-type.tsx](../../website/app/_home/text-type.tsx) | Animated demo heading |
 | [app/_components/variable-wordmark.tsx](../../website/app/_components/variable-wordmark.tsx) | Responsive decorative footer wordmark |
 
@@ -76,7 +76,7 @@ Navigation uses ordinary anchors. Full-document navigation is intentional, espec
 
 The site uses forest green, soft white, sage accents, the green mascot, and self-hosted Bricolage Grotesque/Geist fonts. The browser does not need third-party font or script hosts for those assets.
 
-The hero shader initializes after hydration, with a CSS fallback if WebGL is unavailable or lost. Reduced-motion settings should show stable content. Animations pause offscreen or while hidden; the shader has a 1.5-million-pixel cap. The typed heading and illustrative form retain meaningful static content without JavaScript.
+The hero sits on the page's own flat color, with no gradient or shader. Reduced-motion settings should show stable content. Animations pause offscreen or while hidden. The typed heading and illustrative form retain meaningful static content without JavaScript.
 
 Keep semantic labels, keyboard behavior, focus states, and narrow-screen layouts when editing animated components. The synthetic form illustration must remain clearly separate from actual applicant-data collection.
 
@@ -116,16 +116,16 @@ The checks exercise 320–1440 px layouts, keyboard navigation, fallback/reduced
 
 ## How downloads work
 
-The current source declares release `0.4.0` in both the displayed release module and download helper. The helper also recognizes historical releases through its explicit list. Do not infer the package's source revision solely from its filename or displayed version.
+The current source declares release `0.5.1` in both the displayed release module (`lib/release.ts`) and download helper (`RELEASE` and `LATEST_RELEASE` in `lib/downloads.ts`). The helper also recognizes historical releases through its explicit list. Do not infer the package's source revision solely from its filename or displayed version.
 
 Objects live under a release prefix such as:
 
 ```text
-releases/0.4.0/secondHand-0.4.0-win-x64.exe
-releases/0.4.0/secondHand-0.4.0-mac-arm64.dmg
-releases/0.4.0/secondHand-0.4.0-mac-x64.dmg
-releases/0.4.0/secondHand-extension.zip
-releases/0.4.0/SHA256SUMS.txt
+releases/0.5.1/secondHand-0.5.1-win-x64.exe
+releases/0.5.1/secondHand-0.5.1-mac-arm64.dmg
+releases/0.5.1/secondHand-0.5.1-mac-x64.dmg
+releases/0.5.1/secondHand-extension.zip
+releases/0.5.1/SHA256SUMS.txt
 ```
 
 Only allowed filenames and recognized release combinations are served. The response sets attachment disposition, content length/type, `nosniff`, ETag, cache headers, and byte-range support. A stored checksum can be exposed as `X-Checksum-SHA256`.
@@ -165,7 +165,7 @@ With the same token available only to the upload process, run from `website/`:
 node scripts/publish-downloads.mjs https://your-site.example /absolute/path/to/release
 ```
 
-Replace the placeholder URL with the intended site. Credentials must not be put into the command's URL, committed files, screenshots, or PR text.
+Replace the placeholder URL with the intended site. The 0.5 releases were instead uploaded straight to the bucket with `npx wrangler r2 object put secondhand-downloads/releases/<version>/<file> --file <path> --remote`, then downloaded back from the live site and checked against `SHA256SUMS.txt`. Credentials must not be put into the command's URL, committed files, screenshots, or PR text.
 
 The publisher sends 8 MiB multipart pieces, then downloads each completed object and compares its SHA-256 with the local artifact. The server limits files to 512 MiB, validates sequential part manifests and final byte count, and refuses overwriting existing release keys. The bearer comparison uses hashed constant-time comparison. These checks do not replace the publisher's verification of actual bytes.
 
