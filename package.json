@@ -4,8 +4,8 @@
   "version": "0.5.1",
   "private": true,
   "description": "A local benefits companion for Iowa SNAP",
-  "author": "secondHand contributors",
-  "license": "MIT",
+  "author": "The SecondHand team",
+  "license": "SEE LICENSE IN LICENSE",
   "main": "desktop/main.cjs",
   "engines": { "node": ">=22.12" },
   "scripts": {

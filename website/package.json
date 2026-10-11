@@ -2,7 +2,7 @@
   "name": "secondhand-download-site",
   "version": "0.1.0",
   "private": true,
-  "license": "MIT",
+  "license": "UNLICENSED",
   "engines": {
     "node": ">=22.15.0"
   },
