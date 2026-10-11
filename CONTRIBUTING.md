@@ -52,4 +52,4 @@ Everyone taking part agrees to the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
-By contributing, you agree that your contributions are released under the [MIT License](LICENSE).
+SecondHand is free to use but not open source: the SecondHand team owns it, under the [SecondHand Free Use License](LICENSE). By contributing, you confirm that you have the right to give your contribution, and you agree that the SecondHand team may use, change, and distribute it as part of SecondHand under that license or any other terms the team chooses.

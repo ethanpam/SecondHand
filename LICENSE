@@ -1,21 +1,46 @@
-MIT License
+SecondHand Free Use License
 
-Copyright (c) 2026 SecondHand contributors
+Copyright (c) 2026 Ethan Pham, Jacob Dang, hung-o7, and Bin Doan (the "SecondHand team").
+All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+SecondHand (the desktop app, the Chrome extension, the phone apps, the download website, and the source
+code, documentation, designs, models and media in this repository, together "the Software") is owned by
+the SecondHand team. It is free to use, but it is not open source.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. Free use. You may download the Software from the official SecondHand download site or the official
+   repository, install it on computers and devices you own or control, and use it, at no cost, for your
+   own purposes, including helping other people apply for benefits.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+2. What is not allowed. Without the SecondHand team's prior written permission, you may not:
+   a. copy, modify, translate, adapt, or create derivative works of the Software or any part of it;
+   b. distribute, publish, sublicense, rent, lend, sell, or otherwise transfer the Software or any part of
+      it, or offer it as a hosted or online service;
+   c. reuse any part of the source code, designs, text, or media in another product or project;
+   d. remove or change any copyright, license, or ownership notice; or
+   e. use the SecondHand name or logo in a way that suggests endorsement or affiliation.
+   Making the copies that installing and running the Software requires, and keeping a backup of your own
+   saved data, are allowed.
+
+3. Viewing the source. The source code may be visible to the public. Being able to see it does not give
+   you any right to copy, change, or reuse it beyond what section 1 allows.
+
+4. Third-party components. The Software includes third-party software, fonts, models, and other
+   material that keep their own licenses, listed in THIRD_PARTY_NOTICES.md. This license does not change
+   those terms, and nothing here limits rights those licenses give you in those components.
+
+5. Earlier versions. Versions of SecondHand published before this license, up to and including 0.5.1,
+   were released under the MIT License. Copies of those versions received under the MIT License remain
+   under it. This license applies to everything published after it.
+
+6. Permission. To ask for any use this license does not allow, contact the SecondHand team through the
+   official repository, https://github.com/ethanpam/secondHand.
+
+7. Ending. Your permission under this license ends automatically if you break any of its terms. The
+   SecondHand team may enforce its rights in the Software, including by legal action.
+
+8. No warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+   INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+   NONINFRINGEMENT. IN NO EVENT SHALL THE SECONDHAND TEAM BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+   WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. SecondHand does not decide benefits
+   eligibility and is not affiliated with Iowa HHS or any agency.
