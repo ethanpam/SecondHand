@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  Free and open source (MIT) &nbsp;·&nbsp; Windows and Mac &nbsp;·&nbsp; No account, no cloud, no analytics &nbsp;·&nbsp; Built for <a href="#why-it-matters">Hack Away Hunger 2026</a>
+  Free to use &nbsp;·&nbsp; Windows and Mac &nbsp;·&nbsp; No account, no cloud, no analytics &nbsp;·&nbsp; Built for <a href="#why-it-matters">Hack Away Hunger 2026</a>
 </p>
 
 > [!IMPORTANT]
@@ -312,7 +312,7 @@ Reviewers asked the right question: does every new form need someone to write co
 
 ## Tech stack and architecture
 
-**What kind of software is it?** SecondHand is **free, open-source desktop software** under the MIT license. It is **not a hosted SaaS**: there is no SecondHand server, database, or user account. Each person's data lives only on their own computer. The only thing hosted online is the download website, which serves the installers and holds no applicant data.
+**What kind of software is it?** SecondHand is **free desktop software**, owned by the SecondHand team and not open source ([license](LICENSE)). It is **not a hosted SaaS**: there is no SecondHand server, database, or user account. Each person's data lives only on their own computer. The only thing hosted online is the download website, which serves the installers and holds no applicant data.
 
 ```mermaid
 flowchart LR
@@ -462,7 +462,7 @@ Tests use only the fictional profile in [`tests/fixtures/applicant-profile.json`
 
 ## License and credits
 
-SecondHand contributors' original code is released under the [MIT License](LICENSE). You're free to use, change, and share that code, including for nonprofit and government work. Third-party material retains its own terms; see [third-party notices and permission status](THIRD_PARTY_NOTICES.md), including the React Bits Commons Clause exception.
+SecondHand is free to use, but it is not open source. The SecondHand team (Ethan Pham, Jacob Dang, hung-o7, and Bin Doan) owns it and keeps all rights. Anyone may download and use the official builds at no cost, including to help other people apply for benefits. Copying, changing, redistributing, or reusing the code, designs, or media needs the team's written permission. The terms are in the [SecondHand Free Use License](LICENSE). Versions up to 0.5.1 were released under the MIT License, and copies of those versions keep it. Third-party material retains its own terms; see [third-party notices and permission status](THIRD_PARTY_NOTICES.md), including the React Bits Commons Clause exception.
 
 - **Laya** is fine-tuned from the open [Laya](https://huggingface.co/convaiinnovations/laya) model and published at [huggingface.co/JacobTDang/secondhand-laya](https://huggingface.co/JacobTDang/secondhand-laya) under Apache-2.0.
 - **Bundled open-source software:** Electron (MIT), ONNX Runtime (MIT), Tesseract.js (Apache-2.0), pdf.js (Apache-2.0), React (MIT). The website adapts components from [React Bits](https://reactbits.dev) ([notice](website/public/react-bits-license.txt)) and [Paper Shaders](https://github.com/paper-design/shaders).

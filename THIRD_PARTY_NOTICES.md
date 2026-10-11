@@ -1,6 +1,6 @@
 # Third-party material
 
-SecondHand contributors' original code is licensed under [MIT](LICENSE). Third-party code, fonts, models, questionnaires, and media retain their own terms. The root license does not grant rights that their owners have not granted.
+SecondHand's original code is owned by the SecondHand team and licensed under the [SecondHand Free Use License](LICENSE); it is not open source. Versions up to 0.5.1 were released under MIT. Third-party code, fonts, models, questionnaires, and media retain their own terms. The root license does not grant rights that their owners have not granted.
 
 ## Notices already included
 
@@ -17,4 +17,4 @@ SecondHand contributors' original code is licensed under [MIT](LICENSE). Third-p
 - **Copied questionnaires:** `ML_model/questions/` records original form sources. Source URLs alone are not redistribution licenses. Record the applicable permission or terms for each source, or replace/remove material whose redistribution is not established.
 - **External design/template material:** retain the source references in the website README and design research note; confirm applicable terms for copied template code as well as installed packages.
 
-These open items are documentation gaps, not a claim that the material is unauthorized. Adding MIT to this repository does not resolve them. See the [public-release review](docs/public-release-review.md) for the remaining checks.
+These open items are documentation gaps, not a claim that the material is unauthorized. The root license does not resolve them. See the [public-release review](docs/public-release-review.md) for the remaining checks.
