@@ -4,7 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { LIMITS, fault, requestId } = require('./ocr-limits.cjs');
 
-// Opens only the file the native picker returned, reads at most the hard limit,
+// Opens only the file selected in the native picker or dropped from the computer, reads at most the hard limit,
 // and does not create a copy, sidecar, cache, or document record.
 async function readSelectedFile(filePath, signal) {
   const file = await fs.open(filePath, 'r');
@@ -40,7 +40,7 @@ function createDocumentReader({ chooseFile, createEngine, isUnlocked, onProgress
     }
     return true;
   }
-  async function read(id) {
+  async function read(id, droppedPath) {
     requestId(id);
     if (!isUnlocked()) throw fault('LOCKED');
     if (active) throw fault('BUSY');
@@ -49,7 +49,7 @@ function createDocumentReader({ chooseFile, createEngine, isUnlocked, onProgress
     let bytes;
     const guard = () => { if (active !== job || job.cancelled || !isUnlocked()) throw fault('CANCELLED'); };
     try {
-      const selection = await chooseFile();
+      const selection = droppedPath === undefined ? await chooseFile() : { filePaths: [droppedPath] };
       guard();
       if (selection.canceled || !Array.isArray(selection.filePaths) || selection.filePaths.length !== 1) return { cancelled: true };
       const filePath = selection.filePaths[0];

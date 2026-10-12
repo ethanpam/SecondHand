@@ -1,6 +1,6 @@
 'use strict';
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 const invoke = (method, ...args) => ipcRenderer.invoke('secondhand:invoke', method, ...args);
 
 contextBridge.exposeInMainWorld('secondHand', Object.freeze({
@@ -34,6 +34,11 @@ contextBridge.exposeInMainWorld('secondHand', Object.freeze({
   lock: () => invoke('lock'),
   getData: () => invoke('getData'),
   readDocument: requestId => invoke('readDocument', requestId),
+  readDroppedDocument: (requestId, file) => {
+    const filePath = webUtils.getPathForFile(file);
+    if (!filePath) throw new Error('Drop a file from your computer.');
+    return invoke('readDroppedDocument', { requestId, filePath });
+  },
   cancelDocumentRead: requestId => invoke('cancelDocumentRead', requestId),
   reviewFields: request => invoke('reviewFields', request),
   cancelFieldReview: () => invoke('cancelFieldReview'),

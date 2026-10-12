@@ -891,6 +891,7 @@
     for (const id of ['document-name', 'document-type', 'document-page-summary', 'document-status', 'document-progress-label']) $(id).textContent = '';
     $('document-review').hidden = true;
     $('document-empty').hidden = false;
+    $('document-drop-zone').classList.remove('is-dragging');
     $('document-warnings').hidden = true;
     $('document-no-fields').hidden = true;
     $('document-draft-note').hidden = true;
@@ -1009,7 +1010,7 @@
     checkFields('document', { rulesOnly: true });
   }
 
-  async function readDocument() {
+  async function readDocument(droppedFile) {
     if (documentBusy || !vaultStatus.unlocked || currentView !== 'documents' || !api?.readDocument) return;
     clearDocumentReview();
     const generation = vaultGeneration;
@@ -1018,7 +1019,7 @@
     documentRequestId = requestId;
     documentBusy = true;
     $('document-empty').hidden = true;
-    $('document-status').textContent = 'Choose a document in the file picker. Nothing is uploaded.';
+    $('document-status').textContent = droppedFile ? 'Reading locally. Your document stays on this computer.' : 'Choose a document in the file picker. Nothing is uploaded.';
     $('document-progress-label').textContent = 'Opening your document…';
     documentControls();
     const current = () => vaultStatus.unlocked && generation === vaultGeneration && revision === documentRevision && documentRequestId === requestId && currentView === 'documents';
@@ -1034,7 +1035,7 @@
       $('document-status').textContent = 'Reading locally. Your document stays on this computer.';
     });
     try {
-      const response = await api.readDocument(requestId);
+      const response = await (droppedFile ? api.readDroppedDocument(requestId, droppedFile) : api.readDocument(requestId));
       if (!current()) return;
       if (response?.cancelled) {
         clearDocumentReview({ cancel: false });
@@ -1562,7 +1563,27 @@
     }
   }));
   document.querySelector('.auth-brand').addEventListener('click', (event) => event.preventDefault());
-  $('read-document').addEventListener('click', readDocument);
+  $('read-document').addEventListener('click', () => readDocument());
+  const dropZone = $('document-drop-zone');
+  // File drops must never navigate the app away from its local document review.
+  document.addEventListener('dragover', event => {
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = dropZone.contains(event.target) && currentView === 'documents' && vaultStatus.unlocked && !documentBusy ? 'copy' : 'none';
+  });
+  document.addEventListener('drop', event => { event.preventDefault(); dropZone.classList.remove('is-dragging'); });
+  dropZone.addEventListener('dragenter', () => {
+    if (vaultStatus.unlocked && !documentBusy) dropZone.classList.add('is-dragging');
+  });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('is-dragging'));
+  dropZone.addEventListener('drop', event => {
+    event.preventDefault();
+    if (!vaultStatus.unlocked || currentView !== 'documents' || documentBusy || !api?.readDroppedDocument) return;
+    const files = Array.from(event.dataTransfer?.files || []);
+    if (files.length !== 1) return showError('document-error', new Error('Drop one document at a time.'));
+    if (!/\.(pdf|png|jpe?g)$/i.test(files[0].name)) return showError('document-error', new Error('Choose a PDF, PNG, or JPEG document.'));
+    if (files[0].size > 30 * 1024 * 1024) return showError('document-error', new Error('Choose a document no larger than 30 MiB.'));
+    readDocument(files[0]);
+  });
   $('cancel-document').addEventListener('click', () => {
     clearDocumentReview();
     $('document-status').textContent = 'Reading cancelled. No document text was retained. If the file picker is still open, close it to finish cancelling.';

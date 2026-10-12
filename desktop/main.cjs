@@ -944,6 +944,17 @@ if (nativeOrigin) {
       if (vault.unlocked) touch();
       return result;
     },
+    async readDroppedDocument(request) {
+      requireUnlocked();
+      documentRequestId(request?.requestId);
+      if (typeof request.filePath !== 'string' || request.filePath.length > 32768 || request.filePath.includes('\0') || !path.isAbsolute(request.filePath)) {
+        throw publicError('The document request is invalid.');
+      }
+      touch();
+      const result = await documentReader.read(request.requestId, request.filePath);
+      if (vault.unlocked) touch();
+      return result;
+    },
     cancelDocumentRead: requestId => documentReader.cancel(documentRequestId(requestId)),
     async reviewFields(request) {
       requireUnlocked();

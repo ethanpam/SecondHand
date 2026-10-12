@@ -204,7 +204,20 @@ async function main() {
     // Leaving Documents discarded its review. Read the actual PDF again to
     // exercise the separate, explicitly confirmed historical-reference action.
     await page.locator('.nav-item[data-view="documents"]').click();
-    await page.locator('#read-document').click();
+    // A disk-backed File exercises Electron's real webUtils/contextBridge drop path.
+    await page.evaluate(() => {
+      const input = document.createElement('input');
+      input.type = 'file'; input.id = 'smoke-drop-file'; input.hidden = true;
+      document.body.append(input);
+    });
+    await page.locator('#smoke-drop-file').setInputFiles(fixture);
+    await page.evaluate(() => {
+      const input = document.getElementById('smoke-drop-file');
+      const transfer = new DataTransfer();
+      transfer.items.add(input.files[0]);
+      document.getElementById('document-drop-zone').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }));
+      input.remove();
+    });
     await page.waitForFunction(() => !document.getElementById('document-review').hidden || !document.getElementById('document-error').hidden, null, { timeout: 180000 });
     assert.equal(await page.locator('#document-error').isVisible(), false, await page.locator('#document-error').textContent());
     await expect(page.locator('#document-statement')).toBeVisible();

@@ -46,6 +46,7 @@ async function renderer(t) {
     onUnlocked: () => () => {}, onOpenHousehold: () => () => {},
     unlock: async () => { status = { ...status, unlocked: true }; return status; },
     readDocument: requestId => { const completion = deferred(); reads.push({ requestId, completion }); return completion.promise; },
+    readDroppedDocument: (requestId, file) => { const completion = deferred(); reads.push({ requestId, file, completion }); return completion.promise; },
     cancelDocumentRead: async requestId => { cancels.push(requestId); return true; },
     onDocumentProgress: callback => { const record = { callback, active: true }; subscriptions.push(record); return () => { record.active = false; }; },
     saveProfile: async value => { saves.push(structuredClone(value)); Object.assign(profile, value); return structuredClone(value); }
@@ -320,4 +321,44 @@ test('empty/unrecognized results remain review-only and reader errors recover wi
   assert.equal(view.get('read-document').disabled, false);
   assert.equal(view.get('document-pages').textContent, '');
   assert.deepEqual(view.saves, []);
+});
+
+function drop(view, files, target = 'document-drop-zone') {
+  const event = new view.window.Event('drop', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'dataTransfer', { value: { files } });
+  view.get(target).dispatchEvent(event);
+  assert.equal(event.defaultPrevented, true);
+}
+
+test('dropped documents use the OCR review and cannot finish after lock', async t => {
+  const view = await renderer(t);
+  view.navigate('documents');
+  const file = new view.window.File(['synthetic'], 'sample.PDF');
+  drop(view, [file]);
+  assert.equal(view.reads[0].file, file);
+  drop(view, [file]);
+  assert.equal(view.reads.length, 1, 'busy drops do not replace a read');
+  view.lock();
+  view.reads[0].completion.resolve(documentResult());
+  await tick();
+  assert.equal(view.get('document-review').hidden, true);
+  assert.equal(view.cancels.length, 1);
+  drop(view, [file]);
+  assert.equal(view.reads.length, 1);
+});
+
+test('drop rejects multiple, unsupported and oversized files and prevents navigation elsewhere', async t => {
+  const view = await renderer(t);
+  view.navigate('documents');
+  for (const files of [[], [{ name: 'a.pdf' }, { name: 'b.pdf' }], [{ name: 'file.txt' }], [{ name: 'big.pdf', size: 30 * 1024 * 1024 + 1 }]]) {
+    drop(view, files);
+    assert.equal(view.reads.length, 0);
+    assert.ok(view.get('document-error').textContent);
+  }
+  drop(view, [{ name: 'sample.png', size: 10 }], 'document-empty');
+  assert.equal(view.reads.length, 0);
+  drop(view, [{ name: 'sample.jpeg', size: 10 }]);
+  view.reads[0].completion.resolve(documentResult());
+  await tick();
+  assert.equal(view.get('document-review').hidden, false);
 });

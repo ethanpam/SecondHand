@@ -176,3 +176,19 @@ test('preload tells the window to open Your household with nothing from the even
   api.dismissHouseholdNote();
   assert.deepEqual(calls, [['secondhand:invoke', 'dismissHouseholdNote']]);
 });
+
+test('dropped documents resolve native File paths in preload without exposing a path getter', () => {
+  let api;
+  const calls = [];
+  const nativeFile = {};
+  runFile('desktop/preload.cjs', { require: () => ({
+    contextBridge: { exposeInMainWorld(_name, value) { api = value; } },
+    ipcRenderer: { invoke: (...args) => calls.push(args) },
+    webUtils: { getPathForFile(file) { return file === nativeFile ? '/synthetic/document.pdf' : ''; } }
+  }) });
+  assert.throws(() => api.readDroppedDocument('id', {}), /Drop a file/);
+  assert.equal(calls.length, 0);
+  api.readDroppedDocument('id', nativeFile);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [['secondhand:invoke', 'readDroppedDocument', { requestId: 'id', filePath: '/synthetic/document.pdf' }]]);
+  assert.equal(api.getPathForFile, undefined);
+});
